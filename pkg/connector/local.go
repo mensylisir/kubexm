@@ -1,0 +1,316 @@
+package connector
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime" // To get local OS info
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+)
+
+// LocalConnector implements the Connector interface for local command execution.
+type LocalConnector struct {
+	connCfg  ConnectionCfg // Store for potential future use (e.g. if local connection needs config)
+	cachedOS *OS
+	// No actual "connection" is needed for local, so isConnected is effectively always true
+	// after a successful (no-op) Connect call.
+}
+
+// Connect for LocalConnector is a no-op, as operations are performed locally.
+// It can store the config if needed for any local-specific parameters in the future.
+func (l *LocalConnector) Connect(ctx context.Context, cfg ConnectionCfg) error {
+	l.connCfg = cfg
+	// For local connector, connection is implicitly always available.
+	// We can do a basic check like ensuring the user from cfg exists if needed,
+	// but for now, it's a no-op.
+	return nil
+}
+
+// IsConnected for LocalConnector always returns true as it operates locally.
+func (l *LocalConnector) IsConnected() bool {
+	return true // Local execution doesn't have a "connection" in the remote sense.
+}
+
+// Close for LocalConnector is a no-op.
+func (l *LocalConnector) Close() error {
+	// No resources to release for local execution.
+	return nil
+}
+
+// Exec executes a command locally.
+func (l *LocalConnector) Exec(ctx context.Context, cmd string, options *ExecOptions) (stdout, stderr []byte, err error) {
+	var actualCmd *exec.Cmd
+	shell := []string{"/bin/sh", "-c"} // Default shell
+	if runtime.GOOS == "windows" {
+		shell = []string{"cmd", "/C"}
+	}
+
+	fullCmdString := cmd
+	if options != nil && options.Sudo {
+		// Note: Local sudo might require password input if not configured for NOPASSWD.
+		// This implementation doesn't handle interactive password prompts.
+		// -E is used to preserve environment variables with sudo.
+		fullCmdString = "sudo -E -- " + cmd
+	}
+
+	// Use context for timeout if provided
+	if options != nil && options.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, options.Timeout)
+		defer cancel()
+	}
+
+	actualCmd = exec.CommandContext(ctx, shell[0], append(shell[1:], fullCmdString)...)
+
+	if options != nil && len(options.Env) > 0 {
+		actualCmd.Env = append(os.Environ(), options.Env...)
+	}
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	if options != nil && options.Stream != nil {
+		actualCmd.Stdout = io.MultiWriter(&stdoutBuf, options.Stream)
+		actualCmd.Stderr = io.MultiWriter(&stderrBuf, options.Stream)
+	} else {
+		actualCmd.Stdout = &stdoutBuf
+		actualCmd.Stderr = &stderrBuf
+	}
+
+	err = actualCmd.Run()
+
+	stdout = stdoutBuf.Bytes()
+	stderr = stderrBuf.Bytes()
+
+	if err != nil {
+		exitCode := -1
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
+				exitCode = status.ExitStatus()
+			}
+		}
+
+		// Retry logic
+		if options != nil && options.Retries > 0 {
+			for i := 0; i < options.Retries; i++ {
+				if options.RetryDelay > 0 {
+					time.Sleep(options.RetryDelay)
+				}
+
+				// Create new command for retry
+				retryCmd := exec.CommandContext(ctx, shell[0], append(shell[1:], fullCmdString)...)
+				if options.Env != nil {
+					retryCmd.Env = append(os.Environ(), options.Env...)
+				}
+
+				stdoutBuf.Reset() // Clear buffers for retry
+				stderrBuf.Reset()
+				if options.Stream != nil {
+					retryCmd.Stdout = io.MultiWriter(&stdoutBuf, options.Stream)
+					retryCmd.Stderr = io.MultiWriter(&stderrBuf, options.Stream)
+				} else {
+					retryCmd.Stdout = &stdoutBuf
+					retryCmd.Stderr = &stderrBuf
+				}
+
+				err = retryCmd.Run()
+				stdout = stdoutBuf.Bytes()
+				stderr = stderrBuf.Bytes()
+				if err == nil {
+					break // Success on retry
+				}
+				if exitErr, ok := err.(*exec.ExitError); ok {
+					if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
+						exitCode = status.ExitStatus()
+					}
+				}
+			}
+		}
+
+		if err != nil { // If error persists after retries
+			return stdout, stderr, &CommandError{Cmd: cmd, ExitCode: exitCode, Stdout: string(stdout), Stderr: string(stderr), Underlying: err}
+		}
+	}
+	return stdout, stderr, nil
+}
+
+// Copy copies a local file or directory to another local path.
+func (l *LocalConnector) Copy(ctx context.Context, srcPath, dstPath string, options *FileTransferOptions) error {
+	// Timeout handling (for the whole operation, though os.Copy is blocking)
+	if options != nil && options.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, options.Timeout)
+		defer cancel()
+	}
+
+	// TODO: Implement sudo logic if options.Sudo is true.
+	// This would involve copying to a temp location then using `sudo mv` and `sudo chmod/chown`.
+	// For now, direct copy.
+
+	srcFile, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("failed to open source file %s: %w", srcPath, err)
+	}
+	defer srcFile.Close()
+
+	if err := os.MkdirAll(filepath.Dir(dstPath), os.ModePerm); err != nil {
+		return fmt.Errorf("failed to create destination directory for %s: %w", dstPath, err)
+	}
+
+	dstFile, err := os.Create(dstPath)
+	if err != nil {
+		return fmt.Errorf("failed to create destination file %s: %w", dstPath, err)
+	}
+	defer dstFile.Close()
+
+	_, err = io.Copy(dstFile, srcFile)
+	if err != nil {
+		return fmt.Errorf("failed to copy content from %s to %s: %w", srcPath, dstPath, err)
+	}
+
+	// Apply permissions and ownership
+	if options != nil {
+		if options.Permissions != "" {
+			perm, err := strconv.ParseUint(options.Permissions, 8, 32)
+			if err == nil {
+				if errChmod := os.Chmod(dstPath, os.FileMode(perm)); errChmod != nil {
+					// Log or return error, potentially wrapped
+				}
+			}
+		}
+		// For local, Chown requires process to have privileges.
+		// if options.Owner != "" || options.Group != "" {
+		// This part is complex due to UID/GID lookup and permissions.
+		// os.Chown might fail if not run as root or with appropriate capabilities.
+		// If options.Sudo is true, this should be done via `sudo chown` command.
+		// }
+	}
+	return nil
+}
+
+// CopyContent writes content to a local file.
+func (l *LocalConnector) CopyContent(ctx context.Context, content []byte, dstPath string, options *FileTransferOptions) error {
+	if options != nil && options.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, options.Timeout)
+		defer cancel()
+	}
+
+	// TODO: Sudo handling as in Copy.
+	if err := os.MkdirAll(filepath.Dir(dstPath), os.ModePerm); err != nil {
+		return fmt.Errorf("failed to create destination directory for %s: %w", dstPath, err)
+	}
+
+	err := os.WriteFile(dstPath, content, 0666) // Default permissions, then chmod
+	if err != nil {
+		return fmt.Errorf("failed to write content to %s: %w", dstPath, err)
+	}
+
+	if options != nil {
+		if options.Permissions != "" {
+			perm, err := strconv.ParseUint(options.Permissions, 8, 32)
+			if err == nil {
+				if errChmod := os.Chmod(dstPath, os.FileMode(perm)); errChmod != nil {
+					// Log or return error
+				}
+			}
+		}
+		// Sudo/Chown handling as in Copy.
+	}
+	return nil
+}
+
+// Fetch copies a local file to another local path (effectively same as Copy for local).
+func (l *LocalConnector) Fetch(ctx context.Context, remotePath, localPath string) error {
+	// For local connector, remotePath is just another local path.
+	return l.Copy(ctx, remotePath, localPath, nil) // No options for simplicity, or pass them through.
+}
+
+// Stat gets information about a local file or directory.
+func (l *LocalConnector) Stat(ctx context.Context, path string) (*FileStat, error) {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &FileStat{Name: filepath.Base(path), IsExist: false}, nil
+		}
+		return nil, fmt.Errorf("failed to stat local path %s: %w", path, err)
+	}
+
+	// TODO: Get Owner/Group (requires user/group ID lookup from syscall.Stat_t)
+	// TODO: Get SHA256 sum if needed by reading the file.
+	return &FileStat{
+		Name:    fi.Name(),
+		Size:    fi.Size(),
+		Mode:    fi.Mode(),
+		ModTime: fi.ModTime(),
+		IsDir:   fi.IsDir(),
+		IsExist: true,
+	}, nil
+}
+
+// LookPath searches for an executable in the local PATH.
+func (l *LocalConnector) LookPath(ctx context.Context, file string) (string, error) {
+	return exec.LookPath(file)
+}
+
+// GetOS retrieves local operating system information.
+func (l *LocalConnector) GetOS(ctx context.Context) (*OS, error) {
+	if l.cachedOS != nil {
+		return l.cachedOS, nil
+	}
+
+	osInfo := &OS{
+		ID:   strings.ToLower(runtime.GOOS), // e.g., "linux", "darwin", "windows"
+		Arch: runtime.GOARCH,                // e.g., "amd64", "arm64"
+	}
+
+	// Getting VersionID, Codename, Kernel for local can be more involved
+	// and platform-specific. For example, on Linux, we could read /etc/os-release
+	// or use `uname` commands like in SSHConnector.
+	// For simplicity, we'll start with basic info from `runtime` package.
+
+	// Attempt to get more details for Linux from /etc/os-release
+	if runtime.GOOS == "linux" {
+		content, err := os.ReadFile("/etc/os-release")
+		if err == nil {
+			lines := strings.Split(string(content), "\n")
+			for _, line := range lines {
+				parts := strings.SplitN(line, "=", 2)
+				if len(parts) == 2 {
+					key := strings.TrimSpace(parts[0])
+					val := strings.Trim(strings.TrimSpace(parts[1]), "\"")
+					switch key {
+					case "ID":
+						osInfo.ID = val // Override with more specific ID
+					case "VERSION_ID":
+						osInfo.VersionID = val
+					case "VERSION_CODENAME":
+						osInfo.Codename = val
+					}
+				}
+			}
+		}
+		// Kernel version from `uname -r`
+		kernelCmd := exec.CommandContext(ctx, "uname", "-r")
+		kernelOut, errKernel := kernelCmd.Output()
+		if errKernel == nil {
+			osInfo.Kernel = strings.TrimSpace(string(kernelOut))
+		}
+	} else if runtime.GOOS == "darwin" {
+		// Example for macOS: sw_vers
+		// Similar logic can be added for other OSes.
+		// For now, these fields might remain empty for non-Linux.
+	}
+
+
+	l.cachedOS = osInfo
+	return l.cachedOS, nil
+}
+
+// Ensure LocalConnector implements Connector interface
+var _ Connector = &LocalConnector{}
