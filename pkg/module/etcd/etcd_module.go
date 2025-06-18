@@ -6,6 +6,7 @@ import (
 	"github.com/kubexms/kubexms/pkg/config"
 	// "github.com/kubexms/kubexms/pkg/runtime" // No longer needed for PreRun/PostRun func signatures
 	"github.com/kubexms/kubexms/pkg/spec"
+	etcdsteps "github.com/kubexms/kubexms/pkg/step/etcd"
 	// "github.com/kubexms/kubexms/pkg/task"      // No longer needed for task.Task type
 	// taskEtcd "github.com/kubexms/kubexms/pkg/task/etcd" // These would be actual imports
 	// taskPki "github.com/kubexms/kubexms/pkg/task/pki"
@@ -22,8 +23,20 @@ func NewEtcdModule(cfg *config.Cluster) *spec.ModuleSpec {
 		// Example: Steps: []spec.StepSpec{&pkiSteps.GenerateEtcdCertStepSpec{...}},
 	}
 	installEtcdBinariesTaskSpec := &spec.TaskSpec{
-		Name: "Install Etcd Binaries (Placeholder Spec)",
-		// Example: Steps: []spec.StepSpec{&etcdSteps.InstallEtcdBinariesStepSpec{Version: cfg.Spec.Etcd.Version}},
+		Name: "Provision Etcd Binaries",
+		Steps: []spec.StepSpec{
+			&etcdsteps.DownloadEtcdArchiveStepSpec{
+				Version: cfg.Spec.Etcd.Version, // Assuming cfg.Spec.Etcd.Version is available
+				// Arch, InstallURLBase, DownloadDir will use defaults from the step spec
+			},
+			&etcdsteps.ExtractEtcdArchiveStepSpec{
+				// ExtractionDirBase will use defaults
+			},
+			&etcdsteps.InstallEtcdFromDirStepSpec{
+				// TargetBinDir will use defaults
+			},
+			&etcdsteps.CleanupEtcdInstallationStepSpec{},
+		},
 	}
 	setupInitialEtcdMemberTaskSpec := &spec.TaskSpec{
 		Name: "Setup Initial Etcd Member (Placeholder Spec)",
