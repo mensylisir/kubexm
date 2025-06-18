@@ -2,115 +2,184 @@ package config
 
 import "time"
 
-// This package is a placeholder to allow other packages to compile.
-// It will be properly implemented as a separate module later, likely with YAML/JSON parsing.
+// APIVersion and Kind are standard fields for Kubernetes-style configuration objects.
+const (
+	DefaultAPIVersion = "kubexms.io/v1alpha1"
+	ClusterKind     = "Cluster"
+	// Add other Kinds if more top-level config objects are envisioned
+)
 
-// Metadata holds common metadata for configuration objects.
-type Metadata struct {
-	Name string `yaml:"name,omitempty"` // Example: cluster name
-	// TODO: Add other common fields like UID, CreationTimestamp, Annotations, Labels etc.
-}
-
-// Cluster holds the overall cluster configuration.
-// It's the root object when parsing a cluster configuration file.
+// Cluster is the top-level configuration object, typically parsed from cluster.yaml.
 type Cluster struct {
-	APIVersion string   `yaml:"apiVersion,omitempty"` // Example: "kubexms.io/v1alpha1"
-	Kind       string   `yaml:"kind,omitempty"`       // Example: "Cluster"
-	Metadata   Metadata `yaml:"metadata,omitempty"`   // Cluster metadata
-	Spec       ClusterSpec `yaml:"spec,omitempty"`
+	APIVersion string   `yaml:"apiVersion"`
+	Kind       string   `yaml:"kind"`
+	Metadata   Metadata `yaml:"metadata"`
+	Spec       ClusterSpec `yaml:"spec"`
 }
 
-// ClusterSpec defines the specification of the cluster.
+// Metadata holds common metadata for the cluster.
+type Metadata struct {
+	Name string `yaml:"name"`
+	// Annotations map[string]string `yaml:"annotations,omitempty"`
+	// Labels      map[string]string `yaml:"labels,omitempty"`
+	// CreationTimestamp time.Time `yaml:"creationTimestamp,omitempty"` // Usually set by system, not user
+}
+
+// ClusterSpec defines the desired state of the Kubernetes cluster.
 type ClusterSpec struct {
-	Hosts            []HostSpec            `yaml:"hosts,omitempty"`
-	Global           GlobalSpec            `yaml:"global,omitempty"`
-	ContainerRuntime *ContainerRuntimeSpec `yaml:"containerRuntime,omitempty"` // For selecting runtime type (containerd, docker)
+	Global             GlobalSpec             `yaml:"global,omitempty"`
+	Hosts              []HostSpec             `yaml:"hosts"` // Must have at least one host
+	ContainerRuntime   *ContainerRuntimeSpec  `yaml:"containerRuntime,omitempty"` // Pointer to be optional
 	Containerd       *ContainerdSpec       `yaml:"containerd,omitempty"`       // Specific settings if containerd is used
-	Etcd             *EtcdSpec             `yaml:"etcd,omitempty"`             // Specific settings for Etcd
-	// TODO: Add other cluster-wide configurations:
-	// Kubernetes *KubernetesSpec `yaml:"kubernetes,omitempty"`
-	// Network    *NetworkSpec    `yaml:"network,omitempty"` // For CNI plugin choice and config
-	// Addons     *AddonsSpec     `yaml:"addons,omitempty"`
+	Etcd               *EtcdSpec             `yaml:"etcd,omitempty"`             // Specific settings for Etcd
+	Kubernetes         *KubernetesSpec       `yaml:"kubernetes,omitempty"`
+	Network            *NetworkSpec            `yaml:"network,omitempty"`
+	HighAvailability   *HighAvailabilitySpec   `yaml:"highAvailability,omitempty"`
+	Addons             []AddonSpec            `yaml:"addons,omitempty"`
+	// PreflightConfig    *PreflightConfigSpec    `yaml:"preflightConfig,omitempty"` // Specific preflight controls
+	// UpgradeConfig      *UpgradeConfigSpec      `yaml:"upgradeConfig,omitempty"`   // For cluster upgrades
 }
 
-// GlobalSpec contains global configurations applicable to the cluster deployment.
-// These can often be overridden by host-specific settings in HostSpec.
+// GlobalSpec contains settings applicable to the entire cluster or as defaults for hosts.
 type GlobalSpec struct {
-	ConnectionTimeout time.Duration `yaml:"connectionTimeout,omitempty"` // Example: "30s"
-	WorkDir           string        `yaml:"workDir,omitempty"`           // Default work directory on remote hosts
-	Verbose           bool          `yaml:"verbose,omitempty"`           // Global verbosity setting
-	IgnoreErr         bool          `yaml:"ignoreErr,omitempty"`         // Global ignore error setting
-	User              string        `yaml:"user,omitempty"`              // Default SSH user if not set per host
-	Port              int           `yaml:"port,omitempty"`              // Default SSH port if not set per host
-	PrivateKeyPath    string        `yaml:"privateKeyPath,omitempty"`    // Default private key path if not set per host
-	// SkipPreflight  bool        `yaml:"skipPreflight,omitempty"`   // Example: if preflight module needs a global skip flag
+	User              string        `yaml:"user,omitempty"`              // Default SSH user
+	Port              int           `yaml:"port,omitempty"`              // Default SSH port
+	Password          string        `yaml:"password,omitempty"`          // Default SSH password (use with caution)
+	PrivateKeyPath    string        `yaml:"privateKeyPath,omitempty"`    // Default path to SSH private key
+	ConnectionTimeout time.Duration `yaml:"connectionTimeout,omitempty"` // e.g., "30s"
+	WorkDir           string        `yaml:"workDir,omitempty"`           // Default remote work directory
+	Verbose           bool          `yaml:"verbose,omitempty"`
+	IgnoreErr         bool          `yaml:"ignoreErr,omitempty"`
+	SkipPreflight     bool          `yaml:"skipPreflight,omitempty"`     // Global flag to skip all preflight checks
+	// SudoPassword   string        `yaml:"sudoPassword,omitempty"`   // If sudo needs password (use with extreme caution)
 }
 
-// HostSpec defines the configuration for a single host in the cluster.
+// HostSpec defines the configuration for a single host.
 type HostSpec struct {
-	Name            string            `yaml:"name"` // Mandatory
-	Address         string            `yaml:"address"` // Mandatory
-	InternalAddress string            `yaml:"internalAddress,omitempty"`
+	Name            string            `yaml:"name"`       // Required, unique
+	Address         string            `yaml:"address"`    // Required, IP or FQDN for connection
+	InternalAddress string            `yaml:"internalAddress,omitempty"` // Internal/private IP
 	Port            int               `yaml:"port,omitempty"`            // Overrides GlobalSpec.Port
 	User            string            `yaml:"user,omitempty"`            // Overrides GlobalSpec.User
-	Password        string            `yaml:"password,omitempty"`        // For password-based SSH
-	PrivateKey      []byte            `yaml:"-"`                         // Raw private key content (usually not directly in YAML, loaded from path)
-	PrivateKeyPath  string            `yaml:"privateKeyPath,omitempty"`  // Overrides GlobalSpec.PrivateKeyPath
-	Roles           []string          `yaml:"roles,omitempty"`           // List of roles for the host (e.g., "master", "worker", "etcd")
-	Labels          map[string]string `yaml:"labels,omitempty"`          // Custom labels for flexible grouping
-	Type            string            `yaml:"type,omitempty"`            // Connection type: "ssh", "local". Defaults to "ssh".
-	WorkDir         string            `yaml:"workDir,omitempty"`         // Host-specific work directory, overrides GlobalSpec.WorkDir
-	// TODO: Add host-specific overrides for other global settings if needed (e.g. SudoPassword)
+	Password        string            `yaml:"password,omitempty"`        // Host-specific password
+	PrivateKey      string            `yaml:"privateKey,omitempty"`      // Base64 encoded private key content
+	PrivateKeyPath  string            `yaml:"privateKeyPath,omitempty"`  // Host-specific path, overrides global
+	// BastionHost    *BastionSpec      `yaml:"bastion,omitempty"`       // Bastion/jump host config
+	Roles           []string          `yaml:"roles,omitempty"`           // e.g., ["master", "etcd", "worker"]
+	Labels          map[string]string `yaml:"labels,omitempty"`          // Custom labels
+	Taints          []TaintSpec       `yaml:"taints,omitempty"`          // Kubernetes taints for the node
+	Type            string            `yaml:"type,omitempty"`            // "ssh" (default) or "local"
+	WorkDir         string            `yaml:"workDir,omitempty"`         // Host-specific, overrides global
 }
+
+// TaintSpec defines a Kubernetes node taint.
+type TaintSpec struct {
+	Key    string `yaml:"key"`
+	Value  string `yaml:"value"`
+	Effect string `yaml:"effect"` // NoSchedule, PreferNoSchedule, NoExecute
+}
+
+// BastionSpec defines connection details for a bastion/jump host. (Placeholder from 1.md)
+// type BastionSpec struct {
+// 	Address        string `yaml:"address"`
+// 	Port           int    `yaml:"port,omitempty"`
+// 	User           string `yaml:"user"`
+// 	Password       string `yaml:"password,omitempty"`
+// 	PrivateKeyPath string `yaml:"privateKeyPath,omitempty"`
+// }
 
 // ContainerRuntimeSpec defines settings for the container runtime.
 type ContainerRuntimeSpec struct {
-	Type string `yaml:"type,omitempty"` // "containerd", "docker", etc. Default could be "containerd".
-	// Version string `yaml:"version,omitempty"` // Common version, or use specific type's version
-	// Socket string `yaml:"socket,omitempty"` // e.g., /run/containerd/containerd.sock
-	// TODO: Add other common settings like sandbox image (pause image)
+	Type    string `yaml:"type,omitempty"`    // "containerd" (default), "docker" (not fully supported by modern K8s)
+	Version string `yaml:"version,omitempty"` // e.g., "1.6.9"
 }
 
-// ContainerdSpec defines specific settings for the containerd runtime.
+// ContainerdSpec defines specific settings for containerd.
 // This would be used if ContainerRuntimeSpec.Type is "containerd".
 type ContainerdSpec struct {
-	Version string `yaml:"version,omitempty"`
-	// RegistryMirrorsConfig holds registry mirror configurations.
-	// Key: Registry domain (e.g., "docker.io"). Value: List of mirror URLs.
-	RegistryMirrorsConfig map[string][]string `yaml:"registryMirrors,omitempty"`
-	// UseSystemdCgroup can be a pointer to distinguish between unset (use default) vs explicitly set.
-	// For simplicity, using bool here; factory logic can interpret zero-value vs. explicit.
-	UseSystemdCgroup   bool     `yaml:"useSystemdCgroup,omitempty"` // Defaults to true in step/task if not specified
-	InsecureRegistries []string `yaml:"insecureRegistries,omitempty"`
-	ExtraTomlConfig    string   `yaml:"extraTomlConfig,omitempty"`    // Arbitrary additional TOML to append/merge
-	ConfigPath         string   `yaml:"configPath,omitempty"`         // Override default /etc/containerd/config.toml
+	// Version is often tied to ContainerRuntimeSpec.Version, but can be specific if needed.
+	// ConfigFilePath string `yaml:"configFilePath,omitempty"` // Path to config.toml
+	RegistryMirrors    map[string][]string `yaml:"registryMirrors,omitempty"`   // Maps registry to list of mirror endpoints
+	InsecureRegistries []string            `yaml:"insecureRegistries,omitempty"` // List of insecure registries (e.g. "myregistry.corp:5000")
+	UseSystemdCgroup   bool                `yaml:"useSystemdCgroup,omitempty"`  // Default: true for K8s
+	ExtraTomlConfig    string              `yaml:"extraTomlConfig,omitempty"`   // Raw TOML string to append/merge
 }
 
-// EtcdSpec defines specific settings for etcd.
+// EtcdSpec defines settings for the etcd cluster.
 type EtcdSpec struct {
-    Managed bool     `yaml:"managed,omitempty"` // If kubexms should manage etcd deployment (vs. external)
-    Type    string   `yaml:"type,omitempty"`    // "stacked" (on masters) or "external"
-    Version string   `yaml:"version,omitempty"` // e.g., "v3.5.9"
-    Nodes   []string `yaml:"nodes,omitempty"`   // List of hostnames/IPs for etcd nodes.
-                                               // Used for initial cluster string, and to determine join logic.
-    // TODO: Add more etcd configurations:
-    // DataDir string `yaml:"dataDir,omitempty"`
-    // InitialClusterToken string `yaml:"initialClusterToken,omitempty"`
-    // CertSANs []string `yaml:"certSANs,omitempty"` // Extra SANs for etcd certs
-    // ExternalEtcd *ExternalEtcdSpec `yaml:"external,omitempty"` // If type is "external"
+	Type    string   `yaml:"type,omitempty"`    // "stacked" (on masters, default), "external"
+	Version string   `yaml:"version,omitempty"` // e.g., "v3.5.9"
+	Nodes   []string `yaml:"nodes,omitempty"`   // List of hostnames/IPs for etcd nodes, if type is "external" or to specify members.
+	// DataDir string   `yaml:"dataDir,omitempty"` // Default: /var/lib/etcd or similar
+	// External *ExternalEtcdSpec `yaml:"external,omitempty"` // Config if type is "external"
+	// Backup   *EtcdBackupSpec   `yaml:"backup,omitempty"`
+	// ExtraArgs map[string]string `yaml:"extraArgs,omitempty"`
 }
 
-// TODO: Define KubernetesSpec, NetworkSpec (CalicoSpec, FlannelSpec etc.), AddonsSpec.
-// Example:
-// type KubernetesSpec struct {
-//     Version string `yaml:"version"` // e.g., "v1.25.3"
-//     APIServer APIServerSpec `yaml:"apiServer"`
-//     KubeProxy KubeProxySpec `yaml:"kubeProxy"`
-//     // ... other components ...
+// ExternalEtcdSpec defines connection details for an external etcd cluster.
+// type ExternalEtcdSpec struct {
+// 	Endpoints []string `yaml:"endpoints"`
+// 	CaFile    string   `yaml:"caFile"`
+// 	CertFile  string   `yaml:"certFile"`
+// 	KeyFile   string   `yaml:"keyFile"`
 // }
-// type NetworkSpec struct {
-//     Plugin string `yaml:"plugin"` // "calico", "flannel", "cilium"
-//     PodCIDR string `yaml:"podCidr"`
-//     ServiceCIDR string `yaml:"serviceCidr"`
-//     // PluginSpecificConfig map[string]interface{} `yaml:",inline"`
-// }
+
+// KubernetesSpec defines settings for Kubernetes components.
+type KubernetesSpec struct {
+	Version          string            `yaml:"version"` // e.g., "v1.25.3"
+	ClusterName      string            `yaml:"clusterName,omitempty"` // Default: Metadata.Name
+	APIServer        *APIServerSpec     `yaml:"apiServer,omitempty"` // Pointer to be optional
+	ControllerManager *CMKSpec          `yaml:"controllerManager,omitempty"`
+	Scheduler        *SchedulerSpec     `yaml:"scheduler,omitempty"`
+	Kubelet          *KubeletSpec       `yaml:"kubelet,omitempty"`
+	KubeProxy        *KubeProxySpec     `yaml:"kubeProxy,omitempty"`
+	PodSubnet        string            `yaml:"podSubnet,omitempty"`     // e.g., "10.244.0.0/16"
+	ServiceSubnet    string            `yaml:"serviceSubnet,omitempty"` // e.g., "10.96.0.0/12"
+	FeatureGates     map[string]bool   `yaml:"featureGates,omitempty"`
+}
+
+// APIServerSpec for kube-apiserver settings.
+type APIServerSpec struct {
+	// CertSANs []string `yaml:"certSANs,omitempty"` // Extra SANs for API server cert
+	// ExtraArgs map[string]string `yaml:"extraArgs,omitempty"`
+	// AdmissionPlugins []string `yaml:"admissionPlugins,omitempty"`
+}
+// CMKSpec for kube-controller-manager settings.
+type CMKSpec struct { /* ExtraArgs, etc. */ }
+// SchedulerSpec for kube-scheduler settings.
+type SchedulerSpec struct { /* ExtraArgs, etc. */ }
+// KubeletSpec for kubelet settings.
+type KubeletSpec struct { /* ExtraArgs, cgroupDriver (auto-detect from containerd), etc. */ }
+// KubeProxySpec for kube-proxy settings.
+type KubeProxySpec struct { /* Mode (iptables/ipvs), ExtraArgs, etc. */ }
+
+
+// NetworkSpec defines settings for the CNI network plugin.
+type NetworkSpec struct {
+	Plugin  string `yaml:"plugin,omitempty"` // "calico", "flannel", "cilium", etc.
+	Version string `yaml:"version,omitempty"`
+	// Calico   *CalicoSpec   `yaml:"calico,omitempty"`
+	// Flannel  *FlannelSpec  `yaml:"flannel,omitempty"`
+	// Cilium   *CiliumSpec   `yaml:"cilium,omitempty"`
+}
+
+// HighAvailabilitySpec defines settings for HA (e.g., VIP, load balancers).
+type HighAvailabilitySpec struct {
+	Type string `yaml:"type,omitempty"` // "keepalived", "externalL4" etc.
+	// VIP  string `yaml:"vip,omitempty"`
+	// Keepalived *KeepalivedSpec `yaml:"keepalived,omitempty"`
+}
+
+// AddonSpec defines an addon to be deployed.
+type AddonSpec struct {
+	Name    string                 `yaml:"name"` // e.g., "coredns", "metrics-server"
+	Enabled bool                   `yaml:"enabled,omitempty"` // Default true if listed
+	// Version string                 `yaml:"version,omitempty"`
+	// Config  map[string]interface{} `yaml:"config,omitempty"` // Addon-specific config
+}
+
+// TODO: Define further nested specs like CalicoSpec, ExternalEtcdSpec, KeepalivedSpec, etc.
+// as per the details in markdown files or common requirements. For now, they are commented out
+// to keep this initial full definition manageable, but their place in the hierarchy is shown.
+// The "no placeholder functionality" applies to the fields directly used by currently
+// implemented logic (runtime, factories). These detailed sub-specs are for future expansion.
