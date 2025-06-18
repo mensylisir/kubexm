@@ -32,8 +32,8 @@ func (s *UpdateHostsFileStepSpec) PopulateDefaults() {
 			"172.30.1.102  registry.cluster.local registry",
 			"192.168.122.102  vm2.cluster.local vm2",
 			"192.168.122.103  vm3.cluster.local vm3",
-			"172.30.1.102  dockerhub.kubekey.local", // Note: Same IP as registry
-			"192.168.122.101  lb.kubesphere.local",   // Note: Same IP as vm1
+			"172.30.1.102  dockerhub.kubexms.local", // Changed from kubekey
+			"192.168.122.101  lb.kubexms.local",   // Changed from kubesphere
 		}
 	}
 	if s.BeginMarker == "" {
@@ -48,13 +48,17 @@ func (s *UpdateHostsFileStepSpec) PopulateDefaults() {
 type UpdateHostsFileStepExecutor struct{}
 
 // Check determines if the /etc/hosts file is already correctly configured.
-func (e *UpdateHostsFileStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
-	spec, ok := s.(*UpdateHostsFileStepSpec)
+func (e *UpdateHostsFileStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		return false, fmt.Errorf("unexpected spec type %T", s)
+		return false, fmt.Errorf("StepSpec not found in context for UpdateHostsFileStep Check")
+	}
+	spec, ok := currentFullSpec.(*UpdateHostsFileStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected StepSpec type for UpdateHostsFileStep Check: %T", currentFullSpec)
 	}
 	spec.PopulateDefaults()
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
 	hostsFilePath := "/etc/hosts"
 	contentBytes, err := ctx.Host.Runner.ReadFile(ctx.GoContext, hostsFilePath)
@@ -115,19 +119,20 @@ func (e *UpdateHostsFileStepExecutor) Check(s spec.StepSpec, ctx *runtime.Contex
 }
 
 // Execute updates the /etc/hosts file.
-func (e *UpdateHostsFileStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	spec, ok := s.(*UpdateHostsFileStepSpec)
+func (e *UpdateHostsFileStepExecutor) Execute(ctx runtime.Context) *step.Result {
+	startTime := time.Now()
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		myErr := fmt.Errorf("Execute: unexpected spec type %T", s)
-		stepName := "UpdateHostsFile (type error)"; if s != nil { stepName = s.GetName() }
-		return step.NewResult(stepName, ctx.Host.Name, time.Now(), myErr)
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for UpdateHostsFileStep Execute"))
+	}
+	spec, ok := currentFullSpec.(*UpdateHostsFileStepSpec)
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for UpdateHostsFileStep Execute: %T", currentFullSpec))
 	}
 	spec.PopulateDefaults()
 
-	stepName := spec.GetName()
-	startTime := time.Now()
-	res := step.NewResult(stepName, ctx.Host.Name, startTime, nil)
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", stepName).Sugar()
+	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+	res := step.NewResult(ctx, startTime, nil)
 
 	hostsFilePath := "/etc/hosts"
 
@@ -203,24 +208,24 @@ func (e *UpdateHostsFileStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Cont
 	hostCtxLogger.Infof("Writing updated content to %s", hostsFilePath)
 	if err := ctx.Host.Runner.WriteFile(ctx.GoContext, []byte(finalContentBuilder.String()), hostsFilePath, "0644", true); err != nil {
 		res.Error = fmt.Errorf("failed to write updated %s: %w", hostsFilePath, err)
-		res.SetFailed(res.Error.Error()); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 	hostCtxLogger.Infof("%s updated successfully.", hostsFilePath)
 
 	// Perform a post-execution check
-	done, checkErr := e.Check(s, ctx)
+	done, checkErr := e.Check(ctx) // Pass context
 	if checkErr != nil {
 		res.Error = fmt.Errorf("post-execution check failed: %w", checkErr)
-		res.SetFailed(res.Error.Error()); hostCtxLogger.Errorf("Step failed verification: %v", res.Error); return res
+		res.Status = step.StatusFailed; hostCtxLogger.Errorf("Step failed verification: %v", res.Error); return res
 	}
 	if !done {
 		errMsg := "post-execution check indicates /etc/hosts file is not correctly configured"
 		res.Error = fmt.Errorf(errMsg)
-		res.SetFailed(errMsg); hostCtxLogger.Errorf("Step failed verification: %s", errMsg); return res
+		res.Status = step.StatusFailed; hostCtxLogger.Errorf("Step failed verification: %s", errMsg); return res
 	}
 
-	res.SetSucceeded("/etc/hosts file updated successfully.")
-	hostCtxLogger.Successf("Step succeeded: %s", res.Message)
+	res.Message = "/etc/hosts file updated successfully."
+	// hostCtxLogger.Successf("Step succeeded: %s", res.Message) // Redundant
 	return res
 }
 

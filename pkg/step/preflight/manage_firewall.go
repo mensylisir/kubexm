@@ -52,8 +52,17 @@ func (e *DisableFirewallStepExecutor) checkServiceState(ctx *runtime.Context, se
 }
 
 // Check determines if the firewalls (firewalld, ufw) are already disabled.
-func (e *DisableFirewallStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", s.GetName()).Sugar()
+func (e *DisableFirewallStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
+	if !ok {
+		return false, fmt.Errorf("StepSpec not found in context for DisableFirewallStep Check")
+	}
+	spec, ok := currentFullSpec.(*DisableFirewallStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected StepSpec type for DisableFirewallStep Check: %T", currentFullSpec)
+	}
+	// spec is empty, so no spec.PopulateDefaults() call needed.
+	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 	firewallsToCheck := []string{"firewalld", "ufw"}
 
 	for _, fwService := range firewallsToCheck {
@@ -85,11 +94,19 @@ func (e *DisableFirewallStepExecutor) Check(s spec.StepSpec, ctx *runtime.Contex
 }
 
 // Execute disables common firewalls (firewalld, ufw).
-func (e *DisableFirewallStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	stepName := s.GetName()
+func (e *DisableFirewallStepExecutor) Execute(ctx runtime.Context) *step.Result {
 	startTime := time.Now()
-	res := step.NewResult(stepName, ctx.Host.Name, startTime, nil)
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", stepName).Sugar()
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for DisableFirewallStep Execute"))
+	}
+	spec, ok := currentFullSpec.(*DisableFirewallStepSpec)
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for DisableFirewallStep Execute: %T", currentFullSpec))
+	}
+	// spec is empty, so no spec.PopulateDefaults() call needed.
+	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+	res := step.NewResult(ctx, startTime, nil)
 
 	firewallsToManage := []string{"firewalld", "ufw"}
 
@@ -142,23 +159,23 @@ func (e *DisableFirewallStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Cont
 	}
 
 	// Perform a post-execution check
-	done, checkErr := e.Check(s, ctx)
+	done, checkErr := e.Check(ctx) // Pass context
 	if checkErr != nil {
 		res.Error = fmt.Errorf("post-execution check failed: %w", checkErr)
-		res.SetFailed(res.Error.Error())
+		res.Status = step.StatusFailed
 		hostCtxLogger.Errorf("Step failed verification: %v", res.Error)
 		return res
 	}
 	if !done {
 		errMsg := "post-execution check indicates firewalls are still not correctly disabled"
 		res.Error = fmt.Errorf(errMsg)
-		res.SetFailed(errMsg)
+		res.Status = step.StatusFailed
 		hostCtxLogger.Errorf("Step failed verification: %s", errMsg)
 		return res
 	}
 
-	res.SetSucceeded("Common firewalls (firewalld, ufw) checked and disable operations attempted.")
-	hostCtxLogger.Successf("Step succeeded: %s", res.Message)
+	res.Message = "Common firewalls (firewalld, ufw) checked and disable operations attempted."
+	// hostCtxLogger.Successf("Step succeeded: %s", res.Message) // Redundant
 	return res
 }
 

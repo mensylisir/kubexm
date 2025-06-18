@@ -111,29 +111,33 @@ func contains(slice []string, str string) bool {
 }
 
 // Check determines if the kernel module persistence file is correctly configured.
-func (e *EnsureKernelModulesPersistentStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
-	stepSpec, ok := s.(*EnsureKernelModulesPersistentStepSpec)
+func (e *EnsureKernelModulesPersistentStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		return false, fmt.Errorf("unexpected spec type %T", s)
+		return false, fmt.Errorf("StepSpec not found in context for EnsureKernelModulesPersistentStep Check")
 	}
-	stepSpec.PopulateDefaults()
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", stepSpec.GetName()).Sugar()
+	spec, ok := currentFullSpec.(*EnsureKernelModulesPersistentStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected StepSpec type for EnsureKernelModulesPersistentStep Check: %T", currentFullSpec)
+	}
+	spec.PopulateDefaults()
+	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
-	expectedModules, err := e.resolveModulesInternal(ctx, stepSpec.Modules)
+	expectedModules, err := e.resolveModulesInternal(ctx, spec.Modules)
 	if err != nil {
 		hostCtxLogger.Warnf("Could not resolve module list for checking persistence file: %v", err)
 		return false, nil // Cannot determine expected state, so not "done".
 	}
-	if len(expectedModules) == 0 && len(stepSpec.Modules) > 0 && !contains(stepSpec.Modules, "nf_conntrack_placeholder"){
+	if len(expectedModules) == 0 && len(spec.Modules) > 0 && !contains(spec.Modules, "nf_conntrack_placeholder"){
 		 // If non-placeholder modules were specified but none resolved, something is wrong.
 		 hostCtxLogger.Warnf("No modules resolved for persistence, but spec contained non-placeholder modules. Check module availability.")
 		 return false, nil
 	}
 
 
-	confContentBytes, err := ctx.Host.Runner.ReadFile(ctx.GoContext, stepSpec.ConfFilePath)
+	confContentBytes, err := ctx.Host.Runner.ReadFile(ctx.GoContext, spec.ConfFilePath)
 	if err != nil {
-		hostCtxLogger.Infof("Failed to read kernel module config file %s: %v. Configuration is not done.", stepSpec.ConfFilePath, err)
+		hostCtxLogger.Infof("Failed to read kernel module config file %s: %v. Configuration is not done.", spec.ConfFilePath, err)
 		return false, nil // Conf file doesn't exist or unreadable
 	}
 
@@ -148,96 +152,93 @@ func (e *EnsureKernelModulesPersistentStepExecutor) Check(s spec.StepSpec, ctx *
 	}
 	sort.Strings(actualModulesInConf) // Sort for consistent comparison
 
-	if len(expectedModules) == 0 && len(actualModulesInConf) == 0 && (len(stepSpec.Modules) == 0 || (len(stepSpec.Modules) == 1 && stepSpec.Modules[0] == "nf_conntrack_placeholder" && expectedModules == nil)) {
-		hostCtxLogger.Debugf("No modules specified or resolved, and config file %s is effectively empty. Considered done.", stepSpec.ConfFilePath)
+	if len(expectedModules) == 0 && len(actualModulesInConf) == 0 && (len(spec.Modules) == 0 || (len(spec.Modules) == 1 && spec.Modules[0] == "nf_conntrack_placeholder" && expectedModules == nil)) {
+		hostCtxLogger.Debugf("No modules specified or resolved, and config file %s is effectively empty. Considered done.", spec.ConfFilePath)
 		return true, nil
 	}
 
 	if len(expectedModules) != len(actualModulesInConf) {
 		hostCtxLogger.Infof("Number of modules in %s (%d) does not match expected (%d). Expected: %v, Actual: %v",
-			stepSpec.ConfFilePath, len(actualModulesInConf), len(expectedModules), expectedModules, actualModulesInConf)
+			spec.ConfFilePath, len(actualModulesInConf), len(expectedModules), expectedModules, actualModulesInConf)
 		return false, nil
 	}
 
 	for i := range expectedModules {
 		if expectedModules[i] != actualModulesInConf[i] {
 			hostCtxLogger.Infof("Module list in %s differs from expected. Expected: %v, Actual: %v",
-				stepSpec.ConfFilePath, expectedModules, actualModulesInConf)
+				spec.ConfFilePath, expectedModules, actualModulesInConf)
 			return false, nil
 		}
 	}
 
-	hostCtxLogger.Infof("Kernel module persistence file %s is correctly configured with modules: %v.", stepSpec.ConfFilePath, expectedModules)
+	hostCtxLogger.Infof("Kernel module persistence file %s is correctly configured with modules: %v.", spec.ConfFilePath, expectedModules)
 	return true, nil
 }
 
 // Execute ensures kernel modules are configured to load on boot.
-func (e *EnsureKernelModulesPersistentStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	stepSpec, ok := s.(*EnsureKernelModulesPersistentStepSpec)
-	if !ok {
-		myErr := fmt.Errorf("Execute: unexpected spec type %T", s)
-		stepName := "EnsureKernelModulesPersistent (type error)"; if s != nil { stepName = s.GetName() }
-		return step.NewResult(stepName, ctx.Host.Name, time.Now(), myErr)
-	}
-	stepSpec.PopulateDefaults()
-
-	stepName := stepSpec.GetName()
+func (e *EnsureKernelModulesPersistentStepExecutor) Execute(ctx runtime.Context) *step.Result {
 	startTime := time.Now()
-	res := step.NewResult(stepName, ctx.Host.Name, startTime, nil)
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", stepName).Sugar()
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for EnsureKernelModulesPersistentStep Execute"))
+	}
+	spec, ok := currentFullSpec.(*EnsureKernelModulesPersistentStepSpec)
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for EnsureKernelModulesPersistentStep Execute: %T", currentFullSpec))
+	}
+	spec.PopulateDefaults()
 
-	resolvedModules, err := e.resolveModulesInternal(ctx, stepSpec.Modules)
+	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+	res := step.NewResult(ctx, startTime, nil)
+
+	resolvedModules, err := e.resolveModulesInternal(ctx, spec.Modules)
 	if err != nil {
 		res.Error = fmt.Errorf("failed to resolve module list for persistence: %w", err)
-		res.SetFailed(res.Error.Error()); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
 	if len(resolvedModules) == 0 {
-		hostCtxLogger.Warnf("No kernel modules resolved to persist. If modules were specified, this might indicate they are not available on the system. Config file %s will not be written or will be empty.", stepSpec.ConfFilePath)
-		// Depending on strictness, this could be an error. If stepSpec.Modules was empty, this is fine.
-		// If stepSpec.Modules had items but none resolved, it's a problem.
-		if len(stepSpec.Modules) > 0 && ! (len(stepSpec.Modules) == 1 && stepSpec.Modules[0] == "nf_conntrack_placeholder") {
-			res.Error = fmt.Errorf("no modules could be resolved for persistence out of specified: %v", stepSpec.Modules)
-			res.SetFailed(res.Error.Error()); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		hostCtxLogger.Warnf("No kernel modules resolved to persist. If modules were specified, this might indicate they are not available on the system. Config file %s will not be written or will be empty.", spec.ConfFilePath)
+		if len(spec.Modules) > 0 && ! (len(spec.Modules) == 1 && spec.Modules[0] == "nf_conntrack_placeholder") {
+			res.Error = fmt.Errorf("no modules could be resolved for persistence out of specified: %v", spec.Modules)
+			res.Status = step.StatusFailed; hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 		}
 	}
 
 
-	confDir := filepath.Dir(stepSpec.ConfFilePath)
+	confDir := filepath.Dir(spec.ConfFilePath)
 	if err := ctx.Host.Runner.Mkdirp(ctx.GoContext, confDir, "0755", true); err != nil {
 		res.Error = fmt.Errorf("failed to create directory %s: %w", confDir, err)
-		res.SetFailed(res.Error.Error()); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
 	confFileContent := ""
 	if len(resolvedModules) > 0 {
 		confFileContent = strings.Join(resolvedModules, "\n") + "\n" // Ensure trailing newline
 	} else {
-		// If no modules, write an empty file or a file with a comment.
-		// This ensures that an existing file with old modules is overwritten.
 		confFileContent = "# No kernel modules specified or resolved for persistence by KubexMS.\n"
 	}
 
-	hostCtxLogger.Infof("Writing kernel module persistence configuration to %s with modules: %v", stepSpec.ConfFilePath, resolvedModules)
-	if err := ctx.Host.Runner.WriteFile(ctx.GoContext, []byte(confFileContent), stepSpec.ConfFilePath, "0644", true); err != nil {
-		res.Error = fmt.Errorf("failed to write kernel module config file %s: %w", stepSpec.ConfFilePath, err)
-		res.SetFailed(res.Error.Error()); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+	hostCtxLogger.Infof("Writing kernel module persistence configuration to %s with modules: %v", spec.ConfFilePath, resolvedModules)
+	if err := ctx.Host.Runner.WriteFile(ctx.GoContext, []byte(confFileContent), spec.ConfFilePath, "0644", true); err != nil {
+		res.Error = fmt.Errorf("failed to write kernel module config file %s: %w", spec.ConfFilePath, err)
+		res.Status = step.StatusFailed; hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
-	hostCtxLogger.Infof("Kernel module persistence file %s written successfully.", stepSpec.ConfFilePath)
+	hostCtxLogger.Infof("Kernel module persistence file %s written successfully.", spec.ConfFilePath)
 
-	done, checkErr := e.Check(s, ctx)
+	done, checkErr := e.Check(ctx) // Pass context
 	if checkErr != nil {
 		res.Error = fmt.Errorf("post-execution check failed: %w", checkErr)
-		res.SetFailed(res.Error.Error()); hostCtxLogger.Errorf("Step failed verification: %v", res.Error); return res
+		res.Status = step.StatusFailed; hostCtxLogger.Errorf("Step failed verification: %v", res.Error); return res
 	}
 	if !done {
 		errMsg := "post-execution check indicates kernel module persistence file is not correctly configured"
 		res.Error = fmt.Errorf(errMsg)
-		res.SetFailed(errMsg); hostCtxLogger.Errorf("Step failed verification: %s", errMsg); return res
+		res.Status = step.StatusFailed; hostCtxLogger.Errorf("Step failed verification: %s", errMsg); return res
 	}
 
-	res.SetSucceeded("Kernel module persistence configured successfully.")
-	hostCtxLogger.Successf("Step succeeded: %s", res.Message)
+	res.Message = "Kernel module persistence configured successfully."
+	// hostCtxLogger.Successf("Step succeeded: %s", res.Message) // Redundant
 	return res
 }
 

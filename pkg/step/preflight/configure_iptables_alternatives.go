@@ -43,13 +43,17 @@ func (s *SetIPTablesAlternativesStepSpec) PopulateDefaults() {
 type SetIPTablesAlternativesStepExecutor struct{}
 
 // Check determines if the iptables alternatives are already set to their legacy paths.
-func (e *SetIPTablesAlternativesStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
-	spec, ok := s.(*SetIPTablesAlternativesStepSpec)
+func (e *SetIPTablesAlternativesStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		return false, fmt.Errorf("unexpected spec type %T", s)
+		return false, fmt.Errorf("StepSpec not found in context for SetIPTablesAlternativesStep Check")
+	}
+	spec, ok := currentFullSpec.(*SetIPTablesAlternativesStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected StepSpec type for SetIPTablesAlternativesStep Check: %T", currentFullSpec)
 	}
 	spec.PopulateDefaults()
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
 	for _, alt := range spec.Alternatives {
 		// update-alternatives --display <tool>
@@ -110,19 +114,20 @@ func (e *SetIPTablesAlternativesStepExecutor) Check(s spec.StepSpec, ctx *runtim
 }
 
 // Execute sets the iptables alternatives to their legacy paths.
-func (e *SetIPTablesAlternativesStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	spec, ok := s.(*SetIPTablesAlternativesStepSpec)
+func (e *SetIPTablesAlternativesStepExecutor) Execute(ctx runtime.Context) *step.Result {
+	startTime := time.Now()
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		myErr := fmt.Errorf("Execute: unexpected spec type %T", s)
-		stepName := "SetIPTablesAlternatives (type error)"; if s != nil { stepName = s.GetName() }
-		return step.NewResult(stepName, ctx.Host.Name, time.Now(), myErr)
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for SetIPTablesAlternativesStep Execute"))
+	}
+	spec, ok := currentFullSpec.(*SetIPTablesAlternativesStepSpec)
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for SetIPTablesAlternativesStep Execute: %T", currentFullSpec))
 	}
 	spec.PopulateDefaults()
 
-	stepName := spec.GetName()
-	startTime := time.Now()
-	res := step.NewResult(stepName, ctx.Host.Name, startTime, nil)
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", stepName).Sugar()
+	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+	res := step.NewResult(ctx, startTime, nil)
 
 	var warnings []string
 
@@ -154,32 +159,31 @@ func (e *SetIPTablesAlternativesStepExecutor) Execute(s spec.StepSpec, ctx *runt
 	}
 
 	// Perform a post-execution check
-	done, checkErr := e.Check(s, ctx)
+	done, checkErr := e.Check(ctx) // Pass context
 	if checkErr != nil {
 		// This check error is more serious as it's about verification.
 		res.Error = fmt.Errorf("post-execution check failed: %w", checkErr)
-		res.SetFailed(res.Error.Error())
+		res.Status = step.StatusFailed
 		hostCtxLogger.Errorf("Step failed verification: %v", res.Error)
 		return res
 	}
 	if !done {
 		errMsg := "post-execution check indicates iptables alternatives are not correctly set."
-		// Add collected warnings to the message if any.
 		if len(warnings) > 0 {
 			errMsg += " Previous warnings: " + strings.Join(warnings, "; ")
 		}
 		res.Error = fmt.Errorf(errMsg)
-		res.SetFailed(errMsg) // Mark as failed if check doesn't pass.
+		res.Status = step.StatusFailed // Mark as failed if check doesn't pass.
 		hostCtxLogger.Errorf("Step failed verification: %s", errMsg)
 		return res
 	}
 
 	if len(warnings) > 0 {
-		res.SetSucceededWithWarnings("IPTables alternatives set, but with warnings: " + strings.Join(warnings, "; "))
+		res.Message = "IPTables alternatives set, but with warnings: " + strings.Join(warnings, "; ")
 		hostCtxLogger.Warnf("Step finished with warnings: %s", res.Message)
 	} else {
-		res.SetSucceeded("IPTables alternatives set successfully to legacy versions where applicable.")
-		hostCtxLogger.Successf("Step succeeded: %s", res.Message)
+		res.Message = "IPTables alternatives set successfully to legacy versions where applicable."
+		// hostCtxLogger.Successf("Step succeeded: %s", res.Message) // Redundant
 	}
 	return res
 }

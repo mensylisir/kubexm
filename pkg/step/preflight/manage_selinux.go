@@ -26,8 +26,19 @@ func (s *ConfigureSELinuxStepSpec) GetName() string {
 type ConfigureSELinuxStepExecutor struct{}
 
 // Check determines if SELinux is already configured as disabled.
-func (e *ConfigureSELinuxStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", s.GetName()).Sugar()
+func (e *ConfigureSELinuxStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
+	if !ok {
+		// If spec is not found, we can't determine the step name for logger,
+		// but this situation should ideally not happen if engine sets it.
+		return false, fmt.Errorf("StepSpec not found in context for ConfigureSELinuxStep Check")
+	}
+	spec, ok := currentFullSpec.(*ConfigureSELinuxStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected StepSpec type for ConfigureSELinuxStep Check: %T", currentFullSpec)
+	}
+	// spec is empty, so no spec.PopulateDefaults() call needed.
+	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 	desiredState := "disabled" // For this executor, we hardcode to disabled.
 
 	// 1. Check /etc/selinux/config
@@ -93,27 +104,27 @@ func (e *ConfigureSELinuxStepExecutor) Check(s spec.StepSpec, ctx *runtime.Conte
 }
 
 // Execute configures SELinux to disabled.
-func (e *ConfigureSELinuxStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	stepName := s.GetName()
+func (e *ConfigureSELinuxStepExecutor) Execute(ctx runtime.Context) *step.Result {
 	startTime := time.Now()
-	res := step.NewResult(stepName, ctx.Host.Name, startTime, nil)
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", stepName).Sugar()
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for ConfigureSELinuxStep Execute"))
+	}
+	spec, ok := currentFullSpec.(*ConfigureSELinuxStepSpec)
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for ConfigureSELinuxStep Execute: %T", currentFullSpec))
+	}
+	// spec is empty, so no spec.PopulateDefaults() call needed.
+	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+	res := step.NewResult(ctx, startTime, nil) // Use new constructor
+
 	desiredState := "disabled"
 	configPath := "/etc/selinux/config"
-
-	// 1. Modify /etc/selinux/config using sed
-	// This ensures we only change SELINUX=enforcing or SELINUX=permissive to SELINUX=disabled
-	// and leaves SELINUX=disabled as is.
-	// Using Run for sed is simpler than Read/Modify/Write for this specific replacement.
-	// The command `sed -i 's/^SELINUX=\(enforcing\|permissive\)/SELINUX=disabled/' /etc/selinux/config` is more targeted.
-	// Or, more simply, ensure the line is exactly SELINUX=disabled.
-	// `sed -ri 's/^SELINUX=.*/SELINUX=disabled/' /etc/selinux/config` would be more direct like the original script's goal.
-	// Let's try to make it idempotent by first checking if the file needs modification.
 
 	configContentBytes, err := ctx.Host.Runner.ReadFile(ctx.GoContext, configPath)
 	if err != nil {
 		res.Error = fmt.Errorf("failed to read %s: %w", configPath, err)
-		res.SetFailed(res.Error.Error())
+		res.Status = step.StatusFailed
 		hostCtxLogger.Errorf("Step failed: %v", res.Error)
 		return res
 	}
@@ -131,14 +142,14 @@ func (e *ConfigureSELinuxStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Con
 				needsUpdate = true
 				hostCtxLogger.Infof("Modifying SELinux config line from '%s' to 'SELINUX=%s'", trimmedLine, desiredState)
 			} else {
-				newLines = append(newLines, line) // Keep original if already correct (preserves comments on same line if any)
+				newLines = append(newLines, line)
 			}
 		} else {
 			newLines = append(newLines, line)
 		}
 	}
 
-	if !foundSELinuxLine { // If SELINUX= line doesn't exist, append it.
+	if !foundSELinuxLine {
 		newLines = append(newLines, "SELINUX="+desiredState)
 		needsUpdate = true
 		hostCtxLogger.Infof("Appending 'SELINUX=%s' to %s", desiredState, configPath)
@@ -146,14 +157,13 @@ func (e *ConfigureSELinuxStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Con
 
 	if needsUpdate {
 		newConfigContent := strings.Join(newLines, "\n")
-		// Ensure file ends with a newline.
 		if !strings.HasSuffix(newConfigContent, "\n") && len(newConfigContent) > 0 {
 			newConfigContent += "\n"
 		}
 		err := ctx.Host.Runner.WriteFile(ctx.GoContext, []byte(newConfigContent), configPath, "0644", true)
 		if err != nil {
 			res.Error = fmt.Errorf("failed to write modified %s: %w", configPath, err)
-			res.SetFailed(res.Error.Error())
+			res.Status = step.StatusFailed
 			hostCtxLogger.Errorf("Step failed: %v", res.Error)
 			return res
 		}
@@ -162,42 +172,32 @@ func (e *ConfigureSELinuxStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Con
 		hostCtxLogger.Infof("%s already configured to 'SELINUX=%s'. No changes made to file.", configPath, desiredState)
 	}
 
-	// 2. Run setenforce 0
-	// Check if setenforce command exists
 	setenforcePath, err := ctx.Host.Runner.LookPath(ctx.GoContext, "setenforce")
 	if err != nil || setenforcePath == "" {
 		hostCtxLogger.Warnf("'setenforce' command not found. Skipping runtime SELinux change. Current state will depend on reboot or kernel default. Error: %v", err)
 	} else {
 		hostCtxLogger.Infof("Attempting to set current SELinux mode to Permissive (setenforce 0)...")
-		// Sudo is required for setenforce
 		_, stderr, err := ctx.Host.Runner.RunWithOptions(ctx.GoContext, "setenforce 0", &connector.ExecOptions{Sudo: true})
 		if err != nil {
-			// setenforce 0 might fail if SELinux is already disabled at kernel level.
 			hostCtxLogger.Warnf("'setenforce 0' command finished with error (this may be expected if SELinux is fully disabled by kernel): %v. Stderr: %s", err, string(stderr))
 		} else {
 			hostCtxLogger.Infof("'setenforce 0' executed successfully. SELinux is now Permissive for the current session.")
 		}
 	}
 
-	// Perform a post-execution check
-	done, checkErr := e.Check(s, ctx)
+	done, checkErr := e.Check(ctx) // Pass context
 	if checkErr != nil {
 		res.Error = fmt.Errorf("post-execution check failed: %w", checkErr)
-		res.SetFailed(res.Error.Error())
+		res.Status = step.StatusFailed
 		hostCtxLogger.Errorf("Step failed verification: %v", res.Error)
 		return res
 	}
 	if !done {
-		// This might occur if a reboot is strictly necessary for getenforce to show Disabled
-		// and current session remains Enforcing. The Check logic allows Permissive.
 		hostCtxLogger.Warnf("Post-execution check indicates SELinux may not be fully in the desired state ('Disabled' in config, 'Disabled' or 'Permissive' runtime). This might be expected if a reboot is pending.")
-		// Depending on strictness, this could be a failure. For now, we'll consider it a soft warning if config is set.
-		// The check already allows Permissive.
 	}
 
-
-	res.SetSucceeded(fmt.Sprintf("SELinux configuration set to '%s'. Runtime set to Permissive if possible. Reboot may be required.", desiredState))
-	hostCtxLogger.Successf("Step succeeded: %s", res.Message)
+	res.Message = fmt.Sprintf("SELinux configuration set to '%s'. Runtime set to Permissive if possible. Reboot may be required.", desiredState)
+	// hostCtxLogger.Successf("Step succeeded: %s", res.Message) // Redundant if NewResult sets status
 	return res
 }
 

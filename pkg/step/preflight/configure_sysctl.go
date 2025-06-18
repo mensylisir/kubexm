@@ -71,14 +71,18 @@ func (s *ApplySysctlSettingsStepSpec) PopulateDefaults() {
 type ApplySysctlSettingsStepExecutor struct{}
 
 // Check determines if the sysctl settings are already applied.
-func (e *ApplySysctlSettingsStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
-	spec, ok := s.(*ApplySysctlSettingsStepSpec)
+func (e *ApplySysctlSettingsStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		return false, fmt.Errorf("unexpected spec type %T", s)
+		return false, fmt.Errorf("StepSpec not found in context for ApplySysctlSettingsStep Check")
+	}
+	spec, ok := currentFullSpec.(*ApplySysctlSettingsStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected StepSpec type for ApplySysctlSettingsStep Check: %T", currentFullSpec)
 	}
 	spec.PopulateDefaults() // Ensure defaults are populated
 
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
 	// Check live values for InitialSettings
 	for _, setting := range spec.InitialSettings {
@@ -111,19 +115,20 @@ func (e *ApplySysctlSettingsStepExecutor) Check(s spec.StepSpec, ctx *runtime.Co
 }
 
 // Execute applies the sysctl settings.
-func (e *ApplySysctlSettingsStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	spec, ok := s.(*ApplySysctlSettingsStepSpec)
+func (e *ApplySysctlSettingsStepExecutor) Execute(ctx runtime.Context) *step.Result {
+	startTime := time.Now()
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		myErr := fmt.Errorf("Execute: unexpected spec type %T", s)
-		stepName := "ApplySysctlSettings (type error)"; if s != nil { stepName = s.GetName() }
-		return step.NewResult(stepName, ctx.Host.Name, time.Now(), myErr)
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for ApplySysctlSettingsStep Execute"))
+	}
+	spec, ok := currentFullSpec.(*ApplySysctlSettingsStepSpec)
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for ApplySysctlSettingsStep Execute: %T", currentFullSpec))
 	}
 	spec.PopulateDefaults() // Ensure defaults are populated
 
-	stepName := spec.GetName()
-	startTime := time.Now()
-	res := step.NewResult(stepName, ctx.Host.Name, startTime, nil)
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", stepName).Sugar()
+	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+	res := step.NewResult(ctx, startTime, nil)
 
 	// 1. Append Initial Settings to TargetConfFile
 	hostCtxLogger.Infof("Appending initial sysctl settings to %s...", spec.TargetConfFile)
@@ -152,7 +157,7 @@ func (e *ApplySysctlSettingsStepExecutor) Execute(s spec.StepSpec, ctx *runtime.
 		echoCmd := fmt.Sprintf("printf '%%s\\n' '%s' >> %s", strings.Join(settingsToAppend, "' '"), spec.TargetConfFile)
 		if _, _, err := ctx.Host.Runner.RunWithOptions(ctx.GoContext, echoCmd, &connector.ExecOptions{Sudo: true}); err != nil {
 			res.Error = fmt.Errorf("failed to append initial settings to %s: %w", spec.TargetConfFile, err)
-			res.SetFailed(res.Error.Error()); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+			res.Status = step.StatusFailed; hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 		}
 		hostCtxLogger.Infof("Appended %d initial settings to %s.", len(settingsToAppend), spec.TargetConfFile)
 	} else {
@@ -186,62 +191,47 @@ func (e *ApplySysctlSettingsStepExecutor) Execute(s spec.StepSpec, ctx *runtime.
 	// Ensure these operations are done with appropriate permissions (sudo)
 	if _, _, err := ctx.Host.Runner.RunWithOptions(ctx.GoContext, awkCmd, &connector.ExecOptions{Sudo: true}); err != nil {
 		res.Error = fmt.Errorf("failed to run awk for deduplication on %s: %w", spec.TargetConfFile, err)
-		res.SetFailed(res.Error.Error()); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 	hostCtxLogger.Debugf("Deduplicated content written to %s", tmpFileName)
 
-	// Before moving, ensure ownership and permissions are preserved or set correctly.
-	// `mv` with sudo should handle permissions of the new file, but original ownership might be lost.
-	// A `chown` and `chmod` after mv might be needed if `mv` doesn't preserve.
-	// For now, assume `mv` with sudo is sufficient.
 	if _, _, err := ctx.Host.Runner.RunWithOptions(ctx.GoContext, mvCmd, &connector.ExecOptions{Sudo: true}); err != nil {
-		// Attempt to clean up tmp file if mv fails
 		ctx.Host.Runner.Run(ctx.GoContext, fmt.Sprintf("rm -f %s", tmpFileName), true)
 		res.Error = fmt.Errorf("failed to move deduplicated file %s to %s: %w", tmpFileName, spec.TargetConfFile, err)
-		res.SetFailed(res.Error.Error()); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 	hostCtxLogger.Infof("%s deduplicated successfully.", spec.TargetConfFile)
 
 
 	// 4. Apply Settings Live
 	hostCtxLogger.Infof("Applying sysctl settings live (sysctl -p %s)...", spec.TargetConfFile)
-	// sysctl -p might take a specific file, or default to /etc/sysctl.conf
 	sysctlCmd := fmt.Sprintf("sysctl -p %s", spec.TargetConfFile)
-	// Sudo is required for sysctl -p
 	stdoutSysctl, stderrSysctl, errSysctl := ctx.Host.Runner.RunWithOptions(ctx.GoContext, sysctlCmd, &connector.ExecOptions{Sudo: true})
 	if errSysctl != nil {
-		// sysctl -p can "fail" if some keys are unknown (e.g. from a different kernel version)
-		// Log output and continue, but this might indicate partial success.
 		hostCtxLogger.Warnf("'sysctl -p' command finished with error: %v. Stdout: %s, Stderr: %s. Some settings may not have applied.", errSysctl, stdoutSysctl, stderrSysctl)
-		// Consider this a partial failure or warning, not a full stop for the step.
-		// res.Warning = fmt.Sprintf("sysctl -p reported errors: %v. Stderr: %s", errSysctl, stderrSysctl)
 	} else {
 		hostCtxLogger.Infof("'sysctl -p %s' executed successfully. Live settings updated.", spec.TargetConfFile)
 		if stdoutSysctl != "" { hostCtxLogger.Debugf("sysctl -p stdout: %s", stdoutSysctl) }
 		if stderrSysctl != "" { hostCtxLogger.Debugf("sysctl -p stderr: %s", stderrSysctl) }
 	}
 
-	// Perform a post-execution check
-	done, checkErr := e.Check(s, ctx)
+	done, checkErr := e.Check(ctx) // Pass context
 	if checkErr != nil {
 		res.Error = fmt.Errorf("post-execution check failed: %w", checkErr)
-		// res.AppendMessage(res.Error.Error()) // Add to existing warning if any
-		res.SetFailed(res.Error.Error())
+		res.Status = step.StatusFailed
 		hostCtxLogger.Errorf("Step failed verification: %v", res.Error)
 		return res
 	}
 	if !done {
 		errMsg := "post-execution check indicates sysctl settings are not correctly applied"
 		res.Error = fmt.Errorf(errMsg)
-		// res.AppendMessage(errMsg)
-		res.SetFailed(errMsg)
+		res.Status = step.StatusFailed
 		hostCtxLogger.Errorf("Step failed verification: %s", errMsg)
 		return res
 	}
 
-	res.SetSucceeded("Sysctl settings applied successfully.")
-	// if res.Warning != "" { hostCtxLogger.Warnf("Step succeeded with warnings: %s", res.Warning) }
-	hostCtxLogger.Successf("Step succeeded: %s", res.Message)
+	res.Message = "Sysctl settings applied successfully."
+	// hostCtxLogger.Successf("Step succeeded: %s", res.Message) // Redundant as NewResult sets status
 	return res
 }
 

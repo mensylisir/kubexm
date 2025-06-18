@@ -64,14 +64,18 @@ func (s *ApplySecurityLimitsStepSpec) PopulateDefaults() {
 type ApplySecurityLimitsStepExecutor struct{}
 
 // Check determines if the security limits are already applied in the config file.
-func (e *ApplySecurityLimitsStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
-	spec, ok := s.(*ApplySecurityLimitsStepSpec)
+func (e *ApplySecurityLimitsStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		return false, fmt.Errorf("unexpected spec type %T", s)
+		return false, fmt.Errorf("StepSpec not found in context for ApplySecurityLimitsStep Check")
+	}
+	spec, ok := currentFullSpec.(*ApplySecurityLimitsStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected StepSpec type for ApplySecurityLimitsStep Check: %T", currentFullSpec)
 	}
 	spec.PopulateDefaults()
 
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
 	configContentBytes, err := ctx.Host.Runner.ReadFile(ctx.GoContext, spec.TargetConfFile)
 	if err != nil {
@@ -104,19 +108,20 @@ func (e *ApplySecurityLimitsStepExecutor) Check(s spec.StepSpec, ctx *runtime.Co
 }
 
 // Execute applies the security limits.
-func (e *ApplySecurityLimitsStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	spec, ok := s.(*ApplySecurityLimitsStepSpec)
+func (e *ApplySecurityLimitsStepExecutor) Execute(ctx runtime.Context) *step.Result {
+	startTime := time.Now()
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		myErr := fmt.Errorf("Execute: unexpected spec type %T", s)
-		stepName := "ApplySecurityLimits (type error)"; if s != nil { stepName = s.GetName() }
-		return step.NewResult(stepName, ctx.Host.Name, time.Now(), myErr)
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for ApplySecurityLimitsStep Execute"))
+	}
+	spec, ok := currentFullSpec.(*ApplySecurityLimitsStepSpec)
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for ApplySecurityLimitsStep Execute: %T", currentFullSpec))
 	}
 	spec.PopulateDefaults()
 
-	stepName := spec.GetName()
-	startTime := time.Now()
-	res := step.NewResult(stepName, ctx.Host.Name, startTime, nil)
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", stepName).Sugar()
+	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+	res := step.NewResult(ctx, startTime, nil)
 
 	// 1. Read current TargetConfFile to check for existing lines
 	hostCtxLogger.Infof("Checking and appending initial security limit entries to %s...", spec.TargetConfFile)
@@ -146,7 +151,7 @@ func (e *ApplySecurityLimitsStepExecutor) Execute(s spec.StepSpec, ctx *runtime.
 		echoCmd := fmt.Sprintf("printf '%%s\\n' '%s' >> %s", strings.Join(entriesToAppend, "' '"), spec.TargetConfFile)
 		if _, _, err := ctx.Host.Runner.RunWithOptions(ctx.GoContext, echoCmd, &connector.ExecOptions{Sudo: true}); err != nil {
 			res.Error = fmt.Errorf("failed to append initial entries to %s: %w", spec.TargetConfFile, err)
-			res.SetFailed(res.Error.Error()); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+			res.Status = step.StatusFailed; hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 		}
 		hostCtxLogger.Infof("Appended %d initial entries to %s.", len(entriesToAppend), spec.TargetConfFile)
 	} else {
@@ -173,14 +178,14 @@ func (e *ApplySecurityLimitsStepExecutor) Execute(s spec.StepSpec, ctx *runtime.
 
 	if _, _, err := ctx.Host.Runner.RunWithOptions(ctx.GoContext, awkCmd, &connector.ExecOptions{Sudo: true}); err != nil {
 		res.Error = fmt.Errorf("failed to run awk for deduplication on %s: %w", spec.TargetConfFile, err)
-		res.SetFailed(res.Error.Error()); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 	hostCtxLogger.Debugf("Deduplicated content written to %s", tmpFileName)
 
 	if _, _, err := ctx.Host.Runner.RunWithOptions(ctx.GoContext, mvCmd, &connector.ExecOptions{Sudo: true}); err != nil {
 		ctx.Host.Runner.Run(ctx.GoContext, fmt.Sprintf("rm -f %s", tmpFileName), true) // Attempt cleanup
 		res.Error = fmt.Errorf("failed to move deduplicated file %s to %s: %w", tmpFileName, spec.TargetConfFile, err)
-		res.SetFailed(res.Error.Error()); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 	hostCtxLogger.Infof("%s deduplicated successfully.", spec.TargetConfFile)
 
@@ -188,23 +193,23 @@ func (e *ApplySecurityLimitsStepExecutor) Execute(s spec.StepSpec, ctx *runtime.
 	hostCtxLogger.Info("Security limits configuration updated. Changes will apply at next user login/session.")
 
 	// Perform a post-execution check
-	done, checkErr := e.Check(s, ctx)
+	done, checkErr := e.Check(ctx) // Pass context
 	if checkErr != nil {
 		res.Error = fmt.Errorf("post-execution check failed: %w", checkErr)
-		res.SetFailed(res.Error.Error())
+		res.Status = step.StatusFailed
 		hostCtxLogger.Errorf("Step failed verification: %v", res.Error)
 		return res
 	}
 	if !done {
 		errMsg := fmt.Sprintf("post-execution check indicates security limits in %s are not correctly applied", spec.TargetConfFile)
 		res.Error = fmt.Errorf(errMsg)
-		res.SetFailed(errMsg)
+		res.Status = step.StatusFailed
 		hostCtxLogger.Errorf("Step failed verification: %s", errMsg)
 		return res
 	}
 
-	res.SetSucceeded("Security limits applied successfully.")
-	hostCtxLogger.Successf("Step succeeded: %s", res.Message)
+	res.Message = "Security limits applied successfully."
+	// hostCtxLogger.Successf("Step succeeded: %s", res.Message) // Redundant
 	return res
 }
 
