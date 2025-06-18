@@ -7,16 +7,22 @@ import (
 	"time"
 
 	// "github.com/kubexms/kubexms/pkg/connector" // For step.Result if it references CommandError - not directly needed here
-	"github.com/kubexms/kubexms/pkg/runtime"
-	"github.com/kubexms/kubexms/pkg/spec"     // Import the new spec package
+	"github.com/kubexms/kubexms/pkg/runtime" // Now directly used in StepExecutor interface
+	"github.com/kubexms/kubexms/pkg/spec"    // Import the new spec package
+)
+
+// Status types for Step Result
+const (
+	StatusSucceeded = "Succeeded"
+	StatusFailed    = "Failed"
+	StatusSkipped   = "Skipped" // If Check returns true, or other skip conditions
 )
 
 // Result encapsulates the complete execution result of a single Step on a single host.
-// (This struct remains largely the same as previously defined)
 type Result struct {
 	StepName  string
 	HostName  string
-	Status    string        // "Succeeded", "Failed", "Skipped"
+	Status    string // "Succeeded", "Failed", "Skipped"
 	Stdout    string
 	Stderr    string
 	Error     error
@@ -25,51 +31,52 @@ type Result struct {
 	Message   string
 }
 
+// determineStatus is a helper to set status based on error.
+func determineStatus(err error) string {
+	if err == nil {
+		return StatusSucceeded
+	}
+	return StatusFailed
+}
+
 // NewResult is a helper function to create and initialize a Step Result.
-// (This function remains largely the same)
-// EndTime is typically updated by the executor after the StepExecutor's Execute method finishes.
-func NewResult(stepName, hostName string, startTime time.Time, runErr error) *Result {
-	res := &Result{
+// It now derives StepName and HostName from the runtime.Context.
+func NewResult(ctx runtime.Context, startTime time.Time, executionError error) *Result {
+	stepSpec, ok := ctx.Step().GetCurrentStepSpec()
+	stepName := "UnknownStep (Spec not found in context)"
+	if ok {
+		stepName = stepSpec.GetName()
+	}
+
+	hostName := "localhost" // Default if not a remote execution context
+	if ctx.Host != nil && ctx.Host.Name != "" {
+		hostName = ctx.Host.Name
+	}
+
+	// If ctx itself or essential parts for logging/identification are nil,
+	// a more robust fallback might be needed, or panic if context integrity is critical.
+	// For now, proceeding with defaults.
+
+	return &Result{
 		StepName:  stepName,
 		HostName:  hostName,
 		StartTime: startTime,
-		EndTime:   time.Now(), // Initial EndTime, can be updated by caller
-		Error:     runErr,
+		EndTime:   time.Now(), // EndTime is set when result is created
+		Error:     executionError,
+		Status:    determineStatus(executionError),
 	}
-	if runErr != nil {
-		res.Status = "Failed"
-	} else {
-		res.Status = "Succeeded"
-	}
-	return res
 }
 
-
-// StepExecutor defines the interface for executing the logic of a specific StepSpec.
-// Each type of StepSpec (e.g., command.CommandStepSpec, preflight.CheckCPUStepSpec) will have a
-// corresponding implementation of StepExecutor.
+// StepExecutor defines the interface for a step that can be executed.
 type StepExecutor interface {
-	// Check determines if the operation defined by the spec has already been completed
-	// or if its conditions are already met on the target host.
-	//
-	// Parameters:
-	//   - s: The specific StepSpec instance containing the parameters for this check.
-	//   - ctx: The runtime context providing access to the host's runner and logger.
-	//
-	// Returns:
-	//   - isDone: True if the step's goal is already achieved and Execute should be skipped.
-	//   - err: An error if the check itself failed (e.g., could not query state).
-	Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error)
+	// Check determines if the step needs to be executed.
+	// It should be idempotent.
+	// The step's specific configuration (Spec) can be retrieved from ctx.Step().GetCurrentStepSpec().
+	Check(ctx runtime.Context) (isDone bool, err error)
 
-	// Execute performs the primary action of the step as defined by the spec.
-	//
-	// Parameters:
-	//   - s: The specific StepSpec instance containing the parameters for this execution.
-	//   - ctx: The runtime context providing access to the host's runner and logger.
-	//
-	// Returns:
-	//   - *Result: A detailed result of the execution, including status, output, and any errors.
-	Execute(s spec.StepSpec, ctx *runtime.Context) *Result
+	// Execute performs the action of the step.
+	// The step's specific configuration (Spec) can be retrieved from ctx.Step().GetCurrentStepSpec().
+	Execute(ctx runtime.Context) *Result
 }
 
 // --- Step Executor Registry ---

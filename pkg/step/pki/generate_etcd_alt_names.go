@@ -54,42 +54,48 @@ func (s *GenerateEtcdAltNamesStepSpec) PopulateDefaults() {
 type GenerateEtcdAltNamesStepExecutor struct{}
 
 // Check determines if etcd SANs have already been generated and stored.
-func (e *GenerateEtcdAltNamesStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
-	stepSpec, ok := s.(*GenerateEtcdAltNamesStepSpec)
+func (e *GenerateEtcdAltNamesStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		return false, fmt.Errorf("unexpected spec type %T for %s", s, stepSpec.GetName())
+		return false, fmt.Errorf("StepSpec not found in context for GenerateEtcdAltNamesStep Check")
 	}
-	stepSpec.PopulateDefaults() // Ensure defaults are applied
-	logger := ctx.Logger.SugaredLogger.With("step", stepSpec.GetName())
+	spec, ok := currentFullSpec.(*GenerateEtcdAltNamesStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected StepSpec type for GenerateEtcdAltNamesStep Check: %T", currentFullSpec)
+	}
+	spec.PopulateDefaults() // Ensure defaults are applied
+	logger := ctx.Logger.SugaredLogger().With("step", spec.GetName())
 
-	val, exists := ctx.SharedData.Load(stepSpec.OutputAltNamesSharedDataKey)
+	val, exists := ctx.Task().Get(spec.OutputAltNamesSharedDataKey)
 	if !exists {
-		logger.Debugf("Etcd AltNames not found in SharedData key '%s'. Generation needed.", stepSpec.OutputAltNamesSharedDataKey)
+		logger.Debugf("Etcd AltNames not found in Task Cache key '%s'. Generation needed.", spec.OutputAltNamesSharedDataKey)
 		return false, nil
 	}
 
 	_, ok = val.(*cert.AltNames)
 	if !ok {
-		// This indicates a type mismatch, which is an error state.
-		// It implies something else wrote to this key with an incorrect type.
-		logger.Errorf("Invalid type in SharedData for key '%s'. Expected *cert.AltNames, got %T.", stepSpec.OutputAltNamesSharedDataKey, val)
-		return false, fmt.Errorf("invalid type in SharedData for key %s, expected *cert.AltNames", stepSpec.OutputAltNamesSharedDataKey)
+		logger.Errorf("Invalid type in Task Cache for key '%s'. Expected *cert.AltNames, got %T.", spec.OutputAltNamesSharedDataKey, val)
+		return false, fmt.Errorf("invalid type in Task Cache for key %s, expected *cert.AltNames", spec.OutputAltNamesSharedDataKey)
 	}
 
-	logger.Infof("Etcd AltNames already found in SharedData key '%s'. Assuming correctly generated.", stepSpec.OutputAltNamesSharedDataKey)
+	logger.Infof("Etcd AltNames already found in Task Cache key '%s'. Assuming correctly generated.", spec.OutputAltNamesSharedDataKey)
 	return true, nil
 }
 
-// Execute generates and stores etcd SANs in SharedData.
-func (e *GenerateEtcdAltNamesStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	stepSpec, ok := s.(*GenerateEtcdAltNamesStepSpec)
+// Execute generates and stores etcd SANs in Task Cache.
+func (e *GenerateEtcdAltNamesStepExecutor) Execute(ctx runtime.Context) *step.Result {
+	startTime := time.Now()
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		return step.NewResultForSpec(s, fmt.Errorf("unexpected spec type %T", s))
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for GenerateEtcdAltNamesStep Execute"))
 	}
-	stepSpec.PopulateDefaults()
-	logger := ctx.Logger.SugaredLogger.With("step", stepSpec.GetName())
-	// Assuming this step runs locally, not tied to a specific host from context for result.
-	res := step.NewResult(stepSpec.GetName(), "localhost", time.Now(), nil)
+	spec, ok := currentFullSpec.(*GenerateEtcdAltNamesStepSpec)
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for GenerateEtcdAltNamesStep Execute: %T", currentFullSpec))
+	}
+	spec.PopulateDefaults()
+	logger := ctx.Logger.SugaredLogger().With("step", spec.GetName())
+	res := step.NewResult(ctx, startTime, nil) // Use new constructor
 
 	var altName cert.AltNames
 
@@ -146,10 +152,10 @@ func (e *GenerateEtcdAltNamesStepExecutor) Execute(s spec.StepSpec, ctx *runtime
 	altName.DNSNames = dnsList
 	altName.IPs = ipList
 
-	ctx.SharedData.Store(stepSpec.OutputAltNamesSharedDataKey, &altName)
-	logger.Infof("Generated etcd AltNames. DNS: %v, IPs: %v. Stored in SharedData key '%s'.", altName.DNSNames, altName.IPs, stepSpec.OutputAltNamesSharedDataKey)
+	ctx.Task().Set(spec.OutputAltNamesSharedDataKey, &altName)
+	logger.Infof("Generated etcd AltNames. DNS: %v, IPs: %v. Stored in Task Cache key '%s'.", altName.DNSNames, altName.IPs, spec.OutputAltNamesSharedDataKey)
 
-	res.SetSucceeded()
+	// res.SetSucceeded() // Status is handled by NewResult based on error
 	return res
 }
 

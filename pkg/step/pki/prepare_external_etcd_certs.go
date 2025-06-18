@@ -48,40 +48,42 @@ func (s *PrepareExternalEtcdCertsStepSpec) PopulateDefaults() {
 type PrepareExternalEtcdCertsStepExecutor struct{}
 
 // Check determines if external etcd certificates seem to have been already copied and configured.
-func (e *PrepareExternalEtcdCertsStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
-	stepSpec, ok := s.(*PrepareExternalEtcdCertsStepSpec)
+func (e *PrepareExternalEtcdCertsStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		return false, fmt.Errorf("unexpected spec type %T for %s", s, stepSpec.GetName())
+		return false, fmt.Errorf("StepSpec not found in context for PrepareExternalEtcdCertsStep Check")
 	}
-	stepSpec.PopulateDefaults()
-	logger := ctx.Logger.SugaredLogger.With("step", stepSpec.GetName()) // No host context for local operations
+	spec, ok := currentFullSpec.(*PrepareExternalEtcdCertsStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected StepSpec type for PrepareExternalEtcdCertsStep Check: %T", currentFullSpec)
+	}
+	spec.PopulateDefaults()
+	logger := ctx.Logger.SugaredLogger().With("step", spec.GetName()) // No host context for local operations
 
 	// If no external files are specified, this step is effectively "done" or "not applicable".
-	if stepSpec.ExternalEtcdCAFile == "" && stepSpec.ExternalEtcdCertFile == "" && stepSpec.ExternalEtcdKeyFile == "" {
+	if spec.ExternalEtcdCAFile == "" && spec.ExternalEtcdCertFile == "" && spec.ExternalEtcdKeyFile == "" {
 		logger.Info("No external etcd certificate files specified in spec. Step is considered done/not applicable.")
-		// Ensure the output key is set to an empty list if it's considered "done" in this state.
-		// This helps subsequent steps that might check this key.
-		val, listExists := ctx.SharedData.Load(stepSpec.OutputCopiedFilesListKey)
-		if !listExists { // If not set at all, set it to empty.
-			ctx.SharedData.Store(stepSpec.OutputCopiedFilesListKey, []string{})
-		} else { // If set, ensure it's an empty list to be truly "done"
+		val, listExists := ctx.Task().Get(spec.OutputCopiedFilesListKey)
+		if !listExists {
+			ctx.Task().Set(spec.OutputCopiedFilesListKey, []string{})
+		} else {
 			list, ok := val.([]string)
 			if !ok || len(list) != 0 {
-				logger.Debug("OutputCopiedFilesListKey contains items or is wrong type, but no external files specified. Re-running Execute to clarify state.")
-				return false, nil // Force execute to clean/set SharedData correctly
+				logger.Debug("OutputCopiedFilesListKey in Task Cache contains items or is wrong type, but no external files specified. Re-running Execute to clarify state.")
+				return false, nil
 			}
 		}
 		return true, nil
 	}
 
-	targetPKIPathVal, pkiPathOk := ctx.SharedData.Load(stepSpec.TargetPKIPathSharedDataKey)
+	targetPKIPathVal, pkiPathOk := ctx.Task().Get(spec.TargetPKIPathSharedDataKey)
 	if !pkiPathOk {
-		logger.Debugf("Target PKI path not found in SharedData key '%s'. Cannot check.", stepSpec.TargetPKIPathSharedDataKey)
+		logger.Debugf("Target PKI path not found in Task Cache key '%s'. Cannot check.", spec.TargetPKIPathSharedDataKey)
 		return false, nil
 	}
 	targetPKIPath, ok := targetPKIPathVal.(string)
 	if !ok || targetPKIPath == "" {
-		logger.Warnf("Invalid or empty target PKI path in SharedData key '%s'.", stepSpec.TargetPKIPathSharedDataKey)
+		logger.Warnf("Invalid or empty target PKI path in Task Cache key '%s'.", spec.TargetPKIPathSharedDataKey)
 		return false, nil
 	}
 
@@ -118,66 +120,71 @@ func (e *PrepareExternalEtcdCertsStepExecutor) Check(s spec.StepSpec, ctx *runti
 	}
 	sort.Strings(expectedFileBaseNames) // Sort for consistent comparison later
 
-	// Check if SharedData output list is populated and matches
-	fetchedFilesRaw, listExists := ctx.SharedData.Load(stepSpec.OutputCopiedFilesListKey)
+	// Check if Task Cache output list is populated and matches
+	fetchedFilesRaw, listExists := ctx.Task().Get(spec.OutputCopiedFilesListKey)
 	if !listExists {
-		logger.Debugf("List of copied files (key: '%s') not found in SharedData. Re-run needed.", stepSpec.OutputCopiedFilesListKey)
+		logger.Debugf("List of copied files (key: '%s') not found in Task Cache. Re-run needed.", spec.OutputCopiedFilesListKey)
 		return false, nil
 	}
 	actualCopiedFiles, ok := fetchedFilesRaw.([]string)
 	if !ok {
-		return false, fmt.Errorf("invalid type for copied files list in SharedData key '%s', expected []string", stepSpec.OutputCopiedFilesListKey)
+		return false, fmt.Errorf("invalid type for copied files list in Task Cache key '%s', expected []string", spec.OutputCopiedFilesListKey)
 	}
 	sort.Strings(actualCopiedFiles)
 
 	if len(expectedFileBaseNames) != len(actualCopiedFiles) {
-		logger.Infof("Mismatch in number of expected (%d) vs actual (%d) copied files in SharedData. Expected: %v, Actual: %v",
+		logger.Infof("Mismatch in number of expected (%d) vs actual (%d) copied files in Task Cache. Expected: %v, Actual: %v",
 			len(expectedFileBaseNames), len(actualCopiedFiles), expectedFileBaseNames, actualCopiedFiles)
 		return false, nil
 	}
 	for i := range expectedFileBaseNames {
 		if expectedFileBaseNames[i] != actualCopiedFiles[i] {
-			logger.Infof("Mismatch in content of copied files list in SharedData. Expected: %v, Actual: %v", expectedFileBaseNames, actualCopiedFiles)
+			logger.Infof("Mismatch in content of copied files list in Task Cache. Expected: %v, Actual: %v", expectedFileBaseNames, actualCopiedFiles)
 			return false, nil
 		}
 	}
 
-	logger.Infof("All specified external etcd certificate files exist in %s with correct permissions and SharedData is up-to-date.", targetPKIPath)
+	logger.Infof("All specified external etcd certificate files exist in %s with correct permissions and Task Cache is up-to-date.", targetPKIPath)
 	return true, nil
 }
 
 // Execute copies user-provided external etcd certificates to the local PKI directory.
-func (e *PrepareExternalEtcdCertsStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	stepSpec, ok := s.(*PrepareExternalEtcdCertsStepSpec)
+func (e *PrepareExternalEtcdCertsStepExecutor) Execute(ctx runtime.Context) *step.Result {
+	startTime := time.Now()
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		return step.NewResultForSpec(s, fmt.Errorf("unexpected spec type %T", s))
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for PrepareExternalEtcdCertsStep Execute"))
 	}
-	stepSpec.PopulateDefaults()
-	logger := ctx.Logger.SugaredLogger.With("step", stepSpec.GetName())
-	res := step.NewResult(stepSpec.GetName(), "localhost", time.Now(), nil) // Local operation
+	spec, ok := currentFullSpec.(*PrepareExternalEtcdCertsStepSpec)
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for PrepareExternalEtcdCertsStep Execute: %T", currentFullSpec))
+	}
+	spec.PopulateDefaults()
+	logger := ctx.Logger.SugaredLogger().With("step", spec.GetName())
+	res := step.NewResult(ctx, startTime, nil) // Local operation
 
 	// Handle the case where no external certs are provided.
-	if stepSpec.ExternalEtcdCAFile == "" && stepSpec.ExternalEtcdCertFile == "" && stepSpec.ExternalEtcdKeyFile == "" {
+	if spec.ExternalEtcdCAFile == "" && spec.ExternalEtcdCertFile == "" && spec.ExternalEtcdKeyFile == "" {
 		logger.Info("No external etcd certificate files specified. Nothing to copy.")
-		ctx.SharedData.Store(stepSpec.OutputCopiedFilesListKey, []string{}) // Store empty list
-		res.SetSucceeded()
+		ctx.Task().Set(spec.OutputCopiedFilesListKey, []string{}) // Store empty list
+		// res.SetSucceeded() // Status is set by NewResult
 		return res
 	}
 
-	targetPKIPathVal, pkiPathOk := ctx.SharedData.Load(stepSpec.TargetPKIPathSharedDataKey)
+	targetPKIPathVal, pkiPathOk := ctx.Task().Get(spec.TargetPKIPathSharedDataKey)
 	if !pkiPathOk {
-		res.Error = fmt.Errorf("target PKI path for storing certs not found in SharedData key '%s'", stepSpec.TargetPKIPathSharedDataKey)
-		res.SetFailed(); return res
+		res.Error = fmt.Errorf("target PKI path for storing certs not found in Task Cache key '%s'", spec.TargetPKIPathSharedDataKey)
+		res.Status = step.StatusFailed; return res
 	}
 	targetPKIPath, typeOk := targetPKIPathVal.(string)
 	if !typeOk || targetPKIPath == "" {
-		res.Error = fmt.Errorf("invalid or empty target PKI path in SharedData key '%s'", stepSpec.TargetPKIPathSharedDataKey)
-		res.SetFailed(); return res
+		res.Error = fmt.Errorf("invalid or empty target PKI path in Task Cache key '%s'", spec.TargetPKIPathSharedDataKey)
+		res.Status = step.StatusFailed; return res
 	}
 
 	if err := os.MkdirAll(targetPKIPath, 0700); err != nil { // Local filesystem operation
 		res.Error = fmt.Errorf("failed to create local target PKI directory %s: %w", targetPKIPath, err)
-		res.SetFailed(); return res
+		res.Status = step.StatusFailed; return res
 	}
 	logger.Infof("Ensured local PKI directory exists: %s", targetPKIPath)
 
@@ -240,28 +247,29 @@ func (e *PrepareExternalEtcdCertsStepExecutor) Execute(s spec.StepSpec, ctx *run
 	}
 
 	sort.Strings(copiedFileBaseNames) // Sort for consistent storage and checking
-	ctx.SharedData.Store(stepSpec.OutputCopiedFilesListKey, copiedFileBaseNames)
-	logger.Infof("List of copied external etcd file basenames stored in SharedData key '%s': %v", stepSpec.OutputCopiedFilesListKey, copiedFileBaseNames)
+	ctx.Task().Set(spec.OutputCopiedFilesListKey, copiedFileBaseNames)
+	logger.Infof("List of copied external etcd file basenames stored in Task Cache key '%s': %v", spec.OutputCopiedFilesListKey, copiedFileBaseNames)
 
 	if len(errorsEncountered) > 0 {
 		// If any source file was specified but failed to be copied, it's an issue.
 		res.Error = fmt.Errorf("encountered %d error(s) while preparing external etcd certificates: %s", len(errorsEncountered), strings.Join(errorsEncountered, "; "))
 		// Set as failed if any errors occurred that prevented copying a specified file.
-		res.SetFailed(); return res
+		res.Status = step.StatusFailed; return res
 	}
 
 	// Perform post-execution check
-	done, checkErr := e.Check(s, ctx)
+	done, checkErr := e.Check(ctx) // Pass context
 	if checkErr != nil {
 		res.Error = fmt.Errorf("post-execution check failed: %w", checkErr)
-		res.SetFailed(); return res
+		res.Status = step.StatusFailed; return res
 	}
 	if !done {
 		res.Error = fmt.Errorf("post-execution check indicates external etcd certs preparation was not fully successful")
-		res.SetFailed(); return res
+		res.Status = step.StatusFailed; return res
 	}
 
-	res.SetSucceeded(fmt.Sprintf("Prepared %d external etcd certificate files in %s.", len(copiedFileBaseNames), targetPKIPath))
+	res.Message = fmt.Sprintf("Prepared %d external etcd certificate files in %s.", len(copiedFileBaseNames), targetPKIPath)
+	// res.SetSucceeded() // Status is set by NewResult if err is nil
 	return res
 }
 

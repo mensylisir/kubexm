@@ -15,6 +15,7 @@ import (
 	"github.com/kubexms/kubexms/pkg/logger"
 	"github.com/kubexms/kubexms/pkg/runner"
 	"github.com/kubexms/kubexms/pkg/config"
+	"github.com/kubexms/kubexms/pkg/cache" // Added cache import
 )
 
 // osReadFile is a variable that defaults to os.ReadFile, allowing it to be mocked for tests.
@@ -74,11 +75,22 @@ func (cr *ClusterRuntime) GetHostsByRole(roleName string) []*Host { if cr.RoleIn
 // Context is passed to each execution unit (e.g., a Step in a Task).
 type Context struct {
 	GoContext context.Context
-	Host *Host
-	Cluster *ClusterRuntime
-	Logger *logger.Logger // Logger contextualized for Host, Task, Step etc.
-	SharedData *sync.Map
+	Host      *Host
+	Cluster   *ClusterRuntime
+	Logger    *logger.Logger // Logger contextualized for Host, Task, Step etc.
+	SharedData *sync.Map    // Will be deprecated; keep for now for compatibility
+
+	pipelineCache cache.PipelineCache
+	moduleCache   cache.ModuleCache
+	taskCache     cache.TaskCache
+	stepCache     cache.StepCache
 }
+
+// Accessor methods for caches
+func (c *Context) Pipeline() cache.PipelineCache { return c.pipelineCache }
+func (c *Context) Module() cache.ModuleCache    { return c.moduleCache }
+func (c *Context) Task() cache.TaskCache       { return c.taskCache }
+func (c *Context) Step() cache.StepCache          { return c.stepCache }
 
 // runnerNewRunner allows runner.NewRunner to be replaced for testing.
 var runnerNewRunner = runner.NewRunner
@@ -231,24 +243,52 @@ func NewRuntime(cfg *config.Cluster, baseLogger *logger.Logger) (*ClusterRuntime
 }
 
 // NewHostContext creates a new Context specific to a given host and operation.
-func NewHostContext(goCtx context.Context, host *Host, cluster *runtime.ClusterRuntime) *Context {
-	if goCtx == nil { goCtx = context.Background() }
+// It now accepts cache instances to be associated with this context.
+func NewHostContext(
+	goCtx context.Context,
+	host *Host,
+	cluster *ClusterRuntime, // Corrected type to *ClusterRuntime as it's in the same package
+	pCache cache.PipelineCache,
+	mCache cache.ModuleCache,
+	tCache cache.TaskCache,
+	sCache cache.StepCache,
+) *Context {
+	if goCtx == nil {
+		goCtx = context.Background()
+	}
 
 	var hostSpecificLogger *logger.Logger
-	// Start with the ClusterRuntime's base logger (which might be pipeline-contextualized by Executor)
-	// or fallback to global logger if cluster/cluster.Logger is somehow nil.
-	baseLoggerForContext := cluster.Logger
-	if baseLoggerForContext == nil {
-		baseLoggerForContext = logger.Get()
-		baseLoggerForContext.Warnf("NewHostContext: ClusterRuntime.Logger was nil, using global logger as base.")
+	baseLoggerForContext := logger.Get() // Default to global logger
+
+	if cluster != nil && cluster.Logger != nil {
+		baseLoggerForContext = cluster.Logger
+	} else {
+		baseLoggerForContext.Warnf("NewHostContext: ClusterRuntime or ClusterRuntime.Logger was nil, using global logger as base.")
 	}
 
-	if host != nil {
-		// Add host-specific fields.
+	if host != nil && host.Name != "" { // Ensure host and host.Name are valid before using for logger
 		hostSpecificLogger = &logger.Logger{SugaredLogger: baseLoggerForContext.SugaredLogger.With("host_name", host.Name, "host_address", host.Address)}
 	} else {
-		hostSpecificLogger = baseLoggerForContext // Use as is if host is nil
-		baseLoggerForContext.Warnf("NewHostContext called with nil host.")
+		hostSpecificLogger = baseLoggerForContext // Use base (possibly global) logger if host details are not available
+		if host == nil {
+			hostSpecificLogger.Warnf("NewHostContext called with nil host.")
+		} else {
+			hostSpecificLogger.Warnf("NewHostContext called with host missing a name.")
+		}
 	}
-	return &Context{ GoContext: goCtx, Host: host, Cluster: cluster, Logger: hostSpecificLogger, SharedData: &sync.Map{}}
+
+	// Initialize SharedData for now, it will be removed later
+	sharedData := &sync.Map{}
+
+	return &Context{
+		GoContext:     goCtx,
+		Host:          host,
+		Cluster:       cluster,
+		Logger:        hostSpecificLogger,
+		SharedData:    sharedData, // Keep for now
+		pipelineCache: pCache,
+		moduleCache:   mCache,
+		taskCache:     tCache,
+		stepCache:     sCache,
+	}
 }

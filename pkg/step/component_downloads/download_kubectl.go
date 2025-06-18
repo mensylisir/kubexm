@@ -86,11 +86,17 @@ func (e *DownloadKubectlStepExecutor) determineKubectlURL(version, arch, zone st
 }
 
 // Check sees if kubectl already exists and optionally verifies checksum.
-func (e *DownloadKubectlStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (bool, error) {
-	stepSpec, ok := s.(*DownloadKubectlStepSpec)
-	if !ok {return false, fmt.Errorf("unexpected spec type %T", s)}
+func (e *DownloadKubectlStepExecutor) Check(ctx runtime.Context) (bool, error) {
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
+	if !ok {
+		return false, fmt.Errorf("StepSpec not found in context for DownloadKubectlStep Check")
+	}
+	stepSpec, ok := currentFullSpec.(*DownloadKubectlStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected StepSpec type for DownloadKubectlStep Check: %T", currentFullSpec)
+	}
 	stepSpec.PopulateDefaults(ctx)
-	logger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step", stepSpec.GetName())
+	logger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step", stepSpec.GetName())
 
 	fileName := e.determineKubectlFileName(stepSpec.Version, stepSpec.Arch)
 	expectedFilePath := filepath.Join(stepSpec.DownloadDir, fileName)
@@ -121,24 +127,31 @@ func (e *DownloadKubectlStepExecutor) Check(s spec.StepSpec, ctx *runtime.Contex
 		logger.Infof("%s checksum for %s verified.", checksumType, expectedFilePath)
 	}
 
-	ctx.SharedData.Store(stepSpec.OutputFilePathKey, expectedFilePath)
-	ctx.SharedData.Store(stepSpec.OutputFileNameKey, fileName)
-	ctx.SharedData.Store(stepSpec.OutputComponentTypeKey, "KUBE")
-	ctx.SharedData.Store(stepSpec.OutputVersionKey, stepSpec.Version)
-	ctx.SharedData.Store(stepSpec.OutputArchKey, stepSpec.Arch)
-	if stepSpec.Checksum != "" {ctx.SharedData.Store(stepSpec.OutputChecksumKey, stepSpec.Checksum)}
+	ctx.Task().Set(stepSpec.OutputFilePathKey, expectedFilePath)
+	ctx.Task().Set(stepSpec.OutputFileNameKey, fileName)
+	ctx.Task().Set(stepSpec.OutputComponentTypeKey, "KUBE")
+	ctx.Task().Set(stepSpec.OutputVersionKey, stepSpec.Version)
+	ctx.Task().Set(stepSpec.OutputArchKey, stepSpec.Arch)
+	if stepSpec.Checksum != "" {ctx.Task().Set(stepSpec.OutputChecksumKey, stepSpec.Checksum)}
 	url := e.determineKubectlURL(stepSpec.Version, stepSpec.Arch, stepSpec.Zone)
-	ctx.SharedData.Store(stepSpec.OutputURLKey, url)
+	ctx.Task().Set(stepSpec.OutputURLKey, url)
 	return true, nil
 }
 
 // Execute downloads kubectl.
-func (e *DownloadKubectlStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	stepSpec, ok := s.(*DownloadKubectlStepSpec)
-	if !ok {return step.NewResultForSpec(s, fmt.Errorf("unexpected spec type %T", s))}
+func (e *DownloadKubectlStepExecutor) Execute(ctx runtime.Context) *step.Result {
+	startTime := time.Now()
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for DownloadKubectlStep Execute"))
+	}
+	stepSpec, ok := currentFullSpec.(*DownloadKubectlStepSpec)
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for DownloadKubectlStep Execute: %T", currentFullSpec))
+	}
 	stepSpec.PopulateDefaults(ctx)
-	logger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step", stepSpec.GetName())
-	res := step.NewResultForSpec(s, nil)
+	logger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step", stepSpec.GetName())
+	res := step.NewResult(ctx, startTime, nil)
 
 	fileName := e.determineKubectlFileName(stepSpec.Version, stepSpec.Arch)
 	componentType := "KUBE"
@@ -151,19 +164,20 @@ func (e *DownloadKubectlStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Cont
 	downloadedPath, err := utils.DownloadFile(ctx, url, stepSpec.DownloadDir, fileName, false, stepSpec.Checksum, "sha256")
 	if err != nil {
 		res.Error = fmt.Errorf("failed to download kubectl: %w", err)
-		res.SetFailed(); return res
+		res.Status = step.StatusFailed; return res
 	}
 	logger.Successf("Kubectl downloaded successfully to %s", downloadedPath)
 
-	ctx.SharedData.Store(stepSpec.OutputFilePathKey, downloadedPath)
-	ctx.SharedData.Store(stepSpec.OutputFileNameKey, fileName)
-	ctx.SharedData.Store(stepSpec.OutputComponentTypeKey, componentType)
-	ctx.SharedData.Store(stepSpec.OutputVersionKey, stepSpec.Version)
-	ctx.SharedData.Store(stepSpec.OutputArchKey, stepSpec.Arch)
-	if stepSpec.Checksum != "" {ctx.SharedData.Store(stepSpec.OutputChecksumKey, stepSpec.Checksum)}
-	ctx.SharedData.Store(stepSpec.OutputURLKey, url)
+	ctx.Task().Set(stepSpec.OutputFilePathKey, downloadedPath)
+	ctx.Task().Set(stepSpec.OutputFileNameKey, fileName)
+	ctx.Task().Set(stepSpec.OutputComponentTypeKey, componentType)
+	ctx.Task().Set(stepSpec.OutputVersionKey, stepSpec.Version)
+	ctx.Task().Set(stepSpec.OutputArchKey, stepSpec.Arch)
+	if stepSpec.Checksum != "" {ctx.Task().Set(stepSpec.OutputChecksumKey, stepSpec.Checksum)}
+	ctx.Task().Set(stepSpec.OutputURLKey, url)
 
-	res.SetSucceeded(); return res
+	// res.SetSucceeded(); // Status is set by NewResult if err is nil
+	return res
 }
 
 func init() {

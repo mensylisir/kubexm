@@ -47,14 +47,14 @@ func (s *InstallBinaryStepSpec) PopulateDefaults(ctx *runtime.Context) {
 type InstallBinaryStepExecutor struct{}
 
 // determineSourcePath resolves the full path to the source binary.
-func (e *InstallBinaryStepExecutor) determineSourcePath(ctx *runtime.Context, stepSpec *InstallBinaryStepSpec) (string, error) {
-	basePathVal, found := ctx.SharedData.Load(stepSpec.SourcePathSharedDataKey)
+func (e *InstallBinaryStepExecutor) determineSourcePath(ctx runtime.Context, stepSpec *InstallBinaryStepSpec) (string, error) {
+	basePathVal, found := ctx.Task().Get(stepSpec.SourcePathSharedDataKey)
 	if !found {
-		return "", fmt.Errorf("source path key '%s' not found in SharedData", stepSpec.SourcePathSharedDataKey)
+		return "", fmt.Errorf("source path key '%s' not found in Task Cache", stepSpec.SourcePathSharedDataKey)
 	}
 	basePath, ok := basePathVal.(string)
 	if !ok || basePath == "" {
-		return "", fmt.Errorf("invalid or empty source path in SharedData key '%s'", stepSpec.SourcePathSharedDataKey)
+		return "", fmt.Errorf("invalid or empty source path in Task Cache key '%s'", stepSpec.SourcePathSharedDataKey)
 	}
 
 	if stepSpec.SourceIsDirectory {
@@ -76,27 +76,26 @@ func (e *InstallBinaryStepExecutor) determineSourcePath(ctx *runtime.Context, st
 }
 
 // Check determines if the binary is already installed and configured correctly.
-func (e *InstallBinaryStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
-	stepSpec, ok := s.(*InstallBinaryStepSpec)
+func (e *InstallBinaryStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		return false, fmt.Errorf("unexpected spec type %T for %s", s, stepSpec.GetName())
+		return false, fmt.Errorf("StepSpec not found in context for InstallBinaryStep Check")
 	}
-	stepSpec.PopulateDefaults(ctx)
-	logger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step", stepSpec.GetName())
+	spec, ok := currentFullSpec.(*InstallBinaryStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected StepSpec type for InstallBinaryStep Check: %T", currentFullSpec)
+	}
+	spec.PopulateDefaults(ctx)
+	logger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step", spec.GetName())
 
 	// Determine target path
 	var effectiveTargetFileName string
-	if stepSpec.TargetFileName != "" {
-		effectiveTargetFileName = stepSpec.TargetFileName
-	} else if stepSpec.SourceFileName != "" { // If SourceFileName is given, use it as default target name
-		effectiveTargetFileName = stepSpec.SourceFileName
+	if spec.TargetFileName != "" {
+		effectiveTargetFileName = spec.TargetFileName
+	} else if spec.SourceFileName != "" { // If SourceFileName is given, use it as default target name
+		effectiveTargetFileName = spec.SourceFileName
 	} else {
-		// If TargetFileName and SourceFileName are empty, and SourceIsDirectory is false,
-		// we need to get the base from SourcePathSharedDataKey.
-		// This requires resolving sourcePath even in Check, which might be slow or depend on prior steps.
-		// For a simpler Check, we might require TargetFileName if SourceFileName is not easily known here.
-		// Let's attempt to resolve it for a more complete check.
-		sourcePath, errResolve := e.determineSourcePath(ctx, stepSpec)
+		sourcePath, errResolve := e.determineSourcePath(ctx, spec)
 		if errResolve != nil {
 			logger.Debugf("Cannot determine source path for default target filename in Check: %v. Assuming not done.", errResolve)
 			return false, nil // Cannot determine target, so not done.
@@ -107,7 +106,7 @@ func (e *InstallBinaryStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context)
 		logger.Warnf("Could not determine effective target file name. Assuming not done.")
 		return false, nil
 	}
-	targetPath := filepath.Join(stepSpec.TargetDir, effectiveTargetFileName)
+	targetPath := filepath.Join(spec.TargetDir, effectiveTargetFileName)
 
 	fileExists, err := ctx.Host.Runner.Exists(ctx.GoContext, targetPath)
 	if err != nil {
@@ -119,106 +118,89 @@ func (e *InstallBinaryStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context)
 	}
 	logger.Debugf("Target binary %s exists.", targetPath)
 
-	// Check permissions
-	// Runner.Stat should provide os.FileInfo like interface or specific mode string.
-	// Assuming Runner.Stat returns a struct with a Mode field (os.FileMode).
-	// This part is highly dependent on Runner.Stat's return type.
-	// For simplicity, if Runner.GetMode(path) (string, error) existed, it would be:
-	// currentMode, modeErr := ctx.Host.Runner.GetMode(ctx.GoContext, targetPath)
-	// For now, this check might be rudimentary or skipped if GetMode is not standard.
-	// Let's assume a way to get mode as a string like "0755".
-	// If Runner.Stat gives os.FileInfo: statInfo.Mode().Perm().String() gives "-rwxr-xr-x"
-	// We'd need to convert spec.Permissions (e.g. "0755") to this format or vice-versa.
-	// This is complex. A simpler check is if it's executable, if permissions start with 7.
-	// For now, we'll log that permissions check is simplified.
-	// TODO: Implement robust permission checking once Runner.Stat or Runner.GetMode is clarified.
-	logger.Debugf("Permissions check for %s against %s is simplified/skipped in this version.", targetPath, stepSpec.Permissions)
-
-	// Optional: Add checksum comparison if source available and checksums known.
-	// This would require sourcePath to be determined and file read, which makes Check heavier.
+	logger.Debugf("Permissions check for %s against %s is simplified/skipped in this version.", targetPath, spec.Permissions)
 
 	logger.Infof("Target binary %s exists. Permissions check is rudimentary. Assuming done.", targetPath)
 	return true, nil
 }
 
 // Execute installs the binary.
-func (e *InstallBinaryStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	stepSpec, ok := s.(*InstallBinaryStepSpec)
+func (e *InstallBinaryStepExecutor) Execute(ctx runtime.Context) *step.Result {
+	startTime := time.Now()
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		return step.NewResultForSpec(s, fmt.Errorf("unexpected spec type %T", s))
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for InstallBinaryStep Execute"))
 	}
-	stepSpec.PopulateDefaults(ctx)
-	logger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step", stepSpec.GetName())
-	res := step.NewResultForSpec(s, nil)
+	spec, ok := currentFullSpec.(*InstallBinaryStepSpec)
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for InstallBinaryStep Execute: %T", currentFullSpec))
+	}
+	spec.PopulateDefaults(ctx)
+	logger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step", spec.GetName())
+	res := step.NewResult(ctx, startTime, nil)
 
-	sourcePath, err := e.determineSourcePath(ctx, stepSpec)
+	sourcePath, err := e.determineSourcePath(ctx, spec)
 	if err != nil {
 		res.Error = fmt.Errorf("failed to determine source path: %w", err)
-		res.SetFailed(); return res
+		res.Status = step.StatusFailed; return res
 	}
 	logger.Infof("Determined source path: %s", sourcePath)
 
-	// Verify source file exists before proceeding
 	sourceExists, err := ctx.Host.Runner.Exists(ctx.GoContext, sourcePath)
 	if err != nil {
 		res.Error = fmt.Errorf("error checking existence of source file %s: %w", sourcePath, err)
-		res.SetFailed(); return res
+		res.Status = step.StatusFailed; return res
 	}
 	if !sourceExists {
 		res.Error = fmt.Errorf("source file %s does not exist", sourcePath)
-		res.SetFailed(); return res
+		res.Status = step.StatusFailed; return res
 	}
 
-
-	targetFileName := stepSpec.TargetFileName
+	targetFileName := spec.TargetFileName
 	if targetFileName == "" {
 		targetFileName = filepath.Base(sourcePath)
 	}
-	if targetFileName == "" { // Should not happen if sourcePath is valid file
+	if targetFileName == "" {
 		res.Error = fmt.Errorf("could not determine target filename from source path '%s'", sourcePath)
-		res.SetFailed(); return res
+		res.Status = step.StatusFailed; return res
 	}
-	targetPath := filepath.Join(stepSpec.TargetDir, targetFileName)
+	targetPath := filepath.Join(spec.TargetDir, targetFileName)
 	logger.Infof("Target path for installation: %s", targetPath)
 
-
-	logger.Infof("Ensuring target directory %s exists...", stepSpec.TargetDir)
-	// Sudo true for system bin dirs like /usr/local/bin
-	if err := ctx.Host.Runner.Mkdirp(ctx.GoContext, stepSpec.TargetDir, "0755", true); err != nil {
-		res.Error = fmt.Errorf("failed to create target directory %s: %w", stepSpec.TargetDir, err)
-		res.SetFailed(); return res
+	if err := ctx.Host.Runner.Mkdirp(ctx.GoContext, spec.TargetDir, "0755", true); err != nil {
+		res.Error = fmt.Errorf("failed to create target directory %s: %w", spec.TargetDir, err)
+		res.Status = step.StatusFailed; return res
 	}
 
 	logger.Infof("Copying binary from %s to %s...", sourcePath, targetPath)
-	// Using cp command via runner. Sudo true for writing to system directories.
-	cpCmd := fmt.Sprintf("cp -fp %s %s", sourcePath, targetPath) // -f to overwrite, -p to preserve mode from source temporarily
+	cpCmd := fmt.Sprintf("cp -fp %s %s", sourcePath, targetPath)
 	_, stderrCp, errCp := ctx.Host.Runner.RunWithOptions(ctx.GoContext, cpCmd, &connector.ExecOptions{Sudo: true})
 	if errCp != nil {
 		res.Error = fmt.Errorf("failed to copy binary from %s to %s (stderr: %s): %w", sourcePath, targetPath, stderrCp, errCp)
-		res.SetFailed(); return res
+		res.Status = step.StatusFailed; return res
 	}
 
-	logger.Infof("Setting permissions for %s to %s...", targetPath, stepSpec.Permissions)
-	chmodCmd := fmt.Sprintf("chmod %s %s", stepSpec.Permissions, targetPath)
+	logger.Infof("Setting permissions for %s to %s...", targetPath, spec.Permissions)
+	chmodCmd := fmt.Sprintf("chmod %s %s", spec.Permissions, targetPath)
 	_, stderrChmod, errChmod := ctx.Host.Runner.RunWithOptions(ctx.GoContext, chmodCmd, &connector.ExecOptions{Sudo: true})
 	if errChmod != nil {
 		res.Error = fmt.Errorf("failed to set permissions for %s (stderr: %s): %w", targetPath, stderrChmod, errChmod)
-		res.SetFailed(); return res
+		res.Status = step.StatusFailed; return res
 	}
-	logger.Infof("Binary %s installed and permissions set to %s.", targetPath, stepSpec.Permissions)
+	logger.Infof("Binary %s installed and permissions set to %s.", targetPath, spec.Permissions)
 
-	// Perform post-execution check
-	done, checkErr := e.Check(s, ctx)
+	done, checkErr := e.Check(ctx) // Pass context
 	if checkErr != nil {
 		res.Error = fmt.Errorf("post-execution check failed: %w", checkErr)
-		res.SetFailed(); return res
+		res.Status = step.StatusFailed; return res
 	}
 	if !done {
 		res.Error = fmt.Errorf("post-execution check indicates binary installation was not successful or configuration is incorrect")
-		res.SetFailed(); return res
+		res.Status = step.StatusFailed; return res
 	}
 
-	res.SetSucceeded(); return res
+	// res.SetSucceeded(); // Status is set by NewResult if err is nil
+	return res
 }
 
 func init() {

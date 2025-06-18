@@ -10,8 +10,8 @@ import (
 	"github.com/kubexms/kubexms/pkg/runtime"
 	"github.com/kubexms/kubexms/pkg/step"
 	"github.com/kubexms/kubexms/pkg/step/spec"
-	// "k8s.io/client-go/util/cert" // For the actual cert.AltNames type if KubekeyAltNames was not used in definitions
-	// For this subtask, our stubs (KubekeyCert, KubekeyAltNames, KubeConf) are in this 'pki' package.
+	// "k8s.io/client-go/util/cert" // For the actual cert.AltNames type if KubexmsAltNames was not used in definitions
+	// For this subtask, our stubs (KubexmsCert, KubexmsAltNames, KubexmsKubeConf) are in this 'pki' package.
 	// Actual certs.GenerateCerts would be imported from Kubekey's utils.
 )
 
@@ -49,9 +49,9 @@ type HostSpecForPKI struct {
 // GenerateEtcdNodeCertsStepSpec defines parameters for generating etcd node certificates.
 type GenerateEtcdNodeCertsStepSpec struct {
 	PKIPathSharedDataKey        string `json:"pkiPathSharedDataKey,omitempty"`
-	AltNamesSharedDataKey       string `json:"altNamesSharedDataKey,omitempty"`       // Input: *KubekeyAltNames or *cert.AltNames
-	CACertObjectSharedDataKey   string `json:"caCertObjectSharedDataKey,omitempty"` // Input: *KubekeyCert for CA
-	KubeConfSharedDataKey       string `json:"kubeConfSharedDataKey,omitempty"`       // Input: *KubeConf
+	AltNamesSharedDataKey       string `json:"altNamesSharedDataKey,omitempty"`       // Input: *KubexmsAltNames or *cert.AltNames
+	CACertObjectSharedDataKey   string `json:"caCertObjectSharedDataKey,omitempty"` // Input: *KubexmsCert for CA
+	KubeConfSharedDataKey       string `json:"kubeConfSharedDataKey,omitempty"`       // Input: *KubexmsKubeConf
 	HostsSharedDataKey          string `json:"hostsSharedDataKey,omitempty"`          // Input: []HostSpecForPKI
 	OutputGeneratedFilesListKey string `json:"outputGeneratedFilesListKey,omitempty"` // Output: []string of basenames
 }
@@ -97,27 +97,31 @@ func (e *GenerateEtcdNodeCertsStepExecutor) isHostRole(hostRoles []string, targe
 }
 
 // Check determines if all expected etcd node certificate files already exist.
-func (e *GenerateEtcdNodeCertsStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
-	stepSpec, ok := s.(*GenerateEtcdNodeCertsStepSpec)
+func (e *GenerateEtcdNodeCertsStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		return false, fmt.Errorf("unexpected spec type %T for %s", s, stepSpec.GetName())
+		return false, fmt.Errorf("StepSpec not found in context for GenerateEtcdNodeCertsStep Check")
 	}
-	stepSpec.PopulateDefaults()
-	logger := ctx.Logger.SugaredLogger.With("step", stepSpec.GetName())
+	spec, ok := currentFullSpec.(*GenerateEtcdNodeCertsStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected StepSpec type for GenerateEtcdNodeCertsStep Check: %T", currentFullSpec)
+	}
+	spec.PopulateDefaults()
+	logger := ctx.Logger.SugaredLogger().With("step", spec.GetName())
 
-	pkiPathVal, pkiPathOk := ctx.SharedData.Load(stepSpec.PKIPathSharedDataKey)
-	altNamesVal, altNamesOk := ctx.SharedData.Load(stepSpec.AltNamesSharedDataKey) // Expecting *KubekeyAltNames (our stub)
-	hostsVal, hostsOk := ctx.SharedData.Load(stepSpec.HostsSharedDataKey)
+	pkiPathVal, pkiPathOk := ctx.Task().Get(spec.PKIPathSharedDataKey)
+	altNamesVal, altNamesOk := ctx.Task().Get(spec.AltNamesSharedDataKey) // Now expecting *certutil.AltNames
+	hostsVal, hostsOk := ctx.Task().Get(spec.HostsSharedDataKey)
 
 	if !pkiPathOk || !altNamesOk || !hostsOk {
-		logger.Debug("Missing one or more required inputs (PKIPath, AltNames, Hosts) in SharedData. Cannot check.")
+		logger.Debug("Missing one or more required inputs (PKIPath, AltNames, Hosts) in Task Cache. Cannot check.")
 		return false, nil
 	}
 	pkiPath, _ := pkiPathVal.(string)
-	altNames, _ := altNamesVal.(*KubekeyAltNames) // Using our stub type
-	hosts, _ := hostsVal.([]HostSpecForPKI)
+	altNames, altNamesTypeOk := altNamesVal.(*certutil.AltNames) // Expecting actual k8s type
+	hosts, hostsTypeOk := hostsVal.([]HostSpecForPKI)
 
-	if pkiPath == "" || altNames == nil || hosts == nil {
+	if pkiPath == "" || !altNamesTypeOk || altNames == nil || !hostsTypeOk || hosts == nil { // Check hostsTypeOk as well
 		logger.Debug("Invalid type or empty value for required inputs (PKIPath, AltNames, Hosts). Cannot check.")
 		return false, nil
 	}
@@ -125,19 +129,19 @@ func (e *GenerateEtcdNodeCertsStepExecutor) Check(s spec.StepSpec, ctx *runtime.
 	for _, host := range hosts {
 		hostName := host.Name
 		if e.isHostRole(host.Roles, "etcd") {
-			adminCertDef := KubekeyCertEtcdAdmin(hostName, altNames)
+			adminCertDef := KubexmsCertEtcdAdmin(hostName, altNames) // Use renamed function
 			if !fileExists(filepath.Join(pkiPath, adminCertDef.BaseName+".pem")) || !fileExists(filepath.Join(pkiPath, adminCertDef.BaseName+"-key.pem")) {
 				logger.Debugf("Etcd admin cert/key for host %s not found.", hostName)
 				return false, nil
 			}
-			memberCertDef := KubekeyCertEtcdMember(hostName, altNames)
+			memberCertDef := KubexmsCertEtcdMember(hostName, altNames) // Use renamed function
 			if !fileExists(filepath.Join(pkiPath, memberCertDef.BaseName+".pem")) || !fileExists(filepath.Join(pkiPath, memberCertDef.BaseName+"-key.pem")) {
 				logger.Debugf("Etcd member cert/key for host %s not found.", hostName)
 				return false, nil
 			}
 		}
 		if e.isHostRole(host.Roles, "master") { // Assuming "master" role implies needing etcd client cert
-			clientCertDef := KubekeyCertEtcdClient(hostName, altNames)
+			clientCertDef := KubexmsCertEtcdClient(hostName, altNames) // Use renamed function
 			if !fileExists(filepath.Join(pkiPath, clientCertDef.BaseName+".pem")) || !fileExists(filepath.Join(pkiPath, clientCertDef.BaseName+"-key.pem")) {
 				logger.Debugf("Etcd client cert/key for master host %s not found.", hostName)
 				return false, nil
@@ -145,47 +149,52 @@ func (e *GenerateEtcdNodeCertsStepExecutor) Check(s spec.StepSpec, ctx *runtime.
 		}
 	}
 
-	// Additionally, check if the output list of generated files is already in SharedData.
-	if _, exists := ctx.SharedData.Load(stepSpec.OutputGeneratedFilesListKey); !exists {
-		logger.Debugf("Output list of generated files (key: %s) not yet in SharedData.", stepSpec.OutputGeneratedFilesListKey)
+	// Additionally, check if the output list of generated files is already in Task Cache.
+	if _, exists := ctx.Task().Get(spec.OutputGeneratedFilesListKey); !exists {
+		logger.Debugf("Output list of generated files (key: %s) not yet in Task Cache.", spec.OutputGeneratedFilesListKey)
 		return false, nil
 	}
 
-	logger.Info("All expected etcd node certificates appear to exist, and output list is in SharedData.")
+	logger.Info("All expected etcd node certificates appear to exist, and output list is in Task Cache.")
 	return true, nil
 }
 
 // Execute generates etcd node certificates.
-func (e *GenerateEtcdNodeCertsStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	stepSpec, ok := s.(*GenerateEtcdNodeCertsStepSpec)
+func (e *GenerateEtcdNodeCertsStepExecutor) Execute(ctx runtime.Context) *step.Result {
+	startTime := time.Now()
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		return step.NewResultForSpec(s, fmt.Errorf("unexpected spec type %T", s))
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for GenerateEtcdNodeCertsStep Execute"))
 	}
-	stepSpec.PopulateDefaults()
-	logger := ctx.Logger.SugaredLogger.With("step", stepSpec.GetName())
-	res := step.NewResult(stepSpec.GetName(), "localhost", time.Now(), nil) // Local operation
+	spec, ok := currentFullSpec.(*GenerateEtcdNodeCertsStepSpec)
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for GenerateEtcdNodeCertsStep Execute: %T", currentFullSpec))
+	}
+	spec.PopulateDefaults()
+	logger := ctx.Logger.SugaredLogger().With("step", spec.GetName())
+	res := step.NewResult(ctx, startTime, nil) // Local operation
 
-	// Retrieve inputs from SharedData
-	pkiPathVal, pkiPathOk := ctx.SharedData.Load(stepSpec.PKIPathSharedDataKey)
-	altNamesVal, altNamesOk := ctx.SharedData.Load(stepSpec.AltNamesSharedDataKey)
-	caCertDefVal, caCertDefOk := ctx.SharedData.Load(stepSpec.CACertObjectSharedDataKey)
-	kubeConfVal, kubeConfOk := ctx.SharedData.Load(stepSpec.KubeConfSharedDataKey)
-	hostsVal, hostsOk := ctx.SharedData.Load(stepSpec.HostsSharedDataKey)
+	// Retrieve inputs from Task Cache
+	pkiPathVal, pkiPathOk := ctx.Task().Get(spec.PKIPathSharedDataKey)
+	altNamesVal, altNamesOk := ctx.Task().Get(spec.AltNamesSharedDataKey)
+	caCertDefVal, caCertDefOk := ctx.Task().Get(spec.CACertObjectSharedDataKey)
+	kubeConfVal, kubeConfOk := ctx.Task().Get(spec.KubeConfSharedDataKey)
+	hostsVal, hostsOk := ctx.Task().Get(spec.HostsSharedDataKey)
 
 	if !pkiPathOk || !altNamesOk || !caCertDefOk || !kubeConfOk || !hostsOk {
-		res.Error = fmt.Errorf("missing one or more required inputs (PKIPath, AltNames, CACert, KubeConf, Hosts) in SharedData")
-		res.SetFailed(); return res
+		res.Error = fmt.Errorf("missing one or more required inputs (PKIPath, AltNames, CACert, KubexmsKubeConf, Hosts) in Task Cache")
+		res.Status = step.StatusFailed; return res
 	}
 
 	pkiPath, _ := pkiPathVal.(string)
-	altNames, altNamesTypeOk := altNamesVal.(*KubekeyAltNames) // Using our stub type for KubekeyAltNames
-	caCertDef, caCertDefTypeOk := caCertDefVal.(*KubekeyCert)   // Using our stub type for KubekeyCert
-	kubeConf, kubeConfTypeOk := kubeConfVal.(*KubeConf)       // Using our stub type for KubeConf
+	altNames, altNamesTypeOk := altNamesVal.(*certutil.AltNames) // Expecting actual k8s type
+	caCertDef, caCertDefTypeOk := caCertDefVal.(*KubexmsCert)    // Using our renamed stub type for KubexmsCert
+	kubeConf, kubeConfTypeOk := kubeConfVal.(*KubexmsKubeConf)  // Using our renamed stub type for KubexmsKubeConf
 	hosts, hostsTypeOk := hostsVal.([]HostSpecForPKI)
 
 	if !altNamesTypeOk || !caCertDefTypeOk || !kubeConfTypeOk || !hostsTypeOk || pkiPath == "" {
-		res.Error = fmt.Errorf("invalid type or empty value for one or more required inputs (PKIPath, AltNames, CACert, KubeConf, Hosts)")
-		res.SetFailed(); return res
+		res.Error = fmt.Errorf("invalid type or empty value for one or more required inputs (PKIPath, AltNames, CACert, KubexmsKubeConf, Hosts)")
+		res.Status = step.StatusFailed; return res
 	}
 
 	generatedFileBaseNames := []string{}
@@ -198,15 +207,15 @@ func (e *GenerateEtcdNodeCertsStepExecutor) Execute(s spec.StepSpec, ctx *runtim
 		if e.isHostRole(host.Roles, "etcd") {
 			// Etcd Admin/Server Cert (often the same as Member for simplicity, or a specific admin client)
 			// Original script generates 'admin.pem' then 'member-*.pem'.
-			// Let's follow KubekeyCertEtcdAdmin and KubekeyCertEtcdMember.
+			// Let's follow KubexmsCertEtcdAdmin and KubexmsCertEtcdMember.
 
-			adminCertDef := KubekeyCertEtcdAdmin(hostName, altNames) // Assuming this is a client cert for API server
+			adminCertDef := KubexmsCertEtcdAdmin(hostName, altNames) // Use renamed function
 			logger.Infof("Defining etcd admin cert for %s: %s", hostName, adminCertDef.BaseName)
 			// SIMULATE: err := certsutil.GenerateCerts(adminCertDef, caCertDef, pkiPath, kubeConf)
 			simulateCertGeneration(pkiPath, adminCertDef.BaseName, logger)
 			generatedFileBaseNames = append(generatedFileBaseNames, adminCertDef.BaseName+".pem", adminCertDef.BaseName+"-key.pem")
 
-			memberCertDef := KubekeyCertEtcdMember(hostName, altNames)
+			memberCertDef := KubexmsCertEtcdMember(hostName, altNames) // Use renamed function
 			logger.Infof("Defining etcd member peer/server cert for %s: %s", hostName, memberCertDef.BaseName)
 			// SIMULATE: err := certsutil.GenerateCerts(memberCertDef, caCertDef, pkiPath, kubeConf)
 			simulateCertGeneration(pkiPath, memberCertDef.BaseName, logger)
@@ -215,21 +224,21 @@ func (e *GenerateEtcdNodeCertsStepExecutor) Execute(s spec.StepSpec, ctx *runtim
 
 		// Generate etcd client certs for master nodes (kube-apiserver to connect to etcd)
 		// The original script implies that `etcd-admin.pem` is for kube-apiserver.
-		// If `KubekeyCertEtcdAdmin` is already fulfilling that, this might be redundant or for other clients.
+		// If `KubexmsCertEtcdAdmin` is already fulfilling that, this might be redundant or for other clients.
 		// The script logic was: if host is master AND etcd, generate admin. if host is master (only), generate client.
 		// This suggests admin is a specific client for master+etcd nodes, and 'client' is for other masters.
 		// For now, let's assume any master needs a client cert. If it's also etcd, it already got admin.
-		// If KubekeyCertEtcdAdmin is the main client cert for API server, then this `client` loop might be different.
+		// If KubexmsCertEtcdAdmin is the main client cert for API server, then this `client` loop might be different.
 		// Let's assume the logic: master nodes that are NOT etcd nodes get a generic client cert.
 		// Etcd nodes already have `etcd-admin` and `etcd-member` certs.
-		// The `KubekeyCertEtcdAdmin` was defined as a client cert with "system:masters".
+		// The `KubexmsCertEtcdAdmin` was defined as a client cert with "system:masters".
 		// This seems sufficient for API servers on master nodes that are also etcd nodes.
 		// What if a master is NOT an etcd node? It still needs to talk to etcd.
 		// The original script's `generateEtcdCerts` has:
 		//   - `etcd-admin.pem` (for apiserver, using `ControlPlaneEndpoint` and `PrimaryHost` from KubeConf) - seems global, not per-host.
 		//   - `etcd-member-%s.pem` (per etcd host)
 		// This step's current loop is per-host. The global "etcd-admin" cert might be another step or part of CA step.
-		// For this per-host loop, `KubekeyCertEtcdClient` for master nodes seems appropriate if they need their own identity to etcd.
+		// For this per-host loop, `KubexmsCertEtcdClient` for master nodes seems appropriate if they need their own identity to etcd.
 
 		if e.isHostRole(host.Roles, "master") {
 			// If this master node is also an etcd node, it already got an admin cert.
@@ -237,7 +246,7 @@ func (e *GenerateEtcdNodeCertsStepExecutor) Execute(s spec.StepSpec, ctx *runtim
 			// However, the common pattern is one client cert for all apiservers.
 			// Let's stick to the plan: generate client cert if it's a master.
 			// This might result in multiple "etcd-client-*" certs.
-			clientCertDef := KubekeyCertEtcdClient(hostName, altNames) // Client cert for this specific master host
+			clientCertDef := KubexmsCertEtcdClient(hostName, altNames) // Use renamed function; Client cert for this specific master host
 			logger.Infof("Defining etcd client cert for master host %s: %s", hostName, clientCertDef.BaseName)
 			// SIMULATE: err := certsutil.GenerateCerts(clientCertDef, caCertDef, pkiPath, kubeConf)
 			simulateCertGeneration(pkiPath, clientCertDef.BaseName, logger)
@@ -255,20 +264,21 @@ func (e *GenerateEtcdNodeCertsStepExecutor) Execute(s spec.StepSpec, ctx *runtim
 		}
 	}
 
-	ctx.SharedData.Store(stepSpec.OutputGeneratedFilesListKey, uniqueFiles)
-	logger.Infof("Etcd node certificate generation simulated. List of generated file basenames stored in SharedData: %v", uniqueFiles)
+	ctx.Task().Set(spec.OutputGeneratedFilesListKey, uniqueFiles)
+	logger.Infof("Etcd node certificate generation simulated. List of generated file basenames stored in Task Cache: %v", uniqueFiles)
 
-	done, checkErr := e.Check(s, ctx)
+	done, checkErr := e.Check(ctx) // Pass context
 	if checkErr != nil {
 		res.Error = fmt.Errorf("post-execution check failed: %w", checkErr)
-		res.SetFailed(); return res
+		res.Status = step.StatusFailed; return res
 	}
 	if !done {
 		res.Error = fmt.Errorf("post-execution check indicates etcd node certs generation was not fully successful")
-		res.SetFailed(); return res
+		res.Status = step.StatusFailed; return res
 	}
 
-	res.SetSucceeded(); return res
+	// res.SetSucceeded() // Status is handled by NewResult
+	return res
 }
 
 // fileExists is a helper for local file system checks.

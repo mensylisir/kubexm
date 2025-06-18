@@ -104,13 +104,17 @@ func (e *DownloadEtcdStepExecutor) determineEtcdURL(version, arch, fileName, zon
 }
 
 // Check sees if the etcd tarball already exists and optionally verifies checksum.
-func (e *DownloadEtcdStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (bool, error) {
-	stepSpec, ok := s.(*DownloadEtcdStepSpec)
+func (e *DownloadEtcdStepExecutor) Check(ctx runtime.Context) (bool, error) {
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		return false, fmt.Errorf("unexpected spec type %T for %s", s, stepSpec.GetName())
+		return false, fmt.Errorf("StepSpec not found in context for DownloadEtcdStep Check")
+	}
+	stepSpec, ok := currentFullSpec.(*DownloadEtcdStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected StepSpec type for DownloadEtcdStep Check: %T", currentFullSpec)
 	}
 	stepSpec.PopulateDefaults(ctx)
-	logger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step", stepSpec.GetName())
+	logger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step", stepSpec.GetName())
 
 	fileName := e.determineEtcdFileName(stepSpec.Version, stepSpec.Arch)
 	expectedFilePath := filepath.Join(stepSpec.DownloadDir, fileName)
@@ -147,30 +151,35 @@ func (e *DownloadEtcdStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) 
 	}
 
 	// If file exists and checksum matches (or no checksum specified), it's done.
-	// Store details in SharedData for subsequent steps even if Execute is skipped.
-	ctx.SharedData.Store(stepSpec.OutputFilePathKey, expectedFilePath)
-	ctx.SharedData.Store(stepSpec.OutputFileNameKey, fileName)
-	ctx.SharedData.Store(stepSpec.OutputComponentTypeKey, "ETCD")
-	ctx.SharedData.Store(stepSpec.OutputVersionKey, stepSpec.Version)
-	ctx.SharedData.Store(stepSpec.OutputArchKey, stepSpec.Arch)
+	// Store details in Task Cache for subsequent steps even if Execute is skipped.
+	ctx.Task().Set(stepSpec.OutputFilePathKey, expectedFilePath)
+	ctx.Task().Set(stepSpec.OutputFileNameKey, fileName)
+	ctx.Task().Set(stepSpec.OutputComponentTypeKey, "ETCD")
+	ctx.Task().Set(stepSpec.OutputVersionKey, stepSpec.Version)
+	ctx.Task().Set(stepSpec.OutputArchKey, stepSpec.Arch)
 	if stepSpec.Checksum != "" {
-		ctx.SharedData.Store(stepSpec.OutputChecksumKey, stepSpec.Checksum)
+		ctx.Task().Set(stepSpec.OutputChecksumKey, stepSpec.Checksum)
 	}
 	url := e.determineEtcdURL(stepSpec.Version, stepSpec.Arch, fileName, stepSpec.Zone)
-	ctx.SharedData.Store(stepSpec.OutputURLKey, url)
+	ctx.Task().Set(stepSpec.OutputURLKey, url)
 
 	return true, nil
 }
 
 // Execute downloads the etcd tarball.
-func (e *DownloadEtcdStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	stepSpec, ok := s.(*DownloadEtcdStepSpec)
+func (e *DownloadEtcdStepExecutor) Execute(ctx runtime.Context) *step.Result {
+	startTime := time.Now()
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		return step.NewResultForSpec(s, fmt.Errorf("unexpected spec type %T", s))
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for DownloadEtcdStep Execute"))
+	}
+	stepSpec, ok := currentFullSpec.(*DownloadEtcdStepSpec)
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for DownloadEtcdStep Execute: %T", currentFullSpec))
 	}
 	stepSpec.PopulateDefaults(ctx)
-	logger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step", stepSpec.GetName())
-	res := step.NewResultForSpec(s, nil)
+	logger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step", stepSpec.GetName())
+	res := step.NewResult(ctx, startTime, nil)
 
 	fileName := e.determineEtcdFileName(stepSpec.Version, stepSpec.Arch)
 	componentType := "ETCD"
@@ -185,22 +194,22 @@ func (e *DownloadEtcdStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context
 	downloadedPath, err := utils.DownloadFile(ctx, url, stepSpec.DownloadDir, fileName, false, stepSpec.Checksum, "sha256")
 	if err != nil {
 		res.Error = fmt.Errorf("failed to download etcd: %w", err)
-		res.SetFailed()
+		res.Status = step.StatusFailed
 		return res
 	}
 	logger.Successf("Etcd downloaded successfully to %s", downloadedPath)
 
-	ctx.SharedData.Store(stepSpec.OutputFilePathKey, downloadedPath)
-	ctx.SharedData.Store(stepSpec.OutputFileNameKey, fileName)
-	ctx.SharedData.Store(stepSpec.OutputComponentTypeKey, componentType)
-	ctx.SharedData.Store(stepSpec.OutputVersionKey, stepSpec.Version)
-	ctx.SharedData.Store(stepSpec.OutputArchKey, stepSpec.Arch)
+	ctx.Task().Set(stepSpec.OutputFilePathKey, downloadedPath)
+	ctx.Task().Set(stepSpec.OutputFileNameKey, fileName)
+	ctx.Task().Set(stepSpec.OutputComponentTypeKey, componentType)
+	ctx.Task().Set(stepSpec.OutputVersionKey, stepSpec.Version)
+	ctx.Task().Set(stepSpec.OutputArchKey, stepSpec.Arch)
 	if stepSpec.Checksum != "" {
-		ctx.SharedData.Store(stepSpec.OutputChecksumKey, stepSpec.Checksum)
+		ctx.Task().Set(stepSpec.OutputChecksumKey, stepSpec.Checksum)
 	}
-	ctx.SharedData.Store(stepSpec.OutputURLKey, url)
+	ctx.Task().Set(stepSpec.OutputURLKey, url)
 
-	res.SetSucceeded()
+	// res.SetSucceeded() // Status is set by NewResult if err is nil
 	return res
 }
 
