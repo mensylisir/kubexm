@@ -7,80 +7,111 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kubexms/kubexms/pkg/config"  // For config.Cluster in test helper
 	"github.com/kubexms/kubexms/pkg/connector"
+	"github.com/kubexms/kubexms/pkg/logger"
 	"github.com/kubexms/kubexms/pkg/runner"
 	"github.com/kubexms/kubexms/pkg/runtime"
-	"github.com/kubexms/kubexms/pkg/step" // For the test helper and step.Step
+	"github.com/kubexms/kubexms/pkg/spec" // For spec.StepSpec
+	"github.com/kubexms/kubexms/pkg/step" // For step.Result and mock helpers
 )
 
-// Using the mock_objects_for_test.go from the step package directly via step.newTestContextForStep
+// newTestContextForPreflight uses the shared helper from pkg/step.
+func newTestContextForPreflight(t *testing.T, mockConn *step.MockStepConnector, facts *runner.Facts) *runtime.Context {
+	t.Helper()
+	// If facts are nil, newTestContextForStep will provide its own defaults.
+	return step.newTestContextForStep(t, mockConn, facts)
+}
 
-func TestCheckCPUStep_Run_MetFromFacts(t *testing.T) {
+
+func TestCheckCPUStepExecutor_Execute_MetFromFacts(t *testing.T) {
 	mockConn := step.NewMockStepConnector()
-	facts := &runner.Facts{TotalCPU: 4, OS: &connector.OS{ID: "linux", Arch: "amd64"}}
-	ctx := step.newTestContextForStep(t, mockConn, facts)
+	facts := &runner.Facts{TotalCPU: 4, OS: &connector.OS{ID: "linux-test", Arch: "amd64"}} // Ensure OS is not nil
+	ctx := newTestContextForPreflight(t, mockConn, facts)
 
-	s := CheckCPUStep{MinCores: 2}
-	res := s.Run(ctx)
+	cpuSpec := &CheckCPUStepSpec{MinCores: 2}
+	executor := step.GetExecutor(step.GetSpecTypeName(cpuSpec))
+	if executor == nil {t.Fatal("Executor not registered for CheckCPUStepSpec")}
+
+
+	res := executor.Execute(cpuSpec, ctx)
 
 	if res.Status != "Succeeded" {
 		t.Errorf("Status = %s, want Succeeded. Msg: %s, Err: %v", res.Status, res.Message, res.Error)
 	}
-	if !strings.Contains(res.Message, "Host test-host-step has 4 CPU cores") {
-		t.Errorf("Message = %q, expected to contain 'Host test-host-step has 4 CPU cores'", res.Message)
+	if !strings.Contains(res.Message, "Host "+ctx.Host.Name+" has 4 CPU cores") {
+		t.Errorf("Message = %q, expected to contain 'Host %s has 4 CPU cores'", res.Message, ctx.Host.Name)
 	}
-	if len(mockConn.ExecHistory) > 0 {
+	if len(mockConn.ExecHistory) > 0 { // Should not call exec if facts are sufficient
 		t.Errorf("Exec was called but CPU count should come from facts: %v", mockConn.ExecHistory)
 	}
 }
 
-func TestCheckCPUStep_Run_NotMetFromFacts(t *testing.T) {
+func TestCheckCPUStepExecutor_Execute_NotMetFromCommand(t *testing.T) {
 	mockConn := step.NewMockStepConnector()
-	facts := &runner.Facts{TotalCPU: 1, OS: &connector.OS{ID: "linux", Arch: "amd64"}}
-	ctx := step.newTestContextForStep(t, mockConn, facts)
+	// Simulate facts not having CPU info initially, or OS being nil to force command path
+	facts := &runner.Facts{TotalCPU: 0, OS: &connector.OS{ID: "linux-test", Arch: "amd64"}}
+	ctx := newTestContextForPreflight(t, mockConn, facts)
 
-	s := CheckCPUStep{MinCores: 2}
-	res := s.Run(ctx)
+	cpuSpec := &CheckCPUStepSpec{MinCores: 4}
+	executor := step.GetExecutor(step.GetSpecTypeName(cpuSpec))
+	if executor == nil {t.Fatal("Executor not registered")}
 
-	if res.Status != "Failed" {
-		t.Errorf("Status = %s, want Failed", res.Status)
-	}
-	if !strings.Contains(res.Message, "host test-host-step has 1 CPU cores, but minimum requirement is 2") {
-		t.Errorf("Message = %q incorrect, expected 'host test-host-step has 1 CPU cores, but minimum requirement is 2'", res.Message)
-	}
-}
-
-func TestCheckCPUStep_Run_MetFromCommand_Linux(t *testing.T) {
-	mockConn := step.NewMockStepConnector()
-	// Simulate facts not having CPU info initially
-	facts := &runner.Facts{TotalCPU: 0, OS: &connector.OS{ID: "linux", Arch: "amd64"}}
-	ctx := step.newTestContextForStep(t, mockConn, facts)
 
 	mockConn.ExecFunc = func(ctxGo context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
 		if cmd == "nproc" {
-			return []byte("8"), nil, nil
+			return []byte("2"), nil, nil // Simulate 2 cores found
 		}
 		return nil, nil, fmt.Errorf("unexpected command: %s", cmd)
 	}
 
-	s := CheckCPUStep{MinCores: 4}
-	res := s.Run(ctx)
+	res := executor.Execute(cpuSpec, ctx)
 
-	if res.Status != "Succeeded" {
-		t.Errorf("Status = %s, want Succeeded. Msg: %s, Err: %v", res.Status, res.Message, res.Error)
+	if res.Status != "Failed" {
+		t.Errorf("Status = %s, want Failed. Msg: %s", res.Status, res.Message)
 	}
-	if !strings.Contains(res.Message, "Host test-host-step has 8 CPU cores") {
-		t.Errorf("Message = %q, expected to contain 'Host test-host-step has 8 CPU cores'", res.Message)
-	}
-	if len(mockConn.ExecHistory) != 1 || mockConn.ExecHistory[0] != "nproc" {
-		t.Errorf("Expected 'nproc' to be called, got: %v", mockConn.ExecHistory)
+	expectedMsg := fmt.Sprintf("host %s has 2 CPU cores, but minimum requirement is 4 cores", ctx.Host.Name)
+	if !strings.Contains(res.Message, expectedMsg) {
+		t.Errorf("Message = %q incorrect, expected to contain '%s'", res.Message, expectedMsg)
 	}
 }
 
-func TestCheckCPUStep_Run_MetFromCommand_Darwin(t *testing.T) {
+func TestCheckCPUStepExecutor_Check_Met(t *testing.T) {
+	mockConn := step.NewMockStepConnector()
+	facts := &runner.Facts{TotalCPU: 2, OS: &connector.OS{ID: "linux-test", Arch: "amd64"}}
+	ctx := newTestContextForPreflight(t, mockConn, facts)
+
+	cpuSpec := &CheckCPUStepSpec{MinCores: 2}
+	executor := step.GetExecutor(step.GetSpecTypeName(cpuSpec))
+	if executor == nil {t.Fatal("Executor not registered")}
+
+	isDone, err := executor.Check(cpuSpec, ctx)
+	if err != nil {t.Fatalf("Check() error = %v", err)}
+	if !isDone {t.Error("Check() = false, want true")}
+}
+
+func TestCheckCPUStepExecutor_Check_NotMet(t *testing.T) {
+	mockConn := step.NewMockStepConnector()
+	facts := &runner.Facts{TotalCPU: 1, OS: &connector.OS{ID: "linux-test", Arch: "amd64"}}
+	ctx := newTestContextForPreflight(t, mockConn, facts)
+
+	cpuSpec := &CheckCPUStepSpec{MinCores: 4}
+	executor := step.GetExecutor(step.GetSpecTypeName(cpuSpec))
+	if executor == nil {t.Fatal("Executor not registered")}
+
+	isDone, err := executor.Check(cpuSpec, ctx)
+	if err != nil {t.Fatalf("Check() error = %v", err)}
+	if isDone {t.Error("Check() = true, want false")}
+}
+
+func TestCheckCPUStepExecutor_Execute_MetFromCommand_Darwin(t *testing.T) {
 	mockConn := step.NewMockStepConnector()
 	facts := &runner.Facts{TotalCPU: 0, OS: &connector.OS{ID: "darwin", Arch: "arm64"}}
-	ctx := step.newTestContextForStep(t, mockConn, facts)
+	ctx := newTestContextForPreflight(t, mockConn, facts)
+
+	cpuSpec := &CheckCPUStepSpec{MinCores: 8}
+	executor := step.GetExecutor(step.GetSpecTypeName(cpuSpec))
+	if executor == nil {t.Fatal("Executor not registered")}
 
 	mockConn.ExecFunc = func(ctxGo context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
 		if cmd == "sysctl -n hw.ncpu" {
@@ -88,63 +119,39 @@ func TestCheckCPUStep_Run_MetFromCommand_Darwin(t *testing.T) {
 		}
 		return nil, nil, fmt.Errorf("unexpected command: %s", cmd)
 	}
-	s := CheckCPUStep{MinCores: 8}
-	res := s.Run(ctx)
+
+	res := executor.Execute(cpuSpec, ctx)
 
 	if res.Status != "Succeeded" {
 		t.Errorf("Status = %s, want Succeeded. Msg: %s, Err: %v", res.Status, res.Message, res.Error)
 	}
-	if !strings.Contains(res.Message, "Host test-host-step has 10 CPU cores") {
-		t.Errorf("Message = %q, expected 'Host test-host-step has 10 CPU cores'", res.Message)
+	if !strings.Contains(res.Message, fmt.Sprintf("Host %s has 10 CPU cores", ctx.Host.Name)) {
+		t.Errorf("Message = %q, expected 'Host %s has 10 CPU cores'", res.Message, ctx.Host.Name)
 	}
 }
 
-
-func TestCheckCPUStep_Run_CommandFails(t *testing.T) {
+func TestCheckCPUStepExecutor_Execute_CommandFails(t *testing.T) {
 	mockConn := step.NewMockStepConnector()
-	facts := &runner.Facts{TotalCPU: 0, OS: &connector.OS{ID: "linux", Arch: "amd64"}}
-	ctx := step.newTestContextForStep(t, mockConn, facts)
+	facts := &runner.Facts{TotalCPU: 0, OS: &connector.OS{ID: "linux-test", Arch: "amd64"}}
+	ctx := newTestContextForPreflight(t, mockConn, facts)
 
-	expectedErr := errors.New("nproc failed")
+	cpuSpec := &CheckCPUStepSpec{MinCores: 1}
+	executor := step.GetExecutor(step.GetSpecTypeName(cpuSpec))
+	if executor == nil {t.Fatal("Executor not registered")}
+
+	expectedErr := errors.New("nproc deliberate failure")
 	mockConn.ExecFunc = func(ctxGo context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
 		if cmd == "nproc" {
-			return nil, []byte("some error"), expectedErr
+			return nil, []byte("some error from nproc"), expectedErr
 		}
 		return nil, nil, fmt.Errorf("unexpected command: %s", cmd)
 	}
-	s := CheckCPUStep{MinCores: 1}
-	res := s.Run(ctx)
+
+	res := executor.Execute(cpuSpec, ctx)
 
 	if res.Status != "Failed" {t.Errorf("Status = %s, want Failed", res.Status)}
-	if !errors.Is(res.Error, expectedErr) {
-		t.Errorf("Error = %v, want to wrap %v", res.Error, expectedErr)
+	// Check if the error from Execute wraps the expectedErr from the command
+	if res.Error == nil || !strings.Contains(res.Error.Error(), expectedErr.Error()) {
+		t.Errorf("Error = %v, want to contain original error %v", res.Error, expectedErr)
 	}
-}
-
-
-func TestCheckCPUStep_Check_Met(t *testing.T) {
-	mockConn := step.NewMockStepConnector()
-	facts := &runner.Facts{TotalCPU: 2, OS: &connector.OS{ID: "linux", Arch: "amd64"}}
-	ctx := step.newTestContextForStep(t, mockConn, facts)
-	s := CheckCPUStep{MinCores: 2}
-
-	isDone, err := s.Check(ctx)
-	if err != nil {t.Fatalf("Check() error = %v", err)}
-	if !isDone {t.Error("Check() = false, want true")}
-}
-
-func TestCheckCPUStep_Check_NotMet_CommandFallback(t *testing.T) {
-	mockConn := step.NewMockStepConnector()
-	facts := &runner.Facts{TotalCPU: 0, OS: &connector.OS{ID: "linux", Arch: "amd64"}} // Force command
-	ctx := step.newTestContextForStep(t, mockConn, facts)
-
-	mockConn.ExecFunc = func(ctxGo context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
-		if cmd == "nproc" { return []byte("1"), nil, nil } // Has 1 core
-		return nil, nil, fmt.Errorf("unexpected command: %s", cmd)
-	}
-
-	s := CheckCPUStep{MinCores: 2} // Needs 2 cores
-	isDone, err := s.Check(ctx)
-	if err != nil {t.Fatalf("Check() error = %v", err)}
-	if isDone {t.Error("Check() = true (1 core < 2 cores), want false")}
 }

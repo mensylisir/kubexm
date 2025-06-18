@@ -1,149 +1,20 @@
 package containerd
 
 import (
-	"context"
+	"context" // Required by runtime.Context
 	"fmt"
-	"path/filepath" // Used for filepath.Dir
+	"path/filepath"
 	"strings"
 	"text/template"
 	"time"
 
-	"github.com/kubexms/kubexms/pkg/runner"
+	// "github.com/kubexms/kubexms/pkg/runner" // Not directly needed here, runner methods are on ctx.Host.Runner
 	"github.com/kubexms/kubexms/pkg/runtime"
+	"github.com/kubexms/kubexms/pkg/spec"
 	"github.com/kubexms/kubexms/pkg/step"
 )
 
 const DefaultContainerdConfigPath = "/etc/containerd/config.toml"
-
-// ConfigureContainerdMirrorStep configures containerd registry mirrors and other settings
-// by rendering a config.toml file.
-type ConfigureContainerdMirrorStep struct {
-	// RegistryMirrors maps registry hostnames to their mirror URLs.
-	// E.g., {"docker.io": "https://mirror.example.com"}
-	RegistryMirrors map[string]string
-	// InsecureRegistries is a list of registries to connect to over HTTP or with self-signed certs.
-	// E.g., ["my.insecure.registry:5000"]
-	InsecureRegistries []string
-	// ConfigFilePath is the path to containerd's config.toml.
-	// Defaults to /etc/containerd/config.toml.
-	ConfigFilePath string
-	// ExtraTomlContent allows appending arbitrary valid TOML string to the configuration.
-	// Useful for settings not directly exposed by this step's fields.
-	ExtraTomlContent string
-
-	// UseSystemdCgroup specifies whether to configure containerd to use systemd cgroup driver.
-	// This is a common requirement for Kubernetes.
-	UseSystemdCgroup bool
-}
-
-// Name returns a human-readable name for the step.
-func (s *ConfigureContainerdMirrorStep) Name() string {
-	return "Configure containerd (config.toml)"
-}
-
-func (s *ConfigureContainerdMirrorStep) effectiveConfigPath() string {
-	if s.ConfigFilePath == "" {
-		return DefaultContainerdConfigPath
-	}
-	return s.ConfigFilePath
-}
-
-// Check determines if the containerd configuration reflects the desired state.
-// This is a basic check and verifies existence and key string presence.
-// A fully robust check would require TOML parsing and comparison.
-func (s *ConfigureContainerdMirrorStep) Check(ctx *runtime.Context) (isDone bool, err error) {
-	if ctx.Host.Runner == nil {
-		return false, fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
-	}
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step", s.Name()).Sugar()
-
-	configPath := s.effectiveConfigPath()
-	exists, err := ctx.Host.Runner.Exists(ctx.GoContext, configPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check existence of %s on host %s: %w", configPath, ctx.Host.Name, err)
-	}
-	if !exists {
-		hostCtxLogger.Debugf("Containerd config file %s does not exist.", configPath)
-		return false, nil
-	}
-
-	// If no specific configurations are provided to the step, and the file exists, consider it done.
-	if len(s.RegistryMirrors) == 0 && s.ExtraTomlContent == "" && !s.UseSystemdCgroup && len(s.InsecureRegistries) == 0 {
-		hostCtxLogger.Infof("No specific containerd configurations to check in %s beyond existence.", configPath)
-		return true, nil
-	}
-
-	contentBytes, err := ctx.Host.Runner.ReadFile(ctx.GoContext, configPath)
-	if err != nil {
-		// If we can't read the file, we can't confirm its state, so assume not done.
-		hostCtxLogger.Warnf("Failed to read %s for checking current configuration: %v. Assuming not configured.", configPath, err)
-		return false, nil
-	}
-	content := string(contentBytes)
-
-	allChecksPass := true
-	for registry, mirror := range s.RegistryMirrors {
-		// This is a simplified check. Robust TOML parsing would be better.
-		// Example: [plugins."io.containerd.grpc.v1.cri".registry.mirrors."docker.io"]
-		//            endpoint = ["https://mirror.example.com"]
-		mirrorRegistryPath := fmt.Sprintf(`[plugins."io.containerd.grpc.v1.cri".registry.mirrors.%q]`, registry)
-		mirrorEndpointLine := fmt.Sprintf(`endpoint = ["%s"]`, mirror)
-
-		// Look for the section and then the endpoint within it (basic check)
-		sectionIndex := strings.Index(content, mirrorRegistryPath)
-		if sectionIndex == -1 {
-			hostCtxLogger.Debugf("Mirror section for registry %q not found in %s.", registry, configPath)
-			allChecksPass = false; break
-		}
-		// Check for endpoint within a reasonable distance after the section header
-		searchScopeAfterSection := content[sectionIndex:]
-		if !strings.Contains(searchScopeAfterSection, mirrorEndpointLine) { // This check is very basic
-			hostCtxLogger.Debugf("Mirror endpoint %s for registry %q not found (or not correctly associated) in %s.", mirrorEndpointLine, registry, configPath)
-			allChecksPass = false; break
-		}
-	}
-	if !allChecksPass { return false, nil }
-
-	if s.UseSystemdCgroup {
-		// Example: SystemdCgroup = true
-		// This should be under [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
-		if !strings.Contains(content, "SystemdCgroup = true") { // Basic string check
-			hostCtxLogger.Debugf("SystemdCgroup = true not found in %s.", configPath)
-			allChecksPass = false
-		}
-	}
-	if !allChecksPass { return false, nil }
-
-	if s.ExtraTomlContent != "" {
-	    if !strings.Contains(content, strings.TrimSpace(s.ExtraTomlContent)) {
-	        hostCtxLogger.Debugf("Extra TOML content snippet not found in %s.", configPath)
-	        allChecksPass = false
-	    }
-	}
-    if !allChecksPass { return false, nil }
-
-	for _, insecureReg := range s.InsecureRegistries {
-		// Example: [plugins."io.containerd.grpc.v1.cri".registry.configs."my.insecure.registry:5000".tls]
-		//            insecure_skip_verify = true
-		insecureConfigPath := fmt.Sprintf(`[plugins."io.containerd.grpc.v1.cri".registry.configs.%q.tls]`, insecureReg)
-		insecureSkipLine := "insecure_skip_verify = true"
-
-		sectionIndex := strings.Index(content, insecureConfigPath)
-		if sectionIndex == -1 {
-			hostCtxLogger.Debugf("Insecure registry TLS section for %q not found in %s.", insecureReg, configPath)
-			allChecksPass = false; break
-		}
-		searchScopeAfterSection := content[sectionIndex:]
-		if !strings.Contains(searchScopeAfterSection, insecureSkipLine) {
-			hostCtxLogger.Debugf("insecure_skip_verify = true for registry %q not found in %s.", insecureReg, configPath)
-			allChecksPass = false; break
-		}
-	}
-
-	hostCtxLogger.Debugf("Containerd config file %s exists. Basic content checks result: %v", configPath, allChecksPass)
-	return allChecksPass, nil
-}
-
 
 const containerdConfigTemplate = `
 version = 2
@@ -176,7 +47,7 @@ version = 2
     # Insecure registries configuration
     {{if .InsecureRegistries}}
     [plugins."io.containerd.grpc.v1.cri".registry.configs]
-      {{range .}}
+      {{range .InsecureRegistries}}
       [plugins."io.containerd.grpc.v1.cri".registry.configs."{{.}}".tls] # {{.}} is the insecure registry hostname:port
         insecure_skip_verify = true # For HTTP or self-signed HTTPS
       {{end}}
@@ -188,64 +59,173 @@ version = 2
 {{end}}
 `
 
-// Run generates the config.toml file and writes it to the host.
-func (s *ConfigureContainerdMirrorStep) Run(ctx *runtime.Context) *step.Result {
+// ConfigureContainerdStepSpec defines parameters for configuring containerd.
+type ConfigureContainerdStepSpec struct {
+	RegistryMirrors    map[string]string
+	InsecureRegistries []string
+	ConfigFilePath     string // Defaults to DefaultContainerdConfigPath
+	ExtraTomlContent   string
+	UseSystemdCgroup   bool
+	StepName           string // Optional: for a custom name for this specific step instance
+}
+
+// GetName returns the step name.
+func (s *ConfigureContainerdStepSpec) GetName() string {
+	if s.StepName != "" { return s.StepName }
+	return "Configure containerd (config.toml)"
+}
+
+// effectiveConfigPath returns the actual config file path to be used.
+func (s *ConfigureContainerdStepSpec) effectiveConfigPath() string {
+	if s.ConfigFilePath == "" { return DefaultContainerdConfigPath }
+	return s.ConfigFilePath
+}
+var _ spec.StepSpec = &ConfigureContainerdStepSpec{}
+
+// ConfigureContainerdStepExecutor implements logic for ConfigureContainerdStepSpec.
+type ConfigureContainerdStepExecutor struct{}
+
+func init() {
+	step.Register(step.GetSpecTypeName(&ConfigureContainerdStepSpec{}), &ConfigureContainerdStepExecutor{})
+}
+
+// Check determines if containerd config reflects desired state. (Basic check)
+func (e *ConfigureContainerdStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
+	spec, ok := s.(*ConfigureContainerdStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected spec type %T for ConfigureContainerdStepExecutor Check method", s)
+	}
+	if ctx.Host.Runner == nil {
+		return false, fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
+	}
+	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+
+	configPath := spec.effectiveConfigPath()
+	exists, err := ctx.Host.Runner.Exists(ctx.GoContext, configPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to check existence of %s on host %s: %w", configPath, ctx.Host.Name, err)
+	}
+	if !exists {
+		hostCtxLogger.Debugf("Containerd config file %s does not exist.", configPath)
+		return false, nil
+	}
+
+	if len(spec.RegistryMirrors) == 0 && spec.ExtraTomlContent == "" && !spec.UseSystemdCgroup && len(spec.InsecureRegistries) == 0 {
+		hostCtxLogger.Infof("No specific containerd configurations in spec to check in %s beyond existence.", configPath)
+		return true, nil
+	}
+
+	contentBytes, err := ctx.Host.Runner.ReadFile(ctx.GoContext, configPath)
+	if err != nil {
+		hostCtxLogger.Warnf("Failed to read %s for checking current configuration: %v. Assuming not configured.", configPath, err)
+		return false, nil
+	}
+	content := string(contentBytes)
+
+	allChecksPass := true
+	for registry, mirror := range spec.RegistryMirrors {
+		mirrorEndpoint := fmt.Sprintf(`endpoint = ["%s"]`, mirror)
+		mirrorSection := fmt.Sprintf(`[plugins."io.containerd.grpc.v1.cri".registry.mirrors.%q]`, registry)
+		sectionIndex := strings.Index(content, mirrorSection)
+		if sectionIndex == -1 {
+			hostCtxLogger.Debugf("Mirror section for registry %q not found in %s.", registry, configPath)
+			allChecksPass = false; break
+		}
+		searchScopeAfterSection := content[sectionIndex:]
+		if !strings.Contains(searchScopeAfterSection, mirrorEndpoint) {
+			hostCtxLogger.Debugf("Mirror endpoint %s for registry %q not found (or not correctly associated) in %s.", mirrorEndpointLine, registry, configPath)
+			allChecksPass = false; break
+		}
+	}
+	if !allChecksPass { return false, nil }
+
+	if spec.UseSystemdCgroup && !strings.Contains(content, "SystemdCgroup = true") {
+		hostCtxLogger.Debugf("SystemdCgroup = true not found in %s.", configPath)
+		allChecksPass = false
+	}
+	if !allChecksPass { return false, nil }
+
+	if spec.ExtraTomlContent != "" && !strings.Contains(content, strings.TrimSpace(spec.ExtraTomlContent)) {
+	    hostCtxLogger.Debugf("Extra TOML content snippet not found in %s.", configPath)
+	    allChecksPass = false
+	}
+    if !allChecksPass { return false, nil }
+
+	for _, insecureReg := range spec.InsecureRegistries {
+		insecureConfigPath := fmt.Sprintf(`[plugins."io.containerd.grpc.v1.cri".registry.configs.%q.tls]`, insecureReg)
+		insecureSkipLine := "insecure_skip_verify = true"
+		sectionIndex := strings.Index(content, insecureConfigPath)
+		if sectionIndex == -1 {
+			hostCtxLogger.Debugf("Insecure registry TLS section for %q not found in %s.", insecureReg, configPath)
+			allChecksPass = false; break
+		}
+		searchScopeAfterSection := content[sectionIndex:]
+		if !strings.Contains(searchScopeAfterSection, insecureSkipLine) {
+			hostCtxLogger.Debugf("insecure_skip_verify = true for registry %q not found in %s.", insecureReg, configPath)
+			allChecksPass = false; break
+		}
+	}
+
+	hostCtxLogger.Debugf("Containerd config file %s exists. Basic content checks result: %v", configPath, allChecksPass)
+	return allChecksPass, nil
+}
+
+
+// Execute generates and writes containerd config.
+func (e *ConfigureContainerdStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
+	spec, ok := s.(*ConfigureContainerdStepSpec)
+	if !ok {
+		myErr := fmt.Errorf("Execute: unexpected spec type %T for ConfigureContainerdStepExecutor", s)
+		stepName := "ConfigureContainerd (type error)"
+		if s != nil { stepName = s.GetName() }
+		return step.NewResult(stepName, ctx.Host.Name, time.Now(), myErr)
+	}
+
 	startTime := time.Now()
-	res := step.NewResult(s.Name(), ctx.Host.Name, startTime, nil)
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step", s.Name()).Sugar()
+	res := step.NewResult(spec.GetName(), ctx.Host.Name, startTime, nil)
+	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
 	if ctx.Host.Runner == nil {
 		res.Error = fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
-		res.Status = "Failed"; res.Message = res.Error.Error()
-		hostCtxLogger.Errorf("Step failed: %v", res.Error)
-		return res
+		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
-	configPath := s.effectiveConfigPath()
-
+	configPath := spec.effectiveConfigPath()
 	parentDir := filepath.Dir(configPath)
+
 	if err := ctx.Host.Runner.Mkdirp(ctx.GoContext, parentDir, "0755", true); err != nil {
 		res.Error = fmt.Errorf("failed to create directory %s for containerd config on host %s: %w", parentDir, ctx.Host.Name, err)
-		res.Status = "Failed"; res.Message = res.Error.Error()
-		hostCtxLogger.Errorf("Step failed: %v", res.Error)
-		return res
+		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
 	tmpl, err := template.New("containerdConfig").Parse(containerdConfigTemplate)
 	if err != nil {
-		res.Error = fmt.Errorf("failed to parse internal containerd config template: %w", err)
-		res.Status = "Failed"; res.Message = res.Error.Error()
-		hostCtxLogger.Errorf("Step failed: %v (this is a developer error)", res.Error) // Should not happen with valid template
-		return res
+		res.Error = fmt.Errorf("dev error: failed to parse internal containerd config template: %w", err)
+		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
 	var buf strings.Builder
 	templateData := map[string]interface{}{
-		"RegistryMirrors":    s.RegistryMirrors,
-		"InsecureRegistries": s.InsecureRegistries, // Pass this to the template
-		"UseSystemdCgroup":   s.UseSystemdCgroup,
-		"ExtraTomlContent":   s.ExtraTomlContent,
+		"RegistryMirrors":    spec.RegistryMirrors,
+		"InsecureRegistries": spec.InsecureRegistries,
+		"UseSystemdCgroup":   spec.UseSystemdCgroup,
+		"ExtraTomlContent":   spec.ExtraTomlContent,
 	}
 	if err := tmpl.Execute(&buf, templateData); err != nil {
 		res.Error = fmt.Errorf("failed to render containerd config template for host %s: %w", ctx.Host.Name, err)
-		res.Status = "Failed"; res.Message = res.Error.Error()
-		hostCtxLogger.Errorf("Step failed: %v", res.Error)
-		return res
+		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
 	configContent := buf.String()
-	hostCtxLogger.Debugf("Generated containerd config for %s:
-%s", configPath, configContent)
+	hostCtxLogger.Debugf("Generated containerd config for %s:\n%s", configPath, configContent)
 
+	// Sudo true for writing to /etc
 	err = ctx.Host.Runner.WriteFile(ctx.GoContext, []byte(configContent), configPath, "0644", true)
 	if err != nil {
 		res.Error = fmt.Errorf("failed to write containerd config to %s on host %s: %w", configPath, ctx.Host.Name, err)
-		res.Status = "Failed"; res.Message = res.Error.Error()
-		hostCtxLogger.Errorf("Step failed: %v", res.Error)
-		return res
+		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
-	res.EndTime = time.Now()
-	res.Status = "Succeeded"
+	res.EndTime = time.Now(); res.Status = "Succeeded"
 	res.Message = fmt.Sprintf("Containerd configuration written to %s successfully on host %s.", configPath, ctx.Host.Name)
 	hostCtxLogger.Successf("Step succeeded: %s", res.Message)
 
@@ -254,5 +234,4 @@ func (s *ConfigureContainerdMirrorStep) Run(ctx *runtime.Context) *step.Result {
 
 	return res
 }
-
-var _ step.Step = &ConfigureContainerdMirrorStep{}
+var _ step.StepExecutor = &ConfigureContainerdStepExecutor{}

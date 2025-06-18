@@ -1,194 +1,173 @@
 package pki
 
 import (
-	"context"
+	"context" // Required by runtime.Context
 	"fmt"
 	"path/filepath"
+	"strings" // For strings.TrimSpace in subject formatting, if used
 	"time"
 
-	"github.com/kubexms/kubexms/pkg/runner"
+	"github.com/kubexms/kubexms/pkg/connector" // For connector.ExecOptions
 	"github.com/kubexms/kubexms/pkg/runtime"
+	"github.com/kubexms/kubexms/pkg/spec"
 	"github.com/kubexms/kubexms/pkg/step"
 )
 
-// GenerateRootCAStep generates a self-signed root CA certificate and private key.
-// This step is typically run on a single control-plane node.
-// The generated CA certificate and key can be stored in SharedData or a well-known
-// location on the host for other steps to use.
-type GenerateRootCAStep struct {
-	// CertPath is the desired path on the host to store the CA certificate.
-	// If empty, a default host-specific path like "/etc/kubexms/pki/<hostname>/ca.crt" will be used.
-	CertPath string
-	// KeyPath is the desired path on the host to store the CA private key.
-	// If empty, a default host-specific path like "/etc/kubexms/pki/<hostname>/ca.key" will be used.
-	KeyPath string
-	// CommonName for the CA certificate.
-	CommonName string
-	// ValidityDays is the number of days the CA certificate will be valid.
+// GenerateRootCAStepSpec defines parameters for generating a root CA.
+type GenerateRootCAStepSpec struct {
+	CertPath     string
+	KeyPath      string
+	CommonName   string
 	ValidityDays int
-	// KeyBitSize is the bit size for the private key (e.g., 2048, 4096).
-	KeyBitSize int
-
-	// TODO: Consider Organization, OU, Country, etc. fields for subject.
+	KeyBitSize   int
+	StepName     string // Optional: for a custom name for this specific step instance
+	// Future fields: Organization, OU, Country for subject
 }
 
-// Name returns a human-readable name for the step.
-func (s *GenerateRootCAStep) Name() string {
-	// Use effective paths in name after defaults are applied, if possible,
-	// but Name() might be called before Check/Run where defaults are applied.
-	// For now, use potentially empty CertPath/KeyPath or rely on user setting them before Name() is critical.
-	// Or, make defaultPathsIfNeeded callable from Name() if ctx is available, but it's not.
-	// So, the name might be generic if paths aren't pre-set.
-	nameCertPath := s.CertPath
-	nameKeyPath := s.KeyPath
-	if nameCertPath == "" { nameCertPath = "default_ca.crt" }
-	if nameKeyPath == "" { nameKeyPath = "default_ca.key" }
-	return fmt.Sprintf("Generate Root CA (Cert: %s, Key: %s)", nameCertPath, nameKeyPath)
+// GetName returns the step name.
+func (s *GenerateRootCAStepSpec) GetName() string {
+	if s.StepName != "" { return s.StepName }
+	// For a default name, we might need to know the resolved paths.
+	// This GetName is on the spec, which might not have defaults applied yet if they are dynamic.
+	// So, we use placeholder or rely on user setting SpecName for a fully dynamic default.
+	cp := s.CertPath; if cp == "" { cp = "ca.crt (default path)" }
+	kp := s.KeyPath;  if kp == "" { kp = "ca.key (default path)" }
+	return fmt.Sprintf("Generate Root CA (Cert: %s, Key: %s)", cp, kp)
 }
 
-// defaultPathsIfNeeded sets default values for paths and parameters if they are not provided.
-// It uses the host's name to create a host-specific PKI directory path if paths are empty.
-func (s *GenerateRootCAStep) defaultPathsIfNeeded(hostName string) {
-	// Base PKI directory, potentially made host-specific if paths are not absolute.
-	// If CertPath/KeyPath are absolute, they are used as is.
-	// If they are relative, they could be relative to a global PKI dir or host-specific.
-	// For simplicity, if empty, we define a default absolute path.
-	defaultBaseDir := "/etc/kubexms/pki" // A general base
-	if hostName != "" { // Make it host-specific if paths are not fully qualified by user
-		// This logic might need refinement based on how shared vs. per-host CAs are handled.
-		// If this step is for a truly GLOBAL CA, hostName shouldn't be in the path unless it's the "CA master".
-		// Assuming for now, if paths are empty, they default to a common, non-host-specific path.
-		// defaultBaseDir = filepath.Join("/etc/kubexms/pki", hostName)
-	}
-
+// applyDefaults sets default values for the spec if they are not provided.
+// This method is called by the executor.
+func (s *GenerateRootCAStepSpec) applyDefaults(ctxHostName string) {
+	// If paths are empty, default to a common, non-host-specific path for a global CA,
+	// or make it host-specific if that's the design for this CA type.
+	// For a root CA, it's often global, so not using ctxHostName in path by default.
+	// If a per-host CA was intended, path would include ctxHostName.
+	defaultBaseDir := "/etc/kubexms/pki"
 	if s.CertPath == "" {
 		s.CertPath = filepath.Join(defaultBaseDir, "ca.crt")
 	}
 	if s.KeyPath == "" {
 		s.KeyPath = filepath.Join(defaultBaseDir, "ca.key")
 	}
-	if s.CommonName == "" {
-		s.CommonName = "kubexms-root-ca"
-	}
-	if s.ValidityDays == 0 {
-		s.ValidityDays = 365 * 10 // 10 years
-	}
-	if s.KeyBitSize == 0 {
-		s.KeyBitSize = 4096
-	}
+	if s.CommonName == "" { s.CommonName = "kubexms-root-ca" }
+	if s.ValidityDays == 0 { s.ValidityDays = 365 * 10 } // 10 years
+	if s.KeyBitSize == 0 { s.KeyBitSize = 4096 }
+}
+var _ spec.StepSpec = &GenerateRootCAStepSpec{}
+
+// GenerateRootCAStepExecutor implements logic for GenerateRootCAStepSpec.
+type GenerateRootCAStepExecutor struct{}
+
+func init() {
+	step.Register(step.GetSpecTypeName(&GenerateRootCAStepSpec{}), &GenerateRootCAStepExecutor{})
 }
 
-// Check determines if the root CA certificate and key already exist at the specified paths.
-func (s *GenerateRootCAStep) Check(ctx *runtime.Context) (isDone bool, err error) {
+// Check determines if the root CA cert and key already exist.
+func (e *GenerateRootCAStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
+	spec, ok := s.(*GenerateRootCAStepSpec)
+	if !ok { return false, fmt.Errorf("unexpected spec type %T for GenerateRootCAStepExecutor Check method", s) }
+
+	spec.applyDefaults(ctx.Host.Name) // Apply defaults based on context if paths are relative/need hostname
+	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+
 	if ctx.Host.Runner == nil {
 		return false, fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
 	}
-	s.defaultPathsIfNeeded(ctx.Host.Name) // Ensure paths are set using host context if needed for defaults
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step", s.Name()).Sugar()
 
-
-	certExists, err := ctx.Host.Runner.Exists(ctx.GoContext, s.CertPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check existence of CA cert %s on host %s: %w", s.CertPath, ctx.Host.Name, err)
-	}
-	keyExists, err := ctx.Host.Runner.Exists(ctx.GoContext, s.KeyPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check existence of CA key %s on host %s: %w", s.KeyPath, ctx.Host.Name, err)
-	}
+	certExists, err := ctx.Host.Runner.Exists(ctx.GoContext, spec.CertPath)
+	if err != nil { return false, fmt.Errorf("failed to check CA cert %s on host %s: %w", spec.CertPath, ctx.Host.Name, err) }
+	keyExists, err := ctx.Host.Runner.Exists(ctx.GoContext, spec.KeyPath)
+	if err != nil { return false, fmt.Errorf("failed to check CA key %s on host %s: %w", spec.KeyPath, ctx.Host.Name, err) }
 
 	if certExists && keyExists {
-		hostCtxLogger.Infof("Root CA certificate (%s) and key (%s) already exist.", s.CertPath, s.KeyPath)
-		// TODO: Add verification of CA properties (e.g., common name, expiry, is-ca) for true idempotency.
+		hostCtxLogger.Infof("Root CA certificate (%s) and key (%s) already exist.", spec.CertPath, spec.KeyPath)
+		// TODO: Add verification of CA properties (CN, expiry, isCA flag in cert) for true idempotency.
 		return true, nil
 	}
-	if certExists && !keyExists {
-	    hostCtxLogger.Warnf("Root CA cert %s exists, but key %s does not. Will attempt to regenerate.", s.CertPath, s.KeyPath)
-	}
-    if !certExists && keyExists {
-	    hostCtxLogger.Warnf("Root CA key %s exists, but cert %s does not. Will attempt to regenerate.", s.KeyPath, s.CertPath)
-	}
-	if !certExists && !keyExists {
-		hostCtxLogger.Debugf("Root CA certificate (%s) and key (%s) do not exist.", s.CertPath, s.KeyPath)
-	}
-
-	return false, nil // Not "done" if either is missing
+	if certExists && !keyExists { hostCtxLogger.Warnf("Root CA cert %s exists, but key %s does not. Will attempt to regenerate.", spec.CertPath, spec.KeyPath) }
+    if !certExists && keyExists { hostCtxLogger.Warnf("Root CA key %s exists, but cert %s does not. Will attempt to regenerate.", spec.KeyPath, spec.CertPath) }
+	if !certExists && !keyExists { hostCtxLogger.Debugf("Root CA certificate (%s) and key (%s) do not exist.", spec.CertPath, spec.KeyPath) }
+	return false, nil
 }
 
-// Run generates the root CA certificate and private key using openssl commands.
-func (s *GenerateRootCAStep) Run(ctx *runtime.Context) *step.Result {
-	s.defaultPathsIfNeeded(ctx.Host.Name)
+// Execute generates the root CA.
+func (e *GenerateRootCAStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
+	spec, ok := s.(*GenerateRootCAStepSpec)
+	if !ok {
+		myErr := fmt.Errorf("Execute: unexpected spec type %T for GenerateRootCAStepExecutor", s)
+		stepName := "GenerateRootCA (type error)"; if s != nil { stepName = s.GetName() }
+		return step.NewResult(stepName, ctx.Host.Name, time.Now(), myErr)
+	}
+
+	spec.applyDefaults(ctx.Host.Name)
 	startTime := time.Now()
-	res := step.NewResult(s.Name(), ctx.Host.Name, startTime, nil)
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step", s.Name()).Sugar()
+	res := step.NewResult(spec.GetName(), ctx.Host.Name, startTime, nil)
+	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
 
 	if ctx.Host.Runner == nil {
 		res.Error = fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
-		res.Status = "Failed"; res.Message = res.Error.Error()
-		hostCtxLogger.Errorf("Step failed: %v", res.Error)
-		return res
+		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
-
 	if _, err := ctx.Host.Runner.LookPath(ctx.GoContext, "openssl"); err != nil {
 		res.Error = fmt.Errorf("openssl command not found on host %s, required to generate CA: %w", ctx.Host.Name, err)
-		res.Status = "Failed"; res.Message = res.Error.Error()
-		hostCtxLogger.Errorf("Step failed: %v", res.Error)
-		return res
+		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
-	certDir := filepath.Dir(s.CertPath)
-	keyDir := filepath.Dir(s.KeyPath)
+	certDir := filepath.Dir(spec.CertPath); keyDir := filepath.Dir(spec.KeyPath)
 	// Sudo true for creating directories in /etc or similar system paths.
 	if err := ctx.Host.Runner.Mkdirp(ctx.GoContext, certDir, "0755", true); err != nil {
 		res.Error = fmt.Errorf("failed to create directory %s for CA certificate on host %s: %w", certDir, ctx.Host.Name, err)
 		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
-	if certDir != keyDir {
-		if err := ctx.Host.Runner.Mkdirp(ctx.GoContext, keyDir, "0700", true); err != nil {
+	if certDir != keyDir { // Only create if different to avoid double logging/error
+		if err := ctx.Host.Runner.Mkdirp(ctx.GoContext, keyDir, "0700", true); err != nil { // Key dir more restrictive
 			res.Error = fmt.Errorf("failed to create directory %s for CA key on host %s: %w", keyDir, ctx.Host.Name, err)
 			res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 		}
 	}
 
-	genKeyCmd := fmt.Sprintf("openssl genpkey -algorithm RSA -out %s -pkeyopt rsa_keygen_bits:%d", s.KeyPath, s.KeyBitSize)
-	hostCtxLogger.Infof("Generating CA private key: %s (this might take a moment)", s.KeyPath)
-	_, stderrKey, errKey := ctx.Host.Runner.Run(ctx.GoContext, genKeyCmd, true)
+	// Sudo true for openssl commands if writing to system paths like /etc
+	genKeyCmd := fmt.Sprintf("openssl genpkey -algorithm RSA -out %s -pkeyopt rsa_keygen_bits:%d", spec.KeyPath, spec.KeyBitSize)
+	hostCtxLogger.Infof("Generating CA private key: %s (this might take a moment)", spec.KeyPath)
+	_, stderrKey, errKey := ctx.Host.Runner.RunWithOptions(ctx.GoContext, genKeyCmd, &connector.ExecOptions{Sudo: true})
 	if errKey != nil {
-		res.Error = fmt.Errorf("failed to generate CA private key %s on host %s: %w (stderr: %s)", s.KeyPath, ctx.Host.Name, errKey, string(stderrKey))
+		res.Error = fmt.Errorf("failed to generate CA private key %s on host %s: %w (stderr: %s)", spec.KeyPath, ctx.Host.Name, errKey, string(stderrKey))
 		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
-	if errChmodKey := ctx.Host.Runner.Chmod(ctx.GoContext, s.KeyPath, "0600", true); errChmodKey != nil {
-		hostCtxLogger.Warnf("Failed to chmod CA key %s to 0600 on host %s: %v", s.KeyPath, ctx.Host.Name, errChmodKey)
+	if errChmodKey := ctx.Host.Runner.Chmod(ctx.GoContext, spec.KeyPath, "0600", true); errChmodKey != nil {
+		hostCtxLogger.Warnf("Failed to chmod CA key %s to 0600 on host %s: %v", spec.KeyPath, ctx.Host.Name, errChmodKey)
+		// Non-fatal warning for chmod failure, but key is generated.
 	}
 
-	subject := fmt.Sprintf("/CN=%s", s.CommonName)
-	// Example with more fields: /C=US/ST=California/L=City/O=MyOrg/OU=MyOU/CN=MyCA
-	// if s.Organization != "" { subject += fmt.Sprintf("/O=%s", s.Organization) } // etc.
+	subject := fmt.Sprintf("/CN=%s", strings.ReplaceAll(spec.CommonName, "\"", "\\\"")) // Basic CN sanitation
 	genCertCmd := fmt.Sprintf("openssl req -x509 -new -nodes -key %s -sha256 -days %d -out %s -subj '%s'",
-		s.KeyPath, s.ValidityDays, s.CertPath, subject) // Quote subject
-	hostCtxLogger.Infof("Generating self-signed CA certificate: %s", s.CertPath)
-	_, stderrCert, errCert := ctx.Host.Runner.Run(ctx.GoContext, genCertCmd, true)
+		spec.KeyPath, spec.ValidityDays, spec.CertPath, subject)
+	hostCtxLogger.Infof("Generating self-signed CA certificate: %s", spec.CertPath)
+	_, stderrCert, errCert := ctx.Host.Runner.RunWithOptions(ctx.GoContext, genCertCmd, &connector.ExecOptions{Sudo: true})
 	if errCert != nil {
-		res.Error = fmt.Errorf("failed to generate CA certificate %s on host %s: %w (stderr: %s)", s.CertPath, ctx.Host.Name, errCert, string(stderrCert))
+		res.Error = fmt.Errorf("failed to generate CA certificate %s on host %s: %w (stderr: %s)", spec.CertPath, ctx.Host.Name, errCert, string(stderrCert))
 		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
-	if errChmodCert := ctx.Host.Runner.Chmod(ctx.GoContext, s.CertPath, "0644", true); errChmodCert != nil {
-		hostCtxLogger.Warnf("Failed to chmod CA cert %s to 0644 on host %s: %v", s.CertPath, ctx.Host.Name, errChmodCert)
+	if errChmodCert := ctx.Host.Runner.Chmod(ctx.GoContext, spec.CertPath, "0644", true); errChmodCert != nil {
+		hostCtxLogger.Warnf("Failed to chmod CA cert %s to 0644 on host %s: %v", spec.CertPath, ctx.Host.Name, errChmodCert)
 	}
 
-	// Store paths in SharedData for other steps to potentially use.
-	// Key names should be well-defined constants or exported variables if used across packages.
-	if ctx.SharedData != nil {
-		ctx.SharedData.Store(fmt.Sprintf("pki.ca.%s.certPath", ctx.Host.Name), s.CertPath)
-		ctx.SharedData.Store(fmt.Sprintf("pki.ca.%s.keyPath", ctx.Host.Name), s.KeyPath)
-		// Storing actual content might be too large for SharedData, paths are usually better.
+	if ctx.SharedData != nil { // Store paths in SharedData for other steps
+		sharedCertPathKey := fmt.Sprintf("pki.ca.%s.certPath", ctx.Host.Name) // Make key host-specific if CA is per-host
+		sharedKeyPathKey := fmt.Sprintf("pki.ca.%s.keyPath", ctx.Host.Name)
+		// If CA is global, use a global key: "pki.rootCA.certPath"
+		// Assuming this GenerateRootCAStep might run on one host but CA is for cluster:
+		// sharedCertPathKey = "pki.globalRootCA.certPath"
+		// sharedKeyPathKey = "pki.globalRootCA.keyPath"
+		ctx.SharedData.Store(sharedCertPathKey, spec.CertPath)
+		ctx.SharedData.Store(sharedKeyPathKey, spec.KeyPath)
+		hostCtxLogger.Debugf("Stored CA paths in SharedData: %s, %s", sharedCertPathKey, sharedKeyPathKey)
 	}
 
-	res.EndTime = time.Now()
-	res.Status = "Succeeded"
-	res.Message = fmt.Sprintf("Root CA certificate and key generated successfully at %s and %s on host %s.", s.CertPath, s.KeyPath, ctx.Host.Name)
+	res.EndTime = time.Now(); res.Status = "Succeeded"
+	res.Message = fmt.Sprintf("Root CA certificate and key generated successfully at %s and %s.", spec.CertPath, spec.KeyPath)
 	hostCtxLogger.Successf("Step succeeded: %s", res.Message)
 	return res
 }
-
-var _ step.Step = &GenerateRootCAStep{}
+var _ step.StepExecutor = &GenerateRootCAStepExecutor{}
