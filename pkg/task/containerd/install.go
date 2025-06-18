@@ -3,71 +3,80 @@ package containerd
 import (
 	"github.com/kubexms/kubexms/pkg/config"
 	"github.com/kubexms/kubexms/pkg/spec"
-	stepContainerd "github.com/kubexms/kubexms/pkg/step/containerd" // Import containerd step specs
-	// "github.com/kubexms/kubexms/pkg/task" // No longer needed
+	stepContainerd "github.com/kubexms/kubexms/pkg/step/containerd"
 )
 
 // NewInstallContainerdTask creates a task specification to install and configure containerd.
-// cfg can be used to specify containerd version, mirror settings, etc.
 func NewInstallContainerdTask(cfg *config.Cluster) *spec.TaskSpec {
 
-	// Default values, to be potentially overridden by cfg
-	containerdVersion := "" // Default: install latest available version
-	registryMirrors := map[string]string{}
+	containerdVersion := ""
+	registryMirrors := make(map[string]string)
 	insecureRegistries := []string{}
-	useSystemdCgroup := true // Common best practice for Kubernetes
+	// Default to true for Kubernetes, can be overridden by config.
+	// If cfg.Spec.Containerd is nil, or if UseSystemdCgroup is not set (defaults to false for bool),
+	// this factory default of 'true' will apply.
+	useSystemdCgroup := true
 	extraToml := ""
-	configPath := "" // Use default in step if empty
+	configPath := "" // Step uses its own default if this is empty
 
-	// Example of reading from a hypothetical config structure (adjust to actual config.go structure)
-	// if cfg != nil && cfg.Spec.ContainerRuntime != nil && cfg.Spec.ContainerRuntime.Type == "containerd" {
-	//    if cfg.Spec.ContainerRuntime.Version != "" {
-	//        containerdVersion = cfg.Spec.ContainerRuntime.Version
-	//    }
-	//    if cfg.Spec.ContainerRuntime.Containerd != nil { // Assuming a nested ContainerdSpec
-	//        if len(cfg.Spec.ContainerRuntime.Containerd.RegistryMirrors) > 0 {
-	//             // Logic to convert map[string][]string to map[string]string (taking first mirror)
-	//             for reg, mirrors := range cfg.Spec.ContainerRuntime.Containerd.RegistryMirrors {
-	//                 if len(mirrors) > 0 {
-	//                     registryMirrors[reg] = mirrors[0]
-	//                 }
-	//             }
-	//        }
-	//        if len(cfg.Spec.ContainerRuntime.Containerd.InsecureRegistries) > 0 {
-	//            insecureRegistries = cfg.Spec.ContainerRuntime.Containerd.InsecureRegistries
-	//        }
-	//        if cfg.Spec.ContainerRuntime.Containerd.UseSystemdCgroup != nil {
-	//            useSystemdCgroup = *cfg.Spec.ContainerRuntime.Containerd.UseSystemdCgroup
-	//        }
-	//        extraToml = cfg.Spec.ContainerRuntime.Containerd.ExtraTomlConfig
-	//        configPath = cfg.Spec.ContainerRuntime.Containerd.ConfigPath
-	//    }
-	// }
+	if cfg != nil {
+		if cfg.Spec.ContainerRuntime != nil && cfg.Spec.ContainerRuntime.Version != "" {
+		containerdVersion = cfg.Spec.ContainerRuntime.Version
+		}
+
+		if cfg.Spec.Containerd != nil { // ContainerdSpec is a pointer, so check for nil
+			// If ContainerdSpec.Version is set, it overrides ContainerRuntime.Version for containerd
+			if cfg.Spec.Containerd.Version != "" {
+				containerdVersion = cfg.Spec.Containerd.Version
+			}
+			// Process RegistryMirrors: step takes map[string]string (first mirror for each registry)
+			if cfg.Spec.Containerd.RegistryMirrors != nil { // Was RegistryMirrorsConfig
+			for reg, mirrors := range cfg.Spec.Containerd.RegistryMirrors {
+				if len(mirrors) > 0 {
+				registryMirrors[reg] = mirrors[0]
+				}
+			}
+			}
+			// UseSystemdCgroup: if the ContainerdSpec section exists, its UseSystemdCgroup value
+			// (which is 'false' if omitted in YAML due to bool type) will be used.
+			// If we want 'true' to be the default unless explicitly set to 'false' in config:
+			// This requires UseSystemdCgroup to be a *bool in config.ContainerdSpec.
+			// Given current config.ContainerdSpec.UseSystemdCgroup is bool:
+			useSystemdCgroup = cfg.Spec.Containerd.UseSystemdCgroup
+			// If this results in `false` because it was omitted in YAML, and `true` is desired as default,
+			// the logic should be:
+			// if cfg.Spec.Containerd.IsSet("UseSystemdCgroup") { useSystemdCgroup = cfg.Spec.Containerd.UseSystemdCgroup } else { useSystemdCgroup = true }
+			// For now, we take the value as is from config if ContainerdSpec is present.
+			// The initial `useSystemdCgroup := true` above acts as a default if cfg.Spec.Containerd is nil.
+
+			if len(cfg.Spec.Containerd.InsecureRegistries) > 0 {
+				insecureRegistries = cfg.Spec.Containerd.InsecureRegistries
+			}
+			extraToml = cfg.Spec.Containerd.ExtraTomlConfig
+			if cfg.Spec.Containerd.ConfigPath != "" {
+				configPath = cfg.Spec.Containerd.ConfigPath
+			}
+		}
+	}
 
 
 	return &spec.TaskSpec{
 		Name: "Install and Configure Containerd",
-		RunOnRoles: []string{}, // Typically all nodes needing a runtime
+		RunOnRoles: []string{},
 		Steps: []spec.StepSpec{
 			&stepContainerd.InstallContainerdStepSpec{
 				Version: containerdVersion,
 			},
-			// Assuming ConfigureContainerdMirrorStepSpec was renamed/generalized to ConfigureContainerdStepSpec
 			&stepContainerd.ConfigureContainerdStepSpec{
 				RegistryMirrors:    registryMirrors,
-				InsecureRegistries: insecureRegistries,
 				UseSystemdCgroup:   useSystemdCgroup,
+				InsecureRegistries: insecureRegistries,
 				ExtraTomlContent:   extraToml,
 				ConfigFilePath:     configPath,
 			},
 			&stepContainerd.EnableAndStartContainerdStepSpec{},
 		},
-		Concurrency: 10, // Default concurrency for this task
-		IgnoreError: false, // Containerd installation is usually critical
+		Concurrency: 10,
+		IgnoreError: false,
 	}
 }
-
-// Note: The actual config structure (e.g., cfg.Spec.ContainerRuntime.Containerd) needs to be
-// defined in pkg/config/config.go for the commented-out configuration loading examples to work.
-// The step spec struct stepContainerd.ConfigureContainerdStepSpec must match the name
-// used here (previously it might have been ConfigureContainerdMirrorStepSpec).

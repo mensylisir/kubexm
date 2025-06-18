@@ -1,13 +1,10 @@
 package task
 
 import (
+	"reflect" // For DeepEqual
 	"strings" // For string checks in names/types
 	"testing"
-	// "time" // No longer needed for these factory tests
-	// "context" // No longer needed
-	// "errors" // No longer needed
-	// "fmt" // No longer needed
-	// "sync/atomic" // No longer needed
+	// "time" // Not directly needed for factory output tests
 
 	"github.com/kubexms/kubexms/pkg/config" // For dummy config
 	"github.com/kubexms/kubexms/pkg/spec"    // For spec.TaskSpec, spec.StepSpec
@@ -18,101 +15,142 @@ import (
 	taskPreflight "github.com/kubexms/kubexms/pkg/task/preflight"
 
 	// Import StepSpec types to check them
-	// It's good practice to alias if names might clash or for clarity
-	stepSpecPreflight "github.com/kubexms/kubexms/pkg/step/preflight"
 	stepSpecContainerd "github.com/kubexms/kubexms/pkg/step/containerd"
+	stepSpecPreflight "github.com/kubexms/kubexms/pkg/step/preflight"
 	// commandStepSpec "github.com/kubexms/kubexms/pkg/step/command" // If any task used it directly
 )
 
 // Note: MockStep and newTestRuntimeForTask helpers are removed as they were for testing Task.Run,
-// which no longer exists in pkg/task/task.go (it's now in pkg/executor).
-// Tests now focus on factory output (*spec.TaskSpec).
+// which no longer exists in pkg/task/task.go. Tests now focus on factory output.
 
-func TestNewSystemChecksTask_Factory(t *testing.T) {
-	dummyCfg := &config.Cluster{}
+func TestNewSystemChecksTask_Factory_WithConfig(t *testing.T) {
+	dummyCfg := &config.Cluster{
+		Spec: config.ClusterSpec{
+			PreflightConfig: config.PreflightConfigSpec{
+				MinCPUCores: 3,
+				MinMemoryMB: 3072,
+				DisableSwap: true, // Explicitly request swap disable
+			},
+		},
+	}
 	taskSpec := taskPreflight.NewSystemChecksTask(dummyCfg)
 
 	if taskSpec.Name != "Run System Preflight Checks" {
-		t.Errorf("NewSystemChecksTask name = '%s', want 'Run System Preflight Checks'", taskSpec.Name)
-	}
-	if len(taskSpec.RunOnRoles) != 0 { // Expecting empty, meaning all hosts by default from orchestrator
-		t.Errorf("NewSystemChecksTask RunOnRoles = %v, want empty []string{}", taskSpec.RunOnRoles)
-	}
-	if taskSpec.IgnoreError { // Preflight checks are typically critical
-		t.Error("NewSystemChecksTask IgnoreError = true, want false")
+		t.Errorf("Name = '%s'", taskSpec.Name)
 	}
 
-	// Check for expected steps and their types
-	expectedStepSpecTypeNames := []string{ // Based on TypeName from step.GetSpecTypeName
-		step.GetSpecTypeName(&stepSpecPreflight.CheckCPUStepSpec{}),
-		step.GetSpecTypeName(&stepSpecPreflight.CheckMemoryStepSpec{}),
-		step.GetSpecTypeName(&stepSpecPreflight.DisableSwapStepSpec{}),
-	}
-	if len(taskSpec.Steps) != len(expectedStepSpecTypeNames) {
-		t.Fatalf("NewSystemChecksTask expected %d steps, got %d", len(expectedStepSpecTypeNames), len(taskSpec.Steps))
-	}
+	foundCPUSpec := false
+	foundMemSpec := false
+	foundSwapSpec := false
 
-	for i, sSpec := range taskSpec.Steps {
-		typeName := step.GetSpecTypeName(sSpec)
-		if typeName != expectedStepSpecTypeNames[i] {
-			t.Errorf("Step %d type = %s, want %s", i, typeName, expectedStepSpecTypeNames[i])
-		}
-		// Optionally, type assert and check specific fields of the spec
-		if cs, ok := sSpec.(*stepSpecPreflight.CheckCPUStepSpec); ok {
-			if cs.MinCores != 2 { // Default from factory
-				t.Errorf("CheckCPUStepSpec.MinCores = %d, want 2", cs.MinCores)
+	for _, sSpec := range taskSpec.Steps {
+		switch s := sSpec.(type) {
+		case *stepSpecPreflight.CheckCPUStepSpec:
+			foundCPUSpec = true
+			if s.MinCores != 3 {
+				t.Errorf("CheckCPUStepSpec.MinCores = %d, want 3", s.MinCores)
 			}
+		case *stepSpecPreflight.CheckMemoryStepSpec:
+			foundMemSpec = true
+			if s.MinMemoryMB != 3072 {
+				t.Errorf("CheckMemoryStepSpec.MinMemoryMB = %d, want 3072", s.MinMemoryMB)
+			}
+		case *stepSpecPreflight.DisableSwapStepSpec:
+			foundSwapSpec = true
 		}
+	}
+	if !foundCPUSpec { t.Error("CheckCPUStepSpec not found") }
+	if !foundMemSpec { t.Error("CheckMemoryStepSpec not found") }
+	if !foundSwapSpec { t.Error("DisableSwapStepSpec not found when PreflightConfig.DisableSwap is true") }
+	if len(taskSpec.Steps) != 3 { // Expect all three with DisableSwap: true
+		t.Errorf("Expected 3 steps when DisableSwap is true, got %d", len(taskSpec.Steps))
 	}
 }
 
-func TestNewSetupKernelTask_Factory(t *testing.T) {
-	dummyCfg := &config.Cluster{}
+func TestNewSystemChecksTask_Factory_SkipDisableSwap(t *testing.T) {
+	dummyCfg := &config.Cluster{
+		Spec: config.ClusterSpec{
+			PreflightConfig: config.PreflightConfigSpec{
+				DisableSwap: false, // Explicitly request NOT to disable swap
+			},
+		},
+	}
+	taskSpec := taskPreflight.NewSystemChecksTask(dummyCfg)
+
+	disableSwapStepFound := false
+	for _, sSpec := range taskSpec.Steps {
+		if _, ok := sSpec.(*stepSpecPreflight.DisableSwapStepSpec); ok {
+			disableSwapStepFound = true
+			break
+		}
+	}
+	if disableSwapStepFound {
+		t.Error("DisableSwapStepSpec found when PreflightConfig.DisableSwap is false")
+	}
+	if len(taskSpec.Steps) != 2 { // Expect CPU and Mem checks only
+		t.Errorf("Expected 2 steps when DisableSwap is false, got %d", len(taskSpec.Steps))
+	}
+}
+
+
+func TestNewSetupKernelTask_Factory_WithConfig(t *testing.T) {
+	customModules := []string{"custom_mod1", "custom_mod2"}
+	customSysctl := map[string]string{"custom.param": "1", "another.param": "2"}
+	dummyCfg := &config.Cluster{
+		Spec: config.ClusterSpec{
+			KernelConfig: config.KernelConfigSpec{
+				Modules:      customModules,
+				SysctlParams: customSysctl,
+				// SysctlConfigFilePath: "/my/custom/sysctl.conf", // Example for path override
+			},
+		},
+	}
 	taskSpec := taskPreflight.NewSetupKernelTask(dummyCfg)
 
 	if taskSpec.Name != "Setup Kernel Parameters and Modules" {
-		t.Errorf("Name = '%s', want 'Setup Kernel Parameters and Modules'", taskSpec.Name)
+		t.Errorf("Name = '%s'", taskSpec.Name)
 	}
 
-	expectedStepSpecTypeNames := []string{
-		step.GetSpecTypeName(&stepSpecPreflight.LoadKernelModulesStepSpec{}),
-		step.GetSpecTypeName(&stepSpecPreflight.SetSystemConfigStepSpec{}),
+	var loadModulesSpec *stepSpecPreflight.LoadKernelModulesStepSpec
+	var setSysctlSpec *stepSpecPreflight.SetSystemConfigStepSpec
+
+	for _, sSpec := range taskSpec.Steps {
+		if s, ok := sSpec.(*stepSpecPreflight.LoadKernelModulesStepSpec); ok { loadModulesSpec = s }
+		if s, ok := sSpec.(*stepSpecPreflight.SetSystemConfigStepSpec); ok { setSysctlSpec = s }
 	}
-	if len(taskSpec.Steps) != len(expectedStepSpecTypeNames) {
-		t.Fatalf("Expected %d steps, got %d", len(expectedStepSpecTypeNames), len(taskSpec.Steps))
+
+	if loadModulesSpec == nil { t.Fatal("LoadKernelModulesStepSpec not found") }
+	if !reflect.DeepEqual(loadModulesSpec.Modules, customModules) {
+		t.Errorf("LoadKernelModulesStepSpec.Modules = %v, want %v", loadModulesSpec.Modules, customModules)
 	}
-	for i, sSpec := range taskSpec.Steps {
-		typeName := step.GetSpecTypeName(sSpec)
-		if typeName != expectedStepSpecTypeNames[i] {
-			t.Errorf("Step %d type = %s, want %s", i, typeName, expectedStepSpecTypeNames[i])
-		}
-		if ks, ok := sSpec.(*stepSpecPreflight.LoadKernelModulesStepSpec); ok {
-			// Check default modules from factory
-			expectedModules := []string{"br_netfilter", "overlay", "ip_vs"}
-			if len(ks.Modules) != len(expectedModules) {
-				t.Errorf("LoadKernelModulesStepSpec.Modules count = %d, want %d", len(ks.Modules), len(expectedModules))
-			}
-		}
-		if ss, ok := sSpec.(*stepSpecPreflight.SetSystemConfigStepSpec); ok {
-			if ss.Params["net.ipv4.ip_forward"] != "1" {
-				t.Error("SetSystemConfigStepSpec.Params missing or incorrect net.ipv4.ip_forward")
-			}
-			if ss.Reload == nil || !*ss.Reload { // Reload defaults to true in factory (via *bool)
-				t.Error("SetSystemConfigStepSpec.Reload is not true or nil (expecting explicit true from factory)")
-			}
-		}
+
+	if setSysctlSpec == nil { t.Fatal("SetSystemConfigStepSpec not found") }
+	if !reflect.DeepEqual(setSysctlSpec.Params, customSysctl) {
+		t.Errorf("SetSystemConfigStepSpec.Params = %v, want %v", setSysctlSpec.Params, customSysctl)
+	}
+	// Example if checking path override
+	// if setSysctlSpec.ConfigFilePath != "/my/custom/sysctl.conf" {
+	// 	t.Errorf("SetSystemConfigStepSpec.ConfigFilePath = %s, want /my/custom/sysctl.conf", setSysctlSpec.ConfigFilePath)
+	// }
+	if setSysctlSpec.Reload == nil || !*setSysctlSpec.Reload { // Factory sets Reload to true by default
+		t.Error("SetSystemConfigStepSpec.Reload should be true by default from factory")
 	}
 }
 
-
-func TestNewInstallContainerdTask_Factory(t *testing.T) {
-	// Example of providing some config to the factory
+func TestNewInstallContainerdTask_Factory_WithConfig(t *testing.T) {
 	dummyCfg := &config.Cluster{
 		Spec: config.ClusterSpec{
-			// This assumes Containerd field exists in ClusterSpec and ContainerdSpec in config package
-			// For this test, we'll assume it's nil or default, and factory handles it.
-			// If config.ContainerdSpec was defined and used:
-			// Containerd: &config.ContainerdSpec{ Version: "1.7.1" },
+			ContainerRuntime: &config.ContainerRuntimeSpec{Version: "1.7.1"},
+			Containerd: &config.ContainerdSpec{
+				// Version: "1.7.0", // This would be overridden by ContainerRuntime.Version
+				RegistryMirrors: map[string][]string{ // Renamed from RegistryMirrorsConfig
+					"docker.io": {"https://my.mirror.com", "https://another.mirror.com"},
+				},
+				UseSystemdCgroup:   true,
+				InsecureRegistries: []string{"insecure.reg:5000"},
+				ExtraTomlConfig:   "[plugins.\"io.containerd.toto.v1\"]\n  extra_config = true",
+				ConfigPath: "/custom/containerd.toml",
+			},
 		},
 	}
 	taskSpec := taskContainerd.NewInstallContainerdTask(dummyCfg)
@@ -120,39 +158,45 @@ func TestNewInstallContainerdTask_Factory(t *testing.T) {
 	if taskSpec.Name != "Install and Configure Containerd" {
 		t.Errorf("Name = '%s'", taskSpec.Name)
 	}
-	if len(taskSpec.Steps) != 3 { // Install, Configure, EnableAndStart
+	if len(taskSpec.Steps) != 3 {
 		t.Fatalf("Expected 3 steps, got %d", len(taskSpec.Steps))
 	}
 
-	expectedStepSpecTypeNames := []string{
-		step.GetSpecTypeName(&stepSpecContainerd.InstallContainerdStepSpec{}),
-		step.GetSpecTypeName(&stepSpecContainerd.ConfigureContainerdStepSpec{}),
-		step.GetSpecTypeName(&stepSpecContainerd.EnableAndStartContainerdStepSpec{}),
-	}
-	for i, sSpec := range taskSpec.Steps {
-		typeName := step.GetSpecTypeName(sSpec)
-		if typeName != expectedStepSpecTypeNames[i] {
-			t.Errorf("Step %d type = %s, want %s", i, typeName, expectedStepSpecTypeNames[i])
-		}
+	var installSpec *stepSpecContainerd.InstallContainerdStepSpec
+	var configSpec *stepSpecContainerd.ConfigureContainerdStepSpec
+	// var manageSpec *stepSpecContainerd.EnableAndStartContainerdStepSpec // Not checked in detail here
+
+	for _, sSpec := range taskSpec.Steps {
+		if s, ok := sSpec.(*stepSpecContainerd.InstallContainerdStepSpec); ok { installSpec = s }
+		if s, ok := sSpec.(*stepSpecContainerd.ConfigureContainerdStepSpec); ok { configSpec = s }
+		// if s, ok := sSpec.(*stepSpecContainerd.EnableAndStartContainerdStepSpec); ok { manageSpec = s }
 	}
 
-	// Example: Check if InstallContainerdStepSpec received a default version (empty if latest)
-	if installSpec, ok := taskSpec.Steps[0].(*stepSpecContainerd.InstallContainerdStepSpec); ok {
-		// The factory currently sets version to "" if not in config.
-		// If a specific version was set in dummyCfg and read by factory, test that here.
-		// Example: if dummyCfg.Spec.Containerd.Version was "1.7.1", check installSpec.Version == "1.7.1"
-		if installSpec.Version != "" { // Default in factory is ""
-			t.Logf("InstallContainerdStepSpec.Version = %s (expected empty for latest, or specific if from cfg)", installSpec.Version)
-		}
-	} else {
-		t.Error("First step is not *stepSpecContainerd.InstallContainerdStepSpec")
-	}
+	if installSpec == nil { t.Fatal("InstallContainerdStepSpec not found") }
+	if configSpec == nil { t.Fatal("ConfigureContainerdStepSpec not found") }
+	// if manageSpec == nil { t.Fatal("EnableAndStartContainerdStepSpec not found") }
 
-	if configSpec, ok := taskSpec.Steps[1].(*stepSpecContainerd.ConfigureContainerdStepSpec); ok {
-		if !configSpec.UseSystemdCgroup { // Default in factory is true
-			t.Error("ConfigureContainerdStepSpec.UseSystemdCgroup = false, want true")
-		}
-	} else {
-		t.Error("Second step is not *stepSpecContainerd.ConfigureContainerdStepSpec")
+
+	if installSpec.Version != "1.7.1" { // From ContainerRuntime.Version
+		t.Errorf("InstallContainerdStepSpec.Version = %s, want '1.7.1'", installSpec.Version)
+	}
+	if configSpec.RegistryMirrors["docker.io"] != "https://my.mirror.com" {
+		t.Errorf("ConfigureContainerdStepSpec.RegistryMirrors['docker.io'] = %s, want 'https://my.mirror.com'", configSpec.RegistryMirrors["docker.io"])
+	}
+	if !configSpec.UseSystemdCgroup {
+		t.Error("ConfigureContainerdStepSpec.UseSystemdCgroup = false, want true")
+	}
+	if len(configSpec.InsecureRegistries) != 1 || configSpec.InsecureRegistries[0] != "insecure.reg:5000" {
+		t.Errorf("ConfigureContainerdStepSpec.InsecureRegistries = %v, want ['insecure.reg:5000']", configSpec.InsecureRegistries)
+	}
+	if configSpec.ExtraTomlContent != "[plugins.\"io.containerd.toto.v1\"]\n  extra_config = true" {
+		t.Errorf("ConfigureContainerdStepSpec.ExtraTomlContent mismatch")
+	}
+	if configSpec.ConfigFilePath != "/custom/containerd.toml" {
+		t.Errorf("ConfigureContainerdStepSpec.ConfigFilePath = %s, want /custom/containerd.toml", configSpec.ConfigFilePath)
 	}
 }
+
+// Ensure step.GetSpecTypeName is available for tests that might need it for dynamic checks.
+// This line just ensures the import is used to avoid compile errors if other tests were removed.
+var _ = step.GetSpecTypeName

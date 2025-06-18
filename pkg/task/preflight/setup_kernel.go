@@ -4,46 +4,46 @@ import (
 	"github.com/kubexms/kubexms/pkg/config"
 	"github.com/kubexms/kubexms/pkg/spec"
 	stepPreflight "github.com/kubexms/kubexms/pkg/step/preflight"
-	// "github.com/kubexms/kubexms/pkg/task" // No longer needed
 )
 
 // NewSetupKernelTask creates a task specification to configure kernel parameters and load modules.
-// cfg can be used to make modules and params configurable.
 func NewSetupKernelTask(cfg *config.Cluster) *spec.TaskSpec {
-	// Default values, could be overridden by cfg
+	// Default values
 	kernelModules := []string{"br_netfilter", "overlay", "ip_vs"}
 	sysctlParams := map[string]string{
 		"net.bridge.bridge-nf-call-iptables":  "1",
 		"net.ipv4.ip_forward":                 "1",
 		"net.bridge.bridge-nf-call-ip6tables": "1",
-		// IPVS settings might be conditional based on config (e.g. if IPVS is the chosen kube-proxy mode)
+		// These IPVS params are often recommended but can be conditional
 		// "net.ipv4.vs.conn_reuse_mode":         "0",
         // "net.ipv4.vs.expire_nodest_conn":    "1",
         // "net.ipv4.vs.expire_quiescent_template": "1",
 	}
-	sysctlConfigPath := "/etc/sysctl.d/90-kubexms-kernel.conf" // Default path
-	reloadSysctl := true // Default to reloading sysctl settings
+	// Default path for the sysctl config file written by the step.
+	// The step itself has a default, but task factory can also suggest one.
+	sysctlConfigPath := "/etc/sysctl.d/90-kubexms-kernel.conf"
+	reloadSysctl := true // Default to reloading sysctl settings after writing config
 
-	// Example: Override from cfg if structure exists
-	// if cfg != nil && cfg.Spec.KernelSetup != nil {
-	//    if len(cfg.Spec.KernelSetup.Modules) > 0 {
-	//        kernelModules = cfg.Spec.KernelSetup.Modules
-	//    }
-	//    if len(cfg.Spec.KernelSetup.SysctlParams) > 0 {
-	//        sysctlParams = cfg.Spec.KernelSetup.SysctlParams
-	//    }
-	//    if cfg.Spec.KernelSetup.SysctlConfigPath != "" {
-	//        sysctlConfigPath = cfg.Spec.KernelSetup.SysctlConfigPath
-	//    }
-	//    if cfg.Spec.KernelSetup.ReloadSysctl != nil { // Assuming ReloadSysctl is a *bool in config
-	//        reloadSysctl = *cfg.Spec.KernelSetup.ReloadSysctl
-	//    }
-	// }
-
+	// Override with values from config if provided
+	if cfg != nil { // cfg itself can be nil
+		// KernelConfig is a struct, not a pointer, so it's always there if cfg.Spec is.
+		if len(cfg.Spec.KernelConfig.Modules) > 0 {
+			kernelModules = cfg.Spec.KernelConfig.Modules
+		}
+		if len(cfg.Spec.KernelConfig.SysctlParams) > 0 {
+			// Policy for sysctlParams: config replaces defaults entirely if provided.
+			// A merge strategy could be implemented if needed.
+			sysctlParams = cfg.Spec.KernelConfig.SysctlParams
+		}
+		// Example for SysctlConfigFilePath if it were added to KernelConfigSpec:
+		// if cfg.Spec.KernelConfig.SysctlConfigFilePath != "" {
+		//    sysctlConfigPath = cfg.Spec.KernelConfig.SysctlConfigFilePath
+		// }
+	}
 
 	return &spec.TaskSpec{
 		Name: "Setup Kernel Parameters and Modules",
-		RunOnRoles: []string{}, // Typically for all nodes
+		RunOnRoles: []string{},
 		Steps: []spec.StepSpec{
 			&stepPreflight.LoadKernelModulesStepSpec{
 				Modules: kernelModules,
@@ -51,7 +51,7 @@ func NewSetupKernelTask(cfg *config.Cluster) *spec.TaskSpec {
 			&stepPreflight.SetSystemConfigStepSpec{
 				Params:         sysctlParams,
 				ConfigFilePath: sysctlConfigPath,
-				Reload:         &reloadSysctl, // Pass pointer to bool
+				Reload:         &reloadSysctl, // Pass pointer to bool for reload
 			},
 		},
 		Concurrency: 10,
