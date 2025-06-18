@@ -1,95 +1,73 @@
 package containerd
 
 import (
-	"github.com/kubexms/kubexms/pkg/config" // For config.Cluster and potential ContainerdSpec
-	"github.com/kubexms/kubexms/pkg/step"
-	stepContainerd "github.com/kubexms/kubexms/pkg/step/containerd" // Aliased to avoid name collision
-	"github.com/kubexms/kubexms/pkg/task"
+	"github.com/kubexms/kubexms/pkg/config"
+	"github.com/kubexms/kubexms/pkg/spec"
+	stepContainerd "github.com/kubexms/kubexms/pkg/step/containerd" // Import containerd step specs
+	// "github.com/kubexms/kubexms/pkg/task" // No longer needed
 )
 
-// NewInstallContainerdTask creates a task to install and configure containerd,
-// and then enable and start the service.
-// Configuration values (version, mirrors, etc.) are intended to be sourced from
-// the `cfg *config.Cluster` parameter in a real implementation.
-func NewInstallContainerdTask(cfg *config.Cluster) *task.Task {
-	// These would be derived from cfg.Spec.Containerd or similar in a full implementation.
-	// For example:
-	// var containerdVersion string
-	// if cfg != nil && cfg.Spec.Containerd != nil && cfg.Spec.Containerd.Version != "" {
-	//    containerdVersion = cfg.Spec.Containerd.Version
-	// } else {
-	//    containerdVersion = "1.6.9-1" // A fallback default if not in config
-	// }
-	// registryMirrors := cfg.Spec.Containerd.RegistryMirrors
-	// useSystemdCgroup := cfg.Spec.Containerd.UseSystemdCgroup
+// NewInstallContainerdTask creates a task specification to install and configure containerd.
+// cfg can be used to specify containerd version, mirror settings, etc.
+func NewInstallContainerdTask(cfg *config.Cluster) *spec.TaskSpec {
 
-	// Using example/default values for now as ContainerdSpec is not yet fully defined in pkg/config.
-	containerdVersion := "" // Let InstallContainerdStep use its default or install latest
+	// Default values, to be potentially overridden by cfg
+	containerdVersion := "" // Default: install latest available version
+	registryMirrors := map[string]string{}
+	insecureRegistries := []string{}
+	useSystemdCgroup := true // Common best practice for Kubernetes
+	extraToml := ""
+	configPath := "" // Use default in step if empty
 
-	registryMirrors := map[string]string{
-		// Example: Populate from cfg or provide a default internal mirror if applicable
-		// "docker.io": "https://my-docker-mirror.example.com",
-	}
-	// Example:
-	// if cfg != nil && cfg.Spec.Containerd != nil && cfg.Spec.Containerd.RegistryMirrors != nil {
-	//    if mainMirror, ok := cfg.Spec.Containerd.RegistryMirrors["docker.io"]; ok && len(mainMirror) > 0 {
-	//        registryMirrors["docker.io"] = mainMirror[0] // Take the first one for this step's simplified structure
+	// Example of reading from a hypothetical config structure (adjust to actual config.go structure)
+	// if cfg != nil && cfg.Spec.ContainerRuntime != nil && cfg.Spec.ContainerRuntime.Type == "containerd" {
+	//    if cfg.Spec.ContainerRuntime.Version != "" {
+	//        containerdVersion = cfg.Spec.ContainerRuntime.Version
+	//    }
+	//    if cfg.Spec.ContainerRuntime.Containerd != nil { // Assuming a nested ContainerdSpec
+	//        if len(cfg.Spec.ContainerRuntime.Containerd.RegistryMirrors) > 0 {
+	//             // Logic to convert map[string][]string to map[string]string (taking first mirror)
+	//             for reg, mirrors := range cfg.Spec.ContainerRuntime.Containerd.RegistryMirrors {
+	//                 if len(mirrors) > 0 {
+	//                     registryMirrors[reg] = mirrors[0]
+	//                 }
+	//             }
+	//        }
+	//        if len(cfg.Spec.ContainerRuntime.Containerd.InsecureRegistries) > 0 {
+	//            insecureRegistries = cfg.Spec.ContainerRuntime.Containerd.InsecureRegistries
+	//        }
+	//        if cfg.Spec.ContainerRuntime.Containerd.UseSystemdCgroup != nil {
+	//            useSystemdCgroup = *cfg.Spec.ContainerRuntime.Containerd.UseSystemdCgroup
+	//        }
+	//        extraToml = cfg.Spec.ContainerRuntime.Containerd.ExtraTomlConfig
+	//        configPath = cfg.Spec.ContainerRuntime.Containerd.ConfigPath
 	//    }
 	// }
 
 
-	useSystemdCgroup := true // Common best practice for Kubernetes
-	insecureRegistries := []string{} // Populate from cfg if needed
-	extraToml := "" // Populate from cfg if needed
-
-
-	return &task.Task{
+	return &spec.TaskSpec{
 		Name: "Install and Configure Containerd",
-		// This task should run on any node that needs a container runtime.
-		// Specific roles can be defined, e.g., ["kube_node"], ["all"].
-		// Empty means it's up to the module/pipeline to target appropriate hosts.
-		RunOnRoles: []string{},
-		Steps: []step.Step{
-			// Step 1: Install containerd.io package
-			// TODO: This might need a preceding step to configure package manager repositories
-			// if containerd.io is not in default repos or a specific source is required.
-			&stepContainerd.InstallContainerdStep{
+		RunOnRoles: []string{}, // Typically all nodes needing a runtime
+		Steps: []spec.StepSpec{
+			&stepContainerd.InstallContainerdStepSpec{
 				Version: containerdVersion,
 			},
-			// Step 2: Configure containerd (config.toml)
-			&stepContainerd.ConfigureContainerdMirrorStep{
+			// Assuming ConfigureContainerdMirrorStepSpec was renamed/generalized to ConfigureContainerdStepSpec
+			&stepContainerd.ConfigureContainerdStepSpec{
 				RegistryMirrors:    registryMirrors,
 				InsecureRegistries: insecureRegistries,
 				UseSystemdCgroup:   useSystemdCgroup,
 				ExtraTomlContent:   extraToml,
-				// ConfigFilePath can be left empty to use the default in the step.
+				ConfigFilePath:     configPath,
 			},
-			// Step 3: Enable and start the containerd service
-			&stepContainerd.EnableAndStartContainerdStep{},
+			&stepContainerd.EnableAndStartContainerdStepSpec{},
 		},
 		Concurrency: 10, // Default concurrency for this task
-		IgnoreError: false, // Installing containerd is usually critical.
+		IgnoreError: false, // Containerd installation is usually critical
 	}
 }
 
-// Note: The following types would ideally be defined in pkg/config/containerd.go or similar,
-// and pkg/config/cluster.go would embed it in ClusterSpec.
-// This is a conceptual placeholder based on previous discussions (e.g. 2.md).
-/*
-package config
-
-type ClusterSpec struct {
-	// ... other cluster configurations ...
-	Containerd *ContainerdSpec `yaml:"containerd,omitempty"`
-}
-
-type ContainerdSpec struct {
-	Version            string              `yaml:"version,omitempty"`
-	RegistryMirrors    map[string][]string `yaml:"registryMirrors,omitempty"` // Key: Registry (e.g. "docker.io"), Value: List of mirror URLs
-	InsecureRegistries []string            `yaml:"insecureRegistries,omitempty"`
-	UseSystemdCgroup   *bool               `yaml:"useSystemdCgroup,omitempty"` // Pointer for explicit true/false vs. not set
-	ExtraTomlConfig    string              `yaml:"extraTomlConfig,omitempty"`  // Arbitrary additional TOML content
-	ConfigPath         string              `yaml:"configPath,omitempty"`       // Override default /etc/containerd/config.toml
-	// Potentially add options for custom repository setup (URL, GPG key) if not handled globally.
-}
-*/
+// Note: The actual config structure (e.g., cfg.Spec.ContainerRuntime.Containerd) needs to be
+// defined in pkg/config/config.go for the commented-out configuration loading examples to work.
+// The step spec struct stepContainerd.ConfigureContainerdStepSpec must match the name
+// used here (previously it might have been ConfigureContainerdMirrorStepSpec).

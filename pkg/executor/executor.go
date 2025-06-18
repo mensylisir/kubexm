@@ -473,17 +473,70 @@ func (e *Executor) selectHostsForTaskSpec(
 	return selectedHosts
 }
 
-// selectHostsForModule determines the comprehensive list of hosts a module will run on.
-// This is the union of all hosts targeted by any task within the module.
-// Useful for running module-level PreRun/PostRun hooks.
+// selectHostsForModule determines the comprehensive list of unique hosts a module's
+// PreRun and PostRun hooks should execute on. This is achieved by taking the union
+// of all hosts targeted by any task within that module.
 func (e *Executor) selectHostsForModule(
     moduleSpec *spec.ModuleSpec,
     cluster *runtime.ClusterRuntime,
 ) []*runtime.Host {
-    // TODO: Implementation
-    // - Iterate moduleSpec.Tasks
-    // - For each task, call selectHostsForTaskSpec
-    // - Collect unique hosts into a list.
-    return nil // Placeholder
+	if moduleSpec == nil || cluster == nil || len(cluster.Hosts) == 0 {
+		e.Logger.Debugf("selectHostsForModule: ModuleSpec or ClusterRuntime is nil, or no hosts in cluster. Returning empty host list.")
+		return []*runtime.Host{}
+	}
+
+	moduleHostsMap := make(map[string]*runtime.Host) // Use a map to ensure uniqueness by host name
+
+	pipelineName := "unknown-pipeline"
+	if cluster.ClusterConfig != nil && cluster.ClusterConfig.Metadata.Name != "" {
+		pipelineName = cluster.ClusterConfig.Metadata.Name
+	}
+	moduleSelectionLogger := e.Logger.SugaredLogger.With(
+		"pipeline", pipelineName,
+		"module", moduleSpec.Name,
+		"component", "module_host_selector",
+	).Sugar()
+
+	moduleSelectionLogger.Debugf("Determining unique hosts for module based on its tasks...")
+
+	if len(moduleSpec.Tasks) == 0 {
+		moduleSelectionLogger.Debugf("Module has no tasks. Module-level hooks will target 0 hosts by this selection logic.")
+		// Depending on desired behavior, could default to all hosts, or first host, if module has no tasks but has hooks.
+		// For now, hooks run on hosts targeted by tasks. If no tasks, no hosts for hooks from this logic.
+		return []*runtime.Host{}
+	}
+
+	for _, taskSpec := range moduleSpec.Tasks {
+		if taskSpec == nil { continue } // Skip nil task specs
+		taskTargetHosts := e.selectHostsForTaskSpec(taskSpec, cluster) // This already logs verbosely
+		for _, host := range taskTargetHosts {
+			if _, exists := moduleHostsMap[host.Name]; !exists {
+				moduleHostsMap[host.Name] = host
+			}
+		}
+	}
+
+	if len(moduleHostsMap) == 0 {
+		moduleSelectionLogger.Warnf("No specific hosts targeted by any task in module. Module hooks will target 0 hosts by this selection.")
+		return []*runtime.Host{}
+	}
+
+	uniqueHosts := make([]*runtime.Host, 0, len(moduleHostsMap))
+	for _, host := range moduleHostsMap {
+		uniqueHosts = append(uniqueHosts, host)
+	}
+
+	// Sort for deterministic order, although not strictly necessary for functionality here.
+	sort.Slice(uniqueHosts, func(i, j int) bool {
+		return uniqueHosts[i].Name < uniqueHosts[j].Name
+	})
+
+	selectedHostNames := make([]string, len(uniqueHosts))
+	for i, h := range uniqueHosts {
+		selectedHostNames[i] = h.Name
+	}
+	moduleSelectionLogger.Debugf("Unique hosts selected for module Pre/PostRun hooks: %v", selectedHostNames)
+
+	return uniqueHosts
 }
 ```

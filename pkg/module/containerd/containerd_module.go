@@ -2,103 +2,51 @@ package containerd
 
 import (
 	"github.com/kubexms/kubexms/pkg/config"
-	"github.com/kubexms/kubexms/pkg/module"
-	"github.com/kubexms/kubexms/pkg/runtime"
-	"github.com/kubexms/kubexms/pkg/task"
-	taskContainerd "github.com/kubexms/kubexms/pkg/task/containerd" // Import the actual containerd tasks
-	// taskPreflight "github.com/kubexms/kubexms/pkg/task/preflight" // Might depend on some preflight tasks being done
+	// "github.com/kubexms/kubexms/pkg/runtime" // No longer needed for PreRun/PostRun func signatures
+	"github.com/kubexms/kubexms/pkg/spec"
+	taskContainerd "github.com/kubexms/kubexms/pkg/task/containerd"
+	// "github.com/kubexms/kubexms/pkg/module" // No longer needed
+	// commandStepSpec "github.com/kubexms/kubexms/pkg/step/command" // If hooks were simple commands
 )
 
-// NewContainerdModule creates a module for installing and configuring containerd.
-func NewContainerdModule(cfg *config.Cluster) *module.Module {
-	return &module.Module{
+// NewContainerdModule creates a module specification for installing and configuring containerd.
+func NewContainerdModule(cfg *config.Cluster) *spec.ModuleSpec {
+	return &spec.ModuleSpec{
 		Name: "Containerd Runtime",
 		IsEnabled: func(clusterCfg *config.Cluster) bool {
-			// Example: Enable if containerd is the chosen runtime in config.
-			// This requires a config structure like:
-			// cfg.Spec.ContainerRuntime.Type == "containerd"
-			// For now, assume enabled if this module is included in a pipeline.
-			if clusterCfg != nil && clusterCfg.Spec.ContainerRuntime != nil { // Assuming ContainerRuntime field in ClusterSpec
-				// Ensure Type field exists and is checked.
-				// This is a placeholder for actual config structure.
-				// Example: return clusterCfg.Spec.ContainerRuntime.Type == "containerd"
-				return true // For now, assume if ContainerRuntime section exists, containerd is implied or default
-			}
-			// Default to true if not specified, or false if it must be explicit.
-			// Let's default to true for this example if the specific config isn't there,
-			// implying containerd is the default or only runtime.
+			// Example of how IsEnabled could depend on config:
+			// This assumes a structure like cfg.Spec.ContainerRuntime.Type
+			// The actual structure needs to be defined in pkg/config/config.go
+			// if clusterCfg != nil && clusterCfg.Spec.ContainerRuntime != nil {
+			// 	return clusterCfg.Spec.ContainerRuntime.Type == "containerd"
+			// }
+			// Defaulting to true if no specific config is found, implying containerd is default/always installed by this module.
 			return true
 		},
-		Tasks: []*task.Task{
-			// It's good practice to ensure preflight checks passed before installing components.
-			// This dependency is usually handled by pipeline ordering.
-
+		Tasks: []*spec.TaskSpec{
 			taskContainerd.NewInstallContainerdTask(cfg),
+			// Other containerd related tasks can be added here.
+			// For example, a task to preload images:
+			// taskContainerd.NewPreloadImagesTask(cfg),
 		},
-		PreRun: func(cluster *runtime.ClusterRuntime) error {
-			if cluster != nil && cluster.Logger != nil {
-				cluster.Logger.Infof("Preparing to install and configure containerd...")
-			}
-			return nil
-		},
-		PostRun: func(cluster *runtime.ClusterRuntime, moduleErr error) error {
-			if cluster != nil && cluster.Logger != nil {
-				if moduleErr != nil {
-					cluster.Logger.Errorf("Containerd module finished with error: %v", moduleErr)
-				} else {
-					cluster.Logger.Successf("Containerd module completed successfully.")
-				}
-			}
-			return nil
-		},
+		// PreRun and PostRun hooks are now spec.StepSpec types.
+		// If they were simple logging as before, they'd be removed or converted to CommandStepSpec.
+		// For this refactor, setting to nil.
+		PreRun:  nil,
+		PostRun: nil,
 	}
 }
 
-// Placeholder for config structure assumed by NewContainerdModule's IsEnabled
-// This should eventually live in pkg/config/config.go
+// Placeholder for config structure that might be used by IsEnabled or tasks.
+// This would ultimately reside in pkg/config.
 /*
-// In pkg/config/config.go eventually:
+type ClusterSpec struct {
+	// ... other fields ...
+	ContainerRuntime *ContainerRuntimeSpec `yaml:"containerRuntime,omitempty"`
+}
 
-// Assuming ClusterSpec is already defined
-// type ClusterSpec struct {
-// 	// ... other fields ...
-// 	ContainerRuntime *ContainerRuntimeSpec `yaml:"containerRuntime,omitempty"`
-//	Containerd       *ContainerdSpec       `yaml:"containerd,omitempty"` // This was from task example
-// }
-
-// Example of how ContainerRuntimeSpec might look
 type ContainerRuntimeSpec struct {
-    Type string `yaml:"type,omitempty"` // "containerd", "docker", etc.
-	// Other common runtime settings like socket path, etc.
-	// Specific settings for the chosen type might be in a sub-struct or a generic map.
-	Options map[string]interface{} `yaml:"options,omitempty"`
+    Type string `yaml:"type,omitempty"` // e.g., "containerd", "docker"
+    // ... other common runtime settings ...
 }
-
-// ContainerdSpec (as used in task/containerd/install.go example)
-// This might be part of ContainerRuntimeSpec.Options or a direct field if containerd is special.
-type ContainerdSpec struct {
-	Version            string              `yaml:"version,omitempty"`
-	RegistryMirrors    map[string][]string `yaml:"registryMirrors,omitempty"`
-	InsecureRegistries []string            `yaml:"insecureRegistries,omitempty"`
-	UseSystemdCgroup   *bool               `yaml:"useSystemdCgroup,omitempty"`
-	ExtraTomlConfig    string              `yaml:"extraTomlConfig,omitempty"`
-	ConfigPath         string              `yaml:"configPath,omitempty"`
-}
-
-// A more integrated approach in ClusterSpec:
-// type ClusterSpec struct {
-//     Hosts  []HostSpec
-//     Global GlobalSpec
-//     ContainerRuntime struct { // Could be a pointer if optional
-//         Type string `yaml:"type"` // e.g., "containerd"
-//         Version string `yaml:"version,omitempty"` // Common version field
-//         // Containerd-specific settings if type is "containerd"
-//         RegistryMirrors    map[string][]string `yaml:"registryMirrors,omitempty"`
-//         InsecureRegistries []string            `yaml:"insecureRegistries,omitempty"`
-//         UseSystemdCgroup   *bool               `yaml:"useSystemdCgroup,omitempty"` // Use pointer for explicit true/false
-//         ExtraTomlConfig    string              `yaml:"extraTomlConfig,omitempty"`
-//     } `yaml:"containerRuntime"`
-//     // ... other specs like Etcd, Kubernetes ...
-// }
-
 */
