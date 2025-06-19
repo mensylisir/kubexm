@@ -90,10 +90,7 @@ type TaintSpec struct {
 // Removed placeholder HighAvailabilityConfig (should be in ha_types.go)
 // Removed placeholder PreflightConfig (should be in preflight_types.go)
 // Removed placeholder KernelConfig (should be in kernel_types.go)
-type NetworkConfig struct { // Placeholder
-   Plugin string `json:"plugin,omitempty"`
-   Version string `json:"version,omitempty"`
-}
+// Removed placeholder NetworkConfig
 // Removed placeholder AddonConfig
 
 // SetDefaults_Cluster sets default values for the Cluster configuration.
@@ -148,8 +145,10 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	   cfg.Spec.Kubernetes.ClusterName = cfg.ObjectMeta.Name
 	}
 
-	if cfg.Spec.Network == nil { cfg.Spec.Network = &NetworkConfig{} }
-	// Call SetDefaults_NetworkConfig if/when defined
+	if cfg.Spec.Network == nil {
+	    cfg.Spec.Network = &NetworkConfig{}
+	}
+	SetDefaults_NetworkConfig(cfg.Spec.Network)
 
 	if cfg.Spec.HighAvailability == nil {
 	    cfg.Spec.HighAvailability = &HighAvailabilityConfig{}
@@ -276,7 +275,13 @@ func Validate_Cluster(cfg *Cluster) error {
 	        Validate_AddonConfig(&cfg.Spec.Addons[i], verrs, addonPathPrefix)
 	    }
 	}
-	// ... and so on for Network etc. (Network is still a placeholder)
+
+	// Integrate NetworkConfig validation
+	if cfg.Spec.Network == nil {
+	    verrs.Add("spec.network: section is required") // Or handle if optional based on actual requirements
+	} else {
+	    Validate_NetworkConfig(cfg.Spec.Network, verrs, "spec.network", cfg.Spec.Kubernetes)
+	}
 
 	if !verrs.IsEmpty() { return verrs }
 	return nil
