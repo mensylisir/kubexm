@@ -102,9 +102,21 @@ spec:
       enabled: true
   network:
     plugin: calico
-    version: v3.24.5
+    # version: v3.24.5 # Removed as it's not in v1alpha1.NetworkConfig directly
     podSubnet: "10.244.0.0/16"
     serviceSubnet: "10.96.0.0/12"
+    calico:
+      logSeverityScreen: Info
+      # VethMTU: 1420 # Example if we want to test non-default MTU
+      ipPools:
+      - name: "mypool-1"
+        cidr: "192.168.100.0/24"
+        encapsulation: "VXLAN"
+        natOutgoing: true
+        blockSize: 27
+      - name: "mypool-2-default-blockSize"
+        cidr: "192.168.101.0/24"
+        # blockSize will be defaulted
   highAvailability:
     type: keepalived
     vip: 192.168.1.100
@@ -252,7 +264,32 @@ func TestLoadFromBytes_ValidFull(t *testing.T) {
     if cfg.Spec.Network.PodSubnet != "10.244.0.0/16" {
         t.Errorf("Network.PodSubnet = %s, want 10.244.0.0/16", cfg.Spec.Network.PodSubnet)
     }
+    // Add assertions for Calico fields
+    if cfg.Spec.Network.Calico == nil {
+        t.Fatal("Spec.Network.Calico should not be nil for plugin 'calico'")
+    }
+    if cfg.Spec.Network.Calico.LogSeverityScreen == nil || *cfg.Spec.Network.Calico.LogSeverityScreen != "Info" {
+        t.Errorf("Calico LogSeverityScreen = %v, want 'Info'", cfg.Spec.Network.Calico.LogSeverityScreen)
+    }
+    // if cfg.Spec.Network.Calico.GetVethMTU() != 1420 { // Example if VethMTU was set in YAML
+    //     t.Errorf("Calico VethMTU = %d, want 1420", cfg.Spec.Network.Calico.GetVethMTU())
+    // }
 
+    if len(cfg.Spec.Network.Calico.IPPools) != 2 {
+        t.Fatalf("Expected 2 Calico IPPools, got %d", len(cfg.Spec.Network.Calico.IPPools))
+    }
+    pool1 := cfg.Spec.Network.Calico.IPPools[0]
+    if pool1.Name != "mypool-1" { t.Errorf("IPPool[0].Name = %s, want mypool-1", pool1.Name) }
+    if pool1.CIDR != "192.168.100.0/24" { t.Errorf("IPPool[0].CIDR = %s", pool1.CIDR) }
+    if pool1.Encapsulation != "VXLAN" { t.Errorf("IPPool[0].Encapsulation = %s", pool1.Encapsulation) }
+    if pool1.NatOutgoing == nil || !*pool1.NatOutgoing { t.Error("IPPool[0].NatOutgoing should be true") }
+    if pool1.BlockSize == nil || *pool1.BlockSize != 27 { t.Errorf("IPPool[0].BlockSize = %v, want 27", pool1.BlockSize) }
+
+    pool2 := cfg.Spec.Network.Calico.IPPools[1]
+    if pool2.Name != "mypool-2-default-blockSize" {t.Errorf("IPPool[1].Name incorrect")}
+    if pool2.BlockSize == nil || *pool2.BlockSize != 26 { // Check if it defaulted correctly
+         t.Errorf("IPPool[1].BlockSize = %v, want 26 (default)", pool2.BlockSize)
+    }
 
 	if cfg.Spec.HighAvailability == nil { t.Fatal("Spec.HighAvailability is nil") }
 	if cfg.Spec.HighAvailability.Type != "keepalived" {
