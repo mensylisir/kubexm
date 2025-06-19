@@ -48,6 +48,11 @@ func TestSetDefaults_ContainerdConfig(t *testing.T) {
 	if cfg.ConfigPath == nil || *cfg.ConfigPath != "/etc/containerd/config.toml" {
 	   t.Errorf("ConfigPath default = %v, want /etc/containerd/config.toml", cfg.ConfigPath)
 	}
+	if cfg.DisabledPlugins == nil || cap(cfg.DisabledPlugins) != 0 { t.Error("DisabledPlugins should be initialized to empty slice") }
+	if cfg.RequiredPlugins == nil || len(cfg.RequiredPlugins) != 1 || cfg.RequiredPlugins[0] != "io.containerd.grpc.v1.cri" {
+		t.Errorf("RequiredPlugins default failed: %v", cfg.RequiredPlugins)
+	}
+	if cfg.Imports == nil || cap(cfg.Imports) != 0 { t.Error("Imports should be initialized to empty slice") }
 }
 
 // --- Test Validate_ContainerdConfig ---
@@ -76,6 +81,9 @@ func TestValidate_ContainerdConfig_Invalid(t *testing.T) {
 	   {"empty_mirror_url", &ContainerdConfig{RegistryMirrors: map[string][]string{"docker.io": {" "}}}, "mirror URL cannot be empty"},
 	   {"empty_insecure_reg", &ContainerdConfig{InsecureRegistries: []string{" "}}, "registry host cannot be empty"},
 	   {"empty_config_path", &ContainerdConfig{ConfigPath: pstrContainerdTest(" ")}, "configPath: cannot be empty if specified"}, // Use local helper
+	   {"disabledplugins_empty_item", &ContainerdConfig{DisabledPlugins: []string{" "}}, ".disabledPlugins[0]: plugin name cannot be empty"},
+	   {"requiredplugins_empty_item", &ContainerdConfig{RequiredPlugins: []string{" "}}, ".requiredPlugins[0]: plugin name cannot be empty"},
+	   {"imports_empty_item", &ContainerdConfig{Imports: []string{" "}}, ".imports[0]: import path cannot be empty"},
    }
 
    for _, tt := range tests {

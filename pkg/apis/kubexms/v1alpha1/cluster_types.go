@@ -41,6 +41,9 @@ type ClusterSpec struct {
 	HighAvailability   *HighAvailabilityConfig `json:"highAvailability,omitempty"`
 	Preflight          *PreflightConfig        `json:"preflight,omitempty"`
 	Kernel             *KernelConfig           `json:"kernel,omitempty"`
+	Storage            *StorageConfig          `json:"storage,omitempty"`
+	Registry           *RegistryConfig         `json:"registry,omitempty"`
+	OS                 *OSConfig               `json:"os,omitempty"`
 	Addons             []AddonConfig           `json:"addons,omitempty"` // Slice of AddonConfig
 	// HostsCount int `json:"hostsCount,omitempty"` // Example for printcolumn
 }
@@ -171,6 +174,21 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	for i := range cfg.Spec.Addons { // Iterate by index to modify items in place
 	    SetDefaults_AddonConfig(&cfg.Spec.Addons[i])
 	}
+
+	if cfg.Spec.Storage == nil {
+		cfg.Spec.Storage = &StorageConfig{} // Initialize StorageConfig so its defaults can run
+	}
+	SetDefaults_StorageConfig(cfg.Spec.Storage)
+
+	if cfg.Spec.Registry == nil {
+		cfg.Spec.Registry = &RegistryConfig{}
+	}
+	SetDefaults_RegistryConfig(cfg.Spec.Registry)
+
+	if cfg.Spec.OS == nil {
+		cfg.Spec.OS = &OSConfig{}
+	}
+	SetDefaults_OSConfig(cfg.Spec.OS)
 }
 
 // Validate_Cluster validates the Cluster configuration.
@@ -281,6 +299,18 @@ func Validate_Cluster(cfg *Cluster) error {
 	    verrs.Add("spec.network: section is required") // Or handle if optional based on actual requirements
 	} else {
 	    Validate_NetworkConfig(cfg.Spec.Network, verrs, "spec.network", cfg.Spec.Kubernetes)
+	}
+
+	if cfg.Spec.Storage != nil {
+		Validate_StorageConfig(cfg.Spec.Storage, verrs, "spec.storage")
+	}
+
+	if cfg.Spec.Registry != nil {
+		Validate_RegistryConfig(cfg.Spec.Registry, verrs, "spec.registry")
+	}
+
+	if cfg.Spec.OS != nil {
+		Validate_OSConfig(cfg.Spec.OS, verrs, "spec.os")
 	}
 
 	if !verrs.IsEmpty() { return verrs }

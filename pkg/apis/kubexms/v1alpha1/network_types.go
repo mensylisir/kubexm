@@ -54,7 +54,13 @@ type FlannelConfig struct {
 
 type KubeOvnConfig struct {
 	Enabled *bool `json:"enabled,omitempty"`
-	// TODO: Further enrich based on KubeKey's KubeovnCfg
+	JoinCIDR *string `json:"joinCIDR,omitempty"` // The CIDR of the existing Kube-OVN cluster to join.
+	Label *string `json:"label,omitempty"`     // The node label for Kube-OVN components. Default: "kube-ovn/role"
+	TunnelType *string `json:"tunnelType,omitempty"` // "geneve", "vxlan", or "stt". Default: "geneve"
+	EnableSSL *bool `json:"enableSSL,omitempty"`   // Whether to enable SSL for Kube-OVN components. Default: false
+	// TODO: Add more detailed structs from KubeKey like Dpdk, OvsOvn, KubeOvnController later if needed.
+	// For now, specific overrides can go into general Kubernetes component ExtraArgs if applicable,
+	// or a future KubeOvn operator might handle deeper config via its own CRDs.
 }
 
 type MultusCNIConfig struct {
@@ -63,7 +69,10 @@ type MultusCNIConfig struct {
 
 type HybridnetConfig struct {
 	Enabled *bool `json:"enabled,omitempty"`
-	// TODO: Further enrich based on KubeKey's HybridnetCfg
+	DefaultNetworkType *string `json:"defaultNetworkType,omitempty"` // "Underlay" or "Overlay". Default: "Overlay"
+	EnableNetworkPolicy *bool `json:"enableNetworkPolicy,omitempty"` // Default: true
+	InitDefaultNetwork *bool `json:"initDefaultNetwork,omitempty"` // Whether to init default network. KubeKey 'Init', default: true
+	// TODO: Add Networks []HybridnetNetwork and HybridnetSubnet later if detailed config needed.
 }
 
 // --- Defaulting Functions ---
@@ -86,10 +95,13 @@ func SetDefaults_NetworkConfig(cfg *NetworkConfig) {
 	if cfg.Multus.Enabled == nil { b := false; cfg.Multus.Enabled = &b }
 
 	if cfg.KubeOvn == nil { cfg.KubeOvn = &KubeOvnConfig{} }
-	if cfg.KubeOvn.Enabled == nil { b := false; cfg.KubeOvn.Enabled = &b }
+	// if cfg.KubeOvn.Enabled == nil { b := false; cfg.KubeOvn.Enabled = &b } // This will be handled by SetDefaults_KubeOvnConfig now
+	SetDefaults_KubeOvnConfig(cfg.KubeOvn)
+
 
 	if cfg.Hybridnet == nil { cfg.Hybridnet = &HybridnetConfig{} }
-	if cfg.Hybridnet.Enabled == nil { b := false; cfg.Hybridnet.Enabled = &b }
+	// if cfg.Hybridnet.Enabled == nil { b := false; cfg.Hybridnet.Enabled = &b } // Handled by SetDefaults_HybridnetConfig
+	SetDefaults_HybridnetConfig(cfg.Hybridnet)
 }
 
 func SetDefaults_CalicoConfig(cfg *CalicoConfig, defaultPoolCIDR string) {
@@ -144,6 +156,28 @@ func SetDefaults_FlannelConfig(cfg *FlannelConfig) {
 	if cfg.DirectRouting == nil { b := false; cfg.DirectRouting = &b }
 }
 
+func SetDefaults_KubeOvnConfig(cfg *KubeOvnConfig) {
+	if cfg == nil { return }
+	if cfg.Enabled == nil { b := false; cfg.Enabled = &b }
+	if cfg.Enabled != nil && *cfg.Enabled { // Only default these if KubeOvn is actually enabled
+		if cfg.Label == nil { def := "kube-ovn/role"; cfg.Label = &def }
+		if cfg.TunnelType == nil { def := "geneve"; cfg.TunnelType = &def }
+		if cfg.EnableSSL == nil { b := false; cfg.EnableSSL = &b }
+		// JoinCIDR has no obvious universal default, should be user-provided if joining.
+	}
+}
+
+func SetDefaults_HybridnetConfig(cfg *HybridnetConfig) {
+	if cfg == nil { return }
+	if cfg.Enabled == nil { b := false; cfg.Enabled = &b }
+	if cfg.Enabled != nil && *cfg.Enabled {
+		if cfg.DefaultNetworkType == nil { def := "Overlay"; cfg.DefaultNetworkType = &def }
+		if cfg.EnableNetworkPolicy == nil { b := true; cfg.EnableNetworkPolicy = &b }
+		if cfg.InitDefaultNetwork == nil { b := true; cfg.InitDefaultNetwork = &b }
+	}
+}
+
+
 // --- Validation Functions ---
 func Validate_NetworkConfig(cfg *NetworkConfig, verrs *ValidationErrors, pathPrefix string, k8sSpec *KubernetesConfig) {
 	if cfg == nil { verrs.Add("%s: network configuration section cannot be nil", pathPrefix); return }
@@ -172,7 +206,13 @@ func Validate_NetworkConfig(cfg *NetworkConfig, verrs *ValidationErrors, pathPre
 		if cfg.Flannel == nil { verrs.Add("%s.flannel: config cannot be nil if plugin is 'flannel'", pathPrefix)
 		} else { Validate_FlannelConfig(cfg.Flannel, verrs, pathPrefix+".flannel") }
 	}
-	// TODO: Validate KubeOvn, Multus, Hybridnet if enabled
+
+	if cfg.KubeOvn != nil && cfg.KubeOvn.Enabled != nil && *cfg.KubeOvn.Enabled {
+		Validate_KubeOvnConfig(cfg.KubeOvn, verrs, pathPrefix+".kubeovn")
+	}
+	if cfg.Hybridnet != nil && cfg.Hybridnet.Enabled != nil && *cfg.Hybridnet.Enabled {
+		Validate_HybridnetConfig(cfg.Hybridnet, verrs, pathPrefix+".hybridnet")
+	}
 }
 
 func Validate_CalicoConfig(cfg *CalicoConfig, verrs *ValidationErrors, pathPrefix string) {
@@ -207,6 +247,34 @@ func Validate_FlannelConfig(cfg *FlannelConfig, verrs *ValidationErrors, pathPre
 		verrs.Add("%s.backendMode: invalid: '%s'", pathPrefix, cfg.BackendMode)
 	}
 }
+
+func Validate_KubeOvnConfig(cfg *KubeOvnConfig, verrs *ValidationErrors, pathPrefix string) {
+	if cfg == nil || cfg.Enabled == nil || !*cfg.Enabled { return } // Only validate if enabled
+
+	if cfg.Label != nil && strings.TrimSpace(*cfg.Label) == "" {
+		verrs.Add("%s.label: cannot be empty if specified", pathPrefix)
+	}
+	if cfg.TunnelType != nil && *cfg.TunnelType != "" {
+		validTypes := []string{"geneve", "vxlan", "stt"}
+		if !contains(validTypes, *cfg.TunnelType) { // contains() from network_types.go
+			verrs.Add("%s.tunnelType: invalid type '%s', must be one of %v", pathPrefix, *cfg.TunnelType, validTypes)
+		}
+	}
+	if cfg.JoinCIDR != nil && *cfg.JoinCIDR != "" && !isValidCIDR(*cfg.JoinCIDR) { // isValidCIDR from kubernetes_types.go
+		 verrs.Add("%s.joinCIDR: invalid CIDR format '%s'", pathPrefix, *cfg.JoinCIDR)
+	}
+}
+
+func Validate_HybridnetConfig(cfg *HybridnetConfig, verrs *ValidationErrors, pathPrefix string) {
+	if cfg == nil || cfg.Enabled == nil || !*cfg.Enabled { return } // Only validate if enabled
+	if cfg.DefaultNetworkType != nil && *cfg.DefaultNetworkType != "" {
+		validTypes := []string{"Underlay", "Overlay"}
+		if !contains(validTypes, *cfg.DefaultNetworkType) {
+			verrs.Add("%s.defaultNetworkType: invalid type '%s', must be one of %v", pathPrefix, *cfg.DefaultNetworkType, validTypes)
+		}
+	}
+}
+
 
 // --- Helper Methods & Functions ---
 func (n *NetworkConfig) EnableMultusCNI() bool {

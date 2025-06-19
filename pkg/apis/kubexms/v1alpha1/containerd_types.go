@@ -16,6 +16,10 @@ type ContainerRuntimeConfig struct {
 
 	// Version of the container runtime.
 	Version string `json:"version,omitempty"`
+
+	// Docker holds Docker-specific configurations.
+	// Only applicable if Type is "docker".
+	Docker *DockerConfig `json:"docker,omitempty"`
 }
 
 // ContainerdConfig defines specific settings for the Containerd runtime.
@@ -42,6 +46,14 @@ type ContainerdConfig struct {
 	// ConfigPath is the path to the main containerd configuration file.
 	// Defaults to "/etc/containerd/config.toml".
 	ConfigPath *string `json:"configPath,omitempty"`
+	// DisabledPlugins is a list of plugins to disable in containerd.
+	// Example: ["cri", "diff", "events"]
+	DisabledPlugins []string `json:"disabledPlugins,omitempty"`
+	// RequiredPlugins is a list of plugins that must be enabled. Useful for validation.
+	// Example: ["io.containerd.grpc.v1.cri"]
+	RequiredPlugins []string `json:"requiredPlugins,omitempty"`
+	// Imports are additional .toml files to import into the main config.
+	Imports []string `json:"imports,omitempty"`
 }
 
 // SetDefaults_ContainerRuntimeConfig sets default values for ContainerRuntimeConfig.
@@ -51,6 +63,13 @@ func SetDefaults_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig) {
 	}
 	if cfg.Type == "" {
 		cfg.Type = ContainerRuntimeContainerd
+	}
+
+	if cfg.Type == ContainerRuntimeDocker {
+		if cfg.Docker == nil {
+			cfg.Docker = &DockerConfig{}
+		}
+		SetDefaults_DockerConfig(cfg.Docker)
 	}
 }
 
@@ -70,6 +89,14 @@ func Validate_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig, verrs *Validat
 		verrs.Add("%s.type: invalid type '%s', must be one of %v", pathPrefix, cfg.Type, validTypes)
 	}
 	// Version validation can be added if specific formats or ranges are required.
+
+	if cfg.Type == ContainerRuntimeDocker {
+		if cfg.Docker == nil {
+			verrs.Add("%s.docker: docker configuration section cannot be nil if containerRuntime.type is '%s'", pathPrefix, ContainerRuntimeDocker)
+		} else {
+			Validate_DockerConfig(cfg.Docker, verrs, pathPrefix+".docker")
+		}
+	}
 }
 
 // SetDefaults_ContainerdConfig sets default values for ContainerdConfig.
@@ -91,6 +118,9 @@ func SetDefaults_ContainerdConfig(cfg *ContainerdConfig) {
 	   defaultPath := "/etc/containerd/config.toml"
 	   cfg.ConfigPath = &defaultPath
 	}
+	if cfg.DisabledPlugins == nil { cfg.DisabledPlugins = []string{} }
+	if cfg.RequiredPlugins == nil { cfg.RequiredPlugins = []string{"io.containerd.grpc.v1.cri"} } // CRI plugin is typically required
+	if cfg.Imports == nil { cfg.Imports = []string{} }
 }
 
 // Validate_ContainerdConfig validates ContainerdConfig.
@@ -120,5 +150,15 @@ func Validate_ContainerdConfig(cfg *ContainerdConfig, verrs *ValidationErrors, p
 	}
 	if cfg.ConfigPath != nil && strings.TrimSpace(*cfg.ConfigPath) == "" {
 	   verrs.Add("%s.configPath: cannot be empty if specified", pathPrefix)
+	}
+	for i, plug := range cfg.DisabledPlugins {
+		if strings.TrimSpace(plug) == "" { verrs.Add("%s.disabledPlugins[%d]: plugin name cannot be empty", pathPrefix, i)}
+	}
+	for i, plug := range cfg.RequiredPlugins {
+		if strings.TrimSpace(plug) == "" { verrs.Add("%s.requiredPlugins[%d]: plugin name cannot be empty", pathPrefix, i)}
+	}
+	for i, imp := range cfg.Imports {
+		if strings.TrimSpace(imp) == "" { verrs.Add("%s.imports[%d]: import path cannot be empty", pathPrefix, i)}
+		// Could add path validation, e.g., ensure it's an absolute path or ends with .toml
 	}
 }

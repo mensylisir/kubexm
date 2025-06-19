@@ -22,9 +22,25 @@ func TestSetDefaults_EtcdConfig(t *testing.T) {
 	if cfg.DataDir == nil || *cfg.DataDir != "/var/lib/etcd" {
 		t.Errorf("Default DataDir = %v, want /var/lib/etcd", cfg.DataDir)
 	}
-	if cfg.ExtraArgs == nil {
-		t.Error("ExtraArgs should be initialized to an empty map, not nil")
+	if cfg.ExtraArgs == nil || cap(cfg.ExtraArgs) == 0 { // Check for non-nil empty slice
+		t.Error("ExtraArgs should be initialized as an empty slice, not nil")
 	}
+	if cfg.BackupDir == nil || *cfg.BackupDir != "/var/backups/etcd" { t.Errorf("Default BackupDir failed: %v", cfg.BackupDir) }
+	if cfg.BackupPeriodHours == nil || *cfg.BackupPeriodHours != 24 { t.Errorf("Default BackupPeriodHours failed: %v", cfg.BackupPeriodHours) }
+	if cfg.KeepBackupNumber == nil || *cfg.KeepBackupNumber != 7 { t.Errorf("Default KeepBackupNumber failed: %v", cfg.KeepBackupNumber) }
+
+	if cfg.HeartbeatIntervalMillis == nil || *cfg.HeartbeatIntervalMillis != 100 { t.Errorf("Default HeartbeatIntervalMillis failed: %v", cfg.HeartbeatIntervalMillis) }
+	if cfg.ElectionTimeoutMillis == nil || *cfg.ElectionTimeoutMillis != 1000 { t.Errorf("Default ElectionTimeoutMillis failed: %v", cfg.ElectionTimeoutMillis) }
+	if cfg.SnapshotCount == nil || *cfg.SnapshotCount != 100000 { t.Errorf("Default SnapshotCount failed: %v", cfg.SnapshotCount) }
+	if cfg.AutoCompactionRetentionHours == nil || *cfg.AutoCompactionRetentionHours != 0 { t.Errorf("Default AutoCompactionRetentionHours failed: %v", cfg.AutoCompactionRetentionHours) }
+
+	if cfg.QuotaBackendBytes == nil || *cfg.QuotaBackendBytes != 0 { t.Errorf("Default QuotaBackendBytes failed: %v", cfg.QuotaBackendBytes) }
+	// MaxRequestBytes is not defaulted in SetDefaults_EtcdConfig, so no check here.
+
+	if cfg.Metrics == nil || *cfg.Metrics != "basic" { t.Errorf("Default Metrics failed: %v", cfg.Metrics) }
+	if cfg.LogLevel == nil || *cfg.LogLevel != "info" { t.Errorf("Default LogLevel failed: %v", cfg.LogLevel) }
+	if cfg.MaxSnapshotsToKeep == nil || *cfg.MaxSnapshotsToKeep != 5 { t.Errorf("Default MaxSnapshotsToKeep failed: %v", cfg.MaxSnapshotsToKeep) }
+	if cfg.MaxWALsToKeep == nil || *cfg.MaxWALsToKeep != 5 { t.Errorf("Default MaxWALsToKeep failed: %v", cfg.MaxWALsToKeep) }
 
 	cfgExternal := &EtcdConfig{Type: EtcdTypeExternal}
 	SetDefaults_EtcdConfig(cfgExternal)
@@ -74,6 +90,15 @@ func TestValidate_EtcdConfig_Invalid(t *testing.T) {
 		{"invalid_client_port_high", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, ClientPort: pint(70000)}, ".clientPort: invalid port 70000"},
 		{"invalid_peer_port", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, PeerPort: pint(0)}, ".peerPort: invalid port 0"},
 		{"empty_datadir", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, DataDir: pstr(" ")}, ".dataDir: cannot be empty if specified"},
+		{"negative_backup_period", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, BackupPeriodHours: pint(-1)}, ".backupPeriodHours: cannot be negative"},
+		{"negative_keep_backup", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, KeepBackupNumber: pint(-1)}, ".keepBackupNumber: cannot be negative"},
+		{"zero_heartbeat", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, HeartbeatIntervalMillis: pint(0)}, ".heartbeatIntervalMillis: must be positive"},
+		{"zero_election_timeout", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, ElectionTimeoutMillis: pint(0)}, ".electionTimeoutMillis: must be positive"},
+		{"negative_autocompaction", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, AutoCompactionRetentionHours: pint(-1)}, ".autoCompactionRetentionHours: cannot be negative"},
+		{"negative_quota", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, QuotaBackendBytes: pint64(-100)}, ".quotaBackendBytes: cannot be negative"},
+		{"zero_max_request_bytes", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, MaxRequestBytes: puint(0)}, ".maxRequestBytes: must be positive if set"}, // MaxRequestBytes uses *uint, 0 is invalid if set
+		{"invalid_metrics", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, Metrics: pstr("detailed")}, ".metrics: invalid value 'detailed'"},
+		{"invalid_loglevel", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, LogLevel: pstr("trace")}, ".logLevel: invalid value 'trace'"},
 	}
 
 	for _, tt := range tests {
@@ -131,3 +156,5 @@ func TestEtcdConfig_GetPortsAndDataDir(t *testing.T) {
 // Helper functions to get pointers for basic types in tests
 func pint(i int) *int { v := i; return &v }
 func pstr(s string) *string { return &s }
+func pint64(i int64) *int64 { v := i; return &v }
+func puint(u uint) *uint { v := u; return &v }
