@@ -35,13 +35,21 @@ func init() {
 
 // Check determines if the containerd service is active.
 // A more thorough check might also verify if it's enabled.
-func (e *EnableAndStartContainerdStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
-	// spec is not used by this executor's Check method as EnableAndStartContainerdStepSpec has no parameters affecting Check.
-	if ctx.Host.Runner == nil {
-		return false, fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
+func (e *EnableAndStartContainerdStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
+	if !ok {
+		return false, fmt.Errorf("StepSpec not found in context for EnableAndStartContainerdStep Check")
 	}
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", s.GetName()).Sugar()
+	spec, ok := currentFullSpec.(*EnableAndStartContainerdStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected StepSpec type for EnableAndStartContainerdStep Check: %T", currentFullSpec)
+	}
+	// spec is empty, so no spec.PopulateDefaults() call needed.
 
+	if ctx.Host == nil || ctx.Host.Runner == nil { // Added ctx.Host nil check
+		return false, fmt.Errorf("host or runner not available in context")
+	}
+	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
 	active, err := ctx.Host.Runner.IsServiceActive(ctx.GoContext, containerdServiceName)
 	if err != nil {
@@ -60,23 +68,24 @@ func (e *EnableAndStartContainerdStepExecutor) Check(s spec.StepSpec, ctx *runti
 }
 
 // Execute enables and starts the containerd service.
-func (e *EnableAndStartContainerdStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	spec, ok := s.(*EnableAndStartContainerdStepSpec) // Cast to access spec fields if any in future
-	if !ok {
-		myErr := fmt.Errorf("Execute: unexpected spec type %T for EnableAndStartContainerdStepExecutor", s)
-		stepName := "EnableAndStartContainerd (type error)"
-		if s != nil { stepName = s.GetName() }
-		return step.NewResult(stepName, ctx.Host.Name, time.Now(), myErr)
-	}
-
+func (e *EnableAndStartContainerdStepExecutor) Execute(ctx runtime.Context) *step.Result {
 	startTime := time.Now()
-	res := step.NewResult(spec.GetName(), ctx.Host.Name, startTime, nil)
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for EnableAndStartContainerdStep Execute"))
+	}
+	spec, ok := currentFullSpec.(*EnableAndStartContainerdStepSpec)
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for EnableAndStartContainerdStep Execute: %T", currentFullSpec))
+	}
+	// spec is empty, so no spec.PopulateDefaults() call needed.
 
+	res := step.NewResult(ctx, startTime, nil) // Initialize with nil error
+	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
-	if ctx.Host.Runner == nil {
-		res.Error = fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
-		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+	if ctx.Host == nil || ctx.Host.Runner == nil { // Added ctx.Host nil check
+		res.Error = fmt.Errorf("host or runner not available in context")
+		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
 	hostCtxLogger.Infof("Performing daemon-reload (best effort) before managing %s.", containerdServiceName)
@@ -87,35 +96,34 @@ func (e *EnableAndStartContainerdStepExecutor) Execute(s spec.StepSpec, ctx *run
 	hostCtxLogger.Infof("Enabling %s service...", containerdServiceName)
 	if err := ctx.Host.Runner.EnableService(ctx.GoContext, containerdServiceName); err != nil {
 		res.Error = fmt.Errorf("failed to enable %s service: %w", containerdServiceName, err)
-		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 	hostCtxLogger.Successf("Service %s enabled.", containerdServiceName)
 
 	hostCtxLogger.Infof("Starting %s service...", containerdServiceName)
 	if err := ctx.Host.Runner.StartService(ctx.GoContext, containerdServiceName); err != nil {
 		res.Error = fmt.Errorf("failed to start %s service: %w", containerdServiceName, err)
-		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 	hostCtxLogger.Successf("Service %s started.", containerdServiceName)
 
 	active, verifyErr := ctx.Host.Runner.IsServiceActive(ctx.GoContext, containerdServiceName)
 	if verifyErr != nil {
-		// This is a failure of verification, not necessarily of the start command itself.
 		res.Error = fmt.Errorf("failed to verify %s service status after start: %w", containerdServiceName, verifyErr)
-		res.Status = "Failed" // If verification fails, consider the step failed.
+		res.Status = step.StatusFailed
 		res.Message = res.Error.Error()
 		hostCtxLogger.Errorf("Step could not verify service status: %v", res.Error)
 		return res
 	}
 	if !active {
 		res.Error = fmt.Errorf("%s service started but reported as not active immediately after", containerdServiceName)
-		res.Status = "Failed"; res.Message = res.Error.Error()
+		res.Status = step.StatusFailed; res.Message = res.Error.Error()
 		hostCtxLogger.Errorf("Step failed: %v", res.Error)
 		return res
 	}
 
 	res.EndTime = time.Now()
-	res.Status = "Succeeded"
+	// res.Status is Succeeded if error was nil for NewResult and not changed
 	res.Message = fmt.Sprintf("%s service enabled and started successfully.", containerdServiceName)
 	hostCtxLogger.Successf("Step succeeded: %s", res.Message)
 	return res

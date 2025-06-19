@@ -107,11 +107,11 @@ func NewEtcdModule(cfg *config.Cluster) *spec.ModuleSpec {
 				Version:     etcdVersion,
 				Arch:        arch,
 				Zone:        zone,
-				DownloadDir: filepath.Join(appWorkDir, "etcd-binaries", etcdVersion, arch), // Standardized artifact download path
+				DownloadDir: filepath.Join(appWorkDir, "kubexms", "etcd-binaries", etcdVersion, arch), // Added "kubexms"
 			},
 			&etcdsteps.ExtractEtcdArchiveStepSpec{
 				// ArchivePathSharedDataKey uses default from DownloadEtcdStepSpec's output.
-				ExtractionDir: filepath.Join(appWorkDir, "_artifact_extracts", "etcd", etcdVersion, arch), // Standardized extraction path
+				ExtractionDir: filepath.Join(appWorkDir, "kubexms", "_artifact_extracts", "etcd", etcdVersion, arch), // Added "kubexms"
 				// ExtractedDirSharedDataKey uses its default ("extractedPath").
 			},
 			&etcdsteps.InstallEtcdFromDirStepSpec{
@@ -128,10 +128,10 @@ func NewEtcdModule(cfg *config.Cluster) *spec.ModuleSpec {
 		LocalNode: true,
 		Steps: []spec.StepSpec{
 			&pki.DetermineEtcdPKIPathStepSpec{
-				// This step now reads KubeConf from cache (populated by setupPkiDataContextTask)
-				// and uses KubexmsKubeConf.PKIDirectory as its base to construct the etcd-specific PKI path.
-				// BaseWorkDirSharedDataKey defaults to pki.DefaultKubeConfKey.
-				// EtcdPKISubPath defaults to "pki/etcd".
+				// Explicitly set BaseWorkDir from the module-calculated clusterPkiBaseDir.
+				// The step's executor will then use this directly.
+				BaseWorkDir: clusterPkiBaseDir,
+				// EtcdPKISubPath defaults to "pki/etcd" inside the step spec if not set here.
 				// OutputPKIPathSharedDataKey defaults to pki.DefaultEtcdPKIPathKey.
 			},
 			&pki.GenerateEtcdAltNamesStepSpec{
@@ -152,9 +152,7 @@ func NewEtcdModule(cfg *config.Cluster) *spec.ModuleSpec {
 		Name: "Prepare PKI from Existing Internal Etcd Cluster",
 		// HostFilter: &spec.HostFilter{Roles: []string{"etcd"}, Strategy: spec.PickFirst}, // Example
 		Steps: []spec.StepSpec{
-			&pki.DetermineEtcdPKIPathStepSpec{
-				// BaseWorkDir will be derived from KubeConf in cache.
-			},
+			&pki.DetermineEtcdPKIPathStepSpec{BaseWorkDir: clusterPkiBaseDir},
 			&pki.FetchExistingEtcdCertsStepSpec{
 				// Uses defaults for RemoteCertDir, TargetPKIPathSharedDataKey, OutputFetchedFilesListKey.
 				// TargetPKIPath comes from DetermineEtcdPKIPathStep's output.
@@ -166,9 +164,7 @@ func NewEtcdModule(cfg *config.Cluster) *spec.ModuleSpec {
 		Name:      "Prepare PKI using User-Provided External Etcd Certificates",
 		LocalNode: true,
 		Steps: []spec.StepSpec{
-			&pki.DetermineEtcdPKIPathStepSpec{
-				// BaseWorkDir will be derived from KubeConf in cache.
-			},
+			&pki.DetermineEtcdPKIPathStepSpec{BaseWorkDir: clusterPkiBaseDir},
 			&pki.PrepareExternalEtcdCertsStepSpec{
 				ExternalEtcdCAFile:   cfg.Spec.Etcd.External.CAFile,   // Assumes cfg.Spec.Etcd.External is valid if this task runs
 				ExternalEtcdCertFile: cfg.Spec.Etcd.External.CertFile,

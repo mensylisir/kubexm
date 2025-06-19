@@ -36,9 +36,9 @@ func init() {
 }
 
 // isModuleLoaded is a helper function, now a private method of the executor.
-func (e *LoadKernelModulesStepExecutor) isModuleLoaded(ctx *runtime.Context, moduleName string) (bool, error) {
-	if ctx.Host.Runner == nil {
-		return false, fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
+func (e *LoadKernelModulesStepExecutor) isModuleLoaded(ctx runtime.Context, moduleName string) (bool, error) { // Changed ctx type
+	if ctx.Host == nil || ctx.Host.Runner == nil { // Added ctx.Host nil check
+		return false, fmt.Errorf("host or runner not available in context")
 	}
 	// lsmod | awk '{print $1}' | grep -xq <module_name>
 	cmd := fmt.Sprintf("lsmod | awk '{print $1}' | grep -xq %s", moduleName)
@@ -54,19 +54,27 @@ func (e *LoadKernelModulesStepExecutor) isModuleLoaded(ctx *runtime.Context, mod
 }
 
 // Check determines if all modules are loaded.
-func (e *LoadKernelModulesStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
-	spec, ok := s.(*LoadKernelModulesStepSpec)
+func (e *LoadKernelModulesStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		return false, fmt.Errorf("unexpected spec type %T for LoadKernelModulesStepExecutor Check method", s)
+		return false, fmt.Errorf("StepSpec not found in context for LoadKernelModulesStep Check")
 	}
+	spec, ok := currentFullSpec.(*LoadKernelModulesStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected StepSpec type for LoadKernelModulesStep Check: %T", currentFullSpec)
+	}
+
 	if len(spec.Modules) == 0 {
-		if ctx.Logger != nil { // Check logger for nil to be safe
-			ctx.Logger.Debugf("No modules specified for step '%s' on host %s, considering done.", spec.GetName(), ctx.Host.Name)
+		// Use logger from context after ensuring it's not nil
+		logger := ctx.Logger
+		if logger != nil && logger.SugaredLogger != nil { // Ensure SugaredLogger is also not nil
+			logger.SugaredLogger.Debugf("No modules specified for step '%s' on host %s, considering done.", spec.GetName(), ctx.Host.Name)
+		} else {
+			fmt.Printf("Warning: Logger not available in Check for step '%s'\n", spec.GetName())
 		}
 		return true, nil
 	}
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
-
+	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
 	for _, mod := range spec.Modules {
 		loaded, checkErr := e.isModuleLoaded(ctx, mod)
@@ -85,31 +93,34 @@ func (e *LoadKernelModulesStepExecutor) Check(s spec.StepSpec, ctx *runtime.Cont
 }
 
 // Execute loads kernel modules.
-func (e *LoadKernelModulesStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	spec, ok := s.(*LoadKernelModulesStepSpec)
+func (e *LoadKernelModulesStepExecutor) Execute(ctx runtime.Context) *step.Result {
+	startTime := time.Now()
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		myErr := fmt.Errorf("Execute: unexpected spec type %T for LoadKernelModulesStepExecutor", s)
-		stepName := "LoadKernelModules (type error)"
-		if s != nil { stepName = s.GetName() }
-		return step.NewResult(stepName, ctx.Host.Name, time.Now(), myErr)
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for LoadKernelModulesStep Execute"))
+	}
+	spec, ok := currentFullSpec.(*LoadKernelModulesStepSpec)
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for LoadKernelModulesStep Execute: %T", currentFullSpec))
 	}
 
-	startTime := time.Now()
-	res := step.NewResult(spec.GetName(), ctx.Host.Name, startTime, nil)
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+	res := step.NewResult(ctx, startTime, nil) // Initialize with nil error
+	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 	var errorsCollected []string
 	var successesCollected []string
 
 	if len(spec.Modules) == 0 {
-		res.Status = "Succeeded"; res.Message = "No kernel modules specified to load."
+		res.Message = "No kernel modules specified to load."
+		// Status is already Succeeded by NewResult(ctx, startTime, nil)
 		hostCtxLogger.Infof(res.Message)
-		res.EndTime = time.Now(); return res
+		// res.EndTime is set by NewResult, but update if we return early.
+		res.EndTime = time.Now()
+		return res
 	}
-	if ctx.Host.Runner == nil {
-		res.Error = fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
-		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+	if ctx.Host == nil || ctx.Host.Runner == nil {
+		res.Error = fmt.Errorf("host or runner not available in context")
+		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
-
 
 	for _, mod := range spec.Modules {
 		isLoadedBeforeRun, _ := e.isModuleLoaded(ctx, mod) // Check again before modprobe
@@ -139,14 +150,16 @@ func (e *LoadKernelModulesStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Co
 			successesCollected = append(successesCollected, mod)
 		}
 	}
+	// res.EndTime is set by NewResult, but update to be precise after all actions.
 	res.EndTime = time.Now()
 
 	if len(errorsCollected) > 0 {
-		res.Status = "Failed"; res.Error = fmt.Errorf(strings.Join(errorsCollected, "; "))
+		res.Error = fmt.Errorf(strings.Join(errorsCollected, "; ")) // Set main error
+		res.Status = step.StatusFailed // Explicitly set Failed status
 		res.Message = fmt.Sprintf("Successfully loaded: [%s]. Failed or could not verify: %s", strings.Join(successesCollected, ", "), res.Error.Error())
 		hostCtxLogger.Errorf("Step finished with errors: %s", res.Message)
 	} else {
-		res.Status = "Succeeded"
+		// Status is already Succeeded if errorsCollected is empty (initial error to NewResult was nil)
 		res.Message = fmt.Sprintf("All specified kernel modules (%s) were successfully loaded and verified.", strings.Join(spec.Modules, ", "))
 		hostCtxLogger.Successf("Step succeeded: %s", res.Message)
 	}
