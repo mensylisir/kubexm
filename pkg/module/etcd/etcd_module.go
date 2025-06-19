@@ -5,8 +5,9 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 
-	"github.com/kubexms/kubexms/pkg/config"
-	"github.com/kubexms/kubexms/pkg/runtime" // For runtime.Host in HostFilter
+	// "github.com/kubexms/kubexms/pkg/config" // No longer used
+	"github.com/kubexms/kubexms/pkg/runtime" // For runtime.Host in HostFilter and ClusterRuntime
+	"github.com/kubexms/kubexms/pkg/apis/kubexms/v1alpha1" // For v1alpha1 constants if needed
 	"github.com/kubexms/kubexms/pkg/spec"
 	"github.com/kubexms/kubexms/pkg/step/pki"
 	taskEtcd "github.com/kubexms/kubexms/pkg/task/etcd"
@@ -24,7 +25,16 @@ func normalizeArchFunc(arch string) string {
 }
 
 // NewEtcdModule creates a module specification for deploying or managing an etcd cluster.
-func NewEtcdModule(cfg *config.Cluster) *spec.ModuleSpec { // cfg is now effectively *v1alpha1.Cluster
+func NewEtcdModule(clusterRt *runtime.ClusterRuntime) *spec.ModuleSpec {
+	if clusterRt == nil || clusterRt.ClusterConfig == nil {
+		return &spec.ModuleSpec{
+			Name:      "Etcd Cluster Management (Error: Missing Configuration)",
+			IsEnabled: func(_ *runtime.ClusterRuntime) bool { return false },
+			Tasks:     []*spec.TaskSpec{},
+		}
+	}
+	cfg := clusterRt.ClusterConfig // cfg is *v1alpha1.Cluster
+
 	// --- Determine global parameters from cfg ---
 	// TODO: Re-evaluate architecture detection. cfg.Spec.Arch removed.
 	// Consider deriving from host list or a new global config if diverse archs are supported.
@@ -127,23 +137,20 @@ func NewEtcdModule(cfg *config.Cluster) *spec.ModuleSpec { // cfg is now effecti
 
 
 	validateEtcdClusterTaskSpec := &spec.TaskSpec{
-				Name: "Setup Initial Etcd Member (Placeholder Spec)",
-			}
-			allTasks = append(allTasks, setupInitialEtcdMemberTaskSpec)
-		}
-	}
-
-	validateEtcdClusterTaskSpec := &spec.TaskSpec{
 		Name: "Validate Etcd Cluster Health (Placeholder Spec)",
 	}
 	allTasks = append(allTasks, validateEtcdClusterTaskSpec)
+	// Removed duplicated block here
 
 	return &spec.ModuleSpec{
 		Name: "Etcd Cluster Management",
-		IsEnabled: func(currentCfg *config.Cluster) bool { // currentCfg is *v1alpha1.Cluster
+		IsEnabled: func(cr *runtime.ClusterRuntime) bool {
+			if cr == nil || cr.ClusterConfig == nil {
+				return false // Cannot determine if Etcd is configured
+			}
 			// Enable if Etcd spec exists, regardless of type (external still needs client setup/validation).
 			// The tasks themselves will differ based on Etcd.Type.
-			return currentCfg != nil && currentCfg.Spec.Etcd != nil
+			return cr.ClusterConfig.Spec.Etcd != nil
 		},
 		Tasks: allTasks,
 		PreRun: nil,

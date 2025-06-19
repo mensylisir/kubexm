@@ -6,7 +6,9 @@ import (
 	goruntime "runtime" // Alias to avoid conflict with kubexms/pkg/runtime
 	"os" // For os.Getenv
 
-	"github.com/kubexms/kubexms/pkg/config" // Assumed to have necessary fields
+	// "github.com/kubexms/kubexms/pkg/config" // No longer used
+	"github.com/kubexms/kubexms/pkg/runtime" // For ClusterRuntime
+	"github.com/kubexms/kubexms/pkg/apis/kubexms/v1alpha1" // For v1alpha1.Cluster
 	"github.com/kubexms/kubexms/pkg/spec"
 	// Task constructors will be imported
 	taskKubeComponents "github.com/kubexms/kubexms/pkg/task/kube_components"
@@ -24,7 +26,15 @@ func normalizeArchFunc(arch string) string {
 }
 
 // NewKubernetesComponentsModule creates a module specification for fetching Kubernetes components.
-func NewKubernetesComponentsModule(cfg *config.Cluster) *spec.ModuleSpec {
+func NewKubernetesComponentsModule(clusterRt *runtime.ClusterRuntime) *spec.ModuleSpec {
+	if clusterRt == nil || clusterRt.ClusterConfig == nil {
+		return &spec.ModuleSpec{
+			Name:      "Kubernetes Components Download & Install (Error: Missing Configuration)",
+			IsEnabled: func(_ *runtime.ClusterRuntime) bool { return false },
+			Tasks:     []*spec.TaskSpec{},
+		}
+	}
+	cfg := clusterRt.ClusterConfig // cfg is *v1alpha1.Cluster
 	tasks := []*spec.TaskSpec{}
 
 	// --- Determine global parameters from cfg ---
@@ -80,9 +90,17 @@ func NewKubernetesComponentsModule(cfg *config.Cluster) *spec.ModuleSpec {
 
 	return &spec.ModuleSpec{
 		Name: "Kubernetes Components Download & Install",
-		IsEnabled: func(currentCfg *config.Cluster) bool {
-			k8sEnabled := currentCfg != nil && currentCfg.Spec.Kubernetes != nil && currentCfg.Spec.Kubernetes.Version != ""
-			containerRuntimeEnabled := currentCfg != nil && currentCfg.Spec.ContainerRuntime != nil && currentCfg.Spec.ContainerRuntime.Version != ""
+		IsEnabled: func(cr *runtime.ClusterRuntime) bool {
+			if cr == nil || cr.ClusterConfig == nil {
+				return false
+			}
+			cfg := cr.ClusterConfig // Use cfg from ClusterRuntime for checks
+			k8sEnabled := cfg.Spec.Kubernetes != nil && cfg.Spec.Kubernetes.Version != ""
+			// Check ContainerRuntime Type as well for containerd version logic
+			containerRuntimeEnabled := cfg.Spec.ContainerRuntime != nil &&
+				(cfg.Spec.ContainerRuntime.Type == "containerd" && cfg.Spec.ContainerRuntime.Version != "")
+				// Add other runtime checks here if they also fetch components via this module
+				// e.g. || (cfg.Spec.ContainerRuntime.Type == "docker" && cfg.Spec.ContainerRuntime.Version != "")
 			return k8sEnabled || containerRuntimeEnabled
 		},
 		Tasks: tasks,
