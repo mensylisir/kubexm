@@ -32,6 +32,39 @@ spec:
     # dnsDomain will be defaulted by SetDefaults_KubernetesConfig
 `
 
+const validYAMLDockerRuntime = `
+apiVersion: kubexms.io/v1alpha1
+kind: Cluster
+metadata:
+  name: docker-cluster
+spec:
+  global:
+    user: "dockeruser"
+  hosts:
+  - name: node1
+    address: 192.168.1.50
+    roles: ["control-plane", "worker", "etcd"]
+  containerRuntime:
+    type: docker
+    version: "20.10.17"
+    docker:
+      dataRoot: "/var/lib/docker-custom"
+      logDriver: "journald"
+      execOpts: ["native.cgroupdriver=systemd"]
+      storageDriver: "overlay2"
+      registryMirrors:
+        - "https://dockerhub.mirror.internal"
+      insecureRegistries:
+        - "my.dev.registry:5000"
+      bip: "172.28.0.1/16"
+      defaultAddressPools:
+        - base: "172.29.0.0/16"
+          size: 24
+  kubernetes:
+    version: v1.24.0
+    containerManager: "systemd" # Should match docker's cgroup driver
+`
+
 const validYAMLFull = `
 apiVersion: kubexms.io/v1alpha1
 kind: Cluster
@@ -42,7 +75,7 @@ spec:
     user: globaluser
     port: 2222
     connectionTimeout: 60s
-    workDir: /tmp/global_work
+    workDir: /tmp/global_work_enriched # Make unique for test
     verbose: true
     ignoreErr: false
     skipPreflight: false
@@ -80,34 +113,66 @@ spec:
       - "my.insecure.registry:5000"
     useSystemdCgroup: true
     # configPath: "/etc/containerd/custom_config.toml"
+    disabledPlugins: ["io.containerd.internal.v1.opt"]
   etcd:
     type: stacked
     version: v3.5.9
-    # dataDir: "/var/custom/etcd"
-    clientPort: 2378 # Example of non-default pointer
+    clientPort: 2378
+    peerPort: 2381 # Different from default
+    dataDir: "/mnt/etcd_data_custom"
     extraArgs:
-      election-timeout: "1200"
+      - "--election-timeout=1200" # Changed to slice
+      - "--heartbeat-interval=60"
+    backupDir: "/opt/etcd_backup"
+    backupPeriodHours: 12
+    keepBackupNumber: 5
+    snapshotCount: 50000
+    logLevel: debug
   kubernetes:
     version: v1.25.3
     clusterName: my-k8s-cluster
     dnsDomain: custom.cluster.local
     proxyMode: ipvs
-    apiServer: # Changed from apiServerArgs
+    containerManager: systemd # For kubelet cgroup driver default
+    maxPods: 150
+    featureGates:
+      "EphemeralContainers": true
+    apiServer:
+      admissionPlugins: ["NodeRestriction","NamespaceLifecycle"]
       extraArgs:
-        "audit-log-maxage": "30"
-    kubelet: # Changed from kubeletArgs
+        - "--audit-log-maxage=30" # Changed to slice
+        - "--etcd-servers=http://127.0.0.1:2379" # Example of specific field
+    controllerManager:
+      extraArgs: ["--leader-elect=false"]
+    kubelet:
+      cgroupDriver: "systemd" # Explicitly set
+      evictionHard:
+        "memory.available": "5%"
+        "nodefs.available": "10%"
       extraArgs:
-        "cgroup-driver": "systemd"
+        - "--kube-reserved=cpu=500m,memory=1Gi" # Changed to slice
+    kubeletConfiguration: |
+      apiVersion: kubelet.config.k8s.io/v1beta1
+      kind: KubeletConfiguration
+      serializeImagePulls: false
+      evictionHard:
+        memory.available: "200Mi" # This would override KubeletConfig.EvictionHard if both used
+    kubeProxy:
+      ipvs:
+        scheduler: "wrr"
+        syncPeriod: "15s"
+      extraArgs: ["--v=2"]
     nodelocaldns:
+      enabled: true
+    audit:
       enabled: true
   network:
     plugin: calico
-    # version: v3.24.5 # Removed as it's not in v1alpha1.NetworkConfig directly
     podSubnet: "10.244.0.0/16"
     serviceSubnet: "10.96.0.0/12"
     calico:
       logSeverityScreen: Info
-      # VethMTU: 1420 # Example if we want to test non-default MTU
+      vethMTU: 1420 # Explicitly set
       ipPools:
       - name: "mypool-1"
         cidr: "192.168.100.0/24"
@@ -116,10 +181,11 @@ spec:
         blockSize: 27
       - name: "mypool-2-default-blockSize"
         cidr: "192.168.101.0/24"
-        # blockSize will be defaulted
   highAvailability:
     type: keepalived
     vip: 192.168.1.100
+    controlPlaneEndpointDomain: "k8s-api.internal.example.com"
+    controlPlaneEndpointPort: 8443
   preflight:
     disableSwap: true
     minCPUCores: 2
@@ -139,6 +205,28 @@ spec:
         repo: https://kubernetes-sigs.github.io/metrics-server/
         version: 0.6.1
         values: ["args={--kubelet-insecure-tls}"]
+  # New sections for Storage, Registry, OS
+  storage:
+    defaultStorageClass: "openebs-hostpath"
+    openebs:
+      enabled: true
+      version: "3.3.0"
+      basePath: "/mnt/openebs_data"
+      engines:
+        localHostPath:
+          enabled: true
+        # cstor: { enabled: true } # Example if enabling another
+  registry:
+    privateRegistry: "myreg.local:5000"
+    insecureRegistries: ["myreg.local:5000"]
+    auths:
+      "myreg.local:5000":
+        username: "reguser"
+        password: "regpassword"
+  os:
+    ntpServers: ["ntp1.example.com", "ntp2.example.com"]
+    timezone: "America/Los_Angeles"
+    skipConfigureOS: false
 `
 
 const invalidYAMLMalformed = `
@@ -253,51 +341,65 @@ func TestLoadFromBytes_ValidFull(t *testing.T) {
 	if cfg.Spec.Kubernetes.DNSDomain != "custom.cluster.local" {
 		t.Errorf("Kubernetes.DNSDomain = %s, want custom.cluster.local", cfg.Spec.Kubernetes.DNSDomain)
 	}
-	if cfg.Spec.Kubernetes.APIServer == nil || cfg.Spec.Kubernetes.APIServer.ExtraArgs["audit-log-maxage"] != "30" {
-		t.Error("Kubernetes.APIServer.ExtraArgs not parsed correctly")
+	// Updated assertions for ExtraArgs as []string
+	k8sCfg := cfg.Spec.Kubernetes
+	if k8sCfg.APIServer == nil || len(k8sCfg.APIServer.ExtraArgs) == 0 || k8sCfg.APIServer.ExtraArgs[0] != "--audit-log-maxage=30" {
+		t.Errorf("Kubernetes.APIServer.ExtraArgs not parsed correctly: %v", k8sCfg.APIServer.ExtraArgs)
 	}
+	if k8sCfg.ContainerManager != "systemd" {t.Errorf("K8s ContainerManager failed: %s", k8sCfg.ContainerManager)}
+	if k8sCfg.MaxPods == nil || *k8sCfg.MaxPods != 150 {t.Errorf("K8s MaxPods failed: %v", k8sCfg.MaxPods)}
+	if k8sCfg.FeatureGates == nil || !k8sCfg.FeatureGates["EphemeralContainers"] {t.Error("K8s FeatureGates failed")}
+	if k8sCfg.APIServer == nil || len(k8sCfg.APIServer.AdmissionPlugins) == 0 {t.Error("K8s APIServer.AdmissionPlugins failed")}
+	if k8sCfg.Kubelet == nil || k8sCfg.Kubelet.CgroupDriver == nil || *k8sCfg.Kubelet.CgroupDriver != "systemd" {t.Errorf("K8s Kubelet.CgroupDriver failed: %v", k8sCfg.Kubelet.CgroupDriver)}
+	if k8sCfg.Kubelet.EvictionHard == nil || k8sCfg.Kubelet.EvictionHard["memory.available"] != "5%" {t.Error("K8s Kubelet.EvictionHard failed")}
+	if k8sCfg.KubeletConfiguration == nil || len(k8sCfg.KubeletConfiguration.Raw) == 0 {t.Error("K8s KubeletConfiguration failed")}
+	if k8sCfg.KubeProxy == nil || k8sCfg.KubeProxy.IPVS == nil || k8sCfg.KubeProxy.IPVS.Scheduler != "wrr" {t.Error("K8s KubeProxy.IPVS.Scheduler failed")}
+	if k8sCfg.Audit == nil || k8sCfg.Audit.Enabled == nil || !*k8sCfg.Audit.Enabled {t.Error("K8s Audit.Enabled failed")}
 
-	if cfg.Spec.Network == nil { t.Fatal("Spec.Network is nil") }
-	if cfg.Spec.Network.Plugin != "calico" {
-		t.Errorf("Network.Plugin = %s, want calico", cfg.Spec.Network.Plugin)
+
+	netCfg := cfg.Spec.Network
+	if netCfg == nil {t.Fatal("Spec.Network is nil")}
+	if netCfg.Plugin != "calico" {
+		t.Errorf("Network.Plugin = %s, want calico", netCfg.Plugin)
 	}
-    if cfg.Spec.Network.PodSubnet != "10.244.0.0/16" {
-        t.Errorf("Network.PodSubnet = %s, want 10.244.0.0/16", cfg.Spec.Network.PodSubnet)
+    if netCfg.PodSubnet != "10.244.0.0/16" {
+        t.Errorf("Network.PodSubnet = %s, want 10.244.0.0/16", netCfg.PodSubnet)
     }
-    // Add assertions for Calico fields
-    if cfg.Spec.Network.Calico == nil {
+    if netCfg.Calico == nil {
         t.Fatal("Spec.Network.Calico should not be nil for plugin 'calico'")
     }
-    if cfg.Spec.Network.Calico.LogSeverityScreen == nil || *cfg.Spec.Network.Calico.LogSeverityScreen != "Info" {
-        t.Errorf("Calico LogSeverityScreen = %v, want 'Info'", cfg.Spec.Network.Calico.LogSeverityScreen)
+    if netCfg.Calico.LogSeverityScreen == nil || *netCfg.Calico.LogSeverityScreen != "Info" {
+        t.Errorf("Calico LogSeverityScreen = %v, want 'Info'", netCfg.Calico.LogSeverityScreen)
     }
-    // if cfg.Spec.Network.Calico.GetVethMTU() != 1420 { // Example if VethMTU was set in YAML
-    //     t.Errorf("Calico VethMTU = %d, want 1420", cfg.Spec.Network.Calico.GetVethMTU())
-    // }
+    if netCfg.Calico.VethMTU == nil || *netCfg.Calico.VethMTU != 1420 {t.Errorf("Calico VethMTU failed: %v", netCfg.Calico.VethMTU)}
 
-    if len(cfg.Spec.Network.Calico.IPPools) != 2 {
-        t.Fatalf("Expected 2 Calico IPPools, got %d", len(cfg.Spec.Network.Calico.IPPools))
+    if len(netCfg.Calico.IPPools) != 2 {
+        t.Fatalf("Expected 2 Calico IPPools, got %d", len(netCfg.Calico.IPPools))
     }
-    pool1 := cfg.Spec.Network.Calico.IPPools[0]
+    pool1 := netCfg.Calico.IPPools[0]
     if pool1.Name != "mypool-1" { t.Errorf("IPPool[0].Name = %s, want mypool-1", pool1.Name) }
     if pool1.CIDR != "192.168.100.0/24" { t.Errorf("IPPool[0].CIDR = %s", pool1.CIDR) }
     if pool1.Encapsulation != "VXLAN" { t.Errorf("IPPool[0].Encapsulation = %s", pool1.Encapsulation) }
     if pool1.NatOutgoing == nil || !*pool1.NatOutgoing { t.Error("IPPool[0].NatOutgoing should be true") }
     if pool1.BlockSize == nil || *pool1.BlockSize != 27 { t.Errorf("IPPool[0].BlockSize = %v, want 27", pool1.BlockSize) }
 
-    pool2 := cfg.Spec.Network.Calico.IPPools[1]
+    pool2 := netCfg.Calico.IPPools[1]
     if pool2.Name != "mypool-2-default-blockSize" {t.Errorf("IPPool[1].Name incorrect")}
-    if pool2.BlockSize == nil || *pool2.BlockSize != 26 { // Check if it defaulted correctly
+    if pool2.BlockSize == nil || *pool2.BlockSize != 26 {
          t.Errorf("IPPool[1].BlockSize = %v, want 26 (default)", pool2.BlockSize)
     }
 
-	if cfg.Spec.HighAvailability == nil { t.Fatal("Spec.HighAvailability is nil") }
-	if cfg.Spec.HighAvailability.Type != "keepalived" {
-		t.Errorf("HighAvailability.Type = %s, want keepalived", cfg.Spec.HighAvailability.Type)
+	haCfg := cfg.Spec.HighAvailability
+	if haCfg == nil {t.Fatal("Spec.HighAvailability is nil")}
+	if haCfg.Type != "keepalived" {
+		t.Errorf("HighAvailability.Type = %s, want keepalived", haCfg.Type)
 	}
-    if cfg.Spec.HighAvailability.VIP != "192.168.1.100" {
-        t.Errorf("HighAvailability.VIP = %s, want 192.168.1.100", cfg.Spec.HighAvailability.VIP)
+    if haCfg.VIP != "192.168.1.100" {
+        t.Errorf("HighAvailability.VIP = %s, want 192.168.1.100", haCfg.VIP)
     }
+    if haCfg.ControlPlaneEndpointDomain != "k8s-api.internal.example.com" {t.Errorf("HA ControlPlaneEndpointDomain failed: %s", haCfg.ControlPlaneEndpointDomain)}
+    if haCfg.ControlPlaneEndpointPort == nil || *haCfg.ControlPlaneEndpointPort != 8443 {t.Errorf("HA ControlPlaneEndpointPort failed: %v", haCfg.ControlPlaneEndpointPort)}
+
 
 	if cfg.Spec.Preflight == nil { t.Fatal("Spec.Preflight is nil")}
 	if cfg.Spec.Preflight.DisableSwap == nil || !*cfg.Spec.Preflight.DisableSwap {
@@ -306,6 +408,14 @@ func TestLoadFromBytes_ValidFull(t *testing.T) {
     if cfg.Spec.Preflight.MinCPUCores == nil || *cfg.Spec.Preflight.MinCPUCores != 2 {
         t.Errorf("Preflight.MinCPUCores = %v, want 2", cfg.Spec.Preflight.MinCPUCores)
     }
+
+	etcdCfg := cfg.Spec.Etcd
+	if etcdCfg == nil {t.Fatal("Etcd config is nil")}
+	if etcdCfg.PeerPort == nil || *etcdCfg.PeerPort != 2381 {t.Errorf("Etcd PeerPort failed, got %v", etcdCfg.PeerPort)}
+	if etcdCfg.DataDir == nil || *etcdCfg.DataDir != "/mnt/etcd_data_custom" {t.Errorf("Etcd DataDir failed, got %v", etcdCfg.DataDir)}
+	if len(etcdCfg.ExtraArgs) != 2 || etcdCfg.ExtraArgs[0] != "--election-timeout=1200" {t.Errorf("Etcd ExtraArgs failed: %v", etcdCfg.ExtraArgs)}
+	if etcdCfg.BackupDir == nil || *etcdCfg.BackupDir != "/opt/etcd_backup" {t.Errorf("Etcd BackupDir failed: %v", etcdCfg.BackupDir)}
+	if etcdCfg.LogLevel == nil || *etcdCfg.LogLevel != "debug" {t.Errorf("Etcd LogLevel failed: %v", etcdCfg.LogLevel)}
 
 
 	if len(cfg.Spec.Addons) != 2 {
@@ -323,6 +433,27 @@ func TestLoadFromBytes_ValidFull(t *testing.T) {
     if cfg.Spec.Addons[1].Sources.Chart == nil || cfg.Spec.Addons[1].Sources.Chart.Name != "metrics-server" {
         t.Error("Addon metrics-server chart source not parsed correctly")
     }
+
+	storageCfg := cfg.Spec.Storage
+	if storageCfg == nil {t.Fatal("Storage config is nil")}
+	if storageCfg.DefaultStorageClass == nil || *storageCfg.DefaultStorageClass != "openebs-hostpath" {t.Errorf("Storage DefaultStorageClass failed: %v", storageCfg.DefaultStorageClass)}
+	if storageCfg.OpenEBS == nil || storageCfg.OpenEBS.Enabled == nil || !*storageCfg.OpenEBS.Enabled {t.Error("Storage OpenEBS.Enabled failed")}
+	if storageCfg.OpenEBS.Version == nil || *storageCfg.OpenEBS.Version != "3.3.0" {t.Errorf("Storage OpenEBS.Version failed: %v", storageCfg.OpenEBS.Version)}
+	if storageCfg.OpenEBS.Engines == nil || storageCfg.OpenEBS.Engines.LocalHostPath == nil || storageCfg.OpenEBS.Engines.LocalHostPath.Enabled == nil || !*storageCfg.OpenEBS.Engines.LocalHostPath.Enabled {
+		t.Error("Storage OpenEBS.Engines.LocalHostPath.Enabled failed")
+	}
+
+	registryCfg := cfg.Spec.Registry
+	if registryCfg == nil {t.Fatal("Registry config is nil")}
+	if registryCfg.PrivateRegistry != "myreg.local:5000" {t.Errorf("Registry PrivateRegistry failed: %s", registryCfg.PrivateRegistry)}
+	if len(registryCfg.InsecureRegistries) == 0 || registryCfg.InsecureRegistries[0] != "myreg.local:5000" {t.Error("Registry InsecureRegistries failed")}
+	if auth, ok := registryCfg.Auths["myreg.local:5000"]; !ok || auth.Username != "reguser" {t.Error("Registry Auths failed")}
+
+	osCfg := cfg.Spec.OS
+	if osCfg == nil {t.Fatal("OS config is nil")}
+	if len(osCfg.NtpServers) != 2 || osCfg.NtpServers[0] != "ntp1.example.com" {t.Error("OS NtpServers failed")}
+	if osCfg.Timezone == nil || *osCfg.Timezone != "America/Los_Angeles" {t.Errorf("OS Timezone failed: %v", osCfg.Timezone)}
+	if osCfg.SkipConfigureOS == nil || *osCfg.SkipConfigureOS != false {t.Error("OS SkipConfigureOS failed")}
 }
 
 func TestLoadFromBytes_MalformedYAML(t *testing.T) {
@@ -373,5 +504,37 @@ func TestLoad_EmptyPath(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "path cannot be empty") {
 		t.Errorf("Error message = %q, want 'path cannot be empty'", err.Error())
+	}
+}
+
+func TestLoadFromBytes_ValidDockerRuntime(t *testing.T) {
+	cfg, err := LoadFromBytes([]byte(validYAMLDockerRuntime))
+	if err != nil {
+		t.Fatalf("LoadFromBytes with Docker runtime YAML failed: %v", err)
+	}
+	if cfg.ObjectMeta.Name != "docker-cluster" {
+		t.Errorf("ObjectMeta.Name = %s, want docker-cluster", cfg.ObjectMeta.Name)
+	}
+	if cfg.Spec.ContainerRuntime == nil {t.Fatal("Spec.ContainerRuntime is nil")}
+	if cfg.Spec.ContainerRuntime.Type != "docker" {
+		t.Errorf("ContainerRuntime.Type = %s, want docker", cfg.Spec.ContainerRuntime.Type)
+	}
+	if cfg.Spec.ContainerRuntime.Version != "20.10.17" {
+		t.Errorf("ContainerRuntime.Version = %s, want 20.10.17", cfg.Spec.ContainerRuntime.Version)
+	}
+	dockerCfg := cfg.Spec.ContainerRuntime.Docker
+	if dockerCfg == nil {t.Fatal("Spec.ContainerRuntime.Docker is nil")}
+	if dockerCfg.DataRoot == nil || *dockerCfg.DataRoot != "/var/lib/docker-custom" {
+		t.Errorf("Docker.DataRoot = %v, want /var/lib/docker-custom", dockerCfg.DataRoot)
+	}
+	if dockerCfg.LogDriver == nil || *dockerCfg.LogDriver != "journald" {
+		t.Errorf("Docker.LogDriver = %v, want journald", dockerCfg.LogDriver)
+	}
+	if len(dockerCfg.ExecOpts) == 0 || dockerCfg.ExecOpts[0] != "native.cgroupdriver=systemd" {
+		t.Errorf("Docker.ExecOpts = %v, want [\"native.cgroupdriver=systemd\"]", dockerCfg.ExecOpts)
+	}
+	if cfg.Spec.Kubernetes == nil {t.Fatal("Spec.Kubernetes is nil")}
+	if cfg.Spec.Kubernetes.ContainerManager != "systemd" {
+	   t.Errorf("Kubernetes.ContainerManager = %s, want systemd for Docker with systemd cgroup", cfg.Spec.Kubernetes.ContainerManager)
 	}
 }
