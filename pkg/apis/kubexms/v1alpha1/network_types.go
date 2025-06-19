@@ -8,78 +8,73 @@ import (
 
 // NetworkConfig defines the network configuration for the cluster.
 type NetworkConfig struct {
-	Plugin          string `json:"plugin,omitempty"` // e.g., "calico", "flannel", "cilium", "kubeovn"
-	KubePodsCIDR    string `json:"kubePodsCIDR,omitempty"`
-	KubeServiceCIDR string `json:"kubeServiceCIDR,omitempty"`
+	Plugin          string `json:"plugin,omitempty" yaml:"plugin,omitempty"`
+	KubePodsCIDR    string `json:"kubePodsCIDR,omitempty" yaml:"kubePodsCIDR,omitempty"`
+	KubeServiceCIDR string `json:"kubeServiceCIDR,omitempty" yaml:"kubeServiceCIDR,omitempty"`
 
-	Calico    *CalicoConfig    `json:"calico,omitempty"`
-	Flannel   *FlannelConfig   `json:"flannel,omitempty"`
-	KubeOvn   *KubeOvnConfig   `json:"kubeovn,omitempty"`
-	Multus    *MultusCNIConfig `json:"multus,omitempty"`
-	Hybridnet *HybridnetConfig `json:"hybridnet,omitempty"`
+	Calico    *CalicoConfig    `json:"calico,omitempty" yaml:"calico,omitempty"`
+	Flannel   *FlannelConfig   `json:"flannel,omitempty" yaml:"flannel,omitempty"`
+	KubeOvn   *KubeOvnConfig   `json:"kubeovn,omitempty" yaml:"kubeovn,omitempty"`
+	Multus    *MultusCNIConfig `json:"multus,omitempty" yaml:"multus,omitempty"`
+	Hybridnet *HybridnetConfig `json:"hybridnet,omitempty" yaml:"hybridnet,omitempty"`
 }
 
 // CalicoIPPool defines an IP address pool for Calico.
 type CalicoIPPool struct {
-	Name          string `json:"name,omitempty"` // Name for the IPPool resource
-	CIDR          string `json:"cidr"`           // The CIDR for this pool
-	Encapsulation string `json:"encapsulation,omitempty"` // e.g., "IPIP", "VXLAN", "None". Defaults based on CalicoConfig.
-	NatOutgoing   *bool  `json:"natOutgoing,omitempty"`   // Enable NAT outgoing for this pool. Defaults based on CalicoConfig.
-	BlockSize     *int   `json:"blockSize,omitempty"`     // Calico IPAM block size. Default: 26
-	// Add other IPPool fields as needed e.g. NodeSelector, AllowedUses etc.
+	Name          string `json:"name,omitempty" yaml:"name,omitempty"`
+	CIDR          string `json:"cidr" yaml:"cidr"`
+	Encapsulation string `json:"encapsulation,omitempty" yaml:"encapsulation,omitempty"`
+	NatOutgoing   *bool  `json:"natOutgoing,omitempty" yaml:"natOutgoing,omitempty"`
+	BlockSize     *int   `json:"blockSize,omitempty" yaml:"blockSize,omitempty"`
 }
 
 // CalicoConfig defines settings specific to the Calico CNI plugin.
 type CalicoConfig struct {
-	IPIPMode        string `json:"ipipMode,omitempty"` // e.g., "Always", "CrossSubnet", "Never"
-	VXLANMode       string `json:"vxlanMode,omitempty"` // e.g., "Always", "CrossSubnet", "Never"
-	VethMTU         *int   `json:"vethMTU,omitempty"`  // Changed to *int
-	IPv4NatOutgoing *bool  `json:"ipv4NatOutgoing,omitempty"`
-	DefaultIPPOOL   *bool  `json:"defaultIPPOOL,omitempty"` // Whether to create a default IPPool if IPPools list is empty
-	EnableTypha     *bool  `json:"enableTypha,omitempty"`
-	TyphaReplicas   *int   `json:"typhaReplicas,omitempty"` // Changed to *int
-	TyphaNodeSelector map[string]string `json:"typhaNodeSelector,omitempty"`
-	LogSeverityScreen *string `json:"logSeverityScreen,omitempty"` // e.g., "Info", "Debug", "Warning"
+	IPIPMode        string `json:"ipipMode,omitempty" yaml:"ipipMode,omitempty"`
+	VXLANMode       string `json:"vxlanMode,omitempty" yaml:"vxlanMode,omitempty"`
+	VethMTU         *int   `json:"vethMTU,omitempty" yaml:"vethMTU,omitempty"`
+	IPv4NatOutgoing *bool  `json:"ipv4NatOutgoing,omitempty" yaml:"ipv4NatOutgoing,omitempty"`
+	DefaultIPPOOL   *bool  `json:"defaultIPPOOL,omitempty" yaml:"defaultIPPOOL,omitempty"`
+	EnableTypha     *bool  `json:"enableTypha,omitempty" yaml:"enableTypha,omitempty"`
+	TyphaReplicas   *int   `json:"typhaReplicas,omitempty" yaml:"typhaReplicas,omitempty"`
+	TyphaNodeSelector map[string]string `json:"typhaNodeSelector,omitempty" yaml:"typhaNodeSelector,omitempty"`
+	LogSeverityScreen *string `json:"logSeverityScreen,omitempty" yaml:"logSeverityScreen,omitempty"`
 
-	// IPPools is a list of Calico IPPools to configure.
-	// If empty and DefaultIPPOOL is true, Calico typically creates a default pool based on KubePodsCIDR.
-	IPPools []CalicoIPPool `json:"ipPools,omitempty"`
+	IPPools []CalicoIPPool `json:"ipPools,omitempty" yaml:"ipPools,omitempty"`
 }
 
 // FlannelConfig defines settings specific to the Flannel CNI plugin.
 type FlannelConfig struct {
-	BackendMode   string `json:"backendMode,omitempty"` // e.g., "vxlan", "host-gw", "udp"
-	DirectRouting *bool  `json:"directRouting,omitempty"`
+	BackendMode   string `json:"backendMode,omitempty" yaml:"backendMode,omitempty"`
+	DirectRouting *bool  `json:"directRouting,omitempty" yaml:"directRouting,omitempty"`
 }
 
 type KubeOvnConfig struct {
-	Enabled *bool `json:"enabled,omitempty"`
-	JoinCIDR *string `json:"joinCIDR,omitempty"` // The CIDR of the existing Kube-OVN cluster to join.
-	Label *string `json:"label,omitempty"`     // The node label for Kube-OVN components. Default: "kube-ovn/role"
-	TunnelType *string `json:"tunnelType,omitempty"` // "geneve", "vxlan", or "stt". Default: "geneve"
-	EnableSSL *bool `json:"enableSSL,omitempty"`   // Whether to enable SSL for Kube-OVN components. Default: false
-	// TODO: Add more detailed structs from KubeKey like Dpdk, OvsOvn, KubeOvnController later if needed.
-	// For now, specific overrides can go into general Kubernetes component ExtraArgs if applicable,
-	// or a future KubeOvn operator might handle deeper config via its own CRDs.
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	JoinCIDR *string `json:"joinCIDR,omitempty" yaml:"joinCIDR,omitempty"`
+	Label *string `json:"label,omitempty" yaml:"label,omitempty"`
+	TunnelType *string `json:"tunnelType,omitempty" yaml:"tunnelType,omitempty"`
+	EnableSSL *bool `json:"enableSSL,omitempty" yaml:"enableSSL,omitempty"`
 }
 
 type MultusCNIConfig struct {
-	Enabled *bool `json:"enabled,omitempty"`
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
 
 type HybridnetConfig struct {
-	Enabled *bool `json:"enabled,omitempty"`
-	DefaultNetworkType *string `json:"defaultNetworkType,omitempty"` // "Underlay" or "Overlay". Default: "Overlay"
-	EnableNetworkPolicy *bool `json:"enableNetworkPolicy,omitempty"` // Default: true
-	InitDefaultNetwork *bool `json:"initDefaultNetwork,omitempty"` // Whether to init default network. KubeKey 'Init', default: true
-	// TODO: Add Networks []HybridnetNetwork and HybridnetSubnet later if detailed config needed.
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	DefaultNetworkType *string `json:"defaultNetworkType,omitempty" yaml:"defaultNetworkType,omitempty"`
+	EnableNetworkPolicy *bool `json:"enableNetworkPolicy,omitempty" yaml:"enableNetworkPolicy,omitempty"`
+	InitDefaultNetwork *bool `json:"initDefaultNetwork,omitempty" yaml:"initDefaultNetwork,omitempty"`
 }
 
 // --- Defaulting Functions ---
 
 func SetDefaults_NetworkConfig(cfg *NetworkConfig) {
 	if cfg == nil { return }
-	// No default plugin, user must specify or have higher-level logic.
+	if cfg.Plugin == "" {
+		cfg.Plugin = "calico" // Default plugin to Calico
+	}
 	// KubePodsCIDR and KubeServiceCIDR defaults are better handled at KubernetesConfig or by user.
 
 	if cfg.Plugin == "calico" {
@@ -106,11 +101,15 @@ func SetDefaults_NetworkConfig(cfg *NetworkConfig) {
 
 func SetDefaults_CalicoConfig(cfg *CalicoConfig, defaultPoolCIDR string) {
 	if cfg == nil { return }
-	if cfg.IPIPMode == "" && cfg.VXLANMode == "" { // If neither is set, default IPIP
+	if cfg.IPIPMode == "" { // Default IPIPMode to Always if empty
 	   cfg.IPIPMode = "Always"
 	}
-	if cfg.IPIPMode == "" { cfg.IPIPMode = "Never" } // Default if only VXLANMode is set
-	if cfg.VXLANMode == "" { cfg.VXLANMode = "Never" } // Default if only IPIPMode is set
+	if cfg.VXLANMode == "" { // Default VXLANMode to Never if empty
+	   cfg.VXLANMode = "Never"
+	}
+	// If IPIPMode is "Always", VXLANMode should ideally be "Never" and vice-versa,
+	// but current logic allows both to be e.g. "CrossSubnet".
+	// The prompt's direct defaults are simpler.
 
 	if cfg.IPv4NatOutgoing == nil { b := true; cfg.IPv4NatOutgoing = &b }
 	if cfg.DefaultIPPOOL == nil { b := true; cfg.DefaultIPPOOL = &b } // Default to creating a default ippool
@@ -121,7 +120,7 @@ func SetDefaults_CalicoConfig(cfg *CalicoConfig, defaultPoolCIDR string) {
 	}
     if cfg.TyphaNodeSelector == nil { cfg.TyphaNodeSelector = make(map[string]string) }
 	if cfg.VethMTU == nil {
-	   var defaultMTU int = 0 // Let Calico decide default MTU, or set a common one like 1440/1420
+	   var defaultMTU int = 0 // Default VethMTU to 0 (Calico default)
 	   cfg.VethMTU = &defaultMTU
 	}
 	if cfg.LogSeverityScreen == nil { s := "Info"; cfg.LogSeverityScreen = &s }
