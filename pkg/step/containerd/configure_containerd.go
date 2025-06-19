@@ -90,20 +90,15 @@ func init() {
 }
 
 // Check determines if containerd config reflects desired state. (Basic check)
-func (e *ConfigureContainerdStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
-	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
+func (e *ConfigureContainerdStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
+	spec, ok := s.(*ConfigureContainerdStepSpec)
 	if !ok {
-		return false, fmt.Errorf("StepSpec not found in context for ConfigureContainerdStep Check")
+		return false, fmt.Errorf("unexpected spec type %T for ConfigureContainerdStepExecutor Check method", s)
 	}
-	spec, ok := currentFullSpec.(*ConfigureContainerdStepSpec)
-	if !ok {
-		return false, fmt.Errorf("unexpected StepSpec type for ConfigureContainerdStep Check: %T", currentFullSpec)
+	if ctx.Host.Runner == nil {
+		return false, fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
 	}
-
-	if ctx.Host == nil || ctx.Host.Runner == nil { // Added ctx.Host nil check
-		return false, fmt.Errorf("host or runner not available in context")
-	}
-	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
 	configPath := spec.effectiveConfigPath()
 	exists, err := ctx.Host.Runner.Exists(ctx.GoContext, configPath)
@@ -177,36 +172,35 @@ func (e *ConfigureContainerdStepExecutor) Check(ctx runtime.Context) (isDone boo
 
 
 // Execute generates and writes containerd config.
-func (e *ConfigureContainerdStepExecutor) Execute(ctx runtime.Context) *step.Result {
+func (e *ConfigureContainerdStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
+	spec, ok := s.(*ConfigureContainerdStepSpec)
+	if !ok {
+		myErr := fmt.Errorf("Execute: unexpected spec type %T for ConfigureContainerdStepExecutor", s)
+		stepName := "ConfigureContainerd (type error)"
+		if s != nil { stepName = s.GetName() }
+		return step.NewResult(stepName, ctx.Host.Name, time.Now(), myErr)
+	}
+
 	startTime := time.Now()
-	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
-	if !ok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for ConfigureContainerdStep Execute"))
-	}
-	spec, ok := currentFullSpec.(*ConfigureContainerdStepSpec)
-	if !ok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for ConfigureContainerdStep Execute: %T", currentFullSpec))
-	}
+	res := step.NewResult(spec.GetName(), ctx.Host.Name, startTime, nil)
+	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
-	res := step.NewResult(ctx, startTime, nil) // Initialize with nil error
-	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
-
-	if ctx.Host == nil || ctx.Host.Runner == nil { // Added ctx.Host nil check
-		res.Error = fmt.Errorf("host or runner not available in context")
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+	if ctx.Host.Runner == nil {
+		res.Error = fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
+		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 	configPath := spec.effectiveConfigPath()
 	parentDir := filepath.Dir(configPath)
 
 	if err := ctx.Host.Runner.Mkdirp(ctx.GoContext, parentDir, "0755", true); err != nil {
 		res.Error = fmt.Errorf("failed to create directory %s for containerd config on host %s: %w", parentDir, ctx.Host.Name, err)
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
 	tmpl, err := template.New("containerdConfig").Parse(containerdConfigTemplate)
 	if err != nil {
 		res.Error = fmt.Errorf("dev error: failed to parse internal containerd config template: %w", err)
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
 	var buf strings.Builder
@@ -218,21 +212,20 @@ func (e *ConfigureContainerdStepExecutor) Execute(ctx runtime.Context) *step.Res
 	}
 	if err := tmpl.Execute(&buf, templateData); err != nil {
 		res.Error = fmt.Errorf("failed to render containerd config template for host %s: %w", ctx.Host.Name, err)
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
 	configContent := buf.String()
 	hostCtxLogger.Debugf("Generated containerd config for %s:\n%s", configPath, configContent)
 
+	// Sudo true for writing to /etc
 	err = ctx.Host.Runner.WriteFile(ctx.GoContext, []byte(configContent), configPath, "0644", true)
 	if err != nil {
 		res.Error = fmt.Errorf("failed to write containerd config to %s on host %s: %w", configPath, ctx.Host.Name, err)
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
-	// res.EndTime is set by NewResult, can update if needed for precision
-	res.EndTime = time.Now()
-	// res.Status is Succeeded if error is nil from NewResult
+	res.EndTime = time.Now(); res.Status = "Succeeded"
 	res.Message = fmt.Sprintf("Containerd configuration written to %s successfully on host %s.", configPath, ctx.Host.Name)
 	hostCtxLogger.Successf("Step succeeded: %s", res.Message)
 

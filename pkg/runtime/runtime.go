@@ -11,11 +11,11 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/kubexms/kubexms/pkg/cache" // Added cache import
 	"github.com/kubexms/kubexms/pkg/connector"
 	"github.com/kubexms/kubexms/pkg/logger"
 	"github.com/kubexms/kubexms/pkg/runner"
 	"github.com/kubexms/kubexms/pkg/config"
-	"github.com/kubexms/kubexms/pkg/cache" // Added cache import
 )
 
 // osReadFile is a variable that defaults to os.ReadFile, allowing it to be mocked for tests.
@@ -74,11 +74,12 @@ func (cr *ClusterRuntime) GetHostsByRole(roleName string) []*Host { if cr.RoleIn
 
 // Context is passed to each execution unit (e.g., a Step in a Task).
 type Context struct {
-	GoContext context.Context
-	Host      *Host
-	Cluster   *ClusterRuntime
-	Logger    *logger.Logger // Logger contextualized for Host, Task, Step etc.
-	SharedData *sync.Map    // Will be deprecated; keep for now for compatibility
+	GoContext     context.Context
+	Host          *Host
+	Cluster       *ClusterRuntime
+	Logger        *logger.Logger // Logger contextualized for Host, Task, Step etc.
+	// SharedData is deprecated, will be removed after all steps migrate to scoped caches.
+	SharedData    *sync.Map
 
 	pipelineCache cache.PipelineCache
 	moduleCache   cache.ModuleCache
@@ -106,12 +107,10 @@ func NewRuntime(cfg *config.Cluster, baseLogger *logger.Logger) (*ClusterRuntime
 		baseLogger.Warnf("NewRuntime called with nil baseLogger, using global default logger instance.")
 	}
 
-	// Create a logger for overall runtime operations, enriched with cluster name if available.
 	runtimeLoggerFields := []interface{}{"component", "runtime"}
 	if cfg.Metadata.Name != "" {
 		runtimeLoggerFields = append(runtimeLoggerFields, "cluster_name", cfg.Metadata.Name)
 	}
-	// This rtWrapperLogger is used for NewRuntime's own logging.
 	rtWrapperLogger := &logger.Logger{SugaredLogger: baseLogger.SugaredLogger.With(runtimeLoggerFields...)}
 
 	cr := &ClusterRuntime{
@@ -119,9 +118,9 @@ func NewRuntime(cfg *config.Cluster, baseLogger *logger.Logger) (*ClusterRuntime
 		Hosts:         make([]*Host, 0, len(cfg.Spec.Hosts)),
 		Inventory:     make(map[string]*Host, len(cfg.Spec.Hosts)),
 		RoleInventory: make(map[string][]*Host),
-		Logger:        baseLogger, // Store the original base logger for use in NewHostContext etc.
+		Logger:        baseLogger,
 		GlobalTimeout: cfg.Spec.Global.ConnectionTimeout,
-		WorkDir:       cfg.Spec.Global.WorkDir, // Already defaulted by config.SetDefaults
+		WorkDir:       cfg.Spec.Global.WorkDir,
 		Verbose:       cfg.Spec.Global.Verbose,
 		IgnoreErr:     cfg.Spec.Global.IgnoreErr,
 	}
@@ -140,22 +139,20 @@ func NewRuntime(cfg *config.Cluster, baseLogger *logger.Logger) (*ClusterRuntime
 		currentHostCfg := hostCfg
 
 		g.Go(func() error {
-			// Create a logger specific to this host's initialization process
 			hostInitLogger := rtWrapperLogger.SugaredLogger.With("host_name_init", currentHostCfg.Name, "host_address_init", currentHostCfg.Address).Sugar()
 			hostInitLogger.Debugf("Initializing...")
 
 			connCfg := connector.ConnectionCfg{
 				Host:           currentHostCfg.Address,
-				Port:           currentHostCfg.Port,       // Defaulted by config.SetDefaults
-				User:           currentHostCfg.User,       // Defaulted by config.SetDefaults
-				Password:       currentHostCfg.Password,   // Defaulted by config.SetDefaults (if global password was set)
-				PrivateKeyPath: currentHostCfg.PrivateKeyPath, // Defaulted by config.SetDefaults
+				Port:           currentHostCfg.Port,
+				User:           currentHostCfg.User,
+				Password:       currentHostCfg.Password,
+				PrivateKeyPath: currentHostCfg.PrivateKeyPath,
 				Timeout:        cr.GlobalTimeout,
-				// Bastion: currentHostCfg.Bastion, // TODO: Populate if BastionSpec defined & used
 			}
 
 			var hostPrivateKeyBytes []byte
-			if currentHostCfg.PrivateKey != "" { // This is string (base64) from config.HostSpec
+			if currentHostCfg.PrivateKey != "" {
 				decodedKey, err := base64.StdEncoding.DecodeString(currentHostCfg.PrivateKey)
 				if err != nil {
 					err = fmt.Errorf("host %s: failed to decode base64 private key: %w", currentHostCfg.Name, err)
@@ -163,10 +160,10 @@ func NewRuntime(cfg *config.Cluster, baseLogger *logger.Logger) (*ClusterRuntime
 				}
 				hostPrivateKeyBytes = decodedKey
 				connCfg.PrivateKey = hostPrivateKeyBytes
-				connCfg.PrivateKeyPath = "" // Prioritize key content over path if both specified (though path would usually be empty)
+				connCfg.PrivateKeyPath = ""
 				hostInitLogger.Debugf("Using provided base64 private key content.")
 			} else if currentHostCfg.PrivateKeyPath != "" {
-				keyFileBytes, err := os.ReadFile(currentHostCfg.PrivateKeyPath)
+				keyFileBytes, err := osReadFile(currentHostCfg.PrivateKeyPath) // Use osReadFile variable
 				if err != nil {
 					err = fmt.Errorf("host %s: failed to read private key file '%s': %w", currentHostCfg.Name, currentHostCfg.PrivateKeyPath, err)
 					initErrs.Add(err); hostInitLogger.Errorf("Init failed: %v", err); return err
@@ -177,7 +174,7 @@ func NewRuntime(cfg *config.Cluster, baseLogger *logger.Logger) (*ClusterRuntime
 			}
 
 			var conn connector.Connector
-			hostType := strings.ToLower(strings.TrimSpace(currentHostCfg.Type)) // Type already defaulted to "ssh"
+			hostType := strings.ToLower(strings.TrimSpace(currentHostCfg.Type))
 			if hostType == "local" { conn = &connector.LocalConnector{}
 			} else { conn = &connector.SSHConnector{} }
 
@@ -192,27 +189,26 @@ func NewRuntime(cfg *config.Cluster, baseLogger *logger.Logger) (*ClusterRuntime
 			runnerCtx, runnerCancel := context.WithTimeout(gCtx, cr.GlobalTimeout)
 			defer runnerCancel()
 
-			newRunner, err := runnerNewRunner(runnerCtx, conn) // Use package variable for testability
+			newRunner, err := runnerNewRunner(runnerCtx, conn)
 			if err != nil {
 				conn.Close(); err = fmt.Errorf("host %s: runner init failed: %w", currentHostCfg.Name, err)
 				initErrs.Add(err); hostInitLogger.Errorf("Init failed: %v", err); return err
 			}
 			hostInitLogger.Debugf("Runner initialized. OS: %s, Hostname: %s", newRunner.Facts.OS.ID, newRunner.Facts.Hostname)
 
-			hostWorkDir := currentHostCfg.WorkDir // Already defaulted by config.SetDefaults
-			// Final fallback if somehow still empty (e.g. global and host were empty and defaults didn't set one)
+			hostWorkDir := currentHostCfg.WorkDir
 			if hostWorkDir == "" { hostWorkDir = fmt.Sprintf("/tmp/kubexms_work_%s", currentHostCfg.Name) }
 
 			newHost := &Host{
 				Name:            currentHostCfg.Name, Address: currentHostCfg.Address, InternalAddress: currentHostCfg.InternalAddress,
 				Port:            currentHostCfg.Port, User: currentHostCfg.User,
 				Password:        currentHostCfg.Password,
-				PrivateKeyPath:  currentHostCfg.PrivateKeyPath, // Store original path for reference
-				PrivateKey:      hostPrivateKeyBytes,         // Store actual key bytes
-				Roles:           make(map[string]bool), Labels: currentHostCfg.Labels, // Labels already make(map) by SetDefaults if nil
+				PrivateKeyPath:  currentHostCfg.PrivateKeyPath,
+				PrivateKey:      hostPrivateKeyBytes,
+				Roles:           make(map[string]bool), Labels: currentHostCfg.Labels,
 				Connector:       conn, Runner: newRunner, WorkDir: hostWorkDir,
 			}
-			if newHost.Labels == nil { newHost.Labels = make(map[string]string) } // Ensure not nil
+			if newHost.Labels == nil { newHost.Labels = make(map[string]string) }
 			for _, role := range currentHostCfg.Roles { if strings.TrimSpace(role) != "" { newHost.Roles[strings.TrimSpace(role)] = true } }
 
 			initializedHosts[currentIndex] = newHost
@@ -247,7 +243,7 @@ func NewRuntime(cfg *config.Cluster, baseLogger *logger.Logger) (*ClusterRuntime
 func NewHostContext(
 	goCtx context.Context,
 	host *Host,
-	cluster *ClusterRuntime, // Corrected type to *ClusterRuntime as it's in the same package
+	cluster *ClusterRuntime,
 	pCache cache.PipelineCache,
 	mCache cache.ModuleCache,
 	tCache cache.TaskCache,
@@ -266,10 +262,10 @@ func NewHostContext(
 		baseLoggerForContext.Warnf("NewHostContext: ClusterRuntime or ClusterRuntime.Logger was nil, using global logger as base.")
 	}
 
-	if host != nil && host.Name != "" { // Ensure host and host.Name are valid before using for logger
+	if host != nil && host.Name != "" {
 		hostSpecificLogger = &logger.Logger{SugaredLogger: baseLoggerForContext.SugaredLogger.With("host_name", host.Name, "host_address", host.Address)}
 	} else {
-		hostSpecificLogger = baseLoggerForContext // Use base (possibly global) logger if host details are not available
+		hostSpecificLogger = baseLoggerForContext
 		if host == nil {
 			hostSpecificLogger.Warnf("NewHostContext called with nil host.")
 		} else {
@@ -277,7 +273,6 @@ func NewHostContext(
 		}
 	}
 
-	// Initialize SharedData for now, it will be removed later
 	sharedData := &sync.Map{}
 
 	return &Context{
@@ -285,7 +280,7 @@ func NewHostContext(
 		Host:          host,
 		Cluster:       cluster,
 		Logger:        hostSpecificLogger,
-		SharedData:    sharedData, // Keep for now
+		SharedData:    sharedData,
 		pipelineCache: pCache,
 		moduleCache:   mCache,
 		taskCache:     tCache,

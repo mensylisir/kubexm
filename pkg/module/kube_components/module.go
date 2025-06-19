@@ -42,11 +42,11 @@ func NewKubernetesComponentsModule(cfg *config.Cluster) *spec.ModuleSpec {
 		zone = os.Getenv("KKZONE")
 	}
 
-	programBaseDir := cfg.WorkDir
+	programBaseDir := cfg.WorkDir // Assumed to be <executable_dir>
 	if programBaseDir == "" {
-		programBaseDir = "/opt/kubexms/default_workdir" // Fallback
+		programBaseDir = "/opt/kubexms/default_run_dir" // Fallback
 	}
-	// appFSBaseDir is the root for KubeXMS specific persistent data, like artifacts.
+	// appFSBaseDir is the root for KubeXMS specific persistent data, like artifacts: <executable_dir>/.kubexm
 	appFSBaseDir := filepath.Join(programBaseDir, ".kubexm")
 
 	// --- Kubernetes Components ---
@@ -56,32 +56,34 @@ func NewKubernetesComponentsModule(cfg *config.Cluster) *spec.ModuleSpec {
 	}
 
 	if kubeVersion != "" {
-		tasks = append(tasks, taskKubeComponents.NewFetchKubeadmTask(cfg, kubeVersion, arch, zone, appFSBaseDir))
-		tasks = append(tasks, taskKubeComponents.NewFetchKubeletTask(cfg, kubeVersion, arch, zone, appFSBaseDir))
-		tasks = append(tasks, taskKubeComponents.NewFetchKubectlTask(cfg, kubeVersion, arch, zone, appFSBaseDir))
+		if task := taskKubeComponents.NewFetchKubeadmTask(cfg, kubeVersion, arch, zone, appFSBaseDir); task != nil {
+			tasks = append(tasks, task)
+		}
+		if task := taskKubeComponents.NewFetchKubeletTask(cfg, kubeVersion, arch, zone, appFSBaseDir); task != nil {
+			tasks = append(tasks, task)
+		}
+		if task := taskKubeComponents.NewFetchKubectlTask(cfg, kubeVersion, arch, zone, appFSBaseDir); task != nil {
+			tasks = append(tasks, task)
+		}
 	}
 
 	// --- Containerd ---
 	containerdVersion := ""
 	if cfg.Spec.ContainerRuntime != nil && cfg.Spec.ContainerRuntime.Version != "" {
-		// Assuming ContainerRuntime.Type could be checked here if multiple runtimes were supported.
-		// For now, if version is set, assume it's for containerd.
 		containerdVersion = cfg.Spec.ContainerRuntime.Version
 	}
 
 	if containerdVersion != "" {
-		tasks = append(tasks, taskKubeComponents.NewFetchContainerdTask(cfg, containerdVersion, arch, zone, appFSBaseDir))
+		if task := taskKubeComponents.NewFetchContainerdTask(cfg, containerdVersion, arch, zone, appFSBaseDir); task != nil {
+			tasks = append(tasks, task)
+		}
 	}
 
 	return &spec.ModuleSpec{
 		Name: "Kubernetes Components Download & Install",
 		IsEnabled: func(currentCfg *config.Cluster) bool {
-			// Enable if Kubernetes version is specified, implying it's a K8s cluster setup,
-			// OR if a ContainerRuntime version is specified (as this module handles containerd).
 			k8sEnabled := currentCfg != nil && currentCfg.Spec.Kubernetes != nil && currentCfg.Spec.Kubernetes.Version != ""
 			containerRuntimeEnabled := currentCfg != nil && currentCfg.Spec.ContainerRuntime != nil && currentCfg.Spec.ContainerRuntime.Version != ""
-			// Consider enabling if EITHER Kubernetes components OR a container runtime managed by this module is specified.
-			// This module might be responsible for just containerd even in a non-K8s scenario or a custom K8s where only CR is needed from here.
 			return k8sEnabled || containerRuntimeEnabled
 		},
 		Tasks: tasks,

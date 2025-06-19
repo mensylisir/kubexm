@@ -74,21 +74,17 @@ func init() {
 }
 
 // Check determines if the main command needs to be run based on CheckCmd.
-func (e *CommandStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
-	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
+func (e *CommandStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
+	spec, ok := s.(*CommandStepSpec)
 	if !ok {
-		return false, fmt.Errorf("StepSpec not found in context for CommandStep Check")
-	}
-	spec, ok := currentFullSpec.(*CommandStepSpec)
-	if !ok {
-		return false, fmt.Errorf("unexpected StepSpec type for CommandStep Check: %T", currentFullSpec)
+		return false, fmt.Errorf("unexpected spec type %T for CommandStepExecutor Check method", s)
 	}
 
 	if spec.CheckCmd == "" {
 		return false, nil // No check command, so main command should run
 	}
 
-	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName(), "phase", "Check").Sugar()
+	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName(), "phase", "Check").Sugar()
 	hostCtxLogger.Debugf("Executing CheckCmd: %s", spec.CheckCmd)
 
 	opts := &connector.ExecOptions{
@@ -126,20 +122,22 @@ func (e *CommandStepExecutor) Check(ctx runtime.Context) (isDone bool, err error
 }
 
 // Execute runs the command defined in the CommandStepSpec.
-func (e *CommandStepExecutor) Execute(ctx runtime.Context) *step.Result {
-	startTime := time.Now()
-	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
+func (e *CommandStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
+	spec, ok := s.(*CommandStepSpec)
 	if !ok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for CommandStep Execute"))
-	}
-	spec, ok := currentFullSpec.(*CommandStepSpec)
-	if !ok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for CommandStep Execute: %T", currentFullSpec))
+		err := fmt.Errorf("Execute: unexpected spec type %T for CommandStepExecutor", s)
+		// Attempt to get a name for the result, even if spec is wrong type.
+		specName := "UnknownStep (type error)"
+		if s != nil { // s might be nil if called incorrectly, though unlikely with registry
+			specName = s.GetName()
+		}
+		return step.NewResult(specName, ctx.Host.Name, time.Now(), err)
 	}
 
-	// Initialize result with nil error. The status will be Succeeded unless changed.
-	res := step.NewResult(ctx, startTime, nil)
-	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName(), "phase", "Execute").Sugar()
+	startTime := time.Now()
+	res := step.NewResult(spec.GetName(), ctx.Host.Name, startTime, nil)
+	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName(), "phase", "Execute").Sugar()
+
 
 	opts := &connector.ExecOptions{
 		Sudo:    spec.Sudo,
@@ -157,35 +155,39 @@ func (e *CommandStepExecutor) Execute(ctx runtime.Context) *step.Result {
 	if runErr != nil {
 		var cmdErr *connector.CommandError
 		if errors.As(runErr, &cmdErr) {
-			// Store the original CommandError, NewResult would have set status to Failed if runErr != nil
-			res.Error = cmdErr
+			res.Error = cmdErr // Store the original CommandError
 			if spec.IgnoreError {
 				hostCtxLogger.Warnf("Command '%s' exited with code %d (stderr: %s), but error is ignored. Step considered successful.", spec.Cmd, cmdErr.ExitCode, string(stderr))
-				res.Status = step.StatusSucceeded // Override status
-				res.Error = nil // Clear error as it's ignored for status purposes
+				res.Status = "Succeeded"
+				// res.Error is kept for information, but status indicates success.
+				// If truly ignoring means "no error recorded", then set res.Error = nil here.
+				// For now, let's keep res.Error but override status.
 				res.Message = fmt.Sprintf("Command executed with exit code %d and error '%v', but it was ignored. Original Stderr: %s", cmdErr.ExitCode, cmdErr, string(stderr))
 			} else if cmdErr.ExitCode == spec.ExpectedExitCode {
 				hostCtxLogger.Infof("Command '%s' completed with expected exit code %d.", spec.Cmd, spec.ExpectedExitCode)
-				res.Status = step.StatusSucceeded // Override status
+				res.Status = "Succeeded"
 				res.Error = nil // Not an application-level error for this step as exit code matched.
 			} else {
 				hostCtxLogger.Errorf("Command '%s' failed with exit code %d (expected %d). Stderr: %s", spec.Cmd, cmdErr.ExitCode, spec.ExpectedExitCode, string(stderr))
-				// res.Status is already Failed due to runErr != nil
+				res.Status = "Failed"
+				// res.Error is already cmdErr
 			}
 		} else { // Not a CommandError, so a more fundamental execution failure
 			hostCtxLogger.Errorf("Failed to execute command '%s': %v. Stderr: %s", spec.Cmd, runErr, string(stderr))
-			res.Error = runErr // Already set by NewResult if runErr was passed, but good to be explicit
-			res.Status = step.StatusFailed
+			res.Error = runErr
+			res.Status = "Failed"
 		}
 	} else { // runErr is nil (command executed successfully with exit code 0)
 		if spec.ExpectedExitCode == 0 {
 			hostCtxLogger.Successf("Command '%s' completed successfully.", spec.Cmd)
-			// res.Status is already Succeeded
+			res.Status = "Succeeded"
+			// res.Error is already nil
 		} else {
+			// Command succeeded with 0, but a different exit code was expected.
 			errMsg := fmt.Sprintf("command '%s' exited 0, but expected exit code %d", spec.Cmd, spec.ExpectedExitCode)
 			hostCtxLogger.Errorf("%s. Marked as failed.", errMsg)
 			res.Error = errors.New(errMsg)
-			res.Status = step.StatusFailed
+			res.Status = "Failed"
 		}
 	}
 	return res

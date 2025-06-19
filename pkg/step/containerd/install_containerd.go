@@ -35,20 +35,16 @@ func init() {
 }
 
 // Check determines if containerd.io is installed and matches the specified version.
-func (e *InstallContainerdStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
-	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
+func (e *InstallContainerdStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
+	spec, ok := s.(*InstallContainerdStepSpec)
 	if !ok {
-		return false, fmt.Errorf("StepSpec not found in context for InstallContainerdStep Check")
+		return false, fmt.Errorf("unexpected spec type %T for InstallContainerdStepExecutor Check method", s)
 	}
-	spec, ok := currentFullSpec.(*InstallContainerdStepSpec)
-	if !ok {
-		return false, fmt.Errorf("unexpected StepSpec type for InstallContainerdStep Check: %T", currentFullSpec)
+	if ctx.Host.Runner == nil {
+		return false, fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
 	}
+	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
-	if ctx.Host == nil || ctx.Host.Runner == nil { // Added ctx.Host nil check
-		return false, fmt.Errorf("host or runner not available in context")
-	}
-	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
 	pkgName := "containerd.io"
 	installed, err := ctx.Host.Runner.IsPackageInstalled(ctx.GoContext, pkgName)
@@ -111,31 +107,28 @@ func (e *InstallContainerdStepExecutor) Check(ctx runtime.Context) (isDone bool,
 }
 
 // Execute installs containerd.io.
-func (e *InstallContainerdStepExecutor) Execute(ctx runtime.Context) *step.Result {
+func (e *InstallContainerdStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
+	spec, ok := s.(*InstallContainerdStepSpec)
+	if !ok {
+		myErr := fmt.Errorf("Execute: unexpected spec type %T for InstallContainerdStepExecutor", s)
+		stepName := "InstallContainerd (type error)"
+		if s != nil { stepName = s.GetName() }
+		return step.NewResult(stepName, ctx.Host.Name, time.Now(), myErr)
+	}
+
 	startTime := time.Now()
-	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
-	if !ok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for InstallContainerdStep Execute"))
-	}
-	spec, ok := currentFullSpec.(*InstallContainerdStepSpec)
-	if !ok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for InstallContainerdStep Execute: %T", currentFullSpec))
-	}
+	res := step.NewResult(spec.GetName(), ctx.Host.Name, startTime, nil)
+	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
-	res := step.NewResult(ctx, startTime, nil) // Initialize with nil error
-	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
-
-	if ctx.Host == nil || ctx.Host.Runner == nil { // Added ctx.Host nil check
-		res.Error = fmt.Errorf("host or runner not available in context")
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+	if ctx.Host.Runner == nil {
+		res.Error = fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
+		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
 	hostCtxLogger.Infof("Updating package cache before installing containerd.io...")
 	if err := ctx.Host.Runner.UpdatePackageCache(ctx.GoContext); err != nil {
 		res.Error = fmt.Errorf("failed to update package cache: %w", err)
-		// Update res created by NewResult(ctx, startTime, res.Error) if we want to pass this error to NewResult
-		// For now, direct assignment is fine as NewResult was called with nil error.
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 	hostCtxLogger.Successf("Package cache updated.")
 
@@ -167,12 +160,10 @@ func (e *InstallContainerdStepExecutor) Execute(ctx runtime.Context) *step.Resul
 
 	if err := ctx.Host.Runner.InstallPackages(ctx.GoContext, pkgToInstall); err != nil {
 		res.Error = fmt.Errorf("failed to install package %s: %w", pkgNameForLog, err)
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
-	// res.EndTime is set by NewResult, can update if needed for precision
-	res.EndTime = time.Now()
-	// res.Status is Succeeded if error is nil from NewResult
+	res.EndTime = time.Now(); res.Status = "Succeeded"
 	res.Message = fmt.Sprintf("Package %s installed successfully.", pkgNameForLog)
 	hostCtxLogger.Successf("Step succeeded: %s", res.Message)
 	return res

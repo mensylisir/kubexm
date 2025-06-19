@@ -47,11 +47,13 @@ func NewEtcdModule(cfg *config.Cluster) *spec.ModuleSpec {
 		clusterName = cfg.Metadata.Name
 	}
 
-	programExecutableDir := cfg.WorkDir // cfg.WorkDir is assumed to be <program_executable_directory>
-	if programExecutableDir == "" {
-		programExecutableDir = "/opt/kubexms/default_run_dir" // Fallback
+	// programBaseDir is <executable_dir>
+	programBaseDir := cfg.WorkDir
+	if programBaseDir == "" {
+		programBaseDir = "/opt/kubexms/default_run_dir" // Fallback
 	}
-	appFSBaseDir := filepath.Join(programExecutableDir, ".kubexm") // <executable_dir>/.kubexm
+	// appFSBaseDir is <executable_dir>/.kubexm
+	appFSBaseDir := filepath.Join(programBaseDir, ".kubexm")
 
 	// Cluster-specific PKI root directory.
 	clusterPkiRoot := filepath.Join(appFSBaseDir, "pki", clusterName)
@@ -77,38 +79,33 @@ func NewEtcdModule(cfg *config.Cluster) *spec.ModuleSpec {
 
 	// --- Prepare KubexmsKubeConf for PKI steps ---
 	kubexmsKubeConfInstance := &pki.KubexmsKubeConf{
-		AppFSBaseDir: appFSBaseDir,       // <executable_dir>/.kubexm
-		ClusterName:  clusterName,
-		PKIDirectory: clusterPkiRoot,   // <executable_dir>/.kubexm/pki/clusterName
+		AppFSBaseDir:   appFSBaseDir,    // <executable_dir>/.kubexm
+		ClusterName:    clusterName,
+		PKIDirectory:   clusterPkiRoot,  // <executable_dir>/.kubexm/pki/clusterName
 	}
 
 	// --- Define Tasks ---
 	allTasks := []*spec.TaskSpec{}
 
 	// Task 0: Setup PKI Data Context
-	// This task populates KubeConf, Hosts list, and the specific EtcdPkiPath into Module Cache.
 	setupPkiDataTask := taskEtcd.NewSetupEtcdPkiDataContextTask(cfg, kubexmsKubeConfInstance, hostSpecsForNodeCerts)
 
 	// --- Conditional Task Assembly ---
 	if cfg.Spec.Etcd != nil && cfg.Spec.Etcd.Managed {
-		allTasks = append(allTasks, setupPkiDataTask) // Setup data context first for all PKI scenarios
+		allTasks = append(allTasks, setupPkiDataTask)
 
 		if cfg.Spec.Etcd.Type == "external" {
-			// For external etcd, we only prepare local PKI files if specified by user.
-			// No binary installation by this module.
 			if cfg.Spec.Etcd.External != nil && cfg.Spec.Etcd.External.CAFile != "" {
 				allTasks = append(allTasks, taskEtcd.NewPrepareExternalEtcdPKITask(cfg))
 			} else {
-				// Log warning or handle error: external etcd chosen but no cert paths provided.
-				// The PrepareExternalEtcdCertsStep itself might error if paths are empty and it tries to use them.
+				// Consider logging a warning or returning an error for misconfiguration
 			}
-		} else { // Internal Etcd (new or existing)
+		} else { // Internal Etcd
 			allTasks = append(allTasks, taskEtcd.NewInstallEtcdBinariesTask(cfg, etcdVersion, arch, zone, appFSBaseDir))
 
 			if cfg.Spec.Etcd.Existing {
 				existingPkiTask := taskEtcd.NewPrepareExistingEtcdPKITask(cfg)
 				// TODO: Set HostFilter on existingPkiTask to target a single etcd node for fetching.
-				// Example: existingPkiTask.HostFilter = spec.FirstHostWithRole("etcd")
 				allTasks = append(allTasks, existingPkiTask)
 			} else {
 				allTasks = append(allTasks, taskEtcd.NewGenerateEtcdPKITask(cfg, hostSpecsForAltNames, controlPlaneFQDN, "lb.kubexms.local"))

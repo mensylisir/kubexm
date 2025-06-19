@@ -23,8 +23,8 @@ func NewFetchKubeletTask(
 		Version:     version,
 		Arch:        arch,
 		Zone:        zone,
-		DownloadDir: downloadDir,
-		// OutputFilePathKey: component_downloads.KubeletDownloadedPathKey (default)
+		DownloadDir: downloadDir, // Use structured path
+		// OutputFilePathKey defaults to component_downloads.KubeletDownloadedPathKey
 	}
 
 	installStep := &commonstep.InstallBinaryStepSpec{

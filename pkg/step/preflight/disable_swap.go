@@ -35,11 +35,11 @@ func init() {
 // isSwapOn is a helper function moved into the executor context or kept package-level if only used here.
 // For executor pattern, it's better as a private method of the executor if it needs access to `e` or takes `s`.
 // If it only needs `ctx`, it can be a package-level helper or private method.
-func (e *DisableSwapStepExecutor) isSwapOn(ctx runtime.Context) (bool, string, error) { // Changed ctx type
-	if ctx.Host == nil || ctx.Host.Runner == nil { // Added ctx.Host nil check
-		return false, "", fmt.Errorf("host or runner not available in context")
+func (e *DisableSwapStepExecutor) isSwapOn(ctx *runtime.Context) (bool, string, error) {
+	if ctx.Host.Runner == nil {
+		return false, "", fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
 	}
-	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "operation", "isSwapOnCheck").Sugar()
+	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "operation", "isSwapOnCheck").Sugar()
 
 	// Try `swapon --summary --noheadings` first.
 	stdoutBytes, stderrBytes, err := ctx.Host.Runner.RunWithOptions(ctx.GoContext, "swapon --summary --noheadings", &connector.ExecOptions{Sudo: false})
@@ -93,35 +93,28 @@ func (e *DisableSwapStepExecutor) isSwapOn(ctx runtime.Context) (bool, string, e
 }
 
 // Check determines if swap is already disabled.
-func (e *DisableSwapStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
-	// No spec retrieval needed as DisableSwapStepSpec has no fields that affect Check logic.
-	// Step name for logging can be retrieved if necessary, but isSwapOn logs sufficiently.
+func (e *DisableSwapStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
+	// spec is not used by this executor's Check method as DisableSwapStepSpec has no parameters.
 	swapOn, swapOutput, checkErr := e.isSwapOn(ctx)
 	if checkErr != nil {
-		// Construct a more informative error if host context is available
-		hostName := "unknown"
-		if ctx.Host != nil {
-			hostName = ctx.Host.Name
-		}
-		return false, fmt.Errorf("error checking swap status on host %s: %w. Output: %s", hostName, checkErr, swapOutput)
+		return false, fmt.Errorf("error checking swap status on host %s: %w. Output: %s", ctx.Host.Name, checkErr, swapOutput)
 	}
 	return !swapOn, nil // isDone is true if swap is OFF
 }
 
 // Execute disables swap.
-func (e *DisableSwapStepExecutor) Execute(ctx runtime.Context) *step.Result {
+func (e *DisableSwapStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
+	spec, ok := s.(*DisableSwapStepSpec) // Not strictly needed if spec has no fields, but good practice
+	if !ok {
+		myErr := fmt.Errorf("Execute: unexpected spec type %T for DisableSwapStepExecutor", s)
+		stepName := "DisableSwap (type error)"
+		if s != nil { stepName = s.GetName()}
+		return step.NewResult(stepName, ctx.Host.Name, time.Now(), myErr)
+	}
+
 	startTime := time.Now()
-	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
-	if !ok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for DisableSwapStep Execute"))
-	}
-	spec, ok := currentFullSpec.(*DisableSwapStepSpec)
-	if !ok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for DisableSwapStep Execute: %T", currentFullSpec))
-	}
-	// spec is empty, so no spec.PopulateDefaults() call needed.
-	hostCtxLogger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
-	res := step.NewResult(ctx, startTime, nil)
+	res := step.NewResult(spec.GetName(), ctx.Host.Name, startTime, nil)
+	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
 	hostCtxLogger.Infof("Attempting to turn off active swap with 'swapoff -a'...")
 	_, stderrSwapoff, errSwapoff := ctx.Host.Runner.RunWithOptions(ctx.GoContext, "swapoff -a", &connector.ExecOptions{Sudo: true})
@@ -139,37 +132,30 @@ func (e *DisableSwapStepExecutor) Execute(ctx runtime.Context) *step.Result {
 	_, stderrBackup, errBackup := ctx.Host.Runner.RunWithOptions(ctx.GoContext, backupCmd, &connector.ExecOptions{Sudo: true})
 	if errBackup != nil {
 		res.Error = fmt.Errorf("failed to backup %s: %w (stderr: %s)", fstabPath, errBackup, string(stderrBackup))
-		res.Status = step.StatusFailed; hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = "Failed"; hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
-	// res.Stdout might not exist or be the right place for this type of info.
-	// Log it instead or add to Message. For now, logging is fine.
-	logger.Log(ctx, fmt.Sprintf("Backup of %s created.", fstabPath))
-
+	res.Stdout += fmt.Sprintf("Backup %s: OK\n", fstabPath)
 
 	sedCmd := fmt.Sprintf("sed -E -i.kubexms_fstab_prev '/^[^#].*\\bswap\\b/s/^/#/' %s", fstabPath)
 	_, stderrSed, errSed := ctx.Host.Runner.RunWithOptions(ctx.GoContext, sedCmd, &connector.ExecOptions{Sudo: true})
 	if errSed != nil {
 		res.Error = fmt.Errorf("failed to comment out swap entries in %s using sed: %w (stderr: %s)", fstabPath, errSed, string(stderrSed))
-		res.Status = step.StatusFailed; hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = "Failed"; hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
-	logger.Log(ctx, fmt.Sprintf("Commented swap entries in %s. Stderr from sed: %s", fstabPath, string(stderrSed)))
+	res.Stdout += fmt.Sprintf("Commented swap in %s: OK. Stderr: %s\n", fstabPath, string(stderrSed))
 	hostCtxLogger.Successf("Swap entries in %s commented out.", fstabPath)
 
 	swapOn, finalState, verifyErr := e.isSwapOn(ctx)
-	// res.EndTime is set by NewResult, but if we want to be precise after all actions:
 	res.EndTime = time.Now()
-
 	if verifyErr != nil {
 		res.Error = fmt.Errorf("failed to verify swap status after attempting disable: %w. Last state: %s", verifyErr, finalState)
-		res.Status = step.StatusFailed; hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = "Failed"; hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 	if !swapOn {
-		// res.Status is already Succeeded if verifyErr is nil
-		res.Message = "Swap is successfully disabled."
+		res.Status = "Succeeded"; res.Message = "Swap is successfully disabled."
 		hostCtxLogger.Successf("Step succeeded: %s", res.Message)
 	} else {
-		res.Error = fmt.Errorf("failed to disable swap. Current swap status output: %s", finalState)
-		res.Status = step.StatusFailed
+		res.Status = "Failed"; res.Error = fmt.Errorf("failed to disable swap. Current swap status output: %s", finalState)
 		res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %s", res.Message)
 	}
 	return res
