@@ -5,11 +5,12 @@ import (
 	"os"
 
 	"gopkg.in/yaml.v3"
+	"github.com/kubexms/kubexms/pkg/apis/kubexms/v1alpha1"
 )
 
 // Load reads a cluster configuration YAML file from the given path,
 // unmarshals it into a Cluster struct, sets default values, and validates it.
-func Load(configPath string) (*Cluster, error) {
+func Load(configPath string) (*v1alpha1.Cluster, error) { // Changed return type
 	if configPath == "" {
 		return nil, fmt.Errorf("configuration file path cannot be empty")
 	}
@@ -25,47 +26,23 @@ func Load(configPath string) (*Cluster, error) {
 // LoadFromBytes unmarshals YAML content from a byte slice into a Cluster struct,
 // then (in future steps) sets default values and validates it.
 // This is the core loading logic, also used by Load().
-func LoadFromBytes(yamlBytes []byte) (*Cluster, error) {
-	var cfg Cluster
+func LoadFromBytes(yamlBytes []byte) (*v1alpha1.Cluster, error) { // Changed return type
+	var cfg v1alpha1.Cluster // Changed type to v1alpha1.Cluster
 
 	if err := yaml.Unmarshal(yamlBytes, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal yaml config: %w", err)
 	}
 
-	// Ensure Kind and APIVersion are as expected, or set defaults if appropriate.
-	// Current thinking: these fields should ideally be present in the YAML.
-	// Validation (to be added later) will enforce this.
-	// SetDefaults (to be added later) could populate them if they are empty and
-	// if we decide that's the desired behavior (e.g. cfg.APIVersion = DefaultAPIVersion).
-	// For now, LoadFromBytes focuses on unmarshalling.
+	// Apply default values using the v1alpha1 package's function
+	v1alpha1.SetDefaults_Cluster(&cfg)
 
-	// --- Placeholder calls for SetDefaults and Validate ---
-	// These functions will be implemented in defaults.go and validate.go respectively
-	// in subsequent steps as per the plan.
-
-	// Example of intended flow:
-	// err := SetDefaults(&cfg) // Assuming SetDefaults modifies in place and might return an error
-	// if err != nil {
-	//     return nil, fmt.Errorf("failed to apply default configuration values: %w", err)
-	// }
-	//
-	// err = Validate(&cfg) // Validate will return a comprehensive error if issues are found
-	// if err != nil {
-	//     return nil, fmt.Errorf("configuration validation failed: %w", err)
-	// }
-
-	// Apply default values
-	SetDefaults(&cfg) // Called once
-
-	// Validate the configuration
-	if err := Validate(&cfg); err != nil {
+	// Validate the configuration using the v1alpha1 package's function
+	if err := v1alpha1.Validate_Cluster(&cfg); err != nil {
 	    return nil, fmt.Errorf("configuration validation failed: %w", err)
 	}
 	return &cfg, nil
 }
 
 
-// Note: The Load and LoadFromBytes functions now handle reading, unmarshalling, applying defaults, and validation.
-// The calls to SetDefaults and Validate are placeholders for the logic that will be
-// implemented in subsequent steps as per the plan. The actual implementation of these
-// functions will reside in separate files (defaults.go, validate.go).
+// Note: The Load and LoadFromBytes functions now handle reading, unmarshalling,
+// applying defaults from v1alpha1.SetDefaults_Cluster, and validation from v1alpha1.Validate_Cluster.
