@@ -29,6 +29,13 @@ type Cluster struct {
 
 // ClusterSpec defines the desired state of the Kubernetes cluster.
 type ClusterSpec struct {
+	// RoleGroups defines the different groups of nodes in the cluster.
+	RoleGroups *RoleGroupsSpec `json:"roleGroups,omitempty"`
+	// ControlPlaneEndpoint defines the endpoint for the Kubernetes API server.
+	ControlPlaneEndpoint *ControlPlaneEndpointSpec `json:"controlPlaneEndpoint,omitempty"`
+	// System contains system-level configuration.
+	System *SystemSpec `json:"system,omitempty"`
+
 	Global             *GlobalSpec             `json:"global,omitempty"`
 	Hosts              []HostSpec              `json:"hosts"`
 
@@ -46,6 +53,58 @@ type ClusterSpec struct {
 	OS                 *OSConfig               `json:"os,omitempty"`
 	Addons             []AddonConfig           `json:"addons,omitempty"` // Slice of AddonConfig
 	// HostsCount int `json:"hostsCount,omitempty"` // Example for printcolumn
+}
+
+// RoleGroupsSpec defines the different groups of nodes in the cluster.
+type RoleGroupsSpec struct {
+	Master         MasterRoleSpec   `json:"master,omitempty"`
+	Worker         WorkerRoleSpec   `json:"worker,omitempty"`
+	Etcd           EtcdRoleSpec     `json:"etcd,omitempty"`
+	LoadBalancer   LoadBalancerRoleSpec `json:"loadBalancer,omitempty"`
+	Storage        StorageRoleSpec  `json:"storage,omitempty"`
+	CustomRoles    []CustomRoleSpec `json:"customRoles,omitempty"`
+}
+
+// MasterRoleSpec defines the configuration for master nodes.
+type MasterRoleSpec struct {
+	Hosts []string `json:"hosts,omitempty"`
+}
+
+// WorkerRoleSpec defines the configuration for worker nodes.
+type WorkerRoleSpec struct {
+	Hosts []string `json:"hosts,omitempty"`
+}
+
+// EtcdRoleSpec defines the configuration for etcd nodes.
+type EtcdRoleSpec struct {
+	Hosts []string `json:"hosts,omitempty"`
+}
+
+// LoadBalancerRoleSpec defines the configuration for load balancer nodes.
+type LoadBalancerRoleSpec struct {
+	Hosts []string `json:"hosts,omitempty"`
+}
+
+// StorageRoleSpec defines the configuration for storage nodes.
+type StorageRoleSpec struct {
+	Hosts []string `json:"hosts,omitempty"`
+}
+
+// CustomRoleSpec defines a custom role group.
+type CustomRoleSpec struct {
+	Name  string   `json:"name"`
+	Hosts []string `json:"hosts,omitempty"`
+}
+
+// ControlPlaneEndpointSpec defines the endpoint for the Kubernetes API server.
+type ControlPlaneEndpointSpec struct {
+	Host string `json:"host,omitempty"`
+	Port int    `json:"port,omitempty"`
+}
+
+// SystemSpec defines system-level configuration, such as the package manager.
+type SystemSpec struct {
+	PackageManager string `json:"packageManager,omitempty"` // e.g., "apt", "yum"
 }
 
 // GlobalSpec contains settings applicable to the entire cluster or as defaults for hosts.
@@ -138,20 +197,32 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	if cfg.Spec.Etcd == nil {
 	    cfg.Spec.Etcd = &EtcdConfig{}
 	}
-	SetDefaults_EtcdConfig(cfg.Spec.Etcd)
+	SetDefaults_EtcdConfig(cfg.Spec.Etcd) // Assuming SetDefaults_EtcdConfig exists
+
+	// SetDefaults for RoleGroups, ControlPlaneEndpoint, System
+	if cfg.Spec.RoleGroups == nil {
+		cfg.Spec.RoleGroups = &RoleGroupsSpec{}
+	}
+	// SetDefaults_RoleGroupsSpec(cfg.Spec.RoleGroups) // If it exists
+	if cfg.Spec.ControlPlaneEndpoint == nil {
+		cfg.Spec.ControlPlaneEndpoint = &ControlPlaneEndpointSpec{}
+	}
+	// SetDefaults_ControlPlaneEndpointSpec(cfg.Spec.ControlPlaneEndpoint) // If it exists
+	if cfg.Spec.System == nil {
+		cfg.Spec.System = &SystemSpec{}
+	}
+	// SetDefaults_SystemSpec(cfg.Spec.System) // If it exists
+
 
 	if cfg.Spec.Kubernetes == nil {
 	    cfg.Spec.Kubernetes = &KubernetesConfig{}
 	}
-	SetDefaults_KubernetesConfig(cfg.Spec.Kubernetes, cfg.ObjectMeta.Name)
-	if cfg.Spec.Kubernetes != nil && cfg.Spec.Kubernetes.ClusterName == "" && cfg.ObjectMeta.Name != "" {
-	   cfg.Spec.Kubernetes.ClusterName = cfg.ObjectMeta.Name
-	}
+	SetDefaults_KubernetesConfig(cfg.Spec.Kubernetes, cfg.ObjectMeta.Name) // Assuming SetDefaults_KubernetesConfig exists
 
 	if cfg.Spec.Network == nil {
 	    cfg.Spec.Network = &NetworkConfig{}
 	}
-	SetDefaults_NetworkConfig(cfg.Spec.Network)
+	SetDefaults_NetworkConfig(cfg.Spec.Network) // Assuming SetDefaults_NetworkConfig exists
 
 	if cfg.Spec.HighAvailability == nil {
 	    cfg.Spec.HighAvailability = &HighAvailabilityConfig{}
@@ -176,14 +247,14 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	}
 
 	if cfg.Spec.Storage == nil {
-		cfg.Spec.Storage = &StorageConfig{} // Initialize StorageConfig so its defaults can run
+		cfg.Spec.Storage = &StorageConfig{}
 	}
-	SetDefaults_StorageConfig(cfg.Spec.Storage)
+	SetDefaults_StorageConfig(cfg.Spec.Storage) // Assuming SetDefaults_StorageConfig exists
 
 	if cfg.Spec.Registry == nil {
 		cfg.Spec.Registry = &RegistryConfig{}
 	}
-	SetDefaults_RegistryConfig(cfg.Spec.Registry)
+	SetDefaults_RegistryConfig(cfg.Spec.Registry) // Assuming SetDefaults_RegistryConfig exists
 
 	if cfg.Spec.OS == nil {
 		cfg.Spec.OS = &OSConfig{}
@@ -257,16 +328,31 @@ func Validate_Cluster(cfg *Cluster) error {
 	}
 
 	// Integrate EtcdConfig validation
-	if cfg.Spec.Etcd != nil {
-	    Validate_EtcdConfig(cfg.Spec.Etcd, verrs, "spec.etcd")
+	if cfg.Spec.Etcd != nil { // Changed to pointer, so check for nil
+	    Validate_EtcdConfig(cfg.Spec.Etcd, verrs, "spec.etcd") // Assuming Validate_EtcdConfig exists
+	} else {
+		verrs.Add("spec.etcd: section is required") // Or handle if truly optional
 	}
 
+	// Validate RoleGroups, ControlPlaneEndpoint, System
+	if cfg.Spec.RoleGroups != nil {
+		Validate_RoleGroupsSpec(cfg.Spec.RoleGroups, verrs, "spec.roleGroups") // Assuming Validate_RoleGroupsSpec will be created
+	} // else { verrs.Add("spec.roleGroups: section is required"); } // If mandatory
+	if cfg.Spec.ControlPlaneEndpoint != nil {
+		Validate_ControlPlaneEndpointSpec(cfg.Spec.ControlPlaneEndpoint, verrs, "spec.controlPlaneEndpoint") // Assuming Validate_ControlPlaneEndpointSpec will be created
+	} // else { verrs.Add("spec.controlPlaneEndpoint: section is required"); } // If mandatory
+	if cfg.Spec.System != nil {
+		Validate_SystemSpec(cfg.Spec.System, verrs, "spec.system") // Assuming Validate_SystemSpec will be created
+	} // else { verrs.Add("spec.system: section is required"); } // If mandatory
+
+
 	// Integrate KubernetesConfig validation
-	if cfg.Spec.Kubernetes == nil {
-	    verrs.Add("spec.kubernetes: section is required")
+	if cfg.Spec.Kubernetes != nil { // Changed to pointer
+	    Validate_KubernetesConfig(cfg.Spec.Kubernetes, verrs, "spec.kubernetes") // Assuming Validate_KubernetesConfig exists
 	} else {
-	    Validate_KubernetesConfig(cfg.Spec.Kubernetes, verrs, "spec.kubernetes")
+	    verrs.Add("spec.kubernetes: section is required")
 	}
+
 
 	// Integrate HighAvailability validation
 	if cfg.Spec.HighAvailability != nil {
@@ -295,19 +381,23 @@ func Validate_Cluster(cfg *Cluster) error {
 	}
 
 	// Integrate NetworkConfig validation
-	if cfg.Spec.Network == nil {
-	    verrs.Add("spec.network: section is required") // Or handle if optional based on actual requirements
+	if cfg.Spec.Network != nil { // Changed to pointer
+	    Validate_NetworkConfig(cfg.Spec.Network, verrs, "spec.network", cfg.Spec.Kubernetes) // Assuming Validate_NetworkConfig exists
 	} else {
-	    Validate_NetworkConfig(cfg.Spec.Network, verrs, "spec.network", cfg.Spec.Kubernetes)
+	    verrs.Add("spec.network: section is required")
 	}
 
-	if cfg.Spec.Storage != nil {
-		Validate_StorageConfig(cfg.Spec.Storage, verrs, "spec.storage")
-	}
 
-	if cfg.Spec.Registry != nil {
-		Validate_RegistryConfig(cfg.Spec.Registry, verrs, "spec.registry")
-	}
+	// Integrate StorageConfig validation
+	if cfg.Spec.Storage != nil { // Changed to pointer
+		Validate_StorageConfig(cfg.Spec.Storage, verrs, "spec.storage") // Assuming Validate_StorageConfig exists
+	} // else { verrs.Add("spec.storage: section is required"); } // If optional, no error
+
+	// Integrate RegistryConfig validation
+	if cfg.Spec.Registry != nil { // Changed to pointer
+		Validate_RegistryConfig(cfg.Spec.Registry, verrs, "spec.registry") // Assuming Validate_RegistryConfig exists
+	} // else { verrs.Add("spec.registry: section is required"); } // If optional, no error
+
 
 	if cfg.Spec.OS != nil {
 		Validate_OSConfig(cfg.Spec.OS, verrs, "spec.os")

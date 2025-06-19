@@ -15,7 +15,9 @@ import (
 	"github.com/kubexms/kubexms/pkg/connector"
 	"github.com/kubexms/kubexms/pkg/logger"
 	"github.com/kubexms/kubexms/pkg/runner"
-	// "github.com/kubexms/kubexms/pkg/config" // Removed
+	// "github.com/kubexms/kubexms/pkg/config" // This was the old config path.
+	"{{MODULE_NAME}}/pkg/config" // For parser's output type
+	"{{MODULE_NAME}}/pkg/parser" // The new parser
 	"github.com/kubexms/kubexms/pkg/apis/kubexms/v1alpha1"
 )
 
@@ -153,6 +155,36 @@ type Context struct {
 	taskCache     cache.TaskCache
 	stepCache     cache.StepCache
 }
+
+// NewRuntimeFromYAML is a new constructor that takes YAML data directly,
+// parses it, (notionally) converts it, and then calls NewRuntime.
+func NewRuntimeFromYAML(yamlData []byte, baseLogger *logger.Logger) (*ClusterRuntime, error) {
+	if baseLogger == nil {
+		baseLogger = logger.Get() // Fallback to global default logger
+	}
+	initPhaseLogger := &logger.Logger{SugaredLogger: baseLogger.SugaredLogger.With("phase", "runtime_init_from_yaml")}
+
+	parsedConfig, err := parser.ParseClusterYAML(yamlData)
+	if err != nil {
+		initPhaseLogger.Errorf("Failed to parse cluster YAML: %v", err)
+		return nil, fmt.Errorf("failed to parse cluster YAML: %w", err)
+	}
+
+	initPhaseLogger.Infof("Successfully parsed cluster YAML for cluster: %s", parsedConfig.Metadata.Name)
+
+	// Convert config.Cluster to v1alpha1.Cluster
+	v1alpha1Cfg, err := config.ToV1Alpha1Cluster(parsedConfig)
+	if err != nil {
+		initPhaseLogger.Errorf("Failed to convert parsed config.Cluster to v1alpha1.Cluster: %v", err)
+		return nil, fmt.Errorf("failed to convert config to v1alpha1 API type: %w", err)
+	}
+
+	initPhaseLogger.Infof("Successfully converted YAML config to v1alpha1.Cluster for cluster: %s", v1alpha1Cfg.Name)
+
+	// Call the existing NewRuntime function with the converted v1alpha1.Cluster config
+	return NewRuntime(v1alpha1Cfg, baseLogger)
+}
+
 
 // Accessor methods for caches
 func (c *Context) Pipeline() cache.PipelineCache { return c.pipelineCache }
