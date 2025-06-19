@@ -4,9 +4,6 @@ import (
 	"context"
 	"encoding/base64" // For decoding private key if it's base64 encoded
 	"fmt"
-	"context"
-	"encoding/base64" // For decoding private key if it's base64 encoded
-	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -14,12 +11,12 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/kubexms/kubexms/pkg/cache"
-	"github.com/kubexms/kubexms/pkg/config"
+	"github.com/kubexms/kubexms/pkg/cache" // Added cache import
 	"github.com/kubexms/kubexms/pkg/connector"
 	"github.com/kubexms/kubexms/pkg/logger"
 	"github.com/kubexms/kubexms/pkg/runner"
-	"github.com/kubexms/kubexms/pkg/config"
+	// "github.com/kubexms/kubexms/pkg/config" // Removed
+	"github.com/kubexms/kubexms/pkg/apis/kubexms/v1alpha1"
 )
 
 // osReadFile is a variable that defaults to os.ReadFile, allowing it to be mocked for tests.
@@ -43,6 +40,7 @@ type Host struct {
 
 	Connector connector.Connector
 	Runner    *runner.Runner
+	// WorkDir string // Removed
 }
 
 // String returns the name of the host.
@@ -71,44 +69,74 @@ type ClusterRuntime struct {
 // required for a KubeXMS operation (e.g., cluster creation, scaling).
 type ClusterRuntime struct {
 	BaseRuntime   *BaseRuntime // Embedded BaseRuntime
-	ClusterConfig *config.Cluster
+	ClusterConfig *v1alpha1.Cluster
 	GlobalTimeout time.Duration
 }
 
 // Delegating methods to BaseRuntime
-func (cr *ClusterRuntime) GetHost(name string) *Host { return cr.BaseRuntime.GetHost(name) }
-func (cr *ClusterRuntime) GetAllHosts() []*Host { return cr.BaseRuntime.GetAllHosts() }
-func (cr *ClusterRuntime) GetHostsByRole(roleName string) []*Host { return cr.BaseRuntime.GetHostsByRole(roleName) }
-func (cr *ClusterRuntime) Logger() *logger.Logger { return cr.BaseRuntime.Logger() }
-func (cr *ClusterRuntime) GetWorkDir() string { return cr.BaseRuntime.GetWorkDir() }
-func (cr *ClusterRuntime) GetHostWorkDir(hostName string) string { return cr.BaseRuntime.GetHostWorkDir(hostName) }
-func (cr *ClusterRuntime) IsVerbose() bool { return cr.BaseRuntime.IsVerbose() }
-func (cr *ClusterRuntime) ShouldIgnoreErr() bool { return cr.BaseRuntime.ShouldIgnoreErr() }
-func (cr *ClusterRuntime) AddHost(host *Host) error { return cr.BaseRuntime.AddHost(host) }
-func (cr *ClusterRuntime) RemoveHost(hostName string) error { return cr.BaseRuntime.RemoveHost(hostName) }
-func (cr *ClusterRuntime) ObjName() string { return cr.BaseRuntime.ObjName() }
+func (cr *ClusterRuntime) GetHost(name string) *Host {
+	if cr.BaseRuntime == nil { return nil }
+	return cr.BaseRuntime.GetHost(name)
+}
+func (cr *ClusterRuntime) GetAllHosts() []*Host {
+	if cr.BaseRuntime == nil { return []*Host{} }
+	return cr.BaseRuntime.GetAllHosts()
+}
+func (cr *ClusterRuntime) GetHostsByRole(roleName string) []*Host {
+	if cr.BaseRuntime == nil { return []*Host{} }
+	return cr.BaseRuntime.GetHostsByRole(roleName)
+}
+func (cr *ClusterRuntime) Logger() *logger.Logger {
+	if cr.BaseRuntime == nil { return logger.Get() /* fallback */ }
+	return cr.BaseRuntime.Logger()
+}
+func (cr *ClusterRuntime) GetWorkDir() string {
+	if cr.BaseRuntime == nil { return "" }
+	return cr.BaseRuntime.GetWorkDir()
+}
+func (cr *ClusterRuntime) GetHostWorkDir(hostName string) string {
+	if cr.BaseRuntime == nil { return "" }
+	return cr.BaseRuntime.GetHostWorkDir(hostName)
+}
+func (cr *ClusterRuntime) IsVerbose() bool {
+	if cr.BaseRuntime == nil { return false }
+	return cr.BaseRuntime.IsVerbose()
+}
+func (cr *ClusterRuntime) ShouldIgnoreErr() bool {
+	if cr.BaseRuntime == nil { return false }
+	return cr.BaseRuntime.ShouldIgnoreErr()
+}
+func (cr *ClusterRuntime) AddHost(host *Host) error {
+	if cr.BaseRuntime == nil { return fmt.Errorf("BaseRuntime not initialized in ClusterRuntime") }
+	return cr.BaseRuntime.AddHost(host)
+}
+func (cr *ClusterRuntime) RemoveHost(hostName string) error {
+	if cr.BaseRuntime == nil { return fmt.Errorf("BaseRuntime not initialized in ClusterRuntime") }
+	return cr.BaseRuntime.RemoveHost(hostName)
+}
+func (cr *ClusterRuntime) ObjName() string {
+	if cr.BaseRuntime == nil { return "" }
+	return cr.BaseRuntime.ObjName()
+}
 
-// Copy creates a new ClusterRuntime instance that is a shallow copy of the original,
-// but with a deep copy of the BaseRuntime's host collections.
+// Copy creates a new ClusterRuntime instance.
 func (cr *ClusterRuntime) Copy() *ClusterRuntime {
-	if cr == nil {
-		return nil
-	}
-	if cr.BaseRuntime == nil {
-		// This indicates an inconsistent state, NewRuntime should prevent this.
-		// Log using a package-level logger or print to stderr if no context logger is available.
-		// For example: logger.Get().Errorf("Attempted to copy ClusterRuntime with nil BaseRuntime for object: %s", cr.ClusterConfig.Metadata.Name)
-		// Depending on policy, could panic or return nil/error. Returning nil for now.
-		return nil
-	}
-	copiedBaseRuntime := cr.BaseRuntime.Copy()
-	newCr := &ClusterRuntime{
-		BaseRuntime:   copiedBaseRuntime,
-		ClusterConfig: cr.ClusterConfig, // Shallow copy of config pointer
-		GlobalTimeout: cr.GlobalTimeout,
-	}
-	newCr.Logger().Debugf("Created a copy of ClusterRuntime for '%s'.", newCr.ObjName())
-	return newCr
+    if cr == nil { return nil }
+    if cr.BaseRuntime == nil {
+        // Log this problematic state if possible, maybe with a package-level logger
+        // For now, returning nil to prevent panic.
+        return nil
+    }
+    copiedBaseRuntime := cr.BaseRuntime.Copy()
+    newCr := &ClusterRuntime{
+        BaseRuntime:   copiedBaseRuntime,
+        ClusterConfig: cr.ClusterConfig, // Pointer copy is fine for config
+        GlobalTimeout: cr.GlobalTimeout,
+    }
+    if newCr.Logger() != nil { // Logger comes from copiedBaseRuntime
+       newCr.Logger().Debugf("Created a copy of ClusterRuntime for '%s'.", newCr.ObjName())
+    }
+    return newCr
 }
 
 // Context is passed to each execution unit (e.g., a Step in a Task).
@@ -139,42 +167,61 @@ var runnerNewRunner = runner.NewRunner
 // It takes the parsed and defaulted cluster configuration and a base logger,
 // then initializes all hosts, including setting up their connectors and runners.
 // Host initializations are performed concurrently.
-func NewRuntime(cfg *config.Cluster, baseLogger *logger.Logger) (*ClusterRuntime, error) {
+func NewRuntime(cfg *v1alpha1.Cluster, baseLogger *logger.Logger) (*ClusterRuntime, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("cluster configuration cannot be nil")
 	}
+	initErrs := &InitializationError{}
+
 	if baseLogger == nil {
 		baseLogger = logger.Get() // Fallback to global default logger
 		baseLogger.Warnf("NewRuntime called with nil baseLogger, using global default logger instance.")
 	}
 
-	initPhaseLogger := &logger.Logger{SugaredLogger: baseLogger.SugaredLogger.With("cluster_name", cfg.Metadata.Name, "phase", "runtime_init")}
+	initPhaseLogger := &logger.Logger{SugaredLogger: baseLogger.SugaredLogger.With("cluster_name", cfg.ObjectMeta.Name, "phase", "runtime_init")}
 
-	baseRuntime, err := NewBaseRuntime(cfg.Metadata.Name, cfg.Spec.Global.WorkDir, cfg.Spec.Global.Verbose, cfg.Spec.Global.IgnoreErr, baseLogger)
+	var globalWorkDir string
+	var globalVerbose bool
+	var globalIgnoreErr bool
+	var globalConnectionTimeout time.Duration
+
+	if cfg.Spec.Global != nil {
+		globalWorkDir = cfg.Spec.Global.WorkDir
+		globalVerbose = cfg.Spec.Global.Verbose
+		globalIgnoreErr = cfg.Spec.Global.IgnoreErr
+		globalConnectionTimeout = cfg.Spec.Global.ConnectionTimeout
+	} else {
+		initPhaseLogger.Warnf("cfg.Spec.Global is nil, using default values for BaseRuntime parameters and GlobalTimeout.")
+		globalConnectionTimeout = 30 * time.Second // Default timeout if GlobalSpec is missing
+		// NewBaseRuntime will handle default for globalWorkDir if empty
+	}
+
+	baseRuntime, err := NewBaseRuntime(cfg.ObjectMeta.Name, globalWorkDir, globalVerbose, globalIgnoreErr, baseLogger)
 	if err != nil {
 		initPhaseLogger.Errorf("Failed to create BaseRuntime: %v", err)
-		return nil, err // Propagate the error from NewBaseRuntime
+		return nil, err
 	}
 
 	cr := &ClusterRuntime{
 		BaseRuntime:   baseRuntime,
 		ClusterConfig: cfg,
-		GlobalTimeout: cfg.Spec.Global.ConnectionTimeout,
+		GlobalTimeout: globalConnectionTimeout,
 	}
 
 	if cr.GlobalTimeout <= 0 {
 		cr.GlobalTimeout = 30 * time.Second
-		cr.Logger().Debugf("Global connection timeout not specified or invalid, defaulting to %s", cr.GlobalTimeout)
+		// Ensure logger is available before using it
+		if cr.Logger() != nil {
+			cr.Logger().Debugf("Global connection timeout defaulted to 30s")
+		}
 	}
 
 	g, gCtx := errgroup.WithContext(context.Background())
-	initErrs := &InitializationError{} // Assuming InitializationError is defined with an Add method and an errors field/method
 
-	for _, hostCfg := range cfg.Spec.Hosts {
+	for _, hostCfg := range cfg.Spec.Hosts { // hostCfg is v1alpha1.HostSpec
 		currentHostCfg := hostCfg // Capture range variable
 
 		g.Go(func() error {
-			// Use the logger from the ClusterRuntime (which is from BaseRuntime)
 			hostInitLogger := cr.Logger().SugaredLogger.With("host_name_init", currentHostCfg.Name, "host_address_init", currentHostCfg.Address).Sugar()
 			hostInitLogger.Debugf("Initializing...")
 
@@ -184,11 +231,11 @@ func NewRuntime(cfg *config.Cluster, baseLogger *logger.Logger) (*ClusterRuntime
 				User:           currentHostCfg.User,
 				Password:       currentHostCfg.Password,
 				PrivateKeyPath: currentHostCfg.PrivateKeyPath,
-				Timeout:        cr.GlobalTimeout, // Use GlobalTimeout from ClusterRuntime
+				Timeout:        cr.GlobalTimeout,
 			}
 
 			var hostPrivateKeyBytes []byte
-			if currentHostCfg.PrivateKey != "" {
+			if currentHostCfg.PrivateKey != "" { // This is base64 encoded string from v1alpha1.HostSpec
 				decodedKey, err := base64.StdEncoding.DecodeString(currentHostCfg.PrivateKey)
 				if err != nil {
 					err = fmt.Errorf("host %s: failed to decode base64 private key: %w", currentHostCfg.Name, err)
@@ -209,7 +256,7 @@ func NewRuntime(cfg *config.Cluster, baseLogger *logger.Logger) (*ClusterRuntime
 					return err
 				}
 				hostPrivateKeyBytes = keyFileBytes
-				connCfg.PrivateKey = hostPrivateKeyBytes // SSHConnector will use this
+				connCfg.PrivateKey = hostPrivateKeyBytes
 				hostInitLogger.Debugf("Loaded private key from path: %s", currentHostCfg.PrivateKeyPath)
 			}
 
@@ -231,7 +278,7 @@ func NewRuntime(cfg *config.Cluster, baseLogger *logger.Logger) (*ClusterRuntime
 			}
 			hostInitLogger.Debugf("Connection established.")
 
-			runnerCtx, runnerCancel := context.WithTimeout(gCtx, cr.GlobalTimeout) // Use GlobalTimeout from ClusterRuntime
+			runnerCtx, runnerCancel := context.WithTimeout(gCtx, cr.GlobalTimeout)
 			defer runnerCancel()
 
 			newRunner, err := runnerNewRunner(runnerCtx, conn)
@@ -244,37 +291,35 @@ func NewRuntime(cfg *config.Cluster, baseLogger *logger.Logger) (*ClusterRuntime
 			}
 			hostInitLogger.Debugf("Runner initialized. OS: %s, Hostname: %s", newRunner.Facts.OS.ID, newRunner.Facts.Hostname)
 
+			newHostRoles := make(map[string]bool)
+			for _, roleName := range currentHostCfg.Roles { // hostCfg.Roles is []string
+				if strings.TrimSpace(roleName) != "" {
+					newHostRoles[strings.TrimSpace(roleName)] = true
+				}
+			}
+
 			newHost := &Host{
 				Name:            currentHostCfg.Name,
 				Address:         currentHostCfg.Address,
 				InternalAddress: currentHostCfg.InternalAddress,
 				Port:            currentHostCfg.Port,
 				User:            currentHostCfg.User,
-				Password:        currentHostCfg.Password, // Store for potential use, though connector handles auth
+				Password:        currentHostCfg.Password,
 				PrivateKeyPath:  currentHostCfg.PrivateKeyPath,
-				PrivateKey:      hostPrivateKeyBytes, // Store actual key bytes
-				Roles:           make(map[string]bool),
-				Labels:          currentHostCfg.Labels,
+				PrivateKey:      hostPrivateKeyBytes,
+				Roles:           newHostRoles, // Use converted map
+				Labels:          currentHostCfg.Labels, // Already map[string]string
 				Connector:       conn,
 				Runner:          newRunner,
-				// WorkDir is no longer a field on Host
-			}
-			if newHost.Labels == nil {
-				newHost.Labels = make(map[string]string)
-			}
-			for _, role := range currentHostCfg.Roles {
-				if strings.TrimSpace(role) != "" {
-					newHost.Roles[strings.TrimSpace(role)] = true
-				}
+				// WorkDir field is removed from Host struct
 			}
 
-			// Add host to BaseRuntime's inventory
 			if err := cr.AddHost(newHost); err != nil {
 				err = fmt.Errorf("host %s: failed to add to runtime: %w", currentHostCfg.Name, err)
-				initErrs.Add(err) // Collect error
+				initErrs.Add(err)
 				hostInitLogger.Errorf("Failed to add to runtime: %v", err)
 				conn.Close() // Close connection as we failed to add the host post-connect
-				return err   // Return error for this goroutine
+				return err
 			}
 
 			hostInitLogger.Infof("Successfully initialized and added to runtime.")
@@ -282,23 +327,22 @@ func NewRuntime(cfg *config.Cluster, baseLogger *logger.Logger) (*ClusterRuntime
 		})
 	}
 
-	// Wait for all host initializations to complete or fail
 	if err := g.Wait(); err != nil {
-		// This error is the first non-nil error returned by a goroutine
-		cr.Logger().Warnf("Host initialization process encountered errors (first error: %v). See collected errors below.", err)
-	}
-
-	// Check collected errors after all goroutines have finished
-	if !initErrs.IsEmpty() {
-		numErrors := 0
-		if ie, ok := initErrs.(*InitializationError); ok { // Type assertion
-			numErrors = len(ie.errors)
+		if cr.Logger() != nil {
+			cr.Logger().Warnf("Host initialization process encountered errors. First error: %v", err)
 		}
-		cr.Logger().Errorf("ClusterRuntime initialization failed with %d error(s): %v", numErrors, initErrs.Error())
-		return nil, initErrs // Return combined errors
 	}
 
-	cr.Logger().Successf("ClusterRuntime initialized successfully with %d hosts.", len(cr.GetAllHosts()))
+	if !initErrs.IsEmpty() {
+		if cr.Logger() != nil {
+			cr.Logger().Errorf("ClusterRuntime initialization failed: %v", initErrs)
+		}
+		return nil, initErrs
+	}
+
+	if cr.Logger() != nil {
+		cr.Logger().Successf("ClusterRuntime initialized successfully with %d hosts.", len(cr.GetAllHosts()))
+	}
 	return cr, nil
 }
 
@@ -318,23 +362,21 @@ func NewHostContext(
 	}
 
 	var baseLoggerForContext *logger.Logger
-	if cluster != nil && cluster.BaseRuntime != nil { // Check BaseRuntime
-		baseLoggerForContext = cluster.Logger() // Use the delegating Logger() method
+	if cluster != nil && cluster.BaseRuntime != nil && cluster.Logger() != nil {
+		baseLoggerForContext = cluster.Logger()
 	} else {
 		baseLoggerForContext = logger.Get() // Fallback to global default logger
 		if cluster == nil {
 			baseLoggerForContext.Warnf("NewHostContext called with nil ClusterRuntime, using global logger.")
-		} else { // cluster != nil but BaseRuntime is nil (should ideally not happen if NewRuntime is used)
-			baseLoggerForContext.Warnf("NewHostContext called with ClusterRuntime with nil BaseRuntime, using global logger.")
+		} else { // cluster != nil but BaseRuntime or its logger is nil
+			baseLoggerForContext.Warnf("NewHostContext called with ClusterRuntime with nil or uninitialized BaseRuntime, using global logger.")
 		}
 	}
 
 	hostSpecificLogger := baseLoggerForContext // Default to base
 	if host != nil && host.Name != "" {
-		// Contextualize from the determined baseLoggerForContext
 		hostSpecificLogger = &logger.Logger{SugaredLogger: baseLoggerForContext.SugaredLogger.With("host_name", host.Name, "host_address", host.Address)}
 	} else {
-		// Log warning using the already determined baseLoggerForContext or hostSpecificLogger (which is baseLoggerForContext here)
 		if host == nil {
 			hostSpecificLogger.Warnf("NewHostContext called with nil host.")
 		} else { // host != nil but host.Name is empty
@@ -342,14 +384,14 @@ func NewHostContext(
 		}
 	}
 
-	sharedData := &sync.Map{} // Still present as per instructions
+	sharedData := &sync.Map{} // Retained as per instructions
 
 	return &Context{
 		GoContext:     goCtx,
 		Host:          host,
 		Cluster:       cluster,
 		Logger:        hostSpecificLogger,
-		SharedData:    sharedData, // Retained as per instructions
+		SharedData:    sharedData,
 		pipelineCache: pCache,
 		moduleCache:   mCache,
 		taskCache:     tCache,

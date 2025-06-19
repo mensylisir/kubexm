@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"gopkg.in/yaml.v3" // For direct unmarshal check in one test
+	// "gopkg.in/yaml.v3" // Not strictly needed if relying on LoadFromBytes
+	"github.com/kubexms/kubexms/pkg/apis/kubexms/v1alpha1"
 )
 
 const validYAMLMinimal = `
@@ -16,15 +16,20 @@ kind: Cluster
 metadata:
   name: test-cluster
 spec:
-  global: # Add global user to pass validation after defaults
+  global:
     user: "testuser"
+    # port: 22 # Defaulted by v1alpha1.SetDefaults_Cluster
+    # connectionTimeout: 30s # Defaulted by v1alpha1.SetDefaults_Cluster
   hosts:
   - name: master-1
     address: 192.168.1.10
     roles: ["master", "etcd"]
-    # User field will be inherited from global for this host
-  kubernetes:
+    # user: "testuser" # Inherited from global by v1alpha1.SetDefaults_Cluster
+    # port: 22 # Inherited from global by v1alpha1.SetDefaults_Cluster
+  kubernetes: # kubernetes section is required by v1alpha1.Validate_Cluster
     version: v1.25.0
+    # clusterName will be defaulted by SetDefaults_KubernetesConfig
+    # dnsDomain will be defaulted by SetDefaults_KubernetesConfig
 `
 
 const validYAMLFull = `
@@ -39,11 +44,13 @@ spec:
     connectionTimeout: 60s
     workDir: /tmp/global_work
     verbose: true
+    ignoreErr: false
+    skipPreflight: false
   hosts:
   - name: master-1
     address: 192.168.1.10
     internalAddress: 10.0.0.10
-    port: 22
+    port: 22 # Explicit port for this host
     user: hostuser
     privateKeyPath: /home/hostuser/.ssh/id_rsa
     roles: ["master", "etcd"]
@@ -54,38 +61,72 @@ spec:
       value: "true"
       effect: "NoExecute"
     type: ssh
-    workDir: /tmp/host_work
+    # workDir: /tmp/host_work # Removed, not in v1alpha1.HostSpec
   - name: worker-1
     address: 192.168.1.20
     roles: ["worker"]
-    user: workeruser # Explicit user for this host
+    user: workeruser
+    # Port for worker-1 will be inherited from global (2222)
   containerRuntime:
     type: containerd
     version: "1.6.9"
   containerd:
-    useSystemdCgroup: true
-    registryMirrors: # Changed from RegistryMirrorsConfig to match struct
+    # version: "1.6.9" # Can inherit or be specific
+    registryMirrors:
       "docker.io":
       - "https://mirror.docker.com"
       - "https://another.mirror.com"
+    insecureRegistries:
+      - "my.insecure.registry:5000"
+    useSystemdCgroup: true
+    # configPath: "/etc/containerd/custom_config.toml"
   etcd:
     type: stacked
     version: v3.5.9
-    managed: true # Added to satisfy potential IsEnabled in module factory
+    # dataDir: "/var/custom/etcd"
+    clientPort: 2378 # Example of non-default pointer
+    extraArgs:
+      election-timeout: "1200"
   kubernetes:
     version: v1.25.3
     clusterName: my-k8s-cluster
-    podSubnet: "10.244.0.0/16"
-    serviceSubnet: "10.96.0.0/12"
+    dnsDomain: custom.cluster.local
+    proxyMode: ipvs
+    apiServer: # Changed from apiServerArgs
+      extraArgs:
+        "audit-log-maxage": "30"
+    kubelet: # Changed from kubeletArgs
+      extraArgs:
+        "cgroup-driver": "systemd"
+    nodelocaldns:
+      enabled: true
   network:
     plugin: calico
+    version: v3.24.5
+    podSubnet: "10.244.0.0/16"
+    serviceSubnet: "10.96.0.0/12"
   highAvailability:
     type: keepalived
-    # vip: 192.168.1.100
+    vip: 192.168.1.100
+  preflight:
+    disableSwap: true
+    minCPUCores: 2
+  kernel:
+    modules: ["br_netfilter", "ip_vs"]
+    sysctlParams:
+      "net.bridge.bridge-nf-call-iptables": "1"
   addons:
   - name: coredns
     enabled: true
+    namespace: kube-system
   - name: metrics-server
+    # enabled: true # Defaulted by SetDefaults_AddonConfig
+    sources:
+      chart:
+        name: metrics-server
+        repo: https://kubernetes-sigs.github.io/metrics-server/
+        version: 0.6.1
+        values: ["args={--kubelet-insecure-tls}"]
 `
 
 const invalidYAMLMalformed = `
@@ -107,14 +148,38 @@ func TestLoadFromBytes_ValidMinimal(t *testing.T) {
 		t.Fatalf("LoadFromBytes with minimal valid YAML failed: %v", err)
 	}
 
-	if cfg.Metadata.Name != "test-cluster" {
-		t.Errorf("Metadata.Name = %s, want test-cluster", cfg.Metadata.Name)
+	if cfg.ObjectMeta.Name != "test-cluster" { // Changed to ObjectMeta
+		t.Errorf("ObjectMeta.Name = %s, want test-cluster", cfg.ObjectMeta.Name)
 	}
 	if len(cfg.Spec.Hosts) != 1 {
-		t.Errorf("Expected 1 host, got %d", len(cfg.Spec.Hosts))
+		t.Fatalf("Expected 1 host, got %d", len(cfg.Spec.Hosts))
 	}
-	if cfg.Spec.Hosts[0].User != "testuser" { // Inherited from global
-		t.Errorf("Host[0].User = %s, want testuser", cfg.Spec.Hosts[0].User)
+	// Check defaulted global values
+	if cfg.Spec.Global == nil {
+		t.Fatal("cfg.Spec.Global should be initialized by SetDefaults_Cluster")
+	}
+	if cfg.Spec.Global.Port != 22 {
+		t.Errorf("cfg.Spec.Global.Port = %d, want 22 (default)", cfg.Spec.Global.Port)
+	}
+	// Check host inherited and specific values
+	if cfg.Spec.Hosts[0].User != "testuser" {
+		t.Errorf("Host[0].User = %s, want testuser (from global)", cfg.Spec.Hosts[0].User)
+	}
+	if cfg.Spec.Hosts[0].Port != 22 { // Inherited from global default
+		t.Errorf("Host[0].Port = %d, want 22 (inherited from global default)", cfg.Spec.Hosts[0].Port)
+	}
+	// Check Kubernetes basic values
+	if cfg.Spec.Kubernetes == nil {
+		t.Fatal("cfg.Spec.Kubernetes should be initialized by SetDefaults_Cluster")
+	}
+	if cfg.Spec.Kubernetes.Version != "v1.25.0" {
+		t.Errorf("cfg.Spec.Kubernetes.Version = %s, want v1.25.0", cfg.Spec.Kubernetes.Version)
+	}
+	if cfg.Spec.Kubernetes.ClusterName != "test-cluster" { // Defaulted from ObjectMeta.Name
+		t.Errorf("cfg.Spec.Kubernetes.ClusterName = %s, want test-cluster (defaulted)", cfg.Spec.Kubernetes.ClusterName)
+	}
+	if cfg.Spec.Kubernetes.DNSDomain != "cluster.local" { // Defaulted
+		t.Errorf("cfg.Spec.Kubernetes.DNSDomain = %s, want cluster.local (defaulted)", cfg.Spec.Kubernetes.DNSDomain)
 	}
 }
 
@@ -123,24 +188,104 @@ func TestLoadFromBytes_ValidFull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFromBytes with full valid YAML failed: %v", err)
 	}
-	if cfg.Metadata.Name != "full-cluster" {
-		t.Errorf("Metadata.Name = %s, want full-cluster", cfg.Metadata.Name)
+	if cfg.ObjectMeta.Name != "full-cluster" { // Changed to ObjectMeta
+		t.Errorf("ObjectMeta.Name = %s, want full-cluster", cfg.ObjectMeta.Name)
 	}
+	if cfg.Spec.Global == nil { t.Fatal("Spec.Global is nil") }
 	if cfg.Spec.Global.User != "globaluser" {
 		t.Errorf("Global.User = %s, want globaluser", cfg.Spec.Global.User)
 	}
+	if cfg.Spec.Global.Port != 2222 {
+		t.Errorf("Global.Port = %d, want 2222", cfg.Spec.Global.Port)
+	}
 	if len(cfg.Spec.Hosts) != 2 {
-		t.Errorf("Expected 2 hosts, got %d", len(cfg.Spec.Hosts))
+		t.Fatalf("Expected 2 hosts, got %d", len(cfg.Spec.Hosts))
 	}
 	if cfg.Spec.Hosts[0].User != "hostuser" {
 		t.Errorf("Host[0].User = %s, want hostuser", cfg.Spec.Hosts[0].User)
 	}
+	if cfg.Spec.Hosts[0].Port != 22 {
+		t.Errorf("Host[0].Port = %d, want 22", cfg.Spec.Hosts[0].Port)
+	}
+	if cfg.Spec.Hosts[1].User != "workeruser" {
+		t.Errorf("Host[1].User = %s, want workeruser", cfg.Spec.Hosts[1].User)
+	}
+	if cfg.Spec.Hosts[1].Port != 2222 { // Inherited from global
+		t.Errorf("Host[1].Port = %d, want 2222 (inherited)", cfg.Spec.Hosts[1].Port)
+	}
+
+	if cfg.Spec.ContainerRuntime == nil { t.Fatal("Spec.ContainerRuntime is nil") }
 	if cfg.Spec.ContainerRuntime.Type != "containerd" {
 		t.Errorf("ContainerRuntime.Type = %s, want containerd", cfg.Spec.ContainerRuntime.Type)
 	}
-	if cfg.Spec.Containerd == nil || len(cfg.Spec.Containerd.RegistryMirrors["docker.io"]) != 2 {
-		t.Error("Containerd mirrors for docker.io not parsed correctly or Containerd spec is nil")
+	if cfg.Spec.Containerd == nil { t.Fatal("Spec.Containerd is nil") }
+	if mirrors, ok := cfg.Spec.Containerd.RegistryMirrors["docker.io"]; !ok || len(mirrors) != 2 {
+		t.Error("Containerd mirrors for docker.io not parsed correctly")
 	}
+	if cfg.Spec.Containerd.UseSystemdCgroup == nil || !*cfg.Spec.Containerd.UseSystemdCgroup {
+		t.Error("Containerd.UseSystemdCgroup should be true")
+	}
+
+	if cfg.Spec.Etcd == nil { t.Fatal("Spec.Etcd is nil") }
+	if cfg.Spec.Etcd.Type != "stacked" {
+		t.Errorf("Etcd.Type = %s, want stacked", cfg.Spec.Etcd.Type)
+	}
+	if cfg.Spec.Etcd.ClientPort == nil || *cfg.Spec.Etcd.ClientPort != 2378 {
+		t.Errorf("Etcd.ClientPort = %v, want 2378", cfg.Spec.Etcd.ClientPort)
+	}
+
+	if cfg.Spec.Kubernetes == nil { t.Fatal("Spec.Kubernetes is nil") }
+	if cfg.Spec.Kubernetes.ClusterName != "my-k8s-cluster" {
+		t.Errorf("Kubernetes.ClusterName = %s, want my-k8s-cluster", cfg.Spec.Kubernetes.ClusterName)
+	}
+	if cfg.Spec.Kubernetes.DNSDomain != "custom.cluster.local" {
+		t.Errorf("Kubernetes.DNSDomain = %s, want custom.cluster.local", cfg.Spec.Kubernetes.DNSDomain)
+	}
+	if cfg.Spec.Kubernetes.APIServer == nil || cfg.Spec.Kubernetes.APIServer.ExtraArgs["audit-log-maxage"] != "30" {
+		t.Error("Kubernetes.APIServer.ExtraArgs not parsed correctly")
+	}
+
+	if cfg.Spec.Network == nil { t.Fatal("Spec.Network is nil") }
+	if cfg.Spec.Network.Plugin != "calico" {
+		t.Errorf("Network.Plugin = %s, want calico", cfg.Spec.Network.Plugin)
+	}
+    if cfg.Spec.Network.PodSubnet != "10.244.0.0/16" {
+        t.Errorf("Network.PodSubnet = %s, want 10.244.0.0/16", cfg.Spec.Network.PodSubnet)
+    }
+
+
+	if cfg.Spec.HighAvailability == nil { t.Fatal("Spec.HighAvailability is nil") }
+	if cfg.Spec.HighAvailability.Type != "keepalived" {
+		t.Errorf("HighAvailability.Type = %s, want keepalived", cfg.Spec.HighAvailability.Type)
+	}
+    if cfg.Spec.HighAvailability.VIP != "192.168.1.100" {
+        t.Errorf("HighAvailability.VIP = %s, want 192.168.1.100", cfg.Spec.HighAvailability.VIP)
+    }
+
+	if cfg.Spec.Preflight == nil { t.Fatal("Spec.Preflight is nil")}
+	if cfg.Spec.Preflight.DisableSwap == nil || !*cfg.Spec.Preflight.DisableSwap {
+		t.Error("Preflight.DisableSwap should be true")
+	}
+    if cfg.Spec.Preflight.MinCPUCores == nil || *cfg.Spec.Preflight.MinCPUCores != 2 {
+        t.Errorf("Preflight.MinCPUCores = %v, want 2", cfg.Spec.Preflight.MinCPUCores)
+    }
+
+
+	if len(cfg.Spec.Addons) != 2 {
+		t.Fatalf("Expected 2 addons, got %d", len(cfg.Spec.Addons))
+	}
+	if cfg.Spec.Addons[0].Name != "coredns" {
+		t.Errorf("Addon[0].Name = %s, want coredns", cfg.Spec.Addons[0].Name)
+	}
+	if cfg.Spec.Addons[0].Enabled == nil || !*cfg.Spec.Addons[0].Enabled {
+		t.Error("Addon coredns should be enabled")
+	}
+    if cfg.Spec.Addons[1].Name != "metrics-server" {
+        t.Errorf("Addon[1].Name = %s, want metrics-server", cfg.Spec.Addons[1].Name)
+    }
+    if cfg.Spec.Addons[1].Sources.Chart == nil || cfg.Spec.Addons[1].Sources.Chart.Name != "metrics-server" {
+        t.Error("Addon metrics-server chart source not parsed correctly")
+    }
 }
 
 func TestLoadFromBytes_MalformedYAML(t *testing.T) {
@@ -169,8 +314,8 @@ func TestLoad_FileSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load(%s) failed: %v", configPath, err)
 	}
-	if cfg.Metadata.Name != "full-cluster" {
-		t.Errorf("Loaded config Metadata.Name = %s, want full-cluster", cfg.Metadata.Name)
+	if cfg.ObjectMeta.Name != "full-cluster" { // Changed to ObjectMeta
+		t.Errorf("Loaded config ObjectMeta.Name = %s, want full-cluster", cfg.ObjectMeta.Name)
 	}
 }
 

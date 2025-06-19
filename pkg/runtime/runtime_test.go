@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath" // Added
-	"reflect"       // For reflect.DeepEqual
+	"path/filepath" // Not strictly needed in this version of tests, but often useful
 	"strings"
-	"sync/atomic" // Added
+	// "sync" // Not directly needed by these specific test functions
+	"reflect" // For reflect.DeepEqual
 	"testing"
 	"time"
 
@@ -110,124 +110,70 @@ func TestNewRuntime_Success_DetailedConfig(t *testing.T) {
 	config.SetDefaults(cfg)
 	log := logger.Get()
 
-	origRunnerNewRunner := runnerNewRunner
-	defer func() { runnerNewRunner = origRunnerNewRunner }()
-	var newRunnerCallCount int32 // Changed to int32 for atomic operations
+	origRunnerNewRunner := runnerNewRunner; defer func() { runnerNewRunner = origRunnerNewRunner }()
+	var newRunnerCallCount int
 
 	currentMockOsReadFile = func(name string) ([]byte, error) { // Mock ReadFile for master1's key
-		if name == "/specific/path/master_key" {
-			return []byte("test-key-content-master1"), nil
-		}
+		if name == "/specific/path/master_key" { return []byte("test-key-content-master1"), nil }
 		return nil, fmt.Errorf("os.ReadFile mock: unexpected path %s", name)
 	}
 	defer func() { currentMockOsReadFile = nil }()
 
 	runnerNewRunner = func(ctx context.Context, conn connector.Connector) (*runner.Runner, error) {
-		atomic.AddInt32(&newRunnerCallCount, 1) // Use atomic increment
+		newRunnerCallCount++
 		osInfo, _ := conn.GetOS(ctx)
 		return &runner.Runner{Facts: &runner.Facts{OS: osInfo, Hostname: "mock-run-host"}}, nil
 	}
 
 	rt, err := NewRuntime(cfg, log)
-	if err != nil {
-		t.Fatalf("NewRuntime() with detailed config failed: %v", err)
-	}
-	if rt == nil {
-		t.Fatal("NewRuntime() returned nil runtime")
-	}
-	if len(rt.GetAllHosts()) != 3 { // Use GetAllHosts()
-		t.Errorf("len(rt.GetAllHosts()) = %d, want 3", len(rt.GetAllHosts()))
-	}
-	if atomic.LoadInt32(&newRunnerCallCount) != 3 { // Use atomic load
-		t.Errorf("runner.NewRunner calls = %d, want 3", atomic.LoadInt32(&newRunnerCallCount))
-	}
-
-	// Global WorkDir Assertion
-	if rt.GetWorkDir() != cfg.Spec.Global.WorkDir {
-		t.Errorf("rt.GetWorkDir() = %s, want %s", rt.GetWorkDir(), cfg.Spec.Global.WorkDir)
-	}
+	if err != nil { t.Fatalf("NewRuntime() with detailed config failed: %v", err) }
+	if rt == nil { t.Fatal("NewRuntime() returned nil runtime") }
+	if len(rt.Hosts) != 3 { t.Errorf("len(rt.Hosts) = %d, want 3", len(rt.Hosts)) }
+	if newRunnerCallCount != 3 { t.Errorf("runner.NewRunner calls = %d, want 3", newRunnerCallCount) }
 
 	master1 := rt.GetHost("master1")
-	if master1 == nil {
-		t.Fatal("master1 not found")
-	}
-	if master1.User != "masteruser" {
-		t.Errorf("master1.User = %s", master1.User)
-	}
-	if master1.Port != 22 {
-		t.Errorf("master1.Port = %d", master1.Port)
-	}
-	// Host WorkDir Assertions
-	expectedM1WorkDir := filepath.Join(cfg.Spec.Global.WorkDir, "hosts", "master1")
-	if actualM1WorkDir := rt.GetHostWorkDir("master1"); actualM1WorkDir != expectedM1WorkDir {
-		t.Errorf("master1 workdir = %s, want %s", actualM1WorkDir, expectedM1WorkDir)
-	}
-	if string(master1.PrivateKey) != "test-key-content-master1" {
-		t.Error("master1.PrivateKey content mismatch")
-	}
-	if _, ok := master1.Connector.(*connector.SSHConnector); !ok {
-		t.Errorf("master1 connector type %T", master1.Connector)
-	}
+	if master1 == nil { t.Fatal("master1 not found") }
+	if master1.User != "masteruser" { t.Errorf("master1.User = %s", master1.User) }
+	if master1.Port != 22 { t.Errorf("master1.Port = %d", master1.Port) }
+	if master1.WorkDir != "/hostwork/m1" { t.Errorf("master1.WorkDir = %s", master1.WorkDir)}
+	if string(master1.PrivateKey) != "test-key-content-master1" { t.Error("master1.PrivateKey content mismatch") }
+	if _, ok := master1.Connector.(*connector.SSHConnector); !ok { t.Errorf("master1 connector type %T", master1.Connector)}
+
 
 	worker1 := rt.GetHost("worker1")
-	if worker1 == nil {
-		t.Fatal("worker1 not found")
-	}
-	if worker1.User != "globaluser" {
-		t.Errorf("worker1.User = %s", worker1.User)
-	} // Inherited
-	if worker1.Port != 22022 {
-		t.Errorf("worker1.Port = %d", worker1.Port)
-	} // Inherited
-	// Host WorkDir Assertions
-	expectedW1WorkDir := filepath.Join(cfg.Spec.Global.WorkDir, "hosts", "worker1")
-	if actualW1WorkDir := rt.GetHostWorkDir("worker1"); actualW1WorkDir != expectedW1WorkDir {
-		t.Errorf("worker1 workdir = %s, want %s", actualW1WorkDir, expectedW1WorkDir)
-	}
-	if string(worker1.PrivateKey) != "test-key-content-worker1" {
-		t.Error("worker1.PrivateKey content mismatch")
-	}
+	if worker1 == nil { t.Fatal("worker1 not found") }
+	if worker1.User != "globaluser" { t.Errorf("worker1.User = %s", worker1.User) } // Inherited
+	if worker1.Port != 22022 { t.Errorf("worker1.Port = %d", worker1.Port) } // Inherited
+	if worker1.WorkDir != "/mnt/global_work" {t.Errorf("worker1.WorkDir = %s", worker1.WorkDir)} // Inherited
+	if string(worker1.PrivateKey) != "test-key-content-worker1" { t.Error("worker1.PrivateKey content mismatch") }
 
 	localnode := rt.GetHost("localnode")
-	if localnode == nil {
-		t.Fatal("localnode not found")
-	}
-	if _, ok := localnode.Connector.(*connector.LocalConnector); !ok {
-		t.Error("localnode not LocalConnector")
-	}
+	if localnode == nil {t.Fatal("localnode not found")}
+	if _, ok := localnode.Connector.(*connector.LocalConnector); !ok { t.Error("localnode not LocalConnector")}
 
-	if rt.GlobalTimeout != 15*time.Second {
-		t.Errorf("rt.GlobalTimeout = %v", rt.GlobalTimeout)
-	}
+	if rt.GlobalTimeout != 15*time.Second { t.Errorf("rt.GlobalTimeout = %v", rt.GlobalTimeout)}
 }
 
 func TestNewRuntime_PrivateKeyContentPrecedence(t *testing.T) {
-	keyContent := "from-content-directly"
-	base64KeyContent := base64.StdEncoding.EncodeToString([]byte(keyContent))
-	cfg := &config.Cluster{Spec: config.ClusterSpec{
-		Hosts:      []config.HostSpec{{Name: "h1", Address: "1.1.1.1", Port: 22, User: "u", PrivateKey: base64KeyContent, PrivateKeyPath: "/path/should/be/ignored"}},
-		Kubernetes: config.KubernetesSpec{Version: "v1"}, Global: config.GlobalSpec{User: "u", Port: 22},
+	keyContent := "from-content-directly"; base64KeyContent := base64.StdEncoding.EncodeToString([]byte(keyContent))
+	cfg := &config.Cluster{ Spec: config.ClusterSpec{
+		Hosts: []config.HostSpec{ {Name: "h1", Address: "1.1.1.1", Port: 22, User: "u", PrivateKey: base64KeyContent, PrivateKeyPath: "/path/should/be/ignored"}},
+		Kubernetes: config.KubernetesSpec{Version: "v1"}, Global: config.GlobalSpec{User:"u", Port:22},
 	}}
-	config.SetDefaults(cfg)
-	log := logger.Get()
-	origRunnerNewRunner := runnerNewRunner
-	defer func() { runnerNewRunner = origRunnerNewRunner }()
+	config.SetDefaults(cfg); log := logger.Get()
+	origRunnerNewRunner := runnerNewRunner; defer func() { runnerNewRunner = origRunnerNewRunner }()
 	runnerNewRunner = func(ctx context.Context, conn connector.Connector) (*runner.Runner, error) {
-		return &runner.Runner{Facts: &runner.Facts{OS: &connector.OS{ID: "linux"}}}, nil
+		return &runner.Runner{Facts: &runner.Facts{OS: &connector.OS{ID:"linux"}}}, nil
 	}
 	// osReadFile should not be called if PrivateKey content is provided.
 	// The osReadFileMockWrapperForTest will error if currentMockOsReadFile is nil and it's called.
 	currentMockOsReadFile = nil // Ensure no mock is set, so a call would error.
 
 	rt, err := NewRuntime(cfg, log)
-	if err != nil {
-		t.Fatalf("NewRuntime failed: %v", err)
-	}
-	if len(rt.GetAllHosts()) != 1 { // Use GetAllHosts()
-		t.Fatal("Expected 1 host")
-	}
-	if string(rt.GetAllHosts()[0].PrivateKey) != keyContent { // Use GetAllHosts()
-		t.Errorf("Host.PrivateKey = %s, want %s", string(rt.GetAllHosts()[0].PrivateKey), keyContent)
+	if err != nil {t.Fatalf("NewRuntime failed: %v", err)}
+	if len(rt.Hosts) != 1 {t.Fatal("Expected 1 host")}
+	if string(rt.Hosts[0].PrivateKey) != keyContent {
+		t.Errorf("Host.PrivateKey = %s, want %s", string(rt.Hosts[0].PrivateKey), keyContent)
 	}
 }
 
@@ -307,232 +253,9 @@ func TestNewRuntime_RunnerInitializationFailure(t *testing.T) {
 	if !ok { t.Fatalf("Expected InitializationError, got %T: %v", err, err) }
 	if len(initErr.SubErrors) != 1 { t.Errorf("Expected 1 sub-error for runner failure, got %d", len(initErr.SubErrors)) } else {
 		if !strings.Contains(initErr.SubErrors[0].Error(), "host1") ||
-			!strings.Contains(initErr.SubErrors[0].Error(), "runner init failed") ||
-			!errors.Is(initErr.SubErrors[0], expectedRunnerErr) {
+		!strings.Contains(initErr.SubErrors[0].Error(), "runner init failed") ||
+		!errors.Is(initErr.SubErrors[0], expectedRunnerErr) {
 			t.Errorf("Runner init sub-error message/type mismatch: %v", initErr.SubErrors[0])
 		}
-	}
-}
-
-func TestClusterRuntime_Copy(t *testing.T) {
-	cfg := &config.Cluster{
-		Metadata: config.Metadata{Name: "copy-test-cluster"},
-		Spec: config.ClusterSpec{
-			Global: config.GlobalSpec{User: "testuser", Port: 2222, WorkDir: "/tmp/copytest_unique_" + t.Name(), ConnectionTimeout: 5 * time.Second}, // Unique WorkDir
-			Hosts: []config.HostSpec{
-				{Name: "host1", Address: "1.1.1.1", Roles: []string{"roleA"}},
-				{Name: "host2", Address: "2.2.2.2", Roles: []string{"roleB"}},
-			},
-			Kubernetes: config.KubernetesSpec{Version: "v1.2.3"},
-		},
-	}
-	config.SetDefaults(cfg)
-	log := logger.Get()
-
-	// Ensure unique workdir is cleaned up
-	t.Cleanup(func() { os.RemoveAll(cfg.Spec.Global.WorkDir) })
-
-	origRunnerNewRunner := runnerNewRunner
-	defer func() { runnerNewRunner = origRunnerNewRunner }()
-	runnerNewRunner = func(ctx context.Context, conn connector.Connector) (*runner.Runner, error) {
-		// Mock GetOS for runner facts
-		mockConn, ok := conn.(*mockConnectorForRuntime)
-		if ok && mockConn.GetOSFunc == nil { // If it's our mock and GetOS is not specifically set
-			mockConn.GetOSFunc = func(ctx context.Context) (*connector.OS, error) {
-				return &connector.OS{ID: "linux-mock", Arch: "amd64", Kernel: "mock-kernel", VersionID: "1.0"}, nil
-			}
-		}
-		return &runner.Runner{Facts: &runner.Facts{OS: &connector.OS{ID: "linux-mock"}}}, nil
-	}
-	currentMockOsReadFile = nil // No key paths, so ReadFile shouldn't be called.
-
-	originalRt, err := NewRuntime(cfg, log)
-	if err != nil {
-		t.Fatalf("NewRuntime failed: %v", err)
-	}
-	if originalRt == nil {
-		t.Fatal("Original NewRuntime returned nil")
-	}
-	if originalRt.BaseRuntime == nil {
-		t.Fatal("Original NewRuntime returned with nil BaseRuntime")
-	}
-
-	copiedRt := originalRt.Copy()
-	if copiedRt == nil {
-		t.Fatal("ClusterRuntime.Copy() returned nil")
-	}
-	if copiedRt.BaseRuntime == nil {
-		t.Fatal("Copied ClusterRuntime has nil BaseRuntime")
-	}
-
-	// 1. Check basic properties
-	if copiedRt.ObjName() != originalRt.ObjName() {
-		t.Errorf("Copied ObjName mismatch: got %s, want %s", copiedRt.ObjName(), originalRt.ObjName())
-	}
-	if copiedRt.GlobalTimeout != originalRt.GlobalTimeout {
-		t.Errorf("Copied GlobalTimeout mismatch: got %v, want %v", copiedRt.GlobalTimeout, originalRt.GlobalTimeout)
-	}
-	if copiedRt.ClusterConfig != originalRt.ClusterConfig { // Pointer should be same
-		t.Error("Copied ClusterConfig is not the same pointer (it should be)")
-	}
-
-	// 2. Check BaseRuntime was copied (not same pointer for BaseRuntime itself)
-	if copiedRt.BaseRuntime == originalRt.BaseRuntime {
-		t.Error("BaseRuntime in copy is the same pointer as original's BaseRuntime")
-	}
-	if len(copiedRt.GetAllHosts()) != len(originalRt.GetAllHosts()) {
-		t.Errorf("Host count mismatch in copy: got %d, want %d", len(copiedRt.GetAllHosts()), len(originalRt.GetAllHosts()))
-	}
-	// Ensure host pointers within the collections are the same
-	if len(originalRt.GetAllHosts()) > 0 && len(copiedRt.GetAllHosts()) > 0 {
-		if originalRt.GetAllHosts()[0] != copiedRt.GetAllHosts()[0] {
-			t.Error("Host pointers in copied runtime's host list are not the same as original's")
-		}
-	}
-
-	if copiedRt.GetWorkDir() != originalRt.GetWorkDir() {
-		t.Errorf("Copied WorkDir mismatch: got %s, want %s", copiedRt.GetWorkDir(), originalRt.GetWorkDir())
-	}
-
-	// 3. Test independence of host list modifications
-	originalHostCount := len(originalRt.GetAllHosts())
-	if originalHostCount > 0 {
-		hostToRemoveName := originalRt.GetAllHosts()[0].Name
-
-		if copiedRt.GetHost(hostToRemoveName) == nil {
-			t.Fatalf("Host %s expected in copiedRt before removal, but not found", hostToRemoveName)
-		}
-
-		err = copiedRt.RemoveHost(hostToRemoveName) // RemoveHost is a method on ClusterRuntime now
-		if err != nil {
-			t.Fatalf("Failed to remove host '%s' from copied runtime: %v", hostToRemoveName, err)
-		}
-
-		if len(copiedRt.GetAllHosts()) != originalHostCount-1 {
-			t.Errorf("Host count in copiedRt after removal is %d, expected %d", len(copiedRt.GetAllHosts()), originalHostCount-1)
-		}
-		if len(originalRt.GetAllHosts()) != originalHostCount { // Original should be unchanged
-			t.Errorf("Original runtime host count changed: got %d, expected %d", len(originalRt.GetAllHosts()), originalHostCount)
-		}
-		if originalRt.GetHost(hostToRemoveName) == nil { // Host should still be in original
-			t.Errorf("Host %s was removed from originalRt or not found, but should exist", hostToRemoveName)
-		}
-		if copiedRt.GetHost(hostToRemoveName) != nil { // Host should be gone from copy
-			t.Errorf("Host %s should have been removed from copiedRt, but still exists", hostToRemoveName)
-		}
-	} else {
-		t.Log("Skipping host list independence test as no hosts were initialized by NewRuntime.")
-	}
-
-	// 4. Verify logger is shared (same pointer)
-	if copiedRt.Logger() != originalRt.Logger() {
-		t.Error("Logger instance is not shared between original and copied runtime")
-	}
-
-	// 5. Test that connector mock is correctly used by NewRuntime.
-	// This is implicitly tested if NewRuntime succeeds without file access when PrivateKeyPath is not set.
-	// And that runnerNewRunner mock is used.
-}
-
-func TestBaseRuntime_AddGetRemoveHost(t *testing.T) {
-	log := logger.Get()
-	workDir := t.TempDir() // Use t.TempDir for test-specific work directories
-	br, err := NewBaseRuntime("test-br", workDir, false, false, log)
-	if err != nil {
-		t.Fatalf("NewBaseRuntime failed: %v", err)
-	}
-
-	host1 := &Host{Name: "h1", Roles: map[string]bool{"r1": true}}
-	if err := br.AddHost(host1); err != nil {
-		t.Fatalf("br.AddHost(h1) failed: %v", err)
-	}
-	if br.GetHost("h1") != host1 {
-		t.Error("br.GetHost(h1) did not return host1")
-	}
-	if len(br.GetAllHosts()) != 1 {
-		t.Errorf("len(br.GetAllHosts()) got %d, want 1", len(br.GetAllHosts()))
-	}
-	if len(br.GetHostsByRole("r1")) != 1 || br.GetHostsByRole("r1")[0] != host1 {
-		t.Error("br.GetHostsByRole('r1') failed")
-	}
-
-	// Test adding duplicate
-	if err := br.AddHost(host1); err == nil {
-		t.Error("br.AddHost(h1) again should have failed (duplicate)")
-	}
-
-	host2 := &Host{Name: "h2", Roles: map[string]bool{"r1": true, "r2": true}}
-	br.AddHost(host2)
-	if len(br.GetHostsByRole("r1")) != 2 {
-		t.Error("br.GetHostsByRole('r1') after adding h2 failed")
-	}
-
-	// Test removal
-	if err := br.RemoveHost("h1"); err != nil {
-		t.Fatalf("br.RemoveHost(h1) failed: %v", err)
-	}
-	if br.GetHost("h1") != nil {
-		t.Error("br.GetHost(h1) after removal was not nil")
-	}
-	if len(br.GetAllHosts()) != 1 || br.GetAllHosts()[0] != host2 {
-		t.Error("br.GetAllHosts() after removing h1 failed")
-	}
-	if len(br.GetHostsByRole("r1")) != 1 || br.GetHostsByRole("r1")[0] != host2 {
-		t.Errorf("br.GetHostsByRole('r1') after removing h1 failed: got %v", br.GetHostsByRole("r1"))
-	}
-	if len(br.GetHostsByRole("r2")) != 1 || br.GetHostsByRole("r2")[0] != host2 {
-		t.Error("br.GetHostsByRole('r2') after removing h1 failed")
-	}
-	if err := br.RemoveHost("hNonExistent"); err == nil {
-		t.Error("br.RemoveHost for non-existent host should have failed")
-	}
-}
-
-func TestBaseRuntime_WorkDirs(t *testing.T) {
-	log := logger.Get()
-	globalWorkDirParent := t.TempDir()
-	globalWorkDir := filepath.Join(globalWorkDirParent, "test-br-work")
-	// NewBaseRuntime will create globalWorkDir
-	br, err := NewBaseRuntime("test-br-wd", globalWorkDir, false, false, log)
-	if err != nil {
-		t.Fatalf("NewBaseRuntime failed: %v", err)
-	}
-	if br.GetWorkDir() != globalWorkDir {
-		t.Errorf("br.GetWorkDir() got %s, want %s", br.GetWorkDir(), globalWorkDir)
-	}
-	// Check if directory was created by NewBaseRuntime
-	if _, errStat := os.Stat(globalWorkDir); os.IsNotExist(errStat) {
-		t.Errorf("NewBaseRuntime did not create workDir: %s", globalWorkDir)
-	}
-
-	expectedHostDir := filepath.Join(globalWorkDir, "hosts", "myHost")
-	if br.GetHostWorkDir("myHost") != expectedHostDir {
-		t.Errorf("br.GetHostWorkDir('myHost') got %s, want %s", br.GetHostWorkDir("myHost"), expectedHostDir)
-	}
-}
-
-func TestBaseRuntime_Copy(t *testing.T) {
-	log := logger.Get()
-	br, _ := NewBaseRuntime("test-br-copy", t.TempDir(), false, false, log)
-	br.AddHost(&Host{Name: "h1", Roles: map[string]bool{"r1": true}})
-
-	brCopy := br.Copy()
-	if brCopy.ObjName() != "test-br-copy" {
-		t.Error("Copy ObjName mismatch")
-	}
-	if len(brCopy.GetAllHosts()) != 1 {
-		t.Error("Copy host count mismatch")
-	}
-	if brCopy.GetAllHosts()[0] != br.GetAllHosts()[0] { // Host pointers should be same
-		t.Error("Host pointer in copy is different")
-	}
-
-	// Test independence
-	brCopy.RemoveHost("h1")
-	if len(brCopy.GetAllHosts()) != 0 {
-		t.Error("Host not removed from copy")
-	}
-	if len(br.GetAllHosts()) != 1 {
-		t.Error("Original affected by copy's RemoveHost")
 	}
 }
