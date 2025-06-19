@@ -142,8 +142,9 @@ func KubexmsCertEtcdClient(hostname string, altNames *certutil.AltNames) *Kubexm
 
 // Stub for common.KubeConf (from Kubekey's common package) - Renamed
 type KubexmsKubeConf struct {
-	ClusterName  string
-	PKIDirectory string // Base directory for PKI, e.g., /etc/kubernetes
+	AppFSBaseDir   string // Base path for app's persistent data, e.g., <executable_dir>/.kubexm
+	ClusterName    string
+	PKIDirectory   string // Base directory for this cluster's PKI, e.g., AppFSBaseDir/pki/clusterName
 	// Other fields that might be used by cert generation logic.
 }
 

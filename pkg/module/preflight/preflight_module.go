@@ -3,73 +3,18 @@ package preflight
 import (
 	"github.com/kubexms/kubexms/pkg/config"
 	"github.com/kubexms/kubexms/pkg/spec"
-	"github.com/kubexms/kubexms/pkg/step/preflight" // Direct import for step specs
+	// Step specs are now encapsulated within task constructors from taskPreflight package
+	// "github.com/kubexms/kubexms/pkg/step/preflight"
 	taskPreflight "github.com/kubexms/kubexms/pkg/task/preflight"
 )
 
 // NewPreflightModule creates a new module specification for preflight checks and setup.
 func NewPreflightModule(cfg *config.Cluster) *spec.ModuleSpec {
 
-	// Canonical list of desired kernel modules, including a placeholder for nf_conntrack.
-	desiredModulesWithPlaceholder := []string{
-		"br_netfilter",
-		"overlay",
-		"ip_vs",
-		"ip_vs_rr",
-		"ip_vs_wrr",
-		"ip_vs_sh",
-		"nf_conntrack_placeholder", // Will be resolved by EnsureKernelModulesPersistentStepSpec's executor
-	}
-
-	// Resolve modules for the LoadKernelModulesStepSpec (tries both nf_conntrack variants).
-	resolvedForLoading := []string{}
-	for _, m := range desiredModulesWithPlaceholder {
-		if m == "nf_conntrack_placeholder" {
-			resolvedForLoading = append(resolvedForLoading, "nf_conntrack_ipv4", "nf_conntrack")
-		} else {
-			resolvedForLoading = append(resolvedForLoading, m)
-		}
-	}
-
-	// Task for setting up common Kubernetes prerequisites.
-	// Each step spec within this task relies on its internal PopulateDefaults()
-	// to set its specific parameters based on the system or common defaults.
-	setupKubernetesPrerequisitesTask := &spec.TaskSpec{
-		Name: "Setup Kubernetes System Prerequisites", // Renamed for clarity
-		Steps: []spec.StepSpec{
-			// 1. Disable Swap (this is an existing step in preflight, not the one from sysprep)
-			&preflight.DisableSwapStepSpec{},
-
-			// 2. Configure SELinux
-			&preflight.ConfigureSELinuxStepSpec{},
-
-			// 3. Apply Sysctl Settings
-			&preflight.ApplySysctlSettingsStepSpec{},
-
-			// 4. Apply Security Limits
-			&preflight.ApplySecurityLimitsStepSpec{},
-
-			// 5. Disable Common Firewalls
-			&preflight.DisableFirewallStepSpec{},
-
-			// 6. Load Kernel Modules (attempts to load resolved names)
-			&preflight.LoadKernelModulesStepSpec{Modules: resolvedForLoading},
-
-			// 7. Ensure Kernel Modules are Persistent (will resolve placeholder internally)
-			&preflight.EnsureKernelModulesPersistentStepSpec{Modules: desiredModulesWithPlaceholder},
-
-			// 8. Update /etc/hosts file
-			&preflight.UpdateHostsFileStepSpec{},
-
-			// 9. Set IPTables Alternatives to Legacy
-			&preflight.SetIPTablesAlternativesStepSpec{},
-		},
-	}
-
 	// Start with existing tasks (if any, like system checks from task factories)
 	tasks := []*spec.TaskSpec{
 		// These factory functions might create tasks with steps that are now covered by
-		// setupKubernetesPrerequisitesTask. This might lead to redundancy.
+		// the SetupKubernetesPrerequisitesTask. This might lead to redundancy.
 		// For this refactoring, we are primarily focused on integrating the new task.
 		// A later review could consolidate steps from these factory-generated tasks
 		// if they overlap with SetupKubernetesPrerequisitesTask.
@@ -93,9 +38,13 @@ func NewPreflightModule(cfg *config.Cluster) *spec.ModuleSpec {
 	//    enableK8sPrerequisites = true // Defaulting to true if spec section is absent
 	// }
 
-
 	if enableK8sPrerequisites {
-		tasks = append(tasks, setupKubernetesPrerequisitesTask)
+		// The NewSetupKubernetesPrerequisitesTask constructor now encapsulates the logic
+		// for defining kernel module lists and all prerequisite steps.
+		kubePrereqTask := taskPreflight.NewSetupKubernetesPrerequisitesTask(cfg)
+		if kubePrereqTask != nil { // Constructor might return nil if task is not applicable based on cfg
+			tasks = append(tasks, kubePrereqTask)
+		}
 	}
 
 	return &spec.ModuleSpec{

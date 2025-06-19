@@ -54,13 +54,14 @@ func (s *DownloadKubeletStepSpec) PopulateDefaults(ctx *runtime.Context) {
 			s.Arch = "arm64"
 		}
 	}
-	if s.DownloadDir == "" {
-		defaultBaseDownloadDir := "/tmp/kubexms_downloads"
-		if ctx != nil && ctx.WorkDir != "" {
-			defaultBaseDownloadDir = filepath.Join(ctx.WorkDir, "downloads")
-		}
-		s.DownloadDir = filepath.Join(defaultBaseDownloadDir, "kube")
-	}
+	// DownloadDir is now expected to be set by the module.
+	// if s.DownloadDir == "" {
+	// 	defaultBaseDownloadDir := "/tmp/kubexms_downloads"
+	// 	if ctx != nil && ctx.WorkDir != "" {
+	// 		defaultBaseDownloadDir = filepath.Join(ctx.WorkDir, "downloads")
+	// 	}
+	// 	s.DownloadDir = filepath.Join(defaultBaseDownloadDir, "kube")
+	// }
 	if s.OutputFilePathKey == "" {s.OutputFilePathKey = KubeletDownloadedPathKey}
 	if s.OutputFileNameKey == "" {s.OutputFileNameKey = KubeletDownloadedFileNameKey}
 	if s.OutputComponentTypeKey == "" {s.OutputComponentTypeKey = KubeletComponentTypeKey}

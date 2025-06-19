@@ -5,11 +5,11 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 
-	"github.com/kubexms/kubexms/pkg/config" // Assumed to have necessary fields
+	"github.com/kubexms/kubexms/pkg/config"
+	"github.com/kubexms/kubexms/pkg/runtime" // For runtime.Host in HostFilter
 	"github.com/kubexms/kubexms/pkg/spec"
-	etcdsteps "github.com/kubexms/kubexms/pkg/step/etcd"
 	"github.com/kubexms/kubexms/pkg/step/pki"
-	// commonsteps "github.com/kubexms/kubexms/pkg/step/common" // For common.ExtractArchiveStepSpec etc. if used in future
+	taskEtcd "github.com/kubexms/kubexms/pkg/task/etcd"
 )
 
 // normalizeArchFunc ensures consistent architecture naming (amd64, arm64).
@@ -28,35 +28,35 @@ func NewEtcdModule(cfg *config.Cluster) *spec.ModuleSpec {
 	// --- Determine global parameters from cfg ---
 	arch := cfg.Spec.Arch
 	if arch == "" {
-		arch = goruntime.GOARCH // Default to host architecture of the KubeXMS process
+		arch = goruntime.GOARCH
 	}
 	arch = normalizeArchFunc(arch)
 
-	etcdVersion := "v3.5.0" // Default, overridden by cfg if present
+	etcdVersion := "v3.5.0"
 	if cfg.Spec.Etcd != nil && cfg.Spec.Etcd.Version != "" {
 		etcdVersion = cfg.Spec.Etcd.Version
 	}
 
-	zone := "" // Default (no specific zone for downloads)
+	zone := ""
 	if cfg.Spec.Global != nil && cfg.Spec.Global.Zone != "" {
 		zone = cfg.Spec.Global.Zone
 	}
 
-	clusterName := "kubexms-cluster" // Default
+	clusterName := "kubexms-cluster"
 	if cfg.Metadata.Name != "" {
 		clusterName = cfg.Metadata.Name
 	}
 
-	appWorkDir := cfg.WorkDir // e.g., /opt/kubexms or a user-specified directory
-	if appWorkDir == "" {
-		appWorkDir = "/opt/kubexms/default_workdir" // Fallback if not set in cfg
+	programExecutableDir := cfg.WorkDir // cfg.WorkDir is assumed to be <program_executable_directory>
+	if programExecutableDir == "" {
+		programExecutableDir = "/opt/kubexms/default_run_dir" // Fallback
 	}
+	appFSBaseDir := filepath.Join(programExecutableDir, ".kubexm") // <executable_dir>/.kubexm
 
-	// Base directory for all PKI material for this cluster.
-	// This path is local to where the KubeXMS process runs and generates initial PKI.
-	clusterPkiBaseDir := filepath.Join(appWorkDir, "kubexms-pki", clusterName) // Changed "kubexms/pki" to "kubexms-pki"
+	// Cluster-specific PKI root directory.
+	clusterPkiRoot := filepath.Join(appFSBaseDir, "pki", clusterName)
 
-	controlPlaneFQDN := "lb.kubexms.local" // Default
+	controlPlaneFQDN := "lb.kubexms.local"
 	if cfg.Spec.ControlPlaneEndpoint != nil && cfg.Spec.ControlPlaneEndpoint.Domain != "" {
 		controlPlaneFQDN = cfg.Spec.ControlPlaneEndpoint.Domain
 	}
@@ -64,160 +64,67 @@ func NewEtcdModule(cfg *config.Cluster) *spec.ModuleSpec {
 	// --- Prepare HostSpec lists for PKI steps ---
 	var hostSpecsForAltNames []pki.HostSpecForAltNames
 	var hostSpecsForNodeCerts []pki.HostSpecForPKI
-	for _, chost := range cfg.Spec.Hosts { // Assuming cfg.Spec.Hosts is of type []config.HostSpec
+	for _, chost := range cfg.Spec.Hosts {
 		hostSpecsForAltNames = append(hostSpecsForAltNames, pki.HostSpecForAltNames{
 			Name:            chost.Name,
 			InternalAddress: chost.InternalAddress,
 		})
 		hostSpecsForNodeCerts = append(hostSpecsForNodeCerts, pki.HostSpecForPKI{
 			Name:  chost.Name,
-			Roles: chost.Roles, // Assuming config.HostSpec has a Roles []string field
+			Roles: chost.Roles,
 		})
 	}
 
-	// --- Prepare KubexmsKubeConf stub for PKI steps ---
+	// --- Prepare KubexmsKubeConf for PKI steps ---
 	kubexmsKubeConfInstance := &pki.KubexmsKubeConf{
+		AppFSBaseDir: appFSBaseDir,       // <executable_dir>/.kubexm
 		ClusterName:  clusterName,
-		PKIDirectory: clusterPkiBaseDir, // This is the base for all cluster PKI. Steps will add subpaths.
+		PKIDirectory: clusterPkiRoot,   // <executable_dir>/.kubexm/pki/clusterName
 	}
 
 	// --- Define Tasks ---
-	etcdTaskSpecs := []*spec.TaskSpec{}
+	allTasks := []*spec.TaskSpec{}
 
-	// Task 0: Setup PKI Data Context (runs locally to populate module cache)
-	// This task makes KubeConf and HostLists available to subsequent PKI steps in this module.
-	setupPkiDataContextTask := &spec.TaskSpec{
-		Name:      "Setup Etcd PKI Data Context",
-		LocalNode: true, // Indicates this task runs locally where KubeXMS process is running.
-		Steps: []spec.StepSpec{
-			&pki.SetupEtcdPkiDataContextStepSpec{
-				KubeConfForCache:    kubexmsKubeConfInstance,
-				HostsForPKIForCache: hostSpecsForNodeCerts,
-				// EtcdPkiPathForCache is NOT set here; DetermineEtcdPKIPathStep will handle it using KubeConfForCache.PKIDirectory as base.
-				// HostsForAltNamesForCache is also not set here, as GenerateEtcdAltNamesStepSpec.Hosts is populated directly.
-			},
-		},
-	}
-
-	// Task for installing etcd binaries
-	installEtcdBinariesTask := &spec.TaskSpec{
-		Name: fmt.Sprintf("Provision etcd %s for %s", etcdVersion, arch),
-		Steps: []spec.StepSpec{
-			&etcdsteps.DownloadEtcdArchiveStepSpec{
-				Version:     etcdVersion,
-				Arch:        arch,
-				Zone:        zone,
-				DownloadDir: filepath.Join(appWorkDir, "kubexms", "etcd-binaries", etcdVersion, arch), // Added "kubexms"
-			},
-			&etcdsteps.ExtractEtcdArchiveStepSpec{
-				// ArchivePathSharedDataKey uses default from DownloadEtcdStepSpec's output.
-				ExtractionDir: filepath.Join(appWorkDir, "kubexms", "_artifact_extracts", "etcd", etcdVersion, arch), // Added "kubexms"
-				// ExtractedDirSharedDataKey uses its default ("extractedPath").
-			},
-			&etcdsteps.InstallEtcdFromDirStepSpec{
-				// SourcePathSharedDataKey uses default from ExtractArchiveStepSpec's output.
-				// TargetDir uses its default ("/usr/local/bin").
-			},
-			&etcdsteps.CleanupEtcdInstallationStepSpec{}, // Cleans up based on SharedData from download/extract.
-		},
-	}
-
-	// --- PKI Task Definitions ---
-	generateEtcdPKITask := &spec.TaskSpec{
-		Name:      "Generate New Etcd PKI",
-		LocalNode: true,
-		Steps: []spec.StepSpec{
-			&pki.DetermineEtcdPKIPathStepSpec{
-				// Explicitly set BaseWorkDir from the module-calculated clusterPkiBaseDir.
-				// The step's executor will then use this directly.
-				BaseWorkDir: clusterPkiBaseDir,
-				// EtcdPKISubPath defaults to "pki/etcd" inside the step spec if not set here.
-				// OutputPKIPathSharedDataKey defaults to pki.DefaultEtcdPKIPathKey.
-			},
-			&pki.GenerateEtcdAltNamesStepSpec{
-				ControlPlaneEndpointDomain: controlPlaneFQDN,
-				Hosts:                      hostSpecsForAltNames, // Directly populated by the module.
-			},
-			&pki.GenerateEtcdCAStepSpec{
-				// Relies on default SharedData/TaskCache keys to get PKIPath (from DetermineEtcdPKIPathStep)
-				// and KubeConf (from setupPkiDataContextTask).
-			},
-			&pki.GenerateEtcdNodeCertsStepSpec{
-				// Relies on default SharedData/TaskCache keys for PKIPath, AltNames, CA Cert Object, KubeConf, Hosts.
-			},
-		},
-	}
-
-	prepareExistingEtcdPKITask := &spec.TaskSpec{
-		Name: "Prepare PKI from Existing Internal Etcd Cluster",
-		// HostFilter: &spec.HostFilter{Roles: []string{"etcd"}, Strategy: spec.PickFirst}, // Example
-		Steps: []spec.StepSpec{
-			&pki.DetermineEtcdPKIPathStepSpec{BaseWorkDir: clusterPkiBaseDir},
-			&pki.FetchExistingEtcdCertsStepSpec{
-				// Uses defaults for RemoteCertDir, TargetPKIPathSharedDataKey, OutputFetchedFilesListKey.
-				// TargetPKIPath comes from DetermineEtcdPKIPathStep's output.
-			},
-		},
-	}
-
-	prepareExternalEtcdPKITask := &spec.TaskSpec{
-		Name:      "Prepare PKI using User-Provided External Etcd Certificates",
-		LocalNode: true,
-		Steps: []spec.StepSpec{
-			&pki.DetermineEtcdPKIPathStepSpec{BaseWorkDir: clusterPkiBaseDir},
-			&pki.PrepareExternalEtcdCertsStepSpec{
-				ExternalEtcdCAFile:   cfg.Spec.Etcd.External.CAFile,   // Assumes cfg.Spec.Etcd.External is valid if this task runs
-				ExternalEtcdCertFile: cfg.Spec.Etcd.External.CertFile,
-				ExternalEtcdKeyFile:  cfg.Spec.Etcd.External.KeyFile,
-				// TargetPKIPathSharedDataKey and OutputCopiedFilesListKey use defaults.
-			},
-		},
-	}
+	// Task 0: Setup PKI Data Context
+	// This task populates KubeConf, Hosts list, and the specific EtcdPkiPath into Module Cache.
+	setupPkiDataTask := taskEtcd.NewSetupEtcdPkiDataContextTask(cfg, kubexmsKubeConfInstance, hostSpecsForNodeCerts)
 
 	// --- Conditional Task Assembly ---
-	if cfg.Spec.Etcd == nil || !cfg.Spec.Etcd.Managed {
-		// If Etcd is not configured or not managed, do nothing related to etcd.
-		// The IsEnabled function for the module will handle this.
-	} else {
-		// Always run the PKI data context setup task first if any PKI operation is needed.
-		// This task itself is local and populates the module cache.
-		etcdTaskSpecs = append(etcdTaskSpecs, setupPkiDataContextTask)
+	if cfg.Spec.Etcd != nil && cfg.Spec.Etcd.Managed {
+		allTasks = append(allTasks, setupPkiDataTask) // Setup data context first for all PKI scenarios
 
 		if cfg.Spec.Etcd.Type == "external" {
-			if cfg.Spec.Etcd.External == nil || cfg.Spec.Etcd.External.CAFile == "" {
-				// Configuration error: external etcd specified but no cert paths provided.
-				// Module should probably error out or this task will fail.
-				// For now, add the task; it will fail if paths are empty and required.
-				etcdTaskSpecs = append(etcdTaskSpecs, prepareExternalEtcdPKITask)
-				// No binary installation for external etcd.
+			// For external etcd, we only prepare local PKI files if specified by user.
+			// No binary installation by this module.
+			if cfg.Spec.Etcd.External != nil && cfg.Spec.Etcd.External.CAFile != "" {
+				allTasks = append(allTasks, taskEtcd.NewPrepareExternalEtcdPKITask(cfg))
 			} else {
-				etcdTaskSpecs = append(etcdTaskSpecs, prepareExternalEtcdPKITask)
+				// Log warning or handle error: external etcd chosen but no cert paths provided.
+				// The PrepareExternalEtcdCertsStep itself might error if paths are empty and it tries to use them.
 			}
-		} else { // Internal Etcd
-			etcdTaskSpecs = append(etcdTaskSpecs, installEtcdBinariesTask) // Install binaries for internal etcd
+		} else { // Internal Etcd (new or existing)
+			allTasks = append(allTasks, taskEtcd.NewInstallEtcdBinariesTask(cfg, etcdVersion, arch, zone, appFSBaseDir))
 
-			if cfg.Spec.Etcd.Existing { // Using an existing internal etcd cluster
-				etcdTaskSpecs = append(etcdTaskSpecs, prepareExistingEtcdPKITask)
-				// TODO: Add tasks for distributing fetched certs to other nodes if necessary.
-			} else { // New internal etcd cluster, generate PKI from scratch.
-				etcdTaskSpecs = append(etcdTaskSpecs, generateEtcdPKITask)
+			if cfg.Spec.Etcd.Existing {
+				existingPkiTask := taskEtcd.NewPrepareExistingEtcdPKITask(cfg)
+				// TODO: Set HostFilter on existingPkiTask to target a single etcd node for fetching.
+				// Example: existingPkiTask.HostFilter = spec.FirstHostWithRole("etcd")
+				allTasks = append(allTasks, existingPkiTask)
+			} else {
+				allTasks = append(allTasks, taskEtcd.NewGenerateEtcdPKITask(cfg, hostSpecsForAltNames, controlPlaneFQDN, "lb.kubexms.local"))
 			}
 
-			// Placeholder for other internal etcd tasks (setup members, join, validate)
 			setupInitialEtcdMemberTaskSpec := &spec.TaskSpec{
 				Name: "Setup Initial Etcd Member (Placeholder Spec)",
-				// This task would use prepared PKI and etcd binaries.
-				// Needs HostFilter for initial member(s).
 			}
-			etcdTaskSpecs = append(etcdTaskSpecs, setupInitialEtcdMemberTaskSpec)
+			allTasks = append(allTasks, setupInitialEtcdMemberTaskSpec)
 		}
 	}
 
-	// Common validation task, runs if module is enabled.
 	validateEtcdClusterTaskSpec := &spec.TaskSpec{
 		Name: "Validate Etcd Cluster Health (Placeholder Spec)",
 	}
-	etcdTaskSpecs = append(etcdTaskSpecs, validateEtcdClusterTaskSpec)
+	allTasks = append(allTasks, validateEtcdClusterTaskSpec)
 
 	return &spec.ModuleSpec{
 		Name: "Etcd Cluster Management",
@@ -227,16 +134,8 @@ func NewEtcdModule(cfg *config.Cluster) *spec.ModuleSpec {
 			}
 			return false
 		},
-		Tasks: etcdTaskSpecs,
-		PreRun: func(ctx runtime.Context) error {
-			// This PreRun (if it existed at module execution level, not definition)
-			// could be where KubeConf and Hosts lists are placed into ctx.Module().
-			// However, the current plan uses a dedicated Step (SetupEtcdPkiDataContextStep)
-			// as the first step in tasks that need this data.
-			// If PreRun is for the *entire module before any task*, it's a good place.
-			// For now, using the explicit setup task.
-			return nil
-		},
+		Tasks: allTasks,
+		PreRun: nil,
 		PostRun: nil,
 	}
 }
