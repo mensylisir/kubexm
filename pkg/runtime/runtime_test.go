@@ -353,3 +353,151 @@ func TestNewRuntime_RunnerInitializationFailure(t *testing.T) {
 
 // TODO: Add TestClusterRuntime_Copy if it was defined previously, ensuring it uses v1alpha1.Cluster
 // and calls v1alpha1.SetDefaults_Cluster(cfg).
+
+func TestNewRuntimeFromYAML(t *testing.T) {
+	// Mock runner.NewRunner to prevent actual host connections during these YAML tests
+	// unless specific host interactions are being tested.
+	origRunnerNewRunner := runnerNewRunner
+	defer func() { runnerNewRunner = origRunnerNewRunner }()
+	runnerNewRunner = func(ctx context.Context, conn connector.Connector) (*runner.Runner, error) {
+		// Provide a minimal mock runner
+		osInfo, _ := conn.GetOS(ctx) // Use the mock connector's GetOS
+		return &runner.Runner{Facts: &runner.Facts{OS: osInfo, Hostname: "mock-runner-host"}}, nil
+	}
+
+	// Mock os.ReadFile for private key loading if any test YAML uses PrivateKeyPath
+	// For these tests, we'll mostly use inline keys or no keys.
+	currentMockOsReadFile = func(name string) ([]byte, error) {
+		return nil, fmt.Errorf("os.ReadFile mock: unexpected call to %s in NewRuntimeFromYAML tests", name)
+	}
+	defer func() { currentMockOsReadFile = nil }()
+
+
+	validYAML := `
+apiVersion: kubexms.io/v1alpha1
+kind: Cluster
+metadata:
+  name: yaml-test-cluster
+spec:
+  global:
+    user: yamluser
+  hosts:
+    - name: node-yaml
+      address: 192.168.1.100
+      roles: ["controlplane", "worker"]
+  kubernetes:
+    version: "1.27.1"
+  network:
+    plugin: "calico"
+`
+	// This YAML is structurally valid for parsing but might fail deeper validation
+	// if NewRuntime expects certain fields that are defaulted by v1alpha1.SetDefaults_Cluster
+	// but not present here (e.g. Kubernetes version if it became mandatory post-defaulting).
+	// The conversion function itself is simple, so this mainly tests parser + conversion + NewRuntime call.
+
+	invalidYAMLBadSyntax := `
+apiVersion: kubexms.io/v1alpha1
+kind: Cluster
+metadata:
+  name: bad-yaml
+spec:
+  kubernetes: version: "noquote
+`
+
+	minimalYAML := `
+apiVersion: kubexms.io/v1alpha1
+kind: Cluster
+metadata:
+  name: minimal-cluster
+spec:
+  hosts:
+  - name: m1
+    address: 1.2.3.4
+  # Crucial: NewRuntime expects certain fields to be non-nil after defaulting.
+  # For example, if cfg.Spec.Kubernetes is nil, NewRuntime might fail if it accesses it.
+  # v1alpha1.SetDefaults_Cluster would typically initialize these.
+  # The conversion function now just copies these pointers. If they are nil in config.Cluster.Spec
+  # (because they were nil in YAML and config.Cluster.Spec uses v1alpha1 types directly),
+  // they will be nil in the v1alpha1.Cluster passed to NewRuntime.
+  # So, for a successful NewRuntime call, the YAML needs to provide enough structure
+  # or the SetDefaults_Cluster (called within NewRuntime) needs to be robust.
+  # Let's add a minimal Kubernetes block as NewRuntime likely expects it.
+  kubernetes:
+    version: "v0.0.0-defaulted" # This would be set by SetDefaults_KubernetesConfig typically
+  global: # Global is also often defaulted and expected
+    user: "default"
+    port: 22
+`
+
+
+	testCases := []struct {
+		name          string
+		yamlData      []byte
+		expectError   bool
+		expectedName  string
+		expectedK8sVer string
+		expectedNumHosts int
+	}{
+		{
+			name:          "valid full YAML",
+			yamlData:      []byte(validYAML),
+			expectError:   false,
+			expectedName:  "yaml-test-cluster",
+			expectedK8sVer: "1.27.1",
+			expectedNumHosts: 1,
+		},
+		{
+			name:          "minimal valid YAML for runtime",
+			yamlData:      []byte(minimalYAML),
+			expectError:   false,
+			expectedName:  "minimal-cluster",
+			expectedK8sVer: "v0.0.0-defaulted",
+			expectedNumHosts: 1,
+		},
+		{
+			name:        "invalid YAML syntax",
+			yamlData:    []byte(invalidYAMLBadSyntax),
+			expectError: true,
+		},
+		{
+			name:        "empty YAML data",
+			yamlData:    []byte(""),
+			expectError: true, // Parser should error
+		},
+	}
+
+	log := logger.Get() // Use a common logger
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, err := NewRuntimeFromYAML(tc.yamlData, log)
+
+			if tc.expectError {
+				if err == nil {
+					t.Errorf("Expected an error, but got nil")
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("Expected no error, but got: %v", err)
+				}
+				if rt == nil {
+					t.Fatalf("Expected a non-nil ClusterRuntime, but got nil")
+				}
+				if rt.ClusterConfig == nil {
+					t.Fatalf("ClusterRuntime.ClusterConfig is nil")
+				}
+				if rt.ClusterConfig.Name != tc.expectedName {
+					t.Errorf("Expected cluster name %q, got %q", tc.expectedName, rt.ClusterConfig.Name)
+				}
+				if rt.ClusterConfig.Spec.Kubernetes == nil && tc.expectedK8sVer != "" {
+					t.Errorf("Expected Kubernetes version %q, but Kubernetes spec is nil", tc.expectedK8sVer)
+				} else if rt.ClusterConfig.Spec.Kubernetes != nil && rt.ClusterConfig.Spec.Kubernetes.Version != tc.expectedK8sVer {
+					t.Errorf("Expected Kubernetes version %q, got %q", tc.expectedK8sVer, rt.ClusterConfig.Spec.Kubernetes.Version)
+				}
+				if len(rt.GetAllHosts()) != tc.expectedNumHosts {
+					t.Errorf("Expected %d hosts, got %d", tc.expectedNumHosts, len(rt.GetAllHosts()))
+				}
+			}
+		})
+	}
+}
