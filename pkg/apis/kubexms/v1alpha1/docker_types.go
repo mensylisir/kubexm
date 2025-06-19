@@ -33,7 +33,16 @@ type DockerConfig struct {
 	Runtimes            map[string]DockerRuntime `json:"runtimes,omitempty"` // For configuring other runtimes like kata, nvidia
 	MaxConcurrentDownloads *int `json:"maxConcurrentDownloads,omitempty"`
 	MaxConcurrentUploads   *int `json:"maxConcurrentUploads,omitempty"`
-	Bridge                 *string `json:"bridge,omitempty"` // Name of the bridge, usually "docker0"
+	Bridge                 *string `json:"bridge,omitempty"`
+
+	// InstallCRIDockerd indicates whether to install cri-dockerd shim.
+	// Required for using Docker with Kubernetes versions that have removed dockershim.
+	// Defaults to true if Docker is the selected runtime.
+	InstallCRIDockerd *bool `json:"installCRIDockerd,omitempty"`
+
+	// CRIDockerdVersion specifies the version of cri-dockerd to install.
+	// If empty, the installation logic may choose a default compatible version.
+	CRIDockerdVersion *string `json:"criDockerdVersion,omitempty"`
 }
 
 type DockerRuntime struct {
@@ -57,6 +66,12 @@ func SetDefaults_DockerConfig(cfg *DockerConfig) {
 	if cfg.MaxConcurrentUploads == nil { mcu := 5; cfg.MaxConcurrentUploads = &mcu }   // Docker default
 	if cfg.Bridge == nil { bridgeName := "docker0"; cfg.Bridge = &bridgeName }
 	// DefaultRuntime: Docker's default is typically "runc". Let Docker handle if not specified.
+
+	if cfg.InstallCRIDockerd == nil {
+		b := true // Default to installing cri-dockerd with Docker for Kubernetes
+		cfg.InstallCRIDockerd = &b
+	}
+	// No default for CRIDockerdVersion, let install logic handle it or require user input if specific version needed.
 
 	if cfg.LogDriver == nil { defaultLogDriver := "json-file"; cfg.LogDriver = &defaultLogDriver }
 	// Default DataRoot depends on OS, often /var/lib/docker. Let Docker daemon handle its own default if not set.
@@ -120,4 +135,10 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *ValidationErrors, pathPrefi
 	if cfg.Bridge != nil && strings.TrimSpace(*cfg.Bridge) == "" {
 		verrs.Add("%s.bridge: name cannot be empty if specified", pathPrefix)
 	}
+
+	if cfg.CRIDockerdVersion != nil && strings.TrimSpace(*cfg.CRIDockerdVersion) == "" {
+		verrs.Add("%s.criDockerdVersion: cannot be empty if specified", pathPrefix)
+		// Could add version format validation here if needed, e.g., starts with 'v'
+	}
+	// No specific validation for InstallCRIDockerd (boolean pointer) beyond type checking.
 }

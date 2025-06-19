@@ -60,9 +60,11 @@ spec:
       defaultAddressPools:
         - base: "172.29.0.0/16"
           size: 24
+      installCRIDockerd: true
+      criDockerdVersion: "v0.3.1" # Example version
   kubernetes:
     version: v1.24.0
-    containerManager: "systemd" # Should match docker's cgroup driver
+    containerManager: "systemd"
 `
 
 const validYAMLFull = `
@@ -181,11 +183,28 @@ spec:
         blockSize: 27
       - name: "mypool-2-default-blockSize"
         cidr: "192.168.101.0/24"
+        # blockSize will be defaulted
   highAvailability:
-    type: keepalived
+    type: keepalived+haproxy # More complex HA type
     vip: 192.168.1.100
     controlPlaneEndpointDomain: "k8s-api.internal.example.com"
     controlPlaneEndpointPort: 8443
+    keepalived:
+      interface: "eth1"
+      vrid: 101
+      priority: 150
+      authType: "PASS"
+      authPass: "ha_secret"
+    haproxy:
+      frontendBindAddress: "0.0.0.0" # Can be same as VIP or specific node IP if VIP managed by keepalived on nodes
+      # frontendPort: 8443 # Will default from controlPlaneEndpointPort or HAConfig.FrontendPort if that was a field
+      mode: "tcp"
+      balanceAlgorithm: "leastconn"
+      backendServers: # These would typically be your control plane nodes
+        - name: "master-1-backend" # Name derived from actual host for clarity
+          address: "192.168.1.10" # Matches master-1 host address
+          port: 6443 # Kube API server port on node
+        # Add other masters if any
   preflight:
     disableSwap: true
     minCPUCores: 2
@@ -400,6 +419,31 @@ func TestLoadFromBytes_ValidFull(t *testing.T) {
     if haCfg.ControlPlaneEndpointDomain != "k8s-api.internal.example.com" {t.Errorf("HA ControlPlaneEndpointDomain failed: %s", haCfg.ControlPlaneEndpointDomain)}
     if haCfg.ControlPlaneEndpointPort == nil || *haCfg.ControlPlaneEndpointPort != 8443 {t.Errorf("HA ControlPlaneEndpointPort failed: %v", haCfg.ControlPlaneEndpointPort)}
 
+	if haCfg.Type != "keepalived+haproxy" {
+		t.Errorf("HighAvailability.Type = %s, want keepalived+haproxy", haCfg.Type)
+	}
+	if haCfg.Keepalived == nil { t.Fatal("HA.Keepalived section is nil") }
+	if haCfg.Keepalived.Interface == nil || *haCfg.Keepalived.Interface != "eth1" {
+		t.Errorf("HA.Keepalived.Interface = %v, want 'eth1'", haCfg.Keepalived.Interface)
+	}
+	if haCfg.Keepalived.VRID == nil || *haCfg.Keepalived.VRID != 101 {
+		t.Errorf("HA.Keepalived.VRID = %v, want 101", haCfg.Keepalived.VRID)
+	}
+	// ... more Keepalived assertions (priority, authType, authPass)
+
+	if haCfg.HAProxy == nil { t.Fatal("HA.HAProxy section is nil") }
+	if haCfg.HAProxy.BalanceAlgorithm == nil || *haCfg.HAProxy.BalanceAlgorithm != "leastconn" {
+		t.Errorf("HA.HAProxy.BalanceAlgorithm = %v, want 'leastconn'", haCfg.HAProxy.BalanceAlgorithm)
+	}
+	if len(haCfg.HAProxy.BackendServers) != 1 || haCfg.HAProxy.BackendServers[0].Name != "master-1-backend" {
+		 t.Errorf("HA.HAProxy.BackendServers not parsed as expected: %v", haCfg.HAProxy.BackendServers)
+	}
+	// Check that HAProxy.FrontendPort defaulted correctly
+	// Current SetDefaults_HAProxyConfig defaults FrontendPort to 6443.
+	if haCfg.HAProxy.FrontendPort == nil || *haCfg.HAProxy.FrontendPort != 6443 {
+		 t.Errorf("HA.HAProxy.FrontendPort = %v, want 6443 (HAProxy default)", haCfg.HAProxy.FrontendPort)
+	}
+
 
 	if cfg.Spec.Preflight == nil { t.Fatal("Spec.Preflight is nil")}
 	if cfg.Spec.Preflight.DisableSwap == nil || !*cfg.Spec.Preflight.DisableSwap {
@@ -536,5 +580,11 @@ func TestLoadFromBytes_ValidDockerRuntime(t *testing.T) {
 	if cfg.Spec.Kubernetes == nil {t.Fatal("Spec.Kubernetes is nil")}
 	if cfg.Spec.Kubernetes.ContainerManager != "systemd" {
 	   t.Errorf("Kubernetes.ContainerManager = %s, want systemd for Docker with systemd cgroup", cfg.Spec.Kubernetes.ContainerManager)
+	}
+	if dockerCfg.InstallCRIDockerd == nil || !*dockerCfg.InstallCRIDockerd {
+		t.Errorf("Docker.InstallCRIDockerd expected true, got %v", dockerCfg.InstallCRIDockerd)
+	}
+	if dockerCfg.CRIDockerdVersion == nil || *dockerCfg.CRIDockerdVersion != "v0.3.1" {
+		t.Errorf("Docker.CRIDockerdVersion = %v, want 'v0.3.1'", dockerCfg.CRIDockerdVersion)
 	}
 }
