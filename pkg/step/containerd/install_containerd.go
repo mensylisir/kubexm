@@ -1,29 +1,57 @@
 package containerd
 
 import (
-	"context" // Required by runtime.Context
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
+	"os" // For os.Stat in Check
 
-	"github.com/kubexms/kubexms/pkg/connector" // For connector.ExecOptions
-	"github.com/kubexms/kubexms/pkg/runner"    // For runner.PackageManagerApt etc.
+	"github.com/kubexms/kubexms/pkg/connector"
 	"github.com/kubexms/kubexms/pkg/runtime"
 	"github.com/kubexms/kubexms/pkg/spec"
 	"github.com/kubexms/kubexms/pkg/step"
+	commonstep "github.com/kubexms/kubexms/pkg/step/common" // For DefaultExtractedPathKey
 )
 
-// InstallContainerdStepSpec defines parameters for installing containerd.io.
+// InstallContainerdStepSpec defines parameters for installing containerd from extracted files.
 type InstallContainerdStepSpec struct {
-	Version  string
-	StepName string // Optional: for a custom name for this specific step instance
+	SourceExtractedPathSharedDataKey string            `json:"sourceExtractedPathSharedDataKey,omitempty"` // Key for path to extracted archive root
+	SystemdUnitFileSourceRelPath     string            `json:"systemdUnitFileSourceRelPath,omitempty"`   // Relative path of .service file in archive
+	SystemdUnitFileTargetPath        string            `json:"systemdUnitFileTargetPath,omitempty"`      // Target path for .service file
+	BinariesToCopy                   map[string]string `json:"binariesToCopy,omitempty"`                 // Map: source_rel_path_in_archive -> target_system_path
+	StepName                         string            `json:"stepName,omitempty"`                       // Optional custom name
 }
 
 // GetName returns the step name.
 func (s *InstallContainerdStepSpec) GetName() string {
 	if s.StepName != "" { return s.StepName }
-	if s.Version != "" { return fmt.Sprintf("Install containerd.io (version %s)", s.Version) }
-	return "Install containerd.io (latest)"
+	return "Install Containerd from Extracted Files"
+}
+
+// PopulateDefaults sets default values.
+func (s *InstallContainerdStepSpec) PopulateDefaults() {
+	if s.SourceExtractedPathSharedDataKey == "" {
+		s.SourceExtractedPathSharedDataKey = commonstep.DefaultExtractedPathKey
+	}
+	if s.SystemdUnitFileSourceRelPath == "" {
+		// containerd.service is often at the root of the extracted archive, not in a 'bin' subdir
+		s.SystemdUnitFileSourceRelPath = "containerd.service"
+	}
+	if s.SystemdUnitFileTargetPath == "" {
+		// Common paths for systemd unit files
+		s.SystemdUnitFileTargetPath = "/usr/lib/systemd/system/containerd.service"
+	}
+	if len(s.BinariesToCopy) == 0 {
+		s.BinariesToCopy = map[string]string{
+			"bin/containerd":                "/usr/local/bin/containerd",
+			"bin/containerd-shim":           "/usr/local/bin/containerd-shim",
+			"bin/containerd-shim-runc-v1":   "/usr/local/bin/containerd-shim-runc-v1",
+			"bin/containerd-shim-runc-v2":   "/usr/local/bin/containerd-shim-runc-v2",
+			"bin/ctr":                       "/usr/local/bin/ctr",
+			"bin/runc":                      "/usr/local/sbin/runc", // runc often goes here or /usr/local/bin
+		}
+	}
 }
 var _ spec.StepSpec = &InstallContainerdStepSpec{}
 
@@ -34,138 +62,165 @@ func init() {
 	step.Register(step.GetSpecTypeName(&InstallContainerdStepSpec{}), &InstallContainerdStepExecutor{})
 }
 
-// Check determines if containerd.io is installed and matches the specified version.
-func (e *InstallContainerdStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
-	spec, ok := s.(*InstallContainerdStepSpec)
+// Check determines if containerd seems installed from extracted files.
+func (e *InstallContainerdStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		return false, fmt.Errorf("unexpected spec type %T for InstallContainerdStepExecutor Check method", s)
+		return false, fmt.Errorf("StepSpec not found in context for InstallContainerdStep Check")
 	}
-	if ctx.Host.Runner == nil {
-		return false, fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
+	spec, ok := currentFullSpec.(*InstallContainerdStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected StepSpec type for InstallContainerdStep Check: %T", currentFullSpec)
 	}
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+	spec.PopulateDefaults()
+	logger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step", spec.GetName())
 
-
-	pkgName := "containerd.io"
-	installed, err := ctx.Host.Runner.IsPackageInstalled(ctx.GoContext, pkgName)
-	if err != nil {
-		return false, fmt.Errorf("failed to check if package %s is installed on host %s: %w", pkgName, ctx.Host.Name, err)
+	// Check if all target binaries exist
+	for _, targetPath := range spec.BinariesToCopy {
+		exists, errExists := ctx.Host.Runner.Exists(ctx.GoContext, targetPath)
+		if errExists != nil {
+			return false, fmt.Errorf("failed to check existence of %s: %w", targetPath, errExists)
+		}
+		if !exists {
+			logger.Debugf("Target binary %s does not exist.", targetPath)
+			return false, nil
+		}
+		// TODO: Could add permission check here if critical for Check phase.
 	}
-	if !installed {
-		hostCtxLogger.Debugf("Package %s is not installed.", pkgName)
-		return false, nil
-	}
+	logger.Debug("All target binaries exist.")
 
-	if spec.Version == "" {
-		hostCtxLogger.Infof("Package %s is installed (latest version or version not specified for check).", pkgName)
-		return true, nil
-	}
-
-	hostCtxLogger.Debugf("Package %s is installed, checking version against required '%s'.", pkgName, spec.Version)
-
-	// Version specific check. Assumes runner has a public DetectPackageManager method.
-	pmInfo, detectErr := ctx.Host.Runner.DetectPackageManager(ctx.GoContext)
-	if detectErr != nil {
-		hostCtxLogger.Warnf("Could not detect package manager to verify %s version %s: %v. Assuming check passes to avoid re-install if not strictly needed.", pkgName, spec.Version, detectErr)
-		// If we cannot detect PM, we cannot reliably check version.
-		// Depending on strictness, could return false to force Run, or true to be lenient.
-		// Let's be lenient here for Check, Run will try to install specific version anyway.
-		return true, nil
-	}
-
-	var versionCmd string
-	switch pmInfo.Type {
-	case runner.PackageManagerApt:
-		versionCmd = fmt.Sprintf("apt-cache policy %s | grep 'Installed:' | awk '{print $2}'", pkgName)
-	case runner.PackageManagerYum, runner.PackageManagerDnf:
-		versionCmd = fmt.Sprintf("rpm -q --queryformat '%%{VERSION}-%%{RELEASE}' %s", pkgName)
-	default:
-		hostCtxLogger.Warnf("Version check for %s not implemented for package manager type %s. Assuming check passes.", pkgName, pmInfo.Type)
-		return true, nil
+	// Check if systemd unit file exists
+	if spec.SystemdUnitFileTargetPath != "" {
+		exists, errExists := ctx.Host.Runner.Exists(ctx.GoContext, spec.SystemdUnitFileTargetPath)
+		if errExists != nil {
+			return false, fmt.Errorf("failed to check existence of systemd unit file %s: %w", spec.SystemdUnitFileTargetPath, errExists)
+		}
+		if !exists {
+			logger.Debugf("Systemd unit file %s does not exist.", spec.SystemdUnitFileTargetPath)
+			return false, nil
+		}
+		logger.Debugf("Systemd unit file %s exists.", spec.SystemdUnitFileTargetPath)
 	}
 
-	// Sudo false for version check commands.
-	stdoutBytes, stderrBytes, execErr := ctx.Host.Runner.RunWithOptions(ctx.GoContext, versionCmd, &connector.ExecOptions{Sudo: false})
-	if execErr != nil {
-		hostCtxLogger.Warnf("Failed to get installed version of %s (command: '%s'): %v. Stderr: %s. Assuming version match for check phase to be safe or needs update.", pkgName, versionCmd, execErr, string(stderrBytes))
-		// If we can't get the version, we can't confirm it's correct.
-		// Returning false means Run will execute.
-		return false, nil
-	}
-	installedVersion := strings.TrimSpace(string(stdoutBytes))
-
-	// Version comparison: simple prefix match. e.g. spec.Version "1.6.9" matches installed "1.6.9-1" or "1.6.9".
-	// Trim "v" prefix from spec.Version for comparison if it exists.
-	requiredVersionNoV := strings.TrimPrefix(spec.Version, "v")
-	if strings.HasPrefix(installedVersion, requiredVersionNoV) || installedVersion == requiredVersionNoV {
-		hostCtxLogger.Infof("Package %s version %s is installed and matches required version %s.", pkgName, installedVersion, spec.Version)
-		return true, nil
-	}
-
-	hostCtxLogger.Infof("Package %s version %s is installed, but required version is %s. Main installation logic will run.", pkgName, installedVersion, spec.Version)
-	return false, nil // Installed but not the right version, so not "done".
+	logger.Infof("Containerd installation (binaries and service file) appears complete.")
+	return true, nil
 }
 
-// Execute installs containerd.io.
-func (e *InstallContainerdStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	spec, ok := s.(*InstallContainerdStepSpec)
-	if !ok {
-		myErr := fmt.Errorf("Execute: unexpected spec type %T for InstallContainerdStepExecutor", s)
-		stepName := "InstallContainerd (type error)"
-		if s != nil { stepName = s.GetName() }
-		return step.NewResult(stepName, ctx.Host.Name, time.Now(), myErr)
-	}
-
+// Execute installs containerd from pre-extracted files.
+func (e *InstallContainerdStepExecutor) Execute(ctx runtime.Context) *step.Result {
 	startTime := time.Now()
-	res := step.NewResult(spec.GetName(), ctx.Host.Name, startTime, nil)
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for InstallContainerdStep Execute"))
+	}
+	spec, ok := currentFullSpec.(*InstallContainerdStepSpec)
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for InstallContainerdStep Execute: %T", currentFullSpec))
+	}
+	spec.PopulateDefaults()
+	logger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step", spec.GetName())
+	res := step.NewResult(ctx, startTime, nil)
 
-	if ctx.Host.Runner == nil {
-		res.Error = fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
-		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+	if ctx.Host == nil || ctx.Host.Runner == nil {
+		res.Error = fmt.Errorf("host or runner not available in context"); res.Status = step.StatusFailed; return res
 	}
 
-	hostCtxLogger.Infof("Updating package cache before installing containerd.io...")
-	if err := ctx.Host.Runner.UpdatePackageCache(ctx.GoContext); err != nil {
-		res.Error = fmt.Errorf("failed to update package cache: %w", err)
-		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+	extractedPathVal, found := ctx.Task().Get(spec.SourceExtractedPathSharedDataKey)
+	if !found {
+		res.Error = fmt.Errorf("path to extracted containerd not found in Task Cache using key: %s", spec.SourceExtractedPathSharedDataKey)
+		res.Status = step.StatusFailed; return res
 	}
-	hostCtxLogger.Successf("Package cache updated.")
+	extractedPath, typeOk := extractedPathVal.(string)
+	if !typeOk || extractedPath == "" {
+		res.Error = fmt.Errorf("invalid extracted containerd path in Task Cache (not a string or empty) for key: %s", spec.SourceExtractedPathSharedDataKey)
+		res.Status = step.StatusFailed; return res
+	}
+	logger.Infof("Using extracted containerd files from: %s", extractedPath)
 
-	pkgToInstall := "containerd.io"
-	pkgNameForLog := "containerd.io"
-	versionForCmd := strings.TrimPrefix(spec.Version, "v") // Remove "v" for commands like yum/dnf
+	// Install binaries
+	for srcRelPath, targetSystemPath := range spec.BinariesToCopy {
+		sourceBinaryPath := filepath.Join(extractedPath, srcRelPath)
+		targetDir := filepath.Dir(targetSystemPath)
+		binaryName := filepath.Base(targetSystemPath) // Should match key in map if map value is full path
 
-	if spec.Version != "" { // If a specific version is requested
-		pmInfo, detectErr := ctx.Host.Runner.DetectPackageManager(ctx.GoContext)
-		if detectErr != nil {
-			hostCtxLogger.Warnf("Could not detect package manager to format versioned package name for containerd.io %s: %v. Installing '%s' without version formatting.", spec.Version, detectErr, pkgName)
-			// Attempt to install with version string as is, might work for some PMs or if user knows the exact format.
-			if versionForCmd != "" { pkgToInstall = fmt.Sprintf("%s-%s", pkgName, versionForCmd) } // A common guess
-			pkgNameForLog = pkgToInstall
-		} else {
-			if pmInfo.Type == runner.PackageManagerApt {
-				pkgToInstall = fmt.Sprintf("containerd.io=%s", spec.Version) // APT uses original version string
-			} else if pmInfo.Type == runner.PackageManagerYum || pmInfo.Type == runner.PackageManagerDnf {
-				pkgToInstall = fmt.Sprintf("containerd.io-%s", versionForCmd)
-			} else { // Default or unknown
-				pkgToInstall = fmt.Sprintf("containerd.io-%s", versionForCmd)
-			}
-			pkgNameForLog = pkgToInstall
+		logger.Infof("Ensuring target directory %s for binary %s exists...", targetDir, binaryName)
+		if err := ctx.Host.Runner.Mkdirp(ctx.GoContext, targetDir, "0755", true); err != nil {
+			res.Error = fmt.Errorf("failed to create target directory %s for %s: %w", targetDir, binaryName, err)
+			res.Status = step.StatusFailed; return res
 		}
-		hostCtxLogger.Infof("Attempting to install %s...", pkgNameForLog)
+
+		logger.Infof("Copying binary from %s to %s...", sourceBinaryPath, targetSystemPath)
+		cpCmd := fmt.Sprintf("cp -fp %s %s", sourceBinaryPath, targetSystemPath)
+		_, stderrCp, errCp := ctx.Host.Runner.RunWithOptions(ctx.GoContext, cpCmd, &connector.ExecOptions{Sudo: true})
+		if errCp != nil {
+			res.Error = fmt.Errorf("failed to copy binary %s to %s (stderr: %s): %w", sourceBinaryPath, targetSystemPath, stderrCp, errCp)
+			res.Status = step.StatusFailed; return res
+		}
+
+		chmodCmd := fmt.Sprintf("chmod 0755 %s", targetSystemPath)
+		_, stderrChmod, errChmod := ctx.Host.Runner.RunWithOptions(ctx.GoContext, chmodCmd, &connector.ExecOptions{Sudo: true})
+		if errChmod != nil {
+			res.Error = fmt.Errorf("failed to set permissions for %s (stderr: %s): %w", targetSystemPath, stderrChmod, errChmod)
+			res.Status = step.StatusFailed; return res
+		}
+		logger.Infof("Binary %s installed to %s with permissions 0755.", binaryName, targetSystemPath)
+	}
+
+	// Install systemd unit file
+	if spec.SystemdUnitFileTargetPath != "" && spec.SystemdUnitFileSourceRelPath != "" {
+		sourceServiceFile := filepath.Join(extractedPath, spec.SystemdUnitFileSourceRelPath)
+		targetServiceFileDir := filepath.Dir(spec.SystemdUnitFileTargetPath)
+
+		logger.Infof("Ensuring target directory %s for systemd unit file exists...", targetServiceFileDir)
+		if err := ctx.Host.Runner.Mkdirp(ctx.GoContext, targetServiceFileDir, "0755", true); err != nil {
+			res.Error = fmt.Errorf("failed to create target directory %s for systemd unit file: %w", targetServiceFileDir, err)
+			res.Status = step.StatusFailed; return res
+		}
+
+		logger.Infof("Copying systemd unit file from %s to %s...", sourceServiceFile, spec.SystemdUnitFileTargetPath)
+		// Check if source service file exists first
+		srcServiceFileExists, errExist := ctx.Host.Runner.Exists(ctx.GoContext, sourceServiceFile) // This checks remote path, source is local to extracted archive
+		if errExist != nil {
+			// This check is problematic if extractedPath is remote, but for containerd it's usually local after download.
+			// Assuming extractedPath is accessible for a stat/check from where this runner op is executed.
+			// If utils.DownloadFile puts it on target host, then this check is fine.
+			logger.Warnf("Could not verify existence of source systemd file %s: %v", sourceServiceFile, errExist)
+		}
+		if srcServiceFileExists { // Only copy if source exists
+			cpCmd := fmt.Sprintf("cp -f %s %s", sourceServiceFile, spec.SystemdUnitFileTargetPath)
+			_, stderrCpSvc, errCpSvc := ctx.Host.Runner.RunWithOptions(ctx.GoContext, cpCmd, &connector.ExecOptions{Sudo: true})
+			if errCpSvc != nil {
+				res.Error = fmt.Errorf("failed to copy systemd unit file from %s to %s (stderr: %s): %w", sourceServiceFile, spec.SystemdUnitFileTargetPath, stderrCpSvc, errCpSvc)
+				res.Status = step.StatusFailed; return res
+			}
+			chmodCmdSvc := fmt.Sprintf("chmod 0644 %s", spec.SystemdUnitFileTargetPath)
+			_, stderrChmodSvc, errChmodSvc := ctx.Host.Runner.RunWithOptions(ctx.GoContext, chmodCmdSvc, &connector.ExecOptions{Sudo: true})
+			if errChmodSvc != nil {
+				res.Error = fmt.Errorf("failed to set permissions for systemd unit file %s (stderr: %s): %w", spec.SystemdUnitFileTargetPath, stderrChmodSvc, errChmodSvc)
+				res.Status = step.StatusFailed; return res
+			}
+			logger.Infof("Systemd unit file %s installed successfully.", spec.SystemdUnitFileTargetPath)
+		} else {
+			logger.Warnf("Source systemd unit file %s not found in extracted archive at %s. Skipping installation of service file.", spec.SystemdUnitFileSourceRelPath, extractedPath)
+			// This might not be a fatal error for the step if binaries are copied.
+			// Depending on requirements, this could be res.Error and StatusFailed.
+		}
 	} else {
-		hostCtxLogger.Infof("Attempting to install latest version of %s...", pkgNameForLog)
+		logger.Info("No systemd unit file source or target path specified. Skipping systemd unit file installation.")
 	}
 
-	if err := ctx.Host.Runner.InstallPackages(ctx.GoContext, pkgToInstall); err != nil {
-		res.Error = fmt.Errorf("failed to install package %s: %w", pkgNameForLog, err)
-		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+	// Post-execution check
+	done, checkErr := e.Check(ctx)
+	if checkErr != nil {
+		res.Error = fmt.Errorf("post-execution check failed: %w", checkErr)
+		res.Status = step.StatusFailed; return res
+	}
+	if !done {
+		res.Error = fmt.Errorf("post-execution check indicates containerd installation was not fully successful")
+		res.Status = step.StatusFailed; return res
 	}
 
-	res.EndTime = time.Now(); res.Status = "Succeeded"
-	res.Message = fmt.Sprintf("Package %s installed successfully.", pkgNameForLog)
-	hostCtxLogger.Successf("Step succeeded: %s", res.Message)
+	res.Message = "Containerd installed successfully from extracted files."
 	return res
 }
 var _ step.StepExecutor = &InstallContainerdStepExecutor{}
