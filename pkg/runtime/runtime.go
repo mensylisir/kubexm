@@ -135,8 +135,7 @@ type Context struct {
 	Host          *Host
 	Cluster       *ClusterRuntime
 	Logger        *logger.Logger // Logger contextualized for Host, Task, Step etc.
-	// SharedData is deprecated, will be removed after all steps migrate to scoped caches.
-	SharedData    *sync.Map
+	// SharedData field removed.
 
 	pipelineCache cache.PipelineCache
 	moduleCache   cache.ModuleCache
@@ -410,14 +409,14 @@ func NewHostContext(
 		}
 	}
 
-	sharedData := &sync.Map{} // Retained as per instructions
+	// sharedData := &sync.Map{} // Removed
 
 	return &Context{
 		GoContext:     goCtx,
 		Host:          host,
 		Cluster:       cluster,
 		Logger:        hostSpecificLogger,
-		SharedData:    sharedData,
+		// SharedData:    sharedData, // Removed
 		pipelineCache: pCache,
 		moduleCache:   mCache,
 		taskCache:     tCache,
