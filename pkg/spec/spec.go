@@ -47,7 +47,7 @@ type TaskSpec struct {
 	// are not directly serializable to formats like JSON/YAML without special handling
 	// (e.g., by omitting this field during serialization or using a string-based rule).
 	// For specs defined and consumed within Go code, this is acceptable.
-	Filter func(host *runtime.Host) bool // Requires import "github.com/kubexms/kubexms/pkg/runtime"
+	Filter func(host *runtime.Host) bool
 
 	// IgnoreError, if true, indicates that an error from this task's execution
 	// (i.e., a failure of one of its critical steps) should not cause the parent
@@ -78,7 +78,7 @@ type ModuleSpec struct {
 	// will consider the module always enabled.
 	// Note: Similar to TaskSpec.Filter, a function type here impacts direct
 	// serializability if specs are to be defined in formats like JSON/YAML.
-	IsEnabled func(clusterCfg *config.Cluster) bool
+	IsEnabled func(clusterRt *runtime.ClusterRuntime) bool // Changed to use ClusterRuntime
 
 	// PreRun is a StepSpec that defines a step to be executed once before any
 	// tasks in this module are run. Can be nil if no pre-run step is needed.
@@ -121,3 +121,7 @@ type PipelineSpec struct {
 }
 
 // No separate HookSpec is needed as PreRun/PostRun are directly StepSpec.
+
+// Ensure necessary imports are present, especially for runtime.ClusterRuntime and runtime.Host
+// The file already contains "github.com/kubexms/kubexms/pkg/runtime" based on TaskSpec.Filter
+// No import for "github.com/kubexms/kubexms/pkg/config" should be needed here anymore.

@@ -56,19 +56,7 @@ func (h *Host) GetLabel(labelName string) (string, bool) { if h.Labels == nil { 
 
 // ClusterRuntime holds all global, read-only information and resources
 // required for a KubeXMS operation (e.g., cluster creation, scaling).
-type ClusterRuntime struct {
-	ClusterConfig *config.Cluster
-	Hosts         []*Host
-	Inventory     map[string]*Host
-	RoleInventory map[string][]*Host
-	Logger        *logger.Logger // Base logger for the runtime, can be enriched further
-	GlobalTimeout time.Duration
-	WorkDir       string // Global default WorkDir from config.GlobalSpec
-	Verbose       bool
-	IgnoreErr     bool
-}
-
-// required for a KubeXMS operation (e.g., cluster creation, scaling).
+// This is the canonical definition.
 type ClusterRuntime struct {
 	BaseRuntime   *BaseRuntime // Embedded BaseRuntime
 	ClusterConfig *v1alpha1.Cluster
