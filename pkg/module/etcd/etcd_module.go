@@ -24,33 +24,32 @@ func normalizeArchFunc(arch string) string {
 }
 
 // NewEtcdModule creates a module specification for deploying or managing an etcd cluster.
-func NewEtcdModule(cfg *config.Cluster) *spec.ModuleSpec {
+func NewEtcdModule(cfg *config.Cluster) *spec.ModuleSpec { // cfg is now effectively *v1alpha1.Cluster
 	// --- Determine global parameters from cfg ---
-	arch := cfg.Spec.Arch
-	if arch == "" {
-		arch = goruntime.GOARCH
-	}
+	// TODO: Re-evaluate architecture detection. cfg.Spec.Arch removed.
+	// Consider deriving from host list or a new global config if diverse archs are supported.
+	arch := goruntime.GOARCH
 	arch = normalizeArchFunc(arch)
 
-	etcdVersion := "v3.5.0"
+	etcdVersion := "v3.5.0" // Default, consider making this configurable via EtcdConfig
 	if cfg.Spec.Etcd != nil && cfg.Spec.Etcd.Version != "" {
 		etcdVersion = cfg.Spec.Etcd.Version
 	}
 
-	zone := ""
-	if cfg.Spec.Global != nil && cfg.Spec.Global.Zone != "" {
-		zone = cfg.Spec.Global.Zone
+	zone := "" // Default zone to empty
+	// TODO: Re-evaluate zone. v1alpha1.GlobalSpec does not have Zone.
+	// if cfg.Spec.Global != nil && cfg.Spec.Global.Zone != "" {
+	// 	zone = cfg.Spec.Global.Zone
+	// }
+
+	clusterName := "kubexms-cluster" // Default cluster name
+	if cfg.ObjectMeta.Name != "" {
+		clusterName = cfg.ObjectMeta.Name
 	}
 
-	clusterName := "kubexms-cluster"
-	if cfg.Metadata.Name != "" {
-		clusterName = cfg.Metadata.Name
-	}
-
-	// programBaseDir is <executable_dir>
-	programBaseDir := cfg.WorkDir
-	if programBaseDir == "" {
-		programBaseDir = "/opt/kubexms/default_run_dir" // Fallback
+	programBaseDir := "/opt/kubexms/default_run_dir" // Fallback
+	if cfg.Spec.Global != nil && cfg.Spec.Global.WorkDir != "" {
+		programBaseDir = cfg.Spec.Global.WorkDir
 	}
 	// appFSBaseDir is <executable_dir>/.kubexm
 	appFSBaseDir := filepath.Join(programBaseDir, ".kubexm")
@@ -58,7 +57,7 @@ func NewEtcdModule(cfg *config.Cluster) *spec.ModuleSpec {
 	// Cluster-specific PKI root directory.
 	clusterPkiRoot := filepath.Join(appFSBaseDir, "pki", clusterName)
 
-	controlPlaneFQDN := "lb.kubexms.local"
+	controlPlaneFQDN := "lb.kubexms.local" // Default CPlane FQDN
 	if cfg.Spec.ControlPlaneEndpoint != nil && cfg.Spec.ControlPlaneEndpoint.Domain != "" {
 		controlPlaneFQDN = cfg.Spec.ControlPlaneEndpoint.Domain
 	}
@@ -91,27 +90,43 @@ func NewEtcdModule(cfg *config.Cluster) *spec.ModuleSpec {
 	setupPkiDataTask := taskEtcd.NewSetupEtcdPkiDataContextTask(cfg, kubexmsKubeConfInstance, hostSpecsForNodeCerts)
 
 	// --- Conditional Task Assembly ---
-	if cfg.Spec.Etcd != nil && cfg.Spec.Etcd.Managed {
+	// Check if Etcd config exists and Type indicates it's managed internally
+	isManagedInternalEtcd := false
+	if cfg.Spec.Etcd != nil {
+		// Assuming EtcdTypeKubeXMSInternal means it's managed by this system.
+		// The prompt mentioned "kubexm" as a default type; ensure constants align.
+		// For now, using EtcdTypeKubeXMSInternal as per existing code structure.
+		if cfg.Spec.Etcd.Type == v1alpha1.EtcdTypeKubeXMSInternal || cfg.Spec.Etcd.Type == "kubexm" || cfg.Spec.Etcd.Type == "stacked" {
+			isManagedInternalEtcd = true
+		}
+	}
+
+	if isManagedInternalEtcd {
 		allTasks = append(allTasks, setupPkiDataTask)
+		allTasks = append(allTasks, taskEtcd.NewInstallEtcdBinariesTask(cfg, etcdVersion, arch, zone, appFSBaseDir))
 
-		if cfg.Spec.Etcd.Type == "external" {
-			if cfg.Spec.Etcd.External != nil && cfg.Spec.Etcd.External.CAFile != "" {
-				allTasks = append(allTasks, taskEtcd.NewPrepareExternalEtcdPKITask(cfg))
-			} else {
-				// Consider logging a warning or returning an error for misconfiguration
-			}
-		} else { // Internal Etcd
-			allTasks = append(allTasks, taskEtcd.NewInstallEtcdBinariesTask(cfg, etcdVersion, arch, zone, appFSBaseDir))
+		// TODO: Re-evaluate logic for "Existing" Etcd.
+		// The field cfg.Spec.Etcd.Existing was removed. Determine how to detect an existing setup if needed.
+		// Perhaps by checking DataDir on hosts or other means. For now, assume new setup.
+		allTasks = append(allTasks, taskEtcd.NewGenerateEtcdPKITask(cfg, hostSpecsForAltNames, controlPlaneFQDN, "lb.kubexms.local"))
 
-			if cfg.Spec.Etcd.Existing {
-				existingPkiTask := taskEtcd.NewPrepareExistingEtcdPKITask(cfg)
-				// TODO: Set HostFilter on existingPkiTask to target a single etcd node for fetching.
-				allTasks = append(allTasks, existingPkiTask)
-			} else {
-				allTasks = append(allTasks, taskEtcd.NewGenerateEtcdPKITask(cfg, hostSpecsForAltNames, controlPlaneFQDN, "lb.kubexms.local"))
-			}
+		setupInitialEtcdMemberTaskSpec := &spec.TaskSpec{
+	Name: "Setup Initial Etcd Member (Placeholder Spec)",
+	}
+		allTasks = append(allTasks, setupInitialEtcdMemberTaskSpec)
 
-			setupInitialEtcdMemberTaskSpec := &spec.TaskSpec{
+	} else if cfg.Spec.Etcd != nil && cfg.Spec.Etcd.Type == v1alpha1.EtcdTypeExternal {
+		// External Etcd: still need PKI data context for clients, but also prepare external PKI if specified
+		allTasks = append(allTasks, setupPkiDataTask)
+		if cfg.Spec.Etcd.External != nil && cfg.Spec.Etcd.External.CAFile != "" {
+			allTasks = append(allTasks, taskEtcd.NewPrepareExternalEtcdPKITask(cfg))
+		} else {
+			// Consider logging a warning: External etcd specified but no CA/Cert info provided for secure client connections.
+		}
+	}
+
+
+	validateEtcdClusterTaskSpec := &spec.TaskSpec{
 				Name: "Setup Initial Etcd Member (Placeholder Spec)",
 			}
 			allTasks = append(allTasks, setupInitialEtcdMemberTaskSpec)
@@ -125,11 +140,10 @@ func NewEtcdModule(cfg *config.Cluster) *spec.ModuleSpec {
 
 	return &spec.ModuleSpec{
 		Name: "Etcd Cluster Management",
-		IsEnabled: func(currentCfg *config.Cluster) bool {
-			if currentCfg != nil && currentCfg.Spec.Etcd != nil && currentCfg.Spec.Etcd.Managed {
-				return true
-			}
-			return false
+		IsEnabled: func(currentCfg *config.Cluster) bool { // currentCfg is *v1alpha1.Cluster
+			// Enable if Etcd spec exists, regardless of type (external still needs client setup/validation).
+			// The tasks themselves will differ based on Etcd.Type.
+			return currentCfg != nil && currentCfg.Spec.Etcd != nil
 		},
 		Tasks: allTasks,
 		PreRun: nil,

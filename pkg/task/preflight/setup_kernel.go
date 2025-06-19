@@ -25,21 +25,20 @@ func NewSetupKernelTask(cfg *config.Cluster) *spec.TaskSpec {
 	reloadSysctl := true // Default to reloading sysctl settings after writing config
 
 	// Override with values from config if provided
-	if cfg != nil { // cfg itself can be nil
-		// KernelConfig is a struct, not a pointer, so it's always there if cfg.Spec is.
-		if len(cfg.Spec.KernelConfig.Modules) > 0 {
-			kernelModules = cfg.Spec.KernelConfig.Modules
+	if cfg != nil && cfg.Spec.Kernel != nil { // cfg is *v1alpha1.Cluster, Spec.Kernel is *v1alpha1.KernelConfig
+		if len(cfg.Spec.Kernel.Modules) > 0 {
+			kernelModules = cfg.Spec.Kernel.Modules
 		}
-		if len(cfg.Spec.KernelConfig.SysctlParams) > 0 {
+		if len(cfg.Spec.Kernel.SysctlParams) > 0 {
 			// Policy for sysctlParams: config replaces defaults entirely if provided.
-			// A merge strategy could be implemented if needed.
-			sysctlParams = cfg.Spec.KernelConfig.SysctlParams
+			sysctlParams = cfg.Spec.Kernel.SysctlParams
 		}
-		// Example for SysctlConfigFilePath if it were added to KernelConfigSpec:
-		// if cfg.Spec.KernelConfig.SysctlConfigFilePath != "" {
-		//    sysctlConfigPath = cfg.Spec.KernelConfig.SysctlConfigFilePath
+		// Example for SysctlConfigFilePath if it were part of v1alpha1.KernelConfig:
+		// if cfg.Spec.Kernel.SysctlConfigFilePath != "" { // Assuming it's a string field
+		//    sysctlConfigPath = cfg.Spec.Kernel.SysctlConfigFilePath
 		// }
 	}
+	// If cfg is nil, or cfg.Spec.Kernel is nil, the hardcoded defaults for kernelModules and sysctlParams above will be used.
 
 	return &spec.TaskSpec{
 		Name: "Setup Kernel Parameters and Modules",
