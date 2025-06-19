@@ -26,27 +26,12 @@ func NewISCSIModule(cfg *config.Cluster) *spec.ModuleSpec {
 
 	return &spec.ModuleSpec{
 		Name: "iSCSI Client Management",
-		IsEnabled: func(clusterCfg *config.Cluster) bool {
-			// This function checks if iSCSI client management is enabled.
-			// It should ideally check a specific field in the cluster configuration.
-			// Example:
-			// if clusterCfg != nil &&
-			//    clusterCfg.Spec.Features != nil &&
-			//    clusterCfg.Spec.Features.ISCSIClient != nil &&
-			//    clusterCfg.Spec.Features.ISCSIClient.Managed {
-			//     return true
-			// }
-			// return false
-			// For now, returning true to assume it's managed if module is included,
-			// or until a proper config field is established.
-			// A more realistic default might be based on whether any iSCSI-dependent features are enabled.
-			// Let's use a hypothetical config path for now as per the original plan.
-			if clusterCfg != nil &&
-				clusterCfg.Spec.ISCSIClient != nil && // Assumes config.ISCSIClientSpec exists
-				clusterCfg.Spec.ISCSIClient.Managed {
-				return true
-			}
-			return false // Default to false if not explicitly managed
+		IsEnabled: func(clusterCfg *config.Cluster) bool { // clusterCfg is *v1alpha1.Cluster
+			// TODO: This module is currently disabled as v1alpha1.ClusterSpec
+			// does not have a dedicated iSCSI client management configuration section.
+			// To enable this module, add appropriate fields to v1alpha1.ClusterSpec
+			// (e.g., Spec.Storage.ISCSIClient.Enabled or similar) and update this logic.
+			return false
 		},
 		Tasks:   allTasks,
 		PreRun:  nil,

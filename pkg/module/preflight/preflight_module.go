@@ -10,13 +10,13 @@ import (
 func NewPreflightModule(cfg *config.Cluster) *spec.ModuleSpec {
 	return &spec.ModuleSpec{
 		Name: "Preflight Checks and Setup",
-		IsEnabled: func(clusterCfg *config.Cluster) bool {
+		IsEnabled: func(clusterCfg *config.Cluster) bool { // clusterCfg is *v1alpha1.Cluster
 			// Module is enabled by default.
 			// It's disabled if explicitly told to skip preflight checks in global config.
-			if clusterCfg != nil && clusterCfg.Spec.Global.SkipPreflight {
+			if clusterCfg != nil && clusterCfg.Spec.Global != nil && clusterCfg.Spec.Global.SkipPreflight {
 				return false // SkipPreflight is true, so module is disabled.
 			}
-			return true // Enabled by default or if SkipPreflight is false.
+			return true // Enabled by default, if Global is nil, or if SkipPreflight is false.
 		},
 		Tasks: []*spec.TaskSpec{
 			taskPreflight.NewSystemChecksTask(cfg), // Pass cfg to task factories

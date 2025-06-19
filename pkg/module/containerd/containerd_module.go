@@ -10,15 +10,19 @@ import (
 func NewContainerdModule(cfg *config.Cluster) *spec.ModuleSpec {
 	return &spec.ModuleSpec{
 		Name: "Containerd Runtime",
-		IsEnabled: func(clusterCfg *config.Cluster) bool {
-			// Enable if containerd is the chosen runtime, or if no runtime is specified (defaulting to containerd).
-			if clusterCfg == nil || clusterCfg.Spec.ContainerRuntime == nil {
-				// If ContainerRuntime spec itself is missing, assume default (containerd) is desired.
+		IsEnabled: func(clusterCfg *config.Cluster) bool { // clusterCfg is *v1alpha1.Cluster
+			if clusterCfg == nil {
+				return true // Should not happen if called by runtime with valid cfg
+			}
+			if clusterCfg.Spec.ContainerRuntime == nil {
+				// If ContainerRuntime section is entirely absent from YAML,
+				// SetDefaults_Cluster creates it, and SetDefaults_ContainerRuntimeConfig
+				// would set its Type to "containerd". So this module should run.
 				return true
 			}
-			// If ContainerRuntime spec exists, check its Type.
-			// Empty Type also implies default (containerd).
-			return clusterCfg.Spec.ContainerRuntime.Type == "containerd" || clusterCfg.Spec.ContainerRuntime.Type == ""
+			// If ContainerRuntime section exists, its Type field would have been defaulted to "containerd"
+			// if it was initially empty. So, we just check if it's "containerd".
+			return clusterCfg.Spec.ContainerRuntime.Type == "containerd"
 		},
 		Tasks: []*spec.TaskSpec{
 			taskContainerd.NewInstallContainerdTask(cfg), // Pass cfg

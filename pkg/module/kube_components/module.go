@@ -28,30 +28,25 @@ func NewKubernetesComponentsModule(cfg *config.Cluster) *spec.ModuleSpec {
 	tasks := []*spec.TaskSpec{}
 
 	// --- Determine global parameters from cfg ---
-	arch := cfg.Spec.Arch
-	if arch == "" {
-		arch = goruntime.GOARCH
-	}
+	// TODO: Re-evaluate architecture detection. cfg.Spec.Arch removed.
+	// Consider deriving from host list or a new global config if diverse archs are supported.
+	arch := goruntime.GOARCH
 	arch = normalizeArchFunc(arch)
 
-	zone := ""
-	if cfg.Spec.Global != nil && cfg.Spec.Global.Zone != "" {
-		zone = cfg.Spec.Global.Zone
-	}
-	if zone == "" {
-		zone = os.Getenv("KKZONE")
-	}
+	// TODO: Re-evaluate zone determination. v1alpha1.GlobalSpec does not have Zone.
+	// Consider using a new global config field or deriving from hosts if needed.
+	zone := os.Getenv("KKZONE") // Fallback to environment variable or empty string
 
-	programBaseDir := cfg.WorkDir // Assumed to be <executable_dir>
-	if programBaseDir == "" {
-		programBaseDir = "/opt/kubexms/default_run_dir" // Fallback
+	programBaseDir := "/opt/kubexms/default_run_dir" // Fallback
+	if cfg.Spec.Global != nil && cfg.Spec.Global.WorkDir != "" {
+		programBaseDir = cfg.Spec.Global.WorkDir
 	}
 	// appFSBaseDir is the root for KubeXMS specific persistent data, like artifacts: <executable_dir>/.kubexm
 	appFSBaseDir := filepath.Join(programBaseDir, ".kubexm")
 
 	// --- Kubernetes Components ---
 	kubeVersion := ""
-	if cfg.Spec.Kubernetes != nil && cfg.Spec.Kubernetes.Version != "" {
+	if cfg.Spec.Kubernetes != nil && cfg.Spec.Kubernetes.Version != "" { // Nil check for Kubernetes
 		kubeVersion = cfg.Spec.Kubernetes.Version
 	}
 
@@ -68,12 +63,16 @@ func NewKubernetesComponentsModule(cfg *config.Cluster) *spec.ModuleSpec {
 	}
 
 	// --- Containerd ---
+	// Assuming ContainerRuntime.Version holds the version for Containerd if Type is containerd.
+	// This logic might need to be more robust based on ContainerRuntimeConfig structure.
 	containerdVersion := ""
-	if cfg.Spec.ContainerRuntime != nil && cfg.Spec.ContainerRuntime.Version != "" {
+	if cfg.Spec.ContainerRuntime != nil && cfg.Spec.ContainerRuntime.Type == "containerd" && cfg.Spec.ContainerRuntime.Version != "" { // Nil check
 		containerdVersion = cfg.Spec.ContainerRuntime.Version
 	}
 
 	if containerdVersion != "" {
+		// TODO: Ensure NewFetchContainerdTask correctly uses the version from ContainerRuntime.Version.
+		// If ContainerdConfig has its own version field, that should be preferred if it exists.
 		if task := taskKubeComponents.NewFetchContainerdTask(cfg, containerdVersion, arch, zone, appFSBaseDir); task != nil {
 			tasks = append(tasks, task)
 		}
