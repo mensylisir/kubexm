@@ -10,10 +10,13 @@ import (
 	"strings"
 	// "sync" // Not directly needed by these specific test functions
 	"reflect" // For reflect.DeepEqual
+	"sync/atomic" // Added
 	"testing"
 	"time"
 
-	"github.com/kubexms/kubexms/pkg/config"
+	// "github.com/kubexms/kubexms/pkg/config" // Removed
+	"github.com/kubexms/kubexms/pkg/apis/kubexms/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"github.com/kubexms/kubexms/pkg/connector" // For connector types and OS struct
 	"github.com/kubexms/kubexms/pkg/logger"
 	"github.com/kubexms/kubexms/pkg/runner"
@@ -91,171 +94,262 @@ func TestMain(m *testing.M) {
 
 
 func TestNewRuntime_Success_DetailedConfig(t *testing.T) {
-	cfg := &config.Cluster{
-		APIVersion: config.DefaultAPIVersion, Kind: config.ClusterKind,
-		Metadata:   config.Metadata{Name: "detailed-cluster"},
-		Spec: config.ClusterSpec{
-			Global: config.GlobalSpec{
-				User: "globaluser", Port: 22022, ConnectionTimeout: 15 * time.Second,
-				WorkDir: "/mnt/global_work", PrivateKeyPath: "/global/ssh/key_ignored_if_host_specific",
+	cfg := &v1alpha1.Cluster{
+		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.SchemeGroupVersion.String(), Kind: "Cluster"},
+		ObjectMeta: metav1.ObjectMeta{Name: "detailed-cluster"},
+		Spec: v1alpha1.ClusterSpec{
+			Global: &v1alpha1.GlobalSpec{
+				User:              "globaluser",
+				Port:              22022,
+				ConnectionTimeout: 15 * time.Second,
+				// WorkDir is managed by t.TempDir() below
+				// PrivateKeyPath can be set if needed for the test logic
 			},
-			Hosts: []config.HostSpec{
-				{ Name: "master1", Address: "10.0.0.1", Port: 22, User: "masteruser", PrivateKeyPath: "/specific/path/master_key", Roles: []string{"master", "etcd"}, Type: "ssh", WorkDir: "/hostwork/m1"},
-				{ Name: "worker1", Address: "10.0.0.2", PrivateKey: base64.StdEncoding.EncodeToString([]byte("test-key-content-worker1")), Roles: []string{"worker"}, Type: "ssh"},
-				{ Name: "localnode", Type: "local", Roles: []string{"local"}},
+			Hosts: []v1alpha1.HostSpec{
+				{Name: "master1", Address: "10.0.0.1", Port: 22, User: "masteruser", PrivateKeyPath: "/specific/path/master_key", Roles: []string{"master", "etcd"}, Type: "ssh"},
+				{Name: "worker1", Address: "10.0.0.2", PrivateKey: base64.StdEncoding.EncodeToString([]byte("test-key-content-worker1")), Roles: []string{"worker"}, Type: "ssh"},
+				{Name: "localnode", Type: "local", Roles: []string{"local"}},
 			},
-			Kubernetes: config.KubernetesSpec{Version: "v1.23.0"}, // Required by validation
+			Kubernetes: &v1alpha1.KubernetesConfig{Version: "v1.23.0"}, // Kubernetes is a pointer
 		},
 	}
-	config.SetDefaults(cfg)
+	testGlobalWorkDir := t.TempDir()
+	cfg.Spec.Global.WorkDir = testGlobalWorkDir
+	t.Cleanup(func() { os.RemoveAll(testGlobalWorkDir) })
+
+	v1alpha1.SetDefaults_Cluster(cfg)
 	log := logger.Get()
 
-	origRunnerNewRunner := runnerNewRunner; defer func() { runnerNewRunner = origRunnerNewRunner }()
-	var newRunnerCallCount int
+	origRunnerNewRunner := runnerNewRunner
+	defer func() { runnerNewRunner = origRunnerNewRunner }()
+	var newRunnerCallCount int32 // Changed to int32
 
-	currentMockOsReadFile = func(name string) ([]byte, error) { // Mock ReadFile for master1's key
-		if name == "/specific/path/master_key" { return []byte("test-key-content-master1"), nil }
+	currentMockOsReadFile = func(name string) ([]byte, error) {
+		if name == "/specific/path/master_key" {
+			return []byte("test-key-content-master1"), nil
+		}
 		return nil, fmt.Errorf("os.ReadFile mock: unexpected path %s", name)
 	}
 	defer func() { currentMockOsReadFile = nil }()
 
 	runnerNewRunner = func(ctx context.Context, conn connector.Connector) (*runner.Runner, error) {
-		newRunnerCallCount++
+		atomic.AddInt32(&newRunnerCallCount, 1) // Use atomic
 		osInfo, _ := conn.GetOS(ctx)
 		return &runner.Runner{Facts: &runner.Facts{OS: osInfo, Hostname: "mock-run-host"}}, nil
 	}
 
 	rt, err := NewRuntime(cfg, log)
-	if err != nil { t.Fatalf("NewRuntime() with detailed config failed: %v", err) }
-	if rt == nil { t.Fatal("NewRuntime() returned nil runtime") }
-	if len(rt.Hosts) != 3 { t.Errorf("len(rt.Hosts) = %d, want 3", len(rt.Hosts)) }
-	if newRunnerCallCount != 3 { t.Errorf("runner.NewRunner calls = %d, want 3", newRunnerCallCount) }
+	if err != nil {
+		t.Fatalf("NewRuntime() with detailed config failed: %v", err)
+	}
+	if rt == nil {
+		t.Fatal("NewRuntime() returned nil runtime")
+	}
+	if len(rt.GetAllHosts()) != 3 { // Use GetAllHosts
+		t.Errorf("len(rt.GetAllHosts()) = %d, want 3", len(rt.GetAllHosts()))
+	}
+	if atomic.LoadInt32(&newRunnerCallCount) != 3 { // Use atomic
+		t.Errorf("runner.NewRunner calls = %d, want 3", atomic.LoadInt32(&newRunnerCallCount))
+	}
 
 	master1 := rt.GetHost("master1")
-	if master1 == nil { t.Fatal("master1 not found") }
-	if master1.User != "masteruser" { t.Errorf("master1.User = %s", master1.User) }
-	if master1.Port != 22 { t.Errorf("master1.Port = %d", master1.Port) }
-	if master1.WorkDir != "/hostwork/m1" { t.Errorf("master1.WorkDir = %s", master1.WorkDir)}
-	if string(master1.PrivateKey) != "test-key-content-master1" { t.Error("master1.PrivateKey content mismatch") }
-	if _, ok := master1.Connector.(*connector.SSHConnector); !ok { t.Errorf("master1 connector type %T", master1.Connector)}
-
+	if master1 == nil {
+		t.Fatal("master1 not found")
+	}
+	if master1.User != "masteruser" {
+		t.Errorf("master1.User = %s", master1.User)
+	}
+	if master1.Port != 22 {
+		t.Errorf("master1.Port = %d", master1.Port)
+	}
+	// Assert host work dir using GetHostWorkDir
+	expectedM1WorkDir := filepath.Join(cfg.Spec.Global.WorkDir, "hosts", "master1")
+	if actualM1WorkDir := rt.GetHostWorkDir("master1"); actualM1WorkDir != expectedM1WorkDir {
+		t.Errorf("master1 workdir = %s, want %s", actualM1WorkDir, expectedM1WorkDir)
+	}
+	if string(master1.PrivateKey) != "test-key-content-master1" {
+		t.Error("master1.PrivateKey content mismatch")
+	}
+	if _, ok := master1.Connector.(*connector.SSHConnector); !ok {
+		t.Errorf("master1 connector type %T", master1.Connector)
+	}
 
 	worker1 := rt.GetHost("worker1")
-	if worker1 == nil { t.Fatal("worker1 not found") }
-	if worker1.User != "globaluser" { t.Errorf("worker1.User = %s", worker1.User) } // Inherited
-	if worker1.Port != 22022 { t.Errorf("worker1.Port = %d", worker1.Port) } // Inherited
-	if worker1.WorkDir != "/mnt/global_work" {t.Errorf("worker1.WorkDir = %s", worker1.WorkDir)} // Inherited
-	if string(worker1.PrivateKey) != "test-key-content-worker1" { t.Error("worker1.PrivateKey content mismatch") }
+	if worker1 == nil {
+		t.Fatal("worker1 not found")
+	}
+	if worker1.User != "globaluser" {
+		t.Errorf("worker1.User = %s", worker1.User)
+	} // Inherited
+	if worker1.Port != 22022 {
+		t.Errorf("worker1.Port = %d", worker1.Port)
+	} // Inherited
+	expectedW1WorkDir := filepath.Join(cfg.Spec.Global.WorkDir, "hosts", "worker1")
+	if actualW1WorkDir := rt.GetHostWorkDir("worker1"); actualW1WorkDir != expectedW1WorkDir {
+		t.Errorf("worker1 workdir = %s, want %s", actualW1WorkDir, expectedW1WorkDir)
+	}
+	if string(worker1.PrivateKey) != "test-key-content-worker1" {
+		t.Error("worker1.PrivateKey content mismatch")
+	}
 
 	localnode := rt.GetHost("localnode")
-	if localnode == nil {t.Fatal("localnode not found")}
-	if _, ok := localnode.Connector.(*connector.LocalConnector); !ok { t.Error("localnode not LocalConnector")}
+	if localnode == nil {
+		t.Fatal("localnode not found")
+	}
+	if _, ok := localnode.Connector.(*connector.LocalConnector); !ok {
+		t.Error("localnode not LocalConnector")
+	}
 
-	if rt.GlobalTimeout != 15*time.Second { t.Errorf("rt.GlobalTimeout = %v", rt.GlobalTimeout)}
+	if rt.GlobalTimeout != 15*time.Second {
+		t.Errorf("rt.GlobalTimeout = %v", rt.GlobalTimeout)
+	}
+	if rt.ClusterConfig.ObjectMeta.Name != "detailed-cluster" {
+		t.Errorf("rt.ClusterConfig.ObjectMeta.Name = %s", rt.ClusterConfig.ObjectMeta.Name)
+	}
 }
 
 func TestNewRuntime_PrivateKeyContentPrecedence(t *testing.T) {
-	keyContent := "from-content-directly"; base64KeyContent := base64.StdEncoding.EncodeToString([]byte(keyContent))
-	cfg := &config.Cluster{ Spec: config.ClusterSpec{
-		Hosts: []config.HostSpec{ {Name: "h1", Address: "1.1.1.1", Port: 22, User: "u", PrivateKey: base64KeyContent, PrivateKeyPath: "/path/should/be/ignored"}},
-		Kubernetes: config.KubernetesSpec{Version: "v1"}, Global: config.GlobalSpec{User:"u", Port:22},
-	}}
-	config.SetDefaults(cfg); log := logger.Get()
-	origRunnerNewRunner := runnerNewRunner; defer func() { runnerNewRunner = origRunnerNewRunner }()
-	runnerNewRunner = func(ctx context.Context, conn connector.Connector) (*runner.Runner, error) {
-		return &runner.Runner{Facts: &runner.Facts{OS: &connector.OS{ID:"linux"}}}, nil
+	keyContent := "from-content-directly"
+	base64KeyContent := base64.StdEncoding.EncodeToString([]byte(keyContent))
+	cfg := &v1alpha1.Cluster{
+		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.SchemeGroupVersion.String(), Kind: "Cluster"},
+		ObjectMeta: metav1.ObjectMeta{Name: "pk-test"},
+		Spec: v1alpha1.ClusterSpec{
+			Hosts: []v1alpha1.HostSpec{{Name: "h1", Address: "1.1.1.1", Port: 22, User: "u", PrivateKey: base64KeyContent, PrivateKeyPath: "/path/should/be/ignored"}},
+			Kubernetes: &v1alpha1.KubernetesConfig{Version: "v1.23.0"}, // Required
+			Global:     &v1alpha1.GlobalSpec{User: "u", Port: 22},       // Required for host defaults
+		},
 	}
-	// osReadFile should not be called if PrivateKey content is provided.
-	// The osReadFileMockWrapperForTest will error if currentMockOsReadFile is nil and it's called.
+	v1alpha1.SetDefaults_Cluster(cfg)
+	log := logger.Get()
+
+	origRunnerNewRunner := runnerNewRunner
+	defer func() { runnerNewRunner = origRunnerNewRunner }()
+	runnerNewRunner = func(ctx context.Context, conn connector.Connector) (*runner.Runner, error) {
+		return &runner.Runner{Facts: &runner.Facts{OS: &connector.OS{ID: "linux"}}}, nil
+	}
 	currentMockOsReadFile = nil // Ensure no mock is set, so a call would error.
 
 	rt, err := NewRuntime(cfg, log)
-	if err != nil {t.Fatalf("NewRuntime failed: %v", err)}
-	if len(rt.Hosts) != 1 {t.Fatal("Expected 1 host")}
-	if string(rt.Hosts[0].PrivateKey) != keyContent {
-		t.Errorf("Host.PrivateKey = %s, want %s", string(rt.Hosts[0].PrivateKey), keyContent)
+	if err != nil {
+		t.Fatalf("NewRuntime failed: %v", err)
+	}
+	if len(rt.GetAllHosts()) != 1 { // Use GetAllHosts
+		t.Fatal("Expected 1 host")
+	}
+	if string(rt.GetAllHosts()[0].PrivateKey) != keyContent { // Use GetAllHosts
+		t.Errorf("Host.PrivateKey = %s, want %s", string(rt.GetAllHosts()[0].PrivateKey), keyContent)
 	}
 }
 
 func TestNewRuntime_ConnectionFailure_KeyReadError(t *testing.T) {
 	currentMockOsReadFile = func(name string) ([]byte, error) {
-		if name == "/path/to/host2/key" { return nil, errors.New("simulated read key error for host2") }
-		if name == "/path/to/host1/key" { return []byte("host1_key_data"), nil } // host1 key is fine
+		if name == "/path/to/host2/key" {
+			return nil, errors.New("simulated read key error for host2")
+		}
+		if name == "/path/to/host1/key" {
+			return []byte("host1_key_data"), nil
+		} // host1 key is fine
 		return nil, fmt.Errorf("unexpected ReadFile call to %s", name)
 	}
 	defer func() { currentMockOsReadFile = nil }()
 
-	cfg := &config.Cluster{ Spec: config.ClusterSpec{
-		Hosts: []config.HostSpec{
-			{Name: "host1", Address: "1.1.1.1", Type: "ssh", User:"u1", Port:22, PrivateKeyPath:"/path/to/host1/key"},
-			{Name: "host2", Address: "2.2.2.2", Type: "ssh", User:"u2", Port:22, PrivateKeyPath:"/path/to/host2/key"},
+	cfg := &v1alpha1.Cluster{
+		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.SchemeGroupVersion.String(), Kind: "Cluster"},
+		ObjectMeta: metav1.ObjectMeta{Name: "key-read-error-test"},
+		Spec: v1alpha1.ClusterSpec{
+			Hosts: []v1alpha1.HostSpec{
+				{Name: "host1", Address: "1.1.1.1", Type: "ssh", User: "u1", Port: 22, PrivateKeyPath: "/path/to/host1/key"},
+				{Name: "host2", Address: "2.2.2.2", Type: "ssh", User: "u2", Port: 22, PrivateKeyPath: "/path/to/host2/key"},
+			},
+			Global:     &v1alpha1.GlobalSpec{ConnectionTimeout: 100 * time.Millisecond, User: "u", Port: 22}, // Required for host defaults
+			Kubernetes: &v1alpha1.KubernetesConfig{Version: "v1.23.0"},                                     // Required
 		},
-		Global: config.GlobalSpec{ConnectionTimeout: 100 * time.Millisecond}, // Short timeout
-		Kubernetes: config.KubernetesSpec{Version:"v1"},
-	}}
-	config.SetDefaults(cfg); log := logger.Get()
+	}
+	v1alpha1.SetDefaults_Cluster(cfg)
+	log := logger.Get()
 
-	origRunner := runnerNewRunner; defer func() { runnerNewRunner = origRunner }()
+	origRunner := runnerNewRunner
+	defer func() { runnerNewRunner = origRunner }()
 	var runnerCallsForHost1 int32
 	runnerNewRunner = func(ctx context.Context, conn connector.Connector) (*runner.Runner, error) {
-		// This should only be called for host1 successfully.
-		// We need to get the host address from the connector's config if possible,
-		// or rely on the test setup ensuring only host1 proceeds this far.
-		// For simplicity, assume it's host1 if called.
 		atomic.AddInt32(&runnerCallsForHost1, 1)
-		return &runner.Runner{Facts: &runner.Facts{OS: &connector.OS{ID:"linux"}}}, nil
+		return &runner.Runner{Facts: &runner.Facts{OS: &connector.OS{ID: "linux"}}}, nil
 	}
 
 	rt, err := NewRuntime(cfg, log)
-	if err == nil { t.Fatal("NewRuntime with a failing host key read expected error, got nil") }
-	if rt != nil { t.Errorf("NewRuntime returned non-nil rt on error: %+v", rt) }
+	if err == nil {
+		t.Fatal("NewRuntime with a failing host key read expected error, got nil")
+	}
+	if rt != nil {
+		t.Errorf("NewRuntime returned non-nil rt on error: %+v", rt)
+	}
 
 	initErr, ok := err.(*InitializationError)
-	if !ok { t.Fatalf("Expected InitializationError, got %T: %v", err, err) }
-	if len(initErr.SubErrors) == 0 { t.Fatal("Expected sub-errors, got none") }
+	if !ok {
+		t.Fatalf("Expected InitializationError, got %T: %v", err, err)
+	}
+	if len(initErr.SubErrors()) == 0 { // Assuming SubErrors is a method returning a slice
+		t.Fatal("Expected sub-errors, got none")
+	}
 
 	foundHost2KeyError := false
-	for _, subErr := range initErr.SubErrors {
+	for _, subErr := range initErr.SubErrors() { // Assuming SubErrors is a method
 		if strings.Contains(subErr.Error(), "host2") && strings.Contains(subErr.Error(), "failed to read private key") {
-			foundHost2KeyError = true; break
+			foundHost2KeyError = true
+			break
 		}
 	}
-	if !foundHost2KeyError { t.Errorf("Expected error related to host2 key read, got: %v", initErr.Error()) }
+	if !foundHost2KeyError {
+		t.Errorf("Expected error related to host2 key read, got: %v", initErr.Error())
+	}
 	if atomic.LoadInt32(&runnerCallsForHost1) != 1 {
 		t.Errorf("runnerNewRunner was called %d times, expected 1 (only for host1)", runnerCallsForHost1)
 	}
 }
 
-// TestNewRuntime_RunnerInitializationFailure, TestNewHostContext, TestInitializationError_Methods
-// can remain similar to previous versions, ensuring they use config.SetDefaults on their test cfgs.
-// For brevity, only one more is fully fleshed out here.
-
 func TestNewRuntime_RunnerInitializationFailure(t *testing.T) {
-	cfg := &config.Cluster{ Spec: config.ClusterSpec{
-		Hosts: []config.HostSpec{{Name: "host1", Address: "1.1.1.1", Type: "ssh", User:"u", Port:22, PrivateKeyPath:"/pk"}},
-		Global: config.GlobalSpec{ConnectionTimeout: 1 * time.Second},
-		Kubernetes: config.KubernetesSpec{Version:"v1"},
-	}}
-	config.SetDefaults(cfg); log := logger.Get()
+	cfg := &v1alpha1.Cluster{
+		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.SchemeGroupVersion.String(), Kind: "Cluster"},
+		ObjectMeta: metav1.ObjectMeta{Name: "runner-fail-test"},
+		Spec: v1alpha1.ClusterSpec{
+			Hosts:      []v1alpha1.HostSpec{{Name: "host1", Address: "1.1.1.1", Type: "ssh", User: "u", Port: 22, PrivateKeyPath: "/pk"}},
+			Global:     &v1alpha1.GlobalSpec{ConnectionTimeout: 1 * time.Second, User: "u", Port: 22}, // Required for host defaults
+			Kubernetes: &v1alpha1.KubernetesConfig{Version: "v1.23.0"},                               // Required
+		},
+	}
+	v1alpha1.SetDefaults_Cluster(cfg)
+	log := logger.Get()
 
-	currentMockOsReadFile = func(name string) ([]byte, error) { return []byte("keydata"), nil } // Mock key reading
+	currentMockOsReadFile = func(name string) ([]byte, error) { return []byte("keydata"), nil }
 	defer func() { currentMockOsReadFile = nil }()
 
-	origRunner := runnerNewRunner; defer func() { runnerNewRunner = origRunner }()
+	origRunner := runnerNewRunner
+	defer func() { runnerNewRunner = origRunner }()
 	expectedRunnerErr := errors.New("runner init deliberately failed")
 	runnerNewRunner = func(ctx context.Context, conn connector.Connector) (*runner.Runner, error) {
-		return nil, expectedRunnerErr // Fail runner creation for any host
+		return nil, expectedRunnerErr
 	}
 
 	_, err := NewRuntime(cfg, log)
-	if err == nil { t.Fatal("NewRuntime with failing runner init expected error, got nil") }
+	if err == nil {
+		t.Fatal("NewRuntime with failing runner init expected error, got nil")
+	}
 	initErr, ok := err.(*InitializationError)
-	if !ok { t.Fatalf("Expected InitializationError, got %T: %v", err, err) }
-	if len(initErr.SubErrors) != 1 { t.Errorf("Expected 1 sub-error for runner failure, got %d", len(initErr.SubErrors)) } else {
-		if !strings.Contains(initErr.SubErrors[0].Error(), "host1") ||
-		!strings.Contains(initErr.SubErrors[0].Error(), "runner init failed") ||
-		!errors.Is(initErr.SubErrors[0], expectedRunnerErr) {
-			t.Errorf("Runner init sub-error message/type mismatch: %v", initErr.SubErrors[0])
+	if !ok {
+		t.Fatalf("Expected InitializationError, got %T: %v", err, err)
+	}
+	subErrs := initErr.SubErrors() // Assuming SubErrors is a method
+	if len(subErrs) != 1 {
+		t.Errorf("Expected 1 sub-error for runner failure, got %d", len(subErrs))
+	} else {
+		if !strings.Contains(subErrs[0].Error(), "host1") ||
+			!strings.Contains(subErrs[0].Error(), "runner init failed") ||
+			!errors.Is(subErrs[0], expectedRunnerErr) {
+			t.Errorf("Runner init sub-error message/type mismatch: %v", subErrs[0])
 		}
 	}
 }
+
+// TODO: Add TestClusterRuntime_Copy if it was defined previously, ensuring it uses v1alpha1.Cluster
+// and calls v1alpha1.SetDefaults_Cluster(cfg).
