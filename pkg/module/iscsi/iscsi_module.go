@@ -3,68 +3,52 @@ package iscsi
 import (
 	"github.com/kubexms/kubexms/pkg/config"
 	"github.com/kubexms/kubexms/pkg/spec"
-	"github.com/kubexms/kubexms/pkg/step/iscsi"
+	taskISCSI "github.com/kubexms/kubexms/pkg/task/iscsi" // Import for new task constructors
+	// No direct step imports needed if tasks encapsulate all steps
 )
 
 // NewISCSIModule creates a module specification for managing iSCSI client tools and services.
 func NewISCSIModule(cfg *config.Cluster) *spec.ModuleSpec {
 
-	installAndEnableTask := &spec.TaskSpec{
-		Name: "Install and Enable iSCSI Client",
-		Steps: []spec.StepSpec{
-			&iscsi.InstallISCSIClientPackagesStepSpec{},
-			&iscsi.EnableISCSIClientServiceStepSpec{},
-		},
+	allTasks := []*spec.TaskSpec{}
+
+	// Install and Enable iSCSI Client Task
+	installTask := taskISCSI.NewInstallAndEnableISCSITask(cfg)
+	if installTask != nil {
+		allTasks = append(allTasks, installTask)
 	}
 
-	disableAndUninstallTask := &spec.TaskSpec{
-		Name: "Disable and Uninstall iSCSI Client",
-		Steps: []spec.StepSpec{
-			&iscsi.DisableISCSIClientServiceStepSpec{},
-			&iscsi.UninstallISCSIClientPackagesStepSpec{},
-		},
-	}
-
-	// Assemble the tasks for this module.
-	iscsiTaskSpecs := []*spec.TaskSpec{
-		installAndEnableTask,
-		disableAndUninstallTask,
+	// Disable and Uninstall iSCSI Client Task
+	uninstallTask := taskISCSI.NewDisableAndUninstallISCSITask(cfg)
+	if uninstallTask != nil {
+		allTasks = append(allTasks, uninstallTask)
 	}
 
 	return &spec.ModuleSpec{
 		Name: "iSCSI Client Management",
 		IsEnabled: func(clusterCfg *config.Cluster) bool {
-			// This function checks if the iSCSI client management is enabled in the cluster configuration.
-			// It assumes a structure like:
-			// clusterCfg.Spec.ISCSIClient.Managed
-			//
-			// The actual config.ISCSIClientSpec struct would be defined in pkg/config/config.go
-			// type ClusterSpec struct {
-			//    ...
-			//    ISCSIClient *ISCSIClientSpec `yaml:"iscsiClient,omitempty"`
-			//    ...
+			// This function checks if iSCSI client management is enabled.
+			// It should ideally check a specific field in the cluster configuration.
+			// Example:
+			// if clusterCfg != nil &&
+			//    clusterCfg.Spec.Features != nil &&
+			//    clusterCfg.Spec.Features.ISCSIClient != nil &&
+			//    clusterCfg.Spec.Features.ISCSIClient.Managed {
+			//     return true
 			// }
-			// type ISCSIClientSpec struct {
-			//    Managed bool `yaml:"managed,omitempty"`
-			// }
+			// return false
+			// For now, returning true to assume it's managed if module is included,
+			// or until a proper config field is established.
+			// A more realistic default might be based on whether any iSCSI-dependent features are enabled.
+			// Let's use a hypothetical config path for now as per the original plan.
 			if clusterCfg != nil &&
-				clusterCfg.Spec.Other != nil { // TODO: Replace Other with ISCSIClient once defined in config.go
-				// This is a temporary placeholder for the actual config check.
-				// Replace 'clusterCfg.Spec.Other != nil' with:
-				// clusterCfg.Spec.ISCSIClient != nil && clusterCfg.Spec.ISCSIClient.Managed
-				// For now, to make it compilable without the actual config change,
-				// we'll check a generic existing field or just return false/true.
-				// Let's assume for now it's disabled by default until config is ready.
-				// To actually test, one might temporarily return true or check another existing boolean field.
-				// For the purpose of this step, we are coding against the future config structure.
-				// if clusterCfg.Spec.ISCSIClient != nil && clusterCfg.Spec.ISCSIClient.Managed {
-				// return true
-				// }
+				clusterCfg.Spec.ISCSIClient != nil && // Assumes config.ISCSIClientSpec exists
+				clusterCfg.Spec.ISCSIClient.Managed {
+				return true
 			}
-			// Default to false if the specific config path is not yet available or not true.
-			return false // Placeholder: change this once config.ISCSIClientSpec is implemented
+			return false // Default to false if not explicitly managed
 		},
-		Tasks:   iscsiTaskSpecs,
+		Tasks:   allTasks,
 		PreRun:  nil,
 		PostRun: nil,
 	}
