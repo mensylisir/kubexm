@@ -9,52 +9,34 @@ import (
 
 // RegistryConfig defines configurations related to container image registries.
 type RegistryConfig struct {
-	// RegistryMirrors is a list of mirrors for container registries.
-	// Each string should be a valid registry URL.
-	// Example: ["https://mymirror.example.com"] (applies to docker.io by default or needs more structure)
-	// KubeKey's RegistryConfig had this as []string, implying global mirrors.
-	// A richer structure might be map[string][]string like ContainerdConfig.RegistryMirrors.
-	// For now, sticking to KubeKey's simple []string for global mirrors.
-	RegistryMirrors []string `json:"registryMirrors,omitempty"`
-
-	// InsecureRegistries is a list of registries that can be accessed over HTTP.
-	// Each string should be a host or host:port. Example: ["my.insecure.registry:5000"]
-	InsecureRegistries []string `json:"insecureRegistries,omitempty"`
-
-	// PrivateRegistry specifies a default private registry to prefix images that don't have a registry specified.
-	// Example: "mycompany.registry.com"
-	// If set, an image like "myimage:latest" would be pulled as "mycompany.registry.com/myimage:latest".
-	// If it includes a namespace like "mycompany.registry.com/mynamespace", then "myimage" becomes "mycompany.registry.com/mynamespace/myimage".
-	PrivateRegistry string `json:"privateRegistry,omitempty"`
-
-	// NamespaceOverride can be used to force all images into a specific namespace within a private registry.
-	// This is often used in air-gapped environments. Example: "kube-images"
-	// If PrivateRegistry is "myreg.com" and NamespaceOverride is "airgap", "nginx" becomes "myreg.com/airgap/nginx".
-	NamespaceOverride string `json:"namespaceOverride,omitempty"`
-
-	// Auths provides authentication credentials for private registries.
-	// The key is the registry server address (e.g., "docker.io", "mycompany.registry.com").
-	Auths map[string]RegistryAuth `json:"auths,omitempty"`
-
-	// Type of the private registry, if one is being deployed or managed by this tool.
-	// e.g., "harbor", "docker-registry". Not for client configuration.
-	// This field might be better in a separate "LocalRegistryDeploymentConfig" struct.
-	// For now, adding based on KubeKey's presence.
-	Type *string `json:"type,omitempty"`
-
-	// DataRoot for a locally deployed registry (if Type indicates one is managed).
-	DataRoot *string `json:"dataRoot,omitempty"`
+	RegistryMirrors   []string                `json:"registryMirrors,omitempty" yaml:"registryMirrors,omitempty"`
+	InsecureRegistries []string                `json:"insecureRegistries,omitempty" yaml:"insecureRegistries,omitempty"`
+	PrivateRegistry   string                  `json:"privateRegistry,omitempty" yaml:"privateRegistry,omitempty"`
+	NamespaceOverride string                  `json:"namespaceOverride,omitempty" yaml:"namespaceOverride,omitempty"`
+	Auths             map[string]RegistryAuth `json:"auths,omitempty" yaml:"auths,omitempty"`
+	Type              *string                 `json:"type,omitempty" yaml:"type,omitempty"` // For local registry deployment
+	DataRoot          *string                 `json:"dataRoot,omitempty" yaml:"dataRoot,omitempty"` // For local registry deployment data
+	NamespaceRewrite  *NamespaceRewriteConfig `json:"namespaceRewrite,omitempty" yaml:"namespaceRewrite,omitempty"` // New field
 }
 
 // RegistryAuth defines authentication credentials for a specific registry.
 type RegistryAuth struct {
-	Username string `json:"username,omitempty"`
-	Password string `json:"password,omitempty"`
-	// Auth is a base64 encoded string of "username:password".
-	// If Auth is provided, Username and Password might be ignored by some tools.
-	Auth     string `json:"auth,omitempty"`
-	// Email      string `json:"email,omitempty"` // Often included in Docker config.json
-	// ServerAddress string `json:"serveraddress,omitempty"` // Key of the map is already server address
+	Username string `json:"username,omitempty" yaml:"username,omitempty"`
+	Password string `json:"password,omitempty" yaml:"password,omitempty"`
+	Auth     string `json:"auth,omitempty" yaml:"auth,omitempty"` // Base64 encoded "username:password"
+}
+
+// NamespaceRewriteConfig defines rules for rewriting image namespaces.
+type NamespaceRewriteConfig struct {
+	Enabled bool                   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Rules   []NamespaceRewriteRule `json:"rules,omitempty" yaml:"rules,omitempty"`
+}
+
+// NamespaceRewriteRule defines a single namespace rewrite rule.
+type NamespaceRewriteRule struct {
+	Registry     string `json:"registry,omitempty" yaml:"registry,omitempty"` // Target registry for this rule, e.g., "docker.io"
+	OldNamespace string `json:"oldNamespace" yaml:"oldNamespace"`             // Original namespace, e.g., "library"
+	NewNamespace string `json:"newNamespace" yaml:"newNamespace"`             // Namespace to rewrite to, e.g., "mycorp"
 }
 
 // --- Defaulting Functions ---
@@ -73,7 +55,24 @@ func SetDefaults_RegistryConfig(cfg *RegistryConfig) {
 	if cfg.Auths == nil {
 		cfg.Auths = make(map[string]RegistryAuth)
 	}
-	// No defaults for Type or DataRoot; they are for specific deployment scenarios.
+	if cfg.PrivateRegistry == "" {
+		cfg.PrivateRegistry = "dockerhub.kubexm.local"
+	}
+	if cfg.Type != nil && *cfg.Type != "" { // If a local registry type is specified
+		if cfg.DataRoot == nil || *cfg.DataRoot == "" {
+			defaultDataRoot := "/mnt/registry"
+			cfg.DataRoot = &defaultDataRoot
+		}
+	}
+	// No default for Type itself.
+	if cfg.NamespaceRewrite == nil {
+		cfg.NamespaceRewrite = &NamespaceRewriteConfig{} // Initialize if nil
+	}
+	if cfg.NamespaceRewrite.Rules == nil {
+		cfg.NamespaceRewrite.Rules = []NamespaceRewriteRule{} // Initialize Rules slice
+	}
+	// Default NamespaceRewrite.Enabled to false? Or assume if rules are present, it's enabled?
+	// For now, no default for NamespaceRewrite.Enabled.
 }
 
 // --- Validation Functions ---

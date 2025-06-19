@@ -464,6 +464,23 @@ spec:
 			yamlData:    []byte(""),
 			expectError: true, // Parser should error
 		},
+		{
+			name: "YAML with omitted fields for defaulting",
+			yamlData: []byte(`
+apiVersion: kubexms.io/v1alpha1
+kind: Cluster
+metadata:
+  name: test-defaults
+spec:
+  hosts:
+  - name: node1
+    address: 1.1.1.1
+  # kubernetes, etcd, network, registry, etc. are omitted to test defaulting
+`),
+			expectError:   false, // Expecting successful creation with defaults
+			expectedName:  "test-defaults",
+			// We will check specific default values below, not just k8s version
+		},
 	}
 
 	log := logger.Get() // Use a common logger
@@ -496,6 +513,64 @@ spec:
 				}
 				if len(rt.GetAllHosts()) != tc.expectedNumHosts {
 					t.Errorf("Expected %d hosts, got %d", tc.expectedNumHosts, len(rt.GetAllHosts()))
+				}
+
+				// Specific checks for the defaulting test case
+				if tc.name == "YAML with omitted fields for defaulting" {
+					// Kubernetes defaults
+					if rt.ClusterConfig.Spec.Kubernetes == nil {
+						t.Fatalf("Expected rt.ClusterConfig.Spec.Kubernetes to be defaulted, but it was nil")
+					}
+					if rt.ClusterConfig.Spec.Kubernetes.ContainerManager != "docker" {
+						t.Errorf("Expected Kubernetes.ContainerManager default 'docker', got '%s'", rt.ClusterConfig.Spec.Kubernetes.ContainerManager)
+					}
+					if rt.ClusterConfig.Spec.Kubernetes.MaxPods == nil || *rt.ClusterConfig.Spec.Kubernetes.MaxPods != 110 {
+						t.Errorf("Expected Kubernetes.MaxPods default 110, got %v", rt.ClusterConfig.Spec.Kubernetes.MaxPods)
+					}
+					// Etcd defaults
+					if rt.ClusterConfig.Spec.Etcd == nil {
+						t.Fatalf("Expected rt.ClusterConfig.Spec.Etcd to be defaulted, but it was nil")
+					}
+					if rt.ClusterConfig.Spec.Etcd.Type != "kubexm" {
+						t.Errorf("Expected Etcd.Type default 'kubexm', got '%s'", rt.ClusterConfig.Spec.Etcd.Type)
+					}
+					if rt.ClusterConfig.Spec.Etcd.HeartbeatIntervalMillis == nil || *rt.ClusterConfig.Spec.Etcd.HeartbeatIntervalMillis != 250 {
+						val := "nil"
+						if rt.ClusterConfig.Spec.Etcd.HeartbeatIntervalMillis != nil {
+							val = fmt.Sprintf("%d", *rt.ClusterConfig.Spec.Etcd.HeartbeatIntervalMillis)
+						}
+						t.Errorf("Expected Etcd.HeartbeatIntervalMillis default 250, got %s", val)
+					}
+					if rt.ClusterConfig.Spec.Etcd.ElectionTimeoutMillis == nil || *rt.ClusterConfig.Spec.Etcd.ElectionTimeoutMillis != 5000 {
+						val := "nil"
+						if rt.ClusterConfig.Spec.Etcd.ElectionTimeoutMillis != nil {
+							val = fmt.Sprintf("%d", *rt.ClusterConfig.Spec.Etcd.ElectionTimeoutMillis)
+						}
+						t.Errorf("Expected Etcd.ElectionTimeoutMillis default 5000, got %s", val)
+					}
+					// Network defaults
+					if rt.ClusterConfig.Spec.Network == nil {
+						t.Fatalf("Expected rt.ClusterConfig.Spec.Network to be defaulted, but it was nil")
+					}
+					if rt.ClusterConfig.Spec.Network.Plugin != "calico" {
+						t.Errorf("Expected Network.Plugin default 'calico', got '%s'", rt.ClusterConfig.Spec.Network.Plugin)
+					}
+					if rt.ClusterConfig.Spec.Network.Calico == nil {
+						t.Fatalf("Expected Network.Calico to be defaulted when plugin is 'calico', but it was nil")
+					}
+					if rt.ClusterConfig.Spec.Network.Calico.IPIPMode != "Always" {
+						t.Errorf("Expected Calico.IPIPMode default 'Always', got '%s'", rt.ClusterConfig.Spec.Network.Calico.IPIPMode)
+					}
+					if rt.ClusterConfig.Spec.Network.Calico.VXLANMode != "Never" {
+						t.Errorf("Expected Calico.VXLANMode default 'Never', got '%s'", rt.ClusterConfig.Spec.Network.Calico.VXLANMode)
+					}
+					// Registry defaults
+					if rt.ClusterConfig.Spec.Registry == nil {
+						t.Fatalf("Expected rt.ClusterConfig.Spec.Registry to be defaulted, but it was nil")
+					}
+					if rt.ClusterConfig.Spec.Registry.PrivateRegistry != "dockerhub.kubexm.local" {
+						t.Errorf("Expected Registry.PrivateRegistry default 'dockerhub.kubexm.local', got '%s'", rt.ClusterConfig.Spec.Registry.PrivateRegistry)
+					}
 				}
 			}
 		})

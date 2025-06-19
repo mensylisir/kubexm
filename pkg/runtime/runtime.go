@@ -15,8 +15,8 @@ import (
 	"github.com/kubexms/kubexms/pkg/connector"
 	"github.com/kubexms/kubexms/pkg/logger"
 	"github.com/kubexms/kubexms/pkg/runner"
-	// "github.com/kubexms/kubexms/pkg/config" // This was the old config path.
-	"{{MODULE_NAME}}/pkg/config" // For parser's output type
+	// "github.com/kubexms/kubexms/pkg/config" // This was the old config path, no longer needed.
+	// "{{MODULE_NAME}}/pkg/config" // No longer needed as parser returns v1alpha1.Cluster directly
 	"{{MODULE_NAME}}/pkg/parser" // The new parser
 	"github.com/kubexms/kubexms/pkg/apis/kubexms/v1alpha1"
 )
@@ -170,19 +170,25 @@ func NewRuntimeFromYAML(yamlData []byte, baseLogger *logger.Logger) (*ClusterRun
 		return nil, fmt.Errorf("failed to parse cluster YAML: %w", err)
 	}
 
-	initPhaseLogger.Infof("Successfully parsed cluster YAML for cluster: %s", parsedConfig.Metadata.Name)
-
-	// Convert config.Cluster to v1alpha1.Cluster
-	v1alpha1Cfg, err := config.ToV1Alpha1Cluster(parsedConfig)
-	if err != nil {
-		initPhaseLogger.Errorf("Failed to convert parsed config.Cluster to v1alpha1.Cluster: %v", err)
-		return nil, fmt.Errorf("failed to convert config to v1alpha1 API type: %w", err)
+	// parsedConfig is now directly *v1alpha1.Cluster
+	if parsedConfig == nil {
+		// This case should ideally be caught by the parser if YAML is truly empty or invalid.
+		initPhaseLogger.Errorf("Parsed configuration is nil after parsing YAML.")
+		return nil, fmt.Errorf("parsed configuration is nil after parsing YAML")
 	}
 
-	initPhaseLogger.Infof("Successfully converted YAML config to v1alpha1.Cluster for cluster: %s", v1alpha1Cfg.Name)
+	// Log using ObjectMeta.Name
+	initPhaseLogger.Infof("Successfully parsed cluster YAML for cluster: %s", parsedConfig.ObjectMeta.Name)
 
-	// Call the existing NewRuntime function with the converted v1alpha1.Cluster config
-	return NewRuntime(v1alpha1Cfg, baseLogger)
+	// Apply defaults from the v1alpha1 package
+	v1alpha1.SetDefaults_Cluster(parsedConfig)
+	initPhaseLogger.Infof("Applied v1alpha1 defaults to the cluster configuration for: %s", parsedConfig.ObjectMeta.Name)
+
+	// No explicit conversion/cast function call needed anymore.
+	// parsedConfig is already the *v1alpha1.Cluster type needed by NewRuntime.
+
+	// Call the existing NewRuntime function with the parsed v1alpha1.Cluster config
+	return NewRuntime(parsedConfig, baseLogger)
 }
 
 

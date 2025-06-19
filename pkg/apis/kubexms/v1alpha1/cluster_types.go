@@ -20,128 +20,142 @@ import (
 
 // Cluster is the top-level configuration object.
 type Cluster struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.TypeMeta   `json:",inline" yaml:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 
-	Spec   ClusterSpec   `json:"spec,omitempty"`
+	Spec   ClusterSpec   `json:"spec,omitempty" yaml:"spec,omitempty"`
 	// Status ClusterStatus `json:"status,omitempty"` // Add when status is defined
 }
 
 // ClusterSpec defines the desired state of the Kubernetes cluster.
 type ClusterSpec struct {
 	// RoleGroups defines the different groups of nodes in the cluster.
-	RoleGroups *RoleGroupsSpec `json:"roleGroups,omitempty"`
+	RoleGroups *RoleGroupsSpec `json:"roleGroups,omitempty" yaml:"roleGroups,omitempty"`
 	// ControlPlaneEndpoint defines the endpoint for the Kubernetes API server.
-	ControlPlaneEndpoint *ControlPlaneEndpointSpec `json:"controlPlaneEndpoint,omitempty"`
+	ControlPlaneEndpoint *ControlPlaneEndpointSpec `json:"controlPlaneEndpoint,omitempty" yaml:"controlPlaneEndpoint,omitempty"`
 	// System contains system-level configuration.
-	System *SystemSpec `json:"system,omitempty"`
+	System *SystemSpec `json:"system,omitempty" yaml:"system,omitempty"`
 
-	Global             *GlobalSpec             `json:"global,omitempty"`
-	Hosts              []HostSpec              `json:"hosts"`
+	Global             *GlobalSpec             `json:"global,omitempty" yaml:"global,omitempty"`
+	Hosts              []HostSpec              `json:"hosts" yaml:"hosts"`
 
 	// Component configurations - will be pointers to specific config types
-	ContainerRuntime   *ContainerRuntimeConfig `json:"containerRuntime,omitempty"`
-	Containerd         *ContainerdConfig       `json:"containerd,omitempty"`
-	Etcd               *EtcdConfig             `json:"etcd,omitempty"`
-	Kubernetes         *KubernetesConfig       `json:"kubernetes,omitempty"`
-	Network            *NetworkConfig          `json:"network,omitempty"`
-	HighAvailability   *HighAvailabilityConfig `json:"highAvailability,omitempty"`
-	Preflight          *PreflightConfig        `json:"preflight,omitempty"`
-	Kernel             *KernelConfig           `json:"kernel,omitempty"`
-	Storage            *StorageConfig          `json:"storage,omitempty"`
-	Registry           *RegistryConfig         `json:"registry,omitempty"`
-	OS                 *OSConfig               `json:"os,omitempty"`
-	Addons             []AddonConfig           `json:"addons,omitempty"` // Slice of AddonConfig
+	ContainerRuntime   *ContainerRuntimeConfig `json:"containerRuntime,omitempty" yaml:"containerRuntime,omitempty"`
+	Containerd         *ContainerdConfig       `json:"containerd,omitempty" yaml:"containerd,omitempty"`
+	Etcd               *EtcdConfig             `json:"etcd,omitempty" yaml:"etcd,omitempty"`
+	Kubernetes         *KubernetesConfig       `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"`
+	Network            *NetworkConfig          `json:"network,omitempty" yaml:"network,omitempty"`
+	HighAvailability   *HighAvailabilityConfig `json:"highAvailability,omitempty" yaml:"highAvailability,omitempty"`
+	Preflight          *PreflightConfig        `json:"preflight,omitempty" yaml:"preflight,omitempty"`
+	Kernel             *KernelConfig           `json:"kernel,omitempty" yaml:"kernel,omitempty"`
+	Storage            *StorageConfig          `json:"storage,omitempty" yaml:"storage,omitempty"`
+	Registry           *RegistryConfig         `json:"registry,omitempty" yaml:"registry,omitempty"`
+	OS                 *OSConfig               `json:"os,omitempty" yaml:"os,omitempty"`
+	Addons             []AddonConfig           `json:"addons,omitempty" yaml:"addons,omitempty"`
 	// HostsCount int `json:"hostsCount,omitempty"` // Example for printcolumn
 }
 
 // RoleGroupsSpec defines the different groups of nodes in the cluster.
 type RoleGroupsSpec struct {
-	Master         MasterRoleSpec   `json:"master,omitempty"`
-	Worker         WorkerRoleSpec   `json:"worker,omitempty"`
-	Etcd           EtcdRoleSpec     `json:"etcd,omitempty"`
-	LoadBalancer   LoadBalancerRoleSpec `json:"loadBalancer,omitempty"`
-	Storage        StorageRoleSpec  `json:"storage,omitempty"`
-	CustomRoles    []CustomRoleSpec `json:"customRoles,omitempty"`
+	Master         MasterRoleSpec   `json:"master,omitempty" yaml:"master,omitempty"`
+	Worker         WorkerRoleSpec   `json:"worker,omitempty" yaml:"worker,omitempty"`
+	Etcd           EtcdRoleSpec     `json:"etcd,omitempty" yaml:"etcd,omitempty"`
+	LoadBalancer   LoadBalancerRoleSpec `json:"loadBalancer,omitempty" yaml:"loadBalancer,omitempty"` // YAML name from example: loadbalancer
+	Storage        StorageRoleSpec  `json:"storage,omitempty" yaml:"storage,omitempty"`
+	// Registry       RegistryRoleSpec `json:"registry,omitempty" yaml:"registry,omitempty"` // Assuming a registry role might exist
+	CustomRoles    []CustomRoleSpec `json:"customRoles,omitempty" yaml:"customRoles,omitempty"`
 }
 
 // MasterRoleSpec defines the configuration for master nodes.
 type MasterRoleSpec struct {
-	Hosts []string `json:"hosts,omitempty"`
+	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
 // WorkerRoleSpec defines the configuration for worker nodes.
 type WorkerRoleSpec struct {
-	Hosts []string `json:"hosts,omitempty"`
+	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
 // EtcdRoleSpec defines the configuration for etcd nodes.
 type EtcdRoleSpec struct {
-	Hosts []string `json:"hosts,omitempty"`
+	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
 // LoadBalancerRoleSpec defines the configuration for load balancer nodes.
 type LoadBalancerRoleSpec struct {
-	Hosts []string `json:"hosts,omitempty"`
+	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
 // StorageRoleSpec defines the configuration for storage nodes.
 type StorageRoleSpec struct {
-	Hosts []string `json:"hosts,omitempty"`
+	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
 // CustomRoleSpec defines a custom role group.
 type CustomRoleSpec struct {
-	Name  string   `json:"name"`
-	Hosts []string `json:"hosts,omitempty"`
+	Name  string   `json:"name" yaml:"name"`
+	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
 // ControlPlaneEndpointSpec defines the endpoint for the Kubernetes API server.
+// YAML fields from description: internalLoadbalancer, externalDNS, domain, address, port
 type ControlPlaneEndpointSpec struct {
-	Host string `json:"host,omitempty"`
-	Port int    `json:"port,omitempty"`
+	Host                 string `json:"host,omitempty" yaml:"address,omitempty"` // Maps to 'address' in YAML
+	Port                 int    `json:"port,omitempty" yaml:"port,omitempty"`
+	InternalLoadbalancer string `json:"internalLoadbalancer,omitempty" yaml:"internalLoadbalancer,omitempty"` // New field
+	ExternalDNS          bool   `json:"externalDNS,omitempty" yaml:"externalDNS,omitempty"`                   // New field
+	Domain               string `json:"domain,omitempty" yaml:"domain,omitempty"`                             // New field
 }
 
-// SystemSpec defines system-level configuration, such as the package manager.
+// SystemSpec defines system-level configuration.
+// YAML fields from description: ntpServers, timezone, rpms, debs, preInstall, postInstall, skipConfigureOS
 type SystemSpec struct {
-	PackageManager string `json:"packageManager,omitempty"` // e.g., "apt", "yum"
+	PackageManager    string   `json:"packageManager,omitempty" yaml:"packageManager,omitempty"` // e.g., "apt", "yum"
+	NTPServers        []string `json:"ntpServers,omitempty" yaml:"ntpServers,omitempty"`             // New field
+	Timezone          string   `json:"timezone,omitempty" yaml:"timezone,omitempty"`                 // New field
+	RPMs              []string `json:"rpms,omitempty" yaml:"rpms,omitempty"`                         // New field for RPM package names
+	Debs              []string `json:"debs,omitempty" yaml:"debs,omitempty"`                         // New field for Deb package names
+	PreInstallScripts []string `json:"preInstallScripts,omitempty" yaml:"preInstall,omitempty"`      // New field, assuming list of script paths or inline
+	PostInstallScripts[]string `json:"postInstallScripts,omitempty" yaml:"postInstall,omitempty"`    // New field
+	SkipConfigureOS   bool     `json:"skipConfigureOS,omitempty" yaml:"skipConfigureOS,omitempty"`   // New field
 }
+
 
 // GlobalSpec contains settings applicable to the entire cluster or as defaults for hosts.
 type GlobalSpec struct {
-	User              string        `json:"user,omitempty"`
-	Port              int           `json:"port,omitempty"`
-	Password          string        `json:"password,omitempty"`
-	PrivateKey        string        `json:"privateKey,omitempty"`
-	PrivateKeyPath    string        `json:"privateKeyPath,omitempty"`
-	ConnectionTimeout time.Duration `json:"connectionTimeout,omitempty"`
-	WorkDir           string        `json:"workDir,omitempty"`
-	Verbose           bool          `json:"verbose,omitempty"`
-	IgnoreErr         bool          `json:"ignoreErr,omitempty"`
-	SkipPreflight     bool          `json:"skipPreflight,omitempty"`
+	User              string        `json:"user,omitempty" yaml:"user,omitempty"`
+	Port              int           `json:"port,omitempty" yaml:"port,omitempty"`
+	Password          string        `json:"password,omitempty" yaml:"password,omitempty"`
+	PrivateKey        string        `json:"privateKey,omitempty" yaml:"privateKey,omitempty"`
+	PrivateKeyPath    string        `json:"privateKeyPath,omitempty" yaml:"privateKeyPath,omitempty"`
+	ConnectionTimeout time.Duration `json:"connectionTimeout,omitempty" yaml:"connectionTimeout,omitempty"`
+	WorkDir           string        `json:"workDir,omitempty" yaml:"workDir,omitempty"`
+	Verbose           bool          `json:"verbose,omitempty" yaml:"verbose,omitempty"`
+	IgnoreErr         bool          `json:"ignoreErr,omitempty" yaml:"ignoreErr,omitempty"`
+	SkipPreflight     bool          `json:"skipPreflight,omitempty" yaml:"skipPreflight,omitempty"`
 }
 
 // HostSpec defines the configuration for a single host.
 type HostSpec struct {
-	Name            string            `json:"name"`
-	Address         string            `json:"address"`
-	InternalAddress string            `json:"internalAddress,omitempty"`
-	Port            int               `json:"port,omitempty"`
-	User            string            `json:"user,omitempty"`
-	Password        string            `json:"password,omitempty"`
-	PrivateKey      string            `json:"privateKey,omitempty"`
-	PrivateKeyPath  string            `json:"privateKeyPath,omitempty"`
-	Roles           []string          `json:"roles,omitempty"`
-	Labels          map[string]string `json:"labels,omitempty"`
-	Taints          []TaintSpec       `json:"taints,omitempty"`
-	Type            string            `json:"type,omitempty"`
+	Name            string            `json:"name" yaml:"name"`
+	Address         string            `json:"address" yaml:"address"`
+	InternalAddress string            `json:"internalAddress,omitempty" yaml:"internalAddress,omitempty"`
+	Port            int               `json:"port,omitempty" yaml:"port,omitempty"`
+	User            string            `json:"user,omitempty" yaml:"user,omitempty"`
+	Password        string            `json:"password,omitempty" yaml:"password,omitempty"`
+	PrivateKey      string            `json:"privateKey,omitempty" yaml:"privateKey,omitempty"`
+	PrivateKeyPath  string            `json:"privateKeyPath,omitempty" yaml:"privateKeyPath,omitempty"`
+	Roles           []string          `json:"roles,omitempty" yaml:"roles,omitempty"`
+	Labels          map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
+	Taints          []TaintSpec       `json:"taints,omitempty" yaml:"taints,omitempty"`
+	Type            string            `json:"type,omitempty" yaml:"type,omitempty"`
 }
 
 // TaintSpec defines a Kubernetes node taint.
 type TaintSpec struct {
-	Key    string `json:"key"`
-	Value  string `json:"value"`
-	Effect string `json:"effect"`
+	Key    string `json:"key" yaml:"key"`
+	Value  string `json:"value" yaml:"value"`
+	Effect string `json:"effect" yaml:"effect"`
 }
 
 // Placeholder structs for component configs (initial version)

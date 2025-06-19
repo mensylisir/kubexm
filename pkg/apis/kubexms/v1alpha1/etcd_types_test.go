@@ -10,8 +10,8 @@ func TestSetDefaults_EtcdConfig(t *testing.T) {
 	cfg := &EtcdConfig{}
 	SetDefaults_EtcdConfig(cfg)
 
-	if cfg.Type != EtcdTypeKubeXMSInternal {
-		t.Errorf("Default Type = %s, want %s", cfg.Type, EtcdTypeKubeXMSInternal)
+	if cfg.Type != "kubexm" { // Updated expected default
+		t.Errorf("Default Type = %s, want kubexm", cfg.Type)
 	}
 	if cfg.ClientPort == nil || *cfg.ClientPort != 2379 {
 		t.Errorf("Default ClientPort = %v, want 2379", cfg.ClientPort)
@@ -29,13 +29,14 @@ func TestSetDefaults_EtcdConfig(t *testing.T) {
 	if cfg.BackupPeriodHours == nil || *cfg.BackupPeriodHours != 24 { t.Errorf("Default BackupPeriodHours failed: %v", cfg.BackupPeriodHours) }
 	if cfg.KeepBackupNumber == nil || *cfg.KeepBackupNumber != 7 { t.Errorf("Default KeepBackupNumber failed: %v", cfg.KeepBackupNumber) }
 
-	if cfg.HeartbeatIntervalMillis == nil || *cfg.HeartbeatIntervalMillis != 100 { t.Errorf("Default HeartbeatIntervalMillis failed: %v", cfg.HeartbeatIntervalMillis) }
-	if cfg.ElectionTimeoutMillis == nil || *cfg.ElectionTimeoutMillis != 1000 { t.Errorf("Default ElectionTimeoutMillis failed: %v", cfg.ElectionTimeoutMillis) }
-	if cfg.SnapshotCount == nil || *cfg.SnapshotCount != 100000 { t.Errorf("Default SnapshotCount failed: %v", cfg.SnapshotCount) }
-	if cfg.AutoCompactionRetentionHours == nil || *cfg.AutoCompactionRetentionHours != 0 { t.Errorf("Default AutoCompactionRetentionHours failed: %v", cfg.AutoCompactionRetentionHours) }
+	if cfg.HeartbeatIntervalMillis == nil || *cfg.HeartbeatIntervalMillis != 250 { t.Errorf("Default HeartbeatIntervalMillis failed: %v, want 250", cfg.HeartbeatIntervalMillis) }
+	if cfg.ElectionTimeoutMillis == nil || *cfg.ElectionTimeoutMillis != 5000 { t.Errorf("Default ElectionTimeoutMillis failed: %v, want 5000", cfg.ElectionTimeoutMillis) }
+	if cfg.SnapshotCount == nil || *cfg.SnapshotCount != 10000 { t.Errorf("Default SnapshotCount failed: %v, want 10000", cfg.SnapshotCount) }
+	if cfg.AutoCompactionRetentionHours == nil || *cfg.AutoCompactionRetentionHours != 8 { t.Errorf("Default AutoCompactionRetentionHours failed: %v, want 8", cfg.AutoCompactionRetentionHours) }
 
-	if cfg.QuotaBackendBytes == nil || *cfg.QuotaBackendBytes != 0 { t.Errorf("Default QuotaBackendBytes failed: %v", cfg.QuotaBackendBytes) }
-	// MaxRequestBytes is not defaulted in SetDefaults_EtcdConfig, so no check here.
+	if cfg.QuotaBackendBytes == nil || *cfg.QuotaBackendBytes != 2147483648 { t.Errorf("Default QuotaBackendBytes failed: %v, want 2147483648", cfg.QuotaBackendBytes) }
+	if cfg.MaxRequestBytes == nil || *cfg.MaxRequestBytes != 1572864 { t.Errorf("Default MaxRequestBytes failed: %v, want 1572864", cfg.MaxRequestBytes) }
+
 
 	if cfg.Metrics == nil || *cfg.Metrics != "basic" { t.Errorf("Default Metrics failed: %v", cfg.Metrics) }
 	if cfg.LogLevel == nil || *cfg.LogLevel != "info" { t.Errorf("Default LogLevel failed: %v", cfg.LogLevel) }

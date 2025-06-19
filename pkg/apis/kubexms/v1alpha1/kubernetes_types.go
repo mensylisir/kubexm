@@ -9,115 +9,106 @@ import (
 
 // KubernetesConfig defines the configuration for Kubernetes components.
 type KubernetesConfig struct {
-	Version                string            `json:"version"`
-	ClusterName            string            `json:"clusterName,omitempty"`
-	DNSDomain              string            `json:"dnsDomain,omitempty"`
-	DisableKubeProxy       *bool             `json:"disableKubeProxy,omitempty"` // Default: false (proxy enabled)
-	MasqueradeAll          *bool             `json:"masqueradeAll,omitempty"`    // Default: false
-	MaxPods                *int32            `json:"maxPods,omitempty"`
-	NodeCidrMaskSize       *int32            `json:"nodeCidrMaskSize,omitempty"`
-	ApiserverCertExtraSans []string          `json:"apiserverCertExtraSans,omitempty"`
-	ProxyMode              string            `json:"proxyMode,omitempty"` // e.g., "iptables", "ipvs"
-	AutoRenewCerts         *bool             `json:"autoRenewCerts,omitempty"` // Default: false
-	ContainerManager       string            `json:"containerManager,omitempty"` // e.g., "cgroupfs", "systemd" (for Kubelet)
-	PodSubnet              string            `json:"podSubnet,omitempty"`
-	ServiceSubnet          string            `json:"serviceSubnet,omitempty"`
-	FeatureGates           map[string]bool   `json:"featureGates,omitempty"`
+	Version                string            `json:"version" yaml:"version"`
+	ClusterName            string            `json:"clusterName,omitempty" yaml:"clusterName,omitempty"`
+	DNSDomain              string            `json:"dnsDomain,omitempty" yaml:"dnsDomain,omitempty"`
+	DisableKubeProxy       *bool             `json:"disableKubeProxy,omitempty" yaml:"disableKubeProxy,omitempty"`
+	MasqueradeAll          *bool             `json:"masqueradeAll,omitempty" yaml:"masqueradeAll,omitempty"`
+	MaxPods                *int32            `json:"maxPods,omitempty" yaml:"maxPods,omitempty"`
+	NodeCidrMaskSize       *int32            `json:"nodeCidrMaskSize,omitempty" yaml:"nodeCidrMaskSize,omitempty"` // YAML might be nodeCIDRMaskSize
+	ApiserverCertExtraSans []string          `json:"apiserverCertExtraSans,omitempty" yaml:"apiserverCertExtraSans,omitempty"` // YAML might be apiServerCertExtraSANs
+	ProxyMode              string            `json:"proxyMode,omitempty" yaml:"proxyMode,omitempty"`
+	AutoRenewCerts         *bool             `json:"autoRenewCerts,omitempty" yaml:"autoRenewCerts,omitempty"`
+	ContainerManager       string            `json:"containerManager,omitempty" yaml:"containerManager,omitempty"`
+	PodSubnet              string            `json:"podSubnet,omitempty" yaml:"podSubnet,omitempty"` // Often kubePodsCIDR in network section
+	ServiceSubnet          string            `json:"serviceSubnet,omitempty" yaml:"serviceSubnet,omitempty"` // Often kubeServiceCIDR in network section
+	FeatureGates           map[string]bool   `json:"featureGates,omitempty" yaml:"featureGates,omitempty"`
 
-	APIServer            *APIServerConfig            `json:"apiServer,omitempty"`
-	ControllerManager    *ControllerManagerConfig    `json:"controllerManager,omitempty"`
-	Scheduler            *SchedulerConfig            `json:"scheduler,omitempty"`
-	Kubelet              *KubeletConfig              `json:"kubelet,omitempty"`
-	KubeProxy            *KubeProxyConfig            `json:"kubeProxy,omitempty"`
-	KubeletConfiguration *runtime.RawExtension       `json:"kubeletConfiguration,omitempty"`
-	KubeProxyConfiguration *runtime.RawExtension     `json:"kubeProxyConfiguration,omitempty"`
-	Nodelocaldns         *NodelocaldnsConfig         `json:"nodelocaldns,omitempty"`
-	Audit                *AuditConfig                `json:"audit,omitempty"`
-	Kata                 *KataConfig                 `json:"kata,omitempty"`
-	NodeFeatureDiscovery *NodeFeatureDiscoveryConfig `json:"nodeFeatureDiscovery,omitempty"`
+	APIServer            *APIServerConfig            `json:"apiServer,omitempty" yaml:"apiServer,omitempty"`
+	ControllerManager    *ControllerManagerConfig    `json:"controllerManager,omitempty" yaml:"controllerManager,omitempty"`
+	Scheduler            *SchedulerConfig            `json:"scheduler,omitempty" yaml:"scheduler,omitempty"`
+	Kubelet              *KubeletConfig              `json:"kubelet,omitempty" yaml:"kubelet,omitempty"`
+	KubeProxy            *KubeProxyConfig            `json:"kubeProxy,omitempty" yaml:"kubeProxy,omitempty"`
+	KubeletConfiguration *runtime.RawExtension       `json:"kubeletConfiguration,omitempty" yaml:"kubeletConfiguration,omitempty"`
+	KubeProxyConfiguration *runtime.RawExtension     `json:"kubeProxyConfiguration,omitempty" yaml:"kubeProxyConfiguration,omitempty"`
+	Nodelocaldns         *NodelocaldnsConfig         `json:"nodelocaldns,omitempty" yaml:"nodelocaldns,omitempty"`
+	Audit                *AuditConfig                `json:"audit,omitempty" yaml:"audit,omitempty"`
+	Kata                 *KataConfig                 `json:"kata,omitempty" yaml:"kata,omitempty"`
+	NodeFeatureDiscovery *NodeFeatureDiscoveryConfig `json:"nodeFeatureDiscovery,omitempty" yaml:"nodeFeatureDiscovery,omitempty"`
 }
 
 // APIServerConfig holds configuration for the Kubernetes API Server.
 type APIServerConfig struct {
-	ExtraArgs            []string `json:"extraArgs,omitempty"` // Changed to []string
-	// Example specific fields (can be expanded based on KubeKey)
-	EtcdServers          []string `json:"etcdServers,omitempty"`
-	EtcdCAFile           string   `json:"etcdCAFile,omitempty"`
-	EtcdCertFile         string   `json:"etcdCertFile,omitempty"`
-	EtcdKeyFile          string   `json:"etcdKeyFile,omitempty"`
-	AdmissionPlugins     []string `json:"admissionPlugins,omitempty"`
-	ServiceNodePortRange string   `json:"serviceNodePortRange,omitempty"` // e.g. "30000-32767"
+	ExtraArgs            []string `json:"extraArgs,omitempty" yaml:"extraArgs,omitempty"`
+	EtcdServers          []string `json:"etcdServers,omitempty" yaml:"etcdServers,omitempty"`
+	EtcdCAFile           string   `json:"etcdCAFile,omitempty" yaml:"etcdCAFile,omitempty"`
+	EtcdCertFile         string   `json:"etcdCertFile,omitempty" yaml:"etcdCertFile,omitempty"`
+	EtcdKeyFile          string   `json:"etcdKeyFile,omitempty" yaml:"etcdKeyFile,omitempty"`
+	AdmissionPlugins     []string `json:"admissionPlugins,omitempty" yaml:"admissionPlugins,omitempty"`
+	ServiceNodePortRange string   `json:"serviceNodePortRange,omitempty" yaml:"serviceNodePortRange,omitempty"`
 }
 
 // ControllerManagerConfig holds configuration for the Kubernetes Controller Manager.
 type ControllerManagerConfig struct {
-	ExtraArgs                    []string `json:"extraArgs,omitempty"` // Changed to []string
-	// Example specific fields
-	ServiceAccountPrivateKeyFile string   `json:"serviceAccountPrivateKeyFile,omitempty"`
-	// ClusterCIDR is typically KubernetesConfig.PodSubnet, avoid duplication here unless specific override needed
+	ExtraArgs                    []string `json:"extraArgs,omitempty" yaml:"extraArgs,omitempty"`
+	ServiceAccountPrivateKeyFile string   `json:"serviceAccountPrivateKeyFile,omitempty" yaml:"serviceAccountPrivateKeyFile,omitempty"`
 }
 
 // SchedulerConfig holds configuration for the Kubernetes Scheduler.
 type SchedulerConfig struct {
-	ExtraArgs        []string `json:"extraArgs,omitempty"` // Changed to []string
-	// Example specific fields
-	PolicyConfigFile string   `json:"policyConfigFile,omitempty"`
+	ExtraArgs        []string `json:"extraArgs,omitempty" yaml:"extraArgs,omitempty"`
+	PolicyConfigFile string   `json:"policyConfigFile,omitempty" yaml:"policyConfigFile,omitempty"`
 }
 
 // KubeletConfig holds configuration for the Kubelet.
 type KubeletConfig struct {
-	ExtraArgs        []string            `json:"extraArgs,omitempty"` // Changed to []string
-	// Common typed fields
-	CgroupDriver     *string             `json:"cgroupDriver,omitempty"` // "cgroupfs" or "systemd"
-	EvictionHard     map[string]string   `json:"evictionHard,omitempty"` // e.g. {"memory.available": "100Mi"}
-	HairpinMode      *string             `json:"hairpinMode,omitempty"`  // "promiscuous-bridge", "hairpin-veth", "none"
-	// KubeletConfiguration field is now directly in KubernetesConfig
+	ExtraArgs        []string            `json:"extraArgs,omitempty" yaml:"extraArgs,omitempty"`
+	CgroupDriver     *string             `json:"cgroupDriver,omitempty" yaml:"cgroupDriver,omitempty"`
+	EvictionHard     map[string]string   `json:"evictionHard,omitempty" yaml:"evictionHard,omitempty"`
+	HairpinMode      *string             `json:"hairpinMode,omitempty" yaml:"hairpinMode,omitempty"`
 }
 
 // KubeProxyIPTablesConfig defines specific configuration for KubeProxy in IPTables mode.
 type KubeProxyIPTablesConfig struct {
-   MasqueradeAll *bool  `json:"masqueradeAll,omitempty"`
-   MasqueradeBit *int32 `json:"masqueradeBit,omitempty"`
-   SyncPeriod    string `json:"syncPeriod,omitempty"` // e.g., "30s"
-   MinSyncPeriod string `json:"minSyncPeriod,omitempty"`// e.g., "1s"
+   MasqueradeAll *bool  `json:"masqueradeAll,omitempty" yaml:"masqueradeAll,omitempty"`
+   MasqueradeBit *int32 `json:"masqueradeBit,omitempty" yaml:"masqueradeBit,omitempty"`
+   SyncPeriod    string `json:"syncPeriod,omitempty" yaml:"syncPeriod,omitempty"`
+   MinSyncPeriod string `json:"minSyncPeriod,omitempty" yaml:"minSyncPeriod,omitempty"`
 }
 
 // KubeProxyIPVSConfig defines specific configuration for KubeProxy in IPVS mode.
 type KubeProxyIPVSConfig struct {
-   Scheduler     string   `json:"scheduler,omitempty"` // e.g., "rr", "lc", "dh"
-   SyncPeriod    string   `json:"syncPeriod,omitempty"`
-   MinSyncPeriod string   `json:"minSyncPeriod,omitempty"`
-   ExcludeCIDRs  []string `json:"excludeCIDRs,omitempty"`
+   Scheduler     string   `json:"scheduler,omitempty" yaml:"scheduler,omitempty"`
+   SyncPeriod    string   `json:"syncPeriod,omitempty" yaml:"syncPeriod,omitempty"`
+   MinSyncPeriod string   `json:"minSyncPeriod,omitempty" yaml:"minSyncPeriod,omitempty"`
+   ExcludeCIDRs  []string `json:"excludeCIDRs,omitempty" yaml:"excludeCIDRs,omitempty"` // Matches kubeProxyConfiguration.ipvs.excludeCIDRs from prompt
 }
 
 // KubeProxyConfig holds configuration for KubeProxy.
 type KubeProxyConfig struct {
-	ExtraArgs    []string                 `json:"extraArgs,omitempty"` // Changed to []string
-	// Mode is already in KubernetesConfig.ProxyMode
-	// KubeProxyConfiguration field is now directly in KubernetesConfig
-	IPTables     *KubeProxyIPTablesConfig `json:"ipTables,omitempty"` // Renamed from ipTables
-	IPVS         *KubeProxyIPVSConfig     `json:"ipvs,omitempty"`
+	ExtraArgs    []string                 `json:"extraArgs,omitempty" yaml:"extraArgs,omitempty"`
+	IPTables     *KubeProxyIPTablesConfig `json:"ipTables,omitempty" yaml:"ipTables,omitempty"`
+	IPVS         *KubeProxyIPVSConfig     `json:"ipvs,omitempty" yaml:"ipvs,omitempty"`
 }
 
 // NodelocaldnsConfig holds configuration for nodelocaldns.
 type NodelocaldnsConfig struct {
-	Enabled *bool `json:"enabled,omitempty"` // Default: true
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
 
 // AuditConfig holds configuration for Kubernetes API server audit logging.
 type AuditConfig struct {
-	Enabled *bool `json:"enabled,omitempty"` // Default: false
-	// TODO: Add fields like PolicyFile, LogPath, MaxAge, MaxBackups, MaxSize from KubeKey
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
 
 // KataConfig holds configuration for deploying Kata Containers runtime.
 type KataConfig struct {
-	Enabled *bool `json:"enabled,omitempty"` // Default: false
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
 
 // NodeFeatureDiscoveryConfig holds configuration for node-feature-discovery.
 type NodeFeatureDiscoveryConfig struct {
-	Enabled *bool `json:"enabled,omitempty"` // Default: false
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
 
 // --- Defaulting Functions ---
@@ -139,7 +130,10 @@ func SetDefaults_KubernetesConfig(cfg *KubernetesConfig, clusterMetaName string)
 	}
 	if cfg.AutoRenewCerts == nil { b := false; cfg.AutoRenewCerts = &b }
 	if cfg.DisableKubeProxy == nil { b := false; cfg.DisableKubeProxy = &b }
-	if cfg.MasqueradeAll == nil { b := false; cfg.MasqueradeAll = &b }
+	if cfg.MasqueradeAll == nil { b := false; cfg.MasqueradeAll = &b } // YAML: false
+	if cfg.MaxPods == nil { mp := int32(110); cfg.MaxPods = &mp } // YAML: 110
+	if cfg.NodeCidrMaskSize == nil { ncms := int32(24); cfg.NodeCidrMaskSize = &ncms } // YAML: 24
+	if cfg.ContainerManager == "" { cfg.ContainerManager = "docker" } // YAML: docker. Note: Kubelet.CgroupDriver defaults based on this or to systemd.
 
 	if cfg.Nodelocaldns == nil { cfg.Nodelocaldns = &NodelocaldnsConfig{} }
 	if cfg.Nodelocaldns.Enabled == nil { b := true; cfg.Nodelocaldns.Enabled = &b }
