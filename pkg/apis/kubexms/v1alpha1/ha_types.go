@@ -6,140 +6,275 @@ import (
 	"fmt"     // For pathPrefix in validation calls
 )
 
-// HighAvailabilityConfig defines settings for cluster high availability.
-type HighAvailabilityConfig struct {
-	// Type of HA. e.g., "keepalived+haproxy", "keepalived+nginx_lb", "external_lb", "none".
-	// "none" or empty implies no specific HA mechanism managed by this config.
-	Type string `json:"type,omitempty"`
+// isValidIP helper (if not already present or imported from a shared location)
+// func isValidIP(ip string) bool { return net.ParseIP(ip) != nil }
 
-	// VIP is the virtual IP address for HA configurations like keepalived.
-	// Required if Type involves keepalived.
-	VIP string `json:"vip,omitempty"`
 
-	ControlPlaneEndpointDomain string `json:"controlPlaneEndpointDomain,omitempty"`
-	ControlPlaneEndpointAddress string `json:"controlPlaneEndpointAddress,omitempty"`
-	ControlPlaneEndpointPort *int `json:"controlPlaneEndpointPort,omitempty"`
+// ExternalLoadBalancerConfig defines settings for an external load balancing solution.
+type ExternalLoadBalancerConfig struct {
+	// Enabled indicates if an external load balancer solution is to be used or configured.
+	Enabled *bool `json:"enabled,omitempty"`
 
-	// Keepalived configuration, applicable if Type includes "keepalived".
+	// Type specifies the kind of external load balancer.
+	// Examples: "UserProvided", "ManagedKeepalivedHAProxy", "ManagedKeepalivedNginxLB".
+	Type string `json:"type,omitempty"` // e.g., UserProvided, ManagedKeepalivedHAProxy
+
+	// Keepalived configuration, used if Type involves "ManagedKeepalived*".
 	Keepalived *KeepalivedConfig `json:"keepalived,omitempty"`
-
-	// HAProxy configuration, applicable if Type includes "haproxy".
+	// HAProxy configuration, used if Type is "ManagedKeepalivedHAProxy".
 	HAProxy *HAProxyConfig `json:"haproxy,omitempty"`
-
-	// NginxLB configuration, applicable if Type includes "nginx_lb".
+	// NginxLB configuration, used if Type is "ManagedKeepalivedNginxLB".
 	NginxLB *NginxLBConfig `json:"nginxLB,omitempty"`
+
+	// LoadBalancerHostGroupName specifies the group of hosts (from ClusterSpec.Hosts)
+	// that will run the managed load balancer components (Keepalived, HAProxy, NginxLB).
+	// If empty, it might default to control-plane nodes or require explicit node roles.
+	LoadBalancerHostGroupName *string `json:"loadBalancerHostGroupName,omitempty"`
 }
 
-// SetDefaults_HighAvailabilityConfig sets default values for HighAvailabilityConfig.
+// InternalLoadBalancerConfig defines settings for an internal load balancing solution.
+type InternalLoadBalancerConfig struct {
+	// Enabled indicates if an internal load balancer solution is to be used.
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// Type specifies the kind of internal load balancer.
+	// Examples: "KubeVIP", "WorkerNodeHAProxy" (HAProxy pods on workers).
+	Type string `json:"type,omitempty"`
+
+	// KubeVIP configuration, used if Type is "KubeVIP".
+	KubeVIP *KubeVIPConfig `json:"kubevip,omitempty"` // KubeVIPConfig to be defined in kubevip_types.go
+
+	// WorkerNodeHAProxy configuration, used if Type is "WorkerNodeHAProxy".
+	// This might reuse HAProxyConfig or a simplified version. For now, assume HAProxyConfig.
+	WorkerNodeHAProxy *HAProxyConfig `json:"workerNodeHAProxy,omitempty"`
+}
+
+// HighAvailabilityConfig defines settings for cluster high availability.
+type HighAvailabilityConfig struct {
+	// Enabled flag allows to completely turn on or off the HA configuration processing.
+	// If false, all other HA settings might be ignored. Defaults to false.
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// ControlPlaneEndpoint specifies the main endpoint for accessing the Kubernetes API server.
+	// This might be user-provided if using an unmanaged external LB, or derived from Keepalived VIP.
+	ControlPlaneEndpoint *ControlPlaneEndpointConfig `json:"controlPlaneEndpoint,omitempty"`
+
+	// External load balancing configuration.
+	External *ExternalLoadBalancerConfig `json:"external,omitempty"`
+
+	// Internal load balancing configuration.
+	Internal *InternalLoadBalancerConfig `json:"internal,omitempty"`
+
+	// VIP is the virtual IP address. This field is DEPRECATED in favor of
+	// ControlPlaneEndpoint.Address when managed by Keepalived, or directly set in ControlPlaneEndpoint.
+	// It might still be used by KeepalivedConfig internally.
+	// For backward compatibility or direct Keepalived setup, it can remain.
+	// Consider if this top-level VIP is still needed or if all VIP logic moves into KeepalivedConfig
+	// and ControlPlaneEndpointConfig.Address becomes the source of truth.
+	// For now, let's keep it but note its potential deprecation for endpoint configuration.
+	VIP string `json:"vip,omitempty"`
+	// Fields like ControlPlaneEndpointDomain, ControlPlaneEndpointAddress, ControlPlaneEndpointPort
+	// are now moved into the ControlPlaneEndpointConfig struct.
+}
+
+
+// --- Defaulting Functions ---
 func SetDefaults_HighAvailabilityConfig(cfg *HighAvailabilityConfig) {
 	if cfg == nil {
 		return
 	}
-	// if cfg.Type == "" { // No default HA type, must be explicit or handled by higher logic
-	//    cfg.Type = "none"
-	// }
-	if cfg.ControlPlaneEndpointPort == nil {
-		defaultPort := 6443
-		cfg.ControlPlaneEndpointPort = &defaultPort
+	if cfg.Enabled == nil {
+		b := false // HA features off by default unless specified
+		cfg.Enabled = &b
 	}
 
-	// Initialize specific HA component configs based on Type
-	// and call their SetDefaults.
-	// This ensures that if a user specifies a type like "keepalived+haproxy"
-	// but omits the 'keepalived: {}' or 'haproxy: {}' blocks,
-	// those blocks get initialized and their own defaults applied.
-	if strings.Contains(cfg.Type, "keepalived") {
-		if cfg.Keepalived == nil {
-			cfg.Keepalived = &KeepalivedConfig{}
+	if !*cfg.Enabled { // If HA is not enabled, don't default sub-configs
+		if cfg.ControlPlaneEndpoint == nil { // Still provide a basic endpoint config
+		   cfg.ControlPlaneEndpoint = &ControlPlaneEndpointConfig{}
 		}
-		SetDefaults_KeepalivedConfig(cfg.Keepalived)
-	}
-	if strings.Contains(cfg.Type, "haproxy") {
-		if cfg.HAProxy == nil {
-			cfg.HAProxy = &HAProxyConfig{}
-		}
-		SetDefaults_HAProxyConfig(cfg.HAProxy)
-	}
-	if strings.Contains(cfg.Type, "nginx_lb") { // Assuming "nginx_lb" is the type string
-		if cfg.NginxLB == nil {
-			cfg.NginxLB = &NginxLBConfig{}
-		}
-		SetDefaults_NginxLBConfig(cfg.NginxLB)
-	}
-}
-
-// Validate_HighAvailabilityConfig validates HighAvailabilityConfig.
-func Validate_HighAvailabilityConfig(cfg *HighAvailabilityConfig, verrs *ValidationErrors, pathPrefix string) {
-	if cfg == nil {
+		SetDefaults_ControlPlaneEndpointConfig(cfg.ControlPlaneEndpoint)
 		return
 	}
-	// More specific types are now possible, e.g., "keepalived+haproxy"
-	// Basic validation could check for known keywords or patterns if Type is not empty.
-	// For now, we'll validate sub-configs based on presence and Type hints.
-	// Example: if cfg.Type == "" && (cfg.Keepalived != nil || cfg.HAProxy != nil || cfg.NginxLB != nil) {
-	//    verrs.Add("%s.type: must be specified if keepalived, haproxy, or nginxLB sections are configured", pathPrefix)
-	// }
 
+	if cfg.ControlPlaneEndpoint == nil {
+		cfg.ControlPlaneEndpoint = &ControlPlaneEndpointConfig{}
+	}
+	SetDefaults_ControlPlaneEndpointConfig(cfg.ControlPlaneEndpoint)
 
-	// VIP is required if any keepalived mechanism is implied by Type
-	if strings.Contains(cfg.Type, "keepalived") && strings.TrimSpace(cfg.VIP) == "" {
-		verrs.Add("%s.vip: must be set if HA type involves 'keepalived'", pathPrefix)
+	// Default External LB config
+	if cfg.External == nil {
+		cfg.External = &ExternalLoadBalancerConfig{}
 	}
+	SetDefaults_ExternalLoadBalancerConfig(cfg.External, cfg) // Pass parent HA cfg for context
 
-	if cfg.VIP != "" && !isValidIP(cfg.VIP) {
-		verrs.Add("%s.vip: invalid IP address format '%s'", pathPrefix, cfg.VIP)
+	// Default Internal LB config
+	if cfg.Internal == nil {
+		cfg.Internal = &InternalLoadBalancerConfig{}
 	}
-	if cfg.ControlPlaneEndpointAddress != "" && !isValidIP(cfg.ControlPlaneEndpointAddress) {
-		verrs.Add("%s.controlPlaneEndpointAddress: invalid IP address format '%s'", pathPrefix, cfg.ControlPlaneEndpointAddress)
-	}
-	if cfg.ControlPlaneEndpointPort != nil && (*cfg.ControlPlaneEndpointPort <= 0 || *cfg.ControlPlaneEndpointPort > 65535) {
-		verrs.Add("%s.controlPlaneEndpointPort: invalid port %d", pathPrefix, *cfg.ControlPlaneEndpointPort)
-	}
-	// ControlPlaneEndpointDomain could be validated for hostname format.
+	SetDefaults_InternalLoadBalancerConfig(cfg.Internal)
+}
 
-	// Validate Keepalived config if present or implied by type
-	if strings.Contains(cfg.Type, "keepalived") {
-		if cfg.Keepalived == nil {
-			verrs.Add("%s.keepalived: configuration section must be present if type includes 'keepalived'", pathPrefix)
-		} else {
-			Validate_KeepalivedConfig(cfg.Keepalived, verrs, pathPrefix+".keepalived")
+func SetDefaults_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig, parentHA *HighAvailabilityConfig) {
+	if cfg == nil { return }
+	if cfg.Enabled == nil {
+		b := false // External LB not enabled by default
+		// If parentHA.Type implies external (e.g. "external_lb" or "Managed*"), this could be true.
+		// For now, explicit enable.
+		if parentHA != nil && (strings.Contains(parentHA.Type, "Managed") || parentHA.Type == "UserProvidedExternal") { // Example types
+		   b = true
 		}
-	} else if cfg.Keepalived != nil { // Keepalived config present but type doesn't mention it
-		verrs.Add("%s.type: must include 'keepalived' if keepalived configuration section is present", pathPrefix)
+		cfg.Enabled = &b
 	}
 
-	// Validate HAProxy config if present or implied by type
-	if strings.Contains(cfg.Type, "haproxy") {
-		if cfg.HAProxy == nil {
-			verrs.Add("%s.haproxy: configuration section must be present if type includes 'haproxy'", pathPrefix)
-		} else {
-			Validate_HAProxyConfig(cfg.HAProxy, verrs, pathPrefix+".haproxy")
+	if cfg.Enabled != nil && *cfg.Enabled {
+		if strings.Contains(cfg.Type, "Keepalived") { // Adjusted from parentHA.Type
+			if cfg.Keepalived == nil { cfg.Keepalived = &KeepalivedConfig{} }
+			SetDefaults_KeepalivedConfig(cfg.Keepalived)
+			// If Keepalived is used and configured, its VIP might inform ControlPlaneEndpoint.Address
+			if parentHA != nil && parentHA.ControlPlaneEndpoint != nil && parentHA.ControlPlaneEndpoint.Address == "" &&
+			   cfg.Keepalived != nil && parentHA.VIP != "" { // Use top-level VIP for keepalived context
+				parentHA.ControlPlaneEndpoint.Address = parentHA.VIP
+			}
 		}
-	} else if cfg.HAProxy != nil {
-		verrs.Add("%s.type: must include 'haproxy' if haproxy configuration section is present", pathPrefix)
-	}
-
-	// Validate NginxLB config if present or implied by type
-	if strings.Contains(cfg.Type, "nginx_lb") { // Assuming "nginx_lb" is the type string
-		if cfg.NginxLB == nil {
-			verrs.Add("%s.nginxLB: configuration section must be present if type includes 'nginx_lb'", pathPrefix)
-		} else {
-			Validate_NginxLBConfig(cfg.NginxLB, verrs, pathPrefix+".nginxLB")
+		if strings.Contains(cfg.Type, "HAProxy") { // Adjusted from parentHA.Type
+			if cfg.HAProxy == nil { cfg.HAProxy = &HAProxyConfig{} }
+			SetDefaults_HAProxyConfig(cfg.HAProxy)
 		}
-	} else if cfg.NginxLB != nil {
-		verrs.Add("%s.type: must include 'nginx_lb' if nginxLB configuration section is present", pathPrefix)
-	}
-
-	// Check for external_lb specifics
-	if cfg.Type == "external_lb" {
-		 if strings.TrimSpace(cfg.ControlPlaneEndpointAddress) == "" && strings.TrimSpace(cfg.ControlPlaneEndpointDomain) == "" {
-			 verrs.Add("%s: either controlPlaneEndpointAddress or controlPlaneEndpointDomain must be set for external_lb type", pathPrefix)
-		 }
-		 // Ensure component-specific LB configs are not set for external_lb type
-		 if cfg.Keepalived != nil { verrs.Add("%s.keepalived: should not be set for external_lb type", pathPrefix) }
-		 if cfg.HAProxy != nil { verrs.Add("%s.haproxy: should not be set for external_lb type", pathPrefix) }
-		 if cfg.NginxLB != nil { verrs.Add("%s.nginxLB: should not be set for external_lb type", pathPrefix) }
+		if strings.Contains(cfg.Type, "NginxLB") { // Adjusted from parentHA.Type
+			if cfg.NginxLB == nil { cfg.NginxLB = &NginxLBConfig{} }
+			SetDefaults_NginxLBConfig(cfg.NginxLB)
+		}
 	}
 }
 
-func isValidIP(ip string) bool { return net.ParseIP(ip) != nil }
+func SetDefaults_InternalLoadBalancerConfig(cfg *InternalLoadBalancerConfig) {
+	if cfg == nil { return }
+	if cfg.Enabled == nil { b := false; cfg.Enabled = &b } // Internal LB not enabled by default
+
+	if cfg.Enabled != nil && *cfg.Enabled {
+		if cfg.Type == "KubeVIP" { // Example type
+			if cfg.KubeVIP == nil { cfg.KubeVIP = &KubeVIPConfig{} }
+			SetDefaults_KubeVIPConfig(cfg.KubeVIP)
+		}
+		if cfg.Type == "WorkerNodeHAProxy" { // Example type
+			if cfg.WorkerNodeHAProxy == nil { cfg.WorkerNodeHAProxy = &HAProxyConfig{} }
+			SetDefaults_HAProxyConfig(cfg.WorkerNodeHAProxy)
+		}
+	}
+}
+
+
+// --- Validation Functions ---
+func Validate_HighAvailabilityConfig(cfg *HighAvailabilityConfig, verrs *ValidationErrors, pathPrefix string) {
+	if cfg == nil { return }
+
+	if cfg.Enabled != nil && *cfg.Enabled {
+		// If HA is enabled, there should be some configuration for either external or internal LB,
+		// or a directly configured ControlPlaneEndpoint.
+		isExternalLBConfigured := cfg.External != nil && cfg.External.Enabled != nil && *cfg.External.Enabled
+		isInternalLBConfigured := cfg.Internal != nil && cfg.Internal.Enabled != nil && *cfg.Internal.Enabled
+		isEndpointSetManually := cfg.ControlPlaneEndpoint != nil &&
+								(cfg.ControlPlaneEndpoint.Address != "" || cfg.ControlPlaneEndpoint.Domain != "")
+
+		if !isExternalLBConfigured && !isInternalLBConfigured && !isEndpointSetManually {
+			verrs.Add("%s: if enabled, either external, internal load balancing, or a direct controlPlaneEndpoint must be configured", pathPrefix)
+		}
+
+		// Validate ControlPlaneEndpoint if HA is enabled
+		if cfg.ControlPlaneEndpoint == nil && (isExternalLBConfigured || isInternalLBConfigured) { // Endpoint might be derived
+			// If derived, it should have been populated by defaults or a planning step.
+			// For static validation, if it's nil but expected to be derived, it's hard to check here.
+			// Let's assume if HA components are set, endpoint should eventually be non-nil.
+		} else if cfg.ControlPlaneEndpoint != nil {
+			Validate_ControlPlaneEndpointConfig(cfg.ControlPlaneEndpoint, verrs, pathPrefix+".controlPlaneEndpoint")
+		}
+
+
+		if cfg.External != nil { // cfg.External can exist even if not enabled
+			Validate_ExternalLoadBalancerConfig(cfg.External, verrs, pathPrefix+".external", cfg)
+		}
+		if cfg.Internal != nil {
+			Validate_InternalLoadBalancerConfig(cfg.Internal, verrs, pathPrefix+".internal")
+		}
+		// Top-level VIP validation (if still used)
+		if cfg.VIP != "" && !isValidIP(cfg.VIP) {
+			verrs.Add("%s.vip: invalid IP address format '%s'", pathPrefix, cfg.VIP)
+		}
+
+	} else { // HA not enabled
+	   if cfg.External != nil && cfg.External.Enabled != nil && *cfg.External.Enabled {
+		   verrs.Add("%s.external.enabled: cannot be true if global HA is not enabled", pathPrefix)
+	   }
+	   if cfg.Internal != nil && cfg.Internal.Enabled != nil && *cfg.Internal.Enabled {
+		   verrs.Add("%s.internal.enabled: cannot be true if global HA is not enabled", pathPrefix)
+	   }
+	}
+}
+
+func Validate_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig, verrs *ValidationErrors, pathPrefix string, parentHA *HighAvailabilityConfig) {
+	if cfg == nil || cfg.Enabled == nil || !*cfg.Enabled { return } // Only validate if explicitly enabled
+
+	validTypes := []string{"UserProvided", "ManagedKeepalivedHAProxy", "ManagedKeepalivedNginxLB", ""}
+	isTypeValid := false
+	for _, vt := range validTypes { if cfg.Type == vt { isTypeValid = true; break } }
+	if !isTypeValid {
+		verrs.Add("%s.type: invalid external LB type '%s'", pathPrefix, cfg.Type)
+	}
+
+	isManagedType := strings.Contains(cfg.Type, "Managed")
+
+	if cfg.Type == "UserProvided" {
+		if parentHA == nil || parentHA.ControlPlaneEndpoint == nil || (parentHA.ControlPlaneEndpoint.Address == "" && parentHA.ControlPlaneEndpoint.Domain == "") {
+			verrs.Add("%s: if type is UserProvided, parent controlPlaneEndpoint address or domain must be set", pathPrefix)
+		}
+		// Ensure no managed LB configs are set
+		if cfg.Keepalived != nil { verrs.Add("%s.keepalived: should not be set for UserProvided external LB type", pathPrefix) }
+		// ... similar for HAProxy, NginxLB
+	}
+
+	if strings.Contains(cfg.Type, "Keepalived") {
+		if cfg.Keepalived == nil { verrs.Add("%s.keepalived: section must be present if type includes 'Keepalived'", pathPrefix)
+		} else { Validate_KeepalivedConfig(cfg.Keepalived, verrs, pathPrefix+".keepalived") }
+	} else if cfg.Keepalived != nil {
+		verrs.Add("%s.type: must include 'Keepalived' if keepalived section is present", pathPrefix)
+	}
+	// ... similar validation for HAProxy and NginxLB based on cfg.Type ...
+	if strings.Contains(cfg.Type, "HAProxy") {
+		if cfg.HAProxy == nil { verrs.Add("%s.haproxy: section must be present if type includes 'HAProxy'", pathPrefix)
+		} else { Validate_HAProxyConfig(cfg.HAProxy, verrs, pathPrefix+".haproxy") }
+	} else if cfg.HAProxy != nil {
+		verrs.Add("%s.type: must include 'HAProxy' if haproxy section is present", pathPrefix)
+	}
+	if strings.Contains(cfg.Type, "NginxLB") { // Assuming "NginxLB" as type string
+		if cfg.NginxLB == nil { verrs.Add("%s.nginxLB: section must be present if type includes 'NginxLB'", pathPrefix)
+		} else { Validate_NginxLBConfig(cfg.NginxLB, verrs, pathPrefix+".nginxLB") }
+	} else if cfg.NginxLB != nil {
+		verrs.Add("%s.type: must include 'NginxLB' if nginxLB section is present", pathPrefix)
+	}
+
+	if isManagedType && cfg.LoadBalancerHostGroupName != nil && strings.TrimSpace(*cfg.LoadBalancerHostGroupName) == "" {
+		verrs.Add("%s.loadBalancerHostGroupName: cannot be empty if specified for managed external LB", pathPrefix)
+	}
+}
+
+func Validate_InternalLoadBalancerConfig(cfg *InternalLoadBalancerConfig, verrs *ValidationErrors, pathPrefix string) {
+	if cfg == nil || cfg.Enabled == nil || !*cfg.Enabled { return } // Only validate if explicitly enabled
+
+	validTypes := []string{"KubeVIP", "WorkerNodeHAProxy", ""}
+	isTypeValid := false
+	for _, vt := range validTypes { if cfg.Type == vt { isTypeValid = true; break } }
+	if !isTypeValid {
+		verrs.Add("%s.type: invalid internal LB type '%s'", pathPrefix, cfg.Type)
+	}
+
+	if cfg.Type == "KubeVIP" {
+		if cfg.KubeVIP == nil { verrs.Add("%s.kubevip: section must be present if type is 'KubeVIP'", pathPrefix)
+		} else { Validate_KubeVIPConfig(cfg.KubeVIP, verrs, pathPrefix+".kubevip") }
+	}
+	if cfg.Type == "WorkerNodeHAProxy" {
+		if cfg.WorkerNodeHAProxy == nil { verrs.Add("%s.workerNodeHAProxy: section must be present if type is 'WorkerNodeHAProxy'", pathPrefix)
+		} else { Validate_HAProxyConfig(cfg.WorkerNodeHAProxy, verrs, pathPrefix+".workerNodeHAProxy") }
+	}
+}
+
+// func isValidIP(ip string) bool { return net.ParseIP(ip) != nil } // Moved to endpoint_types.go
