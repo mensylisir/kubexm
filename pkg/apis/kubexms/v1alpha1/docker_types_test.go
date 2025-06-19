@@ -29,6 +29,13 @@ func TestSetDefaults_DockerConfig(t *testing.T) {
 	if cfg.MaxConcurrentDownloads == nil || *cfg.MaxConcurrentDownloads != 3 { t.Errorf("MaxConcurrentDownloads default failed: %v", cfg.MaxConcurrentDownloads) }
 	if cfg.MaxConcurrentUploads == nil || *cfg.MaxConcurrentUploads != 5 { t.Errorf("MaxConcurrentUploads default failed: %v", cfg.MaxConcurrentUploads) }
 	if cfg.Bridge == nil || *cfg.Bridge != "docker0" { t.Errorf("Bridge default failed: %v", cfg.Bridge) }
+
+	if cfg.InstallCRIDockerd == nil || !*cfg.InstallCRIDockerd {
+		t.Errorf("Default InstallCRIDockerd failed, got %v, want true", cfg.InstallCRIDockerd)
+	}
+	if cfg.CRIDockerdVersion != nil && *cfg.CRIDockerdVersion != "" { // Should not be defaulted to a value
+		t.Errorf("Default CRIDockerdVersion failed, got %v, want nil or empty", cfg.CRIDockerdVersion)
+	}
 }
 
 func TestValidate_DockerConfig_Valid(t *testing.T) {
@@ -66,6 +73,7 @@ func TestValidate_DockerConfig_Invalid(t *testing.T) {
 		{"mcd_zero", &DockerConfig{MaxConcurrentDownloads: pintDockerTest(0)}, ".maxConcurrentDownloads: must be positive"},
 		{"mcu_zero", &DockerConfig{MaxConcurrentUploads: pintDockerTest(0)}, ".maxConcurrentUploads: must be positive"},
 		{"empty_bridge", &DockerConfig{Bridge: pstrDockerTest(" ")}, ".bridge: name cannot be empty"},
+		{"empty_cridockerd_version", &DockerConfig{CRIDockerdVersion: pstrDockerTest(" ")}, ".criDockerdVersion: cannot be empty if specified"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
