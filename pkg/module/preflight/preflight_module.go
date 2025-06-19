@@ -78,12 +78,21 @@ func NewPreflightModule(cfg *config.Cluster) *spec.ModuleSpec {
 	}
 
 	// Conditionally add the new comprehensive prerequisites task.
-	// Assuming a hypothetical config structure: cfg.Spec.Preflight.EnableKubernetesPrerequisites
-	// If cfg.Spec.PreflightSpec is nil, or the field is false, this task might be skipped.
-	enableK8sPrerequisites := true // Default to true if config field doesn't exist for now
-	if cfg.Spec.Preflight != nil { // Assuming Preflight is *config.PreflightSpec
-		// enableK8sPrerequisites = cfg.Spec.Preflight.EnableKubernetesPrerequisites // Hypothetical field
-	}
+	// TODO: Implement cfg.Spec.Preflight.EnableKubernetesPrerequisites (or similar) in config.ClusterSpec
+	//       and use it here to make this task's inclusion truly conditional.
+	//       For example:
+	//       enableK8sPrerequisites := false
+	//       if cfg.Spec.Preflight != nil && cfg.Spec.Preflight.EnableKubernetesPrerequisites {
+	//           enableK8sPrerequisites = true
+	//       }
+	//       For now, unconditionally adding the task for testing/development.
+	enableK8sPrerequisites := true // Placeholder: Default to true for now
+	// if cfg.Spec.Preflight != nil && cfg.Spec.Preflight.EnableKubernetesPrerequisites { // Example of actual check
+	// 	enableK8sPrerequisites = true
+	// } else if cfg.Spec.Preflight == nil { // if Preflight spec part is missing, maybe default to true or false based on desired behavior
+	//    enableK8sPrerequisites = true // Defaulting to true if spec section is absent
+	// }
+
 
 	if enableK8sPrerequisites {
 		tasks = append(tasks, setupKubernetesPrerequisitesTask)
