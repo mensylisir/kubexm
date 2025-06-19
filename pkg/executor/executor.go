@@ -70,11 +70,7 @@ func (e *Executor) ExecutePipeline(
 			postRunHookEventLogger := pipelineLogger.SugaredLogger.With("hook_event", "PipelinePostRun", "hook_step", pipelineSpec.PostRun.GetName()).Sugar()
 			postRunHookEventLogger.Infof("Executing...")
 
-			var targetHosts []*runtime.Host
-			allHosts := cluster.GetAllHosts()
-			if len(allHosts) > 0 {
-				targetHosts = []*runtime.Host{allHosts[0]}
-			}
+			var targetHosts []*runtime.Host; if len(cluster.Hosts) > 0 { targetHosts = []*runtime.Host{cluster.Hosts[0]} }
 
 			// Pass the pipelineLogger as the parent for the hook execution
 			hookResults, hookErr := e.executeHookSteps(goCtx, pipelineSpec.PostRun, "PipelinePostRun", targetHosts, cluster, pipelineLogger)
@@ -106,11 +102,7 @@ func (e *Executor) ExecutePipeline(
 	if pipelineSpec.PreRun != nil {
 		preRunHookEventLogger := pipelineLogger.SugaredLogger.With("hook_event", "PipelinePreRun", "hook_step", pipelineSpec.PreRun.GetName()).Sugar()
 		preRunHookEventLogger.Infof("Executing...")
-		var targetHosts []*runtime.Host
-		allHosts := cluster.GetAllHosts()
-		if len(allHosts) > 0 {
-			targetHosts = []*runtime.Host{allHosts[0]}
-		}
+		var targetHosts []*runtime.Host; if len(cluster.Hosts) > 0 { targetHosts = []*runtime.Host{cluster.Hosts[0]} }
 
 		hookResults, hookErr := e.executeHookSteps(goCtx, pipelineSpec.PreRun, "PipelinePreRun", targetHosts, cluster, pipelineLogger)
 		if hookResults != nil { allResults = append(allResults, hookResults...) }
@@ -361,36 +353,20 @@ func (e *Executor) executeHookSteps(
 }
 
 // selectHostsForTaskSpec (as previously defined)
-func (e *Executor) selectHostsForTaskSpec(taskSpec *spec.TaskSpec, cluster *runtime.ClusterRuntime) []*runtime.Host {
+func (e *Executor) selectHostsForTaskSpec( taskSpec *spec.TaskSpec, cluster *runtime.ClusterRuntime) []*runtime.Host {
 	var selectedHosts []*runtime.Host
-	if cluster == nil || len(cluster.GetAllHosts()) == 0 { // Use GetAllHosts()
-		e.Logger.Debugf("selectHostsForTaskSpec: No hosts in cluster.")
-		return selectedHosts
-	}
-	if taskSpec == nil {
-		e.Logger.Warnf("selectHostsForTaskSpec: taskSpec nil.")
-		return selectedHosts
-	}
+	if cluster == nil || len(cluster.Hosts) == 0 { e.Logger.Debugf("selectHostsForTaskSpec: No hosts in cluster."); return selectedHosts }
+	if taskSpec == nil { e.Logger.Warnf("selectHostsForTaskSpec: taskSpec nil."); return selectedHosts }
 
 	pipelineName := "unknown-pipeline"
-	if cluster.ClusterConfig != nil && cluster.ClusterConfig.Metadata.Name != "" {
-		pipelineName = cluster.ClusterConfig.Metadata.Name
-	}
+	if cluster.ClusterConfig != nil && cluster.ClusterConfig.Metadata.Name != "" { pipelineName = cluster.ClusterConfig.Metadata.Name }
 
-	selectorLogger := e.Logger.SugaredLogger.With("pipeline", pipelineName, "task_name_selecting_for", taskSpec.Name, "component", "host_selector").Sugar()
+	selectorLogger := e.Logger.SugaredLogger.With("pipeline", pipelineName, "task_name_selecting_for", taskSpec.Name,"component","host_selector").Sugar()
 	selectorLogger.Debugf("Selecting hosts (Roles: %v, HasFilter: %v)", taskSpec.RunOnRoles, taskSpec.Filter != nil)
-	for _, host := range cluster.GetAllHosts() { // Use GetAllHosts()
+	for _, host := range cluster.Hosts {
 		roleMatch := false
-		if len(taskSpec.RunOnRoles) == 0 {
-			roleMatch = true
-		} else {
-			for _, requiredRole := range taskSpec.RunOnRoles {
-				if host.HasRole(requiredRole) {
-					roleMatch = true
-					break
-				}
-			}
-		}
+		if len(taskSpec.RunOnRoles) == 0 { roleMatch = true
+		} else { for _, requiredRole := range taskSpec.RunOnRoles { if host.HasRole(requiredRole) { roleMatch = true; break } } }
 		if !roleMatch {
 			var hostRoleNames []string; for rn, pr := range host.Roles { if pr { hostRoleNames = append(hostRoleNames, rn)}}; sort.Strings(hostRoleNames)
 			selectorLogger.Debugf("Host '%s' skipped by role (has: [%s], needs: %v).", host.Name, strings.Join(hostRoleNames, ","), taskSpec.RunOnRoles); continue
@@ -405,15 +381,11 @@ func (e *Executor) selectHostsForTaskSpec(taskSpec *spec.TaskSpec, cluster *runt
 }
 
 // selectHostsForModule (as previously defined)
-func (e *Executor) selectHostsForModule(moduleSpec *spec.ModuleSpec, cluster *runtime.ClusterRuntime) []*runtime.Host {
-	if moduleSpec == nil || cluster == nil || len(cluster.GetAllHosts()) == 0 { // Use GetAllHosts()
-		return []*runtime.Host{}
-	}
+func (e *Executor) selectHostsForModule( moduleSpec *spec.ModuleSpec, cluster *runtime.ClusterRuntime) []*runtime.Host {
+	if moduleSpec == nil || cluster == nil || len(cluster.Hosts) == 0 { return []*runtime.Host{} }
 	moduleHostsMap := make(map[string]*runtime.Host)
 	for _, taskSpec := range moduleSpec.Tasks {
-		if taskSpec == nil {
-			continue
-		}
+		if taskSpec == nil { continue }
 		taskTargetHosts := e.selectHostsForTaskSpec(taskSpec, cluster)
 		for _, host := range taskTargetHosts {
 			if _, exists := moduleHostsMap[host.Name]; !exists { moduleHostsMap[host.Name] = host }
