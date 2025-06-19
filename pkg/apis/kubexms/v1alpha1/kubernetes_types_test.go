@@ -3,6 +3,7 @@ package v1alpha1
 import (
 	"strings"
 	"testing"
+	"k8s.io/apimachinery/pkg/runtime"
 	// "k8s.io/apimachinery/pkg/util/version" // Already imported by kubernetes_types.go
 )
 
@@ -52,8 +53,55 @@ func TestSetDefaults_KubernetesConfig(t *testing.T) {
 	}
 
 	if cfg.FeatureGates == nil { t.Error("FeatureGates map should be initialized") }
-	if cfg.APIServer == nil || cfg.APIServer.ExtraArgs == nil { t.Error("APIServer or ExtraArgs map should be initialized") }
-	// ... similar checks for ControllerManager, Scheduler, Kubelet, KubeProxy ExtraArgs ...
+
+	if cfg.APIServer == nil || cfg.APIServer.ExtraArgs == nil || cap(cfg.APIServer.ExtraArgs) == 0 {
+		t.Error("APIServer.ExtraArgs should be initialized as an empty slice")
+	}
+	if cfg.APIServer.AdmissionPlugins == nil || cap(cfg.APIServer.AdmissionPlugins) == 0 {
+		t.Error("APIServer.AdmissionPlugins should be initialized as an empty slice")
+	}
+	if cfg.ControllerManager == nil || cfg.ControllerManager.ExtraArgs == nil || cap(cfg.ControllerManager.ExtraArgs) == 0 {
+		t.Error("ControllerManager.ExtraArgs should be initialized as an empty slice")
+	}
+	if cfg.Scheduler == nil || cfg.Scheduler.ExtraArgs == nil || cap(cfg.Scheduler.ExtraArgs) == 0 {
+		t.Error("Scheduler.ExtraArgs should be initialized as an empty slice")
+	}
+	if cfg.Kubelet == nil || cfg.Kubelet.ExtraArgs == nil || cap(cfg.Kubelet.ExtraArgs) == 0 {
+		t.Error("Kubelet.ExtraArgs should be initialized as an empty slice")
+	}
+	if cfg.Kubelet.EvictionHard == nil {t.Error("Kubelet.EvictionHard map should be initialized")}
+
+	if cfg.Kubelet.CgroupDriver == nil || *cfg.Kubelet.CgroupDriver != "systemd" { // Assuming default to systemd
+		t.Errorf("Kubelet.CgroupDriver default failed, got %v", cfg.Kubelet.CgroupDriver)
+	}
+	cfgWithManager := &KubernetesConfig{ContainerManager: "cgroupfs"}
+	SetDefaults_KubernetesConfig(cfgWithManager, "test")
+	if cfgWithManager.Kubelet.CgroupDriver == nil || *cfgWithManager.Kubelet.CgroupDriver != "cgroupfs" {
+		t.Errorf("Kubelet.CgroupDriver should default from ContainerManager if set, got %v", cfgWithManager.Kubelet.CgroupDriver)
+	}
+
+	if cfg.KubeProxy == nil || cfg.KubeProxy.ExtraArgs == nil || cap(cfg.KubeProxy.ExtraArgs) == 0 {
+		t.Error("KubeProxy.ExtraArgs should be initialized as an empty slice")
+	}
+	// Test KubeProxy sub-config defaults based on ProxyMode
+	cfgProxyIptables := &KubernetesConfig{ProxyMode: "iptables"}
+	SetDefaults_KubernetesConfig(cfgProxyIptables, "iptables-test")
+	if cfgProxyIptables.KubeProxy.IPTables == nil { t.Error("KubeProxy.IPTables should be initialized for iptables mode") }
+	if cfgProxyIptables.KubeProxy.IPTables.MasqueradeAll == nil || !*cfgProxyIptables.KubeProxy.IPTables.MasqueradeAll {
+		t.Error("KubeProxy.IPTables.MasqueradeAll default failed")
+	}
+	if cfgProxyIptables.KubeProxy.IPTables.MasqueradeBit == nil || *cfgProxyIptables.KubeProxy.IPTables.MasqueradeBit != 14 {
+		t.Error("KubeProxy.IPTables.MasqueradeBit default failed")
+	}
+
+
+	cfgProxyIpvs := &KubernetesConfig{ProxyMode: "ipvs"}
+	SetDefaults_KubernetesConfig(cfgProxyIpvs, "ipvs-test")
+	if cfgProxyIpvs.KubeProxy.IPVS == nil { t.Error("KubeProxy.IPVS should be initialized for ipvs mode") }
+	if cfgProxyIpvs.KubeProxy.IPVS.Scheduler != "rr" {t.Error("KubeProxy.IPVS.Scheduler default failed")}
+	if cfgProxyIpvs.KubeProxy.IPVS.ExcludeCIDRs == nil || cap(cfgProxyIpvs.KubeProxy.IPVS.ExcludeCIDRs) == 0 {
+		t.Error("KubeProxy.IPVS.ExcludeCIDRs should be initialized as an empty slice")
+	}
 }
 
 // --- Test Validate_KubernetesConfig ---
@@ -85,6 +133,16 @@ func TestValidate_KubernetesConfig_Invalid(t *testing.T) {
 		{"invalid_proxymode", &KubernetesConfig{Version: "v1.20.0", ProxyMode: "foo"}, ".proxyMode: invalid mode 'foo'"},
 		{"invalid_podsubnet", &KubernetesConfig{Version: "v1.20.0", PodSubnet: "invalid"}, ".podSubnet: invalid CIDR format"},
 		{"invalid_servicesubnet", &KubernetesConfig{Version: "v1.20.0", ServiceSubnet: "invalid"}, ".serviceSubnet: invalid CIDR format"},
+		{"invalid_containerManager", &KubernetesConfig{Version: "v1.20.0", ContainerManager: "rkt"}, ".containerManager: must be 'cgroupfs' or 'systemd'"},
+		{"empty_kubeletConfiguration_raw", &KubernetesConfig{Version: "v1.20.0", KubeletConfiguration: &runtime.RawExtension{Raw: []byte("")}}, ".kubeletConfiguration: raw data cannot be empty"},
+		{"empty_kubeProxyConfiguration_raw", &KubernetesConfig{Version: "v1.20.0", KubeProxyConfiguration: &runtime.RawExtension{Raw: []byte("")}}, ".kubeProxyConfiguration: raw data cannot be empty"},
+		// APIServerConfig validation
+		{"apiserver_invalid_port_range", &KubernetesConfig{Version: "v1.20.0", APIServer: &APIServerConfig{ServiceNodePortRange: "invalid"}}, ".apiServer.serviceNodePortRange: invalid format"},
+		// KubeletConfig validation
+		{"kubelet_invalid_cgroupdriver", &KubernetesConfig{Version: "v1.20.0", Kubelet: &KubeletConfig{CgroupDriver: pstrKubernetesTest("docker")}}, ".kubelet.cgroupDriver: must be 'cgroupfs' or 'systemd'"},
+		{"kubelet_invalid_hairpin", &KubernetesConfig{Version: "v1.20.0", Kubelet: &KubeletConfig{HairpinMode: pstrKubernetesTest("bad")}}, ".kubelet.hairpinMode: invalid mode 'bad'"},
+		// KubeProxyConfig validation
+		{"kubeproxy_iptables_bad_masq_bit", &KubernetesConfig{Version: "v1.20.0", ProxyMode: "iptables", KubeProxy: &KubeProxyConfig{IPTables: &KubeProxyIPTablesConfig{MasqueradeBit: pint32KubernetesTest(32)}}}, ".kubeProxy.ipTables.masqueradeBit: must be between 0 and 31"},
 	}
 
 	for _, tt := range tests {
@@ -156,3 +214,5 @@ func TestKubernetesConfig_Helpers(t *testing.T) {
 	if cfgNilVersion.IsAtLeastVersion("v1.0.0") {t.Error("IsAtLeastVersion should be false for nil version string")}
 
 }
+
+func pstrKubernetesTest(s string) *string { return &s }
