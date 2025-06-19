@@ -74,17 +74,22 @@ func init() {
 }
 
 // Check determines if the main command needs to be run based on CheckCmd.
-func (e *CommandStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
-	spec, ok := s.(*CommandStepSpec)
+func (e *CommandStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		return false, fmt.Errorf("unexpected spec type %T for CommandStepExecutor Check method", s)
+		return false, fmt.Errorf("StepSpec not found in context for Check method in CommandStepExecutor")
+	}
+	spec, ok := currentFullSpec.(*CommandStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected StepSpec type for Check method in CommandStepExecutor: %T. Expected *CommandStepSpec", currentFullSpec)
 	}
 
 	if spec.CheckCmd == "" {
 		return false, nil // No check command, so main command should run
 	}
 
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName(), "phase", "Check").Sugar()
+	// Logger is already contextualized in ctx.Logger from Task.Run
+	hostCtxLogger := ctx.Logger.SugaredLogger.With("phase", "Check").Sugar() // Add phase only
 	hostCtxLogger.Debugf("Executing CheckCmd: %s", spec.CheckCmd)
 
 	opts := &connector.ExecOptions{
@@ -122,21 +127,23 @@ func (e *CommandStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDo
 }
 
 // Execute runs the command defined in the CommandStepSpec.
-func (e *CommandStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	spec, ok := s.(*CommandStepSpec)
+func (e *CommandStepExecutor) Execute(ctx runtime.Context) *step.Result {
+	startTime := time.Now()
+
+	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
 	if !ok {
-		err := fmt.Errorf("Execute: unexpected spec type %T for CommandStepExecutor", s)
-		// Attempt to get a name for the result, even if spec is wrong type.
-		specName := "UnknownStep (type error)"
-		if s != nil { // s might be nil if called incorrectly, though unlikely with registry
-			specName = s.GetName()
-		}
-		return step.NewResult(specName, ctx.Host.Name, time.Now(), err)
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for Execute method in CommandStepExecutor"))
+	}
+	spec, ok := currentFullSpec.(*CommandStepSpec)
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for Execute method in CommandStepExecutor: %T. Expected *CommandStepSpec", currentFullSpec))
 	}
 
-	startTime := time.Now()
-	res := step.NewResult(spec.GetName(), ctx.Host.Name, startTime, nil)
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName(), "phase", "Execute").Sugar()
+	// Logger is already contextualized in ctx.Logger from Task.Run (includes host, step name, etc.)
+	hostCtxLogger := ctx.Logger.SugaredLogger.With("phase", "Execute").Sugar() // Add phase only
+
+	// Initialize result with the context (which includes spec name, host name via logger context)
+	res := step.NewResult(ctx, startTime, nil)
 
 
 	opts := &connector.ExecOptions{
