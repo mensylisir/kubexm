@@ -1,9 +1,9 @@
 package etcd
 
 import (
-	"github.com/kubexms/kubexms/pkg/config"
-	"github.com/kubexms/kubexms/pkg/spec"
-	"github.com/kubexms/kubexms/pkg/step/pki" // For pki.HostSpecForAltNames and step specs
+	"github.com/mensylisir/kubexm/pkg/config"
+	"github.com/mensylisir/kubexm/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/step/pki" // For pki.HostSpecForAltNames and step specs
 )
 
 // NewGenerateEtcdPKITask creates a task to generate all necessary etcd PKI.

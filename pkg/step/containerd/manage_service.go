@@ -6,9 +6,9 @@ import (
 	"time"
 
 	// "github.com/kubexms/kubexms/pkg/runner" // Not directly needed here
-	"github.com/kubexms/kubexms/pkg/runtime"
-	"github.com/kubexms/kubexms/pkg/spec"
-	"github.com/kubexms/kubexms/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/step"
 )
 
 const containerdServiceName = "containerd" // Keep this package-level const

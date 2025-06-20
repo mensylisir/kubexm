@@ -8,7 +8,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/kubexms/kubexms/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/connector"
 )
 
 func TestNewRunner_Success(t *testing.T) {

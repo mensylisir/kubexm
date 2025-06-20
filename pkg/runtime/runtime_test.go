@@ -15,11 +15,11 @@ import (
 	"time"
 
 	// "github.com/kubexms/kubexms/pkg/config" // Removed
-	"github.com/kubexms/kubexms/pkg/apis/kubexms/v1alpha1"
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"github.com/kubexms/kubexms/pkg/connector" // For connector types and OS struct
-	"github.com/kubexms/kubexms/pkg/logger"
-	"github.com/kubexms/kubexms/pkg/runner"
+	"github.com/mensylisir/kubexm/pkg/connector" // For connector types and OS struct
+	"github.com/mensylisir/kubexm/pkg/logger"
+	"github.com/mensylisir/kubexm/pkg/runner"
 	// "github.com/kubexms/kubexms/pkg/spec" // Not directly needed here
 )
 

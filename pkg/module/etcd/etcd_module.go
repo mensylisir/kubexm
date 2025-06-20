@@ -6,11 +6,11 @@ import (
 	goruntime "runtime"
 
 	// "github.com/kubexms/kubexms/pkg/config" // No longer used
-	"github.com/kubexms/kubexms/pkg/runtime" // For runtime.Host in HostFilter and ClusterRuntime
-	"github.com/kubexms/kubexms/pkg/apis/kubexms/v1alpha1" // For v1alpha1 constants if needed
-	"github.com/kubexms/kubexms/pkg/spec"
-	"github.com/kubexms/kubexms/pkg/step/pki"
-	taskEtcd "github.com/kubexms/kubexms/pkg/task/etcd"
+	"github.com/mensylisir/kubexm/pkg/runtime" // For runtime.Host in HostFilter and ClusterRuntime
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // For v1alpha1 constants if needed
+	"github.com/mensylisir/kubexm/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/step/pki"
+	taskEtcd "github.com/mensylisir/kubexm/pkg/task/etcd"
 )
 
 // normalizeArchFunc ensures consistent architecture naming (amd64, arm64).

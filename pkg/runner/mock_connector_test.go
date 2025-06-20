@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kubexms/kubexms/pkg/connector" // Assuming this is the correct path
+	"github.com/mensylisir/kubexm/pkg/connector" // Assuming this is the correct path
 )
 
 // MockConnector is a mock implementation of the connector.Connector interface for testing.

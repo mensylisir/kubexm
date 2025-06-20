@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kubexms/kubexms/pkg/connector" // For connector.ExecOptions
-	"github.com/kubexms/kubexms/pkg/runtime"
-	"github.com/kubexms/kubexms/pkg/spec"
-	"github.com/kubexms/kubexms/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/connector" // For connector.ExecOptions
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/step"
 )
 
 // LoadKernelModulesStepSpec defines parameters for loading kernel modules.

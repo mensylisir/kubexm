@@ -9,9 +9,9 @@ import (
 	"time"
 
 	// "github.com/kubexms/kubexms/pkg/runner" // Not directly needed here, runner methods are on ctx.Host.Runner
-	"github.com/kubexms/kubexms/pkg/runtime"
-	"github.com/kubexms/kubexms/pkg/spec"
-	"github.com/kubexms/kubexms/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/step"
 )
 
 const DefaultContainerdConfigPath = "/etc/containerd/config.toml"

@@ -2,10 +2,10 @@ package preflight
 
 import (
 	// "github.com/kubexms/kubexms/pkg/config" // No longer used
-	"github.com/kubexms/kubexms/pkg/runtime" // For ClusterRuntime
-	"github.com/kubexms/kubexms/pkg/apis/kubexms/v1alpha1" // For v1alpha1.Cluster type
-	"github.com/kubexms/kubexms/pkg/spec"
-	taskPreflight "github.com/kubexms/kubexms/pkg/task/preflight"
+	"github.com/mensylisir/kubexm/pkg/runtime" // For ClusterRuntime
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // For v1alpha1.Cluster type
+	"github.com/mensylisir/kubexm/pkg/spec"
+	taskPreflight "github.com/mensylisir/kubexm/pkg/task/preflight"
 )
 
 // NewPreflightModule creates a new module specification for preflight checks and setup.
