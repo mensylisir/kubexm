@@ -27,6 +27,8 @@ var osReadFile = os.ReadFile
 // Host represents a single node in the cluster inventory. It holds all
 // necessary information to connect to and operate on the host, including
 // its specific Connector and Runner instances.
+// Deprecated: This struct is being replaced by `HostRuntime` in `pkg/runtime/context.go`
+// and `connector.Host`. The runtime logic is now centralized in `RuntimeBuilder`.
 type Host struct {
 	Name            string            // Unique host identifier, e.g., "master1", "worker-node-01"
 	Address         string            // Connection address (IP or FQDN) used by the Connector
@@ -57,6 +59,8 @@ func (h *Host) GetLabel(labelName string) (string, bool) { if h.Labels == nil { 
 // ClusterRuntime holds all global, read-only information and resources
 // required for a KubeXMS operation (e.g., cluster creation, scaling).
 // This is the canonical definition.
+// Deprecated: This struct is being replaced by `Context` in `pkg/runtime/context.go`.
+// The runtime logic is now centralized in `RuntimeBuilder`.
 type ClusterRuntime struct {
 	BaseRuntime      *BaseRuntime // Embedded BaseRuntime
 	ClusterConfig    *v1alpha1.Cluster
@@ -140,6 +144,8 @@ func (cr *ClusterRuntime) Copy() *ClusterRuntime {
 }
 
 // Context is passed to each execution unit (e.g., a Step in a Task).
+// Deprecated: This struct is being replaced by `Context` in `pkg/runtime/context.go` (the global runtime context).
+// Specific task or step contexts might be derived differently in the future if needed.
 type Context struct {
 	GoContext     context.Context
 	Host          *Host
@@ -153,43 +159,49 @@ type Context struct {
 	stepCache     cache.StepCache
 }
 
-// NewRuntimeFromYAML is a new constructor that takes YAML data directly,
-// parses it, (notionally) converts it, and then calls NewRuntime.
-func NewRuntimeFromYAML(yamlData []byte, baseLogger *logger.Logger) (*ClusterRuntime, error) {
+// NewRuntimeFromYAML creates a new runtime Context from YAML data using RuntimeBuilder.
+// It returns the main runtime Context (from pkg/runtime/context.go), a cleanup function, and an error if initialization fails.
+func NewRuntimeFromYAML(yamlData []byte, baseLogger *logger.Logger) (*Context, func(), error) {
 	if baseLogger == nil {
 		baseLogger = logger.Get() // Fallback to global default logger
 	}
-	initPhaseLogger := &logger.Logger{SugaredLogger: baseLogger.SugaredLogger.With("phase", "runtime_init_from_yaml")}
+	// Ensure the logger passed to the builder carries the "phase" information
+	initPhaseLogger := baseLogger.With("phase", "runtime_init_from_yaml")
 
 	parsedConfig, err := parser.ParseClusterYAML(yamlData)
 	if err != nil {
-		initPhaseLogger.Errorf("Failed to parse cluster YAML: %v", err)
-		return nil, fmt.Errorf("failed to parse cluster YAML: %w", err)
+		initPhaseLogger.Error(err, "Failed to parse cluster YAML")
+		return nil, nil, fmt.Errorf("failed to parse cluster YAML: %w", err)
 	}
 
-	// parsedConfig is now directly *v1alpha1.Cluster
 	if parsedConfig == nil {
-		// This case should ideally be caught by the parser if YAML is truly empty or invalid.
-		initPhaseLogger.Errorf("Parsed configuration is nil after parsing YAML.")
-		return nil, fmt.Errorf("parsed configuration is nil after parsing YAML")
+		// This error needs to be created before being passed to the logger
+		err := fmt.Errorf("parsed configuration is nil after parsing YAML")
+		initPhaseLogger.Error(err, "Parsed configuration is nil")
+		return nil, nil, err
 	}
 
-	// Log using ObjectMeta.Name
-	initPhaseLogger.Infof("Successfully parsed cluster YAML for cluster: %s", parsedConfig.ObjectMeta.Name)
+	initPhaseLogger.Info("Successfully parsed cluster YAML", "clusterName", parsedConfig.ObjectMeta.Name)
 
-	// Apply defaults from the v1alpha1 package
 	v1alpha1.SetDefaults_Cluster(parsedConfig)
-	initPhaseLogger.Infof("Applied v1alpha1 defaults to the cluster configuration for: %s", parsedConfig.ObjectMeta.Name)
+	initPhaseLogger.Info("Applied v1alpha1 defaults to the cluster configuration", "clusterName", parsedConfig.ObjectMeta.Name)
 
-	// No explicit conversion/cast function call needed anymore.
-	// parsedConfig is already the *v1alpha1.Cluster type needed by NewRuntime.
+	// Use an empty RuntimeBuilder struct.
+	// The configFile field within RuntimeBuilder is not used by BuildFromConfig.
+	builder := RuntimeBuilder{}
 
-	// Call the existing NewRuntime function with the parsed v1alpha1.Cluster config
-	return NewRuntime(parsedConfig, baseLogger)
+	// Create a background context for the builder.
+	// Callers who need specific context (e.g., for cancellation) should manage it before calling NewRuntimeFromYAML,
+	// or NewRuntimeFromYAML's signature would need to change to accept a context.
+	buildCtx := context.Background()
+
+	// Pass initPhaseLogger as the baseLogger to BuildFromConfig
+	return builder.BuildFromConfig(buildCtx, parsedConfig, initPhaseLogger)
 }
 
 
 // Accessor methods for caches
+// Deprecated: These methods are on the old runtime.Context. The new runtime.Context from context.go has its own cache fields.
 func (c *Context) Pipeline() cache.PipelineCache { return c.pipelineCache }
 func (c *Context) Module() cache.ModuleCache    { return c.moduleCache }
 func (c *Context) Task() cache.TaskCache       { return c.taskCache }
@@ -202,6 +214,10 @@ var runnerNewRunner = runner.NewRunner
 // It takes the parsed and defaulted cluster configuration and a base logger,
 // then initializes all hosts, including setting up their connectors and runners.
 // Host initializations are performed concurrently.
+// Deprecated: Use RuntimeBuilder (BuildFromFile or BuildFromConfig) or NewRuntimeFromYAML.
+// NewRuntimeFromYAML now returns the new *runtime.Context (from pkg/runtime/context.go), func(), error.
+// This NewRuntime function returns the old *ClusterRuntime and its direct host initialization logic
+// has been moved to RuntimeBuilder.
 func NewRuntime(cfg *v1alpha1.Cluster, baseLogger *logger.Logger) (*ClusterRuntime, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("cluster configuration cannot be nil")
@@ -390,6 +406,10 @@ func NewRuntime(cfg *v1alpha1.Cluster, baseLogger *logger.Logger) (*ClusterRunti
 
 // NewHostContext creates a new Context specific to a given host and operation.
 // It now initializes its own cache instances.
+// Deprecated: This function creates the old `runtime.Context` (from pkg/runtime/runtime.go).
+// The new `pkg/runtime/context.Context` (from pkg/runtime/context.go) is the primary context.
+// Specific step or task contexts might be derived from it if needed,
+// but host-specific operations usually use the main `Context` and specify the host.
 func NewHostContext(
 	goCtx context.Context,
 	host *Host,

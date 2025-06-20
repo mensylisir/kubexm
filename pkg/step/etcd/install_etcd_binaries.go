@@ -8,9 +8,10 @@ import (
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/connector" // For connector.ExecOptions
-	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/runtime"   // For runtime.StepContext
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/utils" // For potential DownloadAndExtractWithConnector
 )
 
 // InstallEtcdBinariesStepSpec defines parameters for installing etcd binaries.
@@ -32,27 +33,36 @@ func (s *InstallEtcdBinariesStepSpec) GetName() string {
 }
 
 // applyDefaults sets default values for the spec if they are not provided.
-// This method is called by the executor using runtime context.
-func (s *InstallEtcdBinariesStepSpec) applyDefaults(ctx *runtime.Context) {
+func (s *InstallEtcdBinariesStepSpec) applyDefaults(ctx runtime.StepContext) { // Changed to StepContext
+	logger := ctx.GetLogger()
+	currentHost := ctx.GetHost()
+	hostName := "unknown"
+	if currentHost != nil {
+		hostName = currentHost.GetName()
+	}
+
 	if s.Version == "" {
 		s.Version = "v3.5.9" // A common, recent version as default
-		if ctx != nil && ctx.Logger != nil { // Check for nil ctx and Logger
-			ctx.Logger.Warnf("Host %s: Etcd version not specified for install, defaulting to %s", ctx.Host.Name, s.Version)
-		}
+		logger.Warn("Etcd version not specified for install, defaulting.", "host", hostName, "defaultVersion", s.Version)
 	}
 	if s.TargetDir == "" { s.TargetDir = "/usr/local/bin" }
 	if s.InstallURLBase == "" { s.InstallURLBase = "https://github.com/etcd-io/etcd/releases/download" }
 
-	if s.Arch == "" { // Try to auto-detect Arch if not specified
-		if ctx != nil && ctx.Host != nil && ctx.Host.Runner != nil &&
-			ctx.Host.Runner.Facts != nil && ctx.Host.Runner.Facts.OS != nil &&
-			ctx.Host.Runner.Facts.OS.Arch != "" {
-			s.Arch = ctx.Host.Runner.Facts.OS.Arch
-		} else {
-			s.Arch = "amd64" // Fallback default arch if detection is not possible
-			if ctx != nil && ctx.Logger != nil {
-				ctx.Logger.Warnf("Host %s: Could not auto-detect architecture for etcd download, defaulting to %s", ctx.Host.Name, s.Arch)
+	if s.Arch == "" {
+		if currentHost != nil {
+			facts, err := ctx.GetHostFacts(currentHost)
+			if err == nil && facts != nil && facts.OS != nil && facts.OS.Arch != "" {
+				s.Arch = facts.OS.Arch
+				// Translate common arch names if needed (e.g., x86_64 -> amd64)
+				if s.Arch == "x86_64" { s.Arch = "amd64" }
+				if s.Arch == "aarch64" { s.Arch = "arm64" }
+			} else {
+				s.Arch = "amd64" // Fallback default arch
+				logger.Warn("Could not auto-detect architecture for etcd download, defaulting.", "host", hostName, "defaultArch", s.Arch, "error", err)
 			}
+		} else {
+			s.Arch = "amd64" // Fallback if no host context
+			logger.Warn("No host context to auto-detect architecture for etcd download, defaulting.", "defaultArch", s.Arch)
 		}
 	}
 }
@@ -66,46 +76,62 @@ func init() {
 }
 
 // Check determines if etcd binaries are installed and match version.
-func (e *InstallEtcdBinariesStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
-	rawSpec, rok := ctx.Step().GetCurrentStepSpec()
-	if !rok {
+func (e *InstallEtcdBinariesStepExecutor) Check(ctx runtime.StepContext) (isDone bool, err error) { // Changed to StepContext
+	logger := ctx.GetLogger()
+	currentHost := ctx.GetHost()
+	goCtx := ctx.GoContext()
+
+	if currentHost == nil {
+		logger.Error("Current host not found in context for Check")
+		return false, fmt.Errorf("current host not found in context for InstallEtcdBinariesStep Check")
+	}
+	logger = logger.With("host", currentHost.GetName())
+
+	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
+	if !ok {
+		logger.Error("StepSpec not found in context")
 		return false, fmt.Errorf("StepSpec not found in context for InstallEtcdBinariesStepExecutor Check method")
 	}
 	spec, ok := rawSpec.(*InstallEtcdBinariesStepSpec)
 	if !ok {
-		return false, fmt.Errorf("unexpected spec type %T for InstallEtcdBinariesStepExecutor Check method: %T", rawSpec, rawSpec)
+		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
+		return false, fmt.Errorf("unexpected spec type %T for InstallEtcdBinariesStepExecutor Check method", rawSpec)
 	}
 
-	if ctx.Host.Runner == nil {
-		return false, fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
+	spec.applyDefaults(ctx) // Pass StepContext
+	logger = logger.With("step", spec.GetName())
+
+	conn, err := ctx.GetConnectorForHost(currentHost)
+	if err != nil {
+		logger.Error("Failed to get connector for host", "error", err)
+		return false, fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err)
 	}
-	spec.applyDefaults(ctx) // Ensure defaults are applied before checking
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
 	binaries := []string{"etcd", "etcdctl"}
 	for _, binName := range binaries {
 		binPath := filepath.Join(spec.TargetDir, binName)
-		exists, err := ctx.Host.Runner.Exists(ctx.GoContext, binPath)
-		if err != nil { return false, fmt.Errorf("failed to check existence of %s on host %s: %w", binPath, ctx.Host.Name, err) }
+		exists, err := conn.Exists(goCtx, binPath) // Use connector
+		if err != nil {
+			logger.Error("Failed to check existence of binary", "path", binPath, "error", err)
+			return false, fmt.Errorf("failed to check existence of %s on host %s: %w", binPath, currentHost.GetName(), err)
+		}
 		if !exists {
-			hostCtxLogger.Debugf("Etcd binary %s does not exist at %s.", binName, binPath)
-			return false, nil // Not done if any binary is missing
+			logger.Debug("Etcd binary does not exist.", "path", binPath)
+			return false, nil
 		}
 
 		versionCmd := ""; expectedVersionString := strings.TrimPrefix(spec.Version, "v")
 		if binName == "etcd" { versionCmd = fmt.Sprintf("%s --version", binPath) }
 		if binName == "etcdctl" { versionCmd = fmt.Sprintf("%s version", binPath) }
 
-		stdoutBytes, stderrBytes, execErr := ctx.Host.Runner.RunWithOptions(ctx.GoContext, versionCmd, &connector.ExecOptions{Sudo: false})
+		stdoutBytes, stderrBytes, execErr := conn.RunCommand(goCtx, versionCmd, &connector.ExecOptions{Sudo: false}) // Use connector
 		if execErr != nil {
-			hostCtxLogger.Warnf("Failed to get version of %s (command: '%s'): %v. Stderr: %s. Assuming not correct version.", binPath, versionCmd, execErr, string(stderrBytes))
-			return false, nil // Cannot verify version, assume re-install needed
+			logger.Warn("Failed to get version of binary. Assuming not correct version.", "path", binPath, "command", versionCmd, "error", execErr, "stderr", string(stderrBytes))
+			return false, nil
 		}
 
 		output := string(stdoutBytes)
 		versionLineFound := false
-		// etcd --version output: "etcd Version: 3.5.9" or "etcd version 3.5.9" (older)
-		// etcdctl version output: "etcdctl version: 3.5.9"
 		if binName == "etcd" && (strings.Contains(output, "etcd Version: "+expectedVersionString) || strings.Contains(output, "etcd version "+expectedVersionString)){
 			versionLineFound = true
 		}
@@ -114,60 +140,81 @@ func (e *InstallEtcdBinariesStepExecutor) Check(ctx runtime.Context) (isDone boo
 		}
 
 		if !versionLineFound {
-			hostCtxLogger.Infof("Etcd binary %s exists, but version does not match '%s'. Found output: %s", binPath, expectedVersionString, output)
-			return false, nil // Version mismatch
+			logger.Info("Etcd binary exists, but version does not match.", "path", binPath, "expected", expectedVersionString, "output", output)
+			return false, nil
 		}
-		hostCtxLogger.Debugf("Etcd binary %s version %s already installed at %s.", binName, expectedVersionString, binPath)
+		logger.Debug("Etcd binary version already installed.", "binary", binName, "version", expectedVersionString, "path", binPath)
 	}
-	hostCtxLogger.Infof("All etcd binaries (%s) exist in %s and match version %s.", strings.Join(binaries, ", "), spec.TargetDir, spec.Version)
-	return true, nil // All binaries exist and versions match
+	logger.Info("All etcd binaries exist and match version.", "targetDir", spec.TargetDir, "version", spec.Version)
+	return true, nil
 }
 
 // Execute downloads and installs etcd binaries.
-func (e *InstallEtcdBinariesStepExecutor) Execute(ctx runtime.Context) *step.Result {
+func (e *InstallEtcdBinariesStepExecutor) Execute(ctx runtime.StepContext) *step.Result { // Changed to StepContext
 	startTime := time.Now()
-	rawSpec, rok := ctx.Step().GetCurrentStepSpec()
-	if !rok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for InstallEtcdBinariesStepExecutor Execute method"))
+	logger := ctx.GetLogger()
+	currentHost := ctx.GetHost()
+	goCtx := ctx.GoContext()
+
+	res := step.NewResult(ctx, currentHost, startTime, nil)
+
+	if currentHost == nil {
+		logger.Error("Current host not found in context for Execute")
+		res.Error = fmt.Errorf("current host not found in context for InstallEtcdBinariesStep Execute")
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+	}
+	logger = logger.With("host", currentHost.GetName())
+
+	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
+	if !ok {
+		logger.Error("StepSpec not found in context")
+		res.Error = fmt.Errorf("StepSpec not found in context for InstallEtcdBinariesStepExecutor Execute method")
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 	spec, ok := rawSpec.(*InstallEtcdBinariesStepSpec)
 	if !ok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected spec type %T for InstallEtcdBinariesStepExecutor Execute method: %T", rawSpec, rawSpec))
+		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
+		res.Error = fmt.Errorf("unexpected spec type %T for InstallEtcdBinariesStepExecutor Execute method", rawSpec)
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 
-	spec.applyDefaults(ctx)
-	res := step.NewResult(ctx, startTime, nil) // Use new NewResult signature
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+	spec.applyDefaults(ctx) // Pass StepContext
+	logger = logger.With("step", spec.GetName())
 
-	if ctx.Host.Runner == nil {
-		res.Error = fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+	conn, err := ctx.GetConnectorForHost(currentHost)
+	if err != nil {
+		logger.Error("Failed to get connector for host", "error", err)
+		res.Error = fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err)
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 
 	archiveName := fmt.Sprintf("etcd-%s-linux-%s.tar.gz", spec.Version, spec.Arch)
 	downloadURL := fmt.Sprintf("%s/%s/%s", spec.InstallURLBase, spec.Version, archiveName)
 
-	// Use a host-specific temporary directory for extraction, ideally from ctx.Host.WorkDir if set
-	tmpExtractDirBase := ctx.Host.WorkDir
-	if tmpExtractDirBase == "" {
-		tmpExtractDirBase = "/tmp" // Fallback if no host workdir
-	}
-	extractDir := filepath.Join(tmpExtractDirBase, fmt.Sprintf("etcd-extract-%s-%d", spec.Version, time.Now().UnixNano()))
+	// Determine temporary extraction directory using global work dir + host-specific + unique name
+	// Fallback to /tmp if global work dir is not set (though it should be by builder).
+	baseTmpDir := ctx.GetGlobalWorkDir()
+	if baseTmpDir == "" { baseTmpDir = "/tmp"}
+	extractDir := filepath.Join(baseTmpDir, currentHost.GetName(), fmt.Sprintf("etcd-extract-%s-%d", spec.Version, time.Now().UnixNano()))
 
-	hostCtxLogger.Infof("Downloading and extracting etcd %s from %s to %s", spec.Version, downloadURL, extractDir)
-	// Sudo false for download/extract as it's to a temp/work directory.
-	if err := ctx.Host.Runner.DownloadAndExtract(ctx.GoContext, downloadURL, extractDir, false); err != nil {
+	logger.Info("Downloading and extracting etcd.", "version", spec.Version, "url", downloadURL, "extractDir", extractDir)
+
+	// Assuming a utility function that uses the connector to download and extract.
+	// This function would handle MkdirAll for extractDir and the extraction process.
+	// Sudo for DownloadAndExtractWithConnector might be false if extractDir is user-writable.
+	if err := utils.DownloadAndExtractWithConnector(goCtx, logger, conn, downloadURL, extractDir, false /*sudo for extraction*/); err != nil {
+		logger.Error("Failed to download and extract etcd.", "url", downloadURL, "error", err)
 		res.Error = fmt.Errorf("failed to download and extract etcd from %s: %w", downloadURL, err)
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
-	hostCtxLogger.Successf("Etcd archive downloaded and extracted to %s", extractDir)
+	logger.Info("Etcd archive downloaded and extracted.", "extractDir", extractDir)
 
 	extractedBinDir := filepath.Join(extractDir, fmt.Sprintf("etcd-%s-linux-%s", spec.Version, spec.Arch))
 
-	// Sudo true for Mkdirp if TargetDir is a system path like /usr/local/bin
-	if err := ctx.Host.Runner.Mkdirp(ctx.GoContext, spec.TargetDir, "0755", true); err != nil {
+	if err := conn.Mkdir(goCtx, spec.TargetDir, "0755"); err != nil { // Sudo for Mkdir should be handled by connector if path needs it
+		logger.Error("Failed to create target directory.", "path", spec.TargetDir, "error", err)
 		res.Error = fmt.Errorf("failed to create target directory %s: %w", spec.TargetDir, err)
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 
 	binariesToCopy := []string{"etcd", "etcdctl"}
@@ -175,50 +222,48 @@ func (e *InstallEtcdBinariesStepExecutor) Execute(ctx runtime.Context) *step.Res
 		srcPath := filepath.Join(extractedBinDir, binName)
 		dstPath := filepath.Join(spec.TargetDir, binName)
 
-		hostCtxLogger.Infof("Copying %s from %s to %s", binName, srcPath, dstPath)
+		logger.Info("Copying binary.", "binary", binName, "source", srcPath, "destination", dstPath)
 		copyCmd := fmt.Sprintf("cp %s %s", srcPath, dstPath)
-		// Sudo true for copying to system directories like /usr/local/bin
-		_, stderrCp, errCp := ctx.Host.Runner.RunWithOptions(ctx.GoContext, copyCmd, &connector.ExecOptions{Sudo: true})
+		_, stderrCp, errCp := conn.RunCommand(goCtx, copyCmd, &connector.ExecOptions{Sudo: true})
 		if errCp != nil {
+			logger.Error("Failed to copy binary.", "binary", binName, "stderr", string(stderrCp), "error", errCp)
 			res.Error = fmt.Errorf("failed to copy %s to %s: %w (stderr: %s)", srcPath, dstPath, errCp, string(stderrCp))
-			res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+			res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 		}
 
 		chmodCmd := fmt.Sprintf("chmod +x %s", dstPath)
-		_, stderrChmod, errChmod := ctx.Host.Runner.RunWithOptions(ctx.GoContext, chmodCmd, &connector.ExecOptions{Sudo: true})
+		_, stderrChmod, errChmod := conn.RunCommand(goCtx, chmodCmd, &connector.ExecOptions{Sudo: true})
 		if errChmod != nil {
+			logger.Error("Failed to make binary executable.", "path", dstPath, "stderr", string(stderrChmod), "error", errChmod)
 			res.Error = fmt.Errorf("failed to make %s executable: %w (stderr: %s)", dstPath, errChmod, string(stderrChmod))
-			res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+			res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 		}
-		hostCtxLogger.Successf("Copied and set +x for %s", dstPath)
+		logger.Info("Copied and set +x for binary.", "path", dstPath)
 	}
 
-	hostCtxLogger.Infof("Cleaning up extraction directory %s", extractDir)
-	// Sudo true for Remove if extractDir was created in a place that needs it, or if files are root-owned.
-	// Since DownloadAndExtract sudo was false, files inside should be user-owned.
-	// However, extractDir itself might be under a sudo-created path if Host.WorkDir was /root/something.
-	// Use Sudo true for Remove to be safe, or adjust based on typical Host.WorkDir permissions.
-	if err := ctx.Host.Runner.Remove(ctx.GoContext, extractDir, true); err != nil {
-		hostCtxLogger.Warnf("Failed to cleanup etcd extraction directory %s: %v. This can be ignored or manually cleaned.", extractDir, err)
+	logger.Info("Cleaning up extraction directory.", "path", extractDir)
+	if err := conn.Remove(goCtx, extractDir, true); err != nil { // true for recursive
+		logger.Warn("Failed to cleanup etcd extraction directory. This can be ignored or manually cleaned.", "path", extractDir, "error", err)
 	}
 
 	res.EndTime = time.Now()
-	hostCtxLogger.Infof("Verifying etcd installation after run...")
-	done, checkErr := e.Check(ctx) // Call Check with updated signature
+	logger.Info("Verifying etcd installation after execution.")
+	done, checkErr := e.Check(ctx)
 	if checkErr != nil {
+		logger.Error("Post-execution check failed.", "error", checkErr)
 		res.Status = step.StatusFailed; res.Error = fmt.Errorf("failed to verify etcd installation after run: %w", checkErr)
-		res.Message = res.Error.Error()
 	} else if !done {
+		logger.Error("Post-execution check indicates installation not complete.")
 		res.Status = step.StatusFailed; res.Error = fmt.Errorf("etcd installation verification failed after run (binaries not found or version mismatch)")
-		res.Message = res.Error.Error()
 	} else {
 		res.Status = step.StatusSucceeded; res.Message = fmt.Sprintf("Etcd %s binaries (etcd, etcdctl) installed successfully to %s.", spec.Version, spec.TargetDir)
 	}
 
-	if res.Status == step.StatusFailed {
-		hostCtxLogger.Errorf("Step finished with errors: %s", res.Message)
-	} else {
-		hostCtxLogger.Successf("Step succeeded: %s", res.Message)
+	if res.Status == step.StatusFailed && res.Error != nil { // Ensure message is set if error happened
+	    res.Message = res.Error.Error()
+		logger.Error("Step finished with errors.", "message", res.Message)
+	} else if res.Status == step.StatusSucceeded {
+		logger.Info("Step succeeded.", "message", res.Message)
 	}
 	return res
 }

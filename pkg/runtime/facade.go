@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+
+	"github.com/mensylisir/kubexm/pkg/cache"     // Added for StepCache
 	"github.com/mensylisir/kubexm/pkg/connector" // Updated import path
 	"github.com/mensylisir/kubexm/pkg/logger"    // Updated import path
 	"github.com/mensylisir/kubexm/pkg/runner"    // Updated import path
@@ -46,4 +48,8 @@ type StepContext interface {
 	GetConnectorForHost(host connector.Host) (connector.Connector, error)
 	GetHostFacts(host connector.Host) (*runner.Facts, error)
 	GoContext() context.Context
+	StepCache() cache.StepCache // Added method
+	GetHost() connector.Host    // Added method for current host
+	TaskCache() cache.TaskCache // Added method for Task level cache access
+	ModuleCache() cache.ModuleCache // Added method for Module level cache access
 }

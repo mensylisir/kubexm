@@ -1,14 +1,14 @@
 package pki
 
 import (
-	"context" // Required by runtime.Context
+	// "context" // No longer directly needed if runtime.StepContext is used
 	"fmt"
 	"path/filepath"
 	"strings" // For strings.TrimSpace in subject formatting, if used
 	"time"
 
-	"github.com/mensylisir/kubexm/pkg/connector" // For connector.ExecOptions
-	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/connector" // For connector.ExecOptions & connector.Connector
+	"github.com/mensylisir/kubexm/pkg/runtime"   // For runtime.StepContext
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 )
@@ -37,7 +37,7 @@ func (s *GenerateRootCAStepSpec) GetName() string {
 
 // applyDefaults sets default values for the spec if they are not provided.
 // This method is called by the executor.
-func (s *GenerateRootCAStepSpec) applyDefaults(ctxHostName string) {
+func (s *GenerateRootCAStepSpec) applyDefaults(logger runtime.Logger, hostName string) { // Added logger for consistency if needed
 	// If paths are empty, default to a common, non-host-specific path for a global CA,
 	// or make it host-specific if that's the design for this CA type.
 	// For a root CA, it's often global, so not using ctxHostName in path by default.
@@ -63,127 +63,168 @@ func init() {
 }
 
 // Check determines if the root CA cert and key already exist.
-func (e *GenerateRootCAStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
-	rawSpec, ok := ctx.Step().GetCurrentStepSpec()
+func (e *GenerateRootCAStepExecutor) Check(ctx runtime.StepContext) (isDone bool, err error) { // Changed to StepContext
+	logger := ctx.GetLogger()
+	currentHost := ctx.GetHost() // This step might be host-specific for where openssl runs or where files are checked
+	goCtx := ctx.GoContext()
+
+	hostNameForDefaults := "localhost" // Default if host is nil (e.g. control-plane step)
+	if currentHost != nil {
+		logger = logger.With("host", currentHost.GetName())
+		hostNameForDefaults = currentHost.GetName()
+	}
+
+	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
 	if !ok {
+		logger.Error("StepSpec not found in context")
 		return false, fmt.Errorf("step spec not found in context for GenerateRootCAStepExecutor Check method")
 	}
 	spec, ok := rawSpec.(*GenerateRootCAStepSpec)
 	if !ok {
+		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
 		return false, fmt.Errorf("unexpected spec type %T in context for GenerateRootCAStepExecutor Check method", rawSpec)
 	}
-	spec.applyDefaults(ctx.Host.Name)
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+	spec.applyDefaults(logger, hostNameForDefaults) // Pass logger and hostname
+	logger = logger.With("step", spec.GetName())
 
-	if ctx.Host.Runner == nil {
-		return false, fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
+
+	if currentHost == nil { // If no specific host, this check might be on the control node or is conceptual.
+		logger.Debug("No specific host in context, cannot check for existing CA files on a remote host. Assuming not done if paths are default.")
+		// This check becomes tricky. If paths are default, it implies a shared CA.
+		// If this step ALWAYS runs on a specific node (e.g. first master), then currentHost should be set.
+		// For now, if no host, we can't check remote files.
+		return false, fmt.Errorf("currentHost is nil, cannot perform file checks for GenerateRootCA")
 	}
 
-	certExists, err := ctx.Host.Runner.Exists(ctx.GoContext, spec.CertPath)
-	if err != nil { return false, fmt.Errorf("failed to check CA cert %s on host %s: %w", spec.CertPath, ctx.Host.Name, err) }
-	keyExists, err := ctx.Host.Runner.Exists(ctx.GoContext, spec.KeyPath)
-	if err != nil { return false, fmt.Errorf("failed to check CA key %s on host %s: %w", spec.KeyPath, ctx.Host.Name, err) }
+	conn, err := ctx.GetConnectorForHost(currentHost)
+	if err != nil {
+		logger.Error("Failed to get connector for host", "error", err)
+		return false, fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err)
+	}
+
+	certExists, err := conn.Exists(goCtx, spec.CertPath) // Use connector
+	if err != nil {
+		logger.Error("Failed to check CA cert existence", "path", spec.CertPath, "error", err)
+		return false, fmt.Errorf("failed to check CA cert %s on host %s: %w", spec.CertPath, currentHost.GetName(), err)
+	}
+	keyExists, err := conn.Exists(goCtx, spec.KeyPath) // Use connector
+	if err != nil {
+		logger.Error("Failed to check CA key existence", "path", spec.KeyPath, "error", err)
+		return false, fmt.Errorf("failed to check CA key %s on host %s: %w", spec.KeyPath, currentHost.GetName(), err)
+	}
 
 	if certExists && keyExists {
-		hostCtxLogger.Infof("Root CA certificate (%s) and key (%s) already exist.", spec.CertPath, spec.KeyPath)
-		// TODO: Add verification of CA properties (CN, expiry, isCA flag in cert) for true idempotency.
+		logger.Info("Root CA certificate and key already exist.", "certPath", spec.CertPath, "keyPath", spec.KeyPath)
 		return true, nil
 	}
-	if certExists && !keyExists { hostCtxLogger.Warnf("Root CA cert %s exists, but key %s does not. Will attempt to regenerate.", spec.CertPath, spec.KeyPath) }
-    if !certExists && keyExists { hostCtxLogger.Warnf("Root CA key %s exists, but cert %s does not. Will attempt to regenerate.", spec.KeyPath, spec.CertPath) }
-	if !certExists && !keyExists { hostCtxLogger.Debugf("Root CA certificate (%s) and key (%s) do not exist.", spec.CertPath, spec.KeyPath) }
+	if certExists && !keyExists { logger.Warn("Root CA cert exists, but key does not. Will attempt to regenerate.", "certPath", spec.CertPath, "keyPath", spec.KeyPath) }
+    if !certExists && keyExists { logger.Warn("Root CA key exists, but cert does not. Will attempt to regenerate.", "keyPath", spec.KeyPath, "certPath", spec.CertPath) }
+	if !certExists && !keyExists { logger.Debug("Root CA certificate and key do not exist.", "certPath", spec.CertPath, "keyPath", spec.KeyPath) }
 	return false, nil
 }
 
 // Execute generates the root CA.
-func (e *GenerateRootCAStepExecutor) Execute(ctx runtime.Context) *step.Result {
-	rawSpec, ok := ctx.Step().GetCurrentStepSpec()
+func (e *GenerateRootCAStepExecutor) Execute(ctx runtime.StepContext) *step.Result { // Changed to StepContext
+	startTime := time.Now()
+	logger := ctx.GetLogger()
+	currentHost := ctx.GetHost() // Assuming CA generation happens on a specific host or control node
+	goCtx := ctx.GoContext()
+
+	res := step.NewResult(ctx, currentHost, startTime, nil) // currentHost can be nil if this is a control-plane local step
+
+	hostNameForDefaults := "localhost"
+	if currentHost != nil {
+		logger = logger.With("host", currentHost.GetName())
+		hostNameForDefaults = currentHost.GetName()
+	}
+
+	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
 	if !ok {
-		// Cannot get spec name if rawSpec is nil or not a StepSpec
-		return step.NewResult(ctx, time.Now(), fmt.Errorf("Execute: step spec not found in context for GenerateRootCAStepExecutor"))
+		logger.Error("StepSpec not found in context")
+		res.Error = fmt.Errorf("Execute: step spec not found in context for GenerateRootCAStepExecutor"); res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 	spec, ok := rawSpec.(*GenerateRootCAStepSpec)
 	if !ok {
-		// Try to get a name if rawSpec is at least a spec.StepSpec
-		name := "GenerateRootCA (type error)"
-		if s, isSpec := rawSpec.(spec.StepSpec); isSpec {
-			name = s.GetName()
-		}
-		return step.NewResult(ctx, time.Now(), fmt.Errorf("Execute: unexpected spec type %T (%s) in context for GenerateRootCAStepExecutor", rawSpec, name))
+		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
+		name := "GenerateRootCA (type error)"; if s, isSpec := rawSpec.(spec.StepSpec); isSpec { name = s.GetName() }
+		res.Error = fmt.Errorf("Execute: unexpected spec type %T (%s) in context for GenerateRootCAStepExecutor", rawSpec, name); res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 
-	spec.applyDefaults(ctx.Host.Name)
-	startTime := time.Now()
-	// Initialize res early, so it can be used for error reporting
-	res := step.NewResult(ctx, startTime, nil)
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
+	spec.applyDefaults(logger, hostNameForDefaults) // Pass logger and hostname
+	logger = logger.With("step", spec.GetName())
 
-
-	if ctx.Host.Runner == nil {
-		res.Error = fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+	if currentHost == nil {
+		// This implies the step is running locally on the control plane node, not via a connector to a remote host.
+		// File operations would be local. This needs a different execution path or clear expectation for `GetConnectorForHost(nil)`.
+		// For now, assume a connector for localhost or that openssl commands run locally without a typical connector.
+		// This part of the logic might need refinement based on how "local" steps are handled.
+		// Let's assume for now it requires a host, and if not, it's an error for this step as designed.
+		logger.Error("Current host is nil. This step requires a host context to run openssl commands.")
+		res.Error = fmt.Errorf("current host is nil, GenerateRootCA requires a host context"); res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
-	if _, err := ctx.Host.Runner.LookPath(ctx.GoContext, "openssl"); err != nil {
-		res.Error = fmt.Errorf("openssl command not found on host %s, required to generate CA: %w", ctx.Host.Name, err)
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+
+	conn, err := ctx.GetConnectorForHost(currentHost)
+	if err != nil {
+		logger.Error("Failed to get connector for host", "error", err)
+		res.Error = fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err); res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+	}
+
+	// Check for openssl using LookPath on the connector
+	if _, err := conn.LookPath(goCtx, "openssl"); err != nil {
+		logger.Error("openssl command not found on host, required to generate CA.", "error", err)
+		res.Error = fmt.Errorf("openssl command not found on host %s: %w", currentHost.GetName(), err); res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 
 	certDir := filepath.Dir(spec.CertPath); keyDir := filepath.Dir(spec.KeyPath)
-	// Sudo true for creating directories in /etc or similar system paths.
-	if err := ctx.Host.Runner.Mkdirp(ctx.GoContext, certDir, "0755", true); err != nil {
-		res.Error = fmt.Errorf("failed to create directory %s for CA certificate on host %s: %w", certDir, ctx.Host.Name, err)
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+	if err := conn.Mkdir(goCtx, certDir, "0755"); err != nil { // Sudo handled by connector
+		logger.Error("Failed to create directory for CA certificate.", "path", certDir, "error", err)
+		res.Error = fmt.Errorf("failed to create directory %s for CA certificate on host %s: %w", certDir, currentHost.GetName(), err); res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
-	if certDir != keyDir { // Only create if different to avoid double logging/error
-		if err := ctx.Host.Runner.Mkdirp(ctx.GoContext, keyDir, "0700", true); err != nil { // Key dir more restrictive
-			res.Error = fmt.Errorf("failed to create directory %s for CA key on host %s: %w", keyDir, ctx.Host.Name, err)
-			res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+	if certDir != keyDir {
+		if err := conn.Mkdir(goCtx, keyDir, "0700"); err != nil { // Key dir more restrictive
+			logger.Error("Failed to create directory for CA key.", "path", keyDir, "error", err)
+			res.Error = fmt.Errorf("failed to create directory %s for CA key on host %s: %w", keyDir, currentHost.GetName(), err); res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 		}
 	}
 
-	// Sudo true for openssl commands if writing to system paths like /etc
 	genKeyCmd := fmt.Sprintf("openssl genpkey -algorithm RSA -out %s -pkeyopt rsa_keygen_bits:%d", spec.KeyPath, spec.KeyBitSize)
-	hostCtxLogger.Infof("Generating CA private key: %s (this might take a moment)", spec.KeyPath)
-	_, stderrKey, errKey := ctx.Host.Runner.RunWithOptions(ctx.GoContext, genKeyCmd, &connector.ExecOptions{Sudo: true})
+	logger.Info("Generating CA private key (this might take a moment).", "keyPath", spec.KeyPath)
+	_, stderrKey, errKey := conn.RunCommand(goCtx, genKeyCmd, &connector.ExecOptions{Sudo: true})
 	if errKey != nil {
-		res.Error = fmt.Errorf("failed to generate CA private key %s on host %s: %w (stderr: %s)", spec.KeyPath, ctx.Host.Name, errKey, string(stderrKey))
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
-	}
-	if errChmodKey := ctx.Host.Runner.Chmod(ctx.GoContext, spec.KeyPath, "0600", true); errChmodKey != nil {
-		hostCtxLogger.Warnf("Failed to chmod CA key %s to 0600 on host %s: %v", spec.KeyPath, ctx.Host.Name, errChmodKey)
-		// Non-fatal warning for chmod failure, but key is generated.
+		logger.Error("Failed to generate CA private key.", "keyPath", spec.KeyPath, "stderr", string(stderrKey), "error", errKey)
+		res.Error = fmt.Errorf("failed to generate CA private key %s on host %s: %w (stderr: %s)", spec.KeyPath, currentHost.GetName(), errKey, string(stderrKey)); res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 
-	subject := fmt.Sprintf("/CN=%s", strings.ReplaceAll(spec.CommonName, "\"", "\\\"")) // Basic CN sanitation
+	chmodKeyCmd := fmt.Sprintf("chmod 0600 %s", spec.KeyPath)
+	if _, _, errChmodKey := conn.RunCommand(goCtx, chmodKeyCmd, &connector.ExecOptions{Sudo: true}); errChmodKey != nil {
+		logger.Warn("Failed to chmod CA key.", "keyPath", spec.KeyPath, "error", errChmodKey)
+	}
+
+	subject := fmt.Sprintf("/CN=%s", strings.ReplaceAll(spec.CommonName, "\"", "\\\""))
 	genCertCmd := fmt.Sprintf("openssl req -x509 -new -nodes -key %s -sha256 -days %d -out %s -subj '%s'",
 		spec.KeyPath, spec.ValidityDays, spec.CertPath, subject)
-	hostCtxLogger.Infof("Generating self-signed CA certificate: %s", spec.CertPath)
-	_, stderrCert, errCert := ctx.Host.Runner.RunWithOptions(ctx.GoContext, genCertCmd, &connector.ExecOptions{Sudo: true})
+	logger.Info("Generating self-signed CA certificate.", "certPath", spec.CertPath)
+	_, stderrCert, errCert := conn.RunCommand(goCtx, genCertCmd, &connector.ExecOptions{Sudo: true})
 	if errCert != nil {
-		res.Error = fmt.Errorf("failed to generate CA certificate %s on host %s: %w (stderr: %s)", spec.CertPath, ctx.Host.Name, errCert, string(stderrCert))
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
-	}
-	if errChmodCert := ctx.Host.Runner.Chmod(ctx.GoContext, spec.CertPath, "0644", true); errChmodCert != nil {
-		hostCtxLogger.Warnf("Failed to chmod CA cert %s to 0644 on host %s: %v", spec.CertPath, ctx.Host.Name, errChmodCert)
+		logger.Error("Failed to generate CA certificate.", "certPath", spec.CertPath, "stderr", string(stderrCert), "error", errCert)
+		res.Error = fmt.Errorf("failed to generate CA certificate %s on host %s: %w (stderr: %s)", spec.CertPath, currentHost.GetName(), errCert, string(stderrCert)); res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 
-	// Store paths in Module Cache for other steps/tasks within the same module execution.
-	// These keys should ideally be exported constants from a relevant package (e.g., pkg/pki/constants.go or similar)
-	// For this refactoring, defining them as local consts or string literals.
-	const clusterRootCACertPathKey = "ClusterRootCACertPath" // Example key for cluster-wide root CA cert
-	const clusterRootCAKeyPathKey  = "ClusterRootCAKeyPath"  // Example key for cluster-wide root CA key
+	chmodCertCmd := fmt.Sprintf("chmod 0644 %s", spec.CertPath)
+	if _, _, errChmodCert := conn.RunCommand(goCtx, chmodCertCmd, &connector.ExecOptions{Sudo: true}); errChmodCert != nil {
+		logger.Warn("Failed to chmod CA cert.", "certPath", spec.CertPath, "error", errChmodCert)
+	}
 
-	// PKIPathType in spec could be used to make keys more specific if this step generates different types of CAs
-	// e.g. key := fmt.Sprintf("%sRootCACertPath", spec.PKIPathType) // if PKIPathType is "Etcd" or "Kubernetes"
+	const clusterRootCACertPathKey = "ClusterRootCACertPath"
+	const clusterRootCAKeyPathKey  = "ClusterRootCAKeyPath"
 
-	ctx.Module().Set(clusterRootCACertPathKey, spec.CertPath)
-	ctx.Module().Set(clusterRootCAKeyPathKey, spec.KeyPath)
-	hostCtxLogger.Debugf("Stored Root CA paths in Module Cache: CertPathKey=%s (%s), KeyPathKey=%s (%s)",
-		clusterRootCACertPathKey, spec.CertPath, clusterRootCAKeyPathKey, spec.KeyPath)
+	ctx.ModuleCache().Set(clusterRootCACertPathKey, spec.CertPath) // Use ModuleCache
+	ctx.ModuleCache().Set(clusterRootCAKeyPathKey, spec.KeyPath)
+	logger.Debug("Stored Root CA paths in Module Cache.", "CertPathKey", clusterRootCACertPathKey, "CertPath", spec.CertPath, "KeyPathKey", clusterRootCAKeyPathKey, "KeyPath", spec.KeyPath)
 
 	res.EndTime = time.Now(); res.Status = step.StatusSucceeded
 	res.Message = fmt.Sprintf("Root CA certificate and key generated successfully at %s and %s.", spec.CertPath, spec.KeyPath)
-	hostCtxLogger.Successf("Step succeeded: %s", res.Message)
+	logger.Info("Step succeeded.", "message", res.Message)
 	return res
 }
 var _ step.StepExecutor = &GenerateRootCAStepExecutor{}

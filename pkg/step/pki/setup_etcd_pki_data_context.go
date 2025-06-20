@@ -5,9 +5,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/mensylisir/kubexm/pkg/runtime"
-	"github.com/mensylisir/kubexm/pkg/step"
+	// connector import not strictly needed if no direct host operations beyond what StepContext provides
+	"github.com/mensylisir/kubexm/pkg/runtime" // For runtime.StepContext
 	"github.com/mensylisir/kubexm/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/step"
 )
 
 // SetupEtcdPkiDataContextStepSpec holds the data prepared by the module to be put into the cache.
@@ -50,53 +51,62 @@ type SetupEtcdPkiDataContextStepExecutor struct{}
 
 // Check always returns false to ensure this setup step runs if included in a task.
 // It could alternatively check if all its target keys are already populated in the module cache.
-func (e *SetupEtcdPkiDataContextStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+func (e *SetupEtcdPkiDataContextStepExecutor) Check(ctx runtime.StepContext) (isDone bool, err error) { // Changed to StepContext
 	// Forcing execution to ensure cache reflects current desired state from config.
 	// If this step were more expensive, a more detailed check might be warranted.
+	// No host-specific checks needed here.
 	return false, nil
 }
 
 // Execute populates the module cache with necessary PKI data.
-func (e *SetupEtcdPkiDataContextStepExecutor) Execute(ctx runtime.Context) *step.Result {
+func (e *SetupEtcdPkiDataContextStepExecutor) Execute(ctx runtime.StepContext) *step.Result { // Changed to StepContext
 	startTime := time.Now()
-	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
+	logger := ctx.GetLogger()
+	currentHost := ctx.GetHost() // May be nil if this step is not host-specific
+
+	// This step operates locally or sets global/module-level context,
+	// so currentHost might be nil. NewResult handles nil host.
+	res := step.NewResult(ctx, currentHost, startTime, nil)
+
+	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
 	if !ok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for %s", "SetupEtcdPkiDataContextStep"))
+		logger.Error("StepSpec not found in context")
+		res.Error = fmt.Errorf("StepSpec not found in context for %s", "SetupEtcdPkiDataContextStep")
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
-	spec, ok := currentFullSpec.(*SetupEtcdPkiDataContextStepSpec)
+	spec, ok := rawSpec.(*SetupEtcdPkiDataContextStepSpec)
 	if !ok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type: %T for %s", currentFullSpec, "SetupEtcdPkiDataContextStep"))
+		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
+		res.Error = fmt.Errorf("unexpected StepSpec type: %T for %s", rawSpec, "SetupEtcdPkiDataContextStep")
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 	spec.PopulateDefaults()
-	logger := ctx.Logger.SugaredLogger().With("step", spec.GetName())
-	// This step operates locally, so result is not tied to a specific host from ctx.Host
-	res := step.NewResult(ctx, startTime, nil)
+	logger = logger.With("step", spec.GetName())
 
 
 	if spec.KubeConfToCache == nil {
+		logger.Error("KubeConfToCache is nil in spec")
 		res.Error = fmt.Errorf("KubeConfToCache is nil in spec for %s", spec.GetName())
-		res.Status = step.StatusFailed; return res
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
-	// spec.HostsToCache can be nil/empty if no hosts are defined; this is acceptable.
 
-	// KubeConfToCache.PKIDirectory is the cluster's general PKI root (e.g., .../.kubexm/pki/cluster-name)
 	if spec.KubeConfToCache.PKIDirectory == "" {
+		logger.Error("KubeConfToCache.PKIDirectory is empty in spec; this is needed as the base for Etcd PKI path")
 		res.Error = fmt.Errorf("KubeConfToCache.PKIDirectory is empty in spec for %s; this is needed as the base for Etcd PKI path", spec.GetName())
-		res.Status = step.StatusFailed; return res
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
-	// The specific PKI path for etcd is derived from the cluster's general PKI root + the EtcdSpecificSubPath.
 	etcdSpecificPkiPath := filepath.Join(spec.KubeConfToCache.PKIDirectory, spec.EtcdSpecificSubPath)
 
-	// Store in Module Cache, as this data is relevant for the whole etcd module's operations.
-	ctx.Module().Set(spec.KubeConfOutputKey, spec.KubeConfToCache)
-	logger.Infof("Stored KubexmsKubeConf in module cache under key '%s'", spec.KubeConfOutputKey)
+	ctx.ModuleCache().Set(spec.KubeConfOutputKey, spec.KubeConfToCache) // Use ModuleCache
+	logger.Info("Stored KubexmsKubeConf in module cache.", "key", spec.KubeConfOutputKey)
 
-	ctx.Module().Set(spec.HostsOutputKey, spec.HostsToCache)
-	logger.Infof("Stored []HostSpecForPKI in module cache under key '%s'", spec.HostsOutputKey)
+	ctx.ModuleCache().Set(spec.HostsOutputKey, spec.HostsToCache) // Use ModuleCache
+	logger.Info("Stored []HostSpecForPKI in module cache.", "key", spec.HostsOutputKey)
 
-	ctx.Module().Set(spec.EtcdPkiPathOutputKey, etcdSpecificPkiPath)
-	logger.Infof("Derived and stored etcd-specific PKI path '%s' in module cache under key '%s'", etcdSpecificPkiPath, spec.EtcdPkiPathOutputKey)
+	ctx.ModuleCache().Set(spec.EtcdPkiPathOutputKey, etcdSpecificPkiPath) // Use ModuleCache
+	logger.Info("Derived and stored etcd-specific PKI path in module cache.", "key", spec.EtcdPkiPathOutputKey, "path", etcdSpecificPkiPath)
 
+	res.EndTime = time.Now()
 	res.Message = "Etcd PKI data context successfully populated into module cache."
 	res.Status = step.StatusSucceeded
 	return res
