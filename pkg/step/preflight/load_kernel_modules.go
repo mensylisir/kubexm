@@ -1,202 +1,170 @@
 package preflight
 
 import (
-	// "context" // No longer directly used if runtime.StepContext is used
 	"errors" // For errors.As
 	"fmt"
 	"strings"
-	"time"
+	// "time" // No longer needed
 
-	"github.com/mensylisir/kubexm/pkg/connector" // For connector.ExecOptions and connector.Connector
-	"github.com/mensylisir/kubexm/pkg/runtime"   // For runtime.StepContext
-	"github.com/mensylisir/kubexm/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/step"
+	// spec is no longer needed
 )
 
-// LoadKernelModulesStepSpec defines parameters for loading kernel modules.
-type LoadKernelModulesStepSpec struct {
+// LoadKernelModulesStep loads specified kernel modules on the host.
+type LoadKernelModulesStep struct {
 	Modules  []string
-	StepName string // Optional: for a custom name for this specific step instance
+	StepName string
 }
 
-// GetName returns the step name.
-func (s *LoadKernelModulesStepSpec) GetName() string {
-	if s.StepName != "" { return s.StepName }
-	if len(s.Modules) == 0 {
-		return "Load Kernel Modules (none specified)"
+// NewLoadKernelModulesStep creates a new LoadKernelModulesStep.
+func NewLoadKernelModulesStep(modules []string, stepName string) step.Step {
+	name := stepName
+	if name == "" {
+		if len(modules) == 0 {
+			name = "Load Kernel Modules (none specified)"
+		} else {
+			name = fmt.Sprintf("Load Kernel Modules (%s)", strings.Join(modules, ", "))
+		}
 	}
-	return fmt.Sprintf("Load Kernel Modules (%s)", strings.Join(s.Modules, ", "))
-}
-var _ spec.StepSpec = &LoadKernelModulesStepSpec{}
-
-// LoadKernelModulesStepExecutor implements the logic for LoadKernelModulesStepSpec.
-type LoadKernelModulesStepExecutor struct{}
-
-func init() {
-	step.Register(step.GetSpecTypeName(&LoadKernelModulesStepSpec{}), &LoadKernelModulesStepExecutor{})
-}
-
-// isModuleLoaded is a helper function, now a private method of the executor.
-func (e *LoadKernelModulesStepExecutor) isModuleLoaded(ctx runtime.StepContext, moduleName string) (bool, error) { // Changed to StepContext
-	logger := ctx.GetLogger()
-	currentHost := ctx.GetHost()
-	goCtx := ctx.GoContext()
-
-	if currentHost == nil {
-		return false, fmt.Errorf("current host not found in context for isModuleLoaded check")
+	return &LoadKernelModulesStep{
+		Modules:  modules,
+		StepName: name,
 	}
-	// logger is already contextualized by the caller (Check/Execute methods)
-	// logger = logger.With("host", currentHost.GetName())
+}
 
-	conn, errConn := ctx.GetConnectorForHost(currentHost)
+func (s *LoadKernelModulesStep) isModuleLoaded(ctx runtime.StepContext, host connector.Host, moduleName string) (bool, error) {
+	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "module", moduleName, "operation", "isModuleLoadedCheck")
+
+	conn, errConn := ctx.GetConnectorForHost(host)
 	if errConn != nil {
-		return false, fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), errConn)
+		return false, fmt.Errorf("failed to get connector for host %s: %w", host.GetName(), errConn)
 	}
 
+	// Check with lsmod, awk to get first column (module name), and grep.
+	// grep -x matches whole line, -q for quiet.
 	cmd := fmt.Sprintf("lsmod | awk '{print $1}' | grep -xq %s", moduleName)
-	// Sudo usually not needed for lsmod or grep.
-	_, _, err := conn.RunCommand(goCtx, cmd, &connector.ExecOptions{Sudo: false}) // Use connector
+	_, stderrBytes, err := conn.Exec(ctx.GoContext(), cmd, &connector.ExecOptions{Sudo: false}) // lsmod usually doesn't need sudo
 
 	if err == nil {
 		return true, nil // Exit code 0 from grep -q means found
 	}
+
 	var cmdErr *connector.CommandError
-	if errors.As(err, &cmdErr) && cmdErr.ExitCode == 1 {
-		return false, nil // Exit code 1 from grep -q means not found
+	if errors.As(err, &cmdErr) {
+		if cmdErr.ExitCode == 1 { // Grep returns 1 if not found
+			return false, nil
+		}
+		// For other exit codes from grep, or if awk/lsmod failed before grep.
+		logger.Error("Command to check module loaded status failed with unexpected exit code.", "exit_code", cmdErr.ExitCode, "stderr", string(stderrBytes), "error", err)
+		return false, fmt.Errorf("command '%s' execution failed for module %s on host %s (exit code %d, stderr: %s): %w", cmd, moduleName, host.GetName(), cmdErr.ExitCode, string(stderrBytes), err)
 	}
-	// Any other error means the command execution itself failed.
-	logger.Error("Error executing command to check if module is loaded.", "module", moduleName, "error", err)
-	return false, fmt.Errorf("error executing command to check if module %s is loaded on host %s: %w", moduleName, currentHost.GetName(), err)
+
+	// Non-CommandError type, e.g., context canceled, connection issue
+	logger.Error("Error executing command to check if module is loaded (non-CommandError).", "stderr", string(stderrBytes), "error", err)
+	return false, fmt.Errorf("error executing command '%s' for module %s on host %s: %w", cmd, moduleName, host.GetName(), err)
 }
 
-// Check determines if all modules are loaded.
-func (e *LoadKernelModulesStepExecutor) Check(ctx runtime.StepContext) (isDone bool, err error) { // Changed to StepContext
-	logger := ctx.GetLogger()
-	currentHost := ctx.GetHost()
+func (s *LoadKernelModulesStep) Name() string {
+	return s.StepName
+}
 
-	if currentHost == nil {
-		logger.Error("Current host not found in context for Check")
-		return false, fmt.Errorf("current host is required for LoadKernelModulesStep Check")
+func (s *LoadKernelModulesStep) Description() string {
+	if len(s.Modules) == 0 {
+		return "Ensures no specific kernel modules are loaded (as none were specified)."
 	}
-	logger = logger.With("host", currentHost.GetName())
+	return fmt.Sprintf("Ensures kernel modules are loaded: %s.", strings.Join(s.Modules, ", "))
+}
 
-	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
-	if !ok {
-		logger.Error("StepSpec not found in context")
-		return false, fmt.Errorf("StepSpec not found in context for LoadKernelModulesStepExecutor Check method")
-	}
-	spec, ok := rawSpec.(*LoadKernelModulesStepSpec)
-	if !ok {
-		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
-		return false, fmt.Errorf("unexpected spec type %T for LoadKernelModulesStepExecutor Check method", rawSpec)
-	}
-	logger = logger.With("step", spec.GetName())
+func (s *LoadKernelModulesStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Precheck")
+    if host == nil { return false, fmt.Errorf("host is nil in Precheck for %s", s.Name())}
 
-	if len(spec.Modules) == 0 {
-		logger.Debug("No modules specified, considering done.")
+	if len(s.Modules) == 0 {
+		logger.Debug("No modules specified to load, precheck considered done.")
 		return true, nil
 	}
 
-	for _, mod := range spec.Modules {
-		loaded, checkErr := e.isModuleLoaded(ctx, mod) // Pass StepContext
+	for _, mod := range s.Modules {
+		loaded, checkErr := s.isModuleLoaded(ctx, host, mod)
 		if checkErr != nil {
-			logger.Error("Error checking module.", "module", mod, "error", checkErr)
-			return false, checkErr
+			logger.Error("Error checking module loaded status.", "module", mod, "error", checkErr)
+			return false, checkErr // Propagate error: if we can't check, we can't be sure it's done.
 		}
 		if !loaded {
-			logger.Debug("Module is not loaded.", "module", mod)
-			return false, nil
+			logger.Info("Module not loaded, Run phase is required.", "module", mod)
+			return false, nil // At least one module not loaded
 		}
-		logger.Debug("Module is already loaded.", "module", mod)
 	}
-	logger.Info("All specified modules are already loaded.", "modules", strings.Join(spec.Modules, ", "))
-	return true, nil
+	logger.Info("All specified modules are already loaded.")
+	return true, nil // All modules are loaded
 }
 
-// Execute loads kernel modules.
-func (e *LoadKernelModulesStepExecutor) Execute(ctx runtime.StepContext) *step.Result { // Changed to StepContext
-	startTime := time.now()
-	logger := ctx.GetLogger()
-	currentHost := ctx.GetHost()
-	goCtx := ctx.GoContext()
+func (s *LoadKernelModulesStep) Run(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Run")
+    if host == nil { return fmt.Errorf("host is nil in Run for %s", s.Name())}
 
-	res := step.NewResult(ctx, currentHost, startTime, nil)
-
-	if currentHost == nil {
-		logger.Error("Current host not found in context for Execute")
-		res.Error = fmt.Errorf("current host is required for LoadKernelModulesStep Execute")
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
-	}
-	logger = logger.With("host", currentHost.GetName())
-
-	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
-	if !ok {
-		logger.Error("StepSpec not found in context")
-		res.Error = fmt.Errorf("StepSpec not found in context for LoadKernelModulesStepExecutor Execute method")
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
-	}
-	spec, ok := rawSpec.(*LoadKernelModulesStepSpec)
-	if !ok {
-		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
-		res.Error = fmt.Errorf("unexpected spec type %T for LoadKernelModulesStepExecutor Execute method", rawSpec)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
-	}
-	logger = logger.With("step", spec.GetName())
-
-	var errorsCollected []string
-	var successesCollected []string
-
-	if len(spec.Modules) == 0 {
-		res.Status = step.StatusSucceeded; res.Message = "No kernel modules specified to load."
-		logger.Info(res.Message)
-		res.EndTime = time.Now(); return res
+	if len(s.Modules) == 0 {
+		logger.Info("No modules specified to load.")
+		return nil
 	}
 
-	conn, errConn := ctx.GetConnectorForHost(currentHost)
+	conn, errConn := ctx.GetConnectorForHost(host)
 	if errConn != nil {
-		logger.Error("Failed to get connector for host", "error", errConn)
-		res.Error = fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), errConn)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+		return fmt.Errorf("failed to get connector for host %s: %w", host.GetName(), errConn)
 	}
 
-	for _, mod := range spec.Modules {
-		isLoadedBeforeRun, _ := e.isModuleLoaded(ctx, mod)
-		if isLoadedBeforeRun {
-			logger.Info("Module is already loaded, skipping modprobe.", "module", mod)
-			successesCollected = append(successesCollected, mod)
+	var failedModules []string
+	for _, mod := range s.Modules {
+		// Check if module is already loaded before attempting modprobe
+		// This avoids unnecessary modprobe calls if Precheck was skipped or state changed.
+		loaded, checkErr := s.isModuleLoaded(ctx, host, mod)
+		if checkErr != nil {
+			// If we can't even check, log it and add to failed.
+			logger.Error("Failed to check module status before attempting load.", "module", mod, "error", checkErr)
+			failedModules = append(failedModules, fmt.Sprintf("%s (pre-load check error: %v)", mod, checkErr))
+			continue
+		}
+		if loaded {
+		    logger.Info("Module already loaded, skipping modprobe.", "module", mod)
+		    continue
+		}
+
+		logger.Info("Attempting to load kernel module with modprobe.", "module", mod)
+		// modprobe usually needs sudo.
+		_, stderrBytes, err := conn.Exec(ctx.GoContext(), fmt.Sprintf("modprobe %s", mod), &connector.ExecOptions{Sudo: true})
+		if err != nil {
+			logger.Error("Failed to execute modprobe for module.", "module", mod, "stderr", string(stderrBytes), "error", err)
+			failedModules = append(failedModules, fmt.Sprintf("%s (modprobe error: %v, stderr: %s)", mod, err, string(stderrBytes)))
 			continue
 		}
 
-		logger.Info("Attempting to load kernel module.", "module", mod)
-		_, stderrBytes, err := conn.RunCommand(goCtx, fmt.Sprintf("modprobe %s", mod), &connector.ExecOptions{Sudo: true}) // Use connector
-		if err != nil {
-			errMsg := fmt.Sprintf("failed to load module %s: %v (stderr: %s)", mod, err, string(stderrBytes))
-			logger.Warn(errMsg); errorsCollected = append(errorsCollected, errMsg); continue
-		}
-
-		loadedAfterRun, verifyErr := e.isModuleLoaded(ctx, mod)
+		// Verify after attempting load
+		loadedAfter, verifyErr := s.isModuleLoaded(ctx, host, mod)
 		if verifyErr != nil {
-			errMsg := fmt.Sprintf("failed to verify module %s after attempting load: %v", mod, verifyErr)
-			logger.Warn(errMsg); errorsCollected = append(errorsCollected, errMsg)
-		} else if !loadedAfterRun {
-			errMsg := fmt.Sprintf("module %s reported as loaded by modprobe, but not found by lsmod verification", mod)
-			logger.Warn(errMsg); errorsCollected = append(errorsCollected, errMsg)
+			logger.Error("Failed to verify module status after modprobe.", "module", mod, "error", verifyErr)
+			failedModules = append(failedModules, fmt.Sprintf("%s (post-load verification error: %v)", mod, verifyErr))
+		} else if !loadedAfter {
+			// modprobe might exit 0 even if module is blacklisted or fails to load for other reasons.
+			logger.Error("Module load attempted with modprobe, but lsmod verification failed.", "module", mod)
+			failedModules = append(failedModules, fmt.Sprintf("%s (not found after modprobe attempt)", mod))
 		} else {
 			logger.Info("Kernel module loaded successfully.", "module", mod)
-			successesCollected = append(successesCollected, mod)
 		}
 	}
-	res.EndTime = time.Now()
 
-	if len(errorsCollected) > 0 {
-		res.Status = step.StatusFailed; res.Error = fmt.Errorf(strings.Join(errorsCollected, "; "))
-		res.Message = fmt.Sprintf("Successfully loaded: [%s]. Failed or could not verify: %s", strings.Join(successesCollected, ", "), res.Error.Error())
-		logger.Error("Step finished with errors.", "message", res.Message)
-	} else {
-		res.Status = step.StatusSucceeded
-		res.Message = fmt.Sprintf("All specified kernel modules (%s) were successfully loaded and verified.", strings.Join(spec.Modules, ", "))
-		logger.Info("Step succeeded.", "message", res.Message)
+	if len(failedModules) > 0 {
+		return fmt.Errorf("failed to load/verify kernel module(s) for step %s on host %s: %s", s.Name(), host.GetName(), strings.Join(failedModules, "; "))
 	}
-	return res
+	return nil
 }
-var _ step.StepExecutor = &LoadKernelModulesStepExecutor{}
+
+func (s *LoadKernelModulesStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Rollback")
+	logger.Info("Rollback for LoadKernelModules is a no-op by default to avoid system instability from unloading modules.")
+	return nil
+}
+
+// Ensure LoadKernelModulesStep implements the step.Step interface.
+var _ step.Step = (*LoadKernelModulesStep)(nil)
