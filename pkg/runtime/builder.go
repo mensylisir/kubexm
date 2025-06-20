@@ -37,7 +37,7 @@ func NewRuntimeBuilder(configFile string) *RuntimeBuilder {
 
 // Build constructs and initializes the full runtime Context.
 func (b *RuntimeBuilder) Build(ctx context.Context) (*Context, func(), error) {
-	log := logger.New()
+	log := logger.Get()
 	log.Info("Building runtime environment...", "configFile", b.configFile)
 
 	clusterConfig, err := parser.ParseFromFile(b.configFile)
