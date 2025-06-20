@@ -140,60 +140,100 @@ func TestNewSetupKernelTask_Factory_WithConfig(t *testing.T) {
 func TestNewInstallContainerdTask_Factory_WithConfig(t *testing.T) {
 	dummyCfg := &config.Cluster{
 		Spec: config.ClusterSpec{
+			// Assuming arch and zone are typically global or derived elsewhere for tests
+			Kubernetes: config.KubernetesSpec{Arch: "amd64"},
+			ImageStore: config.ImageStoreSpec{Zone: "us-central1"},
+			// ContainerRuntime.Version is the primary source for version
 			ContainerRuntime: &config.ContainerRuntimeSpec{Version: "1.7.1"},
 			Containerd: &config.ContainerdSpec{
-				// Version: "1.7.0", // This would be overridden by ContainerRuntime.Version
-				RegistryMirrors: map[string][]string{ // Renamed from RegistryMirrorsConfig
+				// Version: "1.7.0", // This would be overridden by ContainerRuntime.Version if logic existed, but factory takes version directly
+				RegistryMirrors: map[string][]string{
 					"docker.io": {"https://my.mirror.com", "https://another.mirror.com"},
 				},
 				UseSystemdCgroup:   true,
 				InsecureRegistries: []string{"insecure.reg:5000"},
-				ExtraTomlConfig:   "[plugins.\"io.containerd.toto.v1\"]\n  extra_config = true",
-				ConfigPath: "/custom/containerd.toml",
+				ExtraTomlConfig:    "[plugins.\"io.containerd.toto.v1\"]\n  extra_config = true",
+				ConfigPath:         "/custom/containerd.toml",
+				// DownloadDir and Checksum are not in config, passed directly to factory.
 			},
 		},
 	}
-	taskSpec := taskContainerd.NewInstallContainerdTask(dummyCfg)
 
-	if taskSpec.Name != "Install and Configure Containerd" {
-		t.Errorf("Name = '%s'", taskSpec.Name)
-	}
-	if len(taskSpec.Steps) != 3 {
-		t.Fatalf("Expected 3 steps, got %d", len(taskSpec.Steps))
+	// Parameters for NewInstallContainerdTaskSpec
+	version := dummyCfg.Spec.ContainerRuntime.Version
+	arch := dummyCfg.Spec.Kubernetes.Arch
+	zone := dummyCfg.Spec.ImageStore.Zone
+	downloadDir := "" // Use factory default
+	checksum := ""    // No checksum in this test
+
+	// Convert map[string][]string to map[string]string for the step, taking the first mirror.
+	// This matches the assumption that ConfigureContainerdStepSpec might only handle one URL per registry.
+	// If ConfigureContainerdStepSpec is updated to handle []string, this conversion is not needed.
+	registryMirrorsForStep := make(map[string]string)
+	if dummyCfg.Spec.Containerd != nil && dummyCfg.Spec.Containerd.RegistryMirrors != nil {
+		for k, v := range dummyCfg.Spec.Containerd.RegistryMirrors {
+			if len(v) > 0 {
+				registryMirrorsForStep[k] = v[0]
+			}
+		}
 	}
 
-	var installSpec *stepSpecContainerd.InstallContainerdStepSpec
-	var configSpec *stepSpecContainerd.ConfigureContainerdStepSpec
-	// var manageSpec *stepSpecContainerd.EnableAndStartContainerdStepSpec // Not checked in detail here
+	insecureRegistries := dummyCfg.Spec.Containerd.InsecureRegistries
+	useSystemdCgroup := dummyCfg.Spec.Containerd.UseSystemdCgroup
+	extraTomlContent := dummyCfg.Spec.Containerd.ExtraTomlConfig
+	containerdConfigPath := dummyCfg.Spec.Containerd.ConfigPath
+	runOnRoles := []string{"all"} // Example role
+	globalWorkDir := "/tmp/kubexm_test_workdir"
+
+	taskSpec := taskContainerd.NewInstallContainerdTaskSpec(
+		version, arch, zone, downloadDir, checksum,
+		registryMirrorsForStep, insecureRegistries,
+		useSystemdCgroup, extraTomlContent, containerdConfigPath,
+		runOnRoles, globalWorkDir,
+	)
+
+	expectedName := "InstallAndConfigureContainerd"
+	if taskSpec.Name != expectedName {
+		t.Errorf("Name = '%s', want '%s'", taskSpec.Name, expectedName)
+	}
+	// Expect 5 steps: Download, Extract, Install, Configure, DaemonReload, Enable, Start
+	if len(taskSpec.Steps) != 7 {
+		t.Fatalf("Expected 7 steps, got %d", len(taskSpec.Steps))
+	}
+
+	var downloadStep *component_downloads.DownloadContainerdStepSpec
+	var configureStep *stepSpecContainerd.ConfigureContainerdStepSpec
+	// Other steps can be similarly checked if needed.
 
 	for _, sSpec := range taskSpec.Steps {
-		if s, ok := sSpec.(*stepSpecContainerd.InstallContainerdStepSpec); ok { installSpec = s }
-		if s, ok := sSpec.(*stepSpecContainerd.ConfigureContainerdStepSpec); ok { configSpec = s }
-		// if s, ok := sSpec.(*stepSpecContainerd.EnableAndStartContainerdStepSpec); ok { manageSpec = s }
+		if s, ok := sSpec.(*component_downloads.DownloadContainerdStepSpec); ok {
+			downloadStep = s
+		}
+		if s, ok := sSpec.(*stepSpecContainerd.ConfigureContainerdStepSpec); ok {
+			configureStep = s
+		}
 	}
 
-	if installSpec == nil { t.Fatal("InstallContainerdStepSpec not found") }
-	if configSpec == nil { t.Fatal("ConfigureContainerdStepSpec not found") }
-	// if manageSpec == nil { t.Fatal("EnableAndStartContainerdStepSpec not found") }
+	if downloadStep == nil { t.Fatal("DownloadContainerdStepSpec not found") }
+	if configureStep == nil { t.Fatal("ConfigureContainerdStepSpec not found") }
 
-
-	if installSpec.Version != "1.7.1" { // From ContainerRuntime.Version
-		t.Errorf("InstallContainerdStepSpec.Version = %s, want '1.7.1'", installSpec.Version)
+	if downloadStep.Version != version {
+		t.Errorf("DownloadContainerdStepSpec.Version = %s, want %s", downloadStep.Version, version)
 	}
-	if configSpec.RegistryMirrors["docker.io"] != "https://my.mirror.com" {
-		t.Errorf("ConfigureContainerdStepSpec.RegistryMirrors['docker.io'] = %s, want 'https://my.mirror.com'", configSpec.RegistryMirrors["docker.io"])
+	if !reflect.DeepEqual(configureStep.RegistryMirrors, registryMirrorsForStep) {
+		t.Errorf("ConfigureContainerdStepSpec.RegistryMirrors = %v, want %v", configureStep.RegistryMirrors, registryMirrorsForStep)
 	}
-	if !configSpec.UseSystemdCgroup {
-		t.Error("ConfigureContainerdStepSpec.UseSystemdCgroup = false, want true")
+	if configureStep.UseSystemdCgroup != useSystemdCgroup {
+		t.Errorf("ConfigureContainerdStepSpec.UseSystemdCgroup = %v, want %v", configureStep.UseSystemdCgroup, useSystemdCgroup)
 	}
-	if len(configSpec.InsecureRegistries) != 1 || configSpec.InsecureRegistries[0] != "insecure.reg:5000" {
-		t.Errorf("ConfigureContainerdStepSpec.InsecureRegistries = %v, want ['insecure.reg:5000']", configSpec.InsecureRegistries)
+	if !reflect.DeepEqual(configureStep.InsecureRegistries, insecureRegistries) {
+		t.Errorf("ConfigureContainerdStepSpec.InsecureRegistries = %v, want %v", configureStep.InsecureRegistries, insecureRegistries)
 	}
-	if configSpec.ExtraTomlContent != "[plugins.\"io.containerd.toto.v1\"]\n  extra_config = true" {
+	if configureStep.ExtraTomlContent != extraTomlContent {
 		t.Errorf("ConfigureContainerdStepSpec.ExtraTomlContent mismatch")
 	}
-	if configSpec.ConfigFilePath != "/custom/containerd.toml" {
-		t.Errorf("ConfigureContainerdStepSpec.ConfigFilePath = %s, want /custom/containerd.toml", configSpec.ConfigFilePath)
+	if configureStep.ConfigFilePath != containerdConfigPath {
+		t.Errorf("ConfigureContainerdStepSpec.ConfigFilePath = %s, want %s", configureStep.ConfigFilePath, containerdConfigPath)
 	}
 }
 

@@ -59,26 +59,24 @@ func TestNewCreateClusterPipelineSpec_Assembly(t *testing.T) {
 
 		// Optional: perform basic checks on the module spec itself
 		if moduleSpec.Name == "Containerd Runtime" {
-			if moduleSpec.IsEnabled == nil {
-				t.Errorf("Containerd module IsEnabled function is nil")
-			} else {
-				// Test IsEnabled with the dummyCfg to ensure it behaves as expected by factory's logic
-				if !moduleSpec.IsEnabled(dummyCfg) {
-					t.Errorf("Containerd module IsEnabled returned false for config type '%s', factory should enable it.",
-						dummyCfg.Spec.ContainerRuntime.Type)
-				}
+			// Example: Check the IsEnabled string condition for Containerd module
+			// This expected string comes from the NewContainerdModuleSpec factory
+			expectedContainerdIsEnabled := "(cfg.Spec.ContainerRuntime == nil) || (cfg.Spec.ContainerRuntime.Type == '') || (cfg.Spec.ContainerRuntime.Type == 'containerd')"
+			if moduleSpec.IsEnabled != expectedContainerdIsEnabled {
+				t.Errorf("Containerd module IsEnabled string mismatch. Got: '%s', Want: '%s'",
+					moduleSpec.IsEnabled, expectedContainerdIsEnabled)
 			}
 			if len(moduleSpec.Tasks) == 0 {
 				t.Errorf("Containerd module spec has no tasks assembled by its factory.")
 			}
 		}
 		if moduleSpec.Name == "Etcd Cluster Management" {
-			if moduleSpec.IsEnabled == nil {
-				t.Errorf("Etcd module IsEnabled function is nil")
-			} else {
-				if !moduleSpec.IsEnabled(dummyCfg) {
-					t.Errorf("Etcd module IsEnabled returned false, but factory default is true or based on Etcd.Managed=true")
-				}
+			// Example: Check the IsEnabled string condition for Etcd module
+			// This expected string comes from the NewEtcdModuleSpec factory
+			expectedEtcdIsEnabled := "cfg.Spec.Etcd != nil"
+			if moduleSpec.IsEnabled != expectedEtcdIsEnabled {
+				t.Errorf("Etcd module IsEnabled string mismatch. Got: '%s', Want: '%s'",
+					moduleSpec.IsEnabled, expectedEtcdIsEnabled)
 			}
 			if len(moduleSpec.Tasks) == 0 {
 				t.Errorf("Etcd module spec has no tasks assembled by its factory (even if placeholders).")
@@ -86,12 +84,12 @@ func TestNewCreateClusterPipelineSpec_Assembly(t *testing.T) {
 		}
 	}
 
-	// 3. Test Pipeline PreRun and PostRun hooks
-	if pipelineSpec.PreRun != nil {
-		t.Errorf("PipelineSpec.PreRun is not nil, got %T (%s)", pipelineSpec.PreRun, pipelineSpec.PreRun.GetName())
+	// 3. Test Pipeline PreRun and PostRun hooks (now string identifiers)
+	if pipelineSpec.PreRunHook != "" { // Expecting empty string as per factory
+		t.Errorf("PipelineSpec.PreRunHook should be empty, got %q", pipelineSpec.PreRunHook)
 	}
-	if pipelineSpec.PostRun != nil {
-		t.Errorf("PipelineSpec.PostRun is not nil, got %T (%s)", pipelineSpec.PostRun, pipelineSpec.PostRun.GetName())
+	if pipelineSpec.PostRunHook != "" { // Expecting empty string as per factory
+		t.Errorf("PipelineSpec.PostRunHook should be empty, got %q", pipelineSpec.PostRunHook)
 	}
 
 	// TODO: Add more test cases for NewCreateClusterPipelineSpec:

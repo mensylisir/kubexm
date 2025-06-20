@@ -1,41 +1,38 @@
 package preflight
 
 import (
-	// "github.com/kubexms/kubexms/pkg/config" // No longer used
-	"github.com/mensylisir/kubexm/pkg/runtime" // For ClusterRuntime
-	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // For v1alpha1.Cluster type
+	"github.com/mensylisir/kubexm/pkg/config" // For config.Cluster
 	"github.com/mensylisir/kubexm/pkg/spec"
-	taskPreflight "github.com/mensylisir/kubexm/pkg/task/preflight"
+	taskPreflightFactory "github.com/mensylisir/kubexm/pkg/task/preflight" // Alias for task spec factories
 )
 
-// NewPreflightModule creates a new module specification for preflight checks and setup.
-func NewPreflightModule(clusterRt *runtime.ClusterRuntime) *spec.ModuleSpec {
-	if clusterRt == nil || clusterRt.ClusterConfig == nil {
+// NewPreflightModuleSpec creates a new module specification for preflight checks and setup.
+func NewPreflightModuleSpec(cfg *config.Cluster) *spec.ModuleSpec {
+	if cfg == nil {
 		return &spec.ModuleSpec{
-			Name:      "Preflight Checks and Setup (Error: Missing Configuration)",
-			IsEnabled: func(_ *runtime.ClusterRuntime) bool { return false },
-			Tasks:     []*spec.TaskSpec{},
+			Name:        "Preflight Checks and Setup",
+			Description: "Performs system preflight checks and applies necessary kernel/system configurations (Error: Missing Configuration)",
+			IsEnabled:   "false",
+			Tasks:       []*spec.TaskSpec{},
 		}
 	}
-	cfg := clusterRt.ClusterConfig // cfg is *v1alpha1.Cluster
+
+	// Define the condition string for IsEnabled.
+	// This reflects the logic: enabled if Global is nil, or Global.SkipPreflight is false.
+	// The Executor will evaluate this against the 'cfg' object.
+	isEnabledCondition := "(cfg.Spec.Global == nil) || (cfg.Spec.Global.SkipPreflight == false)"
 
 	return &spec.ModuleSpec{
-		Name: "Preflight Checks and Setup",
-		IsEnabled: func(cr *runtime.ClusterRuntime) bool {
-			if cr == nil || cr.ClusterConfig == nil || cr.ClusterConfig.Spec.Global == nil {
-				// If Global spec is missing, SkipPreflight is effectively false (module enabled).
-				// SetDefaults_Cluster ensures Global is initialized, so Global should not be nil here.
-				return true
-			}
-			// Module is enabled by default.
-			// It's disabled if explicitly told to skip preflight checks in global config.
-			return !cr.ClusterConfig.Spec.Global.SkipPreflight
-		},
+		Name:        "Preflight Checks and Setup",
+		Description: "Performs system preflight checks (CPU, memory) and applies necessary kernel/system configurations.",
+		IsEnabled:   isEnabledCondition,
 		Tasks: []*spec.TaskSpec{
-			taskPreflight.NewSystemChecksTask(cfg), // Pass cfg to task factories
-			taskPreflight.NewSetupKernelTask(cfg),   // Pass cfg to task factories
+			// These factories already return *spec.TaskSpec
+			taskPreflightFactory.NewSystemChecksTask(cfg),
+			taskPreflightFactory.NewSetupKernelTask(cfg),
+			// Consider adding NewSetupKubernetesPrerequisitesTask(cfg) here if it's standard for preflight
 		},
-		PreRun: nil,
-		PostRun: nil,
+		PreRunHook:  "", // Example: "preflight_start_logging_hook"
+		PostRunHook: "", // Example: "preflight_report_results_hook"
 	}
 }

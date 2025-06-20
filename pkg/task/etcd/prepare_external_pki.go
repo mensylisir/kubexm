@@ -23,7 +23,10 @@ func NewPrepareExternalEtcdPKITask(
 
 	return &spec.TaskSpec{
 		Name:      "Prepare PKI for External Etcd",
-		LocalNode: true, // This task copies local files to a structured local PKI path
+		// LocalNode behavior (running on the orchestrator node) is typically managed by the executor
+		// if RunOnRoles is nil/empty or via a special role/filter.
+		// For now, ensure it conforms to TaskSpec, which doesn't have LocalNode.
+		// RunOnRoles might be set to nil or a specific "local" role by the module using this task.
 		Steps: []spec.StepSpec{
 			// Step 1: Determine/Ensure Local Etcd PKI Path
 			// Retrieves the specific etcd PKI path from Module Cache (set by SetupEtcdPkiDataContextTask),

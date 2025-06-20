@@ -1,11 +1,10 @@
 package pipeline
 
 import (
-	// "github.com/kubexms/kubexms/pkg/config" // Will be replaced by runtime
-	"github.com/mensylisir/kubexm/pkg/runtime" // For ClusterRuntime
+	"github.com/mensylisir/kubexm/pkg/config" // For config.Cluster
 	"github.com/mensylisir/kubexm/pkg/spec"
 
-	// Import module factories
+	// Import module factories (assuming they are now ...ModuleSpec)
 	modulePreflight "github.com/mensylisir/kubexm/pkg/module/preflight"
 	moduleContainerd "github.com/mensylisir/kubexm/pkg/module/containerd"
 	moduleEtcd "github.com/mensylisir/kubexm/pkg/module/etcd"
@@ -19,42 +18,36 @@ import (
 
 // NewCreateClusterPipelineSpec defines the pipeline specification for creating a new Kubernetes cluster.
 // It assembles all necessary modules in the correct order.
-// The clusterRt *runtime.ClusterRuntime parameter provides access to the cluster configuration and runtime context.
-func NewCreateClusterPipelineSpec(clusterRt *runtime.ClusterRuntime) *spec.PipelineSpec {
-	if clusterRt == nil || clusterRt.ClusterConfig == nil {
-		// Or handle error: return nil or an error
-		// For now, returning an empty pipeline spec or panicking might be options
-		// depending on how robust this needs to be for unexpected nil inputs.
-		// Let's assume for now that clusterRt and clusterRt.ClusterConfig are valid.
-		// A robust implementation would return an error or a clearly invalid/empty spec.
-		return &spec.PipelineSpec{Name: "Error: Missing ClusterRuntime or ClusterConfig"}
+// The cfg *config.Cluster parameter provides access to the cluster configuration.
+func NewCreateClusterPipelineSpec(cfg *config.Cluster) *spec.PipelineSpec {
+	if cfg == nil {
+		// Return an empty/error pipeline spec if config is missing
+		return &spec.PipelineSpec{
+			Name:        "Create New Kubernetes Cluster",
+			Description: "Error: Missing cluster configuration.",
+			Modules:     []*spec.ModuleSpec{},
+		}
 	}
-	cfg := clusterRt.ClusterConfig // cfg is *v1alpha1.Cluster
 
 	modules := []*spec.ModuleSpec{
 		// 1. Preflight checks and base system setup
-		modulePreflight.NewPreflightModule(clusterRt),
+		modulePreflight.NewPreflightModuleSpec(cfg),
 
 		// 2. Install and configure container runtime
-		// This module's IsEnabled function should check clusterRt.ClusterConfig to see if containerd is the chosen runtime.
-		moduleContainerd.NewContainerdModule(clusterRt),
+		moduleContainerd.NewContainerdModuleSpec(cfg),
 		// TODO: Add logic or separate module factories for other runtimes like Docker,
 		// and select based on cfg.Spec.ContainerRuntime.Type.
-		// e.g., if cfg.Spec.ContainerRuntime != nil && cfg.Spec.ContainerRuntime.Type == "docker": modules = append(modules, moduleDocker.NewDockerModule(clusterRt))
 
-		// 3. (Optional) Setup HA components like Keepalived/HAProxy if specified in cfg.
-		// This would typically be its own module.
-		// Example:
-		// if cfg.Spec.HighAvailability != nil && cfg.Spec.HighAvailability.Type == "keepalived" {
-		//     modules = append(modules, moduleHA.NewKeepalivedModule(clusterRt))
+		// 3. (Optional) Setup HA components
+		// Example: if cfg.Spec.HighAvailability != nil && cfg.Spec.HighAvailability.Type == "keepalived" {
+		//     modules = append(modules, moduleHA.NewKeepalivedModuleSpec(cfg))
 		// }
 
 		// 4. Deploy Etcd cluster.
-		// The NewEtcdModule's IsEnabled function can check clusterRt.ClusterConfig.Spec.Etcd.Type.
-		moduleEtcd.NewEtcdModule(clusterRt),
+		moduleEtcd.NewEtcdModuleSpec(cfg),
 
 		// 5. Deploy Kubernetes control plane components
-		// Example: modules = append(modules, moduleKubernetes.NewControlPlaneModule(clusterRt))
+		// Example: modules = append(modules, moduleKubernetes.NewControlPlaneModuleSpec(cfg))
 
 		// 6. Join worker nodes to the cluster
 		// Example: modules = append(modules, moduleKubernetes.NewWorkerNodeModule(cfg))
@@ -92,12 +85,11 @@ func NewCreateClusterPipelineSpec(clusterRt *runtime.ClusterRuntime) *spec.Pipel
 	// }
 
 	return &spec.PipelineSpec{
-		Name:    "Create New Kubernetes Cluster",
-		Modules: finalModules,
-		// PreRun:  preRunStep,  // Example if defined
-		// PostRun: postRunStep, // Example if defined
-		PreRun:  nil, // No pipeline-level PreRun hook for this example
-		PostRun: nil, // No pipeline-level PostRun hook for this example
+		Name:        "Create New Kubernetes Cluster",
+		Description: "Pipeline to create a new Kubernetes cluster from scratch, including preflight, runtime, etcd, and control plane setup.",
+		Modules:     finalModules,
+		PreRunHook:  "", // Example: "create_cluster_pre_hook_generic_setup"
+		PostRunHook: "", // Example: "create_cluster_post_hook_final_validation"
 	}
 }
 

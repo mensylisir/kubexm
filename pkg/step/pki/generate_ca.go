@@ -19,6 +19,8 @@ type GenerateRootCAStep struct {
 	ValidityDays int
 	KeyBitSize   int
 	StepName     string
+	CertPemPath  string
+	KeyPemPath   string
 }
 
 // NewGenerateRootCAStep creates a new GenerateRootCAStep.
@@ -44,6 +46,14 @@ func (s *GenerateRootCAStep) populateDefaults(logger runtime.Logger) {
 	if s.KeyPath == "" {
 		s.KeyPath = filepath.Join(defaultBaseDir, "ca.key")
 		logger.Debug("KeyPath defaulted.", "path", s.KeyPath)
+	}
+	if s.CertPemPath == "" {
+		s.CertPemPath = filepath.Join(defaultBaseDir, "ca.pem")
+		logger.Debug("CertPemPath defaulted.", "path", s.CertPemPath)
+	}
+	if s.KeyPemPath == "" {
+		s.KeyPemPath = filepath.Join(defaultBaseDir, "ca-key.pem")
+		logger.Debug("KeyPemPath defaulted.", "path", s.KeyPemPath)
 	}
 	if s.CommonName == "" {
 		s.CommonName = "kubexms-root-ca"
@@ -78,8 +88,8 @@ func (s *GenerateRootCAStep) Description() string {
 	// At description time, defaults might not have been applied yet if called early.
 	// For a more accurate description, ensure populateDefaults has run or use potentially empty values.
 	// For now, use current values.
-	return fmt.Sprintf("Generates a root CA certificate and key: CN=%s, Cert=%s, Key=%s, Validity=%d days, Bits=%d.",
-		s.CommonName, s.CertPath, s.KeyPath, s.ValidityDays, s.KeyBitSize)
+	return fmt.Sprintf("Generates a root CA certificate and key: CN=%s, Cert=%s, Key=%s, CertPEM=%s, KeyPEM=%s, Validity=%d days, Bits=%d.",
+		s.CommonName, s.CertPath, s.KeyPath, s.CertPemPath, s.KeyPemPath, s.ValidityDays, s.KeyBitSize)
 }
 
 func (s *GenerateRootCAStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
@@ -102,17 +112,42 @@ func (s *GenerateRootCAStep) Precheck(ctx runtime.StepContext, host connector.Ho
 		logger.Warn("Failed to check CA key existence, assuming regeneration is needed.", "path", s.KeyPath, "error", err)
 		return false, nil
 	}
+	certPemExists, err := conn.Exists(ctx.GoContext(), s.CertPemPath)
+	if err != nil {
+		logger.Warn("Failed to check CA PEM cert existence, assuming regeneration is needed.", "path", s.CertPemPath, "error", err)
+		return false, nil
+	}
+	keyPemExists, err := conn.Exists(ctx.GoContext(), s.KeyPemPath)
+	if err != nil {
+		logger.Warn("Failed to check CA PEM key existence, assuming regeneration is needed.", "path", s.KeyPemPath, "error", err)
+		return false, nil
+	}
 
-	if certExists && keyExists {
-		logger.Info("Root CA certificate and key already exist.", "certPath", s.CertPath, "keyPath", s.KeyPath)
-		// Optionally, verify CA cert validity here if needed.
-		// For now, existence is enough for Precheck.
+	if certExists && keyExists && certPemExists && keyPemExists {
+		logger.Info("Root CA certificate, key, and PEM files already exist.",
+			"certPath", s.CertPath, "keyPath", s.KeyPath, "certPemPath", s.CertPemPath, "keyPemPath", s.KeyPemPath)
 		return true, nil
 	}
 
-	if certExists && !keyExists { logger.Warn("Root CA cert exists, but key does not. Will attempt to regenerate.", "certPath", s.CertPath, "keyPath", s.KeyPath) }
-	if !certExists && keyExists { logger.Warn("Root CA key exists, but cert does not. Will attempt to regenerate.", "keyPath", s.KeyPath, "certPath", s.CertPath) }
-	if !certExists && !keyExists { logger.Debug("Root CA certificate and/or key do not exist.", "certPath", s.CertPath, "keyPath", s.KeyPath) }
+	// Log specific missing files
+	missingFiles := []string{}
+	if !certExists {
+		missingFiles = append(missingFiles, "CertPath: "+s.CertPath)
+	}
+	if !keyExists {
+		missingFiles = append(missingFiles, "KeyPath: "+s.KeyPath)
+	}
+	if !certPemExists {
+		missingFiles = append(missingFiles, "CertPemPath: "+s.CertPemPath)
+	}
+	if !keyPemExists {
+		missingFiles = append(missingFiles, "KeyPemPath: "+s.KeyPemPath)
+	}
+
+	if len(missingFiles) > 0 {
+		logger.Info("Root CA files are missing. Will attempt to regenerate.", "missing", strings.Join(missingFiles, ", "))
+	}
+
 	return false, nil
 }
 
@@ -191,10 +226,43 @@ func (s *GenerateRootCAStep) Run(ctx runtime.StepContext, host connector.Host) e
 
 	// Store paths in ModuleCache as per original logic
 	const clusterRootCACertPathKey = "ClusterRootCACertPath"
-	const clusterRootCAKeyPathKey  = "ClusterRootCAKeyPath"
+	const clusterRootCAKeyPathKey = "ClusterRootCAKeyPath"
+	const clusterRootCACertPemPathKey = "ClusterRootCACertPemPath"
+	const clusterRootCAKeyPemPathKey = "ClusterRootCAKeyPemPath"
+
 	ctx.ModuleCache().Set(clusterRootCACertPathKey, s.CertPath)
 	ctx.ModuleCache().Set(clusterRootCAKeyPathKey, s.KeyPath)
-	logger.Info("Root CA certificate and key generated and paths stored in ModuleCache.", "certPath", s.CertPath, "keyPath", s.KeyPath)
+	logger.Info("Root CA certificate and key generated.", "certPath", s.CertPath, "keyPath", s.KeyPath)
+
+	// Copy cert to PEM path
+	cpCertCmd := fmt.Sprintf("cp %s %s", s.CertPath, s.CertPemPath)
+	logger.Info("Copying CA certificate to PEM location.", "source", s.CertPath, "destination", s.CertPemPath)
+	_, stderrCpCert, errCpCert := conn.Exec(ctx.GoContext(), cpCertCmd, execOptsSudo)
+	if errCpCert != nil {
+		return fmt.Errorf("failed to copy CA certificate to %s on host %s (stderr: %s): %w", s.CertPemPath, host.GetName(), string(stderrCpCert), errCpCert)
+	}
+	chmodCertPemCmd := fmt.Sprintf("chmod 0644 %s", s.CertPemPath)
+	if _, _, errChmodCertPem := conn.Exec(ctx.GoContext(), chmodCertPemCmd, execOptsSudo); errChmodCertPem != nil {
+		logger.Warn("Failed to chmod CA PEM certificate.", "path", s.CertPemPath, "error", errChmodCertPem)
+	}
+
+	// Copy key to PEM path
+	cpKeyCmd := fmt.Sprintf("cp %s %s", s.KeyPath, s.KeyPemPath)
+	logger.Info("Copying CA key to PEM location.", "source", s.KeyPath, "destination", s.KeyPemPath)
+	_, stderrCpKey, errCpKey := conn.Exec(ctx.GoContext(), cpKeyCmd, execOptsSudo)
+	if errCpKey != nil {
+		return fmt.Errorf("failed to copy CA key to %s on host %s (stderr: %s): %w", s.KeyPemPath, host.GetName(), string(stderrCpKey), errCpKey)
+	}
+	chmodKeyPemCmd := fmt.Sprintf("chmod 0600 %s", s.KeyPemPath)
+	if _, _, errChmodKeyPem := conn.Exec(ctx.GoContext(), chmodKeyPemCmd, execOptsSudo); errChmodKeyPem != nil {
+		logger.Warn("Failed to chmod CA PEM key.", "path", s.KeyPemPath, "error", errChmodKeyPem)
+	}
+
+	ctx.ModuleCache().Set(clusterRootCACertPemPathKey, s.CertPemPath)
+	ctx.ModuleCache().Set(clusterRootCAKeyPemPathKey, s.KeyPemPath)
+
+	logger.Info("Root CA PEM certificate and key copied and paths stored in ModuleCache.",
+		"certPemPath", s.CertPemPath, "keyPemPath", s.KeyPemPath)
 	return nil
 }
 
@@ -222,10 +290,27 @@ func (s *GenerateRootCAStep) Rollback(ctx runtime.StepContext, host connector.Ho
 	}
 
 	const clusterRootCACertPathKey = "ClusterRootCACertPath"
-	const clusterRootCAKeyPathKey  = "ClusterRootCAKeyPath"
-    ctx.ModuleCache().Delete(clusterRootCACertPathKey)
-    ctx.ModuleCache().Delete(clusterRootCAKeyPathKey)
-	logger.Debug("Cleaned up CA paths from ModuleCache.")
+	const clusterRootCAKeyPathKey = "ClusterRootCAKeyPath"
+	const clusterRootCACertPemPathKey = "ClusterRootCACertPemPath"
+	const clusterRootCAKeyPemPathKey = "ClusterRootCAKeyPemPath"
+
+	logger.Info("Attempting to remove CA PEM certificate for rollback.", "path", s.CertPemPath)
+	rmCertPemCmd := fmt.Sprintf("rm -f %s", s.CertPemPath)
+	if _, stderrRmCertPem, errRmCertPem := conn.Exec(ctx.GoContext(), rmCertPemCmd, execOptsSudo); errRmCertPem != nil {
+		logger.Error("Failed to remove CA PEM certificate during rollback.", "path", s.CertPemPath, "stderr", string(stderrRmCertPem), "error", errRmCertPem)
+	}
+
+	logger.Info("Attempting to remove CA PEM key for rollback.", "path", s.KeyPemPath)
+	rmKeyPemCmd := fmt.Sprintf("rm -f %s", s.KeyPemPath)
+	if _, stderrRmKeyPem, errRmKeyPem := conn.Exec(ctx.GoContext(), rmKeyPemCmd, execOptsSudo); errRmKeyPem != nil {
+		logger.Error("Failed to remove CA PEM key during rollback.", "path", s.KeyPemPath, "stderr", string(stderrRmKeyPem), "error", errRmKeyPem)
+	}
+
+	ctx.ModuleCache().Delete(clusterRootCACertPathKey)
+	ctx.ModuleCache().Delete(clusterRootCAKeyPathKey)
+	ctx.ModuleCache().Delete(clusterRootCACertPemPathKey)
+	ctx.ModuleCache().Delete(clusterRootCAKeyPemPathKey)
+	logger.Debug("Cleaned up CA and CA PEM paths from ModuleCache.")
 
 	logger.Info("Rollback attempt for CA generation finished (files removed if existed, cache keys deleted).")
 	return nil

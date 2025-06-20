@@ -38,18 +38,18 @@ type TaskSpec struct {
 	// operations to be performed by this task, in sequence.
 	Steps []StepSpec
 
+	// Description is a human-readable description of what the task does.
+	Description string
+
 	// RunOnRoles specifies which host roles this task should target.
 	// The Executor will use this, along with the Filter, to determine the
 	// actual list of hosts on which to run the steps of this task.
 	RunOnRoles []string
 
-	// Filter provides a more granular, dynamic way to select target hosts.
-	// If non-nil, the Executor will apply this function to hosts that match RunOnRoles.
-	// Note: Including a function type here means TaskSpec structs created in Go
-	// are not directly serializable to formats like JSON/YAML without special handling
-	// (e.g., by omitting this field during serialization or using a string-based rule).
-	// For specs defined and consumed within Go code, this is acceptable.
-	Filter func(host *runtime.Host) bool
+	// Filter is a placeholder for a filter identifier or DSL string.
+	// This string will be processed by the Executor to dynamically determine
+	// the target hosts, potentially in conjunction with RunOnRoles.
+	Filter string
 
 	// IgnoreError, if true, indicates that an error from this task's execution
 	// (i.e., a failure of one of its critical steps) should not cause the parent
@@ -71,28 +71,28 @@ type ModuleSpec struct {
 	// Name is a descriptive name for the module. Used for logging and identification.
 	Name string
 
+	// Description is a human-readable summary of what the module does.
+	Description string
+
 	// Tasks is an ordered slice of *TaskSpec pointers. These define the tasks
 	// to be performed by this module, in sequence.
 	Tasks []*TaskSpec
 
-	// IsEnabled is a function that determines if this module should be executed,
-	// typically based on the provided cluster configuration. If nil, the Executor
-	// will consider the module always enabled.
-	// Note: Similar to TaskSpec.Filter, a function type here impacts direct
-	// serializability if specs are to be defined in formats like JSON/YAML.
-	IsEnabled func(clusterRt *runtime.ClusterRuntime) bool // Changed to use ClusterRuntime
+	// IsEnabled is a condition string (e.g., a CEL expression or a custom DSL)
+	// that the Executor will evaluate to determine if this module should be executed.
+	// Example: "cfg.Spec.ContainerRuntime.Type == 'containerd'"
+	IsEnabled string
 
-	// PreRun is a TaskSpec that defines a task to be executed once before any
-	// main tasks in this module are run. Can be nil if no pre-run task is needed.
-	// If this task fails (and its IgnoreError is false), the module's main tasks and PostRun task are typically skipped.
-	PreRun *TaskSpec // Changed from StepSpec to *TaskSpec
+	// PreRunHook is an identifier (e.g., a string key) for a PreRun hook function or task
+	// that should be executed by the Executor before the main Tasks of this module.
+	// The Executor will need a way to map this identifier to an actual executable hook.
+	// Example: "common_network_check_hook"
+	PreRunHook string
 
-	// PostRun is a TaskSpec that defines a task to be executed once after all
-	// main tasks in this module have attempted to run (or after a PreRun/critical main task failure).
-	// Can be nil if no post-run task is needed.
-	// Errors from this task are typically logged but might not override a primary
-	// error from the module's main task execution.
-	PostRun *TaskSpec // Changed from StepSpec to *TaskSpec
+	// PostRunHook is an identifier for a PostRun hook function or task, similar to PreRunHook,
+	// to be executed by the Executor after the main Tasks of this module have completed (or failed).
+	// Example: "cleanup_temp_files_hook"
+	PostRunHook string
 }
 
 
@@ -104,25 +104,27 @@ type PipelineSpec struct {
 	// Name is a descriptive name for the pipeline (e.g., "CreateCluster", "UpgradeCluster").
 	Name string
 
+	// Description is a human-readable summary of what the pipeline does.
+	Description string
+
 	// Modules is an ordered slice of *ModuleSpec pointers. These define the modules
 	// to be executed by this pipeline, in sequence. The order is critical as it
 	// often represents dependencies between modules.
 	Modules []*ModuleSpec
 
-	// PreRun is a TaskSpec that defines a task to be executed once before any
-	// modules in this pipeline are run. Can be nil. If this task fails (and its IgnoreError is false),
-	// the pipeline's modules and PostRun task are typically skipped.
-	PreRun *TaskSpec // Changed from StepSpec to *TaskSpec
+	// PreRunHook is an identifier (e.g., a string key) for a PreRun hook function or task
+	// that should be executed by the Executor before any Modules in this pipeline are run.
+	// The Executor will need a way to map this identifier to an actual executable hook.
+	// Example: "pipeline_init_logging_hook"
+	PreRunHook string
 
-	// PostRun is a TaskSpec that defines a task to be executed once after all
-	// modules in this pipeline have attempted to run (or after a PreRun or
-	// critical module failure). Can be nil. Errors from this task are
-	// typically logged but might not override a primary error from the pipeline's
-	// main execution.
-	PostRun *TaskSpec // Changed from StepSpec to *TaskSpec
+	// PostRunHook is an identifier for a PostRun hook function or task, similar to PreRunHook,
+	// to be executed by the Executor after all Modules in this pipeline have completed (or failed).
+	// Example: "pipeline_final_report_hook"
+	PostRunHook string
 }
 
-// Hooks are now TaskSpecs.
+// Hooks are now TaskSpecs. // This comment seems outdated in context of PipelineSpec.
 
 // Ensure necessary imports are present, especially for runtime.ClusterRuntime and runtime.Host
 // The file already contains "github.com/kubexms/kubexms/pkg/runtime" based on TaskSpec.Filter

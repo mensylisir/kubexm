@@ -1,17 +1,14 @@
 package kube_components
 
 import (
-	"fmt"
+	// "fmt"
 	"path/filepath"
 	goruntime "runtime" // Alias to avoid conflict with kubexms/pkg/runtime
-	"os" // For os.Getenv
+	"os"                // For os.Getenv
 
-	// "github.com/kubexms/kubexms/pkg/config" // No longer used
-	"github.com/mensylisir/kubexm/pkg/runtime" // For ClusterRuntime
-	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // For v1alpha1.Cluster
+	"github.com/mensylisir/kubexm/pkg/config" // For config.Cluster
 	"github.com/mensylisir/kubexm/pkg/spec"
-	// Task constructors will be imported
-	taskKubeComponents "github.com/mensylisir/kubexm/pkg/task/kube_components"
+	taskKubeComponentsFactory "github.com/mensylisir/kubexm/pkg/task/kube_components" // Alias for task spec factories
 )
 
 // normalizeArchFunc ensures consistent architecture naming (amd64, arm64).
@@ -25,84 +22,81 @@ func normalizeArchFunc(arch string) string {
 	return arch
 }
 
-// NewKubernetesComponentsModule creates a module specification for fetching Kubernetes components.
-func NewKubernetesComponentsModule(clusterRt *runtime.ClusterRuntime) *spec.ModuleSpec {
-	if clusterRt == nil || clusterRt.ClusterConfig == nil {
+// NewKubernetesComponentsModuleSpec creates a module specification for fetching Kubernetes components.
+func NewKubernetesComponentsModuleSpec(cfg *config.Cluster) *spec.ModuleSpec {
+	if cfg == nil {
 		return &spec.ModuleSpec{
-			Name:      "Kubernetes Components Download & Install (Error: Missing Configuration)",
-			IsEnabled: func(_ *runtime.ClusterRuntime) bool { return false },
-			Tasks:     []*spec.TaskSpec{},
+			Name:        "Kubernetes Components Download & Install",
+			Description: "Fetches Kubernetes core components and container runtime binaries (Error: Missing Configuration)",
+			IsEnabled:   "false",
+			Tasks:       []*spec.TaskSpec{},
 		}
 	}
-	cfg := clusterRt.ClusterConfig // cfg is *v1alpha1.Cluster
 	tasks := []*spec.TaskSpec{}
 
-	// --- Determine global parameters from cfg ---
+	// Determine global parameters from cfg
 	// TODO: Re-evaluate architecture detection. cfg.Spec.Arch removed.
-	// Consider deriving from host list or a new global config if diverse archs are supported.
-	arch := goruntime.GOARCH
+	// Use cfg.Spec.Kubernetes.Arch or a more robust detection mechanism.
+	arch := cfg.Spec.Kubernetes.Arch
+	if arch == "" {
+		arch = goruntime.GOARCH // Fallback
+	}
 	arch = normalizeArchFunc(arch)
 
-	// TODO: Re-evaluate zone determination. v1alpha1.GlobalSpec does not have Zone.
-	// Consider using a new global config field or deriving from hosts if needed.
-	zone := os.Getenv("KKZONE") // Fallback to environment variable or empty string
+	// TODO: Re-evaluate zone determination. cfg.Spec.Global.Zone does not exist.
+	// Use cfg.Spec.ImageStore.Zone or similar.
+	zone := cfg.Spec.ImageStore.Zone // Assuming this is the intended source for zone
+	if zone == "" {
+		zone = os.Getenv("KKZONE") // Fallback
+	}
 
 	programBaseDir := "/opt/kubexms/default_run_dir" // Fallback
-	if cfg.Spec.Global != nil && cfg.Spec.Global.WorkDir != "" {
+	if cfg.Spec.Global.WorkDir != "" { // Assuming Global is not nil
 		programBaseDir = cfg.Spec.Global.WorkDir
 	}
-	// appFSBaseDir is the root for KubeXMS specific persistent data, like artifacts: <executable_dir>/.kubexm
 	appFSBaseDir := filepath.Join(programBaseDir, ".kubexm")
 
-	// --- Kubernetes Components ---
+	// Kubernetes Components
 	kubeVersion := ""
-	if cfg.Spec.Kubernetes != nil && cfg.Spec.Kubernetes.Version != "" { // Nil check for Kubernetes
+	if cfg.Spec.Kubernetes != nil && cfg.Spec.Kubernetes.Version != "" {
 		kubeVersion = cfg.Spec.Kubernetes.Version
 	}
 
 	if kubeVersion != "" {
-		if task := taskKubeComponents.NewFetchKubeadmTask(cfg, kubeVersion, arch, zone, appFSBaseDir); task != nil {
-			tasks = append(tasks, task)
+		if taskSpec := taskKubeComponentsFactory.NewFetchKubeadmTask(cfg, kubeVersion, arch, zone, appFSBaseDir); taskSpec != nil {
+			tasks = append(tasks, taskSpec)
 		}
-		if task := taskKubeComponents.NewFetchKubeletTask(cfg, kubeVersion, arch, zone, appFSBaseDir); task != nil {
-			tasks = append(tasks, task)
+		if taskSpec := taskKubeComponentsFactory.NewFetchKubeletTask(cfg, kubeVersion, arch, zone, appFSBaseDir); taskSpec != nil {
+			tasks = append(tasks, taskSpec)
 		}
-		if task := taskKubeComponents.NewFetchKubectlTask(cfg, kubeVersion, arch, zone, appFSBaseDir); task != nil {
-			tasks = append(tasks, task)
+		if taskSpec := taskKubeComponentsFactory.NewFetchKubectlTask(cfg, kubeVersion, arch, zone, appFSBaseDir); taskSpec != nil {
+			tasks = append(tasks, taskSpec)
 		}
 	}
 
-	// --- Containerd ---
-	// Assuming ContainerRuntime.Version holds the version for Containerd if Type is containerd.
-	// This logic might need to be more robust based on ContainerRuntimeConfig structure.
+	// Containerd
 	containerdVersion := ""
-	if cfg.Spec.ContainerRuntime != nil && cfg.Spec.ContainerRuntime.Type == "containerd" && cfg.Spec.ContainerRuntime.Version != "" { // Nil check
+	if cfg.Spec.ContainerRuntime != nil && cfg.Spec.ContainerRuntime.Type == "containerd" && cfg.Spec.ContainerRuntime.Version != "" {
 		containerdVersion = cfg.Spec.ContainerRuntime.Version
 	}
 
 	if containerdVersion != "" {
-		// TODO: Ensure NewFetchContainerdTask correctly uses the version from ContainerRuntime.Version.
-		// If ContainerdConfig has its own version field, that should be preferred if it exists.
-		if task := taskKubeComponents.NewFetchContainerdTask(cfg, containerdVersion, arch, zone, appFSBaseDir); task != nil {
-			tasks = append(tasks, task)
+		if taskSpec := taskKubeComponentsFactory.NewFetchContainerdTask(cfg, containerdVersion, arch, zone, appFSBaseDir); taskSpec != nil {
+			tasks = append(tasks, taskSpec)
 		}
 	}
 
+	// Condition string for IsEnabled. This logic mirrors the original function.
+	// It assumes 'cfg' will be the context for evaluating this expression by the executor.
+	isEnabledCondition := `(cfg.Spec.Kubernetes != nil && cfg.Spec.Kubernetes.Version != "") ||
+						 (cfg.Spec.ContainerRuntime != nil && cfg.Spec.ContainerRuntime.Type == "containerd" && cfg.Spec.ContainerRuntime.Version != "")`
+
 	return &spec.ModuleSpec{
-		Name: "Kubernetes Components Download & Install",
-		IsEnabled: func(cr *runtime.ClusterRuntime) bool {
-			if cr == nil || cr.ClusterConfig == nil {
-				return false
-			}
-			cfg := cr.ClusterConfig // Use cfg from ClusterRuntime for checks
-			k8sEnabled := cfg.Spec.Kubernetes != nil && cfg.Spec.Kubernetes.Version != ""
-			// Check ContainerRuntime Type as well for containerd version logic
-			containerRuntimeEnabled := cfg.Spec.ContainerRuntime != nil &&
-				(cfg.Spec.ContainerRuntime.Type == "containerd" && cfg.Spec.ContainerRuntime.Version != "")
-				// Add other runtime checks here if they also fetch components via this module
-				// e.g. || (cfg.Spec.ContainerRuntime.Type == "docker" && cfg.Spec.ContainerRuntime.Version != "")
-			return k8sEnabled || containerRuntimeEnabled
-		},
-		Tasks: tasks,
+		Name:        "Kubernetes Components Download & Install",
+		Description: "Fetches Kubernetes core components (kubeadm, kubelet, kubectl) and container runtime (containerd) binaries.",
+		IsEnabled:   isEnabledCondition,
+		Tasks:       tasks,
+		PreRunHook:  "",
+		PostRunHook: "",
 	}
 }

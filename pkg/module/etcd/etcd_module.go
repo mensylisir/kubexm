@@ -5,12 +5,11 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 
-	// "github.com/kubexms/kubexms/pkg/config" // No longer used
-	"github.com/mensylisir/kubexm/pkg/runtime" // For runtime.Host in HostFilter and ClusterRuntime
-	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // For v1alpha1 constants if needed
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // For v1alpha1 constants
+	"github.com/mensylisir/kubexm/pkg/config"               // For config.Cluster
 	"github.com/mensylisir/kubexm/pkg/spec"
-	"github.com/mensylisir/kubexm/pkg/step/pki"
-	taskEtcd "github.com/mensylisir/kubexm/pkg/task/etcd"
+	"github.com/mensylisir/kubexm/pkg/step/pki" // For pki data types
+	taskEtcdFactory "github.com/mensylisir/kubexm/pkg/task/etcd" // Alias for etcd task factories
 )
 
 // normalizeArchFunc ensures consistent architecture naming (amd64, arm64).
@@ -24,55 +23,45 @@ func normalizeArchFunc(arch string) string {
 	return arch
 }
 
-// NewEtcdModule creates a module specification for deploying or managing an etcd cluster.
-func NewEtcdModule(clusterRt *runtime.ClusterRuntime) *spec.ModuleSpec {
-	if clusterRt == nil || clusterRt.ClusterConfig == nil {
+// NewEtcdModuleSpec creates a module specification for deploying or managing an etcd cluster.
+func NewEtcdModuleSpec(cfg *config.Cluster) *spec.ModuleSpec {
+	if cfg == nil {
 		return &spec.ModuleSpec{
-			Name:      "Etcd Cluster Management (Error: Missing Configuration)",
-			IsEnabled: func(_ *runtime.ClusterRuntime) bool { return false },
-			Tasks:     []*spec.TaskSpec{},
+			Name:        "Etcd Cluster Management",
+			Description: "Manages the etcd cluster (Error: Missing Configuration)",
+			IsEnabled:   "false",
+			Tasks:       []*spec.TaskSpec{},
 		}
 	}
-	cfg := clusterRt.ClusterConfig // cfg is *v1alpha1.Cluster
 
 	// --- Determine global parameters from cfg ---
-	// TODO: Re-evaluate architecture detection. cfg.Spec.Arch removed.
-	// Consider deriving from host list or a new global config if diverse archs are supported.
-	arch := goruntime.GOARCH
+	arch := goruntime.GOARCH // Consider making this configurable or derived from node information
 	arch = normalizeArchFunc(arch)
 
-	etcdVersion := "v3.5.0" // Default, consider making this configurable via EtcdConfig
+	etcdVersion := "v3.5.0" // Default
 	if cfg.Spec.Etcd != nil && cfg.Spec.Etcd.Version != "" {
 		etcdVersion = cfg.Spec.Etcd.Version
 	}
 
-	zone := "" // Default zone to empty
-	// TODO: Re-evaluate zone. v1alpha1.GlobalSpec does not have Zone.
-	// if cfg.Spec.Global != nil && cfg.Spec.Global.Zone != "" {
-	// 	zone = cfg.Spec.Global.Zone
-	// }
+	zone := "" // Default zone to empty, not currently in cfg.Spec.Global
 
-	clusterName := "kubexms-cluster" // Default cluster name
+	clusterName := "kubexms-cluster" // Default
 	if cfg.ObjectMeta.Name != "" {
 		clusterName = cfg.ObjectMeta.Name
 	}
 
 	programBaseDir := "/opt/kubexms/default_run_dir" // Fallback
-	if cfg.Spec.Global != nil && cfg.Spec.Global.WorkDir != "" {
+	if cfg.Spec.Global.WorkDir != "" { // Assuming Global is not nil
 		programBaseDir = cfg.Spec.Global.WorkDir
 	}
-	// appFSBaseDir is <executable_dir>/.kubexm
 	appFSBaseDir := filepath.Join(programBaseDir, ".kubexm")
-
-	// Cluster-specific PKI root directory.
 	clusterPkiRoot := filepath.Join(appFSBaseDir, "pki", clusterName)
 
-	controlPlaneFQDN := "lb.kubexms.local" // Default CPlane FQDN
+	controlPlaneFQDN := "lb.kubexms.local" // Default
 	if cfg.Spec.ControlPlaneEndpoint != nil && cfg.Spec.ControlPlaneEndpoint.Domain != "" {
 		controlPlaneFQDN = cfg.Spec.ControlPlaneEndpoint.Domain
 	}
 
-	// --- Prepare HostSpec lists for PKI steps ---
 	var hostSpecsForAltNames []pki.HostSpecForAltNames
 	var hostSpecsForNodeCerts []pki.HostSpecForPKI
 	for _, chost := range cfg.Spec.Hosts {
@@ -86,26 +75,33 @@ func NewEtcdModule(clusterRt *runtime.ClusterRuntime) *spec.ModuleSpec {
 		})
 	}
 
-	// --- Prepare KubexmsKubeConf for PKI steps ---
 	kubexmsKubeConfInstance := &pki.KubexmsKubeConf{
-		AppFSBaseDir:   appFSBaseDir,    // <executable_dir>/.kubexm
-		ClusterName:    clusterName,
-		PKIDirectory:   clusterPkiRoot,  // <executable_dir>/.kubexm/pki/clusterName
+		AppFSBaseDir: appFSBaseDir,
+		ClusterName:  clusterName,
+		PKIDirectory: clusterPkiRoot,
 	}
 
-	// --- Define Tasks ---
 	allTasks := []*spec.TaskSpec{}
 
 	// Task 0: Setup PKI Data Context
-	setupPkiDataTask := taskEtcd.NewSetupEtcdPkiDataContextTask(cfg, kubexmsKubeConfInstance, hostSpecsForNodeCerts)
+	// RunOnRoles is nil for this data context task (local execution)
+	setupPkiDataTask, err := taskEtcdFactory.NewSetupEtcdPkiDataContextTaskSpec(
+		kubexmsKubeConfInstance, hostSpecsForNodeCerts, "etcd", // etcdSubPath = "etcd"
+		"", "", "", // Default cache keys
+		nil, // RunOnRoles = nil for local context setup
+	)
+	if err != nil {
+		// Handle error: perhaps return a disabled module or one with an error state
+		return &spec.ModuleSpec{
+			Name:        "Etcd Cluster Management",
+			Description: fmt.Sprintf("Error initializing SetupPkiDataTask: %v", err),
+			IsEnabled:   "false",
+			Tasks:       []*spec.TaskSpec{},
+		}
+	}
 
-	// --- Conditional Task Assembly ---
-	// Check if Etcd config exists and Type indicates it's managed internally
 	isManagedInternalEtcd := false
 	if cfg.Spec.Etcd != nil {
-		// Assuming EtcdTypeKubeXMSInternal means it's managed by this system.
-		// The prompt mentioned "kubexm" as a default type; ensure constants align.
-		// For now, using EtcdTypeKubeXMSInternal as per existing code structure.
 		if cfg.Spec.Etcd.Type == v1alpha1.EtcdTypeKubeXMSInternal || cfg.Spec.Etcd.Type == "kubexm" || cfg.Spec.Etcd.Type == "stacked" {
 			isManagedInternalEtcd = true
 		}
@@ -113,47 +109,58 @@ func NewEtcdModule(clusterRt *runtime.ClusterRuntime) *spec.ModuleSpec {
 
 	if isManagedInternalEtcd {
 		allTasks = append(allTasks, setupPkiDataTask)
-		allTasks = append(allTasks, taskEtcd.NewInstallEtcdBinariesTask(cfg, etcdVersion, arch, zone, appFSBaseDir))
 
-		// TODO: Re-evaluate logic for "Existing" Etcd.
-		// The field cfg.Spec.Etcd.Existing was removed. Determine how to detect an existing setup if needed.
-		// Perhaps by checking DataDir on hosts or other means. For now, assume new setup.
-		allTasks = append(allTasks, taskEtcd.NewGenerateEtcdPKITask(cfg, hostSpecsForAltNames, controlPlaneFQDN, "lb.kubexms.local"))
+		// Placeholder for NewInstallEtcdBinariesTaskSpec
+		// TODO: Replace with actual factory call if NewInstallEtcdBinariesTaskSpec is available
+		installBinariesTask := &spec.TaskSpec{
+			Name:        "InstallEtcdBinaries",
+			Description: fmt.Sprintf("Install etcd binaries version %s for %s (Placeholder)", etcdVersion, arch),
+			RunOnRoles:  []string{"etcd", "master", "control-plane"}, // Example roles
+			Steps:       []spec.StepSpec{
+				// &download.DownloadStepSpec{ URL: ..., Dest: ...},
+				// &archive.ExtractStepSpec{ Archive: ..., DestDir: ...},
+				// &command.CommandStepSpec{ Command: "cp ... /usr/local/bin/"},
+			},
+		}
+		allTasks = append(allTasks, installBinariesTask)
 
-		setupInitialEtcdMemberTaskSpec := &spec.TaskSpec{
-	Name: "Setup Initial Etcd Member (Placeholder Spec)",
-	}
-		allTasks = append(allTasks, setupInitialEtcdMemberTaskSpec)
+		// RunOnRoles for PKI generation is typically nil or master roles
+		generatePkiTask := taskEtcdFactory.NewGenerateEtcdPkiTaskSpec(hostSpecsForAltNames, controlPlaneFQDN, "lb.kubexms.local", nil)
+		allTasks = append(allTasks, generatePkiTask)
+
+		// Placeholder for NewSetupInitialEtcdMemberTaskSpec
+		// TODO: Replace with actual factory call
+		setupInitialEtcdMemberTask := &spec.TaskSpec{
+			Name:        "SetupInitialEtcdMember",
+			Description: "Configures the first etcd member (Placeholder)",
+			RunOnRoles:  []string{"etcd", "master", "control-plane"}, // Usually on specific nodes
+		}
+		allTasks = append(allTasks, setupInitialEtcdMemberTask)
 
 	} else if cfg.Spec.Etcd != nil && cfg.Spec.Etcd.Type == v1alpha1.EtcdTypeExternal {
-		// External Etcd: still need PKI data context for clients, but also prepare external PKI if specified
-		allTasks = append(allTasks, setupPkiDataTask)
+		allTasks = append(allTasks, setupPkiDataTask) // Still need PKI context for client certs potentially
 		if cfg.Spec.Etcd.External != nil && cfg.Spec.Etcd.External.CAFile != "" {
-			allTasks = append(allTasks, taskEtcd.NewPrepareExternalEtcdPKITask(cfg))
-		} else {
-			// Consider logging a warning: External etcd specified but no CA/Cert info provided for secure client connections.
+			prepareExternalPkiTask := taskEtcdFactory.NewPrepareExternalEtcdPKITask(cfg) // Already returns *spec.TaskSpec
+			allTasks = append(allTasks, prepareExternalPkiTask)
 		}
 	}
 
-
-	validateEtcdClusterTaskSpec := &spec.TaskSpec{
-		Name: "Validate Etcd Cluster Health (Placeholder Spec)",
+	// Placeholder for NewValidateEtcdClusterTaskSpec
+	// TODO: Replace with actual factory call
+	validateEtcdClusterTask := &spec.TaskSpec{
+		Name:        "ValidateEtcdClusterHealth",
+		Description: "Checks the health of the etcd cluster (Placeholder)",
+		RunOnRoles:  []string{"master", "control-plane"}, // Usually run from a control node
 	}
-	allTasks = append(allTasks, validateEtcdClusterTaskSpec)
-	// Removed duplicated block here
+	allTasks = append(allTasks, validateEtcdClusterTask)
 
 	return &spec.ModuleSpec{
-		Name: "Etcd Cluster Management",
-		IsEnabled: func(cr *runtime.ClusterRuntime) bool {
-			if cr == nil || cr.ClusterConfig == nil {
-				return false // Cannot determine if Etcd is configured
-			}
-			// Enable if Etcd spec exists, regardless of type (external still needs client setup/validation).
-			// The tasks themselves will differ based on Etcd.Type.
-			return cr.ClusterConfig.Spec.Etcd != nil
-		},
-		Tasks: allTasks,
-		PreRun: nil,
-		PostRun: nil,
+		Name:        "Etcd Cluster Management",
+		Description: "Manages the etcd cluster deployment, PKI, and health.",
+		// Condition to enable this module. Evaluated by Executor based on 'cfg'.
+		IsEnabled:   "cfg.Spec.Etcd != nil",
+		Tasks:       allTasks,
+		PreRunHook:  "", // Example: "etcd_prerun_network_checks"
+		PostRunHook: "", // Example: "etcd_postrun_cleanup"
 	}
 }
