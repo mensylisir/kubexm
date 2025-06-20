@@ -12,9 +12,10 @@ import (
 	// time, context no longer needed
 )
 
-// GenerateRootCAStepSpec generates a root Certificate Authority.
-// This is a spec object, the actual execution is handled by an Executor.
-type GenerateRootCAStepSpec struct {
+// GenerateCAWithCRTStepSpec generates a Certificate Authority (CA) and outputs
+// the certificate and key in .crt and .key formats respectively.
+// This is a spec object; actual execution is handled by an Executor.
+type GenerateCAWithCRTStepSpec struct {
 	spec.StepMeta `json:",inline"` // Embed common meta fields
 	CertPath      string           `json:"certPath,omitempty"`
 	KeyPath       string           `json:"keyPath,omitempty"`
@@ -23,8 +24,8 @@ type GenerateRootCAStepSpec struct {
 	KeyBitSize   int    `json:"keyBitSize,omitempty"`
 }
 
-// NewGenerateRootCAStepSpec creates a new GenerateRootCAStepSpec.
-func NewGenerateRootCAStepSpec(certPath, keyPath, commonName string, validityDays, keyBitSize int, stepName string) *GenerateRootCAStepSpec {
+// NewGenerateCAWithCRTStepSpec creates a new GenerateCAWithCRTStepSpec.
+func NewGenerateCAWithCRTStepSpec(certPath, keyPath, commonName string, validityDays, keyBitSize int, stepName string) *GenerateCAWithCRTStepSpec {
 	// Determine default name and description if stepName is empty
 	name := stepName
 	cp := certPath
@@ -34,10 +35,10 @@ func NewGenerateRootCAStepSpec(certPath, keyPath, commonName string, validityDay
 	if name == "" {
 		name = fmt.Sprintf("Generate Root CA (Cert: %s)", cp)
 	}
-	description := fmt.Sprintf("Generates a root CA certificate and key: CN=%s, Cert=%s, Key=%s, Validity=%d days, Bits=%d.",
-		commonName, certPath, keyPath, validityDays, keyBitSize) // Removed PEM paths from here
+	description := fmt.Sprintf("Generates a CA certificate and key: CN=%s, Cert=%s, Key=%s, Validity=%d days, Bits=%d.",
+		commonName, certPath, keyPath, validityDays, keyBitSize)
 
-	s := &GenerateRootCAStepSpec{
+	s := &GenerateCAWithCRTStepSpec{
 		StepMeta: spec.StepMeta{
 			Name:        name,
 			Description: description, // Initial description, might be refined by populateDefaults
@@ -54,21 +55,21 @@ func NewGenerateRootCAStepSpec(certPath, keyPath, commonName string, validityDay
 }
 
 // GetName returns the step's name.
-func (s *GenerateRootCAStepSpec) GetName() string { return s.StepMeta.Name }
+func (s *GenerateCAWithCRTStepSpec) GetName() string { return s.StepMeta.Name }
 
 // GetDescription returns the step's description.
 // It might be more accurate after populateDefaults has run if it relies on defaulted paths.
-func (s *GenerateRootCAStepSpec) GetDescription() string { return s.StepMeta.Description }
+func (s *GenerateCAWithCRTStepSpec) GetDescription() string { return s.StepMeta.Description }
 
 // GetSpec returns the spec itself.
-func (s *GenerateRootCAStepSpec) GetSpec() interface{} { return s }
+func (s *GenerateCAWithCRTStepSpec) GetSpec() interface{} { return s }
 
 // Meta returns the step's metadata.
-func (s *GenerateRootCAStepSpec) Meta() *spec.StepMeta { return &s.StepMeta }
+func (s *GenerateCAWithCRTStepSpec) Meta() *spec.StepMeta { return &s.StepMeta }
 
 // populateDefaults populates default values for the step spec.
 // This method is typically called by the executor before Precheck or Run.
-func (s *GenerateRootCAStepSpec) populateDefaults(logger runtime.Logger) {
+func (s *GenerateCAWithCRTStepSpec) populateDefaults(logger runtime.Logger) {
 	defaultBaseDir := "/etc/kubexms/pki"
 	if s.CertPath == "" {
 		s.CertPath = filepath.Join(defaultBaseDir, "ca.crt")
@@ -93,16 +94,16 @@ func (s *GenerateRootCAStepSpec) populateDefaults(logger runtime.Logger) {
 	}
 	// After populating defaults, update StepMeta.Description if it relied on these values
 	// This is a simplified update; a more robust approach might involve specific template parsing for description.
-	s.StepMeta.Description = fmt.Sprintf("Generates a root CA certificate and key: CN=%s, Cert=%s, Key=%s, Validity=%d days, Bits=%d.",
-		s.CommonName, s.CertPath, s.KeyPath, s.ValidityDays, s.KeyBitSize) // Removed PEM paths
+	s.StepMeta.Description = fmt.Sprintf("Generates a CA certificate and key: CN=%s, Cert=%s, Key=%s, Validity=%d days, Bits=%d.",
+		s.CommonName, s.CertPath, s.KeyPath, s.ValidityDays, s.KeyBitSize)
 	// Also update Name if it was default and CertPath got populated
 	if strings.HasSuffix(s.StepMeta.Name, "(defaulted)") && s.CertPath != "" && !strings.HasSuffix(s.CertPath, "(defaulted)"){
-		s.StepMeta.Name = fmt.Sprintf("Generate Root CA (Cert: %s)", s.CertPath)
+		s.StepMeta.Name = fmt.Sprintf("Generate CA (Cert: %s)", s.CertPath) // Changed "Root CA" to "CA"
 	}
 }
 
 // Precheck (old method, to be adapted or used by an executor for a non-spec version)
-func (s *GenerateRootCAStepSpec) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *GenerateCAWithCRTStepSpec) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Precheck")
 	s.populateDefaults(logger) // Ensure defaults are applied before precheck logic
 
@@ -125,7 +126,7 @@ func (s *GenerateRootCAStepSpec) Precheck(ctx runtime.StepContext, host connecto
 	// Removed PEM file checks
 
 	if certExists && keyExists {
-		logger.Info("Root CA certificate and key already exist.", "certPath", s.CertPath, "keyPath", s.KeyPath)
+		logger.Info("CA certificate and key already exist.", "certPath", s.CertPath, "keyPath", s.KeyPath) // Changed "Root CA" to "CA"
 		return true, nil
 	}
 
@@ -139,14 +140,14 @@ func (s *GenerateRootCAStepSpec) Precheck(ctx runtime.StepContext, host connecto
 	}
 
 	if len(missingMessages) > 0 {
-		logger.Info(fmt.Sprintf("Root CA files are missing: %s. Will attempt to regenerate.", strings.Join(missingMessages, ", ")))
+		logger.Info(fmt.Sprintf("CA files are missing: %s. Will attempt to regenerate.", strings.Join(missingMessages, ", "))) // Changed "Root CA" to "CA"
 	}
 
 	return false, nil
 }
 
 // Run (old method, to be adapted or used by an executor for a non-spec version)
-func (s *GenerateRootCAStepSpec) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *GenerateCAWithCRTStepSpec) Run(ctx runtime.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Run")
 	s.populateDefaults(logger) // Ensure defaults are applied
 
@@ -226,7 +227,7 @@ func (s *GenerateRootCAStepSpec) Run(ctx runtime.StepContext, host connector.Hos
 
 	ctx.ModuleCache().Set(clusterRootCACertPathKey, s.CertPath)
 	ctx.ModuleCache().Set(clusterRootCAKeyPathKey, s.KeyPath)
-	logger.Info("Root CA certificate and key generated and paths stored in ModuleCache.", "certPath", s.CertPath, "keyPath", s.KeyPath)
+	logger.Info("CA certificate and key generated and paths stored in ModuleCache.", "certPath", s.CertPath, "keyPath", s.KeyPath) // Changed "Root CA" to "CA"
 
 	// Removed PEM copy and chmod logic
 	// Removed PEM path storage in ModuleCache
@@ -235,7 +236,7 @@ func (s *GenerateRootCAStepSpec) Run(ctx runtime.StepContext, host connector.Hos
 }
 
 // Rollback (old method, to be adapted or used by an executor for a non-spec version)
-func (s *GenerateRootCAStepSpec) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *GenerateCAWithCRTStepSpec) Rollback(ctx runtime.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Rollback")
 	s.populateDefaults(logger) // Ensure defaults are applied
 
@@ -273,12 +274,12 @@ func (s *GenerateRootCAStepSpec) Rollback(ctx runtime.StepContext, host connecto
 	return nil
 }
 
-// Ensure GenerateRootCAStepSpec implements the spec.StepSpec interface (conceptually).
+// Ensure GenerateCAWithCRTStepSpec implements the spec.StepSpec interface (conceptually).
 // Actual interface implementation might be via an ExecutableStepSpec that wraps this data spec.
-// var _ spec.StepSpec = (*GenerateRootCAStepSpec)(nil) // This line won't compile if spec.StepSpec is just GetName/GetDescription
+// var _ spec.StepSpec = (*GenerateCAWithCRTStepSpec)(nil) // This line won't compile if spec.StepSpec is just GetName/GetDescription
 
 // The following ensures that the old step.Step interface is still implemented by the new Spec object
 // if this code is intended to be gradually refactored and used by an old-style executor temporarily.
 // For a pure spec object, these Precheck/Run/Rollback methods would be removed from the Spec struct
 // and live in a separate StepExecutor struct.
-var _ step.Step = (*GenerateRootCAStepSpec)(nil)
+var _ step.Step = (*GenerateCAWithCRTStepSpec)(nil)
