@@ -11,15 +11,15 @@ import (
 	// "sync/atomic" // No longer needed
 	// "time" // No longer needed
 
-	"github.com/kubexms/kubexms/pkg/config"    // For dummy config
-	"github.com/kubexms/kubexms/pkg/spec"     // For spec.ModuleSpec, spec.TaskSpec
+	"github.com/mensylisir/kubexm/pkg/config"    // For dummy config
+	"github.com/mensylisir/kubexm/pkg/spec"     // For spec.ModuleSpec, spec.TaskSpec
 	// "github.com/kubexms/kubexms/pkg/runtime" // Not directly needed for factory assembly tests
 	// "github.com/kubexms/kubexms/pkg/step"      // For step.GetSpecTypeName if checking hook step types
 
 	// Import module factories
-	moduleContainerd "github.com/kubexms/kubexms/pkg/module/containerd"
-	modulePreflight "github.com/kubexms/kubexms/pkg/module/preflight"
-	moduleEtcd "github.com/kubexms/kubexms/pkg/module/etcd"
+	moduleContainerd "github.com/mensylisir/kubexm/pkg/module/containerd"
+	modulePreflight "github.com/mensylisir/kubexm/pkg/module/preflight"
+	moduleEtcd "github.com/mensylisir/kubexm/pkg/module/etcd"
 )
 
 // Note: MockTask and newTestRuntimeForModule helpers are removed as they were for testing Module.Run,

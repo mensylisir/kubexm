@@ -6,17 +6,17 @@ import (
 	"testing"
 	// "time" // Not directly needed for factory output tests
 
-	"github.com/kubexms/kubexms/pkg/config" // For dummy config
-	"github.com/kubexms/kubexms/pkg/spec"    // For spec.TaskSpec, spec.StepSpec
-	"github.com/kubexms/kubexms/pkg/step"    // For step.GetSpecTypeName
+	"github.com/mensylisir/kubexm/pkg/config" // For dummy config
+	"github.com/mensylisir/kubexm/pkg/spec"    // For spec.TaskSpec, spec.StepSpec
+	"github.com/mensylisir/kubexm/pkg/step"    // For step.GetSpecTypeName
 
 	// Import task factories
-	taskContainerd "github.com/kubexms/kubexms/pkg/task/containerd"
-	taskPreflight "github.com/kubexms/kubexms/pkg/task/preflight"
+	taskContainerd "github.com/mensylisir/kubexm/pkg/task/containerd"
+	taskPreflight "github.com/mensylisir/kubexm/pkg/task/preflight"
 
 	// Import StepSpec types to check them
-	stepSpecContainerd "github.com/kubexms/kubexms/pkg/step/containerd"
-	stepSpecPreflight "github.com/kubexms/kubexms/pkg/step/preflight"
+	stepSpecContainerd "github.com/mensylisir/kubexm/pkg/step/containerd"
+	stepSpecPreflight "github.com/mensylisir/kubexm/pkg/step/preflight"
 	// commandStepSpec "github.com/kubexms/kubexms/pkg/step/command" // If any task used it directly
 )
 

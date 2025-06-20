@@ -1,10 +1,10 @@
 package containerd
 
 import (
-	"github.com/kubexms/kubexms/pkg/config"
-	"github.com/kubexms/kubexms/pkg/spec"
-	commonstep "github.com/kubexms/kubexms/pkg/step/common" // Added import
-	stepContainerd "github.com/kubexms/kubexms/pkg/step/containerd"
+	"github.com/mensylisir/kubexm/pkg/config"
+	"github.com/mensylisir/kubexm/pkg/spec"
+	commonstep "github.com/mensylisir/kubexm/pkg/step/common" // Added import
+	stepContainerd "github.com/mensylisir/kubexm/pkg/step/containerd"
 )
 
 // NewInstallContainerdTask creates a task specification to install and configure containerd.

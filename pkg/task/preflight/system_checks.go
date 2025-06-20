@@ -1,9 +1,9 @@
 package preflight
 
 import (
-	"github.com/kubexms/kubexms/pkg/config"
-	"github.com/kubexms/kubexms/pkg/spec"
-	stepPreflight "github.com/kubexms/kubexms/pkg/step/preflight"
+	"github.com/mensylisir/kubexm/pkg/config"
+	"github.com/mensylisir/kubexm/pkg/spec"
+	stepPreflight "github.com/mensylisir/kubexm/pkg/step/preflight"
 )
 
 // NewSystemChecksTask creates a new task specification for common system preflight checks.

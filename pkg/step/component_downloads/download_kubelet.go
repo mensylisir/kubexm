@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kubexms/kubexms/pkg/runtime"
-	"github.com/kubexms/kubexms/pkg/step"
-	"github.com/kubexms/kubexms/pkg/step/spec"
-	"github.com/kubexms/kubexms/pkg/utils"
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/utils"
 )
 
 const (

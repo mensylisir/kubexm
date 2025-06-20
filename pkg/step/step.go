@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kubexms/kubexms/pkg/runtime" // Ensure this is the correct path
-	"github.com/kubexms/kubexms/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/runtime" // Ensure this is the correct path
+	"github.com/mensylisir/kubexm/pkg/spec"
 )
 
 // Status types for Step Result

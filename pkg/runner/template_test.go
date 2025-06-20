@@ -8,7 +8,7 @@ import (
 	"testing"
 	"text/template"
 
-	"github.com/kubexms/kubexms/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/connector"
 )
 
 // Helper to quickly get a runner with a mock connector for template tests

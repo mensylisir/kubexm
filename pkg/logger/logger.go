@@ -4,7 +4,7 @@
 //
 // Basic Usage (Global Logger):
 //
-// import "github.com/kubexms/kubexms/pkg/logger" // Adjust import path
+// import "github.com/mensylisir/kubexm/pkg/logger" // Adjust import path
 //
 // func main() {
 //   // Initialize the global logger once at the start of your application.

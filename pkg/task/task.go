@@ -8,10 +8,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/kubexms/kubexms/pkg/logger" // For logger.Logger type in runtime.Context
-	"github.com/kubexms/kubexms/pkg/runtime"
-	"github.com/kubexms/kubexms/pkg/spec" // Added import
-	"github.com/kubexms/kubexms/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/logger" // For logger.Logger type in runtime.Context
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/spec" // Added import
+	"github.com/mensylisir/kubexm/pkg/step"
 	// "github.com/kubexms/kubexms/pkg/config" // Not directly used in this file
 )
 

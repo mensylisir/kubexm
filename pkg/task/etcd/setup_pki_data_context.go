@@ -1,9 +1,9 @@
 package etcd
 
 import (
-	"github.com/kubexms/kubexms/pkg/config"
-	"github.com/kubexms/kubexms/pkg/spec"
-	"github.com/kubexms/kubexms/pkg/step/pki" // For pki.KubexmsKubeConf, pki.HostSpecForPKI, pki.SetupEtcdPkiDataContextStepSpec
+	"github.com/mensylisir/kubexm/pkg/config"
+	"github.com/mensylisir/kubexm/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/step/pki" // For pki.KubexmsKubeConf, pki.HostSpecForPKI, pki.SetupEtcdPkiDataContextStepSpec
 )
 
 // NewSetupEtcdPkiDataContextTask creates a task to populate the module cache with PKI context.

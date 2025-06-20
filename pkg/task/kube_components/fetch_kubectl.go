@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/kubexms/kubexms/pkg/config"
-	"github.com/kubexms/kubexms/pkg/spec"
-	commonstep "github.com/kubexms/kubexms/pkg/step/common"
-	"github.com/kubexms/kubexms/pkg/step/component_downloads"
+	"github.com/mensylisir/kubexm/pkg/config"
+	"github.com/mensylisir/kubexm/pkg/spec"
+	commonstep "github.com/mensylisir/kubexm/pkg/step/common"
+	"github.com/mensylisir/kubexm/pkg/step/component_downloads"
 )
 
 // NewFetchKubectlTask creates a task to download and install kubectl.

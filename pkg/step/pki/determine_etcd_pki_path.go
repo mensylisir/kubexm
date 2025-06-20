@@ -6,9 +6,9 @@ import (
 	// "path/filepath" // No longer needed for path joining here as full path is received
 	"time"
 
-	"github.com/kubexms/kubexms/pkg/runtime"
-	"github.com/kubexms/kubexms/pkg/step"
-	"github.com/kubexms/kubexms/pkg/step/spec"
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/spec"
 )
 
 // DefaultEtcdPKIPathKey is used as default for both input and output key for the etcd PKI path.
