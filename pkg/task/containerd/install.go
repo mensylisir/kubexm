@@ -3,17 +3,14 @@ package containerd
 import (
 	"github.com/kubexms/kubexms/pkg/config"
 	"github.com/kubexms/kubexms/pkg/spec"
+	commonstep "github.com/kubexms/kubexms/pkg/step/common" // Added import
 	stepContainerd "github.com/kubexms/kubexms/pkg/step/containerd"
 )
 
 // NewInstallContainerdTask creates a task specification to install and configure containerd.
 func NewInstallContainerdTask(cfg *config.Cluster) *spec.TaskSpec {
 
-	containerdVersion := ""
-	registryMirrors := make(map[string]string)
-	insecureRegistries := []string{}
-	// Default to true for Kubernetes, can be overridden by config.
-	containerdVersion := ""
+	var containerdVersion string // Corrected declaration
 	registryMirrors := make(map[string]string)
 	insecureRegistries := []string{}
 	useSystemdCgroup := true // Default if no config is found, but SetDefaults should handle this.
@@ -67,10 +64,12 @@ func NewInstallContainerdTask(cfg *config.Cluster) *spec.TaskSpec {
 
 	return &spec.TaskSpec{
 		Name: "Install and Configure Containerd",
-		RunOnRoles: []string{},
+		RunOnRoles: []string{}, // Assuming it runs on all hosts passed to it, or roles are filtered by module.
 		Steps: []spec.StepSpec{
+			// Note: A Download/Fetch step for containerd of 'containerdVersion' would typically precede this.
+			// InstallContainerdStepSpec expects an already extracted archive path.
 			&stepContainerd.InstallContainerdStepSpec{
-				Version:                        containerdVersion,
+				// Version field removed as it's not part of InstallContainerdStepSpec
 				SourceExtractedPathSharedDataKey: commonstep.DefaultExtractedPathKey,
 			},
 			&stepContainerd.ConfigureContainerdStepSpec{

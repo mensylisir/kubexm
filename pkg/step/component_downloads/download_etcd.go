@@ -183,10 +183,10 @@ func (e *DownloadEtcdStepExecutor) Execute(ctx runtime.Context) *step.Result {
 		ctx.Task().Set(spec.OutputChecksumKey, spec.Checksum)
 	}
 	ctx.Task().Set(spec.OutputURLKey, url)
-
+	res.Status = step.StatusSucceeded
 	return res
 }
 
 func init() {
-	step.Register(&DownloadEtcdStepSpec{}, &DownloadEtcdStepExecutor{})
+	step.Register(step.GetSpecTypeName(&DownloadEtcdStepSpec{}), &DownloadEtcdStepExecutor{})
 }

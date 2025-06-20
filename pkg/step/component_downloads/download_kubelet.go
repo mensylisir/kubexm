@@ -76,12 +76,18 @@ func (e *DownloadKubeletStepExecutor) determineKubeletURL(version, arch, zone st
 }
 
 func (e *DownloadKubeletStepExecutor) Check(ctx runtime.Context) (bool, error) {
-	currentFullSpec, _ := ctx.Step().GetCurrentStepSpec()
-	spec := currentFullSpec.(*DownloadKubeletStepSpec)
+	rawSpec, ok := ctx.Step().GetCurrentStepSpec()
+	if !ok {
+		return false, fmt.Errorf("StepSpec not found in context for DownloadKubeletStep Check")
+	}
+	spec, ok := rawSpec.(*DownloadKubeletStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected StepSpec type for DownloadKubeletStep Check: %T", rawSpec)
+	}
 	spec.PopulateDefaults(ctx)
 	logger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step", spec.GetName())
 
-	if spec.DownloadDir == "" {return false, fmt.Errorf("DownloadDir not set in spec for %s", spec.GetName())}
+	if spec.DownloadDir == "" { return false, fmt.Errorf("DownloadDir not set in spec for %s", spec.GetName()) }
 	fileName := e.determineKubeletFileName(spec.Version, spec.Arch)
 	expectedFilePath := filepath.Join(spec.DownloadDir, fileName)
 
@@ -124,8 +130,14 @@ func (e *DownloadKubeletStepExecutor) Check(ctx runtime.Context) (bool, error) {
 
 func (e *DownloadKubeletStepExecutor) Execute(ctx runtime.Context) *step.Result {
 	startTime := time.Now()
-	currentFullSpec, _ := ctx.Step().GetCurrentStepSpec()
-	spec := currentFullSpec.(*DownloadKubeletStepSpec)
+	rawSpec, ok := ctx.Step().GetCurrentStepSpec()
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for DownloadKubeletStep Execute"))
+	}
+	spec, ok := rawSpec.(*DownloadKubeletStepSpec)
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for DownloadKubeletStep Execute: %T", rawSpec))
+	}
 	spec.PopulateDefaults(ctx)
 	logger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step", spec.GetName())
 	res := step.NewResult(ctx, startTime, nil)
@@ -156,10 +168,10 @@ func (e *DownloadKubeletStepExecutor) Execute(ctx runtime.Context) *step.Result 
 	ctx.Task().Set(spec.OutputArchKey, spec.Arch)
 	if spec.Checksum != "" {ctx.Task().Set(spec.OutputChecksumKey, spec.Checksum)}
 	ctx.Task().Set(spec.OutputURLKey, url)
-
+	res.Status = step.StatusSucceeded
 	return res
 }
 
 func init() {
-	step.Register(&DownloadKubeletStepSpec{}, &DownloadKubeletStepExecutor{})
+	step.Register(step.GetSpecTypeName(&DownloadKubeletStepSpec{}), &DownloadKubeletStepExecutor{})
 }

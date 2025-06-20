@@ -98,9 +98,10 @@ func (e *SetupEtcdPkiDataContextStepExecutor) Execute(ctx runtime.Context) *step
 	logger.Infof("Derived and stored etcd-specific PKI path '%s' in module cache under key '%s'", etcdSpecificPkiPath, spec.EtcdPkiPathOutputKey)
 
 	res.Message = "Etcd PKI data context successfully populated into module cache."
+	res.Status = step.StatusSucceeded
 	return res
 }
 
 func init() {
-	step.Register(&SetupEtcdPkiDataContextStepSpec{}, &SetupEtcdPkiDataContextStepExecutor{})
+	step.Register(step.GetSpecTypeName(&SetupEtcdPkiDataContextStepSpec{}), &SetupEtcdPkiDataContextStepExecutor{})
 }

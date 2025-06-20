@@ -372,15 +372,11 @@ func NewRuntime(cfg *v1alpha1.Cluster, baseLogger *logger.Logger) (*ClusterRunti
 }
 
 // NewHostContext creates a new Context specific to a given host and operation.
-// It now accepts cache instances to be associated with this context.
+// It now initializes its own cache instances.
 func NewHostContext(
 	goCtx context.Context,
 	host *Host,
 	cluster *ClusterRuntime,
-	pCache cache.PipelineCache,
-	mCache cache.ModuleCache,
-	tCache cache.TaskCache,
-	sCache cache.StepCache,
 ) *Context {
 	if goCtx == nil {
 		goCtx = context.Background()
@@ -417,9 +413,9 @@ func NewHostContext(
 		Cluster:       cluster,
 		Logger:        hostSpecificLogger,
 		// SharedData:    sharedData, // Removed
-		pipelineCache: pCache,
-		moduleCache:   mCache,
-		taskCache:     tCache,
-		stepCache:     sCache,
+	pipelineCache: cache.NewPipelineCache(),
+	moduleCache:   cache.NewModuleCache(),
+	taskCache:     cache.NewTaskCache(),
+	stepCache:     cache.NewStepCache(),
 	}
 }
