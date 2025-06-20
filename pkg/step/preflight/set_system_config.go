@@ -1,214 +1,204 @@
 package preflight
 
 import (
-	// "context" // No longer directly used if runtime.StepContext is used
+	"bytes" // For writing file content
 	"fmt"
 	"strings"
-	"time"
+	"time" // For timestamp in config file
 
-	"github.com/mensylisir/kubexm/pkg/connector" // For connector.ExecOptions
+	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/runtime"
-	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	// spec is no longer needed
 )
 
-// SetSystemConfigStepSpec defines parameters for setting sysctl kernel parameters.
-type SetSystemConfigStepSpec struct {
+// SetSystemConfigStep sets kernel parameters using sysctl and a configuration file.
+type SetSystemConfigStep struct {
 	Params         map[string]string
-	ConfigFilePath string // If empty, a default like /etc/sysctl.d/99-kubexms-preflight.conf is used
-	Reload         *bool  // Pointer to distinguish between not set (use default true) and explicitly false.
-	StepName       string // Optional: for a custom name for this specific step instance
+	ConfigFilePath string // If empty, a default is used.
+	Reload         bool   // Default true: whether to reload sysctl after writing file.
+	StepName       string
 }
 
-// GetName returns the step name.
-func (s *SetSystemConfigStepSpec) GetName() string {
-	if s.StepName != "" { return s.StepName }
-	return fmt.Sprintf("Set System Kernel Parameters (sysctl) to file: %s", s.effectiveConfigFilePath())
-}
-
-// effectiveConfigFilePath returns the actual config file path to be used.
-func (s *SetSystemConfigStepSpec) effectiveConfigFilePath() string {
-	if s.ConfigFilePath != "" { return s.ConfigFilePath }
-	return "/etc/sysctl.d/99-kubexms-preflight.conf" // Default file
-}
-
-// shouldReload determines if sysctl configuration should be reloaded.
-func (s *SetSystemConfigStepSpec) shouldReload() bool {
-	if s.Reload == nil {
-		return true // Default to true if not specified
+// NewSetSystemConfigStep creates a new SetSystemConfigStep.
+// Use 'reloadDefault' to signify if the default (true) for Reload should be used,
+// or if 'reloadValue' should be taken as the explicit setting.
+func NewSetSystemConfigStep(
+	params map[string]string,
+	configFilePath string,
+	reloadValue bool, reloadDefault bool, // If reloadDefault is true, reloadValue is ignored and default (true) is used.
+	stepName string,
+) step.Step {
+	name := stepName
+	effectivePath := configFilePath
+	if effectivePath == "" {
+		effectivePath = "/etc/sysctl.d/99-kubexms-preflight.conf" // Default config file path
 	}
-	return *s.Reload
+	if name == "" {
+		name = fmt.Sprintf("Set System Kernel Parameters (sysctl) to file: %s", effectivePath)
+	}
+
+	actualReload := true // Default behavior
+	if !reloadDefault { // if reloadDefault is false, it means reloadValue contains the explicit desired setting
+	    actualReload = reloadValue
+	}
+
+	return &SetSystemConfigStep{
+		Params:         params,
+		ConfigFilePath: effectivePath,
+		Reload:         actualReload,
+		StepName:       name,
+	}
 }
-var _ spec.StepSpec = &SetSystemConfigStepSpec{}
 
-// SetSystemConfigStepExecutor implements the logic for SetSystemConfigStepSpec.
-type SetSystemConfigStepExecutor struct{}
-
-func init() {
-	step.Register(step.GetSpecTypeName(&SetSystemConfigStepSpec{}), &SetSystemConfigStepExecutor{})
+func (s *SetSystemConfigStep) Name() string {
+	return s.StepName
 }
 
-// Check determines if sysctl params are already set.
-func (e *SetSystemConfigStepExecutor) Check(ctx runtime.StepContext) (isDone bool, err error) { // Changed to StepContext
-	logger := ctx.GetLogger()
-	currentHost := ctx.GetHost()
-	goCtx := ctx.GoContext()
-
-	if currentHost == nil {
-		logger.Error("Current host not found in context for Check")
-		return false, fmt.Errorf("current host is required for SetSystemConfigStep Check")
+func (s *SetSystemConfigStep) Description() string {
+	paramSummary := []string{}
+	for k, v := range s.Params {
+		paramSummary = append(paramSummary, fmt.Sprintf("%s=%s", k, v))
 	}
-	logger = logger.With("host", currentHost.GetName())
+	return fmt.Sprintf("Sets sysctl params: [%s] to file %s and reloads (reload: %v).",
+		strings.Join(paramSummary, ", "), s.ConfigFilePath, s.Reload)
+}
 
-	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
-	if !ok {
-		logger.Error("StepSpec not found in context")
-		return false, fmt.Errorf("StepSpec not found in context for SetSystemConfigStepExecutor Check method")
-	}
-	spec, ok := rawSpec.(*SetSystemConfigStepSpec)
-	if !ok {
-		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
-		return false, fmt.Errorf("unexpected spec type %T for SetSystemConfigStepExecutor Check method", rawSpec)
-	}
-	logger = logger.With("step", spec.GetName())
+func (s *SetSystemConfigStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Precheck")
+    if host == nil { return false, fmt.Errorf("host is nil in Precheck for %s", s.Name())}
 
-	if len(spec.Params) == 0 {
-		logger.Debug("No sysctl params specified, considering done.")
+	if len(s.Params) == 0 {
+		logger.Debug("No sysctl params specified, precheck considered done.")
 		return true, nil
 	}
 
-	conn, err := ctx.GetConnectorForHost(currentHost)
+	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
-		logger.Error("Failed to get connector for host", "error", err)
-		return false, fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err)
+		return false, fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.Name(), err)
 	}
 
-	for key, expectedValue := range spec.Params {
+	for key, expectedValue := range s.Params {
 		cmd := fmt.Sprintf("sysctl -n %s", key)
-		stdoutBytes, stderrBytes, execErr := conn.RunCommand(goCtx, cmd, &connector.ExecOptions{Sudo: false}) // Use connector
+		// Sudo typically not needed to read sysctl values.
+		stdoutBytes, stderrBytes, execErr := conn.Exec(ctx.GoContext(), cmd, &connector.ExecOptions{Sudo: false})
 		if execErr != nil {
-			logger.Warn("Failed to read current value of sysctl key. Assuming not set as expected.", "key", key, "error", execErr, "stderr", string(stderrBytes))
-			return false, fmt.Errorf("failed to read current value of sysctl key '%s' on host %s: %w (stderr: %s)", key, currentHost.GetName(), execErr, string(stderrBytes))
+			// If we can't read the current value (e.g. key doesn't exist), assume it's not set as desired.
+			logger.Warn("Failed to read current value of sysctl key, assuming not set as expected.", "key", key, "error", execErr, "stderr", string(stderrBytes))
+			return false, nil
 		}
 		currentValue := strings.TrimSpace(string(stdoutBytes))
 		if currentValue != expectedValue {
 			logger.Debug("Sysctl param mismatch.", "key", key, "current", currentValue, "expected", expectedValue)
 			return false, nil
 		}
-		logger.Debug("Sysctl param matches.", "key", key, "value", currentValue)
 	}
 	logger.Info("All specified sysctl parameters already match desired values.")
 	return true, nil
 }
 
-// Execute applies sysctl params.
-func (e *SetSystemConfigStepExecutor) Execute(ctx runtime.StepContext) *step.Result { // Changed to StepContext
-	startTime := time.Now()
-	logger := ctx.GetLogger()
-	currentHost := ctx.GetHost()
-	goCtx := ctx.GoContext()
+func (s *SetSystemConfigStep) Run(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Run")
+    if host == nil { return fmt.Errorf("host is nil in Run for %s", s.Name())}
 
-	res := step.NewResult(ctx, currentHost, startTime, nil)
-
-	if currentHost == nil {
-		logger.Error("Current host not found in context for Execute")
-		res.Error = fmt.Errorf("current host is required for SetSystemConfigStep Execute")
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
-	}
-	logger = logger.With("host", currentHost.GetName())
-
-	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
-	if !ok {
-		logger.Error("StepSpec not found in context")
-		res.Error = fmt.Errorf("StepSpec not found in context for SetSystemConfigStepExecutor Execute method")
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
-	}
-	spec, ok := rawSpec.(*SetSystemConfigStepSpec)
-	if !ok {
-		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
-		res.Error = fmt.Errorf("unexpected spec type %T for SetSystemConfigStepExecutor Execute method", rawSpec)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
-	}
-	logger = logger.With("step", spec.GetName())
-
-	var errorsCollected []string
-	var appliedParams []string
-
-	if len(spec.Params) == 0 {
-		res.Status = step.StatusSucceeded; res.Message = "No sysctl parameters to set."
-		logger.Info(res.Message)
-		res.EndTime = time.Now(); return res
+	if len(s.Params) == 0 {
+		logger.Info("No sysctl parameters to set.")
+		return nil
 	}
 
-	conn, errConn := ctx.GetConnectorForHost(currentHost)
+	conn, errConn := ctx.GetConnectorForHost(host)
 	if errConn != nil {
-		logger.Error("Failed to get connector for host", "error", errConn)
-		res.Error = fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), errConn)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+		return fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.Name(), errConn)
 	}
 
-	var configFileContent strings.Builder
+	var configFileContent bytes.Buffer
 	configFileContent.WriteString(fmt.Sprintf("# Kernel parameters configured by KubeXMS Preflight (%s)\n", time.Now().Format(time.RFC3339)))
-	for key, value := range spec.Params {
+	for key, value := range s.Params {
 		configFileContent.WriteString(fmt.Sprintf("%s = %s\n", key, value))
-		appliedParams = append(appliedParams, fmt.Sprintf("%s=%s", key, value))
 	}
 
-	filePath := spec.effectiveConfigFilePath()
-	logger.Info("Writing sysctl parameters.", "file", filePath, "params", strings.Join(appliedParams, ", "))
-
-	errWrite := conn.WriteFile(goCtx, []byte(configFileContent.String()), filePath, "0644") // Sudo handled by connector if path needs it
+	logger.Info("Writing sysctl parameters to file.", "file", s.ConfigFilePath)
+	// Writing to /etc/sysctl.d/ or /etc/sysctl.conf usually requires sudo.
+	// Assuming conn.WriteFile handles this if the connector is sudo-enabled.
+	// If not, this would need to be a write to temp then sudo mv.
+	errWrite := conn.WriteFile(ctx.GoContext(), configFileContent.Bytes(), s.ConfigFilePath, "0644")
 	if errWrite != nil {
-		errMsg := fmt.Sprintf("failed to write sysctl config file %s: %v", filePath, errWrite)
-		logger.Error(errMsg)
-		errorsCollected = append(errorsCollected, errMsg)
-	} else {
-		logger.Info("Successfully wrote sysctl parameters.", "file", filePath)
-		if spec.shouldReload() {
-			reloadCmd := ""
-			if strings.HasPrefix(filePath, "/etc/sysctl.d/") || strings.HasPrefix(filePath, "/usr/lib/sysctl.d/") || filePath == "/run/sysctl.d/" {
-				reloadCmd = "sysctl --system"
-			} else if filePath == "/etc/sysctl.conf" {
-			    reloadCmd = "sysctl -p /etc/sysctl.conf"
-			} else {
-				reloadCmd = fmt.Sprintf("sysctl -p %s", filePath)
-			}
-
-			logger.Info("Reloading sysctl configuration.", "command", reloadCmd)
-			_, stderrReload, errReload := conn.RunCommand(goCtx, reloadCmd, &connector.ExecOptions{Sudo: true}) // Use connector
-			if errReload != nil {
-				errMsg := fmt.Sprintf("failed to reload sysctl configuration with '%s': %v (stderr: %s)", reloadCmd, errReload, string(stderrReload))
-				logger.Error(errMsg)
-				errorsCollected = append(errorsCollected, errMsg)
-			} else {
-				logger.Info("Sysctl configuration reloaded successfully.", "command", reloadCmd)
-			}
-		} else {
-			logger.Info("Skipping sysctl reload as per step configuration.")
-		}
+		return fmt.Errorf("failed to write sysctl config file %s for step %s on host %s: %w", s.ConfigFilePath, s.Name(), host.GetName(), errWrite)
 	}
-	res.EndTime = time.Now()
+	logger.Info("Successfully wrote sysctl parameters to file.", "file", s.ConfigFilePath)
 
-	if len(errorsCollected) > 0 {
-		res.Status = step.StatusFailed; res.Error = fmt.Errorf(strings.Join(errorsCollected, "; ")); res.Message = res.Error.Error()
-		logger.Error("Step finished with errors.", "message", res.Message)
-	} else {
-		logger.Info("Verifying sysctl parameters after apply...")
-		allSet, checkErr := e.Check(ctx)
-		if checkErr != nil {
-			logger.Error("Failed to verify sysctl params after apply.", "error", checkErr)
-			res.Status = step.StatusFailed; res.Error = fmt.Errorf("failed to verify sysctl params after apply: %w", checkErr)
-			res.Message = res.Error.Error()
-		} else if !allSet {
-			logger.Error("Sysctl params not all set to desired values after apply and reload attempt.")
-			res.Status = step.StatusFailed; res.Error = fmt.Errorf("sysctl params not all set to desired values after apply and reload attempt")
-			res.Message = res.Error.Error()
+	if s.Reload {
+		reloadCmd := ""
+		// Determine appropriate reload command.
+		if strings.HasPrefix(s.ConfigFilePath, "/etc/sysctl.d/") ||
+		   strings.HasPrefix(s.ConfigFilePath, "/usr/lib/sysctl.d/") ||
+		   strings.HasPrefix(s.ConfigFilePath, "/run/sysctl.d/") {
+			reloadCmd = "sysctl --system" // Reloads all system config files including from /etc/sysctl.d
+		} else if s.ConfigFilePath == "/etc/sysctl.conf" {
+		    reloadCmd = "sysctl -p /etc/sysctl.conf" // Specifically load /etc/sysctl.conf
 		} else {
-			res.Status = step.StatusSucceeded
-			res.Message = fmt.Sprintf("All sysctl parameters (%s) successfully set and verified.", strings.Join(appliedParams, ", "))
-			logger.Info("Step succeeded.", "message", res.Message)
+			// For other files, try to load them specifically with -p.
+			// This applies the settings but might not be persistent if not in a standard load path.
+			reloadCmd = fmt.Sprintf("sysctl -p %s", s.ConfigFilePath)
 		}
+
+		logger.Info("Reloading sysctl configuration.", "command", reloadCmd)
+		_, stderrReload, errReload := conn.Exec(ctx.GoContext(), reloadCmd, &connector.ExecOptions{Sudo: true})
+		if errReload != nil {
+			// Log as warning because the file write was successful. Some systems might report non-fatal errors
+			// or if the file had no immediate effect (e.g., already set).
+			logger.Warn("Sysctl reload command finished with error, check stderr for details. Verification will follow.", "command", reloadCmd, "stderr", string(stderrReload), "error", errReload)
+		} else {
+			logger.Info("Sysctl configuration reload command executed.", "command", reloadCmd)
+		}
+	} else {
+		logger.Info("Skipping sysctl reload as per step configuration.")
 	}
-	return res
+
+	logger.Info("Verifying sysctl parameters after apply...")
+	allSet, checkErr := s.Precheck(ctx, host) // Re-use Precheck for verification
+	if checkErr != nil {
+	    // This means the verification check itself failed (e.g. couldn't run sysctl -n)
+	    return fmt.Errorf("failed to verify sysctl params after apply for step %s on host %s: %w", s.Name(), host.GetName(), checkErr)
+	}
+	if !allSet {
+		// This means params are not matching expected values after apply/reload.
+	    return fmt.Errorf("sysctl params not all set to desired values after apply/reload for step %s on host %s. Check previous logs for specific mismatches or reload errors", s.Name(), host.GetName())
+	}
+	logger.Info("All sysctl parameters successfully set and verified.")
+	return nil
 }
-var _ step.StepExecutor = &SetSystemConfigStepExecutor{}
+
+func (s *SetSystemConfigStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Rollback")
+    if host == nil { return fmt.Errorf("host is nil in Rollback for %s", s.Name())}
+
+	logger.Info("Attempting to remove sysctl config file for rollback.", "file", s.ConfigFilePath)
+	conn, errConn := ctx.GetConnectorForHost(host)
+	if errConn != nil {
+		logger.Error("Failed to get connector for host during rollback, cannot remove config file.", "error", errConn)
+		return nil // Best-effort
+	}
+
+	removeOpts := connector.RemoveOptions{Recursive: false, IgnoreNotExist: true}
+	// Assuming conn.Remove handles sudo if connector is sudo-enabled or path requires it.
+	if errRemove := conn.Remove(ctx.GoContext(), s.ConfigFilePath, removeOpts); errRemove != nil {
+		logger.Error("Failed to remove sysctl config file during rollback (best effort).", "file", s.ConfigFilePath, "error", errRemove)
+	} else {
+		logger.Info("Successfully removed sysctl config file if it existed.", "file", s.ConfigFilePath)
+		if s.Reload { // Only reload if original step intended a reload, to try to revert to previous state
+		    reloadCmd := "sysctl --system"
+		    logger.Info("Attempting to reload sysctl after removing config file.", "command", reloadCmd)
+		    _, stderrReload, errReload := conn.Exec(ctx.GoContext(), reloadCmd, &connector.ExecOptions{Sudo: true})
+		    if errReload != nil {
+		        logger.Warn("Sysctl reload after config removal reported an error.", "command", reloadCmd, "stderr", string(stderrReload), "error", errReload)
+		    } else {
+		        logger.Info("Sysctl reloaded after config removal.", "command", reloadCmd)
+		    }
+		}
+	}
+	return nil
+}
+
+// Ensure SetSystemConfigStep implements the step.Step interface.
+var _ step.Step = (*SetSystemConfigStep)(nil)
