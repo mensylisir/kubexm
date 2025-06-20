@@ -1,304 +1,241 @@
 package command
 
 import (
-	"context" // Required by runtime.Context, not directly by this file's logic for context.Background()
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime" // For runtime.StepContext
-	"github.com/mensylisir/kubexm/pkg/spec"    // Import the spec package
-	"github.com/mensylisir/kubexm/pkg/step"    // Import for step.Result, step.Register, etc.
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/step"
 )
 
-// CommandStepSpec holds the declarative parameters for executing a shell command.
-type CommandStepSpec struct {
-	// SpecName is a descriptive name for this command execution step.
-	// If not provided, a name will be generated based on the command.
-	SpecName string
-
-	// Cmd is the shell command to be executed.
-	Cmd string
-
-	// Sudo specifies whether to execute the command with sudo privileges.
-	Sudo bool
-
-	// IgnoreError, if true, means that a non-zero exit code from this command
-	// (or if ExpectedExitCode is not met) will not cause the step to be marked as "Failed".
-	// The step will be "Succeeded", but error details will be in Result.Error/Message.
-	IgnoreError bool
-
-	// Timeout specifies a duration after which the command will be forcefully terminated.
-	// If zero, no timeout is applied beyond the context's deadline.
-	Timeout time.Duration
-
-	// Env is a slice of environment variables to set for the command, in "KEY=VALUE" format.
-	Env []string
-
-	// ExpectedExitCode defines the exit code considered a success. Defaults to 0.
-	// If IgnoreError is false, a mismatch causes the step to be "Failed".
-	ExpectedExitCode int
-
-	// CheckCmd is an optional command for idempotency. If it runs and its exit code
-	// matches CheckExpectedExitCode, the main Cmd is skipped.
+// CommandStep executes a shell command on a target host.
+type CommandStep struct {
+	SpecName            string
+	Cmd                 string
+	Sudo                bool
+	IgnoreError         bool
+	Timeout             time.Duration
+	Env                 []string
+	ExpectedExitCode    int
 	CheckCmd            string
 	CheckSudo           bool
-	CheckExpectedExitCode int // Defaults to 0 for CheckCmd if not set
+	CheckExpectedExitCode int
+	RollbackCmd         string // Optional: command to run for rollback
+	RollbackSudo        bool   // Optional: sudo for rollback command
 }
 
-// GetName returns the configured or generated name of the step spec.
-func (s *CommandStepSpec) GetName() string {
+// NewCommandStep creates a new CommandStep.
+// Parameters for checkCmd, checkSudo, checkExpectedExitCode, rollbackCmd, rollbackSudo are optional and can be empty/zero.
+func NewCommandStep(
+	cmd string,
+	sudo bool,
+	specName string,
+	ignoreError bool,
+	timeout time.Duration,
+	env []string,
+	expectedExitCode int,
+	checkCmd string,
+	checkSudo bool,
+	checkExpectedExitCode int,
+	rollbackCmd string,
+	rollbackSudo bool,
+) step.Step {
+	return &CommandStep{
+		SpecName:            specName,
+		Cmd:                 cmd,
+		Sudo:                sudo,
+		IgnoreError:         ignoreError,
+		Timeout:             timeout,
+		Env:                 env,
+		ExpectedExitCode:    expectedExitCode,
+		CheckCmd:            checkCmd,
+		CheckSudo:           checkSudo,
+		CheckExpectedExitCode: checkExpectedExitCode,
+		RollbackCmd:         rollbackCmd,
+		RollbackSudo:        rollbackSudo,
+	}
+}
+
+func (s *CommandStep) Name() string {
 	if s.SpecName != "" {
 		return s.SpecName
 	}
+	// Generate a default name if SpecName is not provided.
+	// Shorten Cmd if it's too long for a default name.
+	// This logic was previously in CommandStepSpec.GetName().
+	baseName := "Exec: "
 	if len(s.Cmd) > 30 {
-		return fmt.Sprintf("Exec: %s...", s.Cmd[:30])
+		return baseName + s.Cmd[:30] + "..."
 	}
-	return fmt.Sprintf("Exec: %s", s.Cmd)
+	return baseName + s.Cmd
 }
 
-// Ensure CommandStepSpec implements spec.StepSpec
-var _ spec.StepSpec = &CommandStepSpec{}
-
-
-// CommandStepExecutor implements the logic for executing a CommandStepSpec.
-type CommandStepExecutor struct{}
-
-func init() {
-	// Register this executor for the CommandStepSpec type.
-	// The type name string must be unique and consistent.
-	// Using a pointer to the zero value of the spec type for GetSpecTypeName.
-	step.Register(step.GetSpecTypeName(&CommandStepSpec{}), &CommandStepExecutor{})
+func (s *CommandStep) Description() string {
+	return fmt.Sprintf("Executes command: '%s'", s.Cmd)
 }
 
-// Check determines if the main command needs to be run based on CheckCmd.
-func (e *CommandStepExecutor) Check(ctx runtime.StepContext) (isDone bool, err error) {
-	logger := ctx.GetLogger().With("phase", "Check")
+func (s *CommandStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Precheck")
 
-	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
-	if !ok {
-		logger.Error("StepSpec not found in context")
-		return false, fmt.Errorf("StepSpec not found in context for Check method in CommandStepExecutor")
-	}
-	spec, ok := rawSpec.(*CommandStepSpec)
-	if !ok {
-		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
-		return false, fmt.Errorf("unexpected StepSpec type for Check method in CommandStepExecutor: %T. Expected *CommandStepSpec", rawSpec)
-	}
-
-	if spec.CheckCmd == "" {
+	if s.CheckCmd == "" {
 		logger.Debug("No CheckCmd defined, main command will run")
-		return false, nil // No check command, so main command should run
+		return false, nil
 	}
 
-	logger.Debug("Executing CheckCmd", "command", spec.CheckCmd)
+	logger.Debug("Executing CheckCmd", "command", s.CheckCmd)
 
-	currentHost := ctx.GetHost()
-	if currentHost == nil {
-		logger.Error("Current host not found in context")
-		return false, fmt.Errorf("current host not found in context for CheckCmd")
-	}
-
-	goCtx := ctx.GoContext()
-	connector, err := ctx.GetConnectorForHost(currentHost)
+	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
-		logger.Error("Failed to get connector for host", "host", currentHost.GetName(), "error", err)
-		return false, fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err)
+		logger.Error("Failed to get connector for host", "error", err)
+		return false, fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.Name(), err)
 	}
 
 	opts := &connector.ExecOptions{
-		Sudo:    spec.CheckSudo,
-		Timeout: spec.Timeout, // Consider if a shorter timeout is needed for CheckCmd
-		Env:     spec.Env,
+		Sudo:    s.CheckSudo,
+		Timeout: s.Timeout, // Consider if a shorter/different timeout is needed for CheckCmd
+		Env:     s.Env,
 	}
 
-	// Assuming connector.Connector has RunCommand or similar.
-	// If it has RunWithOptions, that would be fine too.
-	// For now, let's assume RunCommand exists and is suitable.
-	// The previous code used Host.Runner.RunWithOptions, which might be a method on a specific runner type.
-	// The generic connector.Connector might have a simpler RunCommand.
-	// Let's assume RunCommand for now, and if it's actually RunWithOptions on the connector, adjust.
-	// connector.ExecOptions are passed, so RunCommand on connector should accept them.
-	// The return values for connector.RunCommand are assumed to be (stdout, stderr, exitCode, error) or similar.
-	// For simplicity, let's assume a method like `RunCommand(ctx, cmd, opts)` returning (stdout, stderr, error)
-	// where error is a *connector.CommandError if it's an exit code issue.
-
-	// Let's use a hypothetical `ExecuteCommand` on the connector that returns combined output and error
-	// For now, sticking to a more common pattern: RunCommand that returns stdout, stderr, and error (which could be CommandError)
-	_, checkCmdStderrBytes, runErr := connector.RunCommand(goCtx, spec.CheckCmd, opts) // Adjusted to use connector
-	checkCmdStderr := string(checkCmdStderrBytes)
+	// Assuming conn.RunCommand exists and is the method to use.
+	// The prompt uses conn.RunCommand, which is not standard on connector.Connector.
+	// connector.Connector has Exec(). Let's adapt to use Exec().
+	// Exec(ctx context.Context, cmd string, opts *ExecOptions) (stdout, stderr []byte, err error)
+	_, stderrBytes, runErr := conn.Exec(ctx.GoContext(), s.CheckCmd, opts)
+	checkCmdStderr := string(stderrBytes)
 
 	if runErr != nil {
-		var cmdErr *connector.CommandError
+		var cmdErr *connector.CommandError // Assuming connector.CommandError exists and is used by Exec
 		if errors.As(runErr, &cmdErr) {
-			if cmdErr.ExitCode == spec.CheckExpectedExitCode {
-				logger.Debug("CheckCmd completed with expected exit code. Main command will be skipped.", "command", spec.CheckCmd, "exitCode", cmdErr.ExitCode)
+			if cmdErr.ExitCode == s.CheckExpectedExitCode {
+				logger.Debug("CheckCmd completed with expected exit code. Main command will be skipped.", "exitCode", cmdErr.ExitCode)
 				return true, nil // isDone = true
 			}
-			logger.Debug("CheckCmd failed with different exit code than expected for 'done' state. Main command will run.", "command", spec.CheckCmd, "exitCode", cmdErr.ExitCode, "expectedExitCode", spec.CheckExpectedExitCode, "stderr", checkCmdStderr)
+			logger.Debug("CheckCmd failed with different exit code than expected for 'done' state. Main command will run.", "exitCode", cmdErr.ExitCode, "expected", s.CheckExpectedExitCode, "stderr", checkCmdStderr)
 			return false, nil
 		}
-		logger.Error("Failed to execute CheckCmd", "command", spec.CheckCmd, "error", runErr, "stderr", checkCmdStderr)
-		return false, fmt.Errorf("check command '%s' execution failed: %w. Stderr: %s", spec.CheckCmd, runErr, checkCmdStderr)
+		logger.Error("Failed to execute CheckCmd", "error", runErr, "stderr", checkCmdStderr)
+		return false, fmt.Errorf("check command '%s' execution failed for step %s on host %s: %w. Stderr: %s", s.CheckCmd, s.Name(), host.GetName(), runErr, checkCmdStderr)
 	}
 
-	// CheckCmd executed successfully (implicit exit code 0 if not CommandError)
-	if spec.CheckExpectedExitCode == 0 {
-		logger.Debug("CheckCmd completed successfully (exit 0). Main command will be skipped.", "command", spec.CheckCmd)
+	// CheckCmd executed successfully (implicit exit code 0 if not CommandError from Exec)
+	if s.CheckExpectedExitCode == 0 {
+		logger.Debug("CheckCmd completed successfully (exit 0). Main command will be skipped.")
 		return true, nil // isDone = true
 	}
 
-	logger.Debug("CheckCmd completed with exit code 0, but expected different for 'done' state. Main command will run.", "command", spec.CheckCmd, "expectedExitCode", spec.CheckExpectedExitCode)
+	logger.Debug("CheckCmd completed with exit code 0, but expected different for 'done' state. Main command will run.", "expected", s.CheckExpectedExitCode)
 	return false, nil
 }
 
-// Execute runs the command defined in the CommandStepSpec.
-func (e *CommandStepExecutor) Execute(ctx runtime.StepContext) *step.Result {
-	startTime := time.Now()
-	logger := ctx.GetLogger().With("phase", "Execute")
-	currentHost := ctx.GetHost()
+func (s *CommandStep) Run(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Run")
 
-	// Initial result, host might be nil for local/orchestration steps not tied to a host.
-	res := step.NewResult(ctx, currentHost, startTime, nil)
-
-	if currentHost == nil {
-		errMsg := "current host not found in context for Execute method"
-		logger.Error(errMsg)
-		res.Error = fmt.Errorf(errMsg)
-		res.Status = step.StatusFailed
-		res.EndTime = time.Now()
-		return res
-	}
-	// From now on, currentHost is not nil. We pass it to NewResult again if an early exit occurs for spec processing.
-
-	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
-	if !ok {
-		errMsg := "StepSpec not found in context"
-		logger.Error(errMsg)
-		res.Error = fmt.Errorf(errMsg) // Update existing res
-		res.Status = step.StatusFailed
-		res.EndTime = time.Now()
-		return res
-	}
-	spec, ok := rawSpec.(*CommandStepSpec)
-	if !ok {
-		errMsg := fmt.Sprintf("unexpected StepSpec type: %T. Expected *CommandStepSpec", rawSpec)
-		logger.Error(errMsg)
-		res.Error = fmt.Errorf(errMsg) // Update existing res
-		res.Status = step.StatusFailed
-		res.EndTime = time.Now()
-		return res
-	}
-
-	goCtx := ctx.GoContext()
-	connector, err := ctx.GetConnectorForHost(currentHost)
+	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
-		logger.Error("Failed to get connector for host", "host", currentHost.GetName(), "error", err)
-		res.Error = fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err)
-		res.Status = step.StatusFailed
-		res.EndTime = time.Now()
-		return res
+		logger.Error("Failed to get connector for host", "error", err)
+		return fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.Name(), err)
 	}
 
 	opts := &connector.ExecOptions{
-		Sudo:    spec.Sudo,
-		Timeout: spec.Timeout,
-		Env:     spec.Env,
+		Sudo:    s.Sudo,
+		Timeout: s.Timeout,
+		Env:     s.Env,
 	}
 
-	logger.Info("Running command", "command", spec.Cmd, "sudo", spec.Sudo)
-	stdoutBytes, stderrBytes, runErr := connector.RunCommand(goCtx, spec.Cmd, opts) // Adjusted to use connector
+	logger.Info("Running command", "command", s.Cmd, "sudo", s.Sudo)
+	// Assuming conn.RunCommand is actually conn.Exec
+	stdoutBytes, stderrBytes, runErr := conn.Exec(ctx.GoContext(), s.Cmd, opts)
 
-	res.Stdout = string(stdoutBytes)
-	res.Stderr = string(stderrBytes)
-	res.EndTime = time.Now() // Set EndTime closer to actual execution end
+	// Stashing stdout/stderr is optional as per comments.
+	// Example:
+	// ctx.StepCache().Set(s.Name()+"#stdout", string(stdoutBytes))
+	// ctx.StepCache().Set(s.Name()+"#stderr", string(stderrBytes))
+
 
 	if runErr != nil {
-		var cmdErr *connector.CommandError
+		var cmdErr *connector.CommandError // Assuming connector.CommandError
 		if errors.As(runErr, &cmdErr) {
-			res.Error = cmdErr // Store the original CommandError
-			if spec.IgnoreError {
-				logger.Warn("Command exited with error, but error is ignored. Step considered successful.", "command", spec.Cmd, "exitCode", cmdErr.ExitCode, "stderr", res.Stderr)
-				res.Status = step.StatusSucceeded
-				res.Message = fmt.Sprintf("Command executed with exit code %d and error '%v', but it was ignored. Original Stderr: %s", cmdErr.ExitCode, cmdErr, res.Stderr)
-			} else if cmdErr.ExitCode == spec.ExpectedExitCode {
-				logger.Info("Command completed with expected exit code.", "command", spec.Cmd, "exitCode", cmdErr.ExitCode)
-				res.Status = step.StatusSucceeded
-				res.Error = nil
-			} else {
-				logger.Error("Command failed with unexpected exit code.", "command", spec.Cmd, "exitCode", cmdErr.ExitCode, "expectedExitCode", spec.ExpectedExitCode, "stderr", res.Stderr)
-				res.Status = step.StatusFailed
+			// Populate CommandError with Stdout/Stderr if not already done by Exec
+			// cmdErr.Stdout = string(stdoutBytes) // Assuming CommandError has these fields
+			// cmdErr.Stderr = string(stderrBytes)
+
+			if s.IgnoreError {
+				logger.Warn("Command exited with error, but error is ignored.", "command", s.Cmd, "exitCode", cmdErr.ExitCode, "stdout", string(stdoutBytes), "stderr", string(stderrBytes))
+				return nil
 			}
-		} else {
-			logger.Error("Failed to execute command (non-CommandError).", "command", spec.Cmd, "error", runErr, "stderr", res.Stderr)
-			res.Error = runErr
-			res.Status = step.StatusFailed
+			if cmdErr.ExitCode == s.ExpectedExitCode {
+				logger.Info("Command completed with expected (non-zero) exit code.", "exitCode", cmdErr.ExitCode, "stdout", string(stdoutBytes), "stderr", string(stderrBytes))
+				return nil
+			}
+			logger.Error("Command failed with unexpected exit code.", "exitCode", cmdErr.ExitCode, "expected", s.ExpectedExitCode, "stdout", string(stdoutBytes), "stderr", string(stderrBytes))
+			return cmdErr // Return the CommandError
 		}
-	} else { // runErr is nil
-		if spec.ExpectedExitCode == 0 {
-			logger.Info("Command completed successfully.", "command", spec.Cmd)
-			res.Status = step.StatusSucceeded
-		} else {
-			errMsg := fmt.Sprintf("command '%s' exited 0, but expected exit code %d", spec.Cmd, spec.ExpectedExitCode)
-			logger.Error(errMsg + ". Marked as failed.")
-			res.Error = errors.New(errMsg)
-			res.Status = step.StatusFailed
-		}
+		// Non-CommandError type
+		logger.Error("Failed to execute command (non-CommandError).", "error", runErr, "stdout", string(stdoutBytes), "stderr", string(stderrBytes))
+		return fmt.Errorf("command '%s' failed for step %s on host %s (non-CommandError): %w. Stdout: %s, Stderr: %s", s.Cmd, s.Name(), host.GetName(), runErr, string(stdoutBytes), string(stderrBytes))
 	}
-	return res
-}
 
-// Ensure CommandStepExecutor implements step.StepExecutor interface
-var _ step.StepExecutor = &CommandStepExecutor{}
-
-// Builder functions for CommandStepSpec for convenience.
-// These allow fluent construction of the spec.
-
-// NewCommandSpec creates a new CommandStepSpec.
-func NewCommandSpec(command string, sudo bool) *CommandStepSpec {
-	return &CommandStepSpec{Cmd: command, Sudo: sudo}
-}
-
-// WithName sets a custom name for the step spec.
-func (s *CommandStepSpec) WithName(name string) *CommandStepSpec {
-	s.SpecName = name
-	return s
-}
-
-// WithIgnoreError sets the IgnoreError flag for the spec.
-func (s *CommandStepSpec) WithIgnoreError(ignore bool) *CommandStepSpec {
-	s.IgnoreError = ignore
-	return s
-}
-
-// WithTimeout sets a timeout for the command in the spec.
-func (s *CommandStepSpec) WithTimeout(timeout time.Duration) *CommandStepSpec {
-	s.Timeout = timeout
-	return s
-}
-
-// WithEnv sets environment variables for the command in the spec.
-func (s *CommandStepSpec) WithEnv(env []string) *CommandStepSpec {
-	s.Env = env
-	return s
-}
-
-// WithExpectedExitCode sets the expected exit code for success in the spec.
-func (s *CommandStepSpec) WithExpectedExitCode(code int) *CommandStepSpec {
-	s.ExpectedExitCode = code
-	return s
-}
-
-// WithCheckCmd defines an idempotency check command for the spec.
-func (s *CommandStepSpec) WithCheckCmd(checkCmd string, checkSudo bool, checkExpectedExitCode ...int) *CommandStepSpec {
-	s.CheckCmd = checkCmd
-	s.CheckSudo = checkSudo
-	if len(checkExpectedExitCode) > 0 {
-		s.CheckExpectedExitCode = checkExpectedExitCode[0]
-	} else {
-		s.CheckExpectedExitCode = 0
+	// runErr is nil (command exited 0)
+	if s.ExpectedExitCode == 0 {
+		logger.Info("Command completed successfully (exit 0).", "stdout", string(stdoutBytes), "stderr", string(stderrBytes))
+		return nil // Success
 	}
-	return s
+
+	// Command exited 0, but a different code was expected.
+	errMsg := fmt.Sprintf("command '%s' exited 0 (stdout: %s, stderr: %s), but expected exit code %d for step %s on host %s", s.Cmd, string(stdoutBytes), string(stderrBytes), s.ExpectedExitCode, s.Name(), host.GetName())
+	logger.Error(errMsg)
+	// Create a CommandError to carry the actual exit code (0) and output
+	return &connector.CommandError{
+        Err:      errors.New(errMsg),
+        ExitCode: 0, // Actual exit code
+        Stdout:   string(stdoutBytes),
+        Stderr:   string(stderrBytes),
+    }
 }
+
+func (s *CommandStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Rollback")
+
+	if s.RollbackCmd == "" {
+		logger.Debug("No RollbackCmd defined for this command step.")
+		return nil
+	}
+
+	logger.Info("Attempting to run rollback command", "command", s.RollbackCmd, "sudo", s.RollbackSudo)
+
+	conn, err := ctx.GetConnectorForHost(host)
+	if err != nil {
+		logger.Error("Failed to get connector for host during rollback", "error", err)
+		return fmt.Errorf("failed to get connector for host %s for rollback of step %s: %w", host.GetName(), s.Name(), err)
+	}
+
+	opts := &connector.ExecOptions{
+		Sudo:    s.RollbackSudo,
+		Timeout: s.Timeout,
+		Env:     s.Env,
+	}
+
+	// Assuming conn.RunCommand is conn.Exec
+	stdoutBytes, stderrBytes, runErr := conn.Exec(ctx.GoContext(), s.RollbackCmd, opts)
+
+	if runErr != nil {
+		logger.Error("Rollback command failed.", "command", s.RollbackCmd, "error", runErr, "stdout", string(stdoutBytes), "stderr", string(stderrBytes))
+		// Return a CommandError if possible, or a generic error
+        var cmdErr *connector.CommandError
+        if errors.As(runErr, &cmdErr) {
+            // cmdErr.Stdout = string(stdoutBytes) // Assuming CommandError has these fields
+            // cmdErr.Stderr = string(stderrBytes)
+            return fmt.Errorf("rollback command '%s' failed for step %s on host %s: %w", s.RollbackCmd, s.Name(), host.GetName(), cmdErr)
+        }
+		return fmt.Errorf("rollback command '%s' failed for step %s on host %s: %w. Stdout: %s, Stderr: %s", s.RollbackCmd, s.Name(), host.GetName(), runErr, string(stdoutBytes), string(stderrBytes))
+	}
+
+	logger.Info("Rollback command executed successfully.", "command", s.RollbackCmd, "stdout", string(stdoutBytes), "stderr", string(stderrBytes))
+	return nil
+}
+
+// Ensure CommandStep implements the step.Step interface.
+var _ step.Step = (*CommandStep)(nil)

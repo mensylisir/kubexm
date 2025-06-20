@@ -1,22 +1,24 @@
 package containerd
 
 import (
-	"context" // Required by runtime.Context
+	"bytes" // For template rendering
 	"fmt"
 	"path/filepath"
 	"strings"
-	"text/template"
-	"time"
+	"text/template" // For template rendering
 
-	"github.com/mensylisir/kubexm/pkg/connector" // Added
-	// "github.com/kubexms/kubexms/pkg/runner" // Not directly needed here, runner methods are on ctx.Host.Runner
+	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/runtime"
-	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	// No longer need spec or time directly
 )
 
 const DefaultContainerdConfigPath = "/etc/containerd/config.toml"
 
+// containerdConfigTemplate is the Go template for generating config.toml.
+// Note: The template provided in the prompt has some subtle differences from typical containerd configs,
+// especially around how mirrors and insecure registries are deeply nested.
+// This template is used as-is from the prompt.
 const containerdConfigTemplate = `
 version = 2
 # Ensure CRI plugin is enabled for Kubernetes. Default is often enabled.
@@ -60,241 +62,196 @@ version = 2
 {{end}}
 `
 
-// ConfigureContainerdStepSpec defines parameters for configuring containerd.
-type ConfigureContainerdStepSpec struct {
+// ConfigureContainerdStep configures containerd by writing its config.toml.
+type ConfigureContainerdStep struct {
 	RegistryMirrors    map[string]string
 	InsecureRegistries []string
-	ConfigFilePath     string // Defaults to DefaultContainerdConfigPath
+	ConfigFilePath     string
 	ExtraTomlContent   string
 	UseSystemdCgroup   bool
-	StepName           string // Optional: for a custom name for this specific step instance
+	StepName           string
 }
 
-// GetName returns the step name.
-func (s *ConfigureContainerdStepSpec) GetName() string {
-	if s.StepName != "" { return s.StepName }
+// NewConfigureContainerdStep creates a new ConfigureContainerdStep.
+func NewConfigureContainerdStep(
+	registryMirrors map[string]string,
+	insecureRegistries []string,
+	configFilePath string,
+	extraTomlContent string,
+	useSystemdCgroup bool,
+	stepName string,
+) step.Step {
+	effectivePath := configFilePath
+	if effectivePath == "" {
+		effectivePath = DefaultContainerdConfigPath
+	}
+	return &ConfigureContainerdStep{
+		RegistryMirrors:    registryMirrors,
+		InsecureRegistries: insecureRegistries,
+		ConfigFilePath:     effectivePath,
+		ExtraTomlContent:   extraTomlContent,
+		UseSystemdCgroup:   useSystemdCgroup,
+		StepName:           stepName,
+	}
+}
+
+func (s *ConfigureContainerdStep) Name() string {
+	if s.StepName != "" {
+		return s.StepName
+	}
 	return "Configure containerd (config.toml)"
 }
 
-// effectiveConfigPath returns the actual config file path to be used.
-func (s *ConfigureContainerdStepSpec) effectiveConfigPath() string {
-	if s.ConfigFilePath == "" { return DefaultContainerdConfigPath }
-	return s.ConfigFilePath
-}
-var _ spec.StepSpec = &ConfigureContainerdStepSpec{}
-
-// ConfigureContainerdStepExecutor implements logic for ConfigureContainerdStepSpec.
-type ConfigureContainerdStepExecutor struct{}
-
-func init() {
-	step.Register(step.GetSpecTypeName(&ConfigureContainerdStepSpec{}), &ConfigureContainerdStepExecutor{})
+func (s *ConfigureContainerdStep) Description() string {
+	return fmt.Sprintf("Configures containerd by writing %s with specified mirrors, insecure registries, and cgroup settings.", s.ConfigFilePath)
 }
 
-// Check determines if containerd config reflects desired state. (Basic check)
-func (e *ConfigureContainerdStepExecutor) Check(ctx runtime.StepContext) (isDone bool, err error) { // Changed to StepContext
-	logger := ctx.GetLogger()
-	currentHost := ctx.GetHost()
-	goCtx := ctx.GoContext()
+func (s *ConfigureContainerdStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Precheck")
 
-	if currentHost == nil {
-		logger.Error("Current host not found in context for Check")
-		return false, fmt.Errorf("current host not found in context for ConfigureContainerdStepExecutor Check")
-	}
-	logger = logger.With("host", currentHost.GetName())
-
-	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
-	if !ok {
-		logger.Error("StepSpec not found in context")
-		return false, fmt.Errorf("StepSpec not found in context for ConfigureContainerdStepExecutor Check method")
-	}
-	spec, ok := rawSpec.(*ConfigureContainerdStepSpec)
-	if !ok {
-		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
-		return false, fmt.Errorf("unexpected StepSpec type for ConfigureContainerdStepExecutor Check method: %T", rawSpec)
-	}
-	logger = logger.With("step", spec.GetName(), "phase", "Check")
-
-
-	conn, err := ctx.GetConnectorForHost(currentHost)
+	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
-		logger.Error("Failed to get connector for host", "error", err)
-		return false, fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err)
+		return false, fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.Name(), err)
 	}
 
-	configPath := spec.effectiveConfigPath()
-	exists, err := conn.Exists(goCtx, configPath) // Use connector
+	exists, err := conn.Exists(ctx.GoContext(), s.ConfigFilePath)
 	if err != nil {
-		logger.Error("Failed to check existence of config file", "path", configPath, "error", err)
-		return false, fmt.Errorf("failed to check existence of %s on host %s: %w", configPath, currentHost.GetName(), err)
+		// If error checking existence, assume not configured and let Run attempt.
+		logger.Warn("Failed to check existence of config file. Assuming not configured.", "path", s.ConfigFilePath, "error", err)
+		return false, nil
 	}
 	if !exists {
-		logger.Debug("Containerd config file does not exist.", "path", configPath)
+		logger.Debug("Containerd config file does not exist.", "path", s.ConfigFilePath)
 		return false, nil
 	}
 
-	if len(spec.RegistryMirrors) == 0 && spec.ExtraTomlContent == "" && !spec.UseSystemdCgroup && len(spec.InsecureRegistries) == 0 {
-		logger.Info("No specific containerd configurations in spec to check beyond existence.", "path", configPath)
-		return true, nil // If file exists and no specific content to check, assume it's "done" or correctly configured by other means.
+	// If no specific content to check, and file exists, assume done.
+	// This means an empty spec (besides path) will consider an existing file as "done".
+	if len(s.RegistryMirrors) == 0 && s.ExtraTomlContent == "" && !s.UseSystemdCgroup && len(s.InsecureRegistries) == 0 {
+		logger.Info("No specific containerd configurations in spec to check beyond existence.", "path", s.ConfigFilePath)
+		return true, nil
 	}
 
-	contentBytes, err := conn.ReadFile(goCtx, configPath) // Use connector
+	contentBytes, err := conn.ReadFile(ctx.GoContext(), s.ConfigFilePath)
 	if err != nil {
-		logger.Warn("Failed to read config for checking current configuration. Assuming not configured.", "path", configPath, "error", err)
-		return false, nil // If cannot read, assume not configured as desired.
+		logger.Warn("Failed to read config for checking current configuration. Assuming not configured.", "path", s.ConfigFilePath, "error", err)
+		return false, nil
 	}
 	content := string(contentBytes)
 
 	allChecksPass := true
-	for registry, mirror := range spec.RegistryMirrors {
+	for registry, mirror := range s.RegistryMirrors {
+		// Basic check, assumes mirror endpoint is unique enough. TOML parsing would be more robust.
 		mirrorEndpoint := fmt.Sprintf(`endpoint = ["%s"]`, mirror)
-		// TOML parsing is tricky with simple string contains. This is a basic check.
-		// A robust check would parse the TOML.
 		mirrorBlock := fmt.Sprintf("[plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"%s\"]", registry)
-		if idx := strings.Index(content, mirrorBlock); idx != -1 {
-			scope := content[idx:]
-			if endIdx := strings.Index(scope, "\n["); endIdx != -1 { // Limit scope to this mirror block
-				scope = scope[:endIdx]
-			}
-			if !strings.Contains(scope, mirrorEndpoint) {
-				logger.Debug("Mirror endpoint not found or incorrect.", "registry", registry, "endpoint", mirrorEndpoint, "path", configPath)
-				allChecksPass = false; break
-			}
-		} else {
-			logger.Debug("Mirror section not found.", "registry", registry, "path", configPath)
-			allChecksPass = false; break
+
+		idx := strings.Index(content, mirrorBlock)
+		if idx == -1 { allChecksPass = false; break }
+
+		scope := content[idx+len(mirrorBlock):] // Start search after the block header
+		nextBlockStart := strings.Index(scope, "\n[")
+		if nextBlockStart != -1 {
+			scope = scope[:nextBlockStart]
 		}
+		if !strings.Contains(scope, mirrorEndpoint) { allChecksPass = false; break }
 	}
-	if !allChecksPass { return false, nil }
+	if !allChecksPass { logger.Debug("Registry mirror check failed."); return false, nil }
 
-	if spec.UseSystemdCgroup && !strings.Contains(content, "SystemdCgroup = true") {
-		logger.Debug("SystemdCgroup = true not found.", "path", configPath)
-		allChecksPass = false
+	if s.UseSystemdCgroup && !strings.Contains(content, "SystemdCgroup = true") {
+		logger.Debug("SystemdCgroup = true not found."); return false, nil
 	}
-	if !allChecksPass { return false, nil }
 
-	if spec.ExtraTomlContent != "" && !strings.Contains(content, strings.TrimSpace(spec.ExtraTomlContent)) {
-	    logger.Debug("Extra TOML content snippet not found.", "path", configPath)
-	    allChecksPass = false
+	// TrimSpace for ExtraTomlContent comparison to handle potential leading/trailing newlines from user input or template.
+	if s.ExtraTomlContent != "" && !strings.Contains(content, strings.TrimSpace(s.ExtraTomlContent)) {
+	    logger.Debug("Extra TOML content snippet not found."); return false, nil
 	}
-    if !allChecksPass { return false, nil }
 
-	for _, insecureReg := range spec.InsecureRegistries {
-		// This check is also basic. A robust check would parse TOML.
-		// [plugins."io.containerd.grpc.v1.cri".registry.configs."registry.example.com".tls]
-		//   insecure_skip_verify = true
+	for _, insecureReg := range s.InsecureRegistries {
 		insecureBlock := fmt.Sprintf("[plugins.\"io.containerd.grpc.v1.cri\".registry.configs.\"%s\".tls]", insecureReg)
 		skipLine := "insecure_skip_verify = true"
-		if idx := strings.Index(content, insecureBlock); idx != -1 {
-			scope := content[idx:]
-			if endIdx := strings.Index(scope, "\n["); endIdx != -1 {
-				scope = scope[:endIdx]
-			}
-			if !strings.Contains(scope, skipLine) {
-				logger.Debug("insecure_skip_verify = true not found for registry.", "registry", insecureReg, "path", configPath)
-				allChecksPass = false; break
-			}
-		} else {
-			logger.Debug("Insecure registry TLS section not found.", "registry", insecureReg, "path", configPath)
-			allChecksPass = false; break
-		}
-	}
 
-	logger.Debug("Containerd config file content checks result.", "path", configPath, "passed", allChecksPass)
-	return allChecksPass, nil
+		idx := strings.Index(content, insecureBlock)
+		if idx == -1 { allChecksPass = false; break }
+
+		scope := content[idx+len(insecureBlock):]
+		nextBlockStart := strings.Index(scope, "\n[")
+		if nextBlockStart != -1 {
+			scope = scope[:nextBlockStart]
+		}
+		if !strings.Contains(scope, skipLine) { allChecksPass = false; break }
+	}
+    if !allChecksPass { logger.Debug("Insecure registry check failed."); return false, nil }
+
+	logger.Info("Containerd config file content checks passed.", "path", s.ConfigFilePath)
+	return true, nil // All checks passed
 }
 
+func (s *ConfigureContainerdStep) Run(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Run")
 
-// Execute generates and writes containerd config.
-func (e *ConfigureContainerdStepExecutor) Execute(ctx runtime.StepContext) *step.Result { // Changed to StepContext
-	startTime := time.Now()
-	logger := ctx.GetLogger()
-	currentHost := ctx.GetHost()
-	goCtx := ctx.GoContext()
-
-	res := step.NewResult(ctx, currentHost, startTime, nil)
-
-	if currentHost == nil {
-		logger.Error("Current host not found in context for Execute")
-		res.Error = fmt.Errorf("current host not found in context for ConfigureContainerdStepExecutor Execute")
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
-	}
-	logger = logger.With("host", currentHost.GetName())
-
-	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
-	if !ok {
-		logger.Error("StepSpec not found in context")
-		res.Error = fmt.Errorf("StepSpec not found in context for ConfigureContainerdStepExecutor Execute method")
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
-	}
-	spec, ok := rawSpec.(*ConfigureContainerdStepSpec)
-	if !ok {
-		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
-		res.Error = fmt.Errorf("unexpected StepSpec type for ConfigureContainerdStepExecutor Execute method: %T", rawSpec)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
-	}
-	logger = logger.With("step", spec.GetName(), "phase", "Execute")
-
-
-	conn, err := ctx.GetConnectorForHost(currentHost)
+	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
-		logger.Error("Failed to get connector for host", "error", err)
-		res.Error = fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+		return fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.Name(), err)
 	}
 
-	configPath := spec.effectiveConfigPath()
-	parentDir := filepath.Dir(configPath)
-
-	// Assuming connector.Mkdir(goCtx, path, perms) and it handles sudo via connector setup or options.
-	// The original used Mkdirp(goCtx, parentDir, "0755", true) -> true for sudo.
-	// Let's assume connector.Mkdir handles recursive and sudo is part of its context/setup.
-	if err := conn.Mkdir(goCtx, parentDir, "0755"); err != nil { // Sudo true is implied if connector is sudo-enabled
-		logger.Error("Failed to create directory for containerd config", "path", parentDir, "error", err)
-		res.Error = fmt.Errorf("failed to create directory %s for containerd config on host %s: %w", parentDir, currentHost.GetName(), err)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+	parentDir := filepath.Dir(s.ConfigFilePath)
+	// Using Exec to ensure directory creation with sudo if needed, as conn.Mkdir might not directly support sudo.
+	mkdirCmd := fmt.Sprintf("mkdir -p %s", parentDir)
+	_, stderrMkdir, errMkdir := conn.Exec(ctx.GoContext(), mkdirCmd, &connector.ExecOptions{Sudo: true})
+	if errMkdir != nil {
+		return fmt.Errorf("failed to create directory %s for containerd config (stderr: %s) on host %s for step %s: %w", parentDir, string(stderrMkdir), host.GetName(), s.Name(), errMkdir)
 	}
 
 	tmpl, err := template.New("containerdConfig").Parse(containerdConfigTemplate)
 	if err != nil {
-		// This is a developer error, not a runtime one usually.
-		logger.Error("Failed to parse internal containerd config template", "error", err)
-		res.Error = fmt.Errorf("dev error: failed to parse internal containerd config template: %w", err)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+		return fmt.Errorf("dev error: failed to parse internal containerd config template for step %s: %w", s.Name(), err)
 	}
 
-	var buf strings.Builder
+	var buf bytes.Buffer
 	templateData := map[string]interface{}{
-		"RegistryMirrors":    spec.RegistryMirrors,
-		"InsecureRegistries": spec.InsecureRegistries,
-		"UseSystemdCgroup":   spec.UseSystemdCgroup,
-		"ExtraTomlContent":   spec.ExtraTomlContent,
+		"RegistryMirrors":    s.RegistryMirrors,
+		"InsecureRegistries": s.InsecureRegistries,
+		"UseSystemdCgroup":   s.UseSystemdCgroup,
+		"ExtraTomlContent":   s.ExtraTomlContent,
 	}
 	if err := tmpl.Execute(&buf, templateData); err != nil {
-		logger.Error("Failed to render containerd config template", "error", err)
-		res.Error = fmt.Errorf("failed to render containerd config template for host %s: %w", currentHost.GetName(), err)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+		return fmt.Errorf("failed to render containerd config template for host %s for step %s: %w", host.GetName(), s.Name(), err)
 	}
 
-	configContent := buf.String()
-	logger.Debug("Generated containerd config", "path", configPath, "content", configContent) // Be careful logging full content if it's sensitive
+	configContentBytes := buf.Bytes()
+	// logger.Debug("Generated containerd config", "content", string(configContentBytes)) // Avoid logging full config unless necessary
 
-	// Assuming connector.WriteFile(goCtx, content []byte, path, permissions string)
-	// Original used WriteFile(goCtx, []byte(configContent), configPath, "0644", true) -> true for sudo.
-	err = conn.WriteFile(goCtx, []byte(configContent), configPath, "0644") // Sudo true is implied if connector is sudo-enabled
+	// Use WriteFile with sudo, assuming it's handled by the connector or a sudo-wrapper if needed.
+	// If connector.WriteFile doesn't handle sudo, would need to write to temp then sudo mv.
+	// For now, assuming WriteFile handles permissions appropriately via connector's setup.
+	err = conn.WriteFile(ctx.GoContext(), configContentBytes, s.ConfigFilePath, "0644")
 	if err != nil {
-		logger.Error("Failed to write containerd config", "path", configPath, "error", err)
-		res.Error = fmt.Errorf("failed to write containerd config to %s on host %s: %w", configPath, currentHost.GetName(), err)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+		return fmt.Errorf("failed to write containerd config to %s on host %s for step %s: %w", s.ConfigFilePath, host.GetName(), s.Name(), err)
 	}
 
-	res.EndTime = time.Now()
-	res.Status = step.StatusSucceeded
-	res.Message = fmt.Sprintf("Containerd configuration written to %s successfully on host %s.", configPath, currentHost.GetName())
-	logger.Info("Step succeeded", "message", res.Message)
-
-	res.Message += " Containerd may need to be restarted for changes to take effect."
-	logger.Info("Containerd may need to be restarted for changes to take effect.", "host", currentHost.GetName(), "configPath", configPath)
-
-	return res
+	logger.Info("Containerd configuration written. Restart containerd service for changes to take effect.", "path", s.ConfigFilePath)
+	return nil
 }
-var _ step.StepExecutor = &ConfigureContainerdStepExecutor{}
+
+func (s *ConfigureContainerdStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Rollback")
+
+	conn, err := ctx.GetConnectorForHost(host)
+	if err != nil {
+		return fmt.Errorf("failed to get connector for host %s for rollback of step %s: %w", host.GetName(), s.Name(), err)
+	}
+
+	logger.Info("Attempting to remove containerd config file for rollback.", "path", s.ConfigFilePath)
+	removeOpts := connector.RemoveOptions{Recursive: false, IgnoreNotExist: true}
+	// Assuming conn.Remove handles sudo if connector is configured for it.
+	if errRemove := conn.Remove(ctx.GoContext(), s.ConfigFilePath, removeOpts); errRemove != nil {
+		logger.Error("Failed to remove containerd config file during rollback.", "path", s.ConfigFilePath, "error", errRemove)
+		// Rollback is best-effort, so not returning error
+	} else {
+		logger.Info("Successfully removed containerd config file if it existed.", "path", s.ConfigFilePath)
+	}
+	return nil
+}
+
+// Ensure ConfigureContainerdStep implements the step.Step interface.
+var _ step.Step = (*ConfigureContainerdStep)(nil)

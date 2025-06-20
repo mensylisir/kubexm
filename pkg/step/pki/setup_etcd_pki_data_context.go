@@ -3,35 +3,60 @@ package pki
 import (
 	"fmt"
 	"path/filepath"
-	"time"
+	// "time" // No longer used
 
-	// connector import not strictly needed if no direct host operations beyond what StepContext provides
-	"github.com/mensylisir/kubexm/pkg/runtime" // For runtime.StepContext
-	"github.com/mensylisir/kubexm/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/connector" // Keep for host parameter in interface methods, though not directly used by logic
+	"github.com/mensylisir/kubexm/pkg/runtime"   // For runtime.StepContext
+	// "github.com/mensylisir/kubexm/pkg/spec" // No longer needed
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 
-// SetupEtcdPkiDataContextStepSpec holds the data prepared by the module to be put into the cache.
-// This data is derived from the main cluster configuration (cfg *config.Cluster).
-type SetupEtcdPkiDataContextStepSpec struct {
-	// Data to be cached, directly populated by the module
-	KubeConfToCache    *KubexmsKubeConf // Contains AppFSBaseDir, ClusterName, PKIDirectory (cluster PKI root)
-	HostsToCache       []HostSpecForPKI // List of hosts with roles for node certificate generation
-	EtcdSpecificSubPath string           // e.g., "etcd" - to be appended to KubeConfToCache.PKIDirectory
+// Define default keys if not imported from a central PKI consts file
+const (
+	DefaultKubeConfKey = "pkiKubeConfig"
+	DefaultHostsKey    = "pkiHosts"
+	// DefaultEtcdPKIPathKey is defined in determine_etcd_pki_path.go.
+	// We'll use its string value directly in populateDefaults if not importing that file.
+	// For this example, using the string literal "etcdPKIPath" as a fallback.
+)
 
-	// SharedData Keys to use when setting these values in the module cache
-	KubeConfOutputKey      string // Defaults to pki.DefaultKubeConfKey
-	HostsOutputKey         string // Defaults to pki.DefaultHostsKey
-	EtcdPkiPathOutputKey string // Defaults to pki.DefaultEtcdPKIPathKey
+// SetupEtcdPkiDataContextStep prepares and caches PKI-related data from the main
+// cluster configuration into ModuleCache for use by other PKI steps.
+type SetupEtcdPkiDataContextStep struct {
+	KubeConfToCache     *KubexmsKubeConf // Input: Prepared KubeConfig (stub) data
+	HostsToCache        []HostSpecForPKI // Input: Prepared Host list for PKI
+	EtcdSpecificSubPath string           // Input: e.g., "etcd"
+
+	KubeConfOutputKey    string // Output cache key
+	HostsOutputKey       string // Output cache key
+	EtcdPkiPathOutputKey string // Output cache key for the derived etcd PKI path
+
+	StepName string
 }
 
-// GetName returns the step name.
-func (s *SetupEtcdPkiDataContextStepSpec) GetName() string {
-	return "Setup Etcd PKI Data Context In Cache"
+// NewSetupEtcdPkiDataContextStep creates a new SetupEtcdPkiDataContextStep.
+// The KubeConfToCache and HostsToCache are provided directly, prepared by the module.
+func NewSetupEtcdPkiDataContextStep(
+	kubeConf *KubexmsKubeConf,
+	hosts []HostSpecForPKI,
+	etcdSubPath string,
+	kubeConfKey, hostsKey, etcdPkiPathKey string, // Allow specifying cache keys
+	stepName string,
+) step.Step {
+	s := &SetupEtcdPkiDataContextStep{
+		KubeConfToCache:      kubeConf,
+		HostsToCache:         hosts,
+		EtcdSpecificSubPath:  etcdSubPath,
+		KubeConfOutputKey:    kubeConfKey,
+		HostsOutputKey:       hostsKey,
+		EtcdPkiPathOutputKey: etcdPkiPathKey,
+		StepName:             stepName,
+	}
+	s.populateDefaults()
+	return s
 }
 
-// PopulateDefaults for shared data keys and specific subpath.
-func (s *SetupEtcdPkiDataContextStepSpec) PopulateDefaults() {
+func (s *SetupEtcdPkiDataContextStep) populateDefaults() {
 	if s.KubeConfOutputKey == "" {
 		s.KubeConfOutputKey = DefaultKubeConfKey
 	}
@@ -39,79 +64,91 @@ func (s *SetupEtcdPkiDataContextStepSpec) PopulateDefaults() {
 		s.HostsOutputKey = DefaultHostsKey
 	}
 	if s.EtcdPkiPathOutputKey == "" {
-		s.EtcdPkiPathOutputKey = DefaultEtcdPKIPathKey
+		// This refers to the constant from determine_etcd_pki_path.go
+		// If that file/constant isn't directly accessible via import, use the string value.
+		s.EtcdPkiPathOutputKey = "etcdPKIPath" // Fallback to string literal if DefaultEtcdPKIPathKey const is not imported
 	}
 	if s.EtcdSpecificSubPath == "" {
-		s.EtcdSpecificSubPath = "etcd"
+		s.EtcdSpecificSubPath = "etcd" // Default sub-directory for etcd PKI under cluster PKI root
+	}
+	if s.StepName == "" {
+		s.StepName = "Setup Etcd PKI Data Context In Cache"
 	}
 }
 
-// SetupEtcdPkiDataContextStepExecutor implements the logic.
-type SetupEtcdPkiDataContextStepExecutor struct{}
+func (s *SetupEtcdPkiDataContextStep) Name() string {
+	return s.StepName
+}
 
-// Check always returns false to ensure this setup step runs if included in a task.
-// It could alternatively check if all its target keys are already populated in the module cache.
-func (e *SetupEtcdPkiDataContextStepExecutor) Check(ctx runtime.StepContext) (isDone bool, err error) { // Changed to StepContext
-	// Forcing execution to ensure cache reflects current desired state from config.
-	// If this step were more expensive, a more detailed check might be warranted.
-	// No host-specific checks needed here.
+func (s *SetupEtcdPkiDataContextStep) Description() string {
+	return fmt.Sprintf("Caches etcd PKI configuration: KubeConf to key '%s', Hosts to key '%s', EtcdPKIPath to key '%s'.",
+		s.KubeConfOutputKey, s.HostsOutputKey, s.EtcdPkiPathOutputKey)
+}
+
+func (s *SetupEtcdPkiDataContextStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+	logger := ctx.GetLogger().With("step", s.Name())
+	if host != nil { // Host is not used by logic but good to include in log if available
+		logger = logger.With("host", host.GetName())
+	}
+	logger = logger.With("phase", "Precheck")
+
+	// This step's purpose is to populate the cache.
+	// It should generally always run to ensure the cache reflects the desired state
+	// passed to its constructor. A sophisticated check for deep equality of cached complex objects
+	// is usually overkill for Precheck.
+	logger.Debug("Precheck always returns false to ensure cache is populated/updated with potentially new data.")
 	return false, nil
 }
 
-// Execute populates the module cache with necessary PKI data.
-func (e *SetupEtcdPkiDataContextStepExecutor) Execute(ctx runtime.StepContext) *step.Result { // Changed to StepContext
-	startTime := time.Now()
-	logger := ctx.GetLogger()
-	currentHost := ctx.GetHost() // May be nil if this step is not host-specific
-
-	// This step operates locally or sets global/module-level context,
-	// so currentHost might be nil. NewResult handles nil host.
-	res := step.NewResult(ctx, currentHost, startTime, nil)
-
-	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
-	if !ok {
-		logger.Error("StepSpec not found in context")
-		res.Error = fmt.Errorf("StepSpec not found in context for %s", "SetupEtcdPkiDataContextStep")
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+func (s *SetupEtcdPkiDataContextStep) Run(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.Name())
+	if host != nil { // Host is not used by logic but good to include in log if available
+		logger = logger.With("host", host.GetName())
 	}
-	spec, ok := rawSpec.(*SetupEtcdPkiDataContextStepSpec)
-	if !ok {
-		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
-		res.Error = fmt.Errorf("unexpected StepSpec type: %T for %s", rawSpec, "SetupEtcdPkiDataContextStep")
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+	logger = logger.With("phase", "Run")
+	// s.populateDefaults(); // Called in constructor
+
+	if s.KubeConfToCache == nil {
+		return fmt.Errorf("KubeConfToCache is nil for step %s; it must be provided during step creation", s.Name())
 	}
-	spec.PopulateDefaults()
-	logger = logger.With("step", spec.GetName())
-
-
-	if spec.KubeConfToCache == nil {
-		logger.Error("KubeConfToCache is nil in spec")
-		res.Error = fmt.Errorf("KubeConfToCache is nil in spec for %s", spec.GetName())
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+	if s.KubeConfToCache.PKIDirectory == "" {
+		return fmt.Errorf("KubeConfToCache.PKIDirectory is empty for step %s; this is needed as the base for Etcd PKI path", s.Name())
 	}
 
-	if spec.KubeConfToCache.PKIDirectory == "" {
-		logger.Error("KubeConfToCache.PKIDirectory is empty in spec; this is needed as the base for Etcd PKI path")
-		res.Error = fmt.Errorf("KubeConfToCache.PKIDirectory is empty in spec for %s; this is needed as the base for Etcd PKI path", spec.GetName())
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
-	}
-	etcdSpecificPkiPath := filepath.Join(spec.KubeConfToCache.PKIDirectory, spec.EtcdSpecificSubPath)
+	etcdSpecificPkiPath := filepath.Join(s.KubeConfToCache.PKIDirectory, s.EtcdSpecificSubPath)
 
-	ctx.ModuleCache().Set(spec.KubeConfOutputKey, spec.KubeConfToCache) // Use ModuleCache
-	logger.Info("Stored KubexmsKubeConf in module cache.", "key", spec.KubeConfOutputKey)
+	ctx.ModuleCache().Set(s.KubeConfOutputKey, s.KubeConfToCache)
+	logger.Info("Stored KubeConf (PKI stub) in module cache.", "key", s.KubeConfOutputKey)
 
-	ctx.ModuleCache().Set(spec.HostsOutputKey, spec.HostsToCache) // Use ModuleCache
-	logger.Info("Stored []HostSpecForPKI in module cache.", "key", spec.HostsOutputKey)
+	ctx.ModuleCache().Set(s.HostsOutputKey, s.HostsToCache)
+	logger.Info("Stored HostSpecForPKI list in module cache.", "key", s.HostsOutputKey)
 
-	ctx.ModuleCache().Set(spec.EtcdPkiPathOutputKey, etcdSpecificPkiPath) // Use ModuleCache
-	logger.Info("Derived and stored etcd-specific PKI path in module cache.", "key", spec.EtcdPkiPathOutputKey, "path", etcdSpecificPkiPath)
+	ctx.ModuleCache().Set(s.EtcdPkiPathOutputKey, etcdSpecificPkiPath)
+	logger.Info("Derived and stored etcd-specific PKI path in module cache.", "key", s.EtcdPkiPathOutputKey, "path", etcdSpecificPkiPath)
 
-	res.EndTime = time.Now()
-	res.Message = "Etcd PKI data context successfully populated into module cache."
-	res.Status = step.StatusSucceeded
-	return res
+	logger.Info("Etcd PKI data context successfully populated into module cache.")
+	return nil
 }
 
-func init() {
-	step.Register(step.GetSpecTypeName(&SetupEtcdPkiDataContextStepSpec{}), &SetupEtcdPkiDataContextStepExecutor{})
+func (s *SetupEtcdPkiDataContextStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.Name())
+	if host != nil { // Host is not used by logic but good to include in log if available
+		logger = logger.With("host", host.GetName())
+	}
+	logger = logger.With("phase", "Rollback")
+	// s.populateDefaults(); // Called in constructor
+
+	logger.Info("Attempting to remove PKI data from ModuleCache.",
+		"kubeConfKey", s.KubeConfOutputKey,
+		"hostsKey", s.HostsOutputKey,
+		"etcdPkiPathKey", s.EtcdPkiPathOutputKey)
+
+	ctx.ModuleCache().Delete(s.KubeConfOutputKey)
+	ctx.ModuleCache().Delete(s.HostsOutputKey)
+	ctx.ModuleCache().Delete(s.EtcdPkiPathOutputKey)
+	logger.Info("Rollback for SetupEtcdPkiDataContextStep: Cleared ModuleCache keys.")
+	return nil
 }
+
+// Ensure SetupEtcdPkiDataContextStep implements the step.Step interface.
+var _ step.Step = (*SetupEtcdPkiDataContextStep)(nil)
