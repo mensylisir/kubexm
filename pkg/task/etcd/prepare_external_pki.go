@@ -1,9 +1,9 @@
 package etcd
 
 import (
-	"github.com/kubexms/kubexms/pkg/config"
-	"github.com/kubexms/kubexms/pkg/spec"
-	"github.com/kubexms/kubexms/pkg/step/pki"
+	"github.com/mensylisir/kubexm/pkg/config"
+	"github.com/mensylisir/kubexm/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/step/pki"
 )
 
 // NewPrepareExternalEtcdPKITask creates a task to prepare local PKI using user-provided external etcd certs.

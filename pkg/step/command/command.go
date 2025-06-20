@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kubexms/kubexms/pkg/connector"
-	"github.com/kubexms/kubexms/pkg/runtime"
-	"github.com/kubexms/kubexms/pkg/spec" // Import the spec package
-	"github.com/kubexms/kubexms/pkg/step"  // Import for step.Result, step.Register, etc.
+	"github.com/mensylisir/kubexm/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/spec" // Import the spec package
+	"github.com/mensylisir/kubexm/pkg/step"  // Import for step.Result, step.Register, etc.
 )
 
 // CommandStepSpec holds the declarative parameters for executing a shell command.

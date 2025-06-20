@@ -1,1 +1,1 @@
-module kubexm
+module github.com/mensylisir/kubexm

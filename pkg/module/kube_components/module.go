@@ -7,11 +7,11 @@ import (
 	"os" // For os.Getenv
 
 	// "github.com/kubexms/kubexms/pkg/config" // No longer used
-	"github.com/kubexms/kubexms/pkg/runtime" // For ClusterRuntime
-	"github.com/kubexms/kubexms/pkg/apis/kubexms/v1alpha1" // For v1alpha1.Cluster
-	"github.com/kubexms/kubexms/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/runtime" // For ClusterRuntime
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // For v1alpha1.Cluster
+	"github.com/mensylisir/kubexm/pkg/spec"
 	// Task constructors will be imported
-	taskKubeComponents "github.com/kubexms/kubexms/pkg/task/kube_components"
+	taskKubeComponents "github.com/mensylisir/kubexm/pkg/task/kube_components"
 )
 
 // normalizeArchFunc ensures consistent architecture naming (amd64, arm64).

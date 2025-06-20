@@ -6,101 +6,124 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kubexms/kubexms/pkg/connector" // Assuming this is the correct path
+	"github.com/mensylisir/kubexm/pkg/connector" // Corrected import path
 )
 
 // Exists checks if a file or directory exists at the given path.
-func (r *Runner) Exists(ctx context.Context, path string) (bool, error) {
-	if r.Conn == nil {
-		return false, fmt.Errorf("runner has no valid connector")
+func (r *defaultRunner) Exists(ctx context.Context, conn connector.Connector, path string) (bool, error) {
+	if conn == nil {
+		return false, fmt.Errorf("connector cannot be nil")
 	}
-	stat, err := r.Conn.Stat(ctx, path)
+	stat, err := conn.Stat(ctx, path)
 	if err != nil {
-		// If Stat itself returns an error (e.g. connection issue), propagate it.
-		// Stat is expected to return IsExist=false and nil error if file simply doesn't exist.
-		return false, err
+		// Check if the error is a "not found" type of error.
+		// This requires the connector's Stat method to return an error type
+		// that can be queried, e.g., by implementing an IsNotExist() bool method
+		// or by checking against os.ErrNotExist if it's wrapped.
+		// For simplicity, if connector.Stat returns any error, we might assume it means
+		// "existence cannot be confirmed" or "does not exist".
+		// A more robust connector would return a specific error type for "not found".
+		// For now, let's assume if Stat returns an error, we can't confirm existence.
+		// If the connector's Stat returns (nil, err) for "not found", this logic needs adjustment.
+		// Based on typical Stat behavior, a "not found" error IS an error.
+		// The prompt's placeholder had: return false, nil for "not found", which implies
+		// conn.Stat should return a FileStat with IsExist=false and err=nil for "not found".
+		if se, ok := err.(interface{ IsNotExist() bool }); ok && se.IsNotExist() {
+			return false, nil
+		}
+		return false, err // Other types of errors (permission denied, connection issue)
 	}
 	return stat.IsExist, nil
 }
 
 // IsDir checks if the given path is a directory.
-func (r *Runner) IsDir(ctx context.Context, path string) (bool, error) {
-	if r.Conn == nil {
-		return false, fmt.Errorf("runner has no valid connector")
+func (r *defaultRunner) IsDir(ctx context.Context, conn connector.Connector, path string) (bool, error) {
+	if conn == nil {
+		return false, fmt.Errorf("connector cannot be nil")
 	}
-	stat, err := r.Conn.Stat(ctx, path)
+	stat, err := conn.Stat(ctx, path)
 	if err != nil {
+		if se, ok := err.(interface{ IsNotExist() bool }); ok && se.IsNotExist() {
+			return false, nil // Path doesn't exist, so not a directory
+		}
 		return false, err
 	}
-	if !stat.IsExist { // If it doesn't exist, it's not a directory
+	if !stat.IsExist { // If it doesn't exist (according to FileStat struct), it's not a directory
 		return false, nil
 	}
 	return stat.IsDir, nil
 }
 
 // ReadFile reads the content of a remote file into a byte slice.
-// This implementation uses 'cat' for simplicity. A more robust solution might
-// use Conn.Fetch to a temporary local file or extend Connector for direct content retrieval.
-func (r *Runner) ReadFile(ctx context.Context, path string) ([]byte, error) {
-	if r.Conn == nil {
-		return nil, fmt.Errorf("runner has no valid connector")
+func (r *defaultRunner) ReadFile(ctx context.Context, conn connector.Connector, path string) ([]byte, error) {
+	if conn == nil {
+		return nil, fmt.Errorf("connector cannot be nil")
 	}
-	// Using Exec to 'cat' the file. Sudo is false by default.
-	// Consider if sudo should be an option here, or if a separate ReadFileSudo is needed.
-	// For now, assuming read doesn't typically require sudo.
-	stdout, stderr, err := r.Conn.Exec(ctx, fmt.Sprintf("cat %s", path), &connector.ExecOptions{Sudo: false})
+	// Check if the connector directly supports ReadFile
+	if extendedConn, ok := conn.(interface {
+		ReadFile(ctx context.Context, path string) ([]byte, error)
+	}); ok {
+		return extendedConn.ReadFile(ctx, path)
+	}
+	// Fallback to using 'cat' if the connector doesn't have a direct ReadFile method
+	cmd := fmt.Sprintf("cat %s", path)
+	stdout, stderr, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: false})
 	if err != nil {
-		// If cat fails (e.g. file not found, permission denied), CommandError will be returned.
-		// We wrap it to provide more context.
 		return stdout, fmt.Errorf("failed to read file '%s' with cat: %w (stderr: %s)", path, err, string(stderr))
 	}
 	return stdout, nil
 }
 
 // WriteFile writes content to a remote file, automatically handling sudo if needed.
-func (r *Runner) WriteFile(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error {
-	if r.Conn == nil {
-		return fmt.Errorf("runner has no valid connector")
+func (r *defaultRunner) WriteFile(ctx context.Context, conn connector.Connector, content []byte, destPath, permissions string, sudo bool) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil")
 	}
-	opts := &connector.FileTransferOptions{
-		Permissions: permissions,
-		Sudo:        sudo,
-		// Owner/Group can be added if needed, though Chown is separate.
+	// Check if the connector directly supports WriteFile or CopyContent
+	if extendedConn, ok := conn.(interface {
+		WriteFile(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error
+	}); ok {
+		return extendedConn.WriteFile(ctx, content, destPath, permissions, sudo)
 	}
-	return r.Conn.CopyContent(ctx, content, destPath, opts)
+	if extendedConnCopy, ok := conn.(interface {
+		CopyContent(ctx context.Context, content []byte, destPath string, options *connector.FileTransferOptions) error
+	}); ok {
+		opts := &connector.FileTransferOptions{
+			Permissions: permissions,
+			Sudo:        sudo,
+		}
+		return extendedConnCopy.CopyContent(ctx, content, destPath, opts)
+	}
+	// Fallback to a command-based approach if direct methods aren't available (more complex)
+	return fmt.Errorf("WriteFile not directly supported by connector and command-based fallback not implemented in this refactor step")
 }
 
 // Mkdirp ensures a directory exists, creating parent directories as needed (like 'mkdir -p').
-// This is an idempotent operation.
-func (r *Runner) Mkdirp(ctx context.Context, path, permissions string, sudo bool) error {
-	if r.Conn == nil {
-		return fmt.Errorf("runner has no valid connector")
+func (r *defaultRunner) Mkdirp(ctx context.Context, conn connector.Connector, path, permissions string, sudo bool) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil")
 	}
-	// The actual 'mkdir -p' command handles idempotency.
 	cmd := fmt.Sprintf("mkdir -p %s", path)
-	_, _, err := r.RunWithOptions(ctx, cmd, &connector.ExecOptions{Sudo: sudo})
+	_, _, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: sudo})
 	if err != nil {
 		return fmt.Errorf("failed to mkdir -p %s: %w", path, err)
 	}
 
 	if permissions != "" {
-		// After creating the directory, set permissions if specified.
-		// This Chmod call needs to handle the path of the created directory.
-		if err := r.Chmod(ctx, path, permissions, sudo); err != nil {
-			return fmt.Errorf("failed to chmod %s on directory %s after mkdirp: %w", permissions, path, err)
+		if errChmod := r.Chmod(ctx, conn, path, permissions, sudo); errChmod != nil {
+			return fmt.Errorf("failed to chmod %s on directory %s after mkdirp: %w", permissions, path, errChmod)
 		}
 	}
 	return nil
 }
 
 // Remove deletes a file or directory (recursively for directories, like 'rm -rf').
-func (r *Runner) Remove(ctx context.Context, path string, sudo bool) error {
-	if r.Conn == nil {
-		return fmt.Errorf("runner has no valid connector")
+func (r *defaultRunner) Remove(ctx context.Context, conn connector.Connector, path string, sudo bool) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil")
 	}
 	cmd := fmt.Sprintf("rm -rf %s", path)
-	// Using RunWithOptions to ensure stderr is captured in case of error.
-	_, stderr, err := r.RunWithOptions(ctx, cmd, &connector.ExecOptions{Sudo: sudo})
+	_, stderr, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: sudo})
 	if err != nil {
 		return fmt.Errorf("failed to remove %s: %w (stderr: %s)", path, err, string(stderr))
 	}
@@ -108,15 +131,15 @@ func (r *Runner) Remove(ctx context.Context, path string, sudo bool) error {
 }
 
 // Chmod changes the permissions of a remote file or directory.
-func (r *Runner) Chmod(ctx context.Context, path, permissions string, sudo bool) error {
-	if r.Conn == nil {
-		return fmt.Errorf("runner has no valid connector")
+func (r *defaultRunner) Chmod(ctx context.Context, conn connector.Connector, path, permissions string, sudo bool) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil")
 	}
 	if permissions == "" {
 		return fmt.Errorf("permissions cannot be empty for Chmod")
 	}
 	cmd := fmt.Sprintf("chmod %s %s", permissions, path)
-	_, stderr, err := r.RunWithOptions(ctx, cmd, &connector.ExecOptions{Sudo: sudo})
+	_, stderr, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: sudo})
 	if err != nil {
 		return fmt.Errorf("failed to chmod %s on %s: %w (stderr: %s)", permissions, path, err, string(stderr))
 	}
@@ -124,64 +147,71 @@ func (r *Runner) Chmod(ctx context.Context, path, permissions string, sudo bool)
 }
 
 // Chown changes the owner and group of a remote file or directory.
-// Chown almost always needs sudo.
-func (r *Runner) Chown(ctx context.Context, path, owner, group string, recursive bool) error {
-	if r.Conn == nil {
-		return fmt.Errorf("runner has no valid connector")
+func (r *defaultRunner) Chown(ctx context.Context, conn connector.Connector, path, owner, group string, recursive bool) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil")
 	}
 	if owner == "" && group == "" {
 		return fmt.Errorf("owner and group cannot both be empty for Chown")
 	}
 
-	ownerGroup := ""
-	if owner != "" {
-		ownerGroup += owner
-	}
+	ownerGroupSpec := owner
 	if group != "" {
 		if owner != "" {
-			ownerGroup += ":"
+			ownerGroupSpec += ":"
 		}
-		ownerGroup += group
+		ownerGroupSpec += group
 	}
 
-	cmdBase := "chown"
+	recursiveFlag := ""
 	if recursive {
-		cmdBase += " -R"
+		recursiveFlag = "-R"
 	}
-	cmd := fmt.Sprintf("%s %s %s", cmdBase, ownerGroup, path)
+	cmd := fmt.Sprintf("chown %s %s %s", recursiveFlag, ownerGroupSpec, path)
 
-	// Chown usually requires sudo. The `sudo` parameter is implicitly true here.
-	// If finer control is needed, a `sudo bool` param can be added to Chown.
-	// Forcing sudo: true for Chown.
-	_, stderr, err := r.RunWithOptions(ctx, cmd, &connector.ExecOptions{Sudo: true})
+	_, stderr, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true}) // Chown usually requires sudo
 	if err != nil {
-		return fmt.Errorf("failed to chown %s to %s (recursive: %v): %w (stderr: %s)", ownerGroup, path, recursive, err, string(stderr))
+		return fmt.Errorf("failed to chown %s to %s (recursive: %v): %w (stderr: %s)", ownerGroupSpec, path, recursive, err, string(stderr))
 	}
 	return nil
 }
 
 // GetSHA256 gets the SHA256 checksum of a remote file for integrity checks.
-func (r *Runner) GetSHA256(ctx context.Context, path string) (string, error) {
-	if r.Conn == nil {
-		return "", fmt.Errorf("runner has no valid connector")
+func (r *defaultRunner) GetSHA256(ctx context.Context, conn connector.Connector, path string) (string, error) {
+	if conn == nil {
+		return "", fmt.Errorf("connector cannot be nil")
 	}
-	// Check for available commands: sha256sum, shasum -a 256
-	// For simplicity, trying sha256sum first.
-	// A more robust solution might use LookPath or try multiple commands.
-	cmd := fmt.Sprintf("sha256sum %s | awk '{print $1}'", path)
-	stdout, stderr, err := r.RunWithOptions(ctx, cmd, &connector.ExecOptions{Sudo: false})
+
+	cmd := fmt.Sprintf("sha256sum %s", path)
+	stdout, stderr, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: false})
 
 	if err != nil {
 		// If sha256sum is not found or fails, try shasum -a 256
-		// This error check is basic. A proper check would be on exit code for "command not found".
-		if cmdErr, ok := err.(*connector.CommandError); ok && (strings.Contains(string(stderr), "not found") || cmdErr.ExitCode == 127) {
-			cmd = fmt.Sprintf("shasum -a 256 %s | awk '{print $1}'", path)
-			stdout, stderr, err = r.RunWithOptions(ctx, cmd, &connector.ExecOptions{Sudo: false})
+		// A more robust check would be on exit code for "command not found" or using LookPath first.
+		var cmdErr *connector.ExitError
+		if融资ok := errors.As(err, &cmdErr);融资ok && (strings.Contains(string(stderr), "not found") || cmdErr.ExitCode() == 127) {
+			cmd = fmt.Sprintf("shasum -a 256 %s", path)
+			stdout, stderr, err = r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: false})
 		}
 	}
 
 	if err != nil {
 		return "", fmt.Errorf("failed to get SHA256 for %s: %w (stderr: %s)", path, err, string(stderr))
 	}
-	return strings.TrimSpace(string(stdout)), nil
+
+	// Output of both sha256sum and shasum is typically "checksum  filename"
+	parts := strings.Fields(string(stdout))
+	if len(parts) > 0 {
+		return parts[0], nil
+	}
+	return "", fmt.Errorf("could not parse SHA256 output: '%s'", string(stdout))
+}
+
+// LookPath searches for an executable in the remote host's PATH.
+func (r *defaultRunner) LookPath(ctx context.Context, conn connector.Connector, file string) (string, error) {
+	if conn == nil {
+		return "", fmt.Errorf("connector cannot be nil")
+	}
+	// Delegate directly to connector's LookPath
+	return conn.LookPath(ctx, file)
 }

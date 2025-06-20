@@ -11,14 +11,14 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/kubexms/kubexms/pkg/cache" // Added cache import
-	"github.com/kubexms/kubexms/pkg/connector"
-	"github.com/kubexms/kubexms/pkg/logger"
-	"github.com/kubexms/kubexms/pkg/runner"
+	"github.com/mensylisir/kubexm/pkg/cache" // Added cache import
+	"github.com/mensylisir/kubexm/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/logger"
+	"github.com/mensylisir/kubexm/pkg/runner"
 	// "github.com/kubexms/kubexms/pkg/config" // This was the old config path, no longer needed.
 	// "{{MODULE_NAME}}/pkg/config" // No longer needed as parser returns v1alpha1.Cluster directly
 	"{{MODULE_NAME}}/pkg/parser" // The new parser
-	"github.com/kubexms/kubexms/pkg/apis/kubexms/v1alpha1"
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 )
 
 // osReadFile is a variable that defaults to os.ReadFile, allowing it to be mocked for tests.

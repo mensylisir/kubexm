@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/kubexms/kubexms/pkg/runtime"
-	"github.com/kubexms/kubexms/pkg/step"
-	"github.com/kubexms/kubexms/pkg/step/spec"
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/spec"
 )
 
 // SetupEtcdPkiDataContextStepSpec holds the data prepared by the module to be put into the cache.

@@ -1,5 +1,7 @@
 package spec
 
+import "github.com/mensylisir/kubexm/pkg/runtime"
+
 // StepSpec is a marker interface for all concrete step specifications.
 // Concrete step specifications are data structures that define the parameters
 // for a particular type of step (e.g., CommandStepSpec, CheckCPUSpec).

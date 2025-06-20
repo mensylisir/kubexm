@@ -2,13 +2,13 @@ package pipeline
 
 import (
 	// "github.com/kubexms/kubexms/pkg/config" // Will be replaced by runtime
-	"github.com/kubexms/kubexms/pkg/runtime" // For ClusterRuntime
-	"github.com/kubexms/kubexms/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/runtime" // For ClusterRuntime
+	"github.com/mensylisir/kubexm/pkg/spec"
 
 	// Import module factories
-	modulePreflight "github.com/kubexms/kubexms/pkg/module/preflight"
-	moduleContainerd "github.com/kubexms/kubexms/pkg/module/containerd"
-	moduleEtcd "github.com/kubexms/kubexms/pkg/module/etcd"
+	modulePreflight "github.com/mensylisir/kubexm/pkg/module/preflight"
+	moduleContainerd "github.com/mensylisir/kubexm/pkg/module/containerd"
+	moduleEtcd "github.com/mensylisir/kubexm/pkg/module/etcd"
 	// moduleKubernetes "github.com/kubexms/kubexms/pkg/module/kubernetes" // Placeholder
 	// moduleNetwork "github.com/kubexms/kubexms/pkg/module/network"    // Placeholder
 	// moduleAddons "github.com/kubexms/kubexms/pkg/module/addons"      // Placeholder

@@ -3,8 +3,8 @@ package pipeline
 import (
 	"testing"
 
-	"github.com/kubexms/kubexms/pkg/config"
-	"github.com/kubexms/kubexms/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/config"
+	"github.com/mensylisir/kubexm/pkg/spec"
 	// No direct need to import specific module or task factories here,
 	// as we are testing the pipeline factory's assembly of module *specs*.
 	// We will check module spec names.

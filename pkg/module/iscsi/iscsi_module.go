@@ -2,10 +2,10 @@ package iscsi
 
 import (
 	// "github.com/kubexms/kubexms/pkg/config" // No longer used
-	"github.com/kubexms/kubexms/pkg/runtime" // For ClusterRuntime
-	"github.com/kubexms/kubexms/pkg/apis/kubexms/v1alpha1" // For v1alpha1.Cluster type
-	"github.com/kubexms/kubexms/pkg/spec"
-	taskISCSI "github.com/kubexms/kubexms/pkg/task/iscsi" // Import for new task constructors
+	"github.com/mensylisir/kubexm/pkg/runtime" // For ClusterRuntime
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // For v1alpha1.Cluster type
+	"github.com/mensylisir/kubexm/pkg/spec"
+	taskISCSI "github.com/mensylisir/kubexm/pkg/task/iscsi" // Import for new task constructors
 	// No direct step imports needed if tasks encapsulate all steps
 )
 

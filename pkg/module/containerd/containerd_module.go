@@ -2,9 +2,9 @@ package containerd
 
 import (
 	// "github.com/kubexms/kubexms/pkg/config" // No longer used directly
-	"github.com/kubexms/kubexms/pkg/runtime" // For ClusterRuntime
-	"github.com/kubexms/kubexms/pkg/spec"
-	taskContainerd "github.com/kubexms/kubexms/pkg/task/containerd"
+	"github.com/mensylisir/kubexm/pkg/runtime" // For ClusterRuntime
+	"github.com/mensylisir/kubexm/pkg/spec"
+	taskContainerd "github.com/mensylisir/kubexm/pkg/task/containerd"
 )
 
 // NewContainerdModule creates a module specification for installing and configuring containerd.

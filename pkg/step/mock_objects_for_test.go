@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kubexms/kubexms/pkg/connector"
-	"github.com/kubexms/kubexms/pkg/logger"
-	"github.com/kubexms/kubexms/pkg/runner"
-	"github.com/kubexms/kubexms/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/logger"
+	"github.com/mensylisir/kubexm/pkg/runner"
+	"github.com/mensylisir/kubexm/pkg/runtime"
 	// "github.com/kubexms/kubexms/pkg/config" // Not directly needed by step tests if runtime.Context is constructed carefully
 )
 
