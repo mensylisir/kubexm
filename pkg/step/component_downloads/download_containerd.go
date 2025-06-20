@@ -5,15 +5,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
+	// "time" // No longer directly used by the step methods for step.Result
 
-	"github.com/mensylisir/kubexm/pkg/connector" // Added
+	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/runtime"
-	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/utils"
+	"github.com/mensylisir/kubexm/pkg/utils" // For DownloadFileWithConnector
 )
 
+// Constants for Task Cache keys
 const (
 	ContainerdDownloadedPathKey     = "ContainerdDownloadedPath"
 	ContainerdDownloadedFileNameKey = "ContainerdDownloadedFileName"
@@ -24,109 +24,140 @@ const (
 	ContainerdDownloadURLKey        = "ContainerdDownloadURL"
 )
 
-type DownloadContainerdStepSpec struct {
-	Version              string `json:"version"`
-	Arch                 string `json:"arch"`
-	Zone                 string `json:"zone,omitempty"`
-	DownloadDir          string `json:"downloadDir,omitempty"` // Expected to be set by module
-	Checksum             string `json:"checksum,omitempty"`
-	OutputFilePathKey    string `json:"outputFilePathKey,omitempty"`
-	OutputFileNameKey    string `json:"outputFileNameKey,omitempty"`
-	OutputComponentTypeKey string `json:"outputComponentTypeKey,omitempty"`
-	OutputVersionKey     string `json:"outputVersionKey,omitempty"`
-	OutputArchKey        string `json:"outputArchKey,omitempty"`
-	OutputChecksumKey    string `json:"outputChecksumKey,omitempty"`
-	OutputURLKey         string `json:"outputURLKey,omitempty"`
+// DownloadContainerdStep downloads the containerd binary.
+type DownloadContainerdStep struct {
+	Version              string
+	Arch                 string
+	Zone                 string // e.g., "cn" for different download sources
+	DownloadDir          string // Directory on the target host to download to
+	Checksum             string // Expected checksum (e.g., "sha256:value")
+	OutputFilePathKey    string
+	OutputFileNameKey    string
+	OutputComponentTypeKey string
+	OutputVersionKey     string
+	OutputArchKey        string
+	OutputChecksumKey    string
+	OutputURLKey         string
+	// Internal fields, not part of constructor args usually
+	determinedArch     string
+	determinedFileName string
+	determinedURL      string
 }
 
-func (s *DownloadContainerdStepSpec) GetName() string {
-	return "Download containerd"
+// NewDownloadContainerdStep creates a new DownloadContainerdStep.
+func NewDownloadContainerdStep(
+	version, arch, zone, downloadDir, checksum string,
+	outputFilePathKey, outputFileNameKey, outputComponentTypeKey,
+	outputVersionKey, outputArchKey, outputChecksumKey, outputURLKey string,
+) step.Step {
+	// Apply default keys if provided keys are empty
+	if outputFilePathKey == "" { outputFilePathKey = ContainerdDownloadedPathKey }
+	if outputFileNameKey == "" { outputFileNameKey = ContainerdDownloadedFileNameKey }
+	if outputComponentTypeKey == "" { outputComponentTypeKey = ContainerdComponentTypeKey }
+	if outputVersionKey == "" { outputVersionKey = ContainerdVersionKey }
+	if outputArchKey == "" { outputArchKey = ContainerdArchKey }
+	if outputChecksumKey == "" { outputChecksumKey = ContainerdChecksumKey }
+	if outputURLKey == "" { outputURLKey = ContainerdDownloadURLKey }
+
+	return &DownloadContainerdStep{
+		Version:              version,
+		Arch:                 arch, // Can be empty, Precheck/Run will determine
+		Zone:                 zone,
+		DownloadDir:          downloadDir,
+		Checksum:             checksum,
+		OutputFilePathKey:    outputFilePathKey,
+		OutputFileNameKey:    outputFileNameKey,
+		OutputComponentTypeKey: outputComponentTypeKey,
+		OutputVersionKey:     outputVersionKey,
+		OutputArchKey:        outputArchKey,
+		OutputChecksumKey:    outputChecksumKey,
+		OutputURLKey:         outputURLKey,
+	}
 }
 
-func (s *DownloadContainerdStepSpec) PopulateDefaults(ctx runtime.StepContext) { // Changed to StepContext
-	if s.Arch == "" {
-		currentHost := ctx.GetHost()
-		if currentHost != nil {
-			// Assuming connector.Host has GetArch() method
-			arch := currentHost.GetArch()
-			if arch == "x86_64" {
-				s.Arch = "amd64"
-			} else if arch == "aarch64" {
-				s.Arch = "arm64"
+func (s *DownloadContainerdStep) populateAndDetermineInternals(ctx runtime.StepContext, host connector.Host) error {
+	if s.determinedArch == "" {
+		archToUse := s.Arch
+		if archToUse == "" {
+			if host != nil {
+				// Assuming connector.Host has GetArch() method
+				hostArch := host.GetArch()
+				if hostArch == "x86_64" {
+					archToUse = "amd64"
+				} else if hostArch == "aarch64" {
+					archToUse = "arm64"
+				} else {
+					archToUse = hostArch // Use as is
+				}
+				ctx.GetLogger().Debug("Host architecture determined", "rawArch", hostArch, "usingArch", archToUse)
 			} else {
-				s.Arch = arch // Use as is if not x86_64 or aarch64
+				return fmt.Errorf("arch is not specified and host is nil, cannot determine architecture for DownloadContainerdStep")
 			}
 		}
+		s.determinedArch = archToUse
 	}
-	// DownloadDir is expected to be set by the module.
-	if s.OutputFilePathKey == "" {s.OutputFilePathKey = ContainerdDownloadedPathKey}
-	if s.OutputFileNameKey == "" {s.OutputFileNameKey = ContainerdDownloadedFileNameKey}
-	if s.OutputComponentTypeKey == "" {s.OutputComponentTypeKey = ContainerdComponentTypeKey}
-	if s.OutputVersionKey == "" {s.OutputVersionKey = ContainerdVersionKey}
-	if s.OutputArchKey == "" {s.OutputArchKey = ContainerdArchKey}
-	if s.OutputChecksumKey == "" {s.OutputChecksumKey = ContainerdChecksumKey}
-	if s.OutputURLKey == "" {s.OutputURLKey = ContainerdDownloadURLKey}
+
+	if s.determinedFileName == "" {
+		s.determinedFileName = fmt.Sprintf("containerd-%s-linux-%s.tar.gz", strings.TrimPrefix(s.Version, "v"), s.determinedArch)
+	}
+
+	if s.determinedURL == "" {
+		versionWithV := s.Version
+		if !strings.HasPrefix(versionWithV, "v") {
+			versionWithV = "v" + versionWithV
+		}
+		effectiveZone := s.Zone
+		// Consider making KKZONE a passed-in config/param from a global/pipeline context if possible,
+		// rather than relying on os.Getenv here, for better testability and explicit configuration.
+		if effectiveZone == "" { effectiveZone = os.Getenv("KKZONE") }
+
+		baseURL := fmt.Sprintf("https://github.com/containerd/containerd/releases/download/%s/%s", versionWithV, s.determinedFileName)
+		if effectiveZone == "cn" {
+			// This specific domain might need to be configurable too.
+			baseURL = fmt.Sprintf("https://download.fastgit.org/containerd/containerd/releases/download/%s/%s", versionWithV, s.determinedFileName)
+			// Or any other mirror: "https://containerd-release.pek3b.qingstor.com/containerd/%s/%s"
+		}
+		s.determinedURL = baseURL
+	}
+	return nil
 }
 
-type DownloadContainerdStepExecutor struct{}
-
-func (e *DownloadContainerdStepExecutor) determineContainerdFileName(version, arch string) string {
-	return fmt.Sprintf("containerd-%s-linux-%s.tar.gz", strings.TrimPrefix(version, "v"), arch)
+func (s *DownloadContainerdStep) Name() string {
+	return "Download Containerd"
 }
 
-func (e *DownloadContainerdStepExecutor) determineContainerdURL(version, arch, fileName, zone string) string {
-	versionWithV := version
-	if !strings.HasPrefix(versionWithV, "v") {
-		versionWithV = "v" + versionWithV
+func (s *DownloadContainerdStep) Description() string {
+	// Use determinedArch if available for a more accurate description after populateInternals
+	archDesc := s.Arch
+	if s.determinedArch != "" {
+		archDesc = s.determinedArch
 	}
-	url := fmt.Sprintf("https://github.com/containerd/containerd/releases/download/%s/%s", versionWithV, fileName)
-	if zone == "cn" {
-		url = fmt.Sprintf("https://containerd-release.pek3b.qingstor.com/containerd/%s/%s", versionWithV, fileName)
-	}
-	return url
+	return fmt.Sprintf("Downloads containerd version %s for %s architecture.", s.Version, archDesc)
 }
 
-func (e *DownloadContainerdStepExecutor) Check(ctx runtime.StepContext) (bool, error) { // Changed to StepContext
-	logger := ctx.GetLogger()
-	currentHost := ctx.GetHost()
-	goCtx := ctx.GoContext()
+func (s *DownloadContainerdStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Precheck")
 
-	if currentHost == nil {
-		logger.Error("Current host not found in context for Check")
-		return false, fmt.Errorf("current host not found in context for DownloadContainerdStep Check")
+	if err := s.populateAndDetermineInternals(ctx, host); err != nil {
+		logger.Error("Failed to populate internal fields", "error", err)
+		return false, err
 	}
-	logger = logger.With("host", currentHost.GetName())
+	if s.DownloadDir == "" {
+		return false, fmt.Errorf("DownloadDir not set for step %s on host %s", s.Name(), host.GetName())
+	}
 
-	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
-	if !ok {
-		logger.Error("StepSpec not found in context")
-		return false, fmt.Errorf("StepSpec not found in context for DownloadContainerdStep Check")
-	}
-	spec, ok := rawSpec.(*DownloadContainerdStepSpec)
-	if !ok {
-		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
-		return false, fmt.Errorf("unexpected StepSpec type for DownloadContainerdStep Check: %T", rawSpec)
-	}
-	spec.PopulateDefaults(ctx) // Pass StepContext
-	logger = logger.With("step", spec.GetName())
-
-	if spec.DownloadDir == "" {
-		logger.Error("DownloadDir not set in spec")
-		return false, fmt.Errorf("DownloadDir not set in spec for %s", spec.GetName())
-	}
-	fileName := e.determineContainerdFileName(spec.Version, spec.Arch)
-	expectedFilePath := filepath.Join(spec.DownloadDir, fileName)
-
-	conn, err := ctx.GetConnectorForHost(currentHost)
+	expectedFilePath := filepath.Join(s.DownloadDir, s.determinedFileName)
+	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
-		logger.Error("Failed to get connector for host", "error", err)
-		return false, fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err)
+		return false, fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.Name(), err)
 	}
 
-	exists, err := conn.Exists(goCtx, expectedFilePath) // Use connector
+	// Assuming connector.Exists(ctx, path) (bool, error)
+	exists, err := conn.Exists(ctx.GoContext(), expectedFilePath)
 	if err != nil {
-		logger.Error("Failed to check existence of file", "path", expectedFilePath, "error", err)
-		return false, fmt.Errorf("failed to check existence of %s: %w", expectedFilePath, err)
+		// Don't consider this a fatal error for precheck, Run should attempt it.
+		logger.Warn("Failed to check existence of target file, proceeding to Run phase.", "path", expectedFilePath, "error", err)
+		return false, nil
 	}
 	if !exists {
 		logger.Info("Containerd archive does not exist.", "path", expectedFilePath)
@@ -134,341 +165,152 @@ func (e *DownloadContainerdStepExecutor) Check(ctx runtime.StepContext) (bool, e
 	}
 	logger.Info("Containerd archive exists.", "path", expectedFilePath)
 
-	if spec.Checksum != "" {
-		checksumValue := spec.Checksum; checksumType := "sha256"
-		if strings.Contains(spec.Checksum, ":") {
-			parts := strings.SplitN(spec.Checksum, ":", 2); checksumType = parts[0]; checksumValue = parts[1]
+	if s.Checksum != "" {
+		checksumValue := s.Checksum
+		checksumType := "sha256" // Default
+		if strings.Contains(s.Checksum, ":") {
+			parts := strings.SplitN(s.Checksum, ":", 2)
+			checksumType = parts[0]
+			checksumValue = parts[1]
 		}
-		logger.Info("Verifying checksum", "type", checksumType, "path", expectedFilePath)
-		actualHash, errC := conn.GetFileChecksum(goCtx, expectedFilePath, checksumType) // Use connector
+		logger.Info("Verifying checksum", "type", checksumType)
+		// Assuming connector.GetFileChecksum(ctx, path, type) (string, error)
+		actualHash, errC := conn.GetFileChecksum(ctx.GoContext(), expectedFilePath, checksumType)
 		if errC != nil {
-			logger.Warn("Failed to get checksum, assuming invalid.", "type", checksumType, "path", expectedFilePath, "error", errC)
-			return false, nil // Treat as not done if checksum fails
+			logger.Warn("Failed to get checksum, assuming invalid and will re-download.", "error", errC)
+			return false, nil
 		}
 		if !strings.EqualFold(actualHash, checksumValue) {
-			logger.Warn("Checksum mismatch.", "type", checksumType, "path", expectedFilePath, "expected", checksumValue, "actual", actualHash)
-			return false, nil // Checksum mismatch, needs re-download or correction
+			logger.Warn("Checksum mismatch. File will be re-downloaded.", "expected", checksumValue, "actual", actualHash)
+			// Consider removing the bad file here if desired:
+			// conn.Remove(ctx.GoContext(), expectedFilePath, connector.RemoveOptions{IgnoreNotExist: true})
+			return false, nil
 		}
-		logger.Info("Checksum verified.", "type", checksumType, "path", expectedFilePath)
+		logger.Info("Checksum verified.")
 	}
 
-	ctx.TaskCache().Set(spec.OutputFilePathKey, expectedFilePath)
-	ctx.TaskCache().Set(spec.OutputFileNameKey, fileName)
-	ctx.TaskCache().Set(spec.OutputComponentTypeKey, "CONTAINER_RUNTIME")
-	ctx.TaskCache().Set(spec.OutputVersionKey, spec.Version)
-	ctx.TaskCache().Set(spec.OutputArchKey, spec.Arch)
-	if spec.Checksum != "" {ctx.TaskCache().Set(spec.OutputChecksumKey, spec.Checksum)}
-	url := e.determineContainerdURL(spec.Version, spec.Arch, fileName, spec.Zone)
-	ctx.TaskCache().Set(spec.OutputURLKey, url)
-	logger.Info("DownloadContainerd check determined step is done, relevant info cached in TaskCache.")
+	// If file exists and checksum matches (or no checksum specified), update cache and return true
+	ctx.TaskCache().Set(s.OutputFilePathKey, expectedFilePath)
+	ctx.TaskCache().Set(s.OutputFileNameKey, s.determinedFileName)
+	ctx.TaskCache().Set(s.OutputComponentTypeKey, "CONTAINER_RUNTIME") // Standardized component type
+	ctx.TaskCache().Set(s.OutputVersionKey, s.Version)
+	ctx.TaskCache().Set(s.OutputArchKey, s.determinedArch)
+	if s.Checksum != "" { ctx.TaskCache().Set(s.OutputChecksumKey, s.Checksum) }
+	ctx.TaskCache().Set(s.OutputURLKey, s.determinedURL)
+	logger.Info("Step is considered done, relevant info cached/updated.")
 	return true, nil
 }
 
-func (e *DownloadContainerdStepExecutor) Execute(ctx runtime.StepContext) *step.Result { // Changed to StepContext
-	startTime := time.Now()
-	logger := ctx.GetLogger()
-	currentHost := ctx.GetHost()
-	goCtx := ctx.GoContext()
+func (s *DownloadContainerdStep) Run(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Run")
 
-	res := step.NewResult(ctx, currentHost, startTime, nil)
-
-	if currentHost == nil {
-		logger.Error("Current host not found in context for Execute")
-		res.Error = fmt.Errorf("current host not found in context for DownloadContainerdStep Execute")
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+	if err := s.populateAndDetermineInternals(ctx, host); err != nil {
+		logger.Error("Failed to populate internal fields", "error", err)
+		return err
 	}
-	logger = logger.With("host", currentHost.GetName())
-
-	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
-	if !ok {
-		logger.Error("StepSpec not found in context")
-		res.Error = fmt.Errorf("StepSpec not found in context for DownloadContainerdStep Execute")
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+	if s.DownloadDir == "" {
+		return fmt.Errorf("DownloadDir not set for step %s on host %s", s.Name(), host.GetName())
 	}
-	spec, ok := rawSpec.(*DownloadContainerdStepSpec)
-	if !ok {
-		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
-		res.Error = fmt.Errorf("unexpected StepSpec type for DownloadContainerdStep Execute: %T", rawSpec)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
-	}
-	spec.PopulateDefaults(ctx) // Pass StepContext
-	logger = logger.With("step", spec.GetName())
 
-
-	if spec.DownloadDir == "" {
-		logger.Error("DownloadDir not set in spec")
-		res.Error = fmt.Errorf("DownloadDir not set in spec for %s", spec.GetName())
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
-	}
-	fileName := e.determineContainerdFileName(spec.Version, spec.Arch)
-	componentType := "CONTAINER_RUNTIME"
-	effectiveZone := spec.Zone
-	if effectiveZone == "" {effectiveZone = os.Getenv("KKZONE")} // KKZONE is a common env var for this
-	url := e.determineContainerdURL(spec.Version, spec.Arch, fileName, effectiveZone)
-
-	logger.Info("Attempting to download containerd", "url", url, "destinationDir", spec.DownloadDir, "fileName", fileName)
-
-	conn, err := ctx.GetConnectorForHost(currentHost)
+	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
-		logger.Error("Failed to get connector for host", "error", err)
-		res.Error = fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+		return fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.Name(), err)
 	}
 
-	// Adapt utils.DownloadFile call
-	// Assuming utils.DownloadFile needs goCtx, logger, connector, url, dir, name, checksum, checksumType
-	// This is a hypothetical signature for an adapted DownloadFile or a new helper.
-	// The original `utils.DownloadFile(ctx, ...)` passed the whole runtime.Context.
-	// For now, assuming `utils.DownloadFile` is adapted or can work with these specific arguments.
-	// If `utils.DownloadFile` is simple (e.g. HTTP GET then save locally on control node), this would be different.
-	// But given `DownloadDir` and the context of other steps, it's likely download *to the target host*.
-	var downloadedPath string
-	var downloadErr error
+    // Ensure download directory exists
+    // Assuming connector.Mkdir(ctx, path, permissions string) error
+    errMkdir := conn.Mkdir(ctx.GoContext(), s.DownloadDir, "0755")
+    if errMkdir != nil {
+        return fmt.Errorf("failed to create download directory %s for step %s on host %s: %w", s.DownloadDir, s.Name(), host.GetName(), errMkdir)
+    }
 
-	// This is a placeholder for how DownloadFile might be called.
-	// The actual implementation of DownloadFile in utils package would need to be checked/adapted.
-	// For this refactoring, we assume it can be made to work with these parameters.
-	// If DownloadFile uses methods from the old runtime.Context not available here, it's a deeper issue.
-	// For now, focusing on what this step *provides* to a download utility.
-	downloadedPath, downloadErr = utils.DownloadFileWithConnector(
-		goCtx,
-		logger, // Pass the contextualized logger
-		conn,   // Pass the connector for the current host
-		url,
-		spec.DownloadDir,
-		fileName,
-		spec.Checksum, // Checksum string, might include type like "sha256:value"
-		// "sha256", // Assuming sha256 if not part of spec.Checksum, DownloadFileWithConnector should parse
-	)
+	destinationPath := filepath.Join(s.DownloadDir, s.determinedFileName)
+	logger.Info("Attempting to download containerd", "url", s.determinedURL, "destination", destinationPath)
 
-	if downloadErr != nil {
-		logger.Error("Failed to download containerd", "error", downloadErr)
-		res.Error = fmt.Errorf("failed to download containerd: %w", downloadErr)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+	// utils.DownloadFileWithConnector(goCtx, logger, conn, url, dir, name, checksumString) (string, error)
+	downloadedPath, dlErr := utils.DownloadFileWithConnector(ctx.GoContext(), logger, conn, s.determinedURL, s.DownloadDir, s.determinedFileName, s.Checksum)
+	if dlErr != nil {
+		return fmt.Errorf("failed to download containerd for step %s on host %s from URL %s: %w", s.Name(), host.GetName(), s.determinedURL, dlErr)
 	}
 	logger.Info("Containerd downloaded successfully.", "path", downloadedPath)
 
-	ctx.TaskCache().Set(spec.OutputFilePathKey, downloadedPath)
-	ctx.TaskCache().Set(spec.OutputFileNameKey, fileName)
-	ctx.TaskCache().Set(spec.OutputComponentTypeKey, componentType)
-	ctx.TaskCache().Set(spec.OutputVersionKey, spec.Version)
-	ctx.TaskCache().Set(spec.OutputArchKey, spec.Arch)
-	if spec.Checksum != "" {ctx.TaskCache().Set(spec.OutputChecksumKey, spec.Checksum)}
-	ctx.TaskCache().Set(spec.OutputURLKey, url)
-
-	res.Status = step.StatusSucceeded
-	res.EndTime = time.Now()
-	return res
-}
-
-func init() {
-		} else if s.Arch == "aarch64" {
-			s.Arch = "arm64"
+	// Verify checksum again after download, if specified. DownloadFileWithConnector might do this already.
+	// If DownloadFileWithConnector already verifies, this is redundant but harmless.
+	if s.Checksum != "" {
+		checksumValue := s.Checksum
+		checksumType := "sha256"
+		if strings.Contains(s.Checksum, ":") {
+			parts := strings.SplitN(s.Checksum, ":", 2)
+			checksumType = parts[0]
+			checksumValue = parts[1]
 		}
-	}
-	// DownloadDir is expected to be set by the module.
-	if s.OutputFilePathKey == "" {s.OutputFilePathKey = ContainerdDownloadedPathKey}
-	if s.OutputFileNameKey == "" {s.OutputFileNameKey = ContainerdDownloadedFileNameKey}
-	if s.OutputComponentTypeKey == "" {s.OutputComponentTypeKey = ContainerdComponentTypeKey}
-	if s.OutputVersionKey == "" {s.OutputVersionKey = ContainerdVersionKey}
-	if s.OutputArchKey == "" {s.OutputArchKey = ContainerdArchKey}
-	if s.OutputChecksumKey == "" {s.OutputChecksumKey = ContainerdChecksumKey}
-	if s.OutputURLKey == "" {s.OutputURLKey = ContainerdDownloadURLKey}
-}
-
-type DownloadContainerdStepExecutor struct{}
-
-func (e *DownloadContainerdStepExecutor) determineContainerdFileName(version, arch string) string {
-	return fmt.Sprintf("containerd-%s-linux-%s.tar.gz", strings.TrimPrefix(version, "v"), arch)
-}
-
-func (e *DownloadContainerdStepExecutor) determineContainerdURL(version, arch, fileName, zone string) string {
-	versionWithV := version
-	if !strings.HasPrefix(versionWithV, "v") {
-		versionWithV = "v" + versionWithV
-	}
-	url := fmt.Sprintf("https://github.com/containerd/containerd/releases/download/%s/%s", versionWithV, fileName)
-	if zone == "cn" {
-		url = fmt.Sprintf("https://containerd-release.pek3b.qingstor.com/containerd/%s/%s", versionWithV, fileName)
-	}
-	return url
-}
-
-func (e *DownloadContainerdStepExecutor) Check(ctx runtime.StepContext) (bool, error) { // Changed to StepContext
-	logger := ctx.GetLogger()
-	currentHost := ctx.GetHost()
-	goCtx := ctx.GoContext()
-
-	if currentHost == nil {
-		logger.Error("Current host not found in context for Check")
-		return false, fmt.Errorf("current host not found in context for DownloadContainerdStep Check")
-	}
-	logger = logger.With("host", currentHost.GetName())
-
-	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
-	if !ok {
-		logger.Error("StepSpec not found in context")
-		return false, fmt.Errorf("StepSpec not found in context for DownloadContainerdStep Check")
-	}
-	spec, ok := rawSpec.(*DownloadContainerdStepSpec)
-	if !ok {
-		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
-		return false, fmt.Errorf("unexpected StepSpec type for DownloadContainerdStep Check: %T", rawSpec)
-	}
-	spec.PopulateDefaults(ctx) // Pass StepContext
-	logger = logger.With("step", spec.GetName())
-
-	if spec.DownloadDir == "" {
-		logger.Error("DownloadDir not set in spec")
-		return false, fmt.Errorf("DownloadDir not set in spec for %s", spec.GetName())
-	}
-	fileName := e.determineContainerdFileName(spec.Version, spec.Arch)
-	expectedFilePath := filepath.Join(spec.DownloadDir, fileName)
-
-	conn, err := ctx.GetConnectorForHost(currentHost)
-	if err != nil {
-		logger.Error("Failed to get connector for host", "error", err)
-		return false, fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err)
-	}
-
-	exists, err := conn.Exists(goCtx, expectedFilePath) // Use connector
-	if err != nil {
-		logger.Error("Failed to check existence of file", "path", expectedFilePath, "error", err)
-		return false, fmt.Errorf("failed to check existence of %s: %w", expectedFilePath, err)
-	}
-	if !exists {
-		logger.Info("Containerd archive does not exist.", "path", expectedFilePath)
-		return false, nil
-	}
-	logger.Info("Containerd archive exists.", "path", expectedFilePath)
-
-	if spec.Checksum != "" {
-		checksumValue := spec.Checksum; checksumType := "sha256"
-		if strings.Contains(spec.Checksum, ":") {
-			parts := strings.SplitN(spec.Checksum, ":", 2); checksumType = parts[0]; checksumValue = parts[1]
-		}
-		logger.Info("Verifying checksum", "type", checksumType, "path", expectedFilePath)
-		actualHash, errC := conn.GetFileChecksum(goCtx, expectedFilePath, checksumType) // Use connector
+		logger.Info("Verifying checksum post-download", "type", checksumType)
+		actualHash, errC := conn.GetFileChecksum(ctx.GoContext(), downloadedPath, checksumType)
 		if errC != nil {
-			logger.Warn("Failed to get checksum, assuming invalid.", "type", checksumType, "path", expectedFilePath, "error", errC)
-			return false, nil // Treat as not done if checksum fails
+			return fmt.Errorf("failed to get checksum for downloaded file %s for step %s on host %s: %w", downloadedPath, s.Name(), host.GetName(), errC)
 		}
 		if !strings.EqualFold(actualHash, checksumValue) {
-			logger.Warn("Checksum mismatch.", "type", checksumType, "path", expectedFilePath, "expected", checksumValue, "actual", actualHash)
-			return false, nil // Checksum mismatch, needs re-download or correction
+			// Consider removing the bad file here
+			// conn.Remove(ctx.GoContext(), downloadedPath, connector.RemoveOptions{IgnoreNotExist: true})
+			return fmt.Errorf("checksum mismatch for downloaded file %s (expected %s, got %s) for step %s on host %s", downloadedPath, checksumValue, actualHash, s.Name(), host.GetName())
 		}
-		logger.Info("Checksum verified.", "type", checksumType, "path", expectedFilePath)
+		logger.Info("Checksum verified post-download.")
 	}
 
-	ctx.TaskCache().Set(spec.OutputFilePathKey, expectedFilePath)
-	ctx.TaskCache().Set(spec.OutputFileNameKey, fileName)
-	ctx.TaskCache().Set(spec.OutputComponentTypeKey, "CONTAINER_RUNTIME")
-	ctx.TaskCache().Set(spec.OutputVersionKey, spec.Version)
-	ctx.TaskCache().Set(spec.OutputArchKey, spec.Arch)
-	if spec.Checksum != "" {ctx.TaskCache().Set(spec.OutputChecksumKey, spec.Checksum)}
-	url := e.determineContainerdURL(spec.Version, spec.Arch, fileName, spec.Zone)
-	ctx.TaskCache().Set(spec.OutputURLKey, url)
-	logger.Info("DownloadContainerd check determined step is done, relevant info cached in TaskCache.")
-	return true, nil
+	ctx.TaskCache().Set(s.OutputFilePathKey, downloadedPath)
+	ctx.TaskCache().Set(s.OutputFileNameKey, s.determinedFileName)
+	ctx.TaskCache().Set(s.OutputComponentTypeKey, "CONTAINER_RUNTIME")
+	ctx.TaskCache().Set(s.OutputVersionKey, s.Version)
+	ctx.TaskCache().Set(s.OutputArchKey, s.determinedArch)
+	if s.Checksum != "" { ctx.TaskCache().Set(s.OutputChecksumKey, s.Checksum) }
+	ctx.TaskCache().Set(s.OutputURLKey, s.determinedURL)
+	return nil
 }
 
-func (e *DownloadContainerdStepExecutor) Execute(ctx runtime.StepContext) *step.Result { // Changed to StepContext
-	startTime := time.Now()
-	logger := ctx.GetLogger()
-	currentHost := ctx.GetHost()
-	goCtx := ctx.GoContext()
+func (s *DownloadContainerdStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Rollback")
 
-	res := step.NewResult(ctx, currentHost, startTime, nil)
-
-	if currentHost == nil {
-		logger.Error("Current host not found in context for Execute")
-		res.Error = fmt.Errorf("current host not found in context for DownloadContainerdStep Execute")
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+	// Populate internals to get determinedFileName, as it might not have run if Precheck was true or Run failed early.
+	if err := s.populateAndDetermineInternals(ctx, host); err != nil {
+		// If we can't even determine filename (e.g. no host for arch), log and return nil as no specific file path to target.
+		logger.Warn("Could not determine file name for rollback, possibly due to missing arch/host info early on. No specific file to remove.", "error", err)
+		return nil
 	}
-	logger = logger.With("host", currentHost.GetName())
 
-	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
-	if !ok {
-		logger.Error("StepSpec not found in context")
-		res.Error = fmt.Errorf("StepSpec not found in context for DownloadContainerdStep Execute")
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+	if s.determinedFileName == "" || s.DownloadDir == "" {
+		logger.Warn("Cannot determine file path for rollback; filename or download dir not set/determined.")
+		return nil
 	}
-	spec, ok := rawSpec.(*DownloadContainerdStepSpec)
-	if !ok {
-		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
-		res.Error = fmt.Errorf("unexpected StepSpec type for DownloadContainerdStep Execute: %T", rawSpec)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
-	}
-	spec.PopulateDefaults(ctx) // Pass StepContext
-	logger = logger.With("step", spec.GetName())
+	downloadedFilePath := filepath.Join(s.DownloadDir, s.determinedFileName)
 
-
-	if spec.DownloadDir == "" {
-		logger.Error("DownloadDir not set in spec")
-		res.Error = fmt.Errorf("DownloadDir not set in spec for %s", spec.GetName())
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
-	}
-	fileName := e.determineContainerdFileName(spec.Version, spec.Arch)
-	componentType := "CONTAINER_RUNTIME"
-	effectiveZone := spec.Zone
-	if effectiveZone == "" {effectiveZone = os.Getenv("KKZONE")} // KKZONE is a common env var for this
-	url := e.determineContainerdURL(spec.Version, spec.Arch, fileName, effectiveZone)
-
-	logger.Info("Attempting to download containerd", "url", url, "destinationDir", spec.DownloadDir, "fileName", fileName)
-
-	conn, err := ctx.GetConnectorForHost(currentHost)
+	logger.Info("Attempting to remove downloaded file for rollback.", "path", downloadedFilePath)
+	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
-		logger.Error("Failed to get connector for host", "error", err)
-		res.Error = fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+		// If connector fails, we can't do much for rollback. Log it.
+		logger.Error("Failed to get connector for host during rollback. File may not be removed.", "error", err)
+		return fmt.Errorf("failed to get connector for host %s for rollback of step %s: %w", host.GetName(), s.Name(), err)
 	}
 
-	// Adapt utils.DownloadFile call
-	// Assuming utils.DownloadFile needs goCtx, logger, connector, url, dir, name, checksum, checksumType
-	// This is a hypothetical signature for an adapted DownloadFile or a new helper.
-	// The original `utils.DownloadFile(ctx, ...)` passed the whole runtime.Context.
-	// For now, assuming `utils.DownloadFile` is adapted or can work with these specific arguments.
-	// If `utils.DownloadFile` is simple (e.g. HTTP GET then save locally on control node), this would be different.
-	// But given `DownloadDir` and the context of other steps, it's likely download *to the target host*.
-	var downloadedPath string
-	var downloadErr error
-
-	// This is a placeholder for how DownloadFile might be called.
-	// The actual implementation of DownloadFile in utils package would need to be checked/adapted.
-	// For this refactoring, we assume it can be made to work with these parameters.
-	// If DownloadFile uses methods from the old runtime.Context not available here, it's a deeper issue.
-	// For now, focusing on what this step *provides* to a download utility.
-	downloadedPath, downloadErr = utils.DownloadFileWithConnector(
-		goCtx,
-		logger, // Pass the contextualized logger
-		conn,   // Pass the connector for the current host
-		url,
-		spec.DownloadDir,
-		fileName,
-		spec.Checksum, // Checksum string, might include type like "sha256:value"
-		// "sha256", // Assuming sha256 if not part of spec.Checksum, DownloadFileWithConnector should parse
-	)
-
-	if downloadErr != nil {
-		logger.Error("Failed to download containerd", "error", downloadErr)
-		res.Error = fmt.Errorf("failed to download containerd: %w", downloadErr)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+	removeOpts := connector.RemoveOptions{ Recursive: false, IgnoreNotExist: true }
+	// Assuming connector.Remove(ctx, path, options RemoveOptions) error
+	if errRemove := conn.Remove(ctx.GoContext(), downloadedFilePath, removeOpts); errRemove != nil {
+		// Log error but don't make rollback fail the whole pipeline usually.
+		logger.Error("Failed to remove file during rollback. It might have already been removed or permissions issue.", "path", downloadedFilePath, "error", errRemove)
+		return fmt.Errorf("failed to remove file %s during rollback for step %s on host %s: %w", downloadedFilePath, s.Name(), host.GetName(), errRemove)
 	}
-	logger.Info("Containerd downloaded successfully.", "path", downloadedPath)
+	logger.Info("Successfully removed downloaded file for rollback (if it existed).", "path", downloadedFilePath)
 
-	ctx.TaskCache().Set(spec.OutputFilePathKey, downloadedPath)
-	ctx.TaskCache().Set(spec.OutputFileNameKey, fileName)
-	ctx.TaskCache().Set(spec.OutputComponentTypeKey, componentType)
-	ctx.TaskCache().Set(spec.OutputVersionKey, spec.Version)
-	ctx.TaskCache().Set(spec.OutputArchKey, spec.Arch)
-	if spec.Checksum != "" {ctx.TaskCache().Set(spec.OutputChecksumKey, spec.Checksum)}
-	ctx.TaskCache().Set(spec.OutputURLKey, url)
-
-	res.Status = step.StatusSucceeded
-	res.EndTime = time.Now()
-	return res
+	// Clean up cache keys
+	ctx.TaskCache().Delete(s.OutputFilePathKey)
+	ctx.TaskCache().Delete(s.OutputFileNameKey)
+	ctx.TaskCache().Delete(s.OutputComponentTypeKey)
+	ctx.TaskCache().Delete(s.OutputVersionKey)
+	ctx.TaskCache().Delete(s.OutputArchKey)
+	ctx.TaskCache().Delete(s.OutputChecksumKey)
+	ctx.TaskCache().Delete(s.OutputURLKey)
+	logger.Debug("Cleaned up task cache keys for rollback.")
+	return nil
 }
 
-func init() {
-	step.Register(step.GetSpecTypeName(&DownloadContainerdStepSpec{}), &DownloadContainerdStepExecutor{})
-}
+// Ensure DownloadContainerdStep implements the step.Step interface.
+var _ step.Step = (*DownloadContainerdStep)(nil)

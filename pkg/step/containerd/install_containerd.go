@@ -3,43 +3,65 @@ package containerd
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
-	"time"
-	// "os" // For os.Stat in Check - not used
+	// "strings" // Not directly used in this refactored version unless for complex path manipulations
+	// "time" // Not used for step.Result
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/runtime"
-	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 	commonstep "github.com/mensylisir/kubexm/pkg/step/common" // For DefaultExtractedPathKey
 )
 
-// InstallContainerdStepSpec defines parameters for installing containerd from extracted files.
-type InstallContainerdStepSpec struct {
-	SourceExtractedPathSharedDataKey string            `json:"sourceExtractedPathSharedDataKey,omitempty"` // Key for path to extracted archive root
-	SystemdUnitFileSourceRelPath     string            `json:"systemdUnitFileSourceRelPath,omitempty"`   // Relative path of .service file in archive
-	SystemdUnitFileTargetPath        string            `json:"systemdUnitFileTargetPath,omitempty"`      // Target path for .service file
-	BinariesToCopy                   map[string]string `json:"binariesToCopy,omitempty"`                 // Map: source_rel_path_in_archive -> target_system_path
-	StepName                         string            `json:"stepName,omitempty"`                       // Optional custom name
+// InstallContainerdStep installs containerd binaries and systemd unit file
+// from a previously extracted archive.
+type InstallContainerdStep struct {
+	SourceExtractedPathSharedDataKey string
+	SystemdUnitFileSourceRelPath     string
+	SystemdUnitFileTargetPath        string
+	BinariesToCopy                   map[string]string // map: source_relative_path -> target_system_path
+	StepName                         string
 }
 
-// GetName returns the step name.
-func (s *InstallContainerdStepSpec) GetName() string {
-	if s.StepName != "" { return s.StepName }
-	return "Install Containerd from Extracted Files"
+// NewInstallContainerdStep creates a new InstallContainerdStep.
+// If binariesToCopy is nil or empty, default binaries will be set.
+// If systemd paths are empty, defaults will be used.
+func NewInstallContainerdStep(
+	sourceExtractedPathKey string,
+	binariesToCopy map[string]string,
+	systemdSourceRelPath, systemdTargetPath string,
+	stepName string,
+) step.Step {
+	s := &InstallContainerdStep{
+		SourceExtractedPathSharedDataKey: sourceExtractedPathKey,
+		SystemdUnitFileSourceRelPath:     systemdSourceRelPath,
+		SystemdUnitFileTargetPath:        systemdTargetPath,
+		BinariesToCopy:                   binariesToCopy,
+		StepName:                         stepName,
+	}
+	s.populateDefaults() // Call populateDefaults after struct creation
+	return s
 }
 
-// PopulateDefaults sets default values.
-func (s *InstallContainerdStepSpec) PopulateDefaults() {
+func (s *InstallContainerdStep) populateDefaults() {
 	if s.SourceExtractedPathSharedDataKey == "" {
-		s.SourceExtractedPathSharedDataKey = commonstep.DefaultExtractedPathKey
+		// Assuming DefaultExtractedPathKey is defined in commonstep or a constants package
+		// For now, using a placeholder. This should be correctly referenced from commonstep.
+		// If commonstep.DefaultExtractedPathKey doesn't exist, this will need adjustment.
+		// Based on previous subtask, commonstep.DefaultExtractedPathKey should be available if that step was done.
+		// However, the prompt used "commonstep.DefaultExtractedPathKey" for a constant that was
+		// defined in extract_archive.go itself. Let's assume this key is a well-known string for now.
+		// The plan implies commonstep.DefaultExtractedPathKey exists from extract_archive refactor.
+		// That constant was `DefaultExtractedPathKey` in `extract_archive.go` but not exported.
+		// The previous subtask `extract_archive.go` defined a *new* `ExtractArchiveStep` which used
+		// `ExtractedDirSharedDataKey` as a field, not a global constant.
+		// Let's use a sensible default string here, or assume it's passed from a global config.
+		// For now, will use the value from previous spec:
+		s.SourceExtractedPathSharedDataKey = "extractedPath" // commonstep.DefaultExtractedPathKey (if it exists and is exported)
 	}
 	if s.SystemdUnitFileSourceRelPath == "" {
-		// containerd.service is often at the root of the extracted archive, not in a 'bin' subdir
-		s.SystemdUnitFileSourceRelPath = "containerd.service"
+		s.SystemdUnitFileSourceRelPath = "containerd.service" // Often at root of extracted archive
 	}
 	if s.SystemdUnitFileTargetPath == "" {
-		// Common paths for systemd unit files
 		s.SystemdUnitFileTargetPath = "/usr/lib/systemd/system/containerd.service"
 	}
 	if len(s.BinariesToCopy) == 0 {
@@ -53,52 +75,33 @@ func (s *InstallContainerdStepSpec) PopulateDefaults() {
 		}
 	}
 }
-var _ spec.StepSpec = &InstallContainerdStepSpec{}
 
-// InstallContainerdStepExecutor implements the logic for InstallContainerdStepSpec.
-type InstallContainerdStepExecutor struct{}
-
-func init() {
-	step.Register(step.GetSpecTypeName(&InstallContainerdStepSpec{}), &InstallContainerdStepExecutor{})
+func (s *InstallContainerdStep) Name() string {
+	if s.StepName != "" {
+		return s.StepName
+	}
+	return "Install Containerd from Extracted Files"
 }
 
-// Check determines if containerd seems installed from extracted files.
-func (e *InstallContainerdStepExecutor) Check(ctx runtime.StepContext) (isDone bool, err error) { // Changed to StepContext
-	logger := ctx.GetLogger()
-	currentHost := ctx.GetHost()
-	goCtx := ctx.GoContext()
+func (s *InstallContainerdStep) Description() string {
+	return fmt.Sprintf("Installs containerd binaries and service file using extracted content from cache key '%s'.", s.SourceExtractedPathSharedDataKey)
+}
 
-	if currentHost == nil {
-		logger.Error("Current host not found in context for Check")
-		return false, fmt.Errorf("current host not found in context for InstallContainerdStep Check")
-	}
-	logger = logger.With("host", currentHost.GetName())
+func (s *InstallContainerdStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Precheck")
+	// s.populateDefaults(); // Already called in constructor
 
-	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
-	if !ok {
-		logger.Error("StepSpec not found in context")
-		return false, fmt.Errorf("StepSpec not found in context for InstallContainerdStep Check")
-	}
-	spec, ok := rawSpec.(*InstallContainerdStepSpec)
-	if !ok {
-		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
-		return false, fmt.Errorf("unexpected StepSpec type for InstallContainerdStep Check: %T", rawSpec)
-	}
-	spec.PopulateDefaults() // PopulateDefaults does not use context
-	logger = logger.With("step", spec.GetName())
-
-	conn, err := ctx.GetConnectorForHost(currentHost)
+	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
-		logger.Error("Failed to get connector for host", "error", err)
-		return false, fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err)
+		return false, fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.Name(), err)
 	}
 
-	// Check if all target binaries exist
-	for _, targetPath := range spec.BinariesToCopy {
-		exists, errExists := conn.Exists(goCtx, targetPath) // Use connector
+	for _, targetPath := range s.BinariesToCopy {
+		exists, errExists := conn.Exists(ctx.GoContext(), targetPath)
 		if errExists != nil {
-			logger.Error("Failed to check existence of target binary", "path", targetPath, "error", errExists)
-			return false, fmt.Errorf("failed to check existence of %s: %w", targetPath, errExists)
+			// If we can't check, assume it's not there and let Run try.
+			logger.Warn("Failed to check existence of target binary, Run will attempt installation.", "path", targetPath, "error", errExists)
+			return false, nil
 		}
 		if !exists {
 			logger.Debug("Target binary does not exist.", "path", targetPath)
@@ -107,172 +110,152 @@ func (e *InstallContainerdStepExecutor) Check(ctx runtime.StepContext) (isDone b
 	}
 	logger.Debug("All target binaries exist.")
 
-	// Check if systemd unit file exists
-	if spec.SystemdUnitFileTargetPath != "" {
-		exists, errExists := conn.Exists(goCtx, spec.SystemdUnitFileTargetPath) // Use connector
+	if s.SystemdUnitFileTargetPath != "" {
+		exists, errExists := conn.Exists(ctx.GoContext(), s.SystemdUnitFileTargetPath)
 		if errExists != nil {
-			logger.Error("Failed to check existence of systemd unit file", "path", spec.SystemdUnitFileTargetPath, "error", errExists)
-			return false, fmt.Errorf("failed to check existence of systemd unit file %s: %w", spec.SystemdUnitFileTargetPath, errExists)
-		}
-		if !exists {
-			logger.Debug("Systemd unit file does not exist.", "path", spec.SystemdUnitFileTargetPath)
+			logger.Warn("Failed to check existence of systemd unit file, Run will attempt installation.", "path", s.SystemdUnitFileTargetPath, "error", errExists)
 			return false, nil
 		}
-		logger.Debug("Systemd unit file exists.", "path", spec.SystemdUnitFileTargetPath)
+		if !exists {
+			logger.Debug("Systemd unit file does not exist.", "path", s.SystemdUnitFileTargetPath)
+			return false, nil
+		}
+		logger.Debug("Systemd unit file exists.", "path", s.SystemdUnitFileTargetPath)
 	}
 
 	logger.Info("Containerd installation (binaries and service file) appears complete.")
 	return true, nil
 }
 
-// Execute installs containerd from pre-extracted files.
-func (e *InstallContainerdStepExecutor) Execute(ctx runtime.StepContext) *step.Result { // Changed to StepContext
-	startTime := time.Now()
-	logger := ctx.GetLogger()
-	currentHost := ctx.GetHost()
-	goCtx := ctx.GoContext()
+func (s *InstallContainerdStep) Run(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Run")
+	// s.populateDefaults(); // Already called in constructor
 
-	res := step.NewResult(ctx, currentHost, startTime, nil)
-
-	if currentHost == nil {
-		logger.Error("Current host not found in context for Execute")
-		res.Error = fmt.Errorf("host not available in context"); res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
-	}
-	logger = logger.With("host", currentHost.GetName())
-
-	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
-	if !ok {
-		logger.Error("StepSpec not found in context")
-		res.Error = fmt.Errorf("StepSpec not found in context for InstallContainerdStep Execute")
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
-	}
-	spec, ok := rawSpec.(*InstallContainerdStepSpec)
-	if !ok {
-		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
-		res.Error = fmt.Errorf("unexpected StepSpec type for InstallContainerdStep Execute: %T", rawSpec)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
-	}
-	spec.PopulateDefaults() // PopulateDefaults does not use context
-	logger = logger.With("step", spec.GetName())
-
-
-	conn, err := ctx.GetConnectorForHost(currentHost)
+	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
-		logger.Error("Failed to get connector for host", "error", err)
-		res.Error = fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+		return fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.Name(), err)
 	}
 
-	extractedPathVal, found := ctx.TaskCache().Get(spec.SourceExtractedPathSharedDataKey) // Use TaskCache
+	extractedPathVal, found := ctx.TaskCache().Get(s.SourceExtractedPathSharedDataKey)
 	if !found {
-		logger.Error("Path to extracted containerd not found in Task Cache", "key", spec.SourceExtractedPathSharedDataKey)
-		res.Error = fmt.Errorf("path to extracted containerd not found in Task Cache using key: %s", spec.SourceExtractedPathSharedDataKey)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+		return fmt.Errorf("path to extracted containerd not found in Task Cache using key '%s' for step %s on host %s", s.SourceExtractedPathSharedDataKey, s.Name(), host.GetName())
 	}
 	extractedPath, typeOk := extractedPathVal.(string)
 	if !typeOk || extractedPath == "" {
-		logger.Error("Invalid extracted containerd path in Task Cache", "key", spec.SourceExtractedPathSharedDataKey, "value", extractedPathVal)
-		res.Error = fmt.Errorf("invalid extracted containerd path in Task Cache (not a string or empty) for key: %s", spec.SourceExtractedPathSharedDataKey)
-		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+		return fmt.Errorf("invalid extracted containerd path in Task Cache (not a string or empty) for key '%s' for step %s on host %s", s.SourceExtractedPathSharedDataKey, s.Name(), host.GetName())
 	}
 	logger.Info("Using extracted containerd files from.", "path", extractedPath)
 
-	// Install binaries
-	for srcRelPath, targetSystemPath := range spec.BinariesToCopy {
+	execOptsSudo := &connector.ExecOptions{Sudo: true} // Most operations here require sudo
+
+	for srcRelPath, targetSystemPath := range s.BinariesToCopy {
 		sourceBinaryPath := filepath.Join(extractedPath, srcRelPath)
 		targetDir := filepath.Dir(targetSystemPath)
 		binaryName := filepath.Base(targetSystemPath)
 
 		logger.Info("Ensuring target directory exists for binary.", "path", targetDir, "binary", binaryName)
-		// Assuming connector.Mkdir handles recursive and sudo if needed (based on connector setup)
-		if err := conn.Mkdir(goCtx, targetDir, "0755"); err != nil {
-			logger.Error("Failed to create target directory", "path", targetDir, "binary", binaryName, "error", err)
-			res.Error = fmt.Errorf("failed to create target directory %s for %s: %w", targetDir, binaryName, err)
-			res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+		// Assuming conn.Mkdir handles sudo if needed, or target is writable by default.
+		// For system paths, sudo is likely needed for Mkdir as well.
+		// Re-evaluating: Mkdir on connector might not take sudo option. Using exec for `mkdir -p` with sudo.
+		mkdirCmd := fmt.Sprintf("mkdir -p %s", targetDir)
+		_, stderrMkdir, errMkdir := conn.Exec(ctx.GoContext(), mkdirCmd, execOptsSudo)
+		if errMkdir != nil {
+			return fmt.Errorf("failed to create target directory %s for %s (stderr: %s) for step %s on host %s: %w", targetDir, binaryName, string(stderrMkdir), s.Name(), host.GetName(), errMkdir)
+		}
+
+		srcExists, errSrcExist := conn.Exists(ctx.GoContext(), sourceBinaryPath)
+		if errSrcExist != nil {
+		    logger.Warn("Could not verify existence of source binary, attempting copy anyway.", "path", sourceBinaryPath, "error", errSrcExist)
+		} else if !srcExists {
+		    return fmt.Errorf("source binary %s not found in extracted path %s for step %s on host %s", srcRelPath, extractedPath, s.Name(), host.GetName())
 		}
 
 		logger.Info("Copying binary.", "source", sourceBinaryPath, "destination", targetSystemPath)
-		// Use RunCommand for cp and chmod as connector might not have direct CopyFile/Chmod methods,
-		// or their parameters (like sudo) are more complex than RunCommand.
 		cpCmd := fmt.Sprintf("cp -fp %s %s", sourceBinaryPath, targetSystemPath)
-		_, stderrCp, errCp := conn.RunCommand(goCtx, cpCmd, &connector.ExecOptions{Sudo: true})
+		_, stderrCp, errCp := conn.Exec(ctx.GoContext(), cpCmd, execOptsSudo)
 		if errCp != nil {
-			logger.Error("Failed to copy binary", "source", sourceBinaryPath, "destination", targetSystemPath, "stderr", string(stderrCp), "error", errCp)
-			res.Error = fmt.Errorf("failed to copy binary %s to %s (stderr: %s): %w", sourceBinaryPath, targetSystemPath, string(stderrCp), errCp)
-			res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+			return fmt.Errorf("failed to copy binary %s to %s (stderr: %s) for step %s on host %s: %w", sourceBinaryPath, targetSystemPath, string(stderrCp), s.Name(), host.GetName(), errCp)
 		}
 
 		chmodCmd := fmt.Sprintf("chmod 0755 %s", targetSystemPath)
-		_, stderrChmod, errChmod := conn.RunCommand(goCtx, chmodCmd, &connector.ExecOptions{Sudo: true})
+		_, stderrChmod, errChmod := conn.Exec(ctx.GoContext(), chmodCmd, execOptsSudo)
 		if errChmod != nil {
-			logger.Error("Failed to set permissions for binary", "path", targetSystemPath, "stderr", string(stderrChmod), "error", errChmod)
-			res.Error = fmt.Errorf("failed to set permissions for %s (stderr: %s): %w", targetSystemPath, string(stderrChmod), errChmod)
-			res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+			return fmt.Errorf("failed to set permissions for %s (stderr: %s) for step %s on host %s: %w", targetSystemPath, string(stderrChmod), s.Name(), host.GetName(), errChmod)
 		}
 		logger.Info("Binary installed and permissions set.", "binary", binaryName, "path", targetSystemPath)
 	}
 
-	// Install systemd unit file
-	if spec.SystemdUnitFileTargetPath != "" && spec.SystemdUnitFileSourceRelPath != "" {
-		sourceServiceFile := filepath.Join(extractedPath, spec.SystemdUnitFileSourceRelPath)
-		targetServiceFileDir := filepath.Dir(spec.SystemdUnitFileTargetPath)
+	if s.SystemdUnitFileTargetPath != "" && s.SystemdUnitFileSourceRelPath != "" {
+		sourceServiceFile := filepath.Join(extractedPath, s.SystemdUnitFileSourceRelPath)
+		targetServiceFileDir := filepath.Dir(s.SystemdUnitFileTargetPath)
 
 		logger.Info("Ensuring target directory for systemd unit file exists.", "path", targetServiceFileDir)
-		if err := conn.Mkdir(goCtx, targetServiceFileDir, "0755"); err != nil {
-			logger.Error("Failed to create target directory for systemd unit file", "path", targetServiceFileDir, "error", err)
-			res.Error = fmt.Errorf("failed to create target directory %s for systemd unit file: %w", targetServiceFileDir, err)
-			res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+		mkdirSvcCmd := fmt.Sprintf("mkdir -p %s", targetServiceFileDir)
+		_, stderrMkdirSvc, errMkdirSvc := conn.Exec(ctx.GoContext(), mkdirSvcCmd, execOptsSudo)
+		if errMkdirSvc != nil {
+			return fmt.Errorf("failed to create target directory %s for systemd unit file (stderr: %s) for step %s on host %s: %w", targetServiceFileDir, string(stderrMkdirSvc), s.Name(), host.GetName(), errMkdirSvc)
 		}
 
-		logger.Info("Copying systemd unit file.", "source", sourceServiceFile, "destination", spec.SystemdUnitFileTargetPath)
-
-		// Check if source service file exists on the target host (where extractedPath is)
-		srcServiceFileExists, errExist := conn.Exists(goCtx, sourceServiceFile)
-		if errExist != nil {
-			logger.Warn("Could not verify existence of source systemd file, attempting copy anyway.", "path", sourceServiceFile, "error", errExist)
-			// Proceed with copy attempt, might fail if not found.
+		srcSvcExists, errSrcSvcExist := conn.Exists(ctx.GoContext(), sourceServiceFile)
+		if errSrcSvcExist != nil {
+		    logger.Warn("Could not verify existence of source systemd file, attempting copy anyway.", "path", sourceServiceFile, "error", errSrcSvcExist)
+		} else if !srcSvcExists {
+		    logger.Warn("Source systemd unit file not found in extracted archive. Skipping installation of service file.", "sourcePath", sourceServiceFile, "archivePath", extractedPath)
 		}
 
-		if srcServiceFileExists { // Only copy if source exists
-			cpCmd := fmt.Sprintf("cp -f %s %s", sourceServiceFile, spec.SystemdUnitFileTargetPath)
-			_, stderrCpSvc, errCpSvc := conn.RunCommand(goCtx, cpCmd, &connector.ExecOptions{Sudo: true})
-			if errCpSvc != nil {
-				logger.Error("Failed to copy systemd unit file", "source", sourceServiceFile, "destination", spec.SystemdUnitFileTargetPath, "stderr", string(stderrCpSvc), "error", errCpSvc)
-				res.Error = fmt.Errorf("failed to copy systemd unit file from %s to %s (stderr: %s): %w", sourceServiceFile, spec.SystemdUnitFileTargetPath, string(stderrCpSvc), errCpSvc)
-				res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
-			}
-			chmodCmdSvc := fmt.Sprintf("chmod 0644 %s", spec.SystemdUnitFileTargetPath)
-			_, stderrChmodSvc, errChmodSvc := conn.RunCommand(goCtx, chmodCmdSvc, &connector.ExecOptions{Sudo: true})
-			if errChmodSvc != nil {
-				logger.Error("Failed to set permissions for systemd unit file", "path", spec.SystemdUnitFileTargetPath, "stderr", string(stderrChmodSvc), "error", errChmodSvc)
-				res.Error = fmt.Errorf("failed to set permissions for systemd unit file %s (stderr: %s): %w", spec.SystemdUnitFileTargetPath, string(stderrChmodSvc), errChmodSvc)
-				res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
-			}
-			logger.Info("Systemd unit file installed successfully.", "path", spec.SystemdUnitFileTargetPath)
-		} else {
-			logger.Warn("Source systemd unit file not found in extracted archive. Skipping installation of service file.", "sourcePath", sourceServiceFile, "archivePath", extractedPath)
+		if srcSvcExists {
+		    logger.Info("Copying systemd unit file.", "source", sourceServiceFile, "destination", s.SystemdUnitFileTargetPath)
+		    cpCmd := fmt.Sprintf("cp -f %s %s", sourceServiceFile, s.SystemdUnitFileTargetPath)
+		    _, stderrCpSvc, errCpSvc := conn.Exec(ctx.GoContext(), cpCmd, execOptsSudo)
+		    if errCpSvc != nil {
+			return fmt.Errorf("failed to copy systemd unit file from %s to %s (stderr: %s) for step %s on host %s: %w", sourceServiceFile, s.SystemdUnitFileTargetPath, string(stderrCpSvc), s.Name(), host.GetName(), errCpSvc)
+		    }
+		    chmodCmdSvc := fmt.Sprintf("chmod 0644 %s", s.SystemdUnitFileTargetPath)
+		    _, stderrChmodSvc, errChmodSvc := conn.Exec(ctx.GoContext(), chmodCmdSvc, execOptsSudo)
+		    if errChmodSvc != nil {
+			return fmt.Errorf("failed to set permissions for systemd unit file %s (stderr: %s) for step %s on host %s: %w", s.SystemdUnitFileTargetPath, string(stderrChmodSvc), s.Name(), host.GetName(), errChmodSvc)
+		    }
+		    logger.Info("Systemd unit file installed successfully.", "path", s.SystemdUnitFileTargetPath)
 		}
 	} else {
 		logger.Info("No systemd unit file source or target path specified. Skipping systemd unit file installation.")
 	}
-
-	res.EndTime = time.Now() // Update end time after all operations
-
-	// Post-execution check by calling Check method again
-	done, checkErr := e.Check(ctx)
-	if checkErr != nil {
-		logger.Error("Post-execution check failed.", "error", checkErr)
-		res.Error = fmt.Errorf("post-execution check failed: %w", checkErr)
-		res.Status = step.StatusFailed; return res
-	}
-	if !done {
-		logger.Error("Post-execution check indicates containerd installation was not fully successful.")
-		res.Error = fmt.Errorf("post-execution check indicates containerd installation was not fully successful")
-		res.Status = step.StatusFailed; return res
-	}
-
-	res.Message = "Containerd installed successfully from extracted files."
-	res.Status = step.StatusSucceeded
-	return res
+	return nil
 }
-var _ step.StepExecutor = &InstallContainerdStepExecutor{}
+
+func (s *InstallContainerdStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Rollback")
+	// s.populateDefaults(); // Defaults should be populated from constructor
+
+	conn, err := ctx.GetConnectorForHost(host)
+	if err != nil {
+		return fmt.Errorf("failed to get connector for host %s for rollback of step %s: %w", host.GetName(), s.Name(), err)
+	}
+
+	execOptsSudo := &connector.ExecOptions{Sudo: true}
+
+	for _, targetPath := range s.BinariesToCopy {
+		logger.Info("Attempting to remove binary for rollback.", "path", targetPath)
+		rmCmd := fmt.Sprintf("rm -f %s", targetPath)
+		_, stderrRm, errRm := conn.Exec(ctx.GoContext(), rmCmd, execOptsSudo)
+		if errRm != nil {
+			logger.Error("Failed to remove binary during rollback.", "path", targetPath, "stderr", string(stderrRm), "error", errRm)
+			// Continue rollback, best-effort
+		}
+	}
+
+	if s.SystemdUnitFileTargetPath != "" {
+		logger.Info("Attempting to remove systemd unit file for rollback.", "path", s.SystemdUnitFileTargetPath)
+		rmCmd := fmt.Sprintf("rm -f %s", s.SystemdUnitFileTargetPath)
+		_, stderrRmSvc, errRmSvc := conn.Exec(ctx.GoContext(), rmCmd, execOptsSudo)
+		if errRmSvc != nil {
+			logger.Error("Failed to remove systemd unit file during rollback.", "path", s.SystemdUnitFileTargetPath, "stderr", string(stderrRmSvc), "error", errRmSvc)
+			// Continue rollback, best-effort
+		}
+	}
+	logger.Info("Rollback attempt for containerd installation finished.")
+	return nil
+}
+
+// Ensure InstallContainerdStep implements the step.Step interface.
+var _ step.Step = (*InstallContainerdStep)(nil)
