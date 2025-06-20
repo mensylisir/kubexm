@@ -109,29 +109,35 @@ func selectHostsForTask(cluster *runtime.ClusterRuntime, t *task.Task) []*runtim
 // If a task fails (and its IgnoreError is false), subsequent tasks in this module are skipped.
 //
 // Parameters:
-//   - goCtx: The parent Go context, for cancellation and deadlines.
-//   - cluster: A pointer to the global *runtime.ClusterRuntime.
+//   - moduleParentCtx: The parent runtime.Context (typically from a Pipeline or global).
 //
 // Returns:
 //   - []*step.Result: An aggregated slice of results from all steps in all tasks executed by this module.
 //   - error: The first critical error encountered (from PreRun or a non-ignored Task failure).
-func (m *Module) Run(goCtx context.Context, cluster *runtime.ClusterRuntime) ([]*step.Result, error) {
-	if cluster == nil || cluster.Logger == nil {
-		// Fallback to global logger if cluster or its logger is nil. This is defensive.
+func (m *Module) Run(moduleParentCtx runtime.Context) ([]*step.Result, error) {
+	if moduleParentCtx.Cluster == nil {
+		// Use moduleParentCtx.Logger if available, otherwise global logger
 		tempLogger := logger.Get().SugaredLogger.With("module", m.Name).Sugar()
-		tempLogger.Errorf("Module.Run called with nil cluster or cluster.Logger. This is unexpected.")
-		// Proceeding with a temporary logger, but this indicates an issue in the calling code.
-		if cluster == nil {
-		    return nil, fmt.Errorf("module '%s' Run called with nil ClusterRuntime", m.Name)
+		if moduleParentCtx.Logger != nil {
+			tempLogger = moduleParentCtx.Logger.SugaredLogger.With("module", m.Name).Sugar()
 		}
-		// If only cluster.Logger was nil, we can assign the tempLogger for the module's operations.
-		// However, this suggests an incomplete ClusterRuntime setup.
-		// For now, let's assume cluster.Logger is always initialized by NewRuntime.
+		tempLogger.Errorf("Module.Run called with a Context that has a nil ClusterRuntime. This is unexpected.")
+		return nil, fmt.Errorf("module '%s' Run called with a Context that has a nil ClusterRuntime", m.Name)
 	}
-	moduleLogger := cluster.Logger.SugaredLogger.With("module", m.Name).Sugar()
+	if moduleParentCtx.Logger == nil {
+		// This case should ideally not happen if moduleParentCtx.Cluster is not nil,
+		// as ClusterRuntime should have a logger. Defensive check.
+		moduleParentCtx.Logger = logger.Get() // Fallback to global logger
+		moduleParentCtx.Logger.Warnf("Module.Run for '%s' received a Context with nil Logger, falling back to global logger.", m.Name)
+	}
+
+	cluster := moduleParentCtx.Cluster
+	goCtx := moduleParentCtx.GoContext // Use GoContext from moduleParentCtx
+
+	moduleLogger := moduleParentCtx.Logger.SugaredLogger.With("module", m.Name).Sugar()
 	moduleLogger.Infof("Starting module execution...")
 
-	if m.IsEnabled != nil && !m.IsEnabled(cluster) { // Pass the whole ClusterRuntime
+	if m.IsEnabled != nil && !m.IsEnabled(cluster) { // Pass cluster (from moduleParentCtx.Cluster)
 		moduleLogger.Infof("Module is disabled by configuration, skipping.")
 		return nil, nil
 	}
@@ -142,13 +148,12 @@ func (m *Module) Run(goCtx context.Context, cluster *runtime.ClusterRuntime) ([]
 	// Execute PreRun hook
 	if m.PreRun != nil {
 		moduleLogger.Debugf("Executing PreRun hook...")
-		if err := m.PreRun(cluster); err != nil {
+		if err := m.PreRun(cluster); err != nil { // Pass cluster
 			moduleLogger.Errorf("PreRun hook failed: %v. Halting module.", err)
 			moduleExecError = fmt.Errorf("module '%s' PreRun hook failed: %w", m.Name, err)
-			// Call PostRun even if PreRun fails
 			if m.PostRun != nil {
 				moduleLogger.Debugf("Executing PostRun hook after PreRun failure...")
-				if postRunErr := m.PostRun(cluster, moduleExecError); postRunErr != nil {
+				if postRunErr := m.PostRun(cluster, moduleExecError); postRunErr != nil { // Pass cluster
 					moduleLogger.Errorf("PostRun hook also failed: %v (this error does not override PreRun error)", postRunErr)
 				}
 			}
@@ -163,40 +168,49 @@ func (m *Module) Run(goCtx context.Context, cluster *runtime.ClusterRuntime) ([]
 			moduleLogger.Warnf("Skipping nil task at index %d in module '%s'.", i, m.Name)
 			continue
 		}
-		taskLogger := moduleLogger.With("task_name", currentTask.Name, "task_index", fmt.Sprintf("%d/%d", i+1, len(m.Tasks))).Sugar()
+
+		// Create a new context for the task. Host is nil here; task.Run will create per-host contexts.
+		taskCtx := runtime.NewHostContext(goCtx, nil, cluster) // Use goCtx from moduleParentCtx
+
+		// Re-scope the logger for this specific task, inheriting from the module's logger.
+		taskCtx.Logger = &logger.Logger{SugaredLogger: moduleParentCtx.Logger.SugaredLogger.With("task_name", currentTask.Name).Sugar()}
+
+		// This task-scoped logger is for messages from the module about the task, not for the task itself.
+		moduleTaskOpLogger := moduleLogger.With("task_name", currentTask.Name, "task_index", fmt.Sprintf("%d/%d", i+1, len(m.Tasks))).Sugar()
 
 		targetHosts := selectHostsForTask(cluster, currentTask)
 		if len(targetHosts) == 0 {
-			taskLogger.Infof("No target hosts for task, skipping.")
+			moduleTaskOpLogger.Infof("No target hosts for task, skipping.")
 			continue
 		}
-		taskLogger.Infof("Running task on %d hosts...", len(targetHosts))
+		moduleTaskOpLogger.Infof("Running task on %d hosts...", len(targetHosts))
 
-		taskStepResults, taskErr := currentTask.Run(goCtx, targetHosts, cluster)
+		// Pass the newly created taskCtx to task.Run
+		taskStepResults, taskErr := currentTask.Run(taskCtx, targetHosts)
 		if taskStepResults != nil {
 			allStepResults = append(allStepResults, taskStepResults...)
 		}
 
 		if taskErr != nil {
-			taskLogger.Errorf("Task execution failed: %v", taskErr)
+			moduleTaskOpLogger.Errorf("Task execution failed: %v", taskErr)
 			if !currentTask.IgnoreError {
-				moduleLogger.Errorf("Task '%s' failed critically. Halting module.", currentTask.Name)
+				moduleLogger.Errorf("Task '%s' failed critically. Halting module.", currentTask.Name) // Use moduleLogger for module-level decision
 				moduleExecError = fmt.Errorf("module '%s' task '%s' failed: %w", m.Name, currentTask.Name, taskErr)
 				break
 			} else {
-				taskLogger.Warnf("Task '%s' failed, but error is ignored. Continuing module.", currentTask.Name)
+				moduleTaskOpLogger.Warnf("Task '%s' failed, but error is ignored. Continuing module.", currentTask.Name)
 			}
 		} else {
-			taskLogger.Successf("Task completed successfully.")
+			moduleTaskOpLogger.Successf("Task completed successfully.")
 		}
 	}
 
 	// Execute PostRun hook
 	if m.PostRun != nil {
 		moduleLogger.Debugf("Executing PostRun hook...")
-		if err := m.PostRun(cluster, moduleExecError); err != nil {
+		if err := m.PostRun(cluster, moduleExecError); err != nil { // Pass cluster
 			moduleLogger.Errorf("PostRun hook failed: %v", err)
-			if moduleExecError == nil { // Only set PostRun error if no prior critical error
+			if moduleExecError == nil {
 				moduleExecError = fmt.Errorf("module '%s' PostRun hook failed: %w", m.Name, err)
 			}
 		} else {
