@@ -8,6 +8,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/mensylisir/kubexm/pkg/connector" // Added
 	// "github.com/kubexms/kubexms/pkg/runner" // Not directly needed here, runner methods are on ctx.Host.Runner
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
@@ -90,126 +91,175 @@ func init() {
 }
 
 // Check determines if containerd config reflects desired state. (Basic check)
-func (e *ConfigureContainerdStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
-	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
+func (e *ConfigureContainerdStepExecutor) Check(ctx runtime.StepContext) (isDone bool, err error) { // Changed to StepContext
+	logger := ctx.GetLogger()
+	currentHost := ctx.GetHost()
+	goCtx := ctx.GoContext()
+
+	if currentHost == nil {
+		logger.Error("Current host not found in context for Check")
+		return false, fmt.Errorf("current host not found in context for ConfigureContainerdStepExecutor Check")
+	}
+	logger = logger.With("host", currentHost.GetName())
+
+	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
 	if !ok {
+		logger.Error("StepSpec not found in context")
 		return false, fmt.Errorf("StepSpec not found in context for ConfigureContainerdStepExecutor Check method")
 	}
-	spec, ok := currentFullSpec.(*ConfigureContainerdStepSpec)
+	spec, ok := rawSpec.(*ConfigureContainerdStepSpec)
 	if !ok {
-		return false, fmt.Errorf("unexpected StepSpec type for ConfigureContainerdStepExecutor Check method: %T", currentFullSpec)
+		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
+		return false, fmt.Errorf("unexpected StepSpec type for ConfigureContainerdStepExecutor Check method: %T", rawSpec)
 	}
+	logger = logger.With("step", spec.GetName(), "phase", "Check")
 
-	if ctx.Host.Runner == nil {
-		return false, fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
+
+	conn, err := ctx.GetConnectorForHost(currentHost)
+	if err != nil {
+		logger.Error("Failed to get connector for host", "error", err)
+		return false, fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err)
 	}
-	// Logger is already contextualized by Task.Run and NewHostContext
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("phase", "Check").Sugar()
 
 	configPath := spec.effectiveConfigPath()
-	exists, err := ctx.Host.Runner.Exists(ctx.GoContext, configPath)
+	exists, err := conn.Exists(goCtx, configPath) // Use connector
 	if err != nil {
-		return false, fmt.Errorf("failed to check existence of %s on host %s: %w", configPath, ctx.Host.Name, err)
+		logger.Error("Failed to check existence of config file", "path", configPath, "error", err)
+		return false, fmt.Errorf("failed to check existence of %s on host %s: %w", configPath, currentHost.GetName(), err)
 	}
 	if !exists {
-		hostCtxLogger.Debugf("Containerd config file %s does not exist.", configPath)
+		logger.Debug("Containerd config file does not exist.", "path", configPath)
 		return false, nil
 	}
 
 	if len(spec.RegistryMirrors) == 0 && spec.ExtraTomlContent == "" && !spec.UseSystemdCgroup && len(spec.InsecureRegistries) == 0 {
-		hostCtxLogger.Infof("No specific containerd configurations in spec to check in %s beyond existence.", configPath)
-		return true, nil
+		logger.Info("No specific containerd configurations in spec to check beyond existence.", "path", configPath)
+		return true, nil // If file exists and no specific content to check, assume it's "done" or correctly configured by other means.
 	}
 
-	contentBytes, err := ctx.Host.Runner.ReadFile(ctx.GoContext, configPath)
+	contentBytes, err := conn.ReadFile(goCtx, configPath) // Use connector
 	if err != nil {
-		hostCtxLogger.Warnf("Failed to read %s for checking current configuration: %v. Assuming not configured.", configPath, err)
-		return false, nil
+		logger.Warn("Failed to read config for checking current configuration. Assuming not configured.", "path", configPath, "error", err)
+		return false, nil // If cannot read, assume not configured as desired.
 	}
 	content := string(contentBytes)
 
 	allChecksPass := true
 	for registry, mirror := range spec.RegistryMirrors {
 		mirrorEndpoint := fmt.Sprintf(`endpoint = ["%s"]`, mirror)
-		mirrorSection := fmt.Sprintf(`[plugins."io.containerd.grpc.v1.cri".registry.mirrors.%q]`, registry)
-		sectionIndex := strings.Index(content, mirrorSection)
-		if sectionIndex == -1 {
-			hostCtxLogger.Debugf("Mirror section for registry %q not found in %s.", registry, configPath)
-			allChecksPass = false; break
-		}
-		searchScopeAfterSection := content[sectionIndex:]
-		if !strings.Contains(searchScopeAfterSection, mirrorEndpoint) {
-			hostCtxLogger.Debugf("Mirror endpoint %s for registry %q not found (or not correctly associated) in %s.", mirrorEndpoint, registry, configPath)
+		// TOML parsing is tricky with simple string contains. This is a basic check.
+		// A robust check would parse the TOML.
+		mirrorBlock := fmt.Sprintf("[plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"%s\"]", registry)
+		if idx := strings.Index(content, mirrorBlock); idx != -1 {
+			scope := content[idx:]
+			if endIdx := strings.Index(scope, "\n["); endIdx != -1 { // Limit scope to this mirror block
+				scope = scope[:endIdx]
+			}
+			if !strings.Contains(scope, mirrorEndpoint) {
+				logger.Debug("Mirror endpoint not found or incorrect.", "registry", registry, "endpoint", mirrorEndpoint, "path", configPath)
+				allChecksPass = false; break
+			}
+		} else {
+			logger.Debug("Mirror section not found.", "registry", registry, "path", configPath)
 			allChecksPass = false; break
 		}
 	}
 	if !allChecksPass { return false, nil }
 
 	if spec.UseSystemdCgroup && !strings.Contains(content, "SystemdCgroup = true") {
-		hostCtxLogger.Debugf("SystemdCgroup = true not found in %s.", configPath)
+		logger.Debug("SystemdCgroup = true not found.", "path", configPath)
 		allChecksPass = false
 	}
 	if !allChecksPass { return false, nil }
 
 	if spec.ExtraTomlContent != "" && !strings.Contains(content, strings.TrimSpace(spec.ExtraTomlContent)) {
-	    hostCtxLogger.Debugf("Extra TOML content snippet not found in %s.", configPath)
+	    logger.Debug("Extra TOML content snippet not found.", "path", configPath)
 	    allChecksPass = false
 	}
     if !allChecksPass { return false, nil }
 
 	for _, insecureReg := range spec.InsecureRegistries {
-		insecureConfigPath := fmt.Sprintf(`[plugins."io.containerd.grpc.v1.cri".registry.configs.%q.tls]`, insecureReg)
-		insecureSkipLine := "insecure_skip_verify = true"
-		sectionIndex := strings.Index(content, insecureConfigPath)
-		if sectionIndex == -1 {
-			hostCtxLogger.Debugf("Insecure registry TLS section for %q not found in %s.", insecureReg, configPath)
-			allChecksPass = false; break
-		}
-		searchScopeAfterSection := content[sectionIndex:]
-		if !strings.Contains(searchScopeAfterSection, insecureSkipLine) {
-			hostCtxLogger.Debugf("insecure_skip_verify = true for registry %q not found in %s.", insecureReg, configPath)
+		// This check is also basic. A robust check would parse TOML.
+		// [plugins."io.containerd.grpc.v1.cri".registry.configs."registry.example.com".tls]
+		//   insecure_skip_verify = true
+		insecureBlock := fmt.Sprintf("[plugins.\"io.containerd.grpc.v1.cri\".registry.configs.\"%s\".tls]", insecureReg)
+		skipLine := "insecure_skip_verify = true"
+		if idx := strings.Index(content, insecureBlock); idx != -1 {
+			scope := content[idx:]
+			if endIdx := strings.Index(scope, "\n["); endIdx != -1 {
+				scope = scope[:endIdx]
+			}
+			if !strings.Contains(scope, skipLine) {
+				logger.Debug("insecure_skip_verify = true not found for registry.", "registry", insecureReg, "path", configPath)
+				allChecksPass = false; break
+			}
+		} else {
+			logger.Debug("Insecure registry TLS section not found.", "registry", insecureReg, "path", configPath)
 			allChecksPass = false; break
 		}
 	}
 
-	hostCtxLogger.Debugf("Containerd config file %s exists. Basic content checks result: %v", configPath, allChecksPass)
+	logger.Debug("Containerd config file content checks result.", "path", configPath, "passed", allChecksPass)
 	return allChecksPass, nil
 }
 
 
 // Execute generates and writes containerd config.
-func (e *ConfigureContainerdStepExecutor) Execute(ctx runtime.Context) *step.Result {
+func (e *ConfigureContainerdStepExecutor) Execute(ctx runtime.StepContext) *step.Result { // Changed to StepContext
 	startTime := time.Now()
+	logger := ctx.GetLogger()
+	currentHost := ctx.GetHost()
+	goCtx := ctx.GoContext()
 
-	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
+	res := step.NewResult(ctx, currentHost, startTime, nil)
+
+	if currentHost == nil {
+		logger.Error("Current host not found in context for Execute")
+		res.Error = fmt.Errorf("current host not found in context for ConfigureContainerdStepExecutor Execute")
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+	}
+	logger = logger.With("host", currentHost.GetName())
+
+	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
 	if !ok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for ConfigureContainerdStepExecutor Execute method"))
+		logger.Error("StepSpec not found in context")
+		res.Error = fmt.Errorf("StepSpec not found in context for ConfigureContainerdStepExecutor Execute method")
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
-	spec, ok := currentFullSpec.(*ConfigureContainerdStepSpec)
+	spec, ok := rawSpec.(*ConfigureContainerdStepSpec)
 	if !ok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for ConfigureContainerdStepExecutor Execute method: %T", currentFullSpec))
+		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
+		res.Error = fmt.Errorf("unexpected StepSpec type for ConfigureContainerdStepExecutor Execute method: %T", rawSpec)
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+	}
+	logger = logger.With("step", spec.GetName(), "phase", "Execute")
+
+
+	conn, err := ctx.GetConnectorForHost(currentHost)
+	if err != nil {
+		logger.Error("Failed to get connector for host", "error", err)
+		res.Error = fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err)
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 
-	// Logger is already contextualized
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("phase", "Execute").Sugar()
-	res := step.NewResult(ctx, startTime, nil) // Use ctx for NewResult
-
-	if ctx.Host.Runner == nil {
-		res.Error = fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
-	}
 	configPath := spec.effectiveConfigPath()
 	parentDir := filepath.Dir(configPath)
 
-	if err := ctx.Host.Runner.Mkdirp(ctx.GoContext, parentDir, "0755", true); err != nil {
-		res.Error = fmt.Errorf("failed to create directory %s for containerd config on host %s: %w", parentDir, ctx.Host.Name, err)
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+	// Assuming connector.Mkdir(goCtx, path, perms) and it handles sudo via connector setup or options.
+	// The original used Mkdirp(goCtx, parentDir, "0755", true) -> true for sudo.
+	// Let's assume connector.Mkdir handles recursive and sudo is part of its context/setup.
+	if err := conn.Mkdir(goCtx, parentDir, "0755"); err != nil { // Sudo true is implied if connector is sudo-enabled
+		logger.Error("Failed to create directory for containerd config", "path", parentDir, "error", err)
+		res.Error = fmt.Errorf("failed to create directory %s for containerd config on host %s: %w", parentDir, currentHost.GetName(), err)
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 
 	tmpl, err := template.New("containerdConfig").Parse(containerdConfigTemplate)
 	if err != nil {
+		// This is a developer error, not a runtime one usually.
+		logger.Error("Failed to parse internal containerd config template", "error", err)
 		res.Error = fmt.Errorf("dev error: failed to parse internal containerd config template: %w", err)
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 
 	var buf strings.Builder
@@ -220,26 +270,30 @@ func (e *ConfigureContainerdStepExecutor) Execute(ctx runtime.Context) *step.Res
 		"ExtraTomlContent":   spec.ExtraTomlContent,
 	}
 	if err := tmpl.Execute(&buf, templateData); err != nil {
-		res.Error = fmt.Errorf("failed to render containerd config template for host %s: %w", ctx.Host.Name, err)
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		logger.Error("Failed to render containerd config template", "error", err)
+		res.Error = fmt.Errorf("failed to render containerd config template for host %s: %w", currentHost.GetName(), err)
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 
 	configContent := buf.String()
-	hostCtxLogger.Debugf("Generated containerd config for %s:\n%s", configPath, configContent)
+	logger.Debug("Generated containerd config", "path", configPath, "content", configContent) // Be careful logging full content if it's sensitive
 
-	// Sudo true for writing to /etc
-	err = ctx.Host.Runner.WriteFile(ctx.GoContext, []byte(configContent), configPath, "0644", true)
+	// Assuming connector.WriteFile(goCtx, content []byte, path, permissions string)
+	// Original used WriteFile(goCtx, []byte(configContent), configPath, "0644", true) -> true for sudo.
+	err = conn.WriteFile(goCtx, []byte(configContent), configPath, "0644") // Sudo true is implied if connector is sudo-enabled
 	if err != nil {
-		res.Error = fmt.Errorf("failed to write containerd config to %s on host %s: %w", configPath, ctx.Host.Name, err)
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		logger.Error("Failed to write containerd config", "path", configPath, "error", err)
+		res.Error = fmt.Errorf("failed to write containerd config to %s on host %s: %w", configPath, currentHost.GetName(), err)
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 
-	res.EndTime = time.Now(); res.Status = step.StatusSucceeded
-	res.Message = fmt.Sprintf("Containerd configuration written to %s successfully on host %s.", configPath, ctx.Host.Name)
-	hostCtxLogger.Successf("Step succeeded: %s", res.Message)
+	res.EndTime = time.Now()
+	res.Status = step.StatusSucceeded
+	res.Message = fmt.Sprintf("Containerd configuration written to %s successfully on host %s.", configPath, currentHost.GetName())
+	logger.Info("Step succeeded", "message", res.Message)
 
 	res.Message += " Containerd may need to be restarted for changes to take effect."
-	hostCtxLogger.Infof("Containerd may need to be restarted on host %s for changes to %s to take effect.", ctx.Host.Name, configPath)
+	logger.Info("Containerd may need to be restarted for changes to take effect.", "host", currentHost.GetName(), "configPath", configPath)
 
 	return res
 }

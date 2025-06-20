@@ -1,7 +1,7 @@
 package preflight
 
 import (
-	"context" // Required by runtime.Context
+	// "context" // No longer directly used if runtime.StepContext is used
 	"fmt"
 	"strings"
 	"time"
@@ -49,73 +49,102 @@ func init() {
 }
 
 // Check determines if sysctl params are already set.
-func (e *SetSystemConfigStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
-	rawSpec, rok := ctx.Step().GetCurrentStepSpec()
-	if !rok {
+func (e *SetSystemConfigStepExecutor) Check(ctx runtime.StepContext) (isDone bool, err error) { // Changed to StepContext
+	logger := ctx.GetLogger()
+	currentHost := ctx.GetHost()
+	goCtx := ctx.GoContext()
+
+	if currentHost == nil {
+		logger.Error("Current host not found in context for Check")
+		return false, fmt.Errorf("current host is required for SetSystemConfigStep Check")
+	}
+	logger = logger.With("host", currentHost.GetName())
+
+	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
+	if !ok {
+		logger.Error("StepSpec not found in context")
 		return false, fmt.Errorf("StepSpec not found in context for SetSystemConfigStepExecutor Check method")
 	}
 	spec, ok := rawSpec.(*SetSystemConfigStepSpec)
 	if !ok {
+		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
 		return false, fmt.Errorf("unexpected spec type %T for SetSystemConfigStepExecutor Check method", rawSpec)
 	}
+	logger = logger.With("step", spec.GetName())
 
 	if len(spec.Params) == 0 {
-		if ctx.Logger != nil {
-			ctx.Logger.Debugf("No sysctl params specified for step '%s' on host %s, considering done.", spec.GetName(), ctx.Host.Name)
-		}
+		logger.Debug("No sysctl params specified, considering done.")
 		return true, nil
 	}
-	if ctx.Host.Runner == nil {
-		return false, fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
+
+	conn, err := ctx.GetConnectorForHost(currentHost)
+	if err != nil {
+		logger.Error("Failed to get connector for host", "error", err)
+		return false, fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err)
 	}
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
 	for key, expectedValue := range spec.Params {
 		cmd := fmt.Sprintf("sysctl -n %s", key)
-		// Sudo not usually needed for reading sysctl values.
-		stdoutBytes, stderrBytes, execErr := ctx.Host.Runner.RunWithOptions(ctx.GoContext, cmd, &connector.ExecOptions{Sudo: false})
+		stdoutBytes, stderrBytes, execErr := conn.RunCommand(goCtx, cmd, &connector.ExecOptions{Sudo: false}) // Use connector
 		if execErr != nil {
-			hostCtxLogger.Warnf("Failed to read current value of sysctl key '%s': %v (stderr: %s). Assuming not set as expected.", key, execErr, string(stderrBytes))
-			// If we can't read the current value, we can't confirm it's correctly set.
-			// So, it's not "done", and an error occurred during the check.
-			return false, fmt.Errorf("failed to read current value of sysctl key '%s' on host %s: %w (stderr: %s)", key, ctx.Host.Name, execErr, string(stderrBytes))
+			logger.Warn("Failed to read current value of sysctl key. Assuming not set as expected.", "key", key, "error", execErr, "stderr", string(stderrBytes))
+			return false, fmt.Errorf("failed to read current value of sysctl key '%s' on host %s: %w (stderr: %s)", key, currentHost.GetName(), execErr, string(stderrBytes))
 		}
 		currentValue := strings.TrimSpace(string(stdoutBytes))
 		if currentValue != expectedValue {
-			hostCtxLogger.Debugf("Check: Sysctl param %s is currently %q, want %q.", key, currentValue, expectedValue)
-			return false, nil // Mismatch found, not done.
+			logger.Debug("Sysctl param mismatch.", "key", key, "current", currentValue, "expected", expectedValue)
+			return false, nil
 		}
-		hostCtxLogger.Debugf("Check: Sysctl param %s is already %q.", key, currentValue)
+		logger.Debug("Sysctl param matches.", "key", key, "value", currentValue)
 	}
-	hostCtxLogger.Infof("All specified sysctl parameters already match desired values.")
-	return true, nil // All params match
+	logger.Info("All specified sysctl parameters already match desired values.")
+	return true, nil
 }
 
 // Execute applies sysctl params.
-func (e *SetSystemConfigStepExecutor) Execute(ctx runtime.Context) *step.Result {
+func (e *SetSystemConfigStepExecutor) Execute(ctx runtime.StepContext) *step.Result { // Changed to StepContext
 	startTime := time.Now()
-	rawSpec, rok := ctx.Step().GetCurrentStepSpec()
-	if !rok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for SetSystemConfigStepExecutor Execute method"))
+	logger := ctx.GetLogger()
+	currentHost := ctx.GetHost()
+	goCtx := ctx.GoContext()
+
+	res := step.NewResult(ctx, currentHost, startTime, nil)
+
+	if currentHost == nil {
+		logger.Error("Current host not found in context for Execute")
+		res.Error = fmt.Errorf("current host is required for SetSystemConfigStep Execute")
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+	}
+	logger = logger.With("host", currentHost.GetName())
+
+	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
+	if !ok {
+		logger.Error("StepSpec not found in context")
+		res.Error = fmt.Errorf("StepSpec not found in context for SetSystemConfigStepExecutor Execute method")
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 	spec, ok := rawSpec.(*SetSystemConfigStepSpec)
 	if !ok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected spec type %T for SetSystemConfigStepExecutor Execute method", rawSpec))
+		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
+		res.Error = fmt.Errorf("unexpected spec type %T for SetSystemConfigStepExecutor Execute method", rawSpec)
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
+	logger = logger.With("step", spec.GetName())
 
-	res := step.NewResult(ctx, startTime, nil) // Use new NewResult signature
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 	var errorsCollected []string
 	var appliedParams []string
 
 	if len(spec.Params) == 0 {
 		res.Status = step.StatusSucceeded; res.Message = "No sysctl parameters to set."
-		hostCtxLogger.Infof(res.Message)
+		logger.Info(res.Message)
 		res.EndTime = time.Now(); return res
 	}
-	if ctx.Host.Runner == nil {
-		res.Error = fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
-		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+
+	conn, errConn := ctx.GetConnectorForHost(currentHost)
+	if errConn != nil {
+		logger.Error("Failed to get connector for host", "error", errConn)
+		res.Error = fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), errConn)
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 
 	var configFileContent strings.Builder
@@ -126,58 +155,58 @@ func (e *SetSystemConfigStepExecutor) Execute(ctx runtime.Context) *step.Result 
 	}
 
 	filePath := spec.effectiveConfigFilePath()
-	hostCtxLogger.Infof("Writing sysctl parameters to %s: %s", filePath, strings.Join(appliedParams, ", "))
+	logger.Info("Writing sysctl parameters.", "file", filePath, "params", strings.Join(appliedParams, ", "))
 
-	// Sudo is required to write to system directories like /etc/sysctl.d/.
-	err := ctx.Host.Runner.WriteFile(ctx.GoContext, []byte(configFileContent.String()), filePath, "0644", true)
-	if err != nil {
-		errMsg := fmt.Sprintf("failed to write sysctl config file %s: %v", filePath, err)
+	errWrite := conn.WriteFile(goCtx, []byte(configFileContent.String()), filePath, "0644") // Sudo handled by connector if path needs it
+	if errWrite != nil {
+		errMsg := fmt.Sprintf("failed to write sysctl config file %s: %v", filePath, errWrite)
+		logger.Error(errMsg)
 		errorsCollected = append(errorsCollected, errMsg)
 	} else {
-		hostCtxLogger.Successf("Successfully wrote sysctl parameters to %s.", filePath)
+		logger.Info("Successfully wrote sysctl parameters.", "file", filePath)
 		if spec.shouldReload() {
 			reloadCmd := ""
 			if strings.HasPrefix(filePath, "/etc/sysctl.d/") || strings.HasPrefix(filePath, "/usr/lib/sysctl.d/") || filePath == "/run/sysctl.d/" {
 				reloadCmd = "sysctl --system"
 			} else if filePath == "/etc/sysctl.conf" {
-			    reloadCmd = "sysctl -p /etc/sysctl.conf" // or just "sysctl -p"
+			    reloadCmd = "sysctl -p /etc/sysctl.conf"
 			} else {
 				reloadCmd = fmt.Sprintf("sysctl -p %s", filePath)
 			}
 
-			hostCtxLogger.Infof("Reloading sysctl configuration using: '%s'", reloadCmd)
-			// Sudo is required for `sysctl -p` or `sysctl --system`.
-			_, stderrReload, errReload := ctx.Host.Runner.RunWithOptions(ctx.GoContext, reloadCmd, &connector.ExecOptions{Sudo: true})
+			logger.Info("Reloading sysctl configuration.", "command", reloadCmd)
+			_, stderrReload, errReload := conn.RunCommand(goCtx, reloadCmd, &connector.ExecOptions{Sudo: true}) // Use connector
 			if errReload != nil {
 				errMsg := fmt.Sprintf("failed to reload sysctl configuration with '%s': %v (stderr: %s)", reloadCmd, errReload, string(stderrReload))
+				logger.Error(errMsg)
 				errorsCollected = append(errorsCollected, errMsg)
 			} else {
-				hostCtxLogger.Successf("Sysctl configuration reloaded successfully using '%s'.", reloadCmd)
+				logger.Info("Sysctl configuration reloaded successfully.", "command", reloadCmd)
 			}
 		} else {
-			hostCtxLogger.Infof("Skipping sysctl reload as per step configuration.")
+			logger.Info("Skipping sysctl reload as per step configuration.")
 		}
 	}
 	res.EndTime = time.Now()
 
 	if len(errorsCollected) > 0 {
 		res.Status = step.StatusFailed; res.Error = fmt.Errorf(strings.Join(errorsCollected, "; ")); res.Message = res.Error.Error()
-		hostCtxLogger.Errorf("Step finished with errors: %s", res.Message)
+		logger.Error("Step finished with errors.", "message", res.Message)
 	} else {
-		hostCtxLogger.Infof("Verifying sysctl parameters after apply...")
-		allSet, checkErr := e.Check(ctx) // Pass ctx to Check
+		logger.Info("Verifying sysctl parameters after apply...")
+		allSet, checkErr := e.Check(ctx)
 		if checkErr != nil {
+			logger.Error("Failed to verify sysctl params after apply.", "error", checkErr)
 			res.Status = step.StatusFailed; res.Error = fmt.Errorf("failed to verify sysctl params after apply: %w", checkErr)
 			res.Message = res.Error.Error()
-			hostCtxLogger.Errorf("Step verification failed: %s", res.Message)
 		} else if !allSet {
+			logger.Error("Sysctl params not all set to desired values after apply and reload attempt.")
 			res.Status = step.StatusFailed; res.Error = fmt.Errorf("sysctl params not all set to desired values after apply and reload attempt")
 			res.Message = res.Error.Error()
-			hostCtxLogger.Errorf("Step verification failed: %s. Some parameters may not have applied correctly.", res.Message)
 		} else {
 			res.Status = step.StatusSucceeded
 			res.Message = fmt.Sprintf("All sysctl parameters (%s) successfully set and verified.", strings.Join(appliedParams, ", "))
-			hostCtxLogger.Successf("Step succeeded: %s", res.Message)
+			logger.Info("Step succeeded.", "message", res.Message)
 		}
 	}
 	return res

@@ -6,8 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mensylisir/kubexm/pkg/runtime" // Ensure this is the correct path
-	"github.com/mensylisir/kubexm/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/connector" // Added for NewResult
+	"github.com/mensylisir/kubexm/pkg/runtime"   // Ensure this is the correct path for StepContext
+	"github.com/mensylisir/kubexm/pkg/spec"      // Already present, used for StepSpec
 )
 
 // Status types for Step Result
@@ -39,22 +40,23 @@ func determineStatus(err error) string {
 }
 
 // NewResult is a helper function to create and initialize a Step Result.
-// It now derives StepName and HostName from the runtime.Context.
-func NewResult(ctx runtime.Context, startTime time.Time, executionError error) *Result {
-	stepSpec, ok := ctx.Step().GetCurrentStepSpec()
-	stepName := "UnknownStep (Spec not found in context)"
-	if ok && stepSpec != nil { // Added nil check for stepSpec
-		stepName = stepSpec.GetName()
+func NewResult(ctx runtime.StepContext, host connector.Host, startTime time.Time, executionError error) *Result {
+	stepName := "UnknownStep (Spec not found or incorrect type in context)"
+	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec() // Use StepCache from StepContext
+	if ok {
+		if typedSpec, assertOK := rawSpec.(spec.StepSpec); assertOK && typedSpec != nil {
+			stepName = typedSpec.GetName()
+		}
 	}
 
-	hostName := "localhost" // Default if not a remote execution context
-	if ctx.Host != nil && ctx.Host.Name != "" {
-		hostName = ctx.Host.Name
+	currentHostName := "localhost" // Default for local steps or if host is nil
+	if host != nil {
+		currentHostName = host.GetName()
 	}
 
 	return &Result{
 		StepName:  stepName,
-		HostName:  hostName,
+		HostName:  currentHostName,
 		StartTime: startTime,
 		EndTime:   time.Now(),
 		Error:     executionError,
@@ -66,12 +68,12 @@ func NewResult(ctx runtime.Context, startTime time.Time, executionError error) *
 type StepExecutor interface {
 	// Check determines if the step needs to be executed.
 	// It should be idempotent.
-	// The step's specific configuration (Spec) can be retrieved from ctx.Step().GetCurrentStepSpec().
-	Check(ctx runtime.Context) (isDone bool, err error)
+	// The step's specific configuration (Spec) can be retrieved from ctx.StepCache().GetCurrentStepSpec().
+	Check(ctx runtime.StepContext) (isDone bool, err error)
 
 	// Execute performs the action of the step.
-	// The step's specific configuration (Spec) can be retrieved from ctx.Step().GetCurrentStepSpec().
-	Execute(ctx runtime.Context) *Result
+	// The step's specific configuration (Spec) can be retrieved from ctx.StepCache().GetCurrentStepSpec().
+	Execute(ctx runtime.StepContext) *Result
 }
 
 // --- Step Executor Registry ---
