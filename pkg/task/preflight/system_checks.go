@@ -13,29 +13,24 @@ func NewSystemChecksTask(cfg *config.Cluster) *spec.TaskSpec {
 	minMemoryMB := uint64(2048) // 2GB
 	runDisableSwapStep := true // By default, try to disable swap
 
-	if cfg != nil { // cfg itself might be nil in some test scenarios or if not loaded
-		// PreflightConfig is a struct, not a pointer, so it always exists if cfg.Spec does.
+	if cfg != nil && cfg.Spec.Preflight != nil { // cfg is *v1alpha1.Cluster, Spec.Preflight is *v1alpha1.PreflightConfig
 		// Check if user provided values that are greater than 0 (for numbers)
-		if cfg.Spec.PreflightConfig.MinCPUCores > 0 {
-			minCores = cfg.Spec.PreflightConfig.MinCPUCores
+		if cfg.Spec.Preflight.MinCPUCores > 0 {
+			minCores = cfg.Spec.Preflight.MinCPUCores
 		}
-		if cfg.Spec.PreflightConfig.MinMemoryMB > 0 {
-			minMemoryMB = cfg.Spec.PreflightConfig.MinMemoryMB
+		if cfg.Spec.Preflight.MinMemoryMB > 0 {
+			minMemoryMB = cfg.Spec.Preflight.MinMemoryMB
 		}
-		// For DisableSwap: if the field `disableSwap` is present in YAML and set to `false`,
-		// then cfg.Spec.PreflightConfig.DisableSwap will be `false`.
-		// If `disableSwap` is `true` in YAML, it will be `true`.
-		// If `disableSwap` is missing in YAML, it will be `false` (Go default for bool).
-		// So, we run DisableSwapStep only if cfg.Spec.PreflightConfig.DisableSwap is true.
-		// This makes disabling swap an opt-in feature if specified via config.
-		// If we want "disable swap by default unless explicitly told not to", the logic would be:
-		// runDisableSwapStep = !cfg.Spec.PreflightConfig.ExplicitlyKeepSwapEnabled (new bool field)
-		// Or, if DisableSwap means "ensure swap is disabled":
-		// if cfg.Spec.PreflightConfig.IsSet("DisableSwap") && !cfg.Spec.PreflightConfig.DisableSwap { runDisableSwapStep = false }
-		// Given the current simple bool `DisableSwap`, the most straightforward is:
-		// only run the step if the config explicitly says `disableSwap: true`.
-		runDisableSwapStep = cfg.Spec.PreflightConfig.DisableSwap
+		// v1alpha1.PreflightConfig.DisableSwap is a bool. If the Preflight section is present,
+		// and DisableSwap is true in YAML, this will be true.
+		// If DisableSwap is false or omitted in YAML (and Preflight section is present), this will be false.
+		// The initial `runDisableSwapStep := true` acts as the default if the entire Preflight section is missing
+		// or if cfg is nil.
+		// If Preflight section is present, we use its DisableSwap value.
+		runDisableSwapStep = cfg.Spec.Preflight.DisableSwap
 	}
+	// If cfg is nil, or cfg.Spec.Preflight is nil, the hardcoded defaults for minCores, minMemoryMB,
+	// and runDisableSwapStep (true) will be used.
 
 	steps := []spec.StepSpec{
 		&stepPreflight.CheckCPUStepSpec{MinCores: minCores},

@@ -1,7 +1,8 @@
 package pipeline
 
 import (
-	"github.com/kubexms/kubexms/pkg/config"
+	// "github.com/kubexms/kubexms/pkg/config" // Will be replaced by runtime
+	"github.com/kubexms/kubexms/pkg/runtime" // For ClusterRuntime
 	"github.com/kubexms/kubexms/pkg/spec"
 
 	// Import module factories
@@ -18,32 +19,42 @@ import (
 
 // NewCreateClusterPipelineSpec defines the pipeline specification for creating a new Kubernetes cluster.
 // It assembles all necessary modules in the correct order.
-// The cfg *config.Cluster parameter is used by module factories to tailor tasks and steps.
-func NewCreateClusterPipelineSpec(cfg *config.Cluster) *spec.PipelineSpec {
+// The clusterRt *runtime.ClusterRuntime parameter provides access to the cluster configuration and runtime context.
+func NewCreateClusterPipelineSpec(clusterRt *runtime.ClusterRuntime) *spec.PipelineSpec {
+	if clusterRt == nil || clusterRt.ClusterConfig == nil {
+		// Or handle error: return nil or an error
+		// For now, returning an empty pipeline spec or panicking might be options
+		// depending on how robust this needs to be for unexpected nil inputs.
+		// Let's assume for now that clusterRt and clusterRt.ClusterConfig are valid.
+		// A robust implementation would return an error or a clearly invalid/empty spec.
+		return &spec.PipelineSpec{Name: "Error: Missing ClusterRuntime or ClusterConfig"}
+	}
+	cfg := clusterRt.ClusterConfig // cfg is *v1alpha1.Cluster
+
 	modules := []*spec.ModuleSpec{
 		// 1. Preflight checks and base system setup
-		modulePreflight.NewPreflightModule(cfg),
+		modulePreflight.NewPreflightModule(clusterRt),
 
 		// 2. Install and configure container runtime
-		// This module's IsEnabled function should check cfg to see if containerd is the chosen runtime.
-		moduleContainerd.NewContainerdModule(cfg),
+		// This module's IsEnabled function should check clusterRt.ClusterConfig to see if containerd is the chosen runtime.
+		moduleContainerd.NewContainerdModule(clusterRt),
 		// TODO: Add logic or separate module factories for other runtimes like Docker,
 		// and select based on cfg.Spec.ContainerRuntime.Type.
-		// e.g., if cfg.Spec.ContainerRuntime.Type == "docker": modules = append(modules, moduleDocker.NewDockerModule(cfg))
+		// e.g., if cfg.Spec.ContainerRuntime != nil && cfg.Spec.ContainerRuntime.Type == "docker": modules = append(modules, moduleDocker.NewDockerModule(clusterRt))
 
 		// 3. (Optional) Setup HA components like Keepalived/HAProxy if specified in cfg.
 		// This would typically be its own module.
 		// Example:
 		// if cfg.Spec.HighAvailability != nil && cfg.Spec.HighAvailability.Type == "keepalived" {
-		//     modules = append(modules, moduleHA.NewKeepalivedModule(cfg))
+		//     modules = append(modules, moduleHA.NewKeepalivedModule(clusterRt))
 		// }
 
 		// 4. Deploy Etcd cluster.
-		// The NewEtcdModule's IsEnabled function can check cfg.Spec.Etcd.Managed or if external etcd is used.
-		moduleEtcd.NewEtcdModule(cfg),
+		// The NewEtcdModule's IsEnabled function can check clusterRt.ClusterConfig.Spec.Etcd.Type.
+		moduleEtcd.NewEtcdModule(clusterRt),
 
 		// 5. Deploy Kubernetes control plane components
-		// Example: modules = append(modules, moduleKubernetes.NewControlPlaneModule(cfg))
+		// Example: modules = append(modules, moduleKubernetes.NewControlPlaneModule(clusterRt))
 
 		// 6. Join worker nodes to the cluster
 		// Example: modules = append(modules, moduleKubernetes.NewWorkerNodeModule(cfg))

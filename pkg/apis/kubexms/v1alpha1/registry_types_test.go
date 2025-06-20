@@ -21,13 +21,32 @@ func TestSetDefaults_RegistryConfig(t *testing.T) {
 	if cfg.Auths == nil {
 		t.Error("Auths should be initialized to empty map")
 	}
-	// Type and DataRoot are not defaulted by SetDefaults_RegistryConfig
-	if cfg.Type != nil {
-		t.Errorf("Type should be nil by default, got %v", *cfg.Type)
+	if cfg.PrivateRegistry != "dockerhub.kubexm.local" {
+		t.Errorf("Expected PrivateRegistry default 'dockerhub.kubexm.local', got '%s'", cfg.PrivateRegistry)
 	}
-	if cfg.DataRoot != nil {
-		t.Errorf("DataRoot should be nil by default, got %v", *cfg.DataRoot)
+
+	// Test DataRoot default when Type is set
+	cfgWithType := &RegistryConfig{Type: pstrRegistryTest("harbor")}
+	SetDefaults_RegistryConfig(cfgWithType)
+	if cfgWithType.DataRoot == nil || *cfgWithType.DataRoot != "/mnt/registry" {
+		t.Errorf("Expected DataRoot default '/mnt/registry' when Type is set, got %v", cfgWithType.DataRoot)
 	}
+
+	// Test DataRoot is not defaulted if Type is not set
+	cfgNoType := &RegistryConfig{}
+	SetDefaults_RegistryConfig(cfgNoType) // PrivateRegistry will be defaulted here again, that's fine
+	if cfgNoType.DataRoot != nil {
+		t.Errorf("DataRoot should remain nil if Type is not set, got %v", *cfgNoType.DataRoot)
+	}
+
+	// Test NamespaceRewrite initialization
+	if cfg.NamespaceRewrite == nil {
+		t.Error("NamespaceRewrite should be initialized")
+	}
+	if cfg.NamespaceRewrite != nil && cfg.NamespaceRewrite.Rules == nil {
+		t.Error("NamespaceRewrite.Rules should be initialized to an empty slice")
+	}
+
 }
 
 func TestValidate_RegistryConfig(t *testing.T) {

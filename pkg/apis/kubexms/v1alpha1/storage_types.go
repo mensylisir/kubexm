@@ -6,37 +6,37 @@ import "strings"
 // For now, it primarily includes OpenEBS settings based on KubeKey examples.
 // This can be expanded to include other storage provisioners or settings.
 type StorageConfig struct {
-	OpenEBS *OpenEBSConfig `json:"openebs,omitempty"`
-	// DefaultStorageClass an optional field to set the default storage class for the cluster.
-	// If not set, the system might not have a default, or one might be set by a storage provisioner.
-	DefaultStorageClass *string `json:"defaultStorageClass,omitempty"`
-	// TODO: Add configurations for other storage provisioners like Ceph, NFS, LocalVolumeProvisioner
-	// e.g. LocalVolumeProvisioner *LocalVolumeProvisionerConfig `json:"localVolumeProvisioner,omitempty"`
+	OpenEBS             *OpenEBSConfig `json:"openebs,omitempty" yaml:"openebs,omitempty"`
+	DefaultStorageClass *string        `json:"defaultStorageClass,omitempty" yaml:"defaultStorageClass,omitempty"`
 }
 
 // OpenEBSConfig defines settings for OpenEBS storage provisioner.
 type OpenEBSConfig struct {
-	BasePath string `json:"basePath,omitempty"`
-	Enabled *bool `json:"enabled,omitempty"`
-	// Version of OpenEBS to install.
-	Version *string `json:"version,omitempty"`
-	// Engines allows specifying which OpenEBS engines to enable or configure.
-	// Example: Engines: { Mayastor: {Enabled: true}, cStor: {Enabled: false}}
-	Engines *OpenEBSEngineConfig `json:"engines,omitempty"`
+	BasePath string                   `json:"basePath,omitempty" yaml:"basePath,omitempty"`
+	Enabled  *bool                    `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Version  *string                  `json:"version,omitempty" yaml:"version,omitempty"`
+	Engines  *OpenEBSEngineConfig     `json:"engines,omitempty" yaml:"engines,omitempty"`
 }
 
 type OpenEBSEngineConfig struct {
-	Mayastor *OpenEBSEngineMayastorConfig `json:"mayastor,omitempty"`
-	Jiva     *OpenEBSEngineJivaConfig     `json:"jiva,omitempty"`
-	cStor    *OpenEBSEnginecStorConfig    `json:"cstor,omitempty"`
-	// LocalHostPath is typically for hostPath based provisioning.
-	LocalHostPath *OpenEBSEngineLocalHostPathConfig `json:"localHostPath,omitempty"`
+	Mayastor      *OpenEBSEngineMayastorConfig      `json:"mayastor,omitempty" yaml:"mayastor,omitempty"`
+	Jiva          *OpenEBSEngineJivaConfig          `json:"jiva,omitempty" yaml:"jiva,omitempty"`
+	cStor         *OpenEBSEnginecStorConfig         `json:"cstor,omitempty" yaml:"cstor,omitempty"`
+	LocalHostPath *OpenEBSEngineLocalHostPathConfig `json:"localHostPath,omitempty" yaml:"localHostPath,omitempty"`
 }
 
-type OpenEBSEngineMayastorConfig struct { Enabled *bool `json:"enabled,omitempty"` /* TODO: Mayastor specific fields */ }
-type OpenEBSEngineJivaConfig struct { Enabled *bool `json:"enabled,omitempty"` /* TODO: Jiva specific fields */ }
-type OpenEBSEnginecStorConfig struct { Enabled *bool `json:"enabled,omitempty"` /* TODO: cStor specific fields */ }
-type OpenEBSEngineLocalHostPathConfig struct { Enabled *bool `json:"enabled,omitempty"` /* BasePath above is related */ }
+type OpenEBSEngineMayastorConfig struct {
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"` /* TODO: Mayastor specific fields */
+}
+type OpenEBSEngineJivaConfig struct {
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"` /* TODO: Jiva specific fields */
+}
+type OpenEBSEnginecStorConfig struct {
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"` /* TODO: cStor specific fields */
+}
+type OpenEBSEngineLocalHostPathConfig struct {
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"` /* BasePath above is related */
+}
 
 // --- Defaulting Functions ---
 

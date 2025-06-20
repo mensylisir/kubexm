@@ -5,7 +5,7 @@ import (
 	"fmt"
 	// "golang.org/x/sync/errgroup" // Not used for sequential task execution within a module
 
-	"github.com/kubexms/kubexms/pkg/config"
+	// "github.com/kubexms/kubexms/pkg/config" // No longer needed directly
 	"github.com/kubexms/kubexms/pkg/logger" // For logger.Logger type
 	"github.com/kubexms/kubexms/pkg/runtime"
 	"github.com/kubexms/kubexms/pkg/step"
@@ -24,9 +24,9 @@ type Module struct {
 	Tasks []*task.Task
 
 	// IsEnabled is a function that determines if this module should be run,
-	// typically based on the provided cluster configuration.
+	// typically based on the provided cluster configuration (via ClusterRuntime).
 	// If nil, the module is considered always enabled.
-	IsEnabled func(clusterCfg *config.Cluster) bool
+	IsEnabled func(clusterRt *runtime.ClusterRuntime) bool
 
 	// PreRun is a hook executed once before any tasks in the module are run.
 	// If it returns an error, the module's execution (including tasks and PostRun) is halted.
@@ -131,7 +131,7 @@ func (m *Module) Run(goCtx context.Context, cluster *runtime.ClusterRuntime) ([]
 	moduleLogger := cluster.Logger.SugaredLogger.With("module", m.Name).Sugar()
 	moduleLogger.Infof("Starting module execution...")
 
-	if m.IsEnabled != nil && !m.IsEnabled(cluster.ClusterConfig) {
+	if m.IsEnabled != nil && !m.IsEnabled(cluster) { // Pass the whole ClusterRuntime
 		moduleLogger.Infof("Module is disabled by configuration, skipping.")
 		return nil, nil
 	}

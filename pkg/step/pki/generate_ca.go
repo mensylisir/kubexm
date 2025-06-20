@@ -153,17 +153,19 @@ func (e *GenerateRootCAStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Conte
 		hostCtxLogger.Warnf("Failed to chmod CA cert %s to 0644 on host %s: %v", spec.CertPath, ctx.Host.Name, errChmodCert)
 	}
 
-	if ctx.SharedData != nil { // Store paths in SharedData for other steps
-		sharedCertPathKey := fmt.Sprintf("pki.ca.%s.certPath", ctx.Host.Name) // Make key host-specific if CA is per-host
-		sharedKeyPathKey := fmt.Sprintf("pki.ca.%s.keyPath", ctx.Host.Name)
-		// If CA is global, use a global key: "pki.rootCA.certPath"
-		// Assuming this GenerateRootCAStep might run on one host but CA is for cluster:
-		// sharedCertPathKey = "pki.globalRootCA.certPath"
-		// sharedKeyPathKey = "pki.globalRootCA.keyPath"
-		ctx.SharedData.Store(sharedCertPathKey, spec.CertPath)
-		ctx.SharedData.Store(sharedKeyPathKey, spec.KeyPath)
-		hostCtxLogger.Debugf("Stored CA paths in SharedData: %s, %s", sharedCertPathKey, sharedKeyPathKey)
-	}
+	// Store paths in Module Cache for other steps/tasks within the same module execution.
+	// These keys should ideally be exported constants from a relevant package (e.g., pkg/pki/constants.go or similar)
+	// For this refactoring, defining them as local consts or string literals.
+	const clusterRootCACertPathKey = "ClusterRootCACertPath" // Example key for cluster-wide root CA cert
+	const clusterRootCAKeyPathKey  = "ClusterRootCAKeyPath"  // Example key for cluster-wide root CA key
+
+	// PKIPathType in spec could be used to make keys more specific if this step generates different types of CAs
+	// e.g. key := fmt.Sprintf("%sRootCACertPath", spec.PKIPathType) // if PKIPathType is "Etcd" or "Kubernetes"
+
+	ctx.Module().Set(clusterRootCACertPathKey, spec.CertPath)
+	ctx.Module().Set(clusterRootCAKeyPathKey, spec.KeyPath)
+	hostCtxLogger.Debugf("Stored Root CA paths in Module Cache: CertPathKey=%s (%s), KeyPathKey=%s (%s)",
+		clusterRootCACertPathKey, spec.CertPath, clusterRootCAKeyPathKey, spec.KeyPath)
 
 	res.EndTime = time.Now(); res.Status = "Succeeded"
 	res.Message = fmt.Sprintf("Root CA certificate and key generated successfully at %s and %s.", spec.CertPath, spec.KeyPath)

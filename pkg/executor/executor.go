@@ -9,7 +9,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/kubexms/kubexms/pkg/config"
+	// "github.com/kubexms/kubexms/pkg/config" // No longer used directly by executor
+	"github.com/kubexms/kubexms/pkg/cache"   // For creating new caches
 	"github.com/kubexms/kubexms/pkg/logger"
 	"github.com/kubexms/kubexms/pkg/runtime"
 	"github.com/kubexms/kubexms/pkg/spec"
@@ -73,7 +74,7 @@ func (e *Executor) ExecutePipeline(
 			var targetHosts []*runtime.Host; if len(cluster.Hosts) > 0 { targetHosts = []*runtime.Host{cluster.Hosts[0]} }
 
 			// Pass the pipelineLogger as the parent for the hook execution
-			hookResults, hookErr := e.executeHookSteps(goCtx, pipelineSpec.PostRun, "PipelinePostRun", targetHosts, cluster, pipelineLogger)
+			hookResults, hookErr := e.executeHookTask(goCtx, pipelineSpec.PostRun, "PipelinePostRun", targetHosts, cluster, pipelineLogger)
 			if hookResults != nil { allResults = append(allResults, hookResults...) }
 			if hookErr != nil {
 				postRunHookEventLogger.Errorf("Failed: %v", hookErr)
@@ -102,9 +103,9 @@ func (e *Executor) ExecutePipeline(
 	if pipelineSpec.PreRun != nil {
 		preRunHookEventLogger := pipelineLogger.SugaredLogger.With("hook_event", "PipelinePreRun", "hook_step", pipelineSpec.PreRun.GetName()).Sugar()
 		preRunHookEventLogger.Infof("Executing...")
-		var targetHosts []*runtime.Host; if len(cluster.Hosts) > 0 { targetHosts = []*runtime.Host{cluster.Hosts[0]} }
+		var targetHosts []*runtime.Host; if len(cluster.Hosts) > 0 { targetHosts = []*runtime.Host{cluster.Hosts[0]} } // TODO: Define target hosts for pipeline hooks more robustly
 
-		hookResults, hookErr := e.executeHookSteps(goCtx, pipelineSpec.PreRun, "PipelinePreRun", targetHosts, cluster, pipelineLogger)
+		hookResults, hookErr := e.executeHookTask(goCtx, pipelineSpec.PreRun, "PipelinePreRun", targetHosts, cluster, pipelineLogger)
 		if hookResults != nil { allResults = append(allResults, hookResults...) }
 		if hookErr != nil {
 			finalError = fmt.Errorf("pipeline PreRun hook '%s' failed: %w", pipelineSpec.PreRun.GetName(), hookErr)
@@ -123,7 +124,7 @@ func (e *Executor) ExecutePipeline(
 		// Create logger for this module, deriving from the pipeline's logger
 		moduleLogger := &logger.Logger{SugaredLogger: pipelineLogger.SugaredLogger.With("module_name", moduleSpec.Name, "module_idx", fmt.Sprintf("%d/%d", modIdx+1, len(pipelineSpec.Modules)))}
 
-		if moduleSpec.IsEnabled != nil && !moduleSpec.IsEnabled(cluster.ClusterConfig) {
+		if moduleSpec.IsEnabled != nil && !moduleSpec.IsEnabled(cluster) { // Pass cluster runtime
 			moduleLogger.Infof("Module is disabled by configuration, skipping.")
 			continue
 		}
@@ -162,30 +163,30 @@ func (e *Executor) executeModule(
 			// Logger for this specific PostRun hook event, derived from moduleLogger
 			postRunHookEventLogger := moduleLogger.SugaredLogger.With("hook_event", fmt.Sprintf("ModulePostRun[%s]", moduleSpec.Name), "hook_step", moduleSpec.PostRun.GetName()).Sugar()
 			postRunHookEventLogger.Infof("Executing...")
-			if len(modTargetHosts) > 0 {
+			if len(modTargetHosts) > 0 || (moduleSpec.PostRun != nil && len(moduleSpec.PostRun.Steps) == 0) { // Allow hooks with no steps to run (e.g. for logging) if modTargetHosts might be empty.
 				// Pass the moduleLogger as the parent for the hook execution
-				hookRes, hookErr := e.executeHookSteps(goCtx, moduleSpec.PostRun, fmt.Sprintf("ModulePostRun[%s]", moduleSpec.Name), modTargetHosts, cluster, moduleLogger)
+				hookRes, hookErr := e.executeHookTask(goCtx, moduleSpec.PostRun, fmt.Sprintf("ModulePostRun[%s]", moduleSpec.Name), modTargetHosts, cluster, moduleLogger)
 				if hookRes != nil { allModStepRes = append(allModStepRes, hookRes...) }
 				if hookErr != nil {
 					postRunHookEventLogger.Errorf("Failed: %v", hookErr)
 					if modErr == nil { modErr = fmt.Errorf("module PostRun hook '%s' failed: %w", moduleSpec.PostRun.GetName(), hookErr) }
 				} else { postRunHookEventLogger.Infof("Completed.") }
-			} else { postRunHookEventLogger.Infof("Skipping (no target hosts).") }
+			} else { postRunHookEventLogger.Infof("Skipping (no target hosts for hook with steps).") }
 		}()
 	}
 
 	if moduleSpec.PreRun != nil {
-		preRunHookEventLogger := moduleLogger.SugaredLogger.With("hook_event", fmt.Sprintf("ModulePreRun[%s]", moduleSpec.Name), "hook_step", moduleSpec.PreRun.GetName()).Sugar()
+		preRunHookEventLogger := moduleLogger.SugaredLogger.With("hook_event", fmt.Sprintf("ModulePreRun[%s]", moduleSpec.Name), "hook_task_name", moduleSpec.PreRun.Name).Sugar()
 		preRunHookEventLogger.Infof("Executing...")
-		if len(modTargetHosts) > 0 {
-			hookRes, hookErr := e.executeHookSteps(goCtx, moduleSpec.PreRun, fmt.Sprintf("ModulePreRun[%s]", moduleSpec.Name), modTargetHosts, cluster, moduleLogger)
+		if len(modTargetHosts) > 0 || (moduleSpec.PreRun != nil && len(moduleSpec.PreRun.Steps) == 0) { // Allow hooks with no steps
+			hookRes, hookErr := e.executeHookTask(goCtx, moduleSpec.PreRun, fmt.Sprintf("ModulePreRun[%s]", moduleSpec.Name), modTargetHosts, cluster, moduleLogger)
 			if hookRes != nil { allModStepRes = append(allModStepRes, hookRes...) }
 			if hookErr != nil {
-				modErr = fmt.Errorf("module PreRun hook '%s' failed: %w", moduleSpec.PreRun.GetName(), hookErr)
+				modErr = fmt.Errorf("module PreRun hook '%s' failed: %w", moduleSpec.PreRun.Name, hookErr)
 				preRunHookEventLogger.Errorf("Failed: %v. Halting module tasks.", modErr); return allModStepRes, modErr
 			}
 			preRunHookEventLogger.Infof("Completed.")
-		} else { preRunHookEventLogger.Infof("Skipping (no target hosts).") }
+		} else { preRunHookEventLogger.Infof("Skipping (no target hosts for hook with steps).") }
 	}
 
 	for taskIdx, taskSpec := range moduleSpec.Tasks {
@@ -234,57 +235,75 @@ func (e *Executor) executeTaskSpec(
 	for _, h := range hosts {
 		currentHost := h
 		g.Go(func() error {
-			// NewHostContext uses cluster.Logger as its base, then adds host fields.
-			// We want the logger in HostContext to have pipeline, module, task, AND host context.
-			hostCtx := runtime.NewHostContext(egCtx, currentHost, cluster)
-			// So, we take the parentTaskLogger (which has pipeline, module, task context)
-			// and add host context to it, then set it in hostCtx.
-			hostSpecificLogger := &logger.Logger{SugaredLogger: parentTaskLogger.SugaredLogger.With("host_name", currentHost.Name)}
-			hostCtx.Logger = hostSpecificLogger
+			// Create a new HostContext for each host.
+			// TODO: Properly initialize PipelineCache and ModuleCache. For now, passing nil.
+			// TaskCache and StepCache are new for each host/step execution within this task.
+			taskCacheForHost := cache.NewMapCache()
 
+			hostSpecificParentLogger := parentTaskLogger.SugaredLogger.With("host_name", currentHost.Name, "host_address", currentHost.Address)
 
-			hostSpecificLogger.Debugf("Starting step sequence")
 			for stepIdx, stepSpecInstance := range taskSpec.Steps {
 				if stepSpecInstance == nil {
-					hostSpecificLogger.Warnf("Skipping nil stepSpecInstance at index %d in task '%s'", stepIdx, taskSpec.Name)
+					hostSpecificParentLogger.Warnf("Skipping nil stepSpecInstance at index %d in task '%s'", stepIdx, taskSpec.Name)
 					continue
 				}
-				// Create logger for this step, deriving from the host-specific task logger
-				stepLoggerInLoop := &logger.Logger{SugaredLogger: hostSpecificLogger.SugaredLogger.With("step_name", stepSpecInstance.GetName(), "step_idx", fmt.Sprintf("%d/%d", stepIdx+1, len(taskSpec.Steps)))}
-				hostCtx.Logger = stepLoggerInLoop // Update context's logger for this specific step's Check/Execute call
+
+				stepCacheForHostStep := cache.NewMapCache()
+				hostCtx := runtime.NewHostContext(egCtx, currentHost, cluster,
+					nil, // TODO: PipelineCache
+					nil, // TODO: ModuleCache
+					taskCacheForHost,
+					stepCacheForHostStep,
+				)
+				// Assign logger with full context (pipeline, module, task, host, step)
+				hostCtx.Logger = &logger.Logger{SugaredLogger: hostSpecificParentLogger.With("step_name", stepSpecInstance.GetName(), "step_idx", fmt.Sprintf("%d/%d", stepIdx+1, len(taskSpec.Steps))).Sugar()}
+
+				// Set current StepSpec in context for the executor to retrieve
+				hostCtx.Step().SetCurrentStepSpec(stepSpecInstance)
 
 				stepExecutor := step.GetExecutor(step.GetSpecTypeName(stepSpecInstance))
 				if stepExecutor == nil {
 					err := fmt.Errorf("no executor for type %s (step: %s)", step.GetSpecTypeName(stepSpecInstance), stepSpecInstance.GetName())
-					stepLoggerInLoop.Errorf("Critical: %v", err); res := step.NewResult(stepSpecInstance.GetName(),currentHost.Name,time.Now(),err); res.Status="Failed"; res.Message="Internal: Executor not found."
+					hostCtx.Logger.Errorf("Critical: %v", err)
+					res := step.NewResult(hostCtx, time.Now(),err) // Use new NewResult signature
+					res.Status="Failed"; res.Message="Internal: Executor not found."
 					resultsMu.Lock(); allTaskStepResults = append(allTaskStepResults, res); resultsMu.Unlock(); return err
 				}
-				stepLoggerInLoop.Debugf("Checking..."); isDone, checkErr := stepExecutor.Check(stepSpecInstance, hostCtx)
+
+				hostCtx.Logger.Debugf("Checking step...")
+				isDone, checkErr := stepExecutor.Check(hostCtx) // Use new Check signature
 				if checkErr != nil {
-					err := fmt.Errorf("step '%s' pre-check failed: %w", stepSpecInstance.GetName(), checkErr); stepLoggerInLoop.Errorf("Pre-check failed: %v", checkErr)
-					res := step.NewResult(stepSpecInstance.GetName()+" [CheckPhase]",currentHost.Name,time.Now(),err); res.Message=err.Error()
+					err := fmt.Errorf("step '%s' pre-check failed: %w", stepSpecInstance.GetName(), checkErr)
+					hostCtx.Logger.Errorf("Pre-check failed: %v", checkErr)
+					res := step.NewResult(hostCtx, time.Now(), err) // Use new NewResult signature (pass hostCtx)
+					res.Message=err.Error() // NewResult might populate this from ctx or error
 					resultsMu.Lock(); allTaskStepResults = append(allTaskStepResults, res); resultsMu.Unlock(); return err
 				}
 				if isDone {
-					stepLoggerInLoop.Infof("Skipped (already done)."); res := step.NewResult(stepSpecInstance.GetName(),currentHost.Name,time.Now(),nil)
+					hostCtx.Logger.Infof("Skipped (already done).")
+					res := step.NewResult(hostCtx, time.Now(), nil) // Use new NewResult signature
 					res.Status="Skipped"; res.Message="Condition met."; res.EndTime=time.Now()
 					resultsMu.Lock(); allTaskStepResults = append(allTaskStepResults, res); resultsMu.Unlock(); continue
 				}
-				stepLoggerInLoop.Infof("Running..."); execResult := stepExecutor.Execute(stepSpecInstance, hostCtx)
+
+				hostCtx.Logger.Infof("Running step...")
+				execResult := stepExecutor.Execute(hostCtx) // Use new Execute signature
 				if execResult == nil {
-					err := fmt.Errorf("step '%s' Execute nil result", stepSpecInstance.GetName()); stepLoggerInLoop.Errorf("%v", err)
-					res := step.NewResult(stepSpecInstance.GetName(),currentHost.Name,time.Now(),err); res.Status = "Failed"; res.Message = "Internal error: Step Execute returned nil result."
+					err := fmt.Errorf("step '%s' Execute nil result", stepSpecInstance.GetName())
+					hostCtx.Logger.Errorf("%v", err)
+					res := step.NewResult(hostCtx, time.Now(),err); res.Status = "Failed"; res.Message = "Internal error: Step Execute returned nil result."
 					resultsMu.Lock(); allTaskStepResults = append(allTaskStepResults, res); resultsMu.Unlock(); return err
 				}
 				resultsMu.Lock(); allTaskStepResults = append(allTaskStepResults, execResult); resultsMu.Unlock()
 				if execResult.Status == "Failed" {
 					errToPropagate := execResult.Error
 					if errToPropagate == nil { errToPropagate = fmt.Errorf("step '%s' on host '%s' reported status Failed without specific error. Message: %s", execResult.StepName, currentHost.Name, execResult.Message) }
-					stepLoggerInLoop.Errorf("Failed: %v", errToPropagate); return fmt.Errorf("step '%s' failed on host '%s': %w", execResult.StepName, currentHost.Name, errToPropagate)
+					hostCtx.Logger.Errorf("Failed: %v", errToPropagate)
+					return fmt.Errorf("step '%s' failed on host '%s': %w", execResult.StepName, currentHost.Name, errToPropagate)
 				}
-				stepLoggerInLoop.Successf("Completed. %s", execResult.Message)
+				hostCtx.Logger.Successf("Completed. %s", execResult.Message)
 			}
-			hostSpecificLogger.Debugf("Step sequence completed.")
+			hostSpecificParentLogger.Debugf("Step sequence completed for task %s on host %s.", taskSpec.Name, currentHost.Name)
 			return nil
 		})
 	}
@@ -294,63 +313,50 @@ func (e *Executor) executeTaskSpec(
 	return allTaskStepResults, taskError
 }
 
-// executeHookSteps now accepts a parentLogger (pipeline or module specific)
-func (e *Executor) executeHookSteps(
-	goCtx context.Context, hookSpec spec.StepSpec, hookNameForLog string,
-	targetHosts []*runtime.Host, cluster *runtime.ClusterRuntime, parentHookLogger *logger.Logger,
-) (hookResults []*step.Result, firstError error) {
-	if hookSpec == nil { parentHookLogger.SugaredLogger.Debugf("Hook '%s' is nil, skipping.", hookNameForLog); return nil, nil }
-	if len(targetHosts) == 0 { parentHookLogger.SugaredLogger.Debugf("No target hosts for hook '%s' (%s), skipping.", hookNameForLog, hookSpec.GetName()); return nil, nil }
-
-	// Create a base logger for this specific hook event, derived from the parent (pipeline/module) logger
-	hookEventLogger := parentHookLogger.SugaredLogger.With("hook_event", hookNameForLog, "hook_step_name", hookSpec.GetName()).Sugar()
-	hookResults = make([]*step.Result, 0, len(targetHosts))
-
-	for _, host := range targetHosts {
-		// runtime.NewHostContext uses cluster.Logger. We need to pass our enriched logger.
-		// Modifying NewHostContext to accept a base logger, or set it after.
-		hostCtx := runtime.NewHostContext(goCtx, host, cluster)
-		// Create a logger specific to this hook AND this host, from the hookEventLogger
-		hostSpecificHookLogger := &logger.Logger{SugaredLogger: hookEventLogger.With("host_name", host.Name)}
-		hostCtx.Logger = hostSpecificHookLogger // Update context's logger
-
-		hostSpecificHookLogger.Infof("Executing on host...")
-		stepExecutor := step.GetExecutor(step.GetSpecTypeName(hookSpec))
-		if stepExecutor == nil {
-			err := fmt.Errorf("no executor for hook type %s (step: %s)", step.GetSpecTypeName(hookSpec), hookSpec.GetName())
-			hostSpecificHookLogger.Errorf("Critical: %v", err); res := step.NewResult(hookSpec.GetName(), host.Name, time.Now(), err)
-			res.Status = "Failed"; res.Message = "Internal: Hook executor not found."; hookResults = append(hookResults, res)
-			if firstError == nil { firstError = err }; continue
-		}
-		hostSpecificHookLogger.Debugf("Checking hook step..."); isDone, checkErr := stepExecutor.Check(hookSpec, hostCtx)
-		if checkErr != nil {
-			err := fmt.Errorf("hook step '%s' pre-check failed: %w", hookSpec.GetName(), checkErr); hostSpecificHookLogger.Errorf("Pre-check failed: %v", checkErr)
-			res := step.NewResult(hookSpec.GetName()+" [CheckPhase]", host.Name, time.Now(), err); res.Message = err.Error()
-			hookResults = append(hookResults, res); if firstError == nil { firstError = err }; continue
-		}
-		if isDone {
-			hostSpecificHookLogger.Infof("Skipped (already done)."); res := step.NewResult(hookSpec.GetName(), host.Name, time.Now(), nil)
-			res.Status = "Skipped"; res.Message = "Hook condition met."; res.EndTime = time.Now()
-			hookResults = append(hookResults, res); continue
-		}
-		hostSpecificHookLogger.Infof("Running hook step..."); execResult := stepExecutor.Execute(hookSpec, hostCtx)
-		if execResult == nil {
-			err := fmt.Errorf("hook step '%s' Execute nil result", hookSpec.GetName()); hostSpecificHookLogger.Errorf("%v", err)
-			res := step.NewResult(hookSpec.GetName(),host.Name,time.Now(),err); res.Status="Failed"; res.Message="Internal: Hook Execute returned nil result."
-			hookResults = append(hookResults, res); if firstError == nil { firstError = err }; continue
-		}
-		hookResults = append(hookResults, execResult)
-		if execResult.Status == "Failed" {
-			errToPropagate := execResult.Error
-			if errToPropagate == nil { errToPropagate = fmt.Errorf("hook step '%s' on host '%s' reported status Failed without specific error. Message: %s", execResult.StepName, host.Name, execResult.Message)}
-			hostSpecificHookLogger.Errorf("Failed: %v", errToPropagate);
-			if firstError == nil { firstError = fmt.Errorf("hook step '%s' failed on host '%s': %w", execResult.StepName, host.Name, errToPropagate) }
-		} else { hostSpecificHookLogger.Successf("Completed. %s", execResult.Message) }
+// executeHookTask executes a single TaskSpec, typically for PreRun or PostRun hooks.
+// It derives a logger for the hook task from the parentLogger.
+func (e *Executor) executeHookTask(
+	goCtx context.Context,
+	hookTaskSpec *spec.TaskSpec,
+	hookTypeForLog string, // e.g., "PipelinePreRun", "ModulePostRun"
+	targetHosts []*runtime.Host,
+	cluster *runtime.ClusterRuntime,
+	parentLogger *logger.Logger,
+) (results []*step.Result, err error) {
+	if hookTaskSpec == nil {
+		parentLogger.Debugf("Hook %s is nil, skipping.", hookTypeForLog)
+		return nil, nil
 	}
-	if firstError != nil { hookEventLogger.Errorf("Hook execution completed with host error(s): %v", firstError)
-	} else { hookEventLogger.Successf("Hook execution completed on all %d hosts.", len(targetHosts)) }
-	return hookResults, firstError
+	// Allow hooks with no steps to still "run" (e.g., for logging start/end of pipeline/module)
+	// but only proceed to executeTaskSpec if there are steps OR if there are no steps AND no specific hosts required (global hook)
+	if len(hookTaskSpec.Steps) > 0 && len(targetHosts) == 0 {
+		parentLogger.Debugf("No target hosts for hook %s (%s) which has steps, skipping.", hookTypeForLog, hookTaskSpec.Name)
+		return nil, nil
+	}
+
+	// If there are no steps, and no hosts, we might still want to log the hook's execution
+    // For now, if no steps, effectively a no-op beyond logging.
+    if len(hookTaskSpec.Steps) == 0 {
+        parentLogger.Infof("Hook %s (%s) has no steps, considered complete.", hookTypeForLog, hookTaskSpec.Name)
+        return nil, nil
+    }
+
+
+	hookLogger := parentLogger.SugaredLogger.With("hook_type", hookTypeForLog, "hook_task_name", hookTaskSpec.Name).Sugar()
+	hookLogger.Infof("Executing hook task...")
+
+	// Use executeTaskSpec to run this hook task
+	results, err = e.executeTaskSpec(goCtx, hookTaskSpec, targetHosts, cluster, &logger.Logger{SugaredLogger: hookLogger})
+
+	if err != nil {
+		hookLogger.Errorf("Hook task execution failed: %v", err)
+		// Error is already wrapped by executeTaskSpec if it's from a step
+	} else {
+		hookLogger.Successf("Hook task completed successfully.")
+	}
+	return results, err
 }
+
 
 // selectHostsForTaskSpec (as previously defined)
 func (e *Executor) selectHostsForTaskSpec( taskSpec *spec.TaskSpec, cluster *runtime.ClusterRuntime) []*runtime.Host {

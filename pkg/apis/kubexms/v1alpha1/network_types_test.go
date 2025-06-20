@@ -15,6 +15,11 @@ func pintNetworkTest(i int) *int { v := i; return &v } // Added for Calico IPPoo
 func TestSetDefaults_NetworkConfig_Overall(t *testing.T) {
 	cfg := &NetworkConfig{}
 	SetDefaults_NetworkConfig(cfg)
+
+	if cfg.Plugin != "calico" { // Check the new default for Plugin
+		t.Errorf("Default Plugin = %s, want calico", cfg.Plugin)
+	}
+
 	// Check general defaults
 	if cfg.Multus == nil || cfg.Multus.Enabled == nil || *cfg.Multus.Enabled != false {
 		t.Errorf("Multus default = %v, want enabled=false", cfg.Multus)

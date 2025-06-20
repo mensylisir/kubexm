@@ -47,7 +47,7 @@ type TaskSpec struct {
 	// are not directly serializable to formats like JSON/YAML without special handling
 	// (e.g., by omitting this field during serialization or using a string-based rule).
 	// For specs defined and consumed within Go code, this is acceptable.
-	Filter func(host *runtime.Host) bool // Requires import "github.com/kubexms/kubexms/pkg/runtime"
+	Filter func(host *runtime.Host) bool
 
 	// IgnoreError, if true, indicates that an error from this task's execution
 	// (i.e., a failure of one of its critical steps) should not cause the parent
@@ -78,19 +78,19 @@ type ModuleSpec struct {
 	// will consider the module always enabled.
 	// Note: Similar to TaskSpec.Filter, a function type here impacts direct
 	// serializability if specs are to be defined in formats like JSON/YAML.
-	IsEnabled func(clusterCfg *config.Cluster) bool
+	IsEnabled func(clusterRt *runtime.ClusterRuntime) bool // Changed to use ClusterRuntime
 
-	// PreRun is a StepSpec that defines a step to be executed once before any
-	// tasks in this module are run. Can be nil if no pre-run step is needed.
-	// If this step fails, the module's tasks and PostRun step are typically skipped.
-	PreRun StepSpec
+	// PreRun is a TaskSpec that defines a task to be executed once before any
+	// main tasks in this module are run. Can be nil if no pre-run task is needed.
+	// If this task fails (and its IgnoreError is false), the module's main tasks and PostRun task are typically skipped.
+	PreRun *TaskSpec // Changed from StepSpec to *TaskSpec
 
-	// PostRun is a StepSpec that defines a step to be executed once after all
-	// tasks in this module have attempted to run (or after a PreRun/critical task failure).
-	// Can be nil if no post-run step is needed.
-	// Errors from this step are typically logged but might not override a primary
+	// PostRun is a TaskSpec that defines a task to be executed once after all
+	// main tasks in this module have attempted to run (or after a PreRun/critical main task failure).
+	// Can be nil if no post-run task is needed.
+	// Errors from this task are typically logged but might not override a primary
 	// error from the module's main task execution.
-	PostRun StepSpec
+	PostRun *TaskSpec // Changed from StepSpec to *TaskSpec
 }
 
 
@@ -107,17 +107,21 @@ type PipelineSpec struct {
 	// often represents dependencies between modules.
 	Modules []*ModuleSpec
 
-	// PreRun is a StepSpec that defines a step to be executed once before any
-	// modules in this pipeline are run. Can be nil. If this step fails,
-	// the pipeline's modules and PostRun step are typically skipped.
-	PreRun StepSpec
+	// PreRun is a TaskSpec that defines a task to be executed once before any
+	// modules in this pipeline are run. Can be nil. If this task fails (and its IgnoreError is false),
+	// the pipeline's modules and PostRun task are typically skipped.
+	PreRun *TaskSpec // Changed from StepSpec to *TaskSpec
 
-	// PostRun is a StepSpec that defines a step to be executed once after all
+	// PostRun is a TaskSpec that defines a task to be executed once after all
 	// modules in this pipeline have attempted to run (or after a PreRun or
-	// critical module failure). Can be nil. Errors from this step are
+	// critical module failure). Can be nil. Errors from this task are
 	// typically logged but might not override a primary error from the pipeline's
 	// main execution.
-	PostRun StepSpec
+	PostRun *TaskSpec // Changed from StepSpec to *TaskSpec
 }
 
-// No separate HookSpec is needed as PreRun/PostRun are directly StepSpec.
+// Hooks are now TaskSpecs.
+
+// Ensure necessary imports are present, especially for runtime.ClusterRuntime and runtime.Host
+// The file already contains "github.com/kubexms/kubexms/pkg/runtime" based on TaskSpec.Filter
+// No import for "github.com/kubexms/kubexms/pkg/config" should be needed here anymore.
