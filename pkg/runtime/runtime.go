@@ -15,7 +15,9 @@ import (
 	"github.com/kubexms/kubexms/pkg/connector"
 	"github.com/kubexms/kubexms/pkg/logger"
 	"github.com/kubexms/kubexms/pkg/runner"
-	// "github.com/kubexms/kubexms/pkg/config" // Removed
+	// "github.com/kubexms/kubexms/pkg/config" // This was the old config path, no longer needed.
+	// "{{MODULE_NAME}}/pkg/config" // No longer needed as parser returns v1alpha1.Cluster directly
+	"{{MODULE_NAME}}/pkg/parser" // The new parser
 	"github.com/kubexms/kubexms/pkg/apis/kubexms/v1alpha1"
 )
 
@@ -54,19 +56,7 @@ func (h *Host) GetLabel(labelName string) (string, bool) { if h.Labels == nil { 
 
 // ClusterRuntime holds all global, read-only information and resources
 // required for a KubeXMS operation (e.g., cluster creation, scaling).
-type ClusterRuntime struct {
-	ClusterConfig *config.Cluster
-	Hosts         []*Host
-	Inventory     map[string]*Host
-	RoleInventory map[string][]*Host
-	Logger        *logger.Logger // Base logger for the runtime, can be enriched further
-	GlobalTimeout time.Duration
-	WorkDir       string // Global default WorkDir from config.GlobalSpec
-	Verbose       bool
-	IgnoreErr     bool
-}
-
-// required for a KubeXMS operation (e.g., cluster creation, scaling).
+// This is the canonical definition.
 type ClusterRuntime struct {
 	BaseRuntime   *BaseRuntime // Embedded BaseRuntime
 	ClusterConfig *v1alpha1.Cluster
@@ -145,14 +135,49 @@ type Context struct {
 	Host          *Host
 	Cluster       *ClusterRuntime
 	Logger        *logger.Logger // Logger contextualized for Host, Task, Step etc.
-	// SharedData is deprecated, will be removed after all steps migrate to scoped caches.
-	SharedData    *sync.Map
+	// SharedData field removed.
 
 	pipelineCache cache.PipelineCache
 	moduleCache   cache.ModuleCache
 	taskCache     cache.TaskCache
 	stepCache     cache.StepCache
 }
+
+// NewRuntimeFromYAML is a new constructor that takes YAML data directly,
+// parses it, (notionally) converts it, and then calls NewRuntime.
+func NewRuntimeFromYAML(yamlData []byte, baseLogger *logger.Logger) (*ClusterRuntime, error) {
+	if baseLogger == nil {
+		baseLogger = logger.Get() // Fallback to global default logger
+	}
+	initPhaseLogger := &logger.Logger{SugaredLogger: baseLogger.SugaredLogger.With("phase", "runtime_init_from_yaml")}
+
+	parsedConfig, err := parser.ParseClusterYAML(yamlData)
+	if err != nil {
+		initPhaseLogger.Errorf("Failed to parse cluster YAML: %v", err)
+		return nil, fmt.Errorf("failed to parse cluster YAML: %w", err)
+	}
+
+	// parsedConfig is now directly *v1alpha1.Cluster
+	if parsedConfig == nil {
+		// This case should ideally be caught by the parser if YAML is truly empty or invalid.
+		initPhaseLogger.Errorf("Parsed configuration is nil after parsing YAML.")
+		return nil, fmt.Errorf("parsed configuration is nil after parsing YAML")
+	}
+
+	// Log using ObjectMeta.Name
+	initPhaseLogger.Infof("Successfully parsed cluster YAML for cluster: %s", parsedConfig.ObjectMeta.Name)
+
+	// Apply defaults from the v1alpha1 package
+	v1alpha1.SetDefaults_Cluster(parsedConfig)
+	initPhaseLogger.Infof("Applied v1alpha1 defaults to the cluster configuration for: %s", parsedConfig.ObjectMeta.Name)
+
+	// No explicit conversion/cast function call needed anymore.
+	// parsedConfig is already the *v1alpha1.Cluster type needed by NewRuntime.
+
+	// Call the existing NewRuntime function with the parsed v1alpha1.Cluster config
+	return NewRuntime(parsedConfig, baseLogger)
+}
+
 
 // Accessor methods for caches
 func (c *Context) Pipeline() cache.PipelineCache { return c.pipelineCache }
@@ -384,14 +409,14 @@ func NewHostContext(
 		}
 	}
 
-	sharedData := &sync.Map{} // Retained as per instructions
+	// sharedData := &sync.Map{} // Removed
 
 	return &Context{
 		GoContext:     goCtx,
 		Host:          host,
 		Cluster:       cluster,
 		Logger:        hostSpecificLogger,
-		SharedData:    sharedData,
+		// SharedData:    sharedData, // Removed
 		pipelineCache: pCache,
 		moduleCache:   mCache,
 		taskCache:     tCache,

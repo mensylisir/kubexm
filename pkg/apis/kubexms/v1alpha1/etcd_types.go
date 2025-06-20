@@ -12,48 +12,47 @@ const (
 
 // EtcdConfig defines the configuration for the Etcd cluster.
 type EtcdConfig struct {
-	Type                string              `json:"type,omitempty"`    // "stacked" or "external"
-	Version             string              `json:"version,omitempty"` // Etcd version for managed setup
-	External            *ExternalEtcdConfig `json:"external,omitempty"`// Config for external etcd
+	Type                string              `json:"type,omitempty" yaml:"type,omitempty"`    // "stacked" or "external"
+	Version             string              `json:"version,omitempty" yaml:"version,omitempty"` // Etcd version for managed setup
+	External            *ExternalEtcdConfig `json:"external,omitempty" yaml:"external,omitempty"`// Config for external etcd
 
-	ClientPort          *int                `json:"clientPort,omitempty"` // Default: 2379
-	PeerPort            *int                `json:"peerPort,omitempty"`   // Default: 2380
-	DataDir             *string             `json:"dataDir,omitempty"`    // Default: "/var/lib/etcd"
+	ClientPort          *int                `json:"clientPort,omitempty" yaml:"clientPort,omitempty"` // Default: 2379
+	PeerPort            *int                `json:"peerPort,omitempty" yaml:"peerPort,omitempty"`   // Default: 2380
+	DataDir             *string             `json:"dataDir,omitempty" yaml:"dataDir,omitempty"`    // Default: "/var/lib/etcd"
 
 	// ExtraArgs for etcd process, as a list of strings (e.g., "--initial-cluster-token=mytoken").
 	// Changed from map[string]string to []string for flag flexibility.
-	ExtraArgs           []string            `json:"extraArgs,omitempty"`
+	ExtraArgs           []string            `json:"extraArgs,omitempty" yaml:"extraArgs,omitempty"`
 
 	// Backup configuration
-	BackupDir           *string `json:"backupDir,omitempty"`           // Directory to store etcd backups
-	BackupPeriodHours   *int    `json:"backupPeriodHours,omitempty"`   // Interval in hours for backups
-	KeepBackupNumber    *int    `json:"keepBackupNumber,omitempty"`    // Number of backups to retain
-	BackupScriptPath    *string `json:"backupScriptPath,omitempty"`    // Path to a custom backup script
+	BackupDir           *string `json:"backupDir,omitempty" yaml:"backupDir,omitempty"`           // Directory to store etcd backups
+	BackupPeriodHours   *int    `json:"backupPeriodHours,omitempty" yaml:"backupPeriodHours,omitempty"`   // Interval in hours for backups
+	KeepBackupNumber    *int    `json:"keepBackupNumber,omitempty" yaml:"keepBackupNumber,omitempty"`    // Number of backups to retain
+	BackupScriptPath    *string `json:"backupScriptPath,omitempty" yaml:"backupScriptPath,omitempty"`    // Path to a custom backup script
 
 	// Performance and tuning
-	HeartbeatIntervalMillis *int    `json:"heartbeatIntervalMillis,omitempty"` // Leader heartbeat interval in milliseconds
-	ElectionTimeoutMillis   *int    `json:"electionTimeoutMillis,omitempty"`   // Election timeout in milliseconds
-	SnapshotCount           *uint64 `json:"snapshotCount,omitempty"`           // Number of committed transactions to trigger a snapshot
-	AutoCompactionRetentionHours *int `json:"autoCompactionRetentionHours,omitempty"` // Auto compaction retention in hours (0 to disable)
-
+	HeartbeatIntervalMillis *int    `json:"heartbeatIntervalMillis,omitempty" yaml:"heartbeatInterval,omitempty"` // Leader heartbeat interval in milliseconds
+	ElectionTimeoutMillis   *int    `json:"electionTimeoutMillis,omitempty" yaml:"electionTimeout,omitempty"`   // Election timeout in milliseconds
+	SnapshotCount           *uint64 `json:"snapshotCount,omitempty" yaml:"snapshotCount,omitempty"`           // Number of committed transactions to trigger a snapshot
+	AutoCompactionRetentionHours *int `json:"autoCompactionRetentionHours,omitempty" yaml:"autoCompactionRetention,omitempty"` // Auto compaction retention in hours (0 to disable)
 
 	// Resource management
-	QuotaBackendBytes   *int64 `json:"quotaBackendBytes,omitempty"` // Etcd storage quota in bytes (0 for no quota)
-	MaxRequestBytes     *uint  `json:"maxRequestBytes,omitempty"`   // Maximum client request size in bytes
+	QuotaBackendBytes   *int64 `json:"quotaBackendBytes,omitempty" yaml:"quotaBackendBytes,omitempty"` // Etcd storage quota in bytes (0 for no quota)
+	MaxRequestBytes     *uint  `json:"maxRequestBytes,omitempty" yaml:"maxRequestBytes,omitempty"`   // Maximum client request size in bytes
 
 	// Operational settings
-	Metrics             *string `json:"metrics,omitempty"`             // Metrics exposure level: "basic" or "extensive"
-	LogLevel            *string `json:"logLevel,omitempty"`            // Log level: "debug", "info", "warn", "error", "panic", "fatal"
-	MaxSnapshotsToKeep  *uint   `json:"maxSnapshotsToKeep,omitempty"`  // Maximum number of snapshot files to keep (0 for unlimited)
-	MaxWALsToKeep       *uint   `json:"maxWALsToKeep,omitempty"`       // Maximum number of WAL files to keep (0 for unlimited)
+	Metrics             *string `json:"metrics,omitempty" yaml:"metrics,omitempty"`             // Metrics exposure level: "basic" or "extensive"
+	LogLevel            *string `json:"logLevel,omitempty" yaml:"logLevel,omitempty"`            // Log level: "debug", "info", "warn", "error", "panic", "fatal"
+	MaxSnapshotsToKeep  *uint   `json:"maxSnapshotsToKeep,omitempty" yaml:"maxSnapshots,omitempty"`  // Maximum number of snapshot files to keep (0 for unlimited)
+	MaxWALsToKeep       *uint   `json:"maxWALsToKeep,omitempty" yaml:"maxWals,omitempty"`       // Maximum number of WAL files to keep (0 for unlimited)
 }
 
 // ExternalEtcdConfig describes how to connect to an external etcd cluster.
 type ExternalEtcdConfig struct {
-	Endpoints []string `json:"endpoints"`
-	CAFile string `json:"caFile,omitempty"`
-	CertFile string `json:"certFile,omitempty"`
-	KeyFile string `json:"keyFile,omitempty"`
+	Endpoints []string `json:"endpoints" yaml:"endpoints"`
+	CAFile    string   `json:"caFile,omitempty" yaml:"caFile,omitempty"`
+	CertFile  string   `json:"certFile,omitempty" yaml:"certFile,omitempty"`
+	KeyFile   string   `json:"keyFile,omitempty" yaml:"keyFile,omitempty"`
 }
 
 // SetDefaults_EtcdConfig sets default values for EtcdConfig.
@@ -62,7 +61,8 @@ func SetDefaults_EtcdConfig(cfg *EtcdConfig) {
 		return
 	}
 	if cfg.Type == "" {
-		cfg.Type = EtcdTypeKubeXMSInternal
+		// cfg.Type = EtcdTypeKubeXMSInternal // Old default
+		cfg.Type = "kubexm" // As per prompt YAML example
 	}
 	if cfg.ClientPort == nil {
 		defaultPort := 2379
@@ -90,17 +90,17 @@ func SetDefaults_EtcdConfig(cfg *EtcdConfig) {
 	if cfg.KeepBackupNumber == nil { defaultKeepBackups := 7; cfg.KeepBackupNumber = &defaultKeepBackups }
 
 	// Default performance/tuning (values from etcd defaults or common practice)
-	if cfg.HeartbeatIntervalMillis == nil { hb := 100; cfg.HeartbeatIntervalMillis = &hb }
-	if cfg.ElectionTimeoutMillis == nil { et := 1000; cfg.ElectionTimeoutMillis = &et }
-	if cfg.SnapshotCount == nil { var sc uint64 = 100000; cfg.SnapshotCount = &sc } // etcd default
-	if cfg.AutoCompactionRetentionHours == nil { acr := 0; cfg.AutoCompactionRetentionHours = &acr } // etcd default is 0 (off for periodic) or 1 for hour-based if mode is 'periodic'
+	if cfg.HeartbeatIntervalMillis == nil { hb := 250; cfg.HeartbeatIntervalMillis = &hb } // YAML: heartbeatInterval: 250
+	if cfg.ElectionTimeoutMillis == nil { et := 5000; cfg.ElectionTimeoutMillis = &et } // YAML: electionTimeout: 5000
+	if cfg.SnapshotCount == nil { var sc uint64 = 10000; cfg.SnapshotCount = &sc } // YAML: snapshotCount: 10000
+	if cfg.AutoCompactionRetentionHours == nil { acr := 8; cfg.AutoCompactionRetentionHours = &acr } // YAML: autoCompactionRetention: 8
 
-	// Resource management defaults (0 usually means disabled or etcd default)
-	if cfg.QuotaBackendBytes == nil { var qbb int64 = 0; cfg.QuotaBackendBytes = &qbb } // 0 = no quota, etcd default 2GB
-	// MaxRequestBytes default is 1.5 MiB in etcd
+	// Resource management defaults
+	if cfg.QuotaBackendBytes == nil { var qbb int64 = 2147483648; cfg.QuotaBackendBytes = &qbb } // YAML: quotaBackendBytes: 2147483648 (2GB)
+	if cfg.MaxRequestBytes == nil { var mrb uint = 1572864; cfg.MaxRequestBytes = &mrb } // YAML: maxRequestBytes: 1572864 (1.5MB)
 
 	// Operational defaults
-	if cfg.Metrics == nil { m := "basic"; cfg.Metrics = &m }
+	if cfg.Metrics == nil { m := "basic"; cfg.Metrics = &m } // YAML: metrics: basic
 	if cfg.LogLevel == nil { l := "info"; cfg.LogLevel = &l }
 	if cfg.MaxSnapshotsToKeep == nil { var ms uint = 5; cfg.MaxSnapshotsToKeep = &ms } // etcd default
 	if cfg.MaxWALsToKeep == nil { var mw uint = 5; cfg.MaxWALsToKeep = &mw }          // etcd default

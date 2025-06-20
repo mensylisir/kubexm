@@ -50,27 +50,30 @@ type Task struct {
 // It handles step idempotency checks (Step.Check) and concurrent execution across hosts.
 //
 // Parameters:
-//   - goCtx: The parent Go context, for cancellation and deadlines.
+//   - taskParentCtx: The parent runtime.Context (typically from a Module).
+//     This context provides access to ClusterRuntime, Logger, GoContext, and caches.
 //   - hosts: A slice of *runtime.Host pointers on which this task should be executed.
 //     This list is typically pre-filtered by a Module based on Task.RunOnRoles and Task.Filter.
-//   - cluster: A pointer to the global *runtime.ClusterRuntime providing access to overall
-//     cluster configuration and shared resources like the logger.
 //
 // Returns:
 //   - []*step.Result: A slice containing the results of all steps executed on all target hosts.
 //   - error: The first critical error encountered during the execution on any host. If all steps
 //     succeed or if failing steps are ignored (e.g., step-level ignore, not Task.IgnoreError),
 //     this will be nil. Task.IgnoreError influences how the *calling Module* treats this error.
-func (t *Task) Run(goCtx context.Context, hosts []*runtime.Host, cluster *runtime.ClusterRuntime) ([]*step.Result, error) {
-	// Ensure logger is available from cluster runtime, or use global default.
-	var baseLogger *logger.Logger
-	if cluster != nil && cluster.Logger != nil {
-		baseLogger = cluster.Logger
-	} else {
-		baseLogger = logger.Get() // Fallback to global logger
-		baseLogger.Warnf("Task.Run for '%s' using global logger due to nil cluster.Logger.", t.Name)
+func (t *Task) Run(taskParentCtx runtime.Context, hosts []*runtime.Host) ([]*step.Result, error) {
+	if taskParentCtx.Cluster == nil {
+		// This should ideally be caught before calling Task.Run
+		initialLogger := taskParentCtx.Logger
+		if initialLogger == nil { initialLogger = logger.Get() } // Defensive
+		initialLogger.Errorf("Task.Run for '%s' called with a Context that has a nil ClusterRuntime.", t.Name)
+		return nil, fmt.Errorf("task '%s' Run called with a Context that has a nil ClusterRuntime", t.Name)
 	}
-	taskLogger := baseLogger.SugaredLogger.With("task", t.Name).Sugar()
+	cluster := taskParentCtx.Cluster
+	goCtx := taskParentCtx.GoContext // Use GoContext from taskParentCtx
+
+	// Use logger from taskParentCtx, adding task-specific field.
+	// taskParentCtx.Logger should already be contextualized by the calling module.
+	taskLogger := taskParentCtx.Logger.SugaredLogger.With("task", t.Name).Sugar()
 	taskLogger.Infof("Starting task...")
 
 	if len(hosts) == 0 {
@@ -82,7 +85,7 @@ func (t *Task) Run(goCtx context.Context, hosts []*runtime.Host, cluster *runtim
 		return nil, nil
 	}
 
-	g, egCtx := errgroup.WithContext(goCtx)
+	g, egCtx := errgroup.WithContext(goCtx) // Use goCtx from taskParentCtx
 
 	concurrency := t.Concurrency
 	if concurrency <= 0 {
@@ -100,40 +103,72 @@ func (t *Task) Run(goCtx context.Context, hosts []*runtime.Host, cluster *runtim
 
 		g.Go(func() error {
 			// Create a new HostContext for each host.
-			// The logger within this hostCtx will be derived from cluster.Logger.
-			hostCtx := runtime.NewHostContext(egCtx, currentHost, cluster)
+			// Pass caches from the parent context. Steps are expected to use these scopes.
+			// TODO: Review if task-specific or step-specific sub-caches are needed here.
+			// For now, module-level caches are propagated.
+			hostCtx := runtime.NewHostContext(egCtx, currentHost, cluster,
+				taskParentCtx.Pipeline(),
+				taskParentCtx.Module(),
+				taskParentCtx.Task(), // Propagates the module's task cache
+				taskParentCtx.Step(), // Propagates the module's step cache (or nil)
+			)
 
 			// Further specialize logger for this task on this host.
-			// NewHostContext already adds host.name and host.address.
+			// NewHostContext already adds host.name and host.address using the base logger from `cluster`.
+			// The logger in hostCtx is now derived from `cluster.Logger`.
+			// We should ensure taskParentCtx.Logger (which includes module context) is used as base in NewHostContext.
+			// This requires NewHostContext to potentially take a baseLogger argument.
+			// For now, let's assume NewHostContext's current logger derivation is sufficient,
+			// or specialize it here if taskParentCtx.Logger is preferred over cluster.Logger.
+			// Current NewHostContext uses cluster.Logger.
+			// Let's re-assign logger in hostCtx to be derived from taskParentCtx.Logger for more specific context.
+			// This assumes taskParentCtx.Logger is already contextualized (e.g., with module name).
+			hostCtx.Logger = &logger.Logger{SugaredLogger: taskParentCtx.Logger.SugaredLogger.With(
+				"host_name", currentHost.Name,
+				"host_address", currentHost.Address,
+			).Sugar()}
+
+			// Further specialize logger for this task on this host within this task's scope.
 			// We add the task name here.
+			// The logger in hostCtx is now derived from taskParentCtx.Logger and enriched with host info.
 			hostTaskLogger := hostCtx.Logger.SugaredLogger.With("task_on_host", t.Name).Sugar()
+			// No need to re-assign hostCtx.Logger here if NewHostContext correctly uses/derives from taskParentCtx.Logger
+			// For now, assuming hostCtx.Logger from NewHostContext is the one to use for steps.
+			// If NewHostContext needs taskParentCtx.Logger, that's a change in NewHostContext.
+			// The current NewHostContext uses cluster.Logger (i.e. taskParentCtx.Cluster.Logger()).
+			// This is a subtle point: should step logs inherit module context or just cluster context?
+			// Let's assume for now module context is desired for steps.
+			// This means NewHostContext should ideally take taskParentCtx.Logger as its base.
+			// Modifying NewHostContext is outside this diff. For now, steps will log with cluster + host context.
+			// To ensure module context is included, we can overwrite hostCtx.Logger here:
 			hostCtx.Logger = &logger.Logger{SugaredLogger: hostTaskLogger}
 
 
 			hostTaskLogger.Infof("Starting task execution on host")
-			// var hostStepResults []*step.Result // Not currently used outside this goroutine
 
 			for i, s := range t.Steps {
-				// Create a step-specific logger from the host-task logger
-				stepLoggerWithFields := hostTaskLogger.With("step", s.Name(), "step_index", fmt.Sprintf("%d/%d", i+1, len(t.Steps)))
-				hostCtx.Logger = &logger.Logger{SugaredLogger: stepLoggerWithFields.Sugar()} // Update context's logger for this step
+				stepSpecificLogger := hostTaskLogger.With("step", s.Name(), "step_index", fmt.Sprintf("%d/%d", i+1, len(t.Steps)))
+				originalStepHostCtxLogger := hostCtx.Logger // Save it
+				hostCtx.Logger = &logger.Logger{SugaredLogger: stepSpecificLogger.Sugar()} // Set step-specific logger for the step's execution
 
-				stepLoggerWithFields.Debugf("Checking step...")
+				stepSpecificLogger.Debugf("Checking step...")
 				isDone, checkErr := s.Check(hostCtx)
+				hostCtx.Logger = originalStepHostCtxLogger // Restore previous logger context for the task loop
+
 				if checkErr != nil {
 					err := fmt.Errorf("step '%s' (on host '%s') pre-check failed: %w", s.Name(), currentHost.Name, checkErr)
-					stepLoggerWithFields.Errorf("Step pre-check failed: %v", checkErr)
+					stepSpecificLogger.Errorf("Step pre-check failed: %v", checkErr) // Use step-specific logger
 
 					checkRes := step.NewResult(s.Name()+" [CheckPhase]", currentHost.Name, time.Now(), err)
-					checkRes.Message = err.Error() // Ensure message has the error
+					checkRes.Message = err.Error()
 					resultsMu.Lock()
 					allResults = append(allResults, checkRes)
 					resultsMu.Unlock()
-					return err
+					return err // Critical pre-check failure
 				}
 
 				if isDone {
-					stepLoggerWithFields.Infof("Step is already done, skipping.")
+					stepSpecificLogger.Infof("Step is already done, skipping.")
 					skipRes := step.NewResult(s.Name(), currentHost.Name, time.Now(), nil)
 					skipRes.Status = "Skipped"
 					skipRes.Message = "Condition already met or task already completed."
@@ -141,43 +176,39 @@ func (t *Task) Run(goCtx context.Context, hosts []*runtime.Host, cluster *runtim
 					resultsMu.Lock()
 					allResults = append(allResults, skipRes)
 					resultsMu.Unlock()
-					// hostStepResults = append(hostStepResults, skipRes) // If needed per host
 					continue
 				}
 
-				stepLoggerWithFields.Infof("Running step...")
+				originalStepHostCtxLogger = hostCtx.Logger // Save again before Run
+				hostCtx.Logger = &logger.Logger{SugaredLogger: stepSpecificLogger.Sugar()} // Set for Run
+				stepSpecificLogger.Infof("Running step...")
 				stepResult := s.Run(hostCtx)
+				hostCtx.Logger = originalStepHostCtxLogger // Restore
+
 				if stepResult == nil {
 				    nilResultErr := fmt.Errorf("step '%s' (on host '%s') Run method returned a nil result", s.Name(), currentHost.Name)
-					stepLoggerWithFields.Errorf("%v", nilResultErr)
-					// Create a result for this failure
+					stepSpecificLogger.Errorf("%v", nilResultErr)
 					failedRes := step.NewResult(s.Name(), currentHost.Name, time.Now(), nilResultErr)
 					failedRes.Status = "Failed"
 					failedRes.Message = "Step implementation returned nil result."
                     resultsMu.Lock()
 					allResults = append(allResults, failedRes)
                     resultsMu.Unlock()
-                    return nilResultErr
+                    return nilResultErr // Critical failure
 				}
 
 				resultsMu.Lock()
 				allResults = append(allResults, stepResult)
 				resultsMu.Unlock()
-				// hostStepResults = append(hostStepResults, stepResult) // If needed per host
 
 				if stepResult.Status == "Failed" {
-					// Error is already logged by the step's Run method.
-					// We just need to propagate it to errgroup.
-					// The stepResult.Error should contain the specific error from the step.
-					// If stepResult.Error is nil but status is Failed, use a generic message.
 					errToPropagate := stepResult.Error
 					if errToPropagate == nil {
-						errToPropagate = fmt.Errorf("step '%s' on host '%s' reported status Failed without a specific error in Result.Error. Message: %s", s.Name(), currentHost.Name, stepResult.Message)
+						errToPropagate = fmt.Errorf("step '%s' on host '%s' reported status Failed without a specific error. Message: %s", s.Name(), currentHost.Name, stepResult.Message)
 					}
-					// No need to log again here, step's Run should have logged its failure.
-					return fmt.Errorf("step '%s' failed on host '%s': %w", s.Name(), currentHost.Name, errToPropagate)
+					// Step's Run should have logged its failure with stepSpecificLogger.
+					return fmt.Errorf("step '%s' failed on host '%s': %w", s.Name(), currentHost.Name, errToPropagate) // Critical step failure
 				}
-				// Success is logged by the step's Run method.
 			}
 			hostTaskLogger.Infof("Task execution completed successfully on host.")
 			return nil

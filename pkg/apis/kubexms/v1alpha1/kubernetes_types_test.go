@@ -37,6 +37,16 @@ func TestSetDefaults_KubernetesConfig(t *testing.T) {
 	if cfg.MasqueradeAll == nil || *cfg.MasqueradeAll != false {
 		t.Errorf("Default MasqueradeAll = %v, want false", cfg.MasqueradeAll)
 	}
+	if cfg.ContainerManager != "docker" { // New default check
+		t.Errorf("Default ContainerManager = %s, want docker", cfg.ContainerManager)
+	}
+	if cfg.MaxPods == nil || *cfg.MaxPods != 110 { // New default check
+		t.Errorf("Default MaxPods = %v, want 110", cfg.MaxPods)
+	}
+	if cfg.NodeCidrMaskSize == nil || *cfg.NodeCidrMaskSize != 24 { // New default check
+		t.Errorf("Default NodeCidrMaskSize = %v, want 24", cfg.NodeCidrMaskSize)
+	}
+
 
 	// Check sub-configs are initialized and defaulted
 	if cfg.Nodelocaldns == nil || cfg.Nodelocaldns.Enabled == nil || *cfg.Nodelocaldns.Enabled != true {
