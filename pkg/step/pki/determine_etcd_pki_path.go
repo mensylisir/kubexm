@@ -58,31 +58,35 @@ func (e *DetermineEtcdPKIPathStepExecutor) Check(ctx runtime.Context) (isDone bo
 	spec.PopulateDefaults()
 	logger := ctx.Logger.SugaredLogger().With("step", spec.GetName())
 
+	if ctx.Host == nil || ctx.Host.Runner == nil {
+		return false, fmt.Errorf("host or runner not available in context for %s Check", spec.GetName())
+	}
+
 	pkiPathVal, pathOk := ctx.Module().Get(spec.PKIPathToEnsureSharedDataKey)
 	if !pathOk {
 		logger.Debugf("Etcd PKI path not found in Module Cache key '%s'. Path determination/setup likely pending.", spec.PKIPathToEnsureSharedDataKey)
-		return false, nil
+		return false, nil // Not an error, just not ready
 	}
 	pkiPath, ok := pkiPathVal.(string)
 	if !ok || pkiPath == "" {
 		logger.Warnf("Invalid or empty Etcd PKI path in Module Cache key '%s'.", spec.PKIPathToEnsureSharedDataKey)
-		return false, nil
+		return false, nil // Data issue, but not a hard error for Check, Execute will fail
 	}
 
-	stat, statErr := os.Stat(pkiPath)
-	if os.IsNotExist(statErr) {
+	// Check if the directory exists using the runner
+	exists, err := ctx.Host.Runner.Exists(ctx.GoContext, pkiPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to check existence of etcd PKI path %s: %w", pkiPath, err)
+	}
+	if !exists {
 		logger.Debugf("Etcd PKI path %s (from Module Cache) does not exist.", pkiPath)
 		return false, nil
 	}
-	if statErr != nil {
-		return false, fmt.Errorf("failed to stat etcd PKI path %s: %w", pkiPath, statErr)
-	}
-	if !stat.IsDir() {
-		return false, fmt.Errorf("etcd PKI path %s is not a directory", pkiPath)
-	}
-	logger.Debugf("Etcd PKI directory %s exists.", pkiPath)
+	// Note: We are not checking if it's a directory here. Mkdirp in Execute handles this.
+	// If it exists as a file, Mkdirp will fail, which is desired.
+	logger.Debugf("Etcd PKI path %s exists.", pkiPath)
 
-	if val, exists := ctx.Task().Get(spec.OutputPKIPathSharedDataKey); exists {
+	if val, taskCacheExists := ctx.Task().Get(spec.OutputPKIPathSharedDataKey); taskCacheExists {
 		if storedPath, okStr := val.(string); okStr && storedPath == pkiPath {
 			logger.Infof("Etcd PKI path %s already available in Task Cache and matches.", pkiPath)
 			return true, nil
@@ -119,11 +123,13 @@ func (e *DetermineEtcdPKIPathStepExecutor) Execute(ctx runtime.Context) *step.Re
 	}
 
 	logger.Infof("Ensuring etcd PKI directory (from Module Cache) exists: %s", pkiPath)
-	if err := os.MkdirAll(pkiPath, 0700); err != nil {
-		res.Error = fmt.Errorf("failed to create etcd PKI directory %s: %w", pkiPath, err)
+	// Use Runner.Mkdirp, assuming pkiPath is on the target host defined by ctx.Host
+	// Mode "0700" is appropriate for PKI directories. Sudo set to true as these are often system paths.
+	if err := ctx.Host.Runner.Mkdirp(ctx.GoContext, pkiPath, "0700", true); err != nil {
+		res.Error = fmt.Errorf("failed to create etcd PKI directory %s on host %s: %w", pkiPath, ctx.Host.Name, err)
 		res.Status = step.StatusFailed; return res
 	}
-	logger.Infof("Etcd PKI directory ensured at %s", pkiPath)
+	logger.Infof("Etcd PKI directory ensured at %s on host %s", pkiPath, ctx.Host.Name)
 
 	ctx.Task().Set(spec.OutputPKIPathSharedDataKey, pkiPath)
 	logger.Infof("Stored etcd PKI path in Task Cache ('%s'): %s", spec.OutputPKIPathSharedDataKey, pkiPath)
@@ -139,9 +145,10 @@ func (e *DetermineEtcdPKIPathStepExecutor) Execute(ctx runtime.Context) *step.Re
 	}
 
 	res.Message = fmt.Sprintf("Etcd PKI path %s ensured and available in Task Cache.", pkiPath)
+	res.Status = step.StatusSucceeded
 	return res
 }
 
 func init() {
-	step.Register(&DetermineEtcdPKIPathStepSpec{}, &DetermineEtcdPKIPathStepExecutor{})
+	step.Register(step.GetSpecTypeName(&DetermineEtcdPKIPathStepSpec{}), &DetermineEtcdPKIPathStepExecutor{})
 }

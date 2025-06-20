@@ -49,11 +49,16 @@ func init() {
 }
 
 // Check determines if sysctl params are already set.
-func (e *SetSystemConfigStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
-	spec, ok := s.(*SetSystemConfigStepSpec)
-	if !ok {
-		return false, fmt.Errorf("unexpected spec type %T for SetSystemConfigStepExecutor Check method", s)
+func (e *SetSystemConfigStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+	rawSpec, rok := ctx.Step().GetCurrentStepSpec()
+	if !rok {
+		return false, fmt.Errorf("StepSpec not found in context for SetSystemConfigStepExecutor Check method")
 	}
+	spec, ok := rawSpec.(*SetSystemConfigStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected spec type %T for SetSystemConfigStepExecutor Check method", rawSpec)
+	}
+
 	if len(spec.Params) == 0 {
 		if ctx.Logger != nil {
 			ctx.Logger.Debugf("No sysctl params specified for step '%s' on host %s, considering done.", spec.GetName(), ctx.Host.Name)
@@ -87,29 +92,30 @@ func (e *SetSystemConfigStepExecutor) Check(s spec.StepSpec, ctx *runtime.Contex
 }
 
 // Execute applies sysctl params.
-func (e *SetSystemConfigStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	spec, ok := s.(*SetSystemConfigStepSpec)
+func (e *SetSystemConfigStepExecutor) Execute(ctx runtime.Context) *step.Result {
+	startTime := time.Now()
+	rawSpec, rok := ctx.Step().GetCurrentStepSpec()
+	if !rok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for SetSystemConfigStepExecutor Execute method"))
+	}
+	spec, ok := rawSpec.(*SetSystemConfigStepSpec)
 	if !ok {
-		myErr := fmt.Errorf("Execute: unexpected spec type %T for SetSystemConfigStepExecutor", s)
-		stepName := "SetSystemConfig (type error)"
-		if s != nil { stepName = s.GetName() }
-		return step.NewResult(stepName, ctx.Host.Name, time.Now(), myErr)
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected spec type %T for SetSystemConfigStepExecutor Execute method", rawSpec))
 	}
 
-	startTime := time.Now()
-	res := step.NewResult(spec.GetName(), ctx.Host.Name, startTime, nil)
+	res := step.NewResult(ctx, startTime, nil) // Use new NewResult signature
 	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 	var errorsCollected []string
 	var appliedParams []string
 
 	if len(spec.Params) == 0 {
-		res.Status = "Succeeded"; res.Message = "No sysctl parameters to set."
+		res.Status = step.StatusSucceeded; res.Message = "No sysctl parameters to set."
 		hostCtxLogger.Infof(res.Message)
 		res.EndTime = time.Now(); return res
 	}
 	if ctx.Host.Runner == nil {
 		res.Error = fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
-		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
 	var configFileContent strings.Builder
@@ -155,21 +161,21 @@ func (e *SetSystemConfigStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Cont
 	res.EndTime = time.Now()
 
 	if len(errorsCollected) > 0 {
-		res.Status = "Failed"; res.Error = fmt.Errorf(strings.Join(errorsCollected, "; ")); res.Message = res.Error.Error()
+		res.Status = step.StatusFailed; res.Error = fmt.Errorf(strings.Join(errorsCollected, "; ")); res.Message = res.Error.Error()
 		hostCtxLogger.Errorf("Step finished with errors: %s", res.Message)
 	} else {
 		hostCtxLogger.Infof("Verifying sysctl parameters after apply...")
-		allSet, checkErr := e.Check(s, ctx)
+		allSet, checkErr := e.Check(ctx) // Pass ctx to Check
 		if checkErr != nil {
-			res.Status = "Failed"; res.Error = fmt.Errorf("failed to verify sysctl params after apply: %w", checkErr)
+			res.Status = step.StatusFailed; res.Error = fmt.Errorf("failed to verify sysctl params after apply: %w", checkErr)
 			res.Message = res.Error.Error()
 			hostCtxLogger.Errorf("Step verification failed: %s", res.Message)
 		} else if !allSet {
-			res.Status = "Failed"; res.Error = fmt.Errorf("sysctl params not all set to desired values after apply and reload attempt")
+			res.Status = step.StatusFailed; res.Error = fmt.Errorf("sysctl params not all set to desired values after apply and reload attempt")
 			res.Message = res.Error.Error()
 			hostCtxLogger.Errorf("Step verification failed: %s. Some parameters may not have applied correctly.", res.Message)
 		} else {
-			res.Status = "Succeeded"
+			res.Status = step.StatusSucceeded
 			res.Message = fmt.Sprintf("All sysctl parameters (%s) successfully set and verified.", strings.Join(appliedParams, ", "))
 			hostCtxLogger.Successf("Step succeeded: %s", res.Message)
 		}

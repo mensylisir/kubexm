@@ -18,128 +18,84 @@ import (
 
 // SSHConnector implements the Connector interface for SSH connections.
 type SSHConnector struct {
-	client      *ssh.Client
-	sftpClient  *sftp.Client
-	connCfg     ConnectionCfg
-	cachedOS    *OS
-	isConnected bool
+	client        *ssh.Client
+	bastionClient *ssh.Client // Client for the bastion host, if used
+	sftpClient    *sftp.Client
+	connCfg       ConnectionCfg // Stores the config used for the current connection
+	cachedOS      *OS
+	isConnected   bool
+	pool          *ConnectionPool // Connection pool instance
+	isFromPool    bool          // True if the current client is from the pool
+}
+
+// NewSSHConnector creates a new SSHConnector, optionally with a connection pool.
+func NewSSHConnector(pool *ConnectionPool) *SSHConnector {
+	return &SSHConnector{
+		pool: pool,
+	}
 }
 
 // Connect establishes an SSH connection to the host specified in cfg.
+// It may use a connection pool if configured and applicable.
 func (s *SSHConnector) Connect(ctx context.Context, cfg ConnectionCfg) error {
-	s.connCfg = cfg
-	var authMethods []ssh.AuthMethod
+	s.connCfg = cfg // Store for potential use in Close (Put to pool)
+	s.isFromPool = false // Reset for this connection attempt
 
-	if cfg.Password != "" {
-		authMethods = append(authMethods, ssh.Password(cfg.Password))
-	}
+	// Try pool first if available and connection is poolable (e.g., no bastion for now)
+	if s.pool != nil && cfg.Bastion == nil {
+		// Attempt to get a connection from the pool
+		pooledClient, err := s.pool.Get(ctx, cfg)
+		if err == nil && pooledClient != nil {
+			s.client = pooledClient
+			s.isFromPool = true
+			s.isConnected = true
 
-	if len(cfg.PrivateKey) > 0 {
-		signer, err := ssh.ParsePrivateKey(cfg.PrivateKey)
-		if err != nil {
-			return &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to parse private key: %w", err)}
-		}
-		authMethods = append(authMethods, ssh.PublicKeys(signer))
-	} else if cfg.PrivateKeyPath != "" {
-		key, err := os.ReadFile(cfg.PrivateKeyPath)
-		if err != nil {
-			return &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to read private key file %s: %w", cfg.PrivateKeyPath, err)}
-		}
-		signer, err := ssh.ParsePrivateKey(key)
-		if err != nil {
-			return &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to parse private key from file %s: %w", cfg.PrivateKeyPath, err)}
-		}
-		authMethods = append(authMethods, ssh.PublicKeys(signer))
-	}
-
-	if len(authMethods) == 0 {
-		return &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("no authentication method provided (password or private key)")}
-	}
-
-	sshConfig := &ssh.ClientConfig{
-		User:            cfg.User,
-		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: Make this configurable
-		Timeout:         cfg.Timeout,
-	}
-
-	var client *ssh.Client
-	var err error
-
-	if cfg.Bastion != nil {
-		bastionAuthMethods := []ssh.AuthMethod{}
-		if cfg.Bastion.Password != "" {
-			bastionAuthMethods = append(bastionAuthMethods, ssh.Password(cfg.Bastion.Password))
-		}
-		if len(cfg.Bastion.PrivateKey) > 0 {
-			signer, err := ssh.ParsePrivateKey(cfg.Bastion.PrivateKey)
-			if err != nil {
-				return &ConnectionError{Host: cfg.Bastion.Host, Err: fmt.Errorf("failed to parse bastion private key: %w", err)}
+			// Perform a basic test to ensure the client from the pool is usable
+			session, testErr := s.client.NewSession()
+			if testErr != nil {
+				// Pooled connection is bad, discard it properly
+				s.pool.CloseConnection(s.connCfg, s.client) // CloseConnection handles numActive
+				s.client = nil
+				s.isFromPool = false
+				s.isConnected = false
+				// Log this event and fall through to direct dial
+				// Consider using a logger if available from context or connector options
+				fmt.Fprintf(os.Stderr, "SSHConnector: Pooled connection for %s failed health check, falling back to direct dial: %v\n", cfg.Host, testErr)
+			} else {
+				session.Close()
+				// fmt.Fprintf(os.Stdout, "SSHConnector: Reused connection from pool for %s\n", cfg.Host)
+				return nil // Successfully connected using a pooled connection
 			}
-			bastionAuthMethods = append(bastionAuthMethods, ssh.PublicKeys(signer))
-		} else if cfg.Bastion.PrivateKeyPath != "" {
-			key, err := os.ReadFile(cfg.Bastion.PrivateKeyPath)
-			if err != nil {
-				return &ConnectionError{Host: cfg.Bastion.Host, Err: fmt.Errorf("failed to read bastion private key file %s: %w", cfg.Bastion.PrivateKeyPath, err)}
-			}
-			signer, err := ssh.ParsePrivateKey(key)
-			if err != nil {
-				return &ConnectionError{Host: cfg.Bastion.Host, Err: fmt.Errorf("failed to parse bastion private key from file %s: %w", cfg.Bastion.PrivateKeyPath, err)}
-			}
-			bastionAuthMethods = append(bastionAuthMethods, ssh.PublicKeys(signer))
-		}
-
-		if len(bastionAuthMethods) == 0 {
-			return &ConnectionError{Host: cfg.Bastion.Host, Err: fmt.Errorf("no authentication method provided for bastion (password or private key)")}
-		}
-
-
-		bastionConfig := &ssh.ClientConfig{
-			User:            cfg.Bastion.User,
-			Auth:            bastionAuthMethods,
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: Make this configurable
-			Timeout:         cfg.Bastion.Timeout,
-		}
-
-		bastionClient, err := ssh.Dial("tcp", net.JoinHostPort(cfg.Bastion.Host, strconv.Itoa(cfg.Bastion.Port)), bastionConfig)
-		if err != nil {
-			return &ConnectionError{Host: cfg.Bastion.Host, Err: fmt.Errorf("failed to dial bastion: %w", err)}
-		}
-
-		conn, err := bastionClient.Dial("tcp", net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)))
-		if err != nil {
-			bastionClient.Close()
-			return &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to dial target host via bastion: %w", err)}
-		}
-
-		ncc, chans, reqs, err := ssh.NewClientConn(conn, net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)), sshConfig)
-		if err != nil {
-			bastionClient.Close() // Close bastion client if NewClientConn fails
-			return &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to create new client connection via bastion: %w", err)}
-		}
-		client = ssh.NewClient(ncc, chans, reqs)
-		// Keep bastionClient to close it later in s.Close() or handle it if main client closes
-		// For now, we are not storing bastionClient in SSHConnector, it will be closed if connection fails
-		// or when the SSHConnector is closed (though not explicitly handled yet).
-		// A more robust solution might involve storing bastionClient and closing it in SSHConnector.Close().
-	} else {
-		client, err = ssh.Dial("tcp", net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)), sshConfig)
-		if err != nil {
-			return &ConnectionError{Host: cfg.Host, Err: err}
+		} else if err != nil {
+			// Log error from pool.Get but still fall through to direct dial
+			fmt.Fprintf(os.Stderr, "SSHConnector: Failed to get connection from pool for %s: %v. Falling back to direct dial.\n", cfg.Host, err)
 		}
 	}
 
-	s.client = client
-
-	// Test connection by opening a session
-	session, err := s.client.NewSession()
-	if err != nil {
-		s.client.Close()
-		return &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to create test session: %w", err)}
+	// Direct Dial Logic (Fallback or Default if pool not used/failed)
+	if !s.isFromPool {
+		// fmt.Fprintf(os.Stdout, "SSHConnector: Attempting direct dial for %s (pool not used or fallback)\n", cfg.Host)
+		client, bastionClient, err := dialSSH(ctx, cfg, cfg.Timeout) // Use cfg.Timeout for direct dials
+		if err != nil {
+			return err // dialSSH already wraps errors in ConnectionError where appropriate
+		}
+		s.client = client
+		s.bastionClient = bastionClient // Store bastion client if one was used
+		// Test connection by opening a session (dialSSH does not do this final test)
+		session, testErr := s.client.NewSession()
+		if testErr != nil {
+			if s.client != nil {
+				s.client.Close()
+			}
+			if s.bastionClient != nil {
+				s.bastionClient.Close()
+			}
+			return &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to create test session after direct dial: %w", testErr)}
+		}
+		session.Close()
+		s.isConnected = true
+		// s.isFromPool remains false
 	}
-	session.Close() // Close the test session immediately
-
-	s.isConnected = true
 	return nil
 }
 
@@ -163,21 +119,43 @@ func (s *SSHConnector) IsConnected() bool {
 // Close closes the SSH and SFTP clients.
 func (s *SSHConnector) Close() error {
 	s.isConnected = false
+	var sshClientErr error
+
 	if s.sftpClient != nil {
 		if err := s.sftpClient.Close(); err != nil {
-			// Log SFTP close error but try to close SSH client anyway
-			// fmt.Fprintf(os.Stderr, "Failed to close SFTP client: %v
-", err)
+			// Log SFTP close error but don't let it override SSH client error
+			fmt.Fprintf(os.Stderr, "SSHConnector: Failed to close SFTP client for %s: %v\n", s.connCfg.Host, err)
 		}
 		s.sftpClient = nil
 	}
+
 	if s.client != nil {
-		err := s.client.Close()
+		if s.isFromPool && s.pool != nil {
+			// Return to pool, assume healthy for now. Pool's Get will re-verify.
+			// connCfg should be the one used to Get this client.
+			s.pool.Put(s.connCfg, s.client, true)
+			// fmt.Fprintf(os.Stdout, "SSHConnector: Returned connection for %s to pool\n", s.connCfg.Host)
+		} else {
+			// Not from pool, or pool is nil, so directly close it.
+			// fmt.Fprintf(os.Stdout, "SSHConnector: Closing direct-dialed connection for %s\n", s.connCfg.Host)
+			sshClientErr = s.client.Close()
+		}
 		s.client = nil
-		return err
 	}
-	// TODO: Handle bastion client closure if it was stored
-	return nil
+	s.isFromPool = false // Reset pool status
+
+	// TODO: Handle bastion client closure if it was stored and managed by this connector instance
+	// For now, bastion client is closed during Connect if subsequent steps fail, or not stored.
+	// If it was a direct dial with bastion, we need to close it.
+	if !s.isFromPool && s.bastionClient != nil {
+		// Log error from bastion close but prioritize main client close error
+		if berr := s.bastionClient.Close(); berr != nil {
+			fmt.Fprintf(os.Stderr, "SSHConnector: Failed to close direct-dialed bastion client for %s: %v\n", s.connCfg.Host, berr)
+		}
+		s.bastionClient = nil
+	}
+
+	return sshClientErr // Only return error from direct client.Close()
 }
 
 // Exec executes a command on the remote host.
@@ -570,3 +548,131 @@ func (s *SSHConnector) GetOS(ctx context.Context) (*OS, error) {
 
 // Ensure SSHConnector implements Connector interface
 var _ Connector = &SSHConnector{}
+
+// dialSSHFunc defines the signature for the SSH dialing function, allowing it to be mocked.
+type dialSSHFunc func(ctx context.Context, cfg ConnectionCfg, effectiveConnectTimeout time.Duration) (*ssh.Client, *ssh.Client, error)
+
+// actualDialSSH holds the real implementation for dialing SSH.
+var actualDialSSH dialSSHFunc = func(ctx context.Context, cfg ConnectionCfg, effectiveConnectTimeout time.Duration) (*ssh.Client, *ssh.Client, error) {
+	var authMethods []ssh.AuthMethod
+
+	if cfg.Password != "" {
+		authMethods = append(authMethods, ssh.Password(cfg.Password))
+	}
+
+	if len(cfg.PrivateKey) > 0 {
+		signer, err := ssh.ParsePrivateKey(cfg.PrivateKey)
+		if err != nil {
+			return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to parse private key: %w", err)}
+		}
+		authMethods = append(authMethods, ssh.PublicKeys(signer))
+	} else if cfg.PrivateKeyPath != "" {
+		key, err := os.ReadFile(cfg.PrivateKeyPath)
+		if err != nil {
+			return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to read private key file %s: %w", cfg.PrivateKeyPath, err)}
+		}
+		signer, err := ssh.ParsePrivateKey(key)
+		if err != nil {
+			return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to parse private key from file %s: %w", cfg.PrivateKeyPath, err)}
+		}
+		authMethods = append(authMethods, ssh.PublicKeys(signer))
+	}
+
+	if len(authMethods) == 0 {
+		return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("no authentication method provided (password or private key)")}
+	}
+
+	sshConfig := &ssh.ClientConfig{
+		User:            cfg.User,
+		Auth:            authMethods,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: Make this configurable
+		Timeout:         effectiveConnectTimeout,     // Use the passed-in timeout
+	}
+
+	var client *ssh.Client
+	var bastionSshClient *ssh.Client // Explicitly separate bastion client variable
+	var err error
+
+	dialAddr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
+
+	if cfg.Bastion != nil {
+		bastionAuthMethods := []ssh.AuthMethod{}
+		if cfg.Bastion.Password != "" {
+			bastionAuthMethods = append(bastionAuthMethods, ssh.Password(cfg.Bastion.Password))
+		}
+		if len(cfg.Bastion.PrivateKey) > 0 {
+			signer, err := ssh.ParsePrivateKey(cfg.Bastion.PrivateKey)
+			if err != nil {
+				return nil, nil, &ConnectionError{Host: cfg.Bastion.Host, Err: fmt.Errorf("failed to parse bastion private key: %w", err)}
+			}
+			bastionAuthMethods = append(bastionAuthMethods, ssh.PublicKeys(signer))
+		} else if cfg.Bastion.PrivateKeyPath != "" {
+			key, err := os.ReadFile(cfg.Bastion.PrivateKeyPath)
+			if err != nil {
+				return nil, nil, &ConnectionError{Host: cfg.Bastion.Host, Err: fmt.Errorf("failed to read bastion private key file %s: %w", cfg.Bastion.PrivateKeyPath, err)}
+			}
+			signer, err := ssh.ParsePrivateKey(key)
+			if err != nil {
+				return nil, nil, &ConnectionError{Host: cfg.Bastion.Host, Err: fmt.Errorf("failed to parse bastion private key from file %s: %w", cfg.Bastion.PrivateKeyPath, err)}
+			}
+			bastionAuthMethods = append(bastionAuthMethods, ssh.PublicKeys(signer))
+		}
+
+		if len(bastionAuthMethods) == 0 {
+			return nil, nil, &ConnectionError{Host: cfg.Bastion.Host, Err: fmt.Errorf("no authentication method provided for bastion (password or private key)")}
+		}
+
+		bastionConfig := &ssh.ClientConfig{
+			User:            cfg.Bastion.User,
+			Auth:            bastionAuthMethods,
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: Make this configurable
+			Timeout:         cfg.Bastion.Timeout,         // Bastion has its own timeout in its Cfg
+		}
+
+		bastionDialAddr := net.JoinHostPort(cfg.Bastion.Host, strconv.Itoa(cfg.Bastion.Port))
+		bastionSshClient, err = ssh.Dial("tcp", bastionDialAddr, bastionConfig)
+		if err != nil {
+			return nil, nil, &ConnectionError{Host: cfg.Bastion.Host, Err: fmt.Errorf("failed to dial bastion: %w", err)}
+		}
+
+		conn, err := bastionSshClient.Dial("tcp", dialAddr)
+		if err != nil {
+			bastionSshClient.Close() // Close bastion if dialing target fails
+			return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to dial target host via bastion: %w", err)}
+		}
+
+		ncc, chans, reqs, err := ssh.NewClientConn(conn, dialAddr, sshConfig)
+		if err != nil {
+			bastionSshClient.Close() // Close bastion if NewClientConn to target fails
+			return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to create new client connection via bastion: %w", err)}
+		}
+		client = ssh.NewClient(ncc, chans, reqs)
+	} else {
+		client, err = ssh.Dial("tcp", dialAddr, sshConfig)
+		if err != nil {
+			return nil, nil, &ConnectionError{Host: cfg.Host, Err: err}
+		}
+	}
+	// The final test session is done by the caller (Connect or Pool's Get)
+	return client, bastionSshClient, nil
+}
+
+// G_dialSSHOverride allows overriding the dialSSH behavior for testing.
+var G_dialSSHOverride dialSSHFunc
+
+// SetDialSSHOverrideForTesting replaces the actual SSH dialer with a mock and returns a cleanup function.
+func SetDialSSHOverrideForTesting(fn dialSSHFunc) (cleanupFunc func()) {
+	G_dialSSHOverride = fn
+	return func() {
+		G_dialSSHOverride = nil
+	}
+}
+
+// dialSSH is a wrapper that either calls the override or the actual implementation.
+// This is the function that SSHConnector.Connect and ConnectionPool.Get should call.
+func dialSSH(ctx context.Context, cfg ConnectionCfg, effectiveConnectTimeout time.Duration) (*ssh.Client, *ssh.Client, error) {
+	if G_dialSSHOverride != nil {
+		return G_dialSSHOverride(ctx, cfg, effectiveConnectTimeout)
+	}
+	return actualDialSSH(ctx, cfg, effectiveConnectTimeout)
+}
