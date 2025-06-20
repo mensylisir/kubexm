@@ -6,10 +6,10 @@ import (
 	// "golang.org/x/sync/errgroup" // Not used for sequential task execution within a module
 
 	// "github.com/kubexms/kubexms/pkg/config" // No longer needed directly
-	"github.com/kubexms/kubexms/pkg/logger" // For logger.Logger type
-	"github.com/kubexms/kubexms/pkg/runtime"
-	"github.com/kubexms/kubexms/pkg/step"
-	"github.com/kubexms/kubexms/pkg/task"
+	"github.com/mensylisir/kubexm/pkg/logger" // For logger.Logger type
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/task"
 )
 
 // Module represents a collection of related Tasks that manage the lifecycle

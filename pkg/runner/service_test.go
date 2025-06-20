@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kubexms/kubexms/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/connector"
 )
 
 // Helper to setup runner with a specific init system for service tests

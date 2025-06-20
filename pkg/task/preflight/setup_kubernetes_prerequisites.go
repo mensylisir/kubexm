@@ -2,12 +2,12 @@ package preflight
 
 import (
 	// "fmt" // Not strictly needed for this task constructor if names are static
-	"github.com/kubexms/kubexms/pkg/config"
-	"github.com/kubexms/kubexms/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/config"
+	"github.com/mensylisir/kubexm/pkg/spec"
 	// Assuming step definitions are in package preflight, directly accessible.
 	// If they were in a sub-package like "preflightstep", an alias would be used.
 	// For this structure, direct access is assumed as per previous step implementations.
-	"github.com/kubexms/kubexms/pkg/step/preflight"
+	"github.com/mensylisir/kubexm/pkg/step/preflight"
 )
 
 // NewSetupKubernetesPrerequisitesTask creates a task to set up common Kubernetes system prerequisites.

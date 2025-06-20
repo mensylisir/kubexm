@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"gopkg.in/yaml.v3"
-	"github.com/kubexms/kubexms/pkg/apis/kubexms/v1alpha1"
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 )
 
 // Load reads a cluster configuration YAML file from the given path,

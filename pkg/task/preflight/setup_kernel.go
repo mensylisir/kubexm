@@ -1,9 +1,9 @@
 package preflight
 
 import (
-	"github.com/kubexms/kubexms/pkg/config"
-	"github.com/kubexms/kubexms/pkg/spec"
-	stepPreflight "github.com/kubexms/kubexms/pkg/step/preflight"
+	"github.com/mensylisir/kubexm/pkg/config"
+	"github.com/mensylisir/kubexm/pkg/spec"
+	stepPreflight "github.com/mensylisir/kubexm/pkg/step/preflight"
 )
 
 // NewSetupKernelTask creates a task specification to configure kernel parameters and load modules.

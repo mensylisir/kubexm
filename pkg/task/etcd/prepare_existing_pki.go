@@ -1,9 +1,9 @@
 package etcd
 
 import (
-	"github.com/kubexms/kubexms/pkg/config"
-	"github.com/kubexms/kubexms/pkg/spec"
-	"github.com/kubexms/kubexms/pkg/step/pki"
+	"github.com/mensylisir/kubexm/pkg/config"
+	"github.com/mensylisir/kubexm/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/step/pki"
 )
 
 // NewPrepareExistingEtcdPKITask creates a task to fetch PKI from an existing etcd cluster.

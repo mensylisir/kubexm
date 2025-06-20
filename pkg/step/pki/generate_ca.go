@@ -7,10 +7,10 @@ import (
 	"strings" // For strings.TrimSpace in subject formatting, if used
 	"time"
 
-	"github.com/kubexms/kubexms/pkg/connector" // For connector.ExecOptions
-	"github.com/kubexms/kubexms/pkg/runtime"
-	"github.com/kubexms/kubexms/pkg/spec"
-	"github.com/kubexms/kubexms/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/connector" // For connector.ExecOptions
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/step"
 )
 
 // GenerateRootCAStepSpec defines parameters for generating a root CA.

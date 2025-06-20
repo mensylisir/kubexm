@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kubexms/kubexms/pkg/connector" // Real import
+	"github.com/mensylisir/kubexm/pkg/connector" // Real import
 )
 
 type mockConnectorForRuntime struct {

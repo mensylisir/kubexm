@@ -5,218 +5,148 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kubexms/kubexms/pkg/connector" // Assuming this is the correct path
+	"github.com/mensylisir/kubexm/pkg/connector"
 )
 
-// InitSystemType defines the type of init system.
-type InitSystemType string
+// Constants for ServiceInfo are in interface.go / runner.go
 
-const (
-	InitSystemUnknown InitSystemType = "unknown"
-	InitSystemSystemd InitSystemType = "systemd"
-	InitSystemSysV    InitSystemType = "sysvinit" // Basic support for SysV
-)
+// detectInitSystem is now a private method of defaultRunner, located in runner.go
 
-// ServiceInfo holds details about the detected init system and its commands.
-type ServiceInfo struct {
-	Type         InitSystemType
-	StartCmd     string // %s for service name
-	StopCmd      string
-	EnableCmd    string
-	DisableCmd   string
-	RestartCmd   string
-	IsActiveCmd  string
-	DaemonReloadCmd string
-}
-
-var (
-	systemdInfo = ServiceInfo{
-		Type:          InitSystemSystemd,
-		StartCmd:      "systemctl start %s",
-		StopCmd:       "systemctl stop %s",
-		EnableCmd:     "systemctl enable %s",
-		DisableCmd:    "systemctl disable %s",
-		RestartCmd:    "systemctl restart %s",
-		IsActiveCmd:   "systemctl is-active --quiet %s", // --quiet sets exit code
-		DaemonReloadCmd: "systemctl daemon-reload",
+// manageService is a helper function, converted to a private method of defaultRunner.
+// It's not part of the Runner interface but used internally by other service methods.
+func (r *defaultRunner) manageService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName, commandTemplate string, sudo bool) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil")
 	}
-	sysvinitInfo = ServiceInfo{ // Simplified SysV support
-		Type:          InitSystemSysV,
-		StartCmd:      "service %s start", // or /etc/init.d/%s start
-		StopCmd:       "service %s stop",
-		EnableCmd:     "chkconfig %s on",    // Varies (chkconfig, update-rc.d)
-		DisableCmd:    "chkconfig %s off",   // Varies
-		RestartCmd:    "service %s restart",
-		IsActiveCmd:   "service %s status", // Output parsing needed, not just exit code
-		DaemonReloadCmd: "", // Typically no direct equivalent for sysvinit in one command
-	}
-)
-
-// detectInitSystem attempts to identify the init system on the host.
-// It caches the result in Runner's Facts if a field is added there.
-func (r *Runner) detectInitSystem(ctx context.Context) (*ServiceInfo, error) {
-	if r.Facts == nil || r.Facts.OS == nil {
-		return nil, fmt.Errorf("OS facts not available, cannot detect init system")
-	}
-	// For now, detect every time. Caching could be added to Facts.
-
-	// Systemd is common on modern Linux. Check for systemctl.
-	if _, err := r.LookPath(ctx, "systemctl"); err == nil {
-		return &systemdInfo, nil
-	}
-
-	// Fallback to checking for SysV 'service' or init.d scripts if systemctl not found.
-	if _, err := r.LookPath(ctx, "service"); err == nil {
-		// This is a basic assumption. More checks might be needed to confirm SysV.
-		return &sysvinitInfo, nil
-	}
-	// Check for /etc/init.d as another indicator for SysV
-	if exists, _ := r.Exists(ctx, "/etc/init.d"); exists {
-		return &sysvinitInfo, nil
-	}
-
-	return nil, fmt.Errorf("unable to detect a supported init system (systemd, sysvinit) on OS ID: %s", r.Facts.OS.ID)
-}
-
-func (r *Runner) manageService(ctx context.Context, serviceName, commandTemplate string, sudo bool) error {
-	if r.Conn == nil {
-		return fmt.Errorf("runner has no valid connector")
+	if facts == nil || facts.InitSystem == nil {
+		return fmt.Errorf("init system facts not available")
 	}
 	if strings.TrimSpace(serviceName) == "" {
 		return fmt.Errorf("serviceName cannot be empty")
-	}
-
-	svcInfo, err := r.detectInitSystem(ctx)
-	if err != nil {
-		return err
 	}
 	if commandTemplate == "" {
 		return fmt.Errorf("internal error: command template is empty for service management")
 	}
 
+	svcInfo := facts.InitSystem
 	cmd := fmt.Sprintf(commandTemplate, serviceName)
-	_, stderr, execErr := r.RunWithOptions(ctx, cmd, &connector.ExecOptions{Sudo: sudo})
+	_, _, execErr := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: sudo})
 	if execErr != nil {
-		return fmt.Errorf("failed to manage service %s with command '%s' using %s: %w (stderr: %s)", serviceName, cmd, svcInfo.Type, execErr, string(stderr))
+		return fmt.Errorf("failed to manage service %s with command '%s' using %s: %w", serviceName, cmd, svcInfo.Type, execErr)
 	}
 	return nil
 }
 
 // StartService starts a service.
-func (r *Runner) StartService(ctx context.Context, serviceName string) error {
-	svcInfo, err := r.detectInitSystem(ctx)
-	if err != nil { return err }
-	return r.manageService(ctx, serviceName, svcInfo.StartCmd, true)
+func (r *defaultRunner) StartService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) error {
+	if facts == nil || facts.InitSystem == nil {
+		return fmt.Errorf("init system facts not available for StartService")
+	}
+	return r.manageService(ctx, conn, facts, serviceName, facts.InitSystem.StartCmd, true)
 }
 
 // StopService stops a service.
-func (r *Runner) StopService(ctx context.Context, serviceName string) error {
-	svcInfo, err := r.detectInitSystem(ctx)
-	if err != nil { return err }
-	return r.manageService(ctx, serviceName, svcInfo.StopCmd, true)
+func (r *defaultRunner) StopService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) error {
+	if facts == nil || facts.InitSystem == nil {
+		return fmt.Errorf("init system facts not available for StopService")
+	}
+	return r.manageService(ctx, conn, facts, serviceName, facts.InitSystem.StopCmd, true)
 }
 
 // RestartService restarts a service.
-func (r *Runner) RestartService(ctx context.Context, serviceName string) error {
-	svcInfo, err := r.detectInitSystem(ctx)
-	if err != nil { return err }
-	return r.manageService(ctx, serviceName, svcInfo.RestartCmd, true)
+func (r *defaultRunner) RestartService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) error {
+	if facts == nil || facts.InitSystem == nil {
+		return fmt.Errorf("init system facts not available for RestartService")
+	}
+	return r.manageService(ctx, conn, facts, serviceName, facts.InitSystem.RestartCmd, true)
 }
 
 // EnableService enables a service to start on boot.
-func (r *Runner) EnableService(ctx context.Context, serviceName string) error {
-	svcInfo, err := r.detectInitSystem(ctx)
-	if err != nil { return err }
+func (r *defaultRunner) EnableService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) error {
+	if facts == nil || facts.InitSystem == nil {
+		return fmt.Errorf("init system facts not available for EnableService")
+	}
+	svcInfo := facts.InitSystem
 	if svcInfo.Type == InitSystemSysV && (svcInfo.EnableCmd == "" || !strings.Contains(svcInfo.EnableCmd, "%s")) {
 		return fmt.Errorf("enabling service '%s' is not reliably supported for detected SysV init variant (command: '%s')", serviceName, svcInfo.EnableCmd)
 	}
-	return r.manageService(ctx, serviceName, svcInfo.EnableCmd, true)
+	return r.manageService(ctx, conn, facts, serviceName, svcInfo.EnableCmd, true)
 }
 
 // DisableService disables a service from starting on boot.
-func (r *Runner) DisableService(ctx context.Context, serviceName string) error {
-	svcInfo, err := r.detectInitSystem(ctx)
-	if err != nil { return err }
+func (r *defaultRunner) DisableService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) error {
+	if facts == nil || facts.InitSystem == nil {
+		return fmt.Errorf("init system facts not available for DisableService")
+	}
+	svcInfo := facts.InitSystem
 	if svcInfo.Type == InitSystemSysV && (svcInfo.DisableCmd == "" || !strings.Contains(svcInfo.DisableCmd, "%s")) {
 		return fmt.Errorf("disabling service '%s' is not reliably supported for detected SysV init variant (command: '%s')", serviceName, svcInfo.DisableCmd)
 	}
-	return r.manageService(ctx, serviceName, svcInfo.DisableCmd, true)
+	return r.manageService(ctx, conn, facts, serviceName, svcInfo.DisableCmd, true)
 }
 
 // IsServiceActive checks if a service is currently active/running.
-func (r *Runner) IsServiceActive(ctx context.Context, serviceName string) (bool, error) {
-	if r.Conn == nil {
-		return false, fmt.Errorf("runner has no valid connector")
+func (r *defaultRunner) IsServiceActive(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) (bool, error) {
+	if conn == nil {
+		return false, fmt.Errorf("connector cannot be nil")
+	}
+	if facts == nil || facts.InitSystem == nil {
+		return false, fmt.Errorf("init system facts not available for IsServiceActive")
 	}
 	if strings.TrimSpace(serviceName) == "" {
 		return false, fmt.Errorf("serviceName cannot be empty")
 	}
 
-	svcInfo, err := r.detectInitSystem(ctx)
-	if err != nil {
-		return false, err
-	}
-
+	svcInfo := facts.InitSystem
 	cmd := fmt.Sprintf(svcInfo.IsActiveCmd, serviceName)
 
-	// For systemd, `systemctl is-active --quiet` exits 0 if active.
-	// For SysV, `service status` exit codes are not always standardized.
-	// Output parsing might be needed for SysV.
 	if svcInfo.Type == InitSystemSystemd {
-		// Sudo is typically not required for `is-active`.
-		return r.Check(ctx, cmd, false)
+		return r.Check(ctx, conn, cmd, false)
 	} else if svcInfo.Type == InitSystemSysV {
-		// `service <name> status` often returns 0 if running, but output is more reliable.
-		// This is a simplified check. A robust SysV check would parse output.
-		// For now, we'll assume exit code 0 from `service status` means active for SysV.
-		// This might need adjustment.
-		stdout, _, execErr := r.RunWithOptions(ctx, cmd, &connector.ExecOptions{Sudo: false})
+		stdout, _, execErr := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: false})
 		if execErr == nil { // Exit code 0
-			// Further check output for SysV if needed, e.g. look for "running" or "active"
-			// For example:
-			// outputStr := strings.ToLower(string(stdout))
-			// return strings.Contains(outputStr, "running") || strings.Contains(outputStr, "active"), nil
-			return true, nil
+			// Basic SysV check: For a more robust check, parse stdout for "running" or "active".
+			// This simplified version assumes exit code 0 means active for many `service status` calls.
+			// Some `service status` might return 0 even if not truly "active" but just "known".
+			// Consider enhancing this if more precise SysV status is needed.
+			outputStr := strings.ToLower(string(stdout))
+			if strings.Contains(outputStr, "is running") || strings.Contains(outputStr, "running...") || strings.Contains(outputStr, "active (running)"){
+				return true, nil
+			}
+			// If output doesn't explicitly say running, but exit code was 0, it's ambiguous.
+			// For now, let's be conservative for SysV if output isn't clearly "running".
+			// However, many scripts use exit code 0 for running.
+			// This part can be refined. If exit code 0 means "definitely running" for target SysV scripts, this is fine.
+			return true, nil // Defaulting to true if exit 0 for SysV status.
 		}
-		// If CommandError with non-zero exit, assume not active for SysV for this basic check.
-		if _, ok := execErr.(*connector.CommandError); ok {
+		if _, ok := execErr.(*connector.ExitError); ok { // Non-zero exit from status command
 			return false, nil
 		}
 		return false, fmt.Errorf("failed to check SysV service status for %s: %w", serviceName, execErr)
 	}
-
 	return false, fmt.Errorf("IsServiceActive not fully implemented for init system type: %s", svcInfo.Type)
 }
 
-// DaemonReload reloads the init system's configuration (e.g., systemctl daemon-reload).
-func (r *Runner) DaemonReload(ctx context.Context) error {
-	if r.Conn == nil {
-		return fmt.Errorf("runner has no valid connector")
+// DaemonReload reloads the init system's configuration.
+func (r *defaultRunner) DaemonReload(ctx context.Context, conn connector.Connector, facts *Facts) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil")
 	}
-	svcInfo, err := r.detectInitSystem(ctx)
-	if err != nil {
-		return err
+	if facts == nil || facts.InitSystem == nil {
+		return fmt.Errorf("init system facts not available for DaemonReload")
 	}
+	svcInfo := facts.InitSystem
 
 	if svcInfo.DaemonReloadCmd == "" {
-		// For SysV, there isn't always a direct equivalent.
-		// This might be a no-op or return an error indicating not supported.
 		if svcInfo.Type == InitSystemSysV {
-			return nil // No-op for basic SysV, or log a warning.
+			return nil // No-op for basic SysV
 		}
 		return fmt.Errorf("daemon-reload command not defined for init system type: %s", svcInfo.Type)
 	}
-
 	cmd := svcInfo.DaemonReloadCmd
-	// Daemon reload usually requires sudo.
-	_, stderr, execErr := r.RunWithOptions(ctx, cmd, &connector.ExecOptions{Sudo: true})
+	_, _, execErr := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true})
 	if execErr != nil {
-		return fmt.Errorf("failed to execute daemon-reload using %s: %w (stderr: %s)", svcInfo.Type, execErr, string(stderr))
+		return fmt.Errorf("failed to execute daemon-reload using %s: %w", svcInfo.Type, execErr)
 	}
 	return nil
 }
-
-// TODO: Add more service management functions:
-// - GetServiceStatus(ctx context.Context, serviceName string) (status string, err error) (more detailed status)
-// - MaskService(ctx context.Context, serviceName string) error
-// - UnmaskService(ctx context.Context, serviceName string) error
