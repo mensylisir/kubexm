@@ -69,23 +69,15 @@ func (p *DeployAppPipeline) Run(ctx *runtime.Context, dryRun bool) (*plan.Execut
 	// ctx.GetLogger().Infof("Generating plan for pipeline %s...", p.Name())
 	// The Plan method of the pipeline needs a runtime.PipelineContext.
 	// The top-level runtime.Context should be able to provide this.
-	// Let's assume runtime.Context itself implements runtime.PipelineContext,
-	// or can provide one, similar to how it might provide ModuleContext/TaskContext.
-	// This is consistent with the idea of runtime.Context being the facade.
 
-	pipelinePlanCtx, ok := ctx.GetPipelineContext().(runtime.PipelineContext) // Assuming GetPipelineContext() exists on *runtime.Context
-	if !ok && ctx != nil { // Fallback or direct usage if *runtime.Context implements PipelineContext
-		var isPipelineCtx bool
-		pipelinePlanCtx, isPipelineCtx = ctx.AsPipelineContext() // Or ctx implements it directly
-		if !isPipelineCtx {
-			return nil, fmt.Errorf("runtime.Context cannot provide a valid runtime.PipelineContext for pipeline %s", p.Name())
-		}
-	} else if ctx == nil {
+	if ctx == nil {
+		// This check might be optional if ctx is guaranteed not to be nil by the caller (e.g., main)
+		// but good for robustness within the Run method itself.
 		return nil, fmt.Errorf("runtime.Context is nil for pipeline %s", p.Name())
 	}
-
-
-	totalPlan, err := p.Plan(pipelinePlanCtx)
+	// Since *runtime.Context implements runtime.PipelineContext (verified by static assertion),
+	// it can be passed directly to methods expecting runtime.PipelineContext.
+	totalPlan, err := p.Plan(ctx)
 	if err != nil {
 		// ctx.GetLogger().Errorf("Failed to generate plan for pipeline %s: %v", p.Name(), err)
 		return nil, fmt.Errorf("failed to generate plan for pipeline %s: %w", p.Name(), err)
