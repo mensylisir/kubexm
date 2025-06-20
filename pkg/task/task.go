@@ -53,15 +53,13 @@ type Task struct {
 // Parameters:
 //   - taskParentCtx: The parent runtime.Context (typically from a Module).
 //     This context provides access to ClusterRuntime, Logger, GoContext, and caches.
-//   - hosts: A slice of *runtime.Host pointers on which this task should be executed.
-//     This list is typically pre-filtered by a Module based on Task.RunOnRoles and Task.Filter.
 //
 // Returns:
 //   - []*step.Result: A slice containing the results of all steps executed on all target hosts.
 //   - error: The first critical error encountered during the execution on any host. If all steps
 //     succeed or if failing steps are ignored (e.g., step-level ignore, not Task.IgnoreError),
 //     this will be nil. Task.IgnoreError influences how the *calling Module* treats this error.
-func (t *Task) Run(taskParentCtx runtime.Context, hosts []*runtime.Host) ([]*step.Result, error) {
+func (t *Task) Run(taskParentCtx runtime.Context) ([]*step.Result, error) {
 	if taskParentCtx.Cluster == nil {
 		// This should ideally be caught before calling Task.Run
 		initialLogger := taskParentCtx.Logger
@@ -73,13 +71,59 @@ func (t *Task) Run(taskParentCtx runtime.Context, hosts []*runtime.Host) ([]*ste
 	goCtx := taskParentCtx.GoContext // Use GoContext from taskParentCtx
 
 	// Use logger from taskParentCtx, adding task-specific field.
-	taskLogger := taskParentCtx.Logger.SugaredLogger.With("task", t.Name).Sugar() // Corrected as per instruction
+	taskLogger := taskParentCtx.Logger.SugaredLogger.With("task", t.Name).Sugar()
 	taskLogger.Infof("Starting task...")
 
-	if len(hosts) == 0 {
-		taskLogger.Infof("No target hosts for task, skipping.")
+	// --- Host Selection Logic ---
+	if cluster.Hosts == nil || len(cluster.Hosts) == 0 {
+		taskLogger.Warnf("No hosts defined in the cluster runtime. Skipping task.")
 		return nil, nil
 	}
+
+	var targetHosts []*runtime.Host
+	taskLogger.Debugf("Selecting hosts for task (Roles: %v, HasFilter: %v) from %d total hosts...", t.RunOnRoles, t.Filter != nil, len(cluster.Hosts))
+	for _, host := range cluster.Hosts {
+		roleMatch := false
+		if len(t.RunOnRoles) == 0 {
+			roleMatch = true // No specific roles required, matches all by role
+		} else {
+			for _, requiredRole := range t.RunOnRoles {
+				if host.HasRole(requiredRole) {
+					roleMatch = true
+					break
+				}
+			}
+		}
+
+		if !roleMatch {
+			taskLogger.Debugf("Host '%s' skipped: role mismatch (host roles: %v, task needs: %v)", host.Name, host.Roles, t.RunOnRoles)
+			continue
+		}
+
+		filterMatch := true
+		if t.Filter != nil {
+			filterMatch = t.Filter(host)
+			if !filterMatch {
+				taskLogger.Debugf("Host '%s' skipped: custom filter returned false", host.Name)
+			}
+		}
+
+		if filterMatch {
+			targetHosts = append(targetHosts, host)
+		}
+	}
+
+	if len(targetHosts) == 0 {
+		taskLogger.Infof("No target hosts selected for task after filtering, skipping.")
+		return nil, nil
+	}
+	taskLogger.Infof("Selected %d target hosts for task: %v", len(targetHosts), func() []string {
+		names := make([]string, len(targetHosts))
+		for i, h := range targetHosts { names[i] = h.Name }
+		return names
+	}())
+	// --- End Host Selection Logic ---
+
 	if len(t.Steps) == 0 {
 		taskLogger.Infof("No steps defined for task, skipping.")
 		return nil, nil
@@ -93,12 +137,12 @@ func (t *Task) Run(taskParentCtx runtime.Context, hosts []*runtime.Host) ([]*ste
 		taskLogger.Debugf("Task concurrency not set or invalid, defaulting to %d", concurrency)
 	}
 	g.SetLimit(concurrency)
-	taskLogger.Debugf("Running task with concurrency limit of %d on %d hosts", concurrency, len(hosts))
+	taskLogger.Debugf("Running task with concurrency limit of %d on %d hosts", concurrency, len(targetHosts))
 
 	var allResults []*step.Result
 	var resultsMu sync.Mutex
 
-	for _, h := range hosts {
+	for _, h := range targetHosts { // Iterate over newly selected targetHosts
 		currentHost := h
 
 		g.Go(func() error {

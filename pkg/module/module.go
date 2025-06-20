@@ -40,69 +40,6 @@ type Module struct {
 	PostRun func(cluster *runtime.ClusterRuntime, moduleExecError error) error
 }
 
-// selectHostsForTask filters the full list of hosts in the ClusterRuntime
-// based on the rules defined in the given Task (RunOnRoles and Filter).
-func selectHostsForTask(cluster *runtime.ClusterRuntime, t *task.Task) []*runtime.Host {
-	var selectedHosts []*runtime.Host
-
-	if cluster == nil || len(cluster.Hosts) == 0 {
-		// Attempt to get a logger even if cluster is nil, for this specific message
-		var log *logger.Logger
-		if cluster != nil && cluster.Logger != nil { log = cluster.Logger } else { log = logger.Get() }
-		log.Debugf("selectHostsForTask: No hosts in cluster to filter from.")
-		return selectedHosts
-	}
-	if t == nil {
-		cluster.Logger.Warnf("selectHostsForTask: Task is nil, cannot select hosts.")
-		return selectedHosts
-	}
-
-	// Use a logger that includes task context if possible
-	taskSelectionLogger := cluster.Logger.SugaredLogger
-	if t.Name != "" {
-		taskSelectionLogger = taskSelectionLogger.With("task_for_host_selection", t.Name)
-	}
-	taskSelectionLogger.Debugf("Selecting hosts (Roles: %v, HasFilter: %v)", t.RunOnRoles, t.Filter != nil)
-
-	for _, host := range cluster.Hosts {
-		roleMatch := false
-		if len(t.RunOnRoles) == 0 {
-			roleMatch = true
-		} else {
-			for _, requiredRole := range t.RunOnRoles {
-				if host.HasRole(requiredRole) {
-					roleMatch = true
-					break
-				}
-			}
-		}
-
-		if !roleMatch {
-			taskSelectionLogger.Debugf("Host '%s' skipped: role mismatch (host roles: %v, task needs: %v)", host.Name, host.Roles, t.RunOnRoles)
-			continue
-		}
-
-		filterMatch := true
-		if t.Filter != nil {
-			filterMatch = t.Filter(host)
-			if !filterMatch {
-				taskSelectionLogger.Debugf("Host '%s' skipped: custom filter returned false", host.Name, t.Name)
-			}
-		}
-
-		if filterMatch {
-			selectedHosts = append(selectedHosts, host)
-		}
-	}
-	taskSelectionLogger.Debugf("Selected %d hosts: %v", len(selectedHosts), func() []string {
-		names := make([]string, len(selectedHosts))
-		for i, h := range selectedHosts { names[i] = h.Name }
-		return names
-	}())
-	return selectedHosts
-}
-
-
 // Run executes all tasks defined in the Module sequentially.
 // It first checks IsEnabled (if defined). If not enabled, it skips execution.
 // It runs PreRun and PostRun hooks if they are defined.
@@ -178,15 +115,12 @@ func (m *Module) Run(moduleParentCtx runtime.Context) ([]*step.Result, error) {
 		// This task-scoped logger is for messages from the module about the task, not for the task itself.
 		moduleTaskOpLogger := moduleLogger.With("task_name", currentTask.Name, "task_index", fmt.Sprintf("%d/%d", i+1, len(m.Tasks))).Sugar()
 
-		targetHosts := selectHostsForTask(cluster, currentTask)
-		if len(targetHosts) == 0 {
-			moduleTaskOpLogger.Infof("No target hosts for task, skipping.")
-			continue
-		}
-		moduleTaskOpLogger.Infof("Running task on %d hosts...", len(targetHosts))
+		// Host selection is now done within Task.Run.
+		// The module no longer needs to know the exact number of hosts upfront.
+		moduleTaskOpLogger.Infof("Attempting to run task...")
 
-		// Pass the newly created taskCtx to task.Run
-		taskStepResults, taskErr := currentTask.Run(taskCtx, targetHosts)
+		// Pass the newly created taskCtx to task.Run. Task.Run will handle host selection.
+		taskStepResults, taskErr := currentTask.Run(taskCtx)
 		if taskStepResults != nil {
 			allStepResults = append(allStepResults, taskStepResults...)
 		}
