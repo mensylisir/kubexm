@@ -8,14 +8,15 @@ import (
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/spec" // Added for spec.StepMeta
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 
-// CommandStep executes a shell command on a target host.
-type CommandStep struct {
-	SpecName            string
-	Cmd                 string
-	Sudo                bool
+// CommandStepSpec executes a shell command on a target host.
+type CommandStepSpec struct {
+	spec.StepMeta       `json:",inline"` // Embed common meta fields
+	Cmd                 string           `json:"cmd,omitempty"`
+	Sudo                bool             `json:"sudo,omitempty"`
 	IgnoreError         bool
 	Timeout             time.Duration
 	Env                 []string
@@ -23,11 +24,11 @@ type CommandStep struct {
 	CheckCmd            string
 	CheckSudo           bool
 	CheckExpectedExitCode int
-	RollbackCmd         string // Optional: command to run for rollback
-	RollbackSudo        bool   // Optional: sudo for rollback command
+	RollbackCmd         string   `json:"rollbackCmd,omitempty"` // Optional: command to run for rollback
+	RollbackSudo        bool     `json:"rollbackSudo,omitempty"`// Optional: sudo for rollback command
 }
 
-// NewCommandStep creates a new CommandStep.
+// NewCommandStepSpec creates a new CommandStepSpec.
 // Parameters for checkCmd, checkSudo, checkExpectedExitCode, rollbackCmd, rollbackSudo are optional and can be empty/zero.
 func NewCommandStep(
 	cmd string,
@@ -42,9 +43,24 @@ func NewCommandStep(
 	checkExpectedExitCode int,
 	rollbackCmd string,
 	rollbackSudo bool,
-) step.Step {
-	return &CommandStep{
-		SpecName:            specName,
+) *CommandStepSpec {
+	// Generate default name if specName is empty
+	name := specName
+	if name == "" {
+		baseName := "Exec: "
+		if len(cmd) > 30 {
+			name = baseName + cmd[:30] + "..."
+		} else {
+			name = baseName + cmd
+		}
+	}
+	description := fmt.Sprintf("Executes command: '%s'", cmd)
+
+	return &CommandStepSpec{
+		StepMeta: spec.StepMeta{
+			Name:        name,
+			Description: description,
+		},
 		Cmd:                 cmd,
 		Sudo:                sudo,
 		IgnoreError:         ignoreError,
@@ -59,26 +75,26 @@ func NewCommandStep(
 	}
 }
 
-func (s *CommandStep) Name() string {
-	if s.SpecName != "" {
-		return s.SpecName
-	}
-	// Generate a default name if SpecName is not provided.
-	// Shorten Cmd if it's too long for a default name.
-	// This logic was previously in CommandStepSpec.GetName().
-	baseName := "Exec: "
-	if len(s.Cmd) > 30 {
-		return baseName + s.Cmd[:30] + "..."
-	}
-	return baseName + s.Cmd
-}
+// Name returns the step's name from StepMeta.
+func (s *CommandStepSpec) Name() string { return s.StepMeta.Name }
 
-func (s *CommandStep) Description() string {
-	return fmt.Sprintf("Executes command: '%s'", s.Cmd)
-}
+// Description returns the step's description from StepMeta.
+func (s *CommandStepSpec) Description() string { return s.StepMeta.Description }
 
-func (s *CommandStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Precheck")
+// GetName (for spec.StepSpec interface if different from step.Step's Name)
+func (s *CommandStepSpec) GetName() string { return s.StepMeta.Name }
+
+// GetDescription (for spec.StepSpec interface if different from step.Step's Description)
+func (s *CommandStepSpec) GetDescription() string { return s.StepMeta.Description }
+
+// GetSpec returns the spec itself.
+func (s *CommandStepSpec) GetSpec() interface{} { return s }
+
+// Meta returns the step's metadata.
+func (s *CommandStepSpec) Meta() *spec.StepMeta { return &s.StepMeta }
+
+func (s *CommandStepSpec) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Precheck")
 
 	if s.CheckCmd == "" {
 		logger.Debug("No CheckCmd defined, main command will run")
@@ -130,8 +146,8 @@ func (s *CommandStep) Precheck(ctx runtime.StepContext, host connector.Host) (bo
 	return false, nil
 }
 
-func (s *CommandStep) Run(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Run")
+func (s *CommandStepSpec) Run(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Run")
 
 	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
@@ -196,8 +212,8 @@ func (s *CommandStep) Run(ctx runtime.StepContext, host connector.Host) error {
     }
 }
 
-func (s *CommandStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Rollback")
+func (s *CommandStepSpec) Rollback(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Rollback")
 
 	if s.RollbackCmd == "" {
 		logger.Debug("No RollbackCmd defined for this command step.")
@@ -237,5 +253,5 @@ func (s *CommandStep) Rollback(ctx runtime.StepContext, host connector.Host) err
 	return nil
 }
 
-// Ensure CommandStep implements the step.Step interface.
-var _ step.Step = (*CommandStep)(nil)
+// Ensure CommandStepSpec implements the step.Step interface.
+var _ step.Step = (*CommandStepSpec)(nil)

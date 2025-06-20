@@ -9,33 +9,37 @@ import (
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/spec" // Added for spec.StepMeta
 	"github.com/mensylisir/kubexm/pkg/step"
-	// spec is no longer needed
 )
 
-// CheckMemoryStep checks if the host meets the minimum memory requirement.
-type CheckMemoryStep struct {
-	MinMemoryMB uint64
-	StepName    string
-	// Internal field to store result of check from Precheck to Run
-	actualMemoryMB uint64
-	checkError     error
+// CheckMemoryStepSpec checks if the host meets the minimum memory requirement.
+type CheckMemoryStepSpec struct {
+	spec.StepMeta `json:",inline"`
+	MinMemoryMB   uint64 `json:"minMemoryMB,omitempty"`
 }
 
-// NewCheckMemoryStep creates a new CheckMemoryStep.
-func NewCheckMemoryStep(minMemoryMB uint64, stepName string) step.Step {
-	name := stepName
-	if name == "" {
-		name = fmt.Sprintf("Check Memory (minimum %d MB)", minMemoryMB)
+// NewCheckMemoryStepSpec creates a new CheckMemoryStepSpec.
+func NewCheckMemoryStepSpec(minMemoryMB uint64, name, description string) *CheckMemoryStepSpec {
+	finalName := name
+	if finalName == "" {
+		finalName = fmt.Sprintf("Check Memory (minimum %d MB)", minMemoryMB)
 	}
-	return &CheckMemoryStep{
+	finalDescription := description
+	if finalDescription == "" {
+		finalDescription = fmt.Sprintf("Checks if the host has at least %d MB memory.", minMemoryMB)
+	}
+	return &CheckMemoryStepSpec{
+		StepMeta: spec.StepMeta{
+			Name:        finalName,
+			Description: finalDescription,
+		},
 		MinMemoryMB: minMemoryMB,
-		StepName:    name,
 	}
 }
 
-func (s *CheckMemoryStep) determineActualMemoryMB(ctx runtime.StepContext, host connector.Host) (uint64, error) {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName())
+func (s *CheckMemoryStepSpec) determineActualMemoryMB(ctx runtime.StepContext, host connector.Host) (uint64, error) {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName())
 
 	facts, errFacts := ctx.GetHostFacts(host)
 	if errFacts == nil && facts != nil && facts.TotalMemory > 0 { // TotalMemory in facts is expected to be in MiB
@@ -98,30 +102,37 @@ func (s *CheckMemoryStep) determineActualMemoryMB(ctx runtime.StepContext, host 
 	return calculatedMemoryMB, nil
 }
 
-func (s *CheckMemoryStep) Name() string {
-	return s.StepName
-}
+// Name returns the step's name (implementing step.Step).
+func (s *CheckMemoryStepSpec) Name() string { return s.StepMeta.Name }
 
-func (s *CheckMemoryStep) Description() string {
-	return fmt.Sprintf("Checks if the host has at least %d MB memory.", s.MinMemoryMB)
-}
+// Description returns the step's description (implementing step.Step).
+func (s *CheckMemoryStepSpec) Description() string { return s.StepMeta.Description }
 
-func (s *CheckMemoryStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Precheck")
+// GetName returns the step's name for spec interface.
+func (s *CheckMemoryStepSpec) GetName() string { return s.StepMeta.Name }
+
+// GetDescription returns the step's description for spec interface.
+func (s *CheckMemoryStepSpec) GetDescription() string { return s.StepMeta.Description }
+
+// GetSpec returns the spec itself.
+func (s *CheckMemoryStepSpec) GetSpec() interface{} { return s }
+
+// Meta returns the step's metadata.
+func (s *CheckMemoryStepSpec) Meta() *spec.StepMeta { return &s.StepMeta }
+
+func (s *CheckMemoryStepSpec) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Precheck")
 
 	if host == nil {
-	    s.checkError = fmt.Errorf("host is nil in Precheck for %s", s.Name())
-	    logger.Error(s.checkError.Error())
-		return false, s.checkError
+	    errMsg := fmt.Errorf("host is nil in Precheck for %s", s.GetName())
+	    logger.Error(errMsg.Error())
+		return false, errMsg
 	}
 
 	actualMemoryMB, err := s.determineActualMemoryMB(ctx, host)
-	s.actualMemoryMB = actualMemoryMB
-	s.checkError = err
-
 	if err != nil {
 		logger.Error("Error determining memory size during precheck.", "error", err)
-		return false, err
+		return false, fmt.Errorf("failed to determine memory size for step %s on host %s: %w", s.GetName(), host.GetName(), err)
 	}
 
 	if actualMemoryMB >= s.MinMemoryMB {
@@ -129,29 +140,36 @@ func (s *CheckMemoryStep) Precheck(ctx runtime.StepContext, host connector.Host)
 		return true, nil
 	}
 
-	errMsg := fmt.Sprintf("Host has %d MB memory, but minimum requirement is %d MB.", actualMemoryMB, s.MinMemoryMB)
-	logger.Info(errMsg + " (Precheck determined failure, Run will report this error)")
-	s.checkError = errors.New(errMsg) // Store specific failure error for Run
-	return false, nil
+	logger.Info("Memory requirement not met.", "actualMB", actualMemoryMB, "minimumMB", s.MinMemoryMB)
+	return false, nil // Requirement not met, but precheck itself is successful. Run will error.
 }
 
-func (s *CheckMemoryStep) Run(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Run")
+func (s *CheckMemoryStepSpec) Run(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Run")
 
-	if s.checkError != nil {
-	    logger.Error("Memory check failed.", "reason", s.checkError)
-		return s.checkError
+	if host == nil {
+		return fmt.Errorf("host is nil in Run for %s", s.GetName())
 	}
 
-	// This case implies Precheck returned (true, nil).
-	logger.Info("Memory requirement already met (unexpectedly in Run).", "actualMB", s.actualMemoryMB, "minimumMB", s.MinMemoryMB)
+	actualMemoryMB, err := s.determineActualMemoryMB(ctx, host)
+	if err != nil {
+		return fmt.Errorf("failed to determine memory size for step %s on host %s: %w", s.GetName(), host.GetName(), err)
+	}
+
+	if actualMemoryMB < s.MinMemoryMB {
+		errMsg := fmt.Errorf("host has %d MB memory, but minimum requirement is %d MB for step %s on host %s", actualMemoryMB, s.MinMemoryMB, s.GetName(), host.GetName())
+		logger.Error(errMsg.Error())
+		return errMsg
+	}
+
+	logger.Info("Memory requirement met.", "actualMB", actualMemoryMB, "minimumMB", s.MinMemoryMB)
 	return nil
 }
 
-func (s *CheckMemoryStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *CheckMemoryStepSpec) Rollback(ctx runtime.StepContext, host connector.Host) error {
 	// No action to rollback for a check-only step.
 	return nil
 }
 
-// Ensure CheckMemoryStep implements the step.Step interface.
-var _ step.Step = (*CheckMemoryStep)(nil)
+// Ensure CheckMemoryStepSpec implements the step.Step interface.
+var _ step.Step = (*CheckMemoryStepSpec)(nil)

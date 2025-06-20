@@ -7,56 +7,69 @@ import (
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/spec" // Added for spec.StepMeta
 	"github.com/mensylisir/kubexm/pkg/step"
-	// spec is no longer needed
 )
 
 // DefaultEtcdPKIPathKey is used as default for both input and output key for the etcd PKI path.
 const DefaultEtcdPKIPathKey = "etcdPKIPath"
 
-// DetermineEtcdPKIPathStep ensures the etcd PKI directory (read from ModuleCache)
+// DetermineEtcdPKIPathStepSpec ensures the etcd PKI directory (read from ModuleCache)
 // exists on the target host and stores its path in TaskCache.
-type DetermineEtcdPKIPathStep struct {
-	PKIPathToEnsureSharedDataKey string // Key to read etcd PKI path from ModuleCache
-	OutputPKIPathSharedDataKey string // Key to store etcd PKI path into TaskCache
-	StepName                     string
+type DetermineEtcdPKIPathStepSpec struct {
+	spec.StepMeta                `json:",inline"`
+	PKIPathToEnsureSharedDataKey string `json:"pkiPathToEnsureSharedDataKey,omitempty"` // Key to read etcd PKI path from ModuleCache
+	OutputPKIPathSharedDataKey string `json:"outputPKIPathSharedDataKey,omitempty"` // Key to store etcd PKI path into TaskCache
 }
 
-// NewDetermineEtcdPKIPathStep creates a new DetermineEtcdPKIPathStep.
-func NewDetermineEtcdPKIPathStep(pkiPathInputKey, pkiPathOutputKey, stepName string) step.Step {
-	s := &DetermineEtcdPKIPathStep{
-		PKIPathToEnsureSharedDataKey: pkiPathInputKey,
-		OutputPKIPathSharedDataKey: pkiPathOutputKey,
-		StepName:                     stepName,
+// NewDetermineEtcdPKIPathStepSpec creates a new DetermineEtcdPKIPathStepSpec.
+func NewDetermineEtcdPKIPathStep(pkiPathInputKey, pkiPathOutputKey, name string) *DetermineEtcdPKIPathStepSpec {
+	finalName := name
+	if finalName == "" {
+		finalName = "Ensure Etcd PKI Path Exists"
 	}
-	s.populateDefaults()
+
+	inputKey := pkiPathInputKey
+	if inputKey == "" { inputKey = DefaultEtcdPKIPathKey}
+	outputKey := pkiPathOutputKey
+	if outputKey == "" { outputKey = DefaultEtcdPKIPathKey}
+
+	description := fmt.Sprintf("Ensures etcd PKI path (from ModuleCache key '%s') exists and stores it to TaskCache key '%s'.",
+		inputKey, outputKey)
+
+	s := &DetermineEtcdPKIPathStepSpec{
+		StepMeta: spec.StepMeta{
+			Name:        finalName,
+			Description: description,
+		},
+		PKIPathToEnsureSharedDataKey: inputKey,
+		OutputPKIPathSharedDataKey: outputKey,
+	}
+	// No separate populateDefaults needed as factory handles it.
 	return s
 }
 
-func (s *DetermineEtcdPKIPathStep) populateDefaults() {
-	if s.PKIPathToEnsureSharedDataKey == "" {
-		s.PKIPathToEnsureSharedDataKey = DefaultEtcdPKIPathKey
-	}
-	if s.OutputPKIPathSharedDataKey == "" {
-		s.OutputPKIPathSharedDataKey = DefaultEtcdPKIPathKey
-	}
-	if s.StepName == "" {
-		s.StepName = "Ensure Etcd PKI Path Exists"
-	}
-}
+// Name returns the step's name (implementing step.Step).
+func (s *DetermineEtcdPKIPathStepSpec) Name() string { return s.StepMeta.Name }
 
-func (s *DetermineEtcdPKIPathStep) Name() string {
-	return s.StepName
-}
+// Description returns the step's description (implementing step.Step).
+func (s *DetermineEtcdPKIPathStepSpec) Description() string { return s.StepMeta.Description }
 
-func (s *DetermineEtcdPKIPathStep) Description() string {
-	return fmt.Sprintf("Ensures etcd PKI path (from ModuleCache key '%s') exists and stores it to TaskCache key '%s'.",
-		s.PKIPathToEnsureSharedDataKey, s.OutputPKIPathSharedDataKey)
-}
+// GetName returns the step's name for spec interface.
+func (s *DetermineEtcdPKIPathStepSpec) GetName() string { return s.StepMeta.Name }
 
-func (s *DetermineEtcdPKIPathStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Precheck")
-	// s.populateDefaults(); // Called in constructor
+// GetDescription returns the step's description for spec interface.
+func (s *DetermineEtcdPKIPathStepSpec) GetDescription() string { return s.StepMeta.Description }
+
+// GetSpec returns the spec itself.
+func (s *DetermineEtcdPKIPathStepSpec) GetSpec() interface{} { return s }
+
+// Meta returns the step's metadata.
+func (s *DetermineEtcdPKIPathStepSpec) Meta() *spec.StepMeta { return &s.StepMeta }
+
+
+func (s *DetermineEtcdPKIPathStepSpec) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Precheck")
 
 	pkiPathVal, pathOk := ctx.ModuleCache().Get(s.PKIPathToEnsureSharedDataKey)
 	if !pathOk {
@@ -71,7 +84,7 @@ func (s *DetermineEtcdPKIPathStep) Precheck(ctx runtime.StepContext, host connec
 
 	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
-		return false, fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.Name(), err)
+		return false, fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.GetName(), err)
 	}
 
 	exists, err := conn.Exists(ctx.GoContext(), pkiPath)
@@ -98,29 +111,29 @@ func (s *DetermineEtcdPKIPathStep) Precheck(ctx runtime.StepContext, host connec
 	return false, nil
 }
 
-func (s *DetermineEtcdPKIPathStep) Run(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Run")
-	// s.populateDefaults(); // Called in constructor
+func (s *DetermineEtcdPKIPathStepSpec) Run(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Run")
 
 	pkiPathVal, pathOk := ctx.ModuleCache().Get(s.PKIPathToEnsureSharedDataKey)
 	if !pathOk {
-		return fmt.Errorf("etcd PKI path not found in Module Cache using key '%s' for step %s on host %s. Ensure a prior step (like SetupEtcdPkiDataContextStep) sets this value in ModuleCache", s.PKIPathToEnsureSharedDataKey, s.Name(), host.GetName())
+		return fmt.Errorf("etcd PKI path not found in Module Cache using key '%s' for step %s on host %s. Ensure a prior step (like SetupEtcdPkiDataContextStep) sets this value in ModuleCache", s.PKIPathToEnsureSharedDataKey, s.GetName(), host.GetName())
 	}
 	pkiPath, typeOk := pkiPathVal.(string)
 	if !typeOk || pkiPath == "" {
-		return fmt.Errorf("invalid or empty etcd PKI path in Module Cache (key '%s', value '%v') for step %s on host %s", s.PKIPathToEnsureSharedDataKey, pkiPathVal, s.Name(), host.GetName())
+		return fmt.Errorf("invalid or empty etcd PKI path in Module Cache (key '%s', value '%v') for step %s on host %s", s.PKIPathToEnsureSharedDataKey, pkiPathVal, s.GetName(), host.GetName())
 	}
 
 	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
-		return fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.Name(), err)
+		return fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.GetName(), err)
 	}
 
 	logger.Info("Ensuring etcd PKI directory (from Module Cache) exists.", "path", pkiPath)
 	// Mode "0700" is appropriate for PKI directories. Sudo may be needed.
 	// Assuming conn.Mkdir handles sudo appropriately if the connector is sudo-enabled.
-	if err := conn.Mkdir(ctx.GoContext(), pkiPath, "0700"); err != nil {
-		return fmt.Errorf("failed to create etcd PKI directory %s on host %s for step %s: %w", pkiPath, host.GetName(), s.Name(), err)
+	// For PKI dirs, sudo is often required. A more explicit Exec("mkdir -p ...", sudo) might be safer.
+	if err := conn.Mkdir(ctx.GoContext(), pkiPath, "0700"); err != nil { // Ensure Mkdir handles sudo if needed.
+		return fmt.Errorf("failed to create etcd PKI directory %s on host %s for step %s: %w", pkiPath, host.GetName(), s.GetName(), err)
 	}
 	logger.Info("Etcd PKI directory ensured.", "path", pkiPath)
 
@@ -129,15 +142,14 @@ func (s *DetermineEtcdPKIPathStep) Run(ctx runtime.StepContext, host connector.H
 	return nil
 }
 
-func (s *DetermineEtcdPKIPathStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Rollback")
-	// s.populateDefaults(); // Called in constructor
+func (s *DetermineEtcdPKIPathStepSpec) Rollback(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Rollback")
 
 	logger.Info("Attempting to remove TaskCache key for etcd PKI path.", "key", s.OutputPKIPathSharedDataKey)
 	ctx.TaskCache().Delete(s.OutputPKIPathSharedDataKey)
-	logger.Info("Rollback for DetermineEtcdPKIPathStep: Cleared TaskCache key.", "key", s.OutputPKIPathSharedDataKey)
+	logger.Info("Rollback for DetermineEtcdPKIPathStepSpec: Cleared TaskCache key.", "key", s.OutputPKIPathSharedDataKey)
 	return nil
 }
 
-// Ensure DetermineEtcdPKIPathStep implements the step.Step interface.
-var _ step.Step = (*DetermineEtcdPKIPathStep)(nil)
+// Ensure DetermineEtcdPKIPathStepSpec implements the step.Step interface.
+var _ step.Step = (*DetermineEtcdPKIPathStepSpec)(nil)

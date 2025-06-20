@@ -8,30 +8,38 @@ import (
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/spec" // Added for spec.StepMeta
 	"github.com/mensylisir/kubexm/pkg/step"
-	// spec is no longer needed
 )
 
-// DisableSwapStep disables swap on the target host.
-type DisableSwapStep struct {
-	StepName string
-	// Internal field to store backup path for rollback
-	fstabBackupPath string
+// DisableSwapStepSpec disables swap on the target host.
+type DisableSwapStepSpec struct {
+	spec.StepMeta `json:",inline"`
+	// No configurable fields needed for this specific version of disable swap
+	// Internal field to store backup path for rollback, not part of the spec for serialization.
+	fstabBackupPath string `json:"-"`
 }
 
-// NewDisableSwapStep creates a new DisableSwapStep.
-func NewDisableSwapStep(stepName string) step.Step {
-	name := stepName
-	if name == "" {
-		name = "Disable Swap"
+// NewDisableSwapStepSpec creates a new DisableSwapStepSpec.
+func NewDisableSwapStepSpec(name, description string) *DisableSwapStepSpec {
+	finalName := name
+	if finalName == "" {
+		finalName = "Disable Swap"
 	}
-	return &DisableSwapStep{
-		StepName: name,
+	finalDescription := description
+	if finalDescription == "" {
+		finalDescription = "Disables swap memory on the host by running 'swapoff -a' and commenting swap entries in /etc/fstab."
+	}
+	return &DisableSwapStepSpec{
+		StepMeta: spec.StepMeta{
+			Name:        finalName,
+			Description: finalDescription,
+		},
 	}
 }
 
-func (s *DisableSwapStep) isSwapOn(ctx runtime.StepContext, host connector.Host) (bool, string, error) {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "operation", "isSwapOnCheck")
+func (s *DisableSwapStepSpec) isSwapOn(ctx runtime.StepContext, host connector.Host) (bool, string, error) {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "operation", "isSwapOnCheck")
 
 	conn, errConn := ctx.GetConnectorForHost(host)
 	if errConn != nil {
@@ -95,27 +103,33 @@ func (s *DisableSwapStep) isSwapOn(ctx runtime.StepContext, host connector.Host)
 	return true, string(stdoutBytes), nil
 }
 
+// Name returns the step's name (implementing step.Step).
+func (s *DisableSwapStepSpec) Name() string { return s.StepMeta.Name }
 
-func (s *DisableSwapStep) Name() string {
-	return s.StepName
-}
+// Description returns the step's description (implementing step.Step).
+func (s *DisableSwapStepSpec) Description() string { return s.StepMeta.Description }
 
-func (s *DisableSwapStep) Description() string {
-	return "Disables swap memory on the host by running 'swapoff -a' and commenting swap entries in /etc/fstab."
-}
+// GetName returns the step's name for spec interface.
+func (s *DisableSwapStepSpec) GetName() string { return s.StepMeta.Name }
 
-func (s *DisableSwapStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Precheck")
+// GetDescription returns the step's description for spec interface.
+func (s *DisableSwapStepSpec) GetDescription() string { return s.StepMeta.Description }
 
-	if host == nil { return false, fmt.Errorf("host is nil in Precheck for %s", s.Name())}
+// GetSpec returns the spec itself.
+func (s *DisableSwapStepSpec) GetSpec() interface{} { return s }
+
+// Meta returns the step's metadata.
+func (s *DisableSwapStepSpec) Meta() *spec.StepMeta { return &s.StepMeta }
+
+func (s *DisableSwapStepSpec) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Precheck")
+
+	if host == nil { return false, fmt.Errorf("host is nil in Precheck for %s", s.GetName())}
 
 	swapOn, _, checkErr := s.isSwapOn(ctx, host)
 	if checkErr != nil {
 		logger.Error("Error checking swap status during precheck.", "error", checkErr)
-		// Don't fail precheck for check error, let Run attempt to disable.
-		// But if it's a critical error (e.g., cannot connect), it should be returned.
-		// For now, assume Run should proceed if check itself fails.
-		return false, nil
+		return false, nil // Let Run attempt.
 	}
 	if !swapOn {
 		logger.Info("Swap is already disabled.")
@@ -125,9 +139,9 @@ func (s *DisableSwapStep) Precheck(ctx runtime.StepContext, host connector.Host)
 	return false, nil
 }
 
-func (s *DisableSwapStep) Run(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Run")
-    if host == nil { return fmt.Errorf("host is nil in Run for %s", s.Name())}
+func (s *DisableSwapStepSpec) Run(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Run")
+    if host == nil { return fmt.Errorf("host is nil in Run for %s", s.GetName())}
 
 	conn, errConn := ctx.GetConnectorForHost(host)
 	if errConn != nil {
@@ -184,26 +198,23 @@ func (s *DisableSwapStep) Run(ctx runtime.StepContext, host connector.Host) erro
 		return nil // Don't fail the step if modification was likely successful but verification failed
 	}
 	if swapOn {
-		return fmt.Errorf("failed to disable swap for step %s on host %s. 'swapon --summary' still shows active swap: %s", s.Name(), host.GetName(), finalState)
+		return fmt.Errorf("failed to disable swap for step %s on host %s. 'swapon --summary' still shows active swap: %s", s.GetName(), host.GetName(), finalState)
 	}
 	logger.Info("Swap successfully disabled and verified.")
 	return nil
 }
 
-func (s *DisableSwapStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Rollback")
-    if host == nil { return fmt.Errorf("host is nil in Rollback for %s", s.Name())}
+func (s *DisableSwapStepSpec) Rollback(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Rollback")
+    if host == nil { return fmt.Errorf("host is nil in Rollback for %s", s.GetName())}
 
 	if s.fstabBackupPath == "" {
 		logger.Warn("No fstab backup path recorded, cannot restore fstab. Skipping fstab restoration.")
-		// We could try `swapon -a` if fstab was our only change, but if sed failed, fstab might be original.
-		// If Run completed, fstab was modified. If Run failed before fstab mod, backup path might be empty.
 		return nil
 	}
 
 	conn, errConn := ctx.GetConnectorForHost(host)
 	if errConn != nil {
-		// If no connector, can't do much.
 		logger.Error("Failed to get connector for host during rollback, cannot restore fstab.", "error", errConn)
 		return fmt.Errorf("failed to get connector for host %s for rollback: %w", host.GetName(), errConn)
 	}
@@ -231,5 +242,5 @@ func (s *DisableSwapStep) Rollback(ctx runtime.StepContext, host connector.Host)
 	return nil
 }
 
-// Ensure DisableSwapStep implements the step.Step interface.
-var _ step.Step = (*DisableSwapStep)(nil)
+// Ensure DisableSwapStepSpec implements the step.Step interface.
+var _ step.Step = (*DisableSwapStepSpec)(nil)

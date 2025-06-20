@@ -22,12 +22,14 @@ const (
 	KubeletArchKey               = "KubeletArch"
 	KubeletChecksumKey           = "KubeletChecksum"
 	KubeletDownloadURLKey        = "KubeletDownloadURL"
+	"github.com/mensylisir/kubexm/pkg/spec" // Added for spec.StepMeta
 )
 
-// DownloadKubeletStep downloads the kubelet binary.
-type DownloadKubeletStep struct {
-	Version              string
-	Arch                 string
+// DownloadKubeletStepSpec downloads the kubelet binary.
+type DownloadKubeletStepSpec struct {
+	spec.StepMeta        `json:",inline"`
+	Version              string `json:"version,omitempty"`
+	Arch                 string `json:"arch,omitempty"`
 	Zone                 string // e.g., "cn" for different download sources
 	DownloadDir          string // Directory on the target host to download to
 	Checksum             string // Expected checksum (e.g., "sha256:value")
@@ -44,12 +46,15 @@ type DownloadKubeletStep struct {
 	determinedURL      string
 }
 
-// NewDownloadKubeletStep creates a new DownloadKubeletStep.
+// NewDownloadKubeletStepSpec creates a new DownloadKubeletStepSpec.
 func NewDownloadKubeletStep(
 	version, arch, zone, downloadDir, checksum string,
 	outputFilePathKey, outputFileNameKey, outputComponentTypeKey,
 	outputVersionKey, outputArchKey, outputChecksumKey, outputURLKey string,
-) step.Step {
+) *DownloadKubeletStepSpec {
+	name := "Download Kubelet" // Default name
+	description := fmt.Sprintf("Downloads kubelet version %s for %s architecture.", version, arch)
+
 	if outputFilePathKey == "" { outputFilePathKey = KubeletDownloadedPathKey }
 	if outputFileNameKey == "" { outputFileNameKey = KubeletDownloadedFileNameKey }
 	if outputComponentTypeKey == "" { outputComponentTypeKey = KubeletComponentTypeKey }
@@ -58,7 +63,11 @@ func NewDownloadKubeletStep(
 	if outputChecksumKey == "" { outputChecksumKey = KubeletChecksumKey }
 	if outputURLKey == "" { outputURLKey = KubeletDownloadURLKey }
 
-	return &DownloadKubeletStep{
+	return &DownloadKubeletStepSpec{
+		StepMeta: spec.StepMeta{
+			Name:        name,
+			Description: description, // Will be updated by populateAndDetermineInternals
+		},
 		Version:              version,
 		Arch:                 arch,
 		Zone:                 zone,
@@ -74,22 +83,19 @@ func NewDownloadKubeletStep(
 	}
 }
 
-func (s *DownloadKubeletStep) populateAndDetermineInternals(ctx runtime.StepContext, host connector.Host) error {
+func (s *DownloadKubeletStepSpec) populateAndDetermineInternals(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName())
 	if s.determinedArch == "" {
 		archToUse := s.Arch
 		if archToUse == "" {
 			if host != nil {
 				hostArch := host.GetArch()
-				if hostArch == "x86_64" {
-					archToUse = "amd64"
-				} else if hostArch == "aarch64" {
-					archToUse = "arm64"
-				} else {
-					archToUse = hostArch
-				}
-				ctx.GetLogger().Debug("Host architecture determined for kubelet", "rawArch", hostArch, "usingArch", archToUse)
+				if hostArch == "x86_64" { archToUse = "amd64"
+				} else if hostArch == "aarch64" { archToUse = "arm64"
+				} else { archToUse = hostArch }
+				logger.Debug("Host architecture determined for kubelet", "rawArch", hostArch, "usingArch", archToUse)
 			} else {
-				return fmt.Errorf("arch is not specified and host is nil, cannot determine architecture for DownloadKubeletStep")
+				return fmt.Errorf("arch is not specified and host is nil, cannot determine architecture for %s", s.GetName())
 			}
 		}
 		s.determinedArch = archToUse
@@ -101,11 +107,9 @@ func (s *DownloadKubeletStep) populateAndDetermineInternals(ctx runtime.StepCont
 
 	if s.determinedURL == "" {
 		versionWithV := s.Version
-		if !strings.HasPrefix(versionWithV, "v") {
-			versionWithV = "v" + versionWithV
-		}
+		if !strings.HasPrefix(versionWithV, "v") { versionWithV = "v" + versionWithV }
 		effectiveZone := s.Zone
-		if effectiveZone == "" { effectiveZone = os.Getenv("KKZONE") }
+		if effectiveZone == "" { effectiveZone = os.Getenv("KKZONE") } // Consider passing zone via config
 
 		baseURL := fmt.Sprintf("https://storage.googleapis.com/kubernetes-release/release/%s/bin/linux/%s/%s", versionWithV, s.determinedArch, s.determinedFileName)
 		if effectiveZone == "cn" {
@@ -113,27 +117,37 @@ func (s *DownloadKubeletStep) populateAndDetermineInternals(ctx runtime.StepCont
 		}
 		s.determinedURL = baseURL
 	}
+	// Update StepMeta description with determined values
+	s.StepMeta.Description = fmt.Sprintf("Downloads kubelet version %s for %s architecture from %s.", s.Version, s.determinedArch, s.determinedURL)
 	return nil
 }
 
-func (s *DownloadKubeletStep) Name() string {
-	return "Download Kubelet"
-}
+// Name returns the step's name (implementing step.Step).
+func (s *DownloadKubeletStepSpec) Name() string { return s.StepMeta.Name }
 
-func (s *DownloadKubeletStep) Description() string {
-	archDesc := s.Arch
-	if s.determinedArch != "" { archDesc = s.determinedArch }
-	return fmt.Sprintf("Downloads kubelet version %s for %s architecture.", s.Version, archDesc)
-}
+// Description returns the step's description (implementing step.Step).
+func (s *DownloadKubeletStepSpec) Description() string { return s.StepMeta.Description }
 
-func (s *DownloadKubeletStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Precheck")
-	if err := s.populateAndDetermineInternals(ctx, host); err != nil {
-		logger.Error("Failed to populate internal fields", "error", err)
+// GetName returns the step's name for spec interface.
+func (s *DownloadKubeletStepSpec) GetName() string { return s.StepMeta.Name }
+
+// GetDescription returns the step's description for spec interface.
+func (s *DownloadKubeletStepSpec) GetDescription() string { return s.StepMeta.Description }
+
+// GetSpec returns the spec itself.
+func (s *DownloadKubeletStepSpec) GetSpec() interface{} { return s }
+
+// Meta returns the step's metadata.
+func (s *DownloadKubeletStepSpec) Meta() *spec.StepMeta { return &s.StepMeta }
+
+func (s *DownloadKubeletStepSpec) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Precheck")
+	if err := s.populateAndDetermineInternals(ctx, host); err != nil { // This also updates description
+		logger.Error("Failed to populate internal fields during precheck", "error", err)
 		return false, err
 	}
 	if s.DownloadDir == "" {
-		return false, fmt.Errorf("DownloadDir not set for step %s on host %s", s.Name(), host.GetName())
+		return false, fmt.Errorf("DownloadDir not set for step %s on host %s", s.GetName(), host.GetName())
 	}
 
 	expectedFilePath := filepath.Join(s.DownloadDir, s.determinedFileName)
@@ -182,14 +196,14 @@ func (s *DownloadKubeletStep) Precheck(ctx runtime.StepContext, host connector.H
 	return true, nil
 }
 
-func (s *DownloadKubeletStep) Run(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Run")
-	if err := s.populateAndDetermineInternals(ctx, host); err != nil {
-		logger.Error("Failed to populate internal fields", "error", err)
+func (s *DownloadKubeletStepSpec) Run(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Run")
+	if err := s.populateAndDetermineInternals(ctx, host); err != nil { // This also updates description
+		logger.Error("Failed to populate internal fields during run", "error", err)
 		return err
 	}
 	if s.DownloadDir == "" {
-		return fmt.Errorf("DownloadDir not set for step %s on host %s", s.Name(), host.GetName())
+		return fmt.Errorf("DownloadDir not set for step %s on host %s", s.GetName(), host.GetName())
 	}
 
 	conn, err := ctx.GetConnectorForHost(host)
@@ -197,7 +211,7 @@ func (s *DownloadKubeletStep) Run(ctx runtime.StepContext, host connector.Host) 
 		return fmt.Errorf("failed to get connector for host %s: %w", host.GetName(), err)
 	}
 
-	errMkdir := conn.Mkdir(ctx.GoContext(), s.DownloadDir, "0755")
+	errMkdir := conn.Mkdir(ctx.GoContext(), s.DownloadDir, "0755") // Ensure Mkdir handles sudo if needed
 	if errMkdir != nil {
 		return fmt.Errorf("failed to create download directory %s: %w", s.DownloadDir, errMkdir)
 	}
@@ -205,7 +219,7 @@ func (s *DownloadKubeletStep) Run(ctx runtime.StepContext, host connector.Host) 
 	destinationPath := filepath.Join(s.DownloadDir, s.determinedFileName)
 	logger.Info("Attempting to download kubelet", "url", s.determinedURL, "destination", destinationPath)
 
-	downloadedPath, dlErr := utils.DownloadFileWithConnector(ctx.GoContext(), logger, conn, s.determinedURL, s.DownloadDir, s.determinedFileName, s.Checksum)
+	downloadedPath, dlErr := utils.DownloadFileWithConnector(ctx.GoContext(), logger, conn, s.determinedURL, s.DownloadDir, s.determinedFileName, s.Checksum) // Assuming this utility exists
 	if dlErr != nil {
 		return fmt.Errorf("failed to download kubelet from URL %s: %w", s.determinedURL, dlErr)
 	}
@@ -213,7 +227,7 @@ func (s *DownloadKubeletStep) Run(ctx runtime.StepContext, host connector.Host) 
 
 	logger.Info("Making kubelet binary executable", "path", downloadedPath)
 	chmodCmd := fmt.Sprintf("chmod +x %s", downloadedPath)
-	_, _, chmodErr := conn.Exec(ctx.GoContext(), chmodCmd, &connector.ExecOptions{Sudo: false})
+	_, _, chmodErr := conn.Exec(ctx.GoContext(), chmodCmd, &connector.ExecOptions{Sudo: utils.PathRequiresSudo(downloadedPath)})
 	if chmodErr != nil {
 		logger.Warn("Failed to make kubelet binary executable. Manual chmod might be required.", "path", downloadedPath, "error", chmodErr)
 	} else {
@@ -226,7 +240,7 @@ func (s *DownloadKubeletStep) Run(ctx runtime.StepContext, host connector.Host) 
 			parts := strings.SplitN(s.Checksum, ":", 2); checksumType = parts[0]; checksumValue = parts[1]
 		}
 		logger.Info("Verifying checksum post-download", "type", checksumType)
-		actualHash, errC := conn.GetFileChecksum(ctx.GoContext(), downloadedPath, checksumType)
+		actualHash, errC := conn.GetFileChecksum(ctx.GoContext(), downloadedPath, checksumType) // Assuming this method exists
 		if errC != nil {
 			return fmt.Errorf("failed to get checksum for downloaded kubelet file %s: %w", downloadedPath, errC)
 		}
@@ -246,9 +260,9 @@ func (s *DownloadKubeletStep) Run(ctx runtime.StepContext, host connector.Host) 
 	return nil
 }
 
-func (s *DownloadKubeletStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Rollback")
-	if err := s.populateAndDetermineInternals(ctx, host); err != nil {
+func (s *DownloadKubeletStepSpec) Rollback(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Rollback")
+	if err := s.populateAndDetermineInternals(ctx, host); err != nil { // This also updates description
 		logger.Warn("Could not determine file name for rollback", "error", err)
 		return nil
 	}
@@ -283,5 +297,5 @@ func (s *DownloadKubeletStep) Rollback(ctx runtime.StepContext, host connector.H
 	return nil
 }
 
-// Ensure DownloadKubeletStep implements the step.Step interface.
-var _ step.Step = (*DownloadKubeletStep)(nil)
+// Ensure DownloadKubeletStepSpec implements the step.Step interface.
+var _ step.Step = (*DownloadKubeletStepSpec)(nil)

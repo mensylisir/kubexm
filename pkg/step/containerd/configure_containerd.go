@@ -9,8 +9,9 @@ import (
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/spec" // Added for spec.StepMeta
 	"github.com/mensylisir/kubexm/pkg/step"
-	// No longer need spec or time directly
+	// No longer need time directly
 )
 
 const DefaultContainerdConfigPath = "/etc/containerd/config.toml"
@@ -62,56 +63,76 @@ version = 2
 {{end}}
 `
 
-// ConfigureContainerdStep configures containerd by writing its config.toml.
-type ConfigureContainerdStep struct {
-	RegistryMirrors    map[string]string
-	InsecureRegistries []string
-	ConfigFilePath     string
-	ExtraTomlContent   string
-	UseSystemdCgroup   bool
-	StepName           string
+// ConfigureContainerdStepSpec configures containerd by writing its config.toml.
+type ConfigureContainerdStepSpec struct {
+	spec.StepMeta      `json:",inline"`
+	RegistryMirrors    map[string]string `json:"registryMirrors,omitempty"`
+	InsecureRegistries []string          `json:"insecureRegistries,omitempty"`
+	ConfigFilePath     string            `json:"configFilePath,omitempty"`
+	ExtraTomlContent   string            `json:"extraTomlContent,omitempty"`
+	UseSystemdCgroup   bool              `json:"useSystemdCgroup,omitempty"`
 }
 
-// NewConfigureContainerdStep creates a new ConfigureContainerdStep.
+// NewConfigureContainerdStepSpec creates a new ConfigureContainerdStepSpec.
 func NewConfigureContainerdStep(
 	registryMirrors map[string]string,
 	insecureRegistries []string,
 	configFilePath string,
 	extraTomlContent string,
 	useSystemdCgroup bool,
-	stepName string,
-) step.Step {
+	name, description string, // Added name and description for StepMeta
+) *ConfigureContainerdStepSpec {
 	effectivePath := configFilePath
 	if effectivePath == "" {
 		effectivePath = DefaultContainerdConfigPath
 	}
-	return &ConfigureContainerdStep{
+
+	finalName := name
+	if finalName == "" {
+		finalName = "Configure containerd (config.toml)"
+	}
+	finalDescription := description
+	if finalDescription == "" {
+		finalDescription = fmt.Sprintf("Configures containerd by writing %s with specified mirrors, insecure registries, and cgroup settings.", effectivePath)
+	}
+
+	return &ConfigureContainerdStepSpec{
+		StepMeta: spec.StepMeta{
+			Name:        finalName,
+			Description: finalDescription,
+		},
 		RegistryMirrors:    registryMirrors,
 		InsecureRegistries: insecureRegistries,
 		ConfigFilePath:     effectivePath,
 		ExtraTomlContent:   extraTomlContent,
 		UseSystemdCgroup:   useSystemdCgroup,
-		StepName:           stepName,
 	}
 }
 
-func (s *ConfigureContainerdStep) Name() string {
-	if s.StepName != "" {
-		return s.StepName
-	}
-	return "Configure containerd (config.toml)"
-}
+// Name returns the step's name (implementing step.Step).
+func (s *ConfigureContainerdStepSpec) Name() string { return s.StepMeta.Name }
 
-func (s *ConfigureContainerdStep) Description() string {
-	return fmt.Sprintf("Configures containerd by writing %s with specified mirrors, insecure registries, and cgroup settings.", s.ConfigFilePath)
-}
+// Description returns the step's description (implementing step.Step).
+func (s *ConfigureContainerdStepSpec) Description() string { return s.StepMeta.Description }
 
-func (s *ConfigureContainerdStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Precheck")
+// GetName returns the step's name for spec interface.
+func (s *ConfigureContainerdStepSpec) GetName() string { return s.StepMeta.Name }
+
+// GetDescription returns the step's description for spec interface.
+func (s *ConfigureContainerdStepSpec) GetDescription() string { return s.StepMeta.Description }
+
+// GetSpec returns the spec itself.
+func (s *ConfigureContainerdStepSpec) GetSpec() interface{} { return s }
+
+// Meta returns the step's metadata.
+func (s *ConfigureContainerdStepSpec) Meta() *spec.StepMeta { return &s.StepMeta }
+
+func (s *ConfigureContainerdStepSpec) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Precheck")
 
 	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
-		return false, fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.Name(), err)
+		return false, fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.GetName(), err)
 	}
 
 	exists, err := conn.Exists(ctx.GoContext(), s.ConfigFilePath)
@@ -186,25 +207,25 @@ func (s *ConfigureContainerdStep) Precheck(ctx runtime.StepContext, host connect
 	return true, nil // All checks passed
 }
 
-func (s *ConfigureContainerdStep) Run(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Run")
+func (s *ConfigureContainerdStepSpec) Run(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Run")
 
 	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
-		return fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.Name(), err)
+		return fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.GetName(), err)
 	}
 
 	parentDir := filepath.Dir(s.ConfigFilePath)
 	// Using Exec to ensure directory creation with sudo if needed, as conn.Mkdir might not directly support sudo.
 	mkdirCmd := fmt.Sprintf("mkdir -p %s", parentDir)
-	_, stderrMkdir, errMkdir := conn.Exec(ctx.GoContext(), mkdirCmd, &connector.ExecOptions{Sudo: true})
+	_, stderrMkdir, errMkdir := conn.Exec(ctx.GoContext(), mkdirCmd, &connector.ExecOptions{Sudo: true}) // Assume sudo for /etc
 	if errMkdir != nil {
-		return fmt.Errorf("failed to create directory %s for containerd config (stderr: %s) on host %s for step %s: %w", parentDir, string(stderrMkdir), host.GetName(), s.Name(), errMkdir)
+		return fmt.Errorf("failed to create directory %s for containerd config (stderr: %s) on host %s for step %s: %w", parentDir, string(stderrMkdir), host.GetName(), s.GetName(), errMkdir)
 	}
 
 	tmpl, err := template.New("containerdConfig").Parse(containerdConfigTemplate)
 	if err != nil {
-		return fmt.Errorf("dev error: failed to parse internal containerd config template for step %s: %w", s.Name(), err)
+		return fmt.Errorf("dev error: failed to parse internal containerd config template for step %s: %w", s.GetName(), err)
 	}
 
 	var buf bytes.Buffer
@@ -215,30 +236,31 @@ func (s *ConfigureContainerdStep) Run(ctx runtime.StepContext, host connector.Ho
 		"ExtraTomlContent":   s.ExtraTomlContent,
 	}
 	if err := tmpl.Execute(&buf, templateData); err != nil {
-		return fmt.Errorf("failed to render containerd config template for host %s for step %s: %w", host.GetName(), s.Name(), err)
+		return fmt.Errorf("failed to render containerd config template for host %s for step %s: %w", host.GetName(), s.GetName(), err)
 	}
 
 	configContentBytes := buf.Bytes()
-	// logger.Debug("Generated containerd config", "content", string(configContentBytes)) // Avoid logging full config unless necessary
 
-	// Use WriteFile with sudo, assuming it's handled by the connector or a sudo-wrapper if needed.
-	// If connector.WriteFile doesn't handle sudo, would need to write to temp then sudo mv.
-	// For now, assuming WriteFile handles permissions appropriately via connector's setup.
-	err = conn.WriteFile(ctx.GoContext(), configContentBytes, s.ConfigFilePath, "0644")
+	// Assuming conn.CopyContent handles sudo internally if needed, based on FileStat.Sudo hint.
+	// Or, if paths are always privileged, ensure connector is sudo-enabled or use Exec with sudo for writes.
+	err = conn.CopyContent(ctx.GoContext(), string(configContentBytes), s.ConfigFilePath, connector.FileStat{
+		Permissions: "0644",
+		Sudo:        true, // Writing to /etc/containerd usually requires sudo
+	})
 	if err != nil {
-		return fmt.Errorf("failed to write containerd config to %s on host %s for step %s: %w", s.ConfigFilePath, host.GetName(), s.Name(), err)
+		return fmt.Errorf("failed to write containerd config to %s on host %s for step %s: %w", s.ConfigFilePath, host.GetName(), s.GetName(), err)
 	}
 
 	logger.Info("Containerd configuration written. Restart containerd service for changes to take effect.", "path", s.ConfigFilePath)
 	return nil
 }
 
-func (s *ConfigureContainerdStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Rollback")
+func (s *ConfigureContainerdStepSpec) Rollback(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Rollback")
 
 	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
-		return fmt.Errorf("failed to get connector for host %s for rollback of step %s: %w", host.GetName(), s.Name(), err)
+		return fmt.Errorf("failed to get connector for host %s for rollback of step %s: %w", host.GetName(), s.GetName(), err)
 	}
 
 	logger.Info("Attempting to remove containerd config file for rollback.", "path", s.ConfigFilePath)
@@ -253,5 +275,5 @@ func (s *ConfigureContainerdStep) Rollback(ctx runtime.StepContext, host connect
 	return nil
 }
 
-// Ensure ConfigureContainerdStep implements the step.Step interface.
-var _ step.Step = (*ConfigureContainerdStep)(nil)
+// Ensure ConfigureContainerdStepSpec implements the step.Step interface.
+var _ step.Step = (*ConfigureContainerdStepSpec)(nil)

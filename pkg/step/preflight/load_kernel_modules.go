@@ -8,34 +8,45 @@ import (
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/spec" // Added for spec.StepMeta
 	"github.com/mensylisir/kubexm/pkg/step"
-	// spec is no longer needed
 )
 
-// LoadKernelModulesStep loads specified kernel modules on the host.
-type LoadKernelModulesStep struct {
-	Modules  []string
-	StepName string
+// LoadKernelModulesStepSpec loads specified kernel modules on the host.
+type LoadKernelModulesStepSpec struct {
+	spec.StepMeta `json:",inline"`
+	Modules       []string `json:"modules,omitempty"`
 }
 
-// NewLoadKernelModulesStep creates a new LoadKernelModulesStep.
-func NewLoadKernelModulesStep(modules []string, stepName string) step.Step {
-	name := stepName
-	if name == "" {
+// NewLoadKernelModulesStepSpec creates a new LoadKernelModulesStepSpec.
+func NewLoadKernelModulesStepSpec(modules []string, name, description string) *LoadKernelModulesStepSpec {
+	finalName := name
+	if finalName == "" {
 		if len(modules) == 0 {
-			name = "Load Kernel Modules (none specified)"
+			finalName = "Load Kernel Modules (none specified)"
 		} else {
-			name = fmt.Sprintf("Load Kernel Modules (%s)", strings.Join(modules, ", "))
+			finalName = fmt.Sprintf("Load Kernel Modules (%s)", strings.Join(modules, ", "))
 		}
 	}
-	return &LoadKernelModulesStep{
-		Modules:  modules,
-		StepName: name,
+	finalDescription := description
+	if finalDescription == "" {
+		if len(modules) == 0 {
+			finalDescription = "Ensures no specific kernel modules are loaded (as none were specified)."
+		} else {
+			finalDescription = fmt.Sprintf("Ensures kernel modules are loaded: %s.", strings.Join(modules, ", "))
+		}
+	}
+	return &LoadKernelModulesStepSpec{
+		StepMeta: spec.StepMeta{
+			Name:        finalName,
+			Description: finalDescription,
+		},
+		Modules: modules,
 	}
 }
 
-func (s *LoadKernelModulesStep) isModuleLoaded(ctx runtime.StepContext, host connector.Host, moduleName string) (bool, error) {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "module", moduleName, "operation", "isModuleLoadedCheck")
+func (s *LoadKernelModulesStepSpec) isModuleLoaded(ctx runtime.StepContext, host connector.Host, moduleName string) (bool, error) {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "module", moduleName, "operation", "isModuleLoadedCheck")
 
 	conn, errConn := ctx.GetConnectorForHost(host)
 	if errConn != nil {
@@ -66,20 +77,27 @@ func (s *LoadKernelModulesStep) isModuleLoaded(ctx runtime.StepContext, host con
 	return false, fmt.Errorf("error executing command '%s' for module %s on host %s: %w", cmd, moduleName, host.GetName(), err)
 }
 
-func (s *LoadKernelModulesStep) Name() string {
-	return s.StepName
-}
+// Name returns the step's name (implementing step.Step).
+func (s *LoadKernelModulesStepSpec) Name() string { return s.StepMeta.Name }
 
-func (s *LoadKernelModulesStep) Description() string {
-	if len(s.Modules) == 0 {
-		return "Ensures no specific kernel modules are loaded (as none were specified)."
-	}
-	return fmt.Sprintf("Ensures kernel modules are loaded: %s.", strings.Join(s.Modules, ", "))
-}
+// Description returns the step's description (implementing step.Step).
+func (s *LoadKernelModulesStepSpec) Description() string { return s.StepMeta.Description }
 
-func (s *LoadKernelModulesStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Precheck")
-    if host == nil { return false, fmt.Errorf("host is nil in Precheck for %s", s.Name())}
+// GetName returns the step's name for spec interface.
+func (s *LoadKernelModulesStepSpec) GetName() string { return s.StepMeta.Name }
+
+// GetDescription returns the step's description for spec interface.
+func (s *LoadKernelModulesStepSpec) GetDescription() string { return s.StepMeta.Description }
+
+// GetSpec returns the spec itself.
+func (s *LoadKernelModulesStepSpec) GetSpec() interface{} { return s }
+
+// Meta returns the step's metadata.
+func (s *LoadKernelModulesStepSpec) Meta() *spec.StepMeta { return &s.StepMeta }
+
+func (s *LoadKernelModulesStepSpec) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Precheck")
+    if host == nil { return false, fmt.Errorf("host is nil in Precheck for %s", s.GetName())}
 
 	if len(s.Modules) == 0 {
 		logger.Debug("No modules specified to load, precheck considered done.")
@@ -101,9 +119,9 @@ func (s *LoadKernelModulesStep) Precheck(ctx runtime.StepContext, host connector
 	return true, nil // All modules are loaded
 }
 
-func (s *LoadKernelModulesStep) Run(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Run")
-    if host == nil { return fmt.Errorf("host is nil in Run for %s", s.Name())}
+func (s *LoadKernelModulesStepSpec) Run(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Run")
+    if host == nil { return fmt.Errorf("host is nil in Run for %s", s.GetName())}
 
 	if len(s.Modules) == 0 {
 		logger.Info("No modules specified to load.")
@@ -155,16 +173,16 @@ func (s *LoadKernelModulesStep) Run(ctx runtime.StepContext, host connector.Host
 	}
 
 	if len(failedModules) > 0 {
-		return fmt.Errorf("failed to load/verify kernel module(s) for step %s on host %s: %s", s.Name(), host.GetName(), strings.Join(failedModules, "; "))
+		return fmt.Errorf("failed to load/verify kernel module(s) for step %s on host %s: %s", s.GetName(), host.GetName(), strings.Join(failedModules, "; "))
 	}
 	return nil
 }
 
-func (s *LoadKernelModulesStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Rollback")
+func (s *LoadKernelModulesStepSpec) Rollback(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Rollback")
 	logger.Info("Rollback for LoadKernelModules is a no-op by default to avoid system instability from unloading modules.")
 	return nil
 }
 
-// Ensure LoadKernelModulesStep implements the step.Step interface.
-var _ step.Step = (*LoadKernelModulesStep)(nil)
+// Ensure LoadKernelModulesStepSpec implements the step.Step interface.
+var _ step.Step = (*LoadKernelModulesStepSpec)(nil)
