@@ -26,11 +26,11 @@ type InstallContainerdStepSpec struct {
 // NewInstallContainerdStepSpec creates a new InstallContainerdStepSpec.
 // If binariesToCopy is nil or empty, default binaries will be set.
 // If systemd paths are empty, defaults will be used.
-func NewInstallContainerdStep(
+func NewInstallContainerdStepSpec( // Renamed factory
 	sourceExtractedPathKey string,
 	binariesToCopy map[string]string,
 	systemdSourceRelPath, systemdTargetPath string,
-	name, description string, // Added for StepMeta
+	name, description string,
 ) *InstallContainerdStepSpec {
 	finalName := name
 	if finalName == "" {
@@ -64,28 +64,30 @@ func (s *InstallContainerdStepSpec) populateDefaults() {
 		// Based on previous subtask, commonstep.DefaultExtractedPathKey should be available if that step was done.
 		// However, the prompt used "commonstep.DefaultExtractedPathKey" for a constant that was
 		// defined in extract_archive.go itself. Let's assume this key is a well-known string for now.
-		// The plan implies commonstep.DefaultExtractedPathKey exists from extract_archive refactor.
-		// That constant was `DefaultExtractedPathKey` in `extract_archive.go` but not exported.
-		// The previous subtask `extract_archive.go` defined a *new* `ExtractArchiveStep` which used
-		// `ExtractedDirSharedDataKey` as a field, not a global constant.
-		// Let's use a sensible default string here, or assume it's passed from a global config.
-		// For now, will use the value from previous spec:
-		s.SourceExtractedPathSharedDataKey = "extractedPath" // commonstep.DefaultExtractedPathKey (if it exists and is exported)
+		// Use the default key from ExtractContainerdStepSpec output
+		s.SourceExtractedPathSharedDataKey = DefaultContainerdExtractedPathKey // "ContainerdExtractedPath"
 	}
 	if s.SystemdUnitFileSourceRelPath == "" {
-		s.SystemdUnitFileSourceRelPath = "containerd.service" // Often at root of extracted archive
+		// Path relative to the root of extracted archive (e.g. /tmp/extract_XYZ)
+		// For cri-containerd-cni*.tar.gz, this is typically etc/systemd/system/containerd.service
+		s.SystemdUnitFileSourceRelPath = "etc/systemd/system/containerd.service"
 	}
 	if s.SystemdUnitFileTargetPath == "" {
-		s.SystemdUnitFileTargetPath = "/usr/lib/systemd/system/containerd.service"
+		// Standard system path for systemd unit files
+		s.SystemdUnitFileTargetPath = "/etc/systemd/system/containerd.service"
 	}
 	if len(s.BinariesToCopy) == 0 {
+		// Source paths are relative to the root of the extracted archive.
+		// Target paths are absolute system paths.
+		// Based on typical cri-containerd-cni*.tar.gz structure.
 		s.BinariesToCopy = map[string]string{
-			"bin/containerd":                "/usr/local/bin/containerd",
-			"bin/containerd-shim":           "/usr/local/bin/containerd-shim",
-			"bin/containerd-shim-runc-v1":   "/usr/local/bin/containerd-shim-runc-v1",
-			"bin/containerd-shim-runc-v2":   "/usr/local/bin/containerd-shim-runc-v2",
-			"bin/ctr":                       "/usr/local/bin/ctr",
-			"bin/runc":                      "/usr/local/sbin/runc", // runc often goes here or /usr/local/bin
+			"usr/local/bin/containerd":                "/usr/local/bin/containerd",
+			"usr/local/bin/containerd-shim":           "/usr/local/bin/containerd-shim",
+			"usr/local/bin/containerd-shim-runc-v1":   "/usr/local/bin/containerd-shim-runc-v1",
+			"usr/local/bin/containerd-shim-runc-v2":   "/usr/local/bin/containerd-shim-runc-v2",
+			"usr/local/bin/ctr":                       "/usr/local/bin/ctr",
+			"usr/local/sbin/runc":                     "/usr/local/sbin/runc",
+			// crictl might also be in usr/local/bin/crictl in some bundles
 		}
 	}
 	// If description was not provided to factory, set a default one now that paths are populated.

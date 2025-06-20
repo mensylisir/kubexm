@@ -14,52 +14,68 @@ import (
 )
 
 // ExtractEtcdStepSpec defines the parameters for extracting an etcd archive
-// and installing the binaries.
+// and placing them in a target directory.
 type ExtractEtcdStepSpec struct {
-	spec.StepMeta // Embed common meta fields
+	spec.StepMeta `json:",inline"`
 
-	ArchivePathKey   string `json:"archivePathKey,omitempty"`   // Key to retrieve the downloaded archive path from shared data (e.g., EtcdDownloadedArchiveKey)
-	Version          string `json:"version,omitempty"`          // Etcd version, e.g., "v3.5.9". Used for determining path inside tarball.
-	Arch             string `json:"arch,omitempty"`             // Architecture, e.g., "amd64". Used for determining path inside tarball.
-	TargetInstallDir string `json:"targetInstallDir,omitempty"` // Directory to install etcd/etcdctl binaries, e.g., "/usr/local/bin"
-	// ExtractedBinDirKey string `json:"extractedBinDirKey,omitempty"` // Optional: Key to store the path of the temp extraction dir that contains the binaries
+	ArchivePathCacheKey       string `json:"archivePathCacheKey,omitempty"`       // Required
+	TargetDir                 string `json:"targetDir,omitempty"`                 // Staging directory for extracted contents
+	StripComponents           int    `json:"stripComponents"`                     // For tar --strip-components
+	OutputExtractedPathCacheKey string `json:"outputExtractedPathCacheKey,omitempty"` // Required: Key to store the path to the extracted root (e.g., TargetDir or TargetDir/etcd-vX.Y.Z-linux-ARCH)
+	Sudo                      bool   `json:"sudo,omitempty"`                      // For mkdir if TargetDir needs sudo
+	// Version and Arch are implicitly part of the archive, not direct fields for this step's core logic,
+	// but might be useful if a deeper inspection of archive contents were needed by the step itself.
+	// For now, this step just extracts based on strip_components.
 }
 
 // NewExtractEtcdStepSpec creates a new ExtractEtcdStepSpec.
-func NewExtractEtcdStepSpec(stepName, archivePathKey, version, arch, targetInstallDir string) *ExtractEtcdStepSpec {
-	if stepName == "" {
-		stepName = "Extract and Install Etcd Binaries"
+func NewExtractEtcdStepSpec(name, description, archivePathCacheKey, outputExtractedPathCacheKey string) *ExtractEtcdStepSpec {
+	finalName := name
+	if finalName == "" {
+		finalName = "Extract Etcd Archive"
 	}
+	finalDescription := description
+	// Description refined in populateDefaults
 
-	inKey := archivePathKey
-	if inKey == "" {
-		inKey = EtcdDownloadedArchiveKey // Default key from download step
-	}
-
-	normalizedVersion := version
-	if !strings.HasPrefix(normalizedVersion, "v") && normalizedVersion != "" {
-		normalizedVersion = "v" + normalizedVersion
-	}
-	// Version and Arch are important for constructing the path within the tarball,
-	// e.g., etcd-v3.5.9-linux-amd64/etcd
-	// If version or arch is empty, the executor might need to determine them or raise an error.
-
-	installDir := targetInstallDir
-	if installDir == "" {
-		installDir = "/usr/local/bin" // Default install directory
+	if archivePathCacheKey == "" || outputExtractedPathCacheKey == "" {
+		// Required fields
 	}
 
 	return &ExtractEtcdStepSpec{
 		StepMeta: spec.StepMeta{
-			Name:        stepName,
-			Description: fmt.Sprintf("Extracts etcd binaries from archive (input key: %s, version: %s, arch: %s) and installs them to %s.", inKey, normalizedVersion, arch, installDir),
+			Name:        finalName,
+			Description: finalDescription,
 		},
-		ArchivePathKey:   inKey,
-		Version:          normalizedVersion,
-		Arch:             arch,
-		TargetInstallDir: installDir,
+		ArchivePathCacheKey:       archivePathCacheKey,
+		OutputExtractedPathCacheKey: outputExtractedPathCacheKey,
+		// Defaults for TargetDir, StripComponents, Sudo in populateDefaults
 	}
 }
+
+func (s *ExtractEtcdStepSpec) populateDefaults(logger runtime.Logger, stepID string) {
+	if s.TargetDir == "" {
+		s.TargetDir = filepath.Join("/tmp", fmt.Sprintf("kubexms_extract_etcd_%s_%d", stepID, time.Now().UnixNano()))
+		logger.Debug("TargetDir defaulted.", "dir", s.TargetDir)
+	}
+	// etcd archives (e.g. etcd-v3.5.9-linux-amd64.tar.gz) typically contain a single top-level directory
+	// (e.g. etcd-v3.5.9-linux-amd64/) inside which the binaries (etcd, etcdctl) reside.
+	// Stripping 1 component will place these binaries directly into TargetDir.
+	if s.StripComponents == 0 && !utils.IsFieldExplicitlySet(s, "StripComponents") { // Check hypothetical IsFieldExplicitlySet
+		s.StripComponents = 1
+		logger.Debug("StripComponents defaulted to 1.")
+	}
+
+	if !s.Sudo && utils.PathRequiresSudo(s.TargetDir) {
+		s.Sudo = true
+		logger.Debug("Sudo defaulted to true due to privileged TargetDir.")
+	}
+
+	if s.StepMeta.Description == "" {
+		s.StepMeta.Description = fmt.Sprintf("Extracts etcd archive (from cache key '%s') into %s, stripping %d component(s). Output path to cache key '%s'.",
+			s.ArchivePathCacheKey, s.TargetDir, s.StripComponents, s.OutputExtractedPathCacheKey)
+	}
+}
+
 
 // GetName returns the step's name.
 func (s *ExtractEtcdStepSpec) GetName() string { return s.StepMeta.Name }
@@ -103,12 +119,16 @@ func (s *ExtractEtcdStepSpec) getEffectiveArchivePath(ctx runtime.StepContext) (
 }
 
 
-// Precheck checks if the etcd binaries already exist in the target directory.
+// Precheck determines if the extraction seems already done.
 func (s *ExtractEtcdStepSpec) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Precheck")
+	s.populateDefaults(logger, ctx.GetStepID())
 
-	if s.TargetInstallDir == "" || s.Version == "" || s.Arch == "" {
-		return false, fmt.Errorf("TargetInstallDir, Version, and Arch must be specified for step: %s", s.GetName())
+	if s.ArchivePathCacheKey == "" || s.OutputExtractedPathCacheKey == "" {
+		return false, fmt.Errorf("ArchivePathCacheKey and OutputExtractedPathCacheKey must be specified for %s", s.GetName())
+	}
+	if s.TargetDir == "" { // Should be set by populateDefaults
+	    return false, fmt.Errorf("TargetDir is empty after populateDefaults for %s", s.GetName())
 	}
 
 	conn, err := ctx.GetConnectorForHost(host)
@@ -116,61 +136,65 @@ func (s *ExtractEtcdStepSpec) Precheck(ctx runtime.StepContext, host connector.H
 		return false, fmt.Errorf("failed to get connector for host %s: %w", host.GetName(), err)
 	}
 
-	binaries := []string{"etcd", "etcdctl"} // etcdutl is sometimes included too
-	expectedVersionString := strings.TrimPrefix(s.Version, "v")
+	// Check if archive path is even in cache.
+	if _, archivePathFound := ctx.StepCache().Get(s.ArchivePathCacheKey); !archivePathFound {
+		logger.Info("Archive path not found in cache. Extraction cannot proceed with precheck validation of output.", "key", s.ArchivePathCacheKey)
+		// If target already exists and is correct (checked next), then this step is done.
+	}
 
-	for _, binName := range binaries {
-		binPath := filepath.Join(s.TargetInstallDir, binName)
-		exists, errExist := conn.Exists(ctx.GoContext(), binPath)
-		if errExist != nil {
-			logger.Warn("Failed to check existence of binary, assuming not installed.", "path", binPath, "error", errExist)
-			return false, nil
-		}
-		if !exists {
-			logger.Debug("Etcd binary does not exist.", "path", binPath)
-			return false, nil
-		}
-
-		// Check version (optional, but good for etcd)
-		var versionCmd string
-		if binName == "etcd" { versionCmd = fmt.Sprintf("%s --version", binPath) }
-		if binName == "etcdctl" { versionCmd = fmt.Sprintf("%s version", binPath) }
-
-		if versionCmd != "" {
-			stdoutBytes, stderrBytes, execErr := conn.Exec(ctx.GoContext(), versionCmd, &connector.ExecOptions{})
-			output := string(stdoutBytes) + string(stderrBytes)
-			if execErr != nil {
-				logger.Warn("Failed to get version of binary, assuming not correct.", "path", binPath, "error", execErr, "output", output)
-				return false, nil
+	// Check if OutputExtractedPathCacheKey already holds a valid, existing path with expected content.
+	expectedExtractedPath := s.TargetDir // After stripping, TargetDir is the root of extracted content.
+	if cachedPathVal, found := ctx.StepCache().Get(s.OutputExtractedPathCacheKey); found {
+		if cachedPath, ok := cachedPathVal.(string); ok && cachedPath == expectedExtractedPath {
+			// Check for a marker file, e.g., "etcd" binary within this path.
+			// The exact relative path of "etcd" depends on how much is stripped and original archive structure.
+			// If strip N, and original was dir1/dir2/.../dirN/etcd, then "etcd" is at root of TargetDir.
+			markerFile := filepath.Join(cachedPath, "etcd")
+			exists, _ := conn.Exists(ctx.GoContext(), markerFile)
+			if exists {
+				logger.Info("Cached extracted path exists and contains marker file 'etcd'. Assuming already extracted correctly.", "key", s.OutputExtractedPathCacheKey, "path", cachedPath)
+				return true, nil
 			}
-			versionLineFound := false
-			if binName == "etcd" && (strings.Contains(output, "etcd Version: "+expectedVersionString) || strings.Contains(output, "etcd version "+expectedVersionString)) {
-				versionLineFound = true
-			}
-			if binName == "etcdctl" && (strings.Contains(output, "etcdctl version: "+expectedVersionString) || strings.Contains(output, `"etcdserver":"`+expectedVersionString+`"`)) {
-				versionLineFound = true
-			}
-			if !versionLineFound {
-				logger.Info("Etcd binary exists, but version mismatch.", "path", binPath, "expected", expectedVersionString, "output", output)
-				return false, nil
-			}
-			logger.Debug("Etcd binary version matches.", "binary", binName, "path", binPath)
+			logger.Info("Cached extracted path exists, but marker file 'etcd' not found. Re-extraction might be needed.", "path", cachedPath)
 		}
 	}
-	logger.Info("All etcd binaries exist in target directory and match version.", "dir", s.TargetInstallDir)
-	return true, nil
+
+	// Fallback: Directly check if the TargetDir exists and contains the marker.
+	targetExists, _ := conn.Exists(ctx.GoContext(), s.TargetDir)
+	if targetExists {
+		markerFile := filepath.Join(s.TargetDir, "etcd")
+		contentExists, _ := conn.Exists(ctx.GoContext(), markerFile)
+		if contentExists {
+			logger.Info("TargetDir exists and contains marker file 'etcd'. Assuming already extracted.", "targetDir", s.TargetDir)
+			ctx.StepCache().Set(s.OutputExtractedPathCacheKey, s.TargetDir) // Populate cache
+			return true, nil
+		}
+		logger.Info("TargetDir exists but does not contain marker file 'etcd'. Extraction needed.", "targetDir", s.TargetDir)
+	} else {
+		logger.Info("TargetDir does not exist. Extraction needed.", "targetDir", s.TargetDir)
+	}
+	return false, nil
 }
 
-// Run extracts the etcd archive and installs binaries.
+// Run performs the archive extraction into TargetDir.
 func (s *ExtractEtcdStepSpec) Run(ctx runtime.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Run")
+	s.populateDefaults(logger, ctx.GetStepID())
 
-	archivePath, err := s.getEffectiveArchivePath(ctx)
-	if err != nil {
-		return err
+	if s.ArchivePathCacheKey == "" || s.OutputExtractedPathCacheKey == "" {
+		return fmt.Errorf("ArchivePathCacheKey and OutputExtractedPathCacheKey must be specified for %s", s.GetName())
 	}
-	if s.TargetInstallDir == "" || s.Version == "" || s.Arch == "" {
-		return fmt.Errorf("TargetInstallDir, Version, and Arch must be specified for step: %s", s.GetName())
+	if s.TargetDir == "" {
+	    return fmt.Errorf("TargetDir is empty after populateDefaults for %s", s.GetName())
+	}
+
+	archivePathVal, found := ctx.StepCache().Get(s.ArchivePathCacheKey)
+	if !found {
+		return fmt.Errorf("etcd archive path not found in StepCache using key '%s'", s.ArchivePathCacheKey)
+	}
+	archivePath, ok := archivePathVal.(string)
+	if !ok || archivePath == "" {
+		return fmt.Errorf("invalid or empty etcd archive path in StepCache (key '%s')", s.ArchivePathCacheKey)
 	}
 
 	conn, err := ctx.GetConnectorForHost(host)
@@ -178,88 +202,39 @@ func (s *ExtractEtcdStepSpec) Run(ctx runtime.StepContext, host connector.Host) 
 		return fmt.Errorf("failed to get connector for host %s: %w", host.GetName(), err)
 	}
 
-	// Create a temporary extraction directory
-	baseTmpDir := ctx.GetGlobalWorkDir()
-	if baseTmpDir == "" {
-		baseTmpDir = "/tmp"
-	}
-	// Sanitize host name for directory creation
-	safeHostName := strings.ReplaceAll(host.GetName(), "/", "_")
-	tempExtractDir := filepath.Join(baseTmpDir, safeHostName, fmt.Sprintf("etcd-extract-temp-%s-%d", s.Version, time.Now().UnixNano()))
+	execOpts := &connector.ExecOptions{Sudo: s.Sudo}
 
-	defer func() {
-		logger.Debug("Cleaning up temporary extraction directory.", "path", tempExtractDir)
-		if err := conn.Remove(ctx.GoContext(), tempExtractDir, connector.RemoveOptions{Recursive: true, IgnoreNotExist: true}); err != nil {
-			logger.Warn("Failed to cleanup temporary extraction directory.", "path", tempExtractDir, "error", err)
-		}
-	}()
-
-	logger.Info("Ensuring temporary extraction directory exists.", "path", tempExtractDir)
-	// Sudo for mkdir depends on baseTmpDir permissions. Assume utils.PathRequiresSudo.
-	mkdirOpts := &connector.ExecOptions{Sudo: utils.PathRequiresSudo(tempExtractDir)}
-	_, stderrMkdir, errMkdir := conn.Exec(ctx.GoContext(), fmt.Sprintf("mkdir -p %s", tempExtractDir), mkdirOpts)
+	logger.Info("Ensuring target extraction directory exists.", "path", s.TargetDir)
+	mkdirCmd := fmt.Sprintf("mkdir -p %s", s.TargetDir)
+	_, stderrMkdir, errMkdir := conn.Exec(ctx.GoContext(), mkdirCmd, execOpts)
 	if errMkdir != nil {
-		return fmt.Errorf("failed to create temporary extraction directory %s (stderr: %s): %w", tempExtractDir, string(stderrMkdir), errMkdir)
+		return fmt.Errorf("failed to create target extraction directory %s (stderr: %s): %w", s.TargetDir, string(stderrMkdir), errMkdir)
 	}
 
-	logger.Info("Extracting etcd archive.", "archive", archivePath, "destination", tempExtractDir)
-	// tar -xzf etcd-v3.5.9-linux-amd64.tar.gz -C /tmp/etcd-extract-temp --strip-components=1 etcd-v3.5.9-linux-amd64/etcd etcd-v3.5.9-linux-amd64/etcdctl
-	archiveInternalDir := fmt.Sprintf("etcd-%s-linux-%s", s.Version, s.Arch)
-	filesToExtract := []string{
-		filepath.Join(archiveInternalDir, "etcd"),
-		filepath.Join(archiveInternalDir, "etcdctl"),
-		// filepath.Join(archiveInternalDir, "etcdutl"), // If needed
-	}
-	// Sudo for tar command if tempExtractDir requires it (less likely for /tmp, more for GlobalWorkDir if privileged)
-	tarOpts := &connector.ExecOptions{Sudo: utils.PathRequiresSudo(tempExtractDir)}
-	extractCmd := fmt.Sprintf("tar -xzf %s -C %s --strip-components=1 %s",
-		archivePath,
-		tempExtractDir,
-		strings.Join(filesToExtract, " "))
+	logger.Info("Extracting etcd archive.", "archive", archivePath, "destination", s.TargetDir, "strip", s.StripComponents)
+	// Standard etcd archive (e.g., etcd-v3.5.9-linux-amd64.tar.gz) has a top-level directory like "etcd-v3.5.9-linux-amd64/".
+	// --strip-components=1 will remove this top-level directory, placing contents (etcd, etcdctl, Documentation, etc.) into TargetDir.
+	extractCmd := fmt.Sprintf("tar -xzf %s -C %s --strip-components=%d",
+		archivePath, s.TargetDir, s.StripComponents)
 
-	_, stderrTar, errTar := conn.Exec(ctx.GoContext(), extractCmd, tarOpts)
-	if errTar != nil {
-		return fmt.Errorf("failed to extract etcd binaries from %s (stderr: %s): %w", archivePath, string(stderrTar), errTar)
+	_, stderrExtract, errExtract := conn.Exec(ctx.GoContext(), extractCmd, execOpts)
+	if errExtract != nil {
+		return fmt.Errorf("failed to extract etcd archive %s to %s (stderr: %s): %w", archivePath, s.TargetDir, string(stderrExtract), errExtract)
 	}
 
-	// Ensure target installation directory exists
-	logger.Info("Ensuring target installation directory exists.", "path", s.TargetInstallDir)
-	mkdirInstallOpts := &connector.ExecOptions{Sudo: utils.PathRequiresSudo(s.TargetInstallDir)}
-	_, stderrMkdirInstall, errMkdirInstall := conn.Exec(ctx.GoContext(), fmt.Sprintf("mkdir -p %s", s.TargetInstallDir), mkdirInstallOpts)
-	if errMkdirInstall != nil {
-		return fmt.Errorf("failed to create target install directory %s (stderr: %s): %w", s.TargetInstallDir, string(stderrMkdirInstall), errMkdirInstall)
-	}
-
-	// Move binaries to target directory and set permissions
-	binaries := []string{"etcd", "etcdctl"}
-	for _, binName := range binaries {
-		srcPath := filepath.Join(tempExtractDir, binName)
-		dstPath := filepath.Join(s.TargetInstallDir, binName)
-
-		logger.Info("Moving etcd binary to target location.", "binary", binName, "destination", dstPath)
-		mvOpts := &connector.ExecOptions{Sudo: true} // Assume /usr/local/bin needs sudo
-		mvCmd := fmt.Sprintf("mv -f %s %s", srcPath, dstPath)
-		_, stderrMv, errMv := conn.Exec(ctx.GoContext(), mvCmd, mvOpts)
-		if errMv != nil {
-			return fmt.Errorf("failed to move %s to %s (stderr: %s): %w", srcPath, dstPath, string(stderrMv), errMv)
-		}
-
-		chmodCmd := fmt.Sprintf("chmod +x %s", dstPath)
-		_, stderrChmod, errChmod := conn.Exec(ctx.GoContext(), chmodCmd, mvOpts) // mvOpts has Sudo:true
-		if errChmod != nil {
-			return fmt.Errorf("failed to make %s executable (stderr: %s): %w", dstPath, string(stderrChmod), errChmod)
-		}
-	}
-	logger.Info("Etcd binaries installed successfully.", "dir", s.TargetInstallDir)
+	// The actual root of extracted content is now s.TargetDir itself due to stripping.
+	ctx.StepCache().Set(s.OutputExtractedPathCacheKey, s.TargetDir)
+	logger.Info("Etcd archive extracted successfully, output path cached.", "key", s.OutputExtractedPathCacheKey, "path", s.TargetDir)
 	return nil
 }
 
-// Rollback removes the installed etcd binaries.
+// Rollback removes the target extraction directory.
 func (s *ExtractEtcdStepSpec) Rollback(ctx runtime.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Rollback")
+	s.populateDefaults(logger, ctx.GetStepID()) // Ensure TargetDir is populated
 
-	if s.TargetInstallDir == "" {
-		logger.Info("TargetInstallDir is empty, cannot determine files to roll back.")
+	if s.TargetDir == "" {
+		logger.Info("TargetDir is empty, cannot perform rollback.")
 		return nil
 	}
 
@@ -268,18 +243,20 @@ func (s *ExtractEtcdStepSpec) Rollback(ctx runtime.StepContext, host connector.H
 		return fmt.Errorf("failed to get connector for host %s for rollback: %w", host.GetName(), err)
 	}
 
-	binaries := []string{"etcd", "etcdctl"}
-	for _, binName := range binaries {
-		binPath := filepath.Join(s.TargetInstallDir, binName)
-		logger.Info("Attempting to remove etcd binary.", "path", binPath)
-		rmOpts := &connector.ExecOptions{Sudo: true} // Assume /usr/local/bin needs sudo
-		rmCmd := fmt.Sprintf("rm -f %s", binPath)
-		_, stderrRm, errRm := conn.Exec(ctx.GoContext(), rmCmd, rmOpts)
-		if errRm != nil {
-			logger.Error("Failed to remove etcd binary during rollback (best effort).", "path", binPath, "stderr", string(stderrRm), "error", errRm)
-		} else {
-			logger.Info("Etcd binary removed successfully.", "path", binPath)
-		}
+	logger.Info("Attempting to remove extraction directory for rollback (best effort).", "dir", s.TargetDir)
+	rmCmd := fmt.Sprintf("rm -rf %s", s.TargetDir)
+	execOpts := &connector.ExecOptions{Sudo: s.Sudo}
+	_, stderrRm, errRm := conn.Exec(ctx.GoContext(), rmCmd, execOpts)
+
+	if errRm != nil {
+		logger.Error("Failed to remove extraction directory during rollback.", "dir", s.TargetDir, "stderr", string(stderrRm), "error", errRm)
+	} else {
+		logger.Info("Extraction directory removed successfully.", "dir", s.TargetDir)
+	}
+
+	if s.OutputExtractedPathCacheKey != "" {
+		ctx.StepCache().Delete(s.OutputExtractedPathCacheKey)
+		logger.Debug("Removed extracted path from cache.", "key", s.OutputExtractedPathCacheKey)
 	}
 	return nil
 }
