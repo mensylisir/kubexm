@@ -58,9 +58,19 @@ func (h *Host) GetLabel(labelName string) (string, bool) { if h.Labels == nil { 
 // required for a KubeXMS operation (e.g., cluster creation, scaling).
 // This is the canonical definition.
 type ClusterRuntime struct {
-	BaseRuntime   *BaseRuntime // Embedded BaseRuntime
-	ClusterConfig *v1alpha1.Cluster
-	GlobalTimeout time.Duration
+	BaseRuntime      *BaseRuntime // Embedded BaseRuntime
+	ClusterConfig    *v1alpha1.Cluster
+	GlobalTimeout    time.Duration
+	ConnectionPool *connector.ConnectionPool // Added connection pool
+}
+
+// ShutdownConnectionPool gracefully shuts down the connection pool.
+func (cr *ClusterRuntime) ShutdownConnectionPool() {
+	if cr.ConnectionPool != nil {
+		cr.Logger().Infof("Shutting down SSH connection pool...")
+		cr.ConnectionPool.Shutdown()
+		cr.Logger().Infof("SSH connection pool shutdown complete.")
+	}
 }
 
 // Delegating methods to BaseRuntime
@@ -227,10 +237,16 @@ func NewRuntime(cfg *v1alpha1.Cluster, baseLogger *logger.Logger) (*ClusterRunti
 		return nil, err
 	}
 
+	// Initialize Connection Pool
+	poolCfg := connector.DefaultPoolConfig()
+	// TODO: Customize poolCfg from cfg (v1alpha1.Cluster) if needed in the future
+	pool := connector.NewConnectionPool(poolCfg)
+
 	cr := &ClusterRuntime{
-		BaseRuntime:   baseRuntime,
-		ClusterConfig: cfg,
-		GlobalTimeout: globalConnectionTimeout,
+		BaseRuntime:      baseRuntime,
+		ClusterConfig:    cfg,
+		GlobalTimeout:    globalConnectionTimeout,
+		ConnectionPool: pool, // Assign the initialized pool
 	}
 
 	if cr.GlobalTimeout <= 0 {
@@ -290,7 +306,8 @@ func NewRuntime(cfg *v1alpha1.Cluster, baseLogger *logger.Logger) (*ClusterRunti
 			if hostType == "local" {
 				conn = &connector.LocalConnector{}
 			} else {
-				conn = &connector.SSHConnector{}
+				// Use the pool-aware SSHConnector constructor
+				conn = connector.NewSSHConnector(cr.ConnectionPool)
 			}
 
 			connectCtx, connectCancel := context.WithTimeout(gCtx, connCfg.Timeout)
