@@ -18,6 +18,9 @@ import (
 	"github.com/mensylisir/kubexm/pkg/parser"
 	"github.com/mensylisir/kubexm/pkg/runner"
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
+	"github.com/mensylisir/kubexm/pkg/common" // Added for constants like KUBEXM
+	"github.com/mensylisir/kubexm/pkg/util"   // Added for CreateDir
+	"path/filepath"                           // Added for filepath operations
 )
 
 // osReadFile is a variable that defaults to os.ReadFile, allowing it to be mocked for tests.
@@ -200,8 +203,47 @@ func (b *RuntimeBuilder) BuildFromConfig(ctx context.Context, clusterConfig *v1a
 	}
 
 	if runtimeCtx.GlobalWorkDir == "" {
-		runtimeCtx.GlobalWorkDir = "/tmp/kubexm"
+		// Generate default GlobalWorkDir
+		currentDir, err := filepath.Abs(filepath.Dir(os.Args[0]))
+		if err != nil {
+			log.Error(err, "Failed to get current directory for GlobalWorkDir generation")
+			cleanupFunc() // Assuming cleanupFunc handles necessary resource release
+			return nil, nil, fmt.Errorf("failed to get current directory: %w", err)
+		}
+		defaultWorkDir := filepath.Join(currentDir, common.KUBEXM, clusterConfig.Name)
+		log.Info("Global.WorkDir not set, using default.", "path", defaultWorkDir)
+		runtimeCtx.GlobalWorkDir = defaultWorkDir
 	}
+
+	// Ensure GlobalWorkDir and its subdirectories (logs, host-specific dirs) are created
+	log.Info("Ensuring GlobalWorkDir exists.", "path", runtimeCtx.GlobalWorkDir)
+	if err := util.CreateDir(runtimeCtx.GlobalWorkDir); err != nil {
+		log.Error(err, "Failed to create GlobalWorkDir", "path", runtimeCtx.GlobalWorkDir)
+		cleanupFunc()
+		return nil, nil, fmt.Errorf("failed to create global work directory '%s': %w", runtimeCtx.GlobalWorkDir, err)
+	}
+
+	logDir := filepath.Join(runtimeCtx.GlobalWorkDir, common.DefaultLogsDir)
+	log.Info("Ensuring log directory exists.", "path", logDir)
+	if err := util.CreateDir(logDir); err != nil {
+		log.Error(err, "Failed to create log directory", "path", logDir)
+		cleanupFunc()
+		return nil, nil, fmt.Errorf("failed to create log directory '%s': %w", logDir, err)
+	}
+
+	// Create host-specific work directories
+	for _, hostCfg := range clusterConfig.Spec.Hosts {
+		hostWorkDir := filepath.Join(runtimeCtx.GlobalWorkDir, hostCfg.Name)
+		log.Info("Ensuring host-specific work directory exists.", "host", hostCfg.Name, "path", hostWorkDir)
+		if err := util.CreateDir(hostWorkDir); err != nil {
+			log.Error(err, "Failed to create host-specific work directory", "host", hostCfg.Name, "path", hostWorkDir)
+			cleanupFunc()
+			// Decide if this is a fatal error for the whole process or just for this host
+			// For now, let's make it fatal for the builder process.
+			return nil, nil, fmt.Errorf("failed to create host-specific work directory '%s' for host '%s': %w", hostWorkDir, hostCfg.Name, err)
+		}
+	}
+
 	if runtimeCtx.GlobalConnectionTimeout <= 0 {
 		runtimeCtx.GlobalConnectionTimeout = 30 * time.Second
 	}
