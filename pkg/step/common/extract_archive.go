@@ -32,9 +32,7 @@ func (s *ExtractArchiveStepSpec) GetName() string {
 }
 
 // PopulateDefaults sets default values for the spec.
-// The archivePathFromSharedData parameter is kept if any defaults might depend on it,
-// but for ExtractionDir, it's no longer used to form a default path.
-func (s *ExtractArchiveStepSpec) PopulateDefaults(ctx runtime.Context, archivePathFromSharedData string) {
+func (s *ExtractArchiveStepSpec) PopulateDefaults() {
 	if s.ArchivePathSharedDataKey == "" {
 		s.ArchivePathSharedDataKey = DefaultDownloadedFilePathKey // Default input key
 	}
@@ -58,7 +56,7 @@ func (e *ExtractArchiveStepExecutor) Check(ctx runtime.Context) (isDone bool, er
 	if !ok {
 		return false, fmt.Errorf("unexpected StepSpec type for ExtractArchiveStep Check: %T", currentFullSpec)
 	}
-	spec.PopulateDefaults(ctx, "") // archivePath not critical for Check's default Population if not used by other defaults
+	spec.PopulateDefaults()
 	logger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step", spec.GetName())
 
 	if spec.ExtractionDir == "" { // Module must provide this.
@@ -121,7 +119,7 @@ func (e *ExtractArchiveStepExecutor) Execute(ctx runtime.Context) *step.Result {
 		pathStr, okStr := archivePathVal.(string)
 		if okStr { archivePath = pathStr }
 	}
-	spec.PopulateDefaults(ctx, archivePath)
+	spec.PopulateDefaults()
 	logger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step", spec.GetName())
 	res := step.NewResult(ctx, startTime, nil)
 
@@ -189,9 +187,10 @@ func (e *ExtractArchiveStepExecutor) Execute(ctx runtime.Context) *step.Result {
 		res.Status = step.StatusFailed
 		return res
 	}
+	res.Status = step.StatusSucceeded
 	return res
 }
 
 func init() {
-	step.Register(&ExtractArchiveStepSpec{}, &ExtractArchiveStepExecutor{})
+	step.Register(step.GetSpecTypeName(&ExtractArchiveStepSpec{}), &ExtractArchiveStepExecutor{})
 }

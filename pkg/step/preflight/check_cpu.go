@@ -91,52 +91,57 @@ func (e *CheckCPUStepExecutor) runCheckLogic(s *CheckCPUStepSpec, ctx *runtime.C
 }
 
 // Check determines if the CPU core requirement is already met.
-func (e *CheckCPUStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
-	spec, ok := s.(*CheckCPUStepSpec)
-	if !ok {
-		return false, fmt.Errorf("unexpected spec type %T for CheckCPUStepExecutor Check method", s)
+func (e *CheckCPUStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+	rawSpec, rok := ctx.Step().GetCurrentStepSpec()
+	if !rok {
+		return false, fmt.Errorf("StepSpec not found in context for CheckCPUStepExecutor Check method")
 	}
-	_, met, err := e.runCheckLogic(spec, ctx)
+	spec, ok := rawSpec.(*CheckCPUStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected spec type %T for CheckCPUStepExecutor Check method", rawSpec)
+	}
+
+	_, met, errLogic := e.runCheckLogic(spec, ctx)
 	// If runCheckLogic itself had an error (e.g. command execution failed), propagate that.
-	if err != nil {
-		return false, err
+	if errLogic != nil {
+		return false, errLogic
 	}
 	// If met is true, the condition is satisfied, so the step is "done".
 	return met, nil
 }
 
 // Execute performs the check for CPU cores and returns a result.
-func (e *CheckCPUStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	spec, ok := s.(*CheckCPUStepSpec)
+func (e *CheckCPUStepExecutor) Execute(ctx runtime.Context) *step.Result {
+	startTime := time.Now()
+	rawSpec, rok := ctx.Step().GetCurrentStepSpec()
+	if !rok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for CheckCPUStepExecutor Execute method"))
+	}
+	spec, ok := rawSpec.(*CheckCPUStepSpec)
 	if !ok {
-		err := fmt.Errorf("Execute: unexpected spec type %T for CheckCPUStepExecutor", s)
-		stepName := "UnknownCheckCPU (type error)"
-		if s != nil { stepName = s.GetName() }
-		return step.NewResult(stepName, ctx.Host.Name, time.Now(), err)
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected spec type %T for CheckCPUStepExecutor Execute method", rawSpec))
 	}
 
-	startTime := time.Now()
-	res := step.NewResult(spec.GetName(), ctx.Host.Name, startTime, nil)
+	res := step.NewResult(ctx, startTime, nil) // Use new NewResult signature
 	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
-
 
 	currentCores, met, checkErr := e.runCheckLogic(spec, ctx)
 	res.EndTime = time.Now()
 
 	if checkErr != nil {
 		res.Error = checkErr
-		res.Status = "Failed"
+		res.Status = step.StatusFailed
 		res.Message = fmt.Sprintf("Error checking CPU cores: %v", checkErr)
 		hostCtxLogger.Errorf("Step failed: %v", checkErr)
 		return res
 	}
 
 	if met {
-		res.Status = "Succeeded"
+		res.Status = step.StatusSucceeded
 		res.Message = fmt.Sprintf("Host has %d CPU cores, which meets the minimum requirement of %d cores.", currentCores, spec.MinCores)
 		hostCtxLogger.Successf("Step succeeded: %s", res.Message)
 	} else {
-		res.Status = "Failed"
+		res.Status = step.StatusFailed
 		res.Error = fmt.Errorf("host has %d CPU cores, but minimum requirement is %d cores", currentCores, spec.MinCores)
 		res.Message = res.Error.Error()
 		hostCtxLogger.Errorf("Step failed: %s", res.Message)

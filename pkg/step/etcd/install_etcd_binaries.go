@@ -66,9 +66,15 @@ func init() {
 }
 
 // Check determines if etcd binaries are installed and match version.
-func (e *InstallEtcdBinariesStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
-	spec, ok := s.(*InstallEtcdBinariesStepSpec)
-	if !ok { return false, fmt.Errorf("unexpected spec type %T for InstallEtcdBinariesStepExecutor Check method", s) }
+func (e *InstallEtcdBinariesStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+	rawSpec, rok := ctx.Step().GetCurrentStepSpec()
+	if !rok {
+		return false, fmt.Errorf("StepSpec not found in context for InstallEtcdBinariesStepExecutor Check method")
+	}
+	spec, ok := rawSpec.(*InstallEtcdBinariesStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected spec type %T for InstallEtcdBinariesStepExecutor Check method: %T", rawSpec, rawSpec)
+	}
 
 	if ctx.Host.Runner == nil {
 		return false, fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
@@ -118,22 +124,24 @@ func (e *InstallEtcdBinariesStepExecutor) Check(s spec.StepSpec, ctx *runtime.Co
 }
 
 // Execute downloads and installs etcd binaries.
-func (e *InstallEtcdBinariesStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	spec, ok := s.(*InstallEtcdBinariesStepSpec)
+func (e *InstallEtcdBinariesStepExecutor) Execute(ctx runtime.Context) *step.Result {
+	startTime := time.Now()
+	rawSpec, rok := ctx.Step().GetCurrentStepSpec()
+	if !rok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for InstallEtcdBinariesStepExecutor Execute method"))
+	}
+	spec, ok := rawSpec.(*InstallEtcdBinariesStepSpec)
 	if !ok {
-		myErr := fmt.Errorf("Execute: unexpected spec type %T for InstallEtcdBinariesStepExecutor", s)
-		stepName := "InstallEtcdBinaries (type error)"; if s != nil { stepName = s.GetName() }
-		return step.NewResult(stepName, ctx.Host.Name, time.Now(), myErr)
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected spec type %T for InstallEtcdBinariesStepExecutor Execute method: %T", rawSpec, rawSpec))
 	}
 
 	spec.applyDefaults(ctx)
-	startTime := time.Now()
-	res := step.NewResult(spec.GetName(), ctx.Host.Name, startTime, nil)
+	res := step.NewResult(ctx, startTime, nil) // Use new NewResult signature
 	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
 	if ctx.Host.Runner == nil {
 		res.Error = fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
-		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
 	archiveName := fmt.Sprintf("etcd-%s-linux-%s.tar.gz", spec.Version, spec.Arch)
@@ -150,7 +158,7 @@ func (e *InstallEtcdBinariesStepExecutor) Execute(s spec.StepSpec, ctx *runtime.
 	// Sudo false for download/extract as it's to a temp/work directory.
 	if err := ctx.Host.Runner.DownloadAndExtract(ctx.GoContext, downloadURL, extractDir, false); err != nil {
 		res.Error = fmt.Errorf("failed to download and extract etcd from %s: %w", downloadURL, err)
-		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 	hostCtxLogger.Successf("Etcd archive downloaded and extracted to %s", extractDir)
 
@@ -159,7 +167,7 @@ func (e *InstallEtcdBinariesStepExecutor) Execute(s spec.StepSpec, ctx *runtime.
 	// Sudo true for Mkdirp if TargetDir is a system path like /usr/local/bin
 	if err := ctx.Host.Runner.Mkdirp(ctx.GoContext, spec.TargetDir, "0755", true); err != nil {
 		res.Error = fmt.Errorf("failed to create target directory %s: %w", spec.TargetDir, err)
-		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
 	binariesToCopy := []string{"etcd", "etcdctl"}
@@ -173,14 +181,14 @@ func (e *InstallEtcdBinariesStepExecutor) Execute(s spec.StepSpec, ctx *runtime.
 		_, stderrCp, errCp := ctx.Host.Runner.RunWithOptions(ctx.GoContext, copyCmd, &connector.ExecOptions{Sudo: true})
 		if errCp != nil {
 			res.Error = fmt.Errorf("failed to copy %s to %s: %w (stderr: %s)", srcPath, dstPath, errCp, string(stderrCp))
-			res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+			res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 		}
 
 		chmodCmd := fmt.Sprintf("chmod +x %s", dstPath)
 		_, stderrChmod, errChmod := ctx.Host.Runner.RunWithOptions(ctx.GoContext, chmodCmd, &connector.ExecOptions{Sudo: true})
 		if errChmod != nil {
 			res.Error = fmt.Errorf("failed to make %s executable: %w (stderr: %s)", dstPath, errChmod, string(stderrChmod))
-			res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+			res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 		}
 		hostCtxLogger.Successf("Copied and set +x for %s", dstPath)
 	}
@@ -196,18 +204,18 @@ func (e *InstallEtcdBinariesStepExecutor) Execute(s spec.StepSpec, ctx *runtime.
 
 	res.EndTime = time.Now()
 	hostCtxLogger.Infof("Verifying etcd installation after run...")
-	done, checkErr := e.Check(s, ctx);
+	done, checkErr := e.Check(ctx) // Call Check with updated signature
 	if checkErr != nil {
-		res.Status = "Failed"; res.Error = fmt.Errorf("failed to verify etcd installation after run: %w", checkErr)
+		res.Status = step.StatusFailed; res.Error = fmt.Errorf("failed to verify etcd installation after run: %w", checkErr)
 		res.Message = res.Error.Error()
 	} else if !done {
-		res.Status = "Failed"; res.Error = fmt.Errorf("etcd installation verification failed after run (binaries not found or version mismatch)")
+		res.Status = step.StatusFailed; res.Error = fmt.Errorf("etcd installation verification failed after run (binaries not found or version mismatch)")
 		res.Message = res.Error.Error()
 	} else {
-		res.Status = "Succeeded"; res.Message = fmt.Sprintf("Etcd %s binaries (etcd, etcdctl) installed successfully to %s.", spec.Version, spec.TargetDir)
+		res.Status = step.StatusSucceeded; res.Message = fmt.Sprintf("Etcd %s binaries (etcd, etcdctl) installed successfully to %s.", spec.Version, spec.TargetDir)
 	}
 
-	if res.Status == "Failed" {
+	if res.Status == step.StatusFailed {
 		hostCtxLogger.Errorf("Step finished with errors: %s", res.Message)
 	} else {
 		hostCtxLogger.Successf("Step succeeded: %s", res.Message)
