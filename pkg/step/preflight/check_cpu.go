@@ -1,7 +1,7 @@
 package preflight
 
 import (
-	"context" // Not directly used by this file's funcs, but runtime.Context needs it
+	// "context" // No longer directly used if runtime.StepContext is used
 	"errors"  // For errors.As
 	"fmt"
 	"strconv"
@@ -41,47 +41,54 @@ func init() {
 }
 
 // runCheckLogic contains the core logic for checking CPU cores, shared by Check and Execute.
-func (e *CheckCPUStepExecutor) runCheckLogic(s *CheckCPUStepSpec, ctx *runtime.Context) (currentCores int, met bool, err error) {
-	if ctx.Host.Runner == nil {
-		return 0, false, fmt.Errorf("runner not available in context for host %s", ctx.Host.Name)
+func (e *CheckCPUStepExecutor) runCheckLogic(s *CheckCPUStepSpec, ctx runtime.StepContext) (currentCores int, met bool, err error) { // Changed to StepContext
+	logger := ctx.GetLogger()
+	currentHost := ctx.GetHost()
+	goCtx := ctx.GoContext()
+
+	if currentHost == nil {
+		return 0, false, fmt.Errorf("current host not found in context for runCheckLogic")
 	}
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", s.GetName()).Sugar()
+	logger = logger.With("host", currentHost.GetName(), "step", s.GetName())
 
-
-	// Prefer facts if available and seems valid (TotalCPU > 0)
-	if ctx.Host.Runner.Facts != nil && ctx.Host.Runner.Facts.TotalCPU > 0 {
-		currentCores = ctx.Host.Runner.Facts.TotalCPU
-		hostCtxLogger.Debugf("Using CPU count from facts: %d", currentCores)
+	facts, errFacts := ctx.GetHostFacts(currentHost)
+	if errFacts == nil && facts != nil && facts.TotalCPU > 0 {
+		currentCores = facts.TotalCPU
+		logger.Debug("Using CPU count from facts.", "cores", currentCores)
 	} else {
-		hostCtxLogger.Debugf("CPU facts not available or zero, attempting to get CPU count via command.")
+		if errFacts != nil {
+			logger.Debug("Failed to get host facts, will try command.", "error", errFacts)
+		} else if facts == nil || facts.TotalCPU <=0 {
+			logger.Debug("CPU facts not available or zero, attempting to get CPU count via command.")
+		}
+
+		conn, errConn := ctx.GetConnectorForHost(currentHost)
+		if errConn != nil {
+			return 0, false, fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), errConn)
+		}
 
 		cmdToRun := "nproc"
 		osID := "linux" // Default assumption
-		if ctx.Host.Runner.Facts != nil && ctx.Host.Runner.Facts.OS != nil && ctx.Host.Runner.Facts.OS.ID != "" {
-			osID = strings.ToLower(ctx.Host.Runner.Facts.OS.ID)
+		if facts != nil && facts.OS != nil && facts.OS.ID != "" {
+			osID = strings.ToLower(facts.OS.ID)
 		}
 
-		if osID == "darwin" { // macOS specific command if nproc is typically not there or facts were missing
+		if osID == "darwin" {
 			cmdToRun = "sysctl -n hw.ncpu"
 		}
 
-		// Execute chosen command
-		stdoutBytes, stderrBytes, execErr := ctx.Host.Runner.RunWithOptions(ctx.GoContext, cmdToRun, &connector.ExecOptions{})
-
+		stdoutBytes, stderrBytes, execErr := conn.RunCommand(goCtx, cmdToRun, &connector.ExecOptions{}) // Use connector
 		if execErr != nil {
-			// If primary command (nproc or sysctl based on initial OS ID) failed, and it was nproc on non-Darwin,
-			// it's unlikely another command will work. If it was nproc and OS IS Darwin, sysctl was already chosen.
-			// If the primary command failed, this is the error we report.
-			return 0, false, fmt.Errorf("failed to execute command to get CPU count ('%s') on host %s: %w (stderr: %s)", cmdToRun, ctx.Host.Name, execErr, string(stderrBytes))
+			return 0, false, fmt.Errorf("failed to execute command to get CPU count ('%s') on host %s: %w (stderr: %s)", cmdToRun, currentHost.GetName(), execErr, string(stderrBytes))
 		}
 
 		coresStr := strings.TrimSpace(string(stdoutBytes))
 		parsedCores, parseErr := strconv.Atoi(coresStr)
 		if parseErr != nil {
-			return 0, false, fmt.Errorf("failed to parse CPU count from command output '%s' on host %s: %w", coresStr, ctx.Host.Name, parseErr)
+			return 0, false, fmt.Errorf("failed to parse CPU count from command output '%s' on host %s: %w", coresStr, currentHost.GetName(), parseErr)
 		}
 		currentCores = parsedCores
-		hostCtxLogger.Debugf("Determined CPU count via command '%s': %d", cmdToRun, currentCores)
+		logger.Debug("Determined CPU count via command.", "command", cmdToRun, "cores", currentCores)
 	}
 
 	if currentCores >= s.MinCores {
@@ -91,60 +98,78 @@ func (e *CheckCPUStepExecutor) runCheckLogic(s *CheckCPUStepSpec, ctx *runtime.C
 }
 
 // Check determines if the CPU core requirement is already met.
-func (e *CheckCPUStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
-	rawSpec, rok := ctx.Step().GetCurrentStepSpec()
-	if !rok {
+func (e *CheckCPUStepExecutor) Check(ctx runtime.StepContext) (isDone bool, err error) { // Changed to StepContext
+	logger := ctx.GetLogger() // Initial logger
+	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
+	if !ok {
+		logger.Error("StepSpec not found in context for CheckCPUStepExecutor Check method")
 		return false, fmt.Errorf("StepSpec not found in context for CheckCPUStepExecutor Check method")
 	}
 	spec, ok := rawSpec.(*CheckCPUStepSpec)
 	if !ok {
+		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
 		return false, fmt.Errorf("unexpected spec type %T for CheckCPUStepExecutor Check method", rawSpec)
 	}
 
 	_, met, errLogic := e.runCheckLogic(spec, ctx)
-	// If runCheckLogic itself had an error (e.g. command execution failed), propagate that.
 	if errLogic != nil {
 		return false, errLogic
 	}
-	// If met is true, the condition is satisfied, so the step is "done".
 	return met, nil
 }
 
 // Execute performs the check for CPU cores and returns a result.
-func (e *CheckCPUStepExecutor) Execute(ctx runtime.Context) *step.Result {
+func (e *CheckCPUStepExecutor) Execute(ctx runtime.StepContext) *step.Result { // Changed to StepContext
 	startTime := time.Now()
-	rawSpec, rok := ctx.Step().GetCurrentStepSpec()
-	if !rok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for CheckCPUStepExecutor Execute method"))
+	logger := ctx.GetLogger() // Initial logger
+	currentHost := ctx.GetHost()
+
+	res := step.NewResult(ctx, currentHost, startTime, nil)
+
+	// Logger will be further contextualized in runCheckLogic if currentHost is not nil
+
+	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
+	if !ok {
+		logger.Error("StepSpec not found in context for CheckCPUStepExecutor Execute method")
+		res.Error = fmt.Errorf("StepSpec not found in context for CheckCPUStepExecutor Execute method")
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 	spec, ok := rawSpec.(*CheckCPUStepSpec)
 	if !ok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected spec type %T for CheckCPUStepExecutor Execute method", rawSpec))
+		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
+		res.Error = fmt.Errorf("unexpected spec type %T for CheckCPUStepExecutor Execute method", rawSpec)
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 
-	res := step.NewResult(ctx, startTime, nil) // Use new NewResult signature
-	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
-
+	// If currentHost is nil, runCheckLogic will error out, which is handled below.
+	// The logger passed to runCheckLogic (via ctx) will be the base one if currentHost is nil.
 	currentCores, met, checkErr := e.runCheckLogic(spec, ctx)
 	res.EndTime = time.Now()
+
+	// Re-acquire logger that might have been contextualized by runCheckLogic (if host was available)
+	// or use the initial one.
+	logger = ctx.GetLogger()
+	if currentHost != nil { logger = logger.With("host", currentHost.GetName()) }
+	logger = logger.With("step", spec.GetName())
+
 
 	if checkErr != nil {
 		res.Error = checkErr
 		res.Status = step.StatusFailed
 		res.Message = fmt.Sprintf("Error checking CPU cores: %v", checkErr)
-		hostCtxLogger.Errorf("Step failed: %v", checkErr)
+		logger.Error("Step failed.", "error", checkErr)
 		return res
 	}
 
 	if met {
 		res.Status = step.StatusSucceeded
 		res.Message = fmt.Sprintf("Host has %d CPU cores, which meets the minimum requirement of %d cores.", currentCores, spec.MinCores)
-		hostCtxLogger.Successf("Step succeeded: %s", res.Message)
+		logger.Info("Step succeeded.", "message", res.Message)
 	} else {
 		res.Status = step.StatusFailed
 		res.Error = fmt.Errorf("host has %d CPU cores, but minimum requirement is %d cores", currentCores, spec.MinCores)
 		res.Message = res.Error.Error()
-		hostCtxLogger.Errorf("Step failed: %s", res.Message)
+		logger.Error("Step failed.", "message", res.Message)
 	}
 	return res
 }

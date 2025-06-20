@@ -2,13 +2,14 @@ package pki
 
 import (
 	"fmt"
-	"os"
+	// "os" // Not used directly
 	// "path/filepath" // No longer needed for path joining here as full path is received
 	"time"
 
+	"github.com/mensylisir/kubexm/pkg/connector" // Added
 	"github.com/mensylisir/kubexm/pkg/runtime"
-	"github.com/mensylisir/kubexm/pkg/step"
 	"github.com/mensylisir/kubexm/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/step"
 )
 
 // DefaultEtcdPKIPathKey is used as default for both input and output key for the etcd PKI path.
@@ -46,100 +47,147 @@ func (s *DetermineEtcdPKIPathStepSpec) PopulateDefaults() {
 type DetermineEtcdPKIPathStepExecutor struct{}
 
 // Check determines if the etcd PKI path (read from module cache) exists and is in task cache.
-func (e *DetermineEtcdPKIPathStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
-	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
+func (e *DetermineEtcdPKIPathStepExecutor) Check(ctx runtime.StepContext) (isDone bool, err error) { // Changed to StepContext
+	logger := ctx.GetLogger()
+	currentHost := ctx.GetHost() // PKI path checks are host-specific
+	goCtx := ctx.GoContext()
+
+	if currentHost == nil {
+		// This step might run on a control-plane node or a node where etcd is relevant.
+		// If GetHost() returns nil, it implies this step might not be host-specific in some contexts.
+		// However, file operations usually are. Assuming for now it needs a host.
+		logger.Error("Current host not found in context for Check")
+		return false, fmt.Errorf("current host not found in context for %s Check", "DetermineEtcdPKIPathStep")
+	}
+	logger = logger.With("host", currentHost.GetName())
+
+	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
 	if !ok {
+		logger.Error("StepSpec not found in context")
 		return false, fmt.Errorf("StepSpec not found in context for %s Check", "DetermineEtcdPKIPathStep")
 	}
-	spec, ok := currentFullSpec.(*DetermineEtcdPKIPathStepSpec)
+	spec, ok := rawSpec.(*DetermineEtcdPKIPathStepSpec)
 	if !ok {
-		return false, fmt.Errorf("unexpected StepSpec type for %s Check: %T", "DetermineEtcdPKIPathStep", currentFullSpec)
+		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
+		return false, fmt.Errorf("unexpected StepSpec type for %s Check: %T", "DetermineEtcdPKIPathStep", rawSpec)
 	}
 	spec.PopulateDefaults()
-	logger := ctx.Logger.SugaredLogger().With("step", spec.GetName())
+	logger = logger.With("step", spec.GetName())
 
-	if ctx.Host == nil || ctx.Host.Runner == nil {
-		return false, fmt.Errorf("host or runner not available in context for %s Check", spec.GetName())
-	}
-
-	pkiPathVal, pathOk := ctx.Module().Get(spec.PKIPathToEnsureSharedDataKey)
+	// PKIPathToEnsureSharedDataKey is read from ModuleCache
+	pkiPathVal, pathOk := ctx.ModuleCache().Get(spec.PKIPathToEnsureSharedDataKey)
 	if !pathOk {
-		logger.Debugf("Etcd PKI path not found in Module Cache key '%s'. Path determination/setup likely pending.", spec.PKIPathToEnsureSharedDataKey)
-		return false, nil // Not an error, just not ready
+		logger.Debug("Etcd PKI path not found in Module Cache. Path determination/setup likely pending.", "key", spec.PKIPathToEnsureSharedDataKey)
+		return false, nil
 	}
 	pkiPath, ok := pkiPathVal.(string)
 	if !ok || pkiPath == "" {
-		logger.Warnf("Invalid or empty Etcd PKI path in Module Cache key '%s'.", spec.PKIPathToEnsureSharedDataKey)
-		return false, nil // Data issue, but not a hard error for Check, Execute will fail
+		logger.Warn("Invalid or empty Etcd PKI path in Module Cache.", "key", spec.PKIPathToEnsureSharedDataKey)
+		return false, nil
 	}
 
-	// Check if the directory exists using the runner
-	exists, err := ctx.Host.Runner.Exists(ctx.GoContext, pkiPath)
+	conn, err := ctx.GetConnectorForHost(currentHost)
 	if err != nil {
+		logger.Error("Failed to get connector for host", "error", err)
+		return false, fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err)
+	}
+
+	exists, err := conn.Exists(goCtx, pkiPath) // Use connector
+	if err != nil {
+		logger.Error("Failed to check existence of etcd PKI path", "path", pkiPath, "error", err)
 		return false, fmt.Errorf("failed to check existence of etcd PKI path %s: %w", pkiPath, err)
 	}
 	if !exists {
-		logger.Debugf("Etcd PKI path %s (from Module Cache) does not exist.", pkiPath)
+		logger.Debug("Etcd PKI path (from Module Cache) does not exist.", "path", pkiPath)
 		return false, nil
 	}
-	// Note: We are not checking if it's a directory here. Mkdirp in Execute handles this.
-	// If it exists as a file, Mkdirp will fail, which is desired.
-	logger.Debugf("Etcd PKI path %s exists.", pkiPath)
+	logger.Debug("Etcd PKI path exists.", "path", pkiPath)
 
-	if val, taskCacheExists := ctx.Task().Get(spec.OutputPKIPathSharedDataKey); taskCacheExists {
+	// Check if it's in TaskCache already
+	if val, taskCacheExists := ctx.TaskCache().Get(spec.OutputPKIPathSharedDataKey); taskCacheExists {
 		if storedPath, okStr := val.(string); okStr && storedPath == pkiPath {
-			logger.Infof("Etcd PKI path %s already available in Task Cache and matches.", pkiPath)
+			logger.Info("Etcd PKI path already available in Task Cache and matches.", "path", pkiPath)
 			return true, nil
 		}
-		logger.Infof("Etcd PKI path in Task Cache (%v) does not match expected path (%s) or is invalid type.", val, pkiPath)
+		logger.Info("Etcd PKI path in Task Cache does not match expected path or is invalid type.", "cachedValue", val, "expectedPath", pkiPath)
 	}
+	logger.Debug("Etcd PKI path not yet in Task Cache with matching value.")
 	return false, nil
 }
 
 // Execute ensures the pre-determined etcd PKI path exists and stores it in Task Cache.
-func (e *DetermineEtcdPKIPathStepExecutor) Execute(ctx runtime.Context) *step.Result {
+func (e *DetermineEtcdPKIPathStepExecutor) Execute(ctx runtime.StepContext) *step.Result { // Changed to StepContext
 	startTime := time.Now()
-	currentFullSpec, ok := ctx.Step().GetCurrentStepSpec()
-	if !ok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for %s Execute", "DetermineEtcdPKIPathStep"))
+	logger := ctx.GetLogger()
+	currentHost := ctx.GetHost()
+	goCtx := ctx.GoContext()
+
+	res := step.NewResult(ctx, currentHost, startTime, nil)
+
+	if currentHost == nil {
+		logger.Error("Current host not found in context for Execute")
+		res.Error = fmt.Errorf("current host not found in context for %s Execute", "DetermineEtcdPKIPathStep")
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
-	spec, ok := currentFullSpec.(*DetermineEtcdPKIPathStepSpec)
+	logger = logger.With("host", currentHost.GetName())
+
+	rawSpec, ok := ctx.StepCache().GetCurrentStepSpec()
 	if !ok {
-		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for %s Execute: %T", "DetermineEtcdPKIPathStep", currentFullSpec))
+		logger.Error("StepSpec not found in context")
+		res.Error = fmt.Errorf("StepSpec not found in context for %s Execute", "DetermineEtcdPKIPathStep")
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+	}
+	spec, ok := rawSpec.(*DetermineEtcdPKIPathStepSpec)
+	if !ok {
+		logger.Error("Unexpected StepSpec type", "type", fmt.Sprintf("%T", rawSpec))
+		res.Error = fmt.Errorf("unexpected StepSpec type for %s Execute: %T", "DetermineEtcdPKIPathStep", rawSpec)
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 	spec.PopulateDefaults()
-	logger := ctx.Logger.SugaredLogger().With("step", spec.GetName())
-	res := step.NewResult(ctx, startTime, nil)
+	logger = logger.With("step", spec.GetName())
 
-	pkiPathVal, pathOk := ctx.Module().Get(spec.PKIPathToEnsureSharedDataKey)
+	pkiPathVal, pathOk := ctx.ModuleCache().Get(spec.PKIPathToEnsureSharedDataKey) // Use ModuleCache
 	if !pathOk {
+		logger.Error("Etcd PKI path not found in Module Cache. Ensure SetupEtcdPkiDataContextStep ran successfully.", "key", spec.PKIPathToEnsureSharedDataKey)
 		res.Error = fmt.Errorf("etcd PKI path not found in Module Cache key '%s'. Ensure SetupEtcdPkiDataContextStep ran successfully.", spec.PKIPathToEnsureSharedDataKey)
-		res.Status = step.StatusFailed; return res
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 	pkiPath, typeOk := pkiPathVal.(string)
 	if !typeOk || pkiPath == "" {
+		logger.Error("Invalid or empty etcd PKI path in Module Cache.", "key", spec.PKIPathToEnsureSharedDataKey)
 		res.Error = fmt.Errorf("invalid or empty etcd PKI path in Module Cache key '%s'", spec.PKIPathToEnsureSharedDataKey)
-		res.Status = step.StatusFailed; return res
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
 
-	logger.Infof("Ensuring etcd PKI directory (from Module Cache) exists: %s", pkiPath)
-	// Use Runner.Mkdirp, assuming pkiPath is on the target host defined by ctx.Host
-	// Mode "0700" is appropriate for PKI directories. Sudo set to true as these are often system paths.
-	if err := ctx.Host.Runner.Mkdirp(ctx.GoContext, pkiPath, "0700", true); err != nil {
-		res.Error = fmt.Errorf("failed to create etcd PKI directory %s on host %s: %w", pkiPath, ctx.Host.Name, err)
-		res.Status = step.StatusFailed; return res
+	conn, err := ctx.GetConnectorForHost(currentHost)
+	if err != nil {
+		logger.Error("Failed to get connector for host", "error", err)
+		res.Error = fmt.Errorf("failed to get connector for host %s: %w", currentHost.GetName(), err)
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
 	}
-	logger.Infof("Etcd PKI directory ensured at %s on host %s", pkiPath, ctx.Host.Name)
 
-	ctx.Task().Set(spec.OutputPKIPathSharedDataKey, pkiPath)
-	logger.Infof("Stored etcd PKI path in Task Cache ('%s'): %s", spec.OutputPKIPathSharedDataKey, pkiPath)
+	logger.Info("Ensuring etcd PKI directory (from Module Cache) exists.", "path", pkiPath)
+	// Mode "0700" is appropriate for PKI directories. Sudo may be needed.
+	if err := conn.Mkdir(goCtx, pkiPath, "0700"); err != nil { // Sudo handled by connector if needed
+		logger.Error("Failed to create etcd PKI directory.", "path", pkiPath, "error", err)
+		res.Error = fmt.Errorf("failed to create etcd PKI directory %s on host %s: %w", pkiPath, currentHost.GetName(), err)
+		res.Status = step.StatusFailed; res.EndTime = time.Now(); return res
+	}
+	logger.Info("Etcd PKI directory ensured.", "path", pkiPath, "host", currentHost.GetName())
+
+	ctx.TaskCache().Set(spec.OutputPKIPathSharedDataKey, pkiPath) // Use TaskCache
+	logger.Info("Stored etcd PKI path in Task Cache.", "key", spec.OutputPKIPathSharedDataKey, "path", pkiPath)
+
+	res.EndTime = time.Now() // Update end time
 
 	done, checkErr := e.Check(ctx)
 	if checkErr != nil {
+		logger.Error("Post-execution check failed.", "error", checkErr)
 		res.Error = fmt.Errorf("post-execution check failed: %w", checkErr)
 		res.Status = step.StatusFailed; return res
 	}
 	if !done {
+		logger.Error("Post-execution check indicates Etcd PKI Path was not correctly ensured or cached.")
 		res.Error = fmt.Errorf("post-execution check indicates Etcd PKI Path was not correctly ensured or cached in Task Cache")
 		res.Status = step.StatusFailed; return res
 	}

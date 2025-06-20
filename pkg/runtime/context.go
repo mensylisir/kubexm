@@ -3,7 +3,8 @@ package runtime
 import (
 	"context"
 	"fmt"
-	// "github.com/mensylisir/kubexm/pkg/cache" // Cache not used in provided snippet, can be added if needed
+	"time" // Added for time.Duration
+	"github.com/mensylisir/kubexm/pkg/cache" // Cache not used in provided snippet, can be added if needed
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/engine"
 	"github.com/mensylisir/kubexm/pkg/logger"
@@ -20,13 +21,23 @@ type Context struct {
 	Runner        runner.Runner
 	ClusterConfig *v1alpha1.Cluster
 	HostRuntimes  map[string]*HostRuntime // key: host.GetName()
+	ConnectionPool *connector.ConnectionPool
 
-	// Caches as defined in the issue, though not used in the provided methods.
-	// Uncomment if cache implementations are to be added.
-	// pipelineCache cache.Cache
-	// moduleCache   cache.Cache
-	// taskCache     cache.Cache
-	// stepCache     cache.Cache
+	// Global configurations
+	GlobalWorkDir string
+	GlobalVerbose bool
+	GlobalIgnoreErr bool
+	GlobalConnectionTimeout time.Duration
+
+	// Caches
+	PipelineCache cache.Cache
+	ModuleCache   cache.Cache
+	TaskCache     cache.Cache
+	StepCache     cache.Cache
+
+	// CurrentHost stores the specific host this context is currently operating on.
+	// This is particularly relevant for StepContext.
+	CurrentHost   connector.Host
 }
 
 // HostRuntime encapsulates all runtime information for a single host.
@@ -46,10 +57,30 @@ func NewContextWithGoContext(gCtx context.Context, parent *Context) *Context {
 	}
 	newCtx := *parent // Shallow copy
 	newCtx.GoCtx = gCtx
+	newCtx.CurrentHost = parent.CurrentHost // Also copy CurrentHost
+	return &newCtx
+}
+
+// ForHost creates a new context specifically for operations on the given host.
+// It performs a shallow copy of the parent context and sets the CurrentHost.
+func (c *Context) ForHost(host connector.Host) *Context {
+	newCtx := *c // Shallow copy
+	newCtx.CurrentHost = host
+	// Potentially, the logger could also be updated here to include host-specific fields.
+	// For example: newCtx.Logger = c.Logger.With("host", host.GetName())
+	// However, this depends on whether the logger in StepContext should be automatically host-scoped
+	// or if step implementations are responsible for using a host-specific logger.
+	// For now, just copying the logger as is.
 	return &newCtx
 }
 
 // --- Interface Implementations / Getters for Facades ---
+
+// GetHost returns the current host associated with this context.
+// This is required to satisfy the StepContext interface.
+func (c *Context) GetHost() connector.Host {
+	return c.CurrentHost
+}
 
 // GoContext returns the underlying Go context.
 func (c *Context) GoContext() context.Context {
@@ -142,6 +173,65 @@ func (c *Context) GetConnectorForHost(host connector.Host) (connector.Connector,
 		return nil, fmt.Errorf("no active connector found or available for host: %s", host.GetName())
 	}
 	return hr.Conn, nil
+}
+
+// --- Global Configuration Getters ---
+
+// GetGlobalWorkDir returns the global working directory.
+func (c *Context) GetGlobalWorkDir() string {
+	return c.GlobalWorkDir
+}
+
+// IsVerbose returns true if verbose mode is enabled.
+func (c *Context) IsVerbose() bool {
+	return c.GlobalVerbose
+}
+
+// ShouldIgnoreErr returns true if errors should be ignored.
+func (c *Context) ShouldIgnoreErr() bool {
+	return c.GlobalIgnoreErr
+}
+
+// GetGlobalConnectionTimeout returns the global connection timeout.
+func (c *Context) GetGlobalConnectionTimeout() time.Duration {
+	return c.GlobalConnectionTimeout
+}
+
+// StepCache returns the step cache.
+// This is required to satisfy the StepContext interface.
+func (c *Context) StepCache() cache.StepCache {
+	// Assuming c.StepCache is of a type that can be asserted to cache.StepCache.
+	// This typically means that cache.StepCache is an interface implemented by the
+	// concrete type stored in c.StepCache, or c.StepCache is already of this type.
+	if stepCache, ok := c.StepCache.(cache.StepCache); ok {
+		return stepCache
+	}
+	// Handle cases where the assertion might fail, though ideally, it shouldn't
+	// if everything is initialized correctly.
+	// Returning nil or panicking depends on how strict the error handling should be.
+	// For now, let's assume it's always correctly initialized by the builder.
+	// If c.StepCache can be nil, further checks might be needed.
+	return c.StepCache.(cache.StepCache)
+}
+
+// TaskCache returns the task cache.
+// This is required to satisfy the StepContext interface (if it needs TaskCache access).
+func (c *Context) TaskCache() cache.TaskCache {
+	// Similar to StepCache, assuming c.TaskCache can be asserted to cache.TaskCache.
+	if taskCache, ok := c.TaskCache.(cache.TaskCache); ok {
+		return taskCache
+	}
+	// Fallback or panic, assuming correct initialization.
+	return c.TaskCache.(cache.TaskCache)
+}
+
+// ModuleCache returns the module cache.
+// This is required to satisfy the StepContext interface (if it needs ModuleCache access).
+func (c *Context) ModuleCache() cache.ModuleCache {
+	if moduleCache, ok := c.ModuleCache.(cache.ModuleCache); ok {
+		return moduleCache
+	}
+	return c.ModuleCache.(cache.ModuleCache)
 }
 
 // --- Facade Provider Methods ---
