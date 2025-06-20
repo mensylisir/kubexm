@@ -221,6 +221,7 @@ func (e *InstallContainerdStepExecutor) Execute(ctx runtime.Context) *step.Resul
 	}
 
 	res.Message = "Containerd installed successfully from extracted files."
+	res.Status = step.StatusSucceeded
 	return res
 }
 var _ step.StepExecutor = &InstallContainerdStepExecutor{}

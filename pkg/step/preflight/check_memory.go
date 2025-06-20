@@ -92,49 +92,55 @@ func (e *CheckMemoryStepExecutor) runCheckLogic(s *CheckMemoryStepSpec, ctx *run
 }
 
 // Check determines if the memory requirement is met.
-func (e *CheckMemoryStepExecutor) Check(s spec.StepSpec, ctx *runtime.Context) (isDone bool, err error) {
-	spec, ok := s.(*CheckMemoryStepSpec)
-	if !ok {
-		return false, fmt.Errorf("unexpected spec type %T for CheckMemoryStepExecutor Check method", s)
+func (e *CheckMemoryStepExecutor) Check(ctx runtime.Context) (isDone bool, err error) {
+	rawSpec, rok := ctx.Step().GetCurrentStepSpec()
+	if !rok {
+		return false, fmt.Errorf("StepSpec not found in context for CheckMemoryStepExecutor Check method")
 	}
-	_, met, err := e.runCheckLogic(spec, ctx)
+	spec, ok := rawSpec.(*CheckMemoryStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected spec type %T for CheckMemoryStepExecutor Check method", rawSpec)
+	}
+
+	_, met, errLogic := e.runCheckLogic(spec, ctx)
 	// If runCheckLogic itself had an error (e.g. command execution failed), propagate that.
-	if err != nil {
-		return false, err
+	if errLogic != nil {
+		return false, errLogic
 	}
 	return met, nil
 }
 
 // Execute performs the memory check and returns a result.
-func (e *CheckMemoryStepExecutor) Execute(s spec.StepSpec, ctx *runtime.Context) *step.Result {
-	spec, ok := s.(*CheckMemoryStepSpec)
+func (e *CheckMemoryStepExecutor) Execute(ctx runtime.Context) *step.Result {
+	startTime := time.Now()
+	rawSpec, rok := ctx.Step().GetCurrentStepSpec()
+	if !rok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for CheckMemoryStepExecutor Execute method"))
+	}
+	spec, ok := rawSpec.(*CheckMemoryStepSpec)
 	if !ok {
-		myErr := fmt.Errorf("Execute: unexpected spec type %T for CheckMemoryStepExecutor", s)
-		stepName := "UnknownCheckMemory (type error)"
-		if s != nil { stepName = s.GetName() }
-		return step.NewResult(stepName, ctx.Host.Name, time.Now(), myErr)
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected spec type %T for CheckMemoryStepExecutor Execute method", rawSpec))
 	}
 
-	startTime := time.Now()
-	res := step.NewResult(spec.GetName(), ctx.Host.Name, startTime, nil)
+	res := step.NewResult(ctx, startTime, nil) // Use new NewResult signature
 	hostCtxLogger := ctx.Logger.SugaredLogger.With("host", ctx.Host.Name, "step_spec", spec.GetName()).Sugar()
 
 	currentMemoryMB, met, checkErr := e.runCheckLogic(spec, ctx)
 	res.EndTime = time.Now()
 
 	if checkErr != nil {
-		res.Error = checkErr; res.Status = "Failed"
+		res.Error = checkErr; res.Status = step.StatusFailed
 		res.Message = fmt.Sprintf("Error checking memory: %v", checkErr)
 		hostCtxLogger.Errorf("Step failed: %v", checkErr)
 		return res
 	}
 
 	if met {
-		res.Status = "Succeeded"
+		res.Status = step.StatusSucceeded
 		res.Message = fmt.Sprintf("Host has %d MB memory, which meets the minimum requirement of %d MB.", currentMemoryMB, spec.MinMemoryMB)
 		hostCtxLogger.Successf("Step succeeded: %s", res.Message)
 	} else {
-		res.Status = "Failed"
+		res.Status = step.StatusFailed
 		res.Error = fmt.Errorf("host has %d MB memory, but minimum requirement is %d MB", currentMemoryMB, spec.MinMemoryMB)
 		res.Message = res.Error.Error()
 		hostCtxLogger.Errorf("Step failed: %s", res.Message)

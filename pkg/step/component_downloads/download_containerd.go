@@ -80,12 +80,18 @@ func (e *DownloadContainerdStepExecutor) determineContainerdURL(version, arch, f
 }
 
 func (e *DownloadContainerdStepExecutor) Check(ctx runtime.Context) (bool, error) {
-	currentFullSpec, _ := ctx.Step().GetCurrentStepSpec()
-	spec := currentFullSpec.(*DownloadContainerdStepSpec)
+	rawSpec, ok := ctx.Step().GetCurrentStepSpec()
+	if !ok {
+		return false, fmt.Errorf("StepSpec not found in context for DownloadContainerdStep Check")
+	}
+	spec, ok := rawSpec.(*DownloadContainerdStepSpec)
+	if !ok {
+		return false, fmt.Errorf("unexpected StepSpec type for DownloadContainerdStep Check: %T", rawSpec)
+	}
 	spec.PopulateDefaults(ctx)
 	logger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step", spec.GetName())
 
-	if spec.DownloadDir == "" {return false, fmt.Errorf("DownloadDir not set in spec for %s", spec.GetName())}
+	if spec.DownloadDir == "" { return false, fmt.Errorf("DownloadDir not set in spec for %s", spec.GetName()) }
 	fileName := e.determineContainerdFileName(spec.Version, spec.Arch)
 	expectedFilePath := filepath.Join(spec.DownloadDir, fileName)
 
@@ -128,8 +134,14 @@ func (e *DownloadContainerdStepExecutor) Check(ctx runtime.Context) (bool, error
 
 func (e *DownloadContainerdStepExecutor) Execute(ctx runtime.Context) *step.Result {
 	startTime := time.Now()
-	currentFullSpec, _ := ctx.Step().GetCurrentStepSpec()
-	spec := currentFullSpec.(*DownloadContainerdStepSpec)
+	rawSpec, ok := ctx.Step().GetCurrentStepSpec()
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("StepSpec not found in context for DownloadContainerdStep Execute"))
+	}
+	spec, ok := rawSpec.(*DownloadContainerdStepSpec)
+	if !ok {
+		return step.NewResult(ctx, startTime, fmt.Errorf("unexpected StepSpec type for DownloadContainerdStep Execute: %T", rawSpec))
+	}
 	spec.PopulateDefaults(ctx)
 	logger := ctx.Logger.SugaredLogger().With("host", ctx.Host.Name, "step", spec.GetName())
 	res := step.NewResult(ctx, startTime, nil)
@@ -160,10 +172,10 @@ func (e *DownloadContainerdStepExecutor) Execute(ctx runtime.Context) *step.Resu
 	ctx.Task().Set(spec.OutputArchKey, spec.Arch)
 	if spec.Checksum != "" {ctx.Task().Set(spec.OutputChecksumKey, spec.Checksum)}
 	ctx.Task().Set(spec.OutputURLKey, url)
-
+	res.Status = step.StatusSucceeded
 	return res
 }
 
 func init() {
-	step.Register(&DownloadContainerdStepSpec{}, &DownloadContainerdStepExecutor{})
+	step.Register(step.GetSpecTypeName(&DownloadContainerdStepSpec{}), &DownloadContainerdStepExecutor{})
 }

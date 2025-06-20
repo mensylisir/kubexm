@@ -139,7 +139,7 @@ func (e *ConfigureContainerdStepExecutor) Check(ctx runtime.Context) (isDone boo
 		}
 		searchScopeAfterSection := content[sectionIndex:]
 		if !strings.Contains(searchScopeAfterSection, mirrorEndpoint) {
-			hostCtxLogger.Debugf("Mirror endpoint %s for registry %q not found (or not correctly associated) in %s.", mirrorEndpointLine, registry, configPath)
+			hostCtxLogger.Debugf("Mirror endpoint %s for registry %q not found (or not correctly associated) in %s.", mirrorEndpoint, registry, configPath)
 			allChecksPass = false; break
 		}
 	}
@@ -203,13 +203,13 @@ func (e *ConfigureContainerdStepExecutor) Execute(ctx runtime.Context) *step.Res
 
 	if err := ctx.Host.Runner.Mkdirp(ctx.GoContext, parentDir, "0755", true); err != nil {
 		res.Error = fmt.Errorf("failed to create directory %s for containerd config on host %s: %w", parentDir, ctx.Host.Name, err)
-		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
 	tmpl, err := template.New("containerdConfig").Parse(containerdConfigTemplate)
 	if err != nil {
 		res.Error = fmt.Errorf("dev error: failed to parse internal containerd config template: %w", err)
-		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
 	var buf strings.Builder
@@ -221,7 +221,7 @@ func (e *ConfigureContainerdStepExecutor) Execute(ctx runtime.Context) *step.Res
 	}
 	if err := tmpl.Execute(&buf, templateData); err != nil {
 		res.Error = fmt.Errorf("failed to render containerd config template for host %s: %w", ctx.Host.Name, err)
-		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
 	configContent := buf.String()
@@ -231,10 +231,10 @@ func (e *ConfigureContainerdStepExecutor) Execute(ctx runtime.Context) *step.Res
 	err = ctx.Host.Runner.WriteFile(ctx.GoContext, []byte(configContent), configPath, "0644", true)
 	if err != nil {
 		res.Error = fmt.Errorf("failed to write containerd config to %s on host %s: %w", configPath, ctx.Host.Name, err)
-		res.Status = "Failed"; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
+		res.Status = step.StatusFailed; res.Message = res.Error.Error(); hostCtxLogger.Errorf("Step failed: %v", res.Error); return res
 	}
 
-	res.EndTime = time.Now(); res.Status = "Succeeded"
+	res.EndTime = time.Now(); res.Status = step.StatusSucceeded
 	res.Message = fmt.Sprintf("Containerd configuration written to %s successfully on host %s.", configPath, ctx.Host.Name)
 	hostCtxLogger.Successf("Step succeeded: %s", res.Message)
 
