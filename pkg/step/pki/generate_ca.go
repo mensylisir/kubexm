@@ -7,37 +7,68 @@ import (
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/runtime" // For runtime.Logger and runtime.StepContext
+	"github.com/mensylisir/kubexm/pkg/spec"    // Added for spec.StepMeta
 	"github.com/mensylisir/kubexm/pkg/step"
-	// time, spec, context no longer needed
+	// time, context no longer needed
 )
 
-// GenerateRootCAStep generates a root Certificate Authority.
-type GenerateRootCAStep struct {
-	CertPath     string
-	KeyPath      string
-	CommonName   string
-	ValidityDays int
-	KeyBitSize   int
-	StepName     string
-	CertPemPath  string
-	KeyPemPath   string
+// GenerateRootCAStepSpec generates a root Certificate Authority.
+// This is a spec object, the actual execution is handled by an Executor.
+type GenerateRootCAStepSpec struct {
+	spec.StepMeta `json:",inline"` // Embed common meta fields
+	CertPath      string           `json:"certPath,omitempty"`
+	KeyPath       string           `json:"keyPath,omitempty"`
+	CommonName   string `json:"commonName,omitempty"`
+	ValidityDays int    `json:"validityDays,omitempty"`
+	KeyBitSize   int    `json:"keyBitSize,omitempty"`
 }
 
-// NewGenerateRootCAStep creates a new GenerateRootCAStep.
-func NewGenerateRootCAStep(certPath, keyPath, commonName string, validityDays, keyBitSize int, stepName string) step.Step {
-	s := &GenerateRootCAStep{
+// NewGenerateRootCAStepSpec creates a new GenerateRootCAStepSpec.
+func NewGenerateRootCAStepSpec(certPath, keyPath, commonName string, validityDays, keyBitSize int, stepName string) *GenerateRootCAStepSpec {
+	// Determine default name and description if stepName is empty
+	name := stepName
+	cp := certPath
+	if cp == "" {
+		cp = "/etc/kubexms/pki/ca.crt (defaulted)" // temp for description if certPath is empty
+	}
+	if name == "" {
+		name = fmt.Sprintf("Generate Root CA (Cert: %s)", cp)
+	}
+	description := fmt.Sprintf("Generates a root CA certificate and key: CN=%s, Cert=%s, Key=%s, Validity=%d days, Bits=%d.",
+		commonName, certPath, keyPath, validityDays, keyBitSize) // Removed PEM paths from here
+
+	s := &GenerateRootCAStepSpec{
+		StepMeta: spec.StepMeta{
+			Name:        name,
+			Description: description, // Initial description, might be refined by populateDefaults
+		},
 		CertPath:     certPath,
 		KeyPath:      keyPath,
 		CommonName:   commonName,
 		ValidityDays: validityDays,
 		KeyBitSize:   keyBitSize,
-		StepName:     stepName,
 	}
-	// Defaults are applied in populateDefaults, called by Precheck/Run via their context logger
+	// Note: populateDefaults is not called here, it's typically called by an executor using context.
+	// The description might be re-evaluated after defaults are populated if it depends on them.
 	return s
 }
 
-func (s *GenerateRootCAStep) populateDefaults(logger runtime.Logger) {
+// GetName returns the step's name.
+func (s *GenerateRootCAStepSpec) GetName() string { return s.StepMeta.Name }
+
+// GetDescription returns the step's description.
+// It might be more accurate after populateDefaults has run if it relies on defaulted paths.
+func (s *GenerateRootCAStepSpec) GetDescription() string { return s.StepMeta.Description }
+
+// GetSpec returns the spec itself.
+func (s *GenerateRootCAStepSpec) GetSpec() interface{} { return s }
+
+// Meta returns the step's metadata.
+func (s *GenerateRootCAStepSpec) Meta() *spec.StepMeta { return &s.StepMeta }
+
+// populateDefaults populates default values for the step spec.
+// This method is typically called by the executor before Precheck or Run.
+func (s *GenerateRootCAStepSpec) populateDefaults(logger runtime.Logger) {
 	defaultBaseDir := "/etc/kubexms/pki"
 	if s.CertPath == "" {
 		s.CertPath = filepath.Join(defaultBaseDir, "ca.crt")
@@ -47,14 +78,7 @@ func (s *GenerateRootCAStep) populateDefaults(logger runtime.Logger) {
 		s.KeyPath = filepath.Join(defaultBaseDir, "ca.key")
 		logger.Debug("KeyPath defaulted.", "path", s.KeyPath)
 	}
-	if s.CertPemPath == "" {
-		s.CertPemPath = filepath.Join(defaultBaseDir, "ca.pem")
-		logger.Debug("CertPemPath defaulted.", "path", s.CertPemPath)
-	}
-	if s.KeyPemPath == "" {
-		s.KeyPemPath = filepath.Join(defaultBaseDir, "ca-key.pem")
-		logger.Debug("KeyPemPath defaulted.", "path", s.KeyPemPath)
-	}
+	// Removed PEM path defaulting
 	if s.CommonName == "" {
 		s.CommonName = "kubexms-root-ca"
 		logger.Debug("CommonName defaulted.", "cn", s.CommonName)
@@ -67,34 +91,20 @@ func (s *GenerateRootCAStep) populateDefaults(logger runtime.Logger) {
 		s.KeyBitSize = 4096
 		logger.Debug("KeyBitSize defaulted.", "bits", s.KeyBitSize)
 	}
-}
-
-func (s *GenerateRootCAStep) Name() string {
-	if s.StepName != "" {
-		return s.StepName
+	// After populating defaults, update StepMeta.Description if it relied on these values
+	// This is a simplified update; a more robust approach might involve specific template parsing for description.
+	s.StepMeta.Description = fmt.Sprintf("Generates a root CA certificate and key: CN=%s, Cert=%s, Key=%s, Validity=%d days, Bits=%d.",
+		s.CommonName, s.CertPath, s.KeyPath, s.ValidityDays, s.KeyBitSize) // Removed PEM paths
+	// Also update Name if it was default and CertPath got populated
+	if strings.HasSuffix(s.StepMeta.Name, "(defaulted)") && s.CertPath != "" && !strings.HasSuffix(s.CertPath, "(defaulted)"){
+		s.StepMeta.Name = fmt.Sprintf("Generate Root CA (Cert: %s)", s.CertPath)
 	}
-	// Use a temporary CertPath for naming if s.CertPath is not yet populated by defaults.
-	// This ensures a somewhat meaningful default name even if populateDefaults hasn't run.
-	cp := s.CertPath
-	if cp == "" {
-	    // This is a fallback if Name() is called before populateDefaults (e.g. by external logging before Precheck)
-	    // In normal flow, populateDefaults in Precheck/Run will set s.CertPath before this might be an issue.
-	    cp = filepath.Join("/etc/kubexms/pki", "ca.crt") + " (default path)"
-	}
-	return fmt.Sprintf("Generate Root CA (Cert: %s)", cp)
 }
 
-func (s *GenerateRootCAStep) Description() string {
-	// At description time, defaults might not have been applied yet if called early.
-	// For a more accurate description, ensure populateDefaults has run or use potentially empty values.
-	// For now, use current values.
-	return fmt.Sprintf("Generates a root CA certificate and key: CN=%s, Cert=%s, Key=%s, CertPEM=%s, KeyPEM=%s, Validity=%d days, Bits=%d.",
-		s.CommonName, s.CertPath, s.KeyPath, s.CertPemPath, s.KeyPemPath, s.ValidityDays, s.KeyBitSize)
-}
-
-func (s *GenerateRootCAStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Precheck")
-	s.populateDefaults(logger)
+// Precheck (old method, to be adapted or used by an executor for a non-spec version)
+func (s *GenerateRootCAStepSpec) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Precheck")
+	s.populateDefaults(logger) // Ensure defaults are applied before precheck logic
 
 	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
@@ -112,48 +122,33 @@ func (s *GenerateRootCAStep) Precheck(ctx runtime.StepContext, host connector.Ho
 		logger.Warn("Failed to check CA key existence, assuming regeneration is needed.", "path", s.KeyPath, "error", err)
 		return false, nil
 	}
-	certPemExists, err := conn.Exists(ctx.GoContext(), s.CertPemPath)
-	if err != nil {
-		logger.Warn("Failed to check CA PEM cert existence, assuming regeneration is needed.", "path", s.CertPemPath, "error", err)
-		return false, nil
-	}
-	keyPemExists, err := conn.Exists(ctx.GoContext(), s.KeyPemPath)
-	if err != nil {
-		logger.Warn("Failed to check CA PEM key existence, assuming regeneration is needed.", "path", s.KeyPemPath, "error", err)
-		return false, nil
-	}
+	// Removed PEM file checks
 
-	if certExists && keyExists && certPemExists && keyPemExists {
-		logger.Info("Root CA certificate, key, and PEM files already exist.",
-			"certPath", s.CertPath, "keyPath", s.KeyPath, "certPemPath", s.CertPemPath, "keyPemPath", s.KeyPemPath)
+	if certExists && keyExists {
+		logger.Info("Root CA certificate and key already exist.", "certPath", s.CertPath, "keyPath", s.KeyPath)
 		return true, nil
 	}
 
 	// Log specific missing files
-	missingFiles := []string{}
+	missingMessages := []string{}
 	if !certExists {
-		missingFiles = append(missingFiles, "CertPath: "+s.CertPath)
+		missingMessages = append(missingMessages, fmt.Sprintf("CertPath: %s", s.CertPath))
 	}
 	if !keyExists {
-		missingFiles = append(missingFiles, "KeyPath: "+s.KeyPath)
-	}
-	if !certPemExists {
-		missingFiles = append(missingFiles, "CertPemPath: "+s.CertPemPath)
-	}
-	if !keyPemExists {
-		missingFiles = append(missingFiles, "KeyPemPath: "+s.KeyPemPath)
+		missingMessages = append(missingMessages, fmt.Sprintf("KeyPath: %s", s.KeyPath))
 	}
 
-	if len(missingFiles) > 0 {
-		logger.Info("Root CA files are missing. Will attempt to regenerate.", "missing", strings.Join(missingFiles, ", "))
+	if len(missingMessages) > 0 {
+		logger.Info(fmt.Sprintf("Root CA files are missing: %s. Will attempt to regenerate.", strings.Join(missingMessages, ", ")))
 	}
 
 	return false, nil
 }
 
-func (s *GenerateRootCAStep) Run(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Run")
-	s.populateDefaults(logger)
+// Run (old method, to be adapted or used by an executor for a non-spec version)
+func (s *GenerateRootCAStepSpec) Run(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Run")
+	s.populateDefaults(logger) // Ensure defaults are applied
 
 	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
@@ -224,55 +219,29 @@ func (s *GenerateRootCAStep) Run(ctx runtime.StepContext, host connector.Host) e
 		logger.Warn("Failed to chmod CA cert.", "certPath", s.CertPath, "error", errChmodCert)
 	}
 
-	// Store paths in ModuleCache as per original logic
+	// Store paths in ModuleCache
 	const clusterRootCACertPathKey = "ClusterRootCACertPath"
 	const clusterRootCAKeyPathKey = "ClusterRootCAKeyPath"
-	const clusterRootCACertPemPathKey = "ClusterRootCACertPemPath"
-	const clusterRootCAKeyPemPathKey = "ClusterRootCAKeyPemPath"
+	// Removed PEM cache key constants
 
 	ctx.ModuleCache().Set(clusterRootCACertPathKey, s.CertPath)
 	ctx.ModuleCache().Set(clusterRootCAKeyPathKey, s.KeyPath)
-	logger.Info("Root CA certificate and key generated.", "certPath", s.CertPath, "keyPath", s.KeyPath)
+	logger.Info("Root CA certificate and key generated and paths stored in ModuleCache.", "certPath", s.CertPath, "keyPath", s.KeyPath)
 
-	// Copy cert to PEM path
-	cpCertCmd := fmt.Sprintf("cp %s %s", s.CertPath, s.CertPemPath)
-	logger.Info("Copying CA certificate to PEM location.", "source", s.CertPath, "destination", s.CertPemPath)
-	_, stderrCpCert, errCpCert := conn.Exec(ctx.GoContext(), cpCertCmd, execOptsSudo)
-	if errCpCert != nil {
-		return fmt.Errorf("failed to copy CA certificate to %s on host %s (stderr: %s): %w", s.CertPemPath, host.GetName(), string(stderrCpCert), errCpCert)
-	}
-	chmodCertPemCmd := fmt.Sprintf("chmod 0644 %s", s.CertPemPath)
-	if _, _, errChmodCertPem := conn.Exec(ctx.GoContext(), chmodCertPemCmd, execOptsSudo); errChmodCertPem != nil {
-		logger.Warn("Failed to chmod CA PEM certificate.", "path", s.CertPemPath, "error", errChmodCertPem)
-	}
+	// Removed PEM copy and chmod logic
+	// Removed PEM path storage in ModuleCache
 
-	// Copy key to PEM path
-	cpKeyCmd := fmt.Sprintf("cp %s %s", s.KeyPath, s.KeyPemPath)
-	logger.Info("Copying CA key to PEM location.", "source", s.KeyPath, "destination", s.KeyPemPath)
-	_, stderrCpKey, errCpKey := conn.Exec(ctx.GoContext(), cpKeyCmd, execOptsSudo)
-	if errCpKey != nil {
-		return fmt.Errorf("failed to copy CA key to %s on host %s (stderr: %s): %w", s.KeyPemPath, host.GetName(), string(stderrCpKey), errCpKey)
-	}
-	chmodKeyPemCmd := fmt.Sprintf("chmod 0600 %s", s.KeyPemPath)
-	if _, _, errChmodKeyPem := conn.Exec(ctx.GoContext(), chmodKeyPemCmd, execOptsSudo); errChmodKeyPem != nil {
-		logger.Warn("Failed to chmod CA PEM key.", "path", s.KeyPemPath, "error", errChmodKeyPem)
-	}
-
-	ctx.ModuleCache().Set(clusterRootCACertPemPathKey, s.CertPemPath)
-	ctx.ModuleCache().Set(clusterRootCAKeyPemPathKey, s.KeyPemPath)
-
-	logger.Info("Root CA PEM certificate and key copied and paths stored in ModuleCache.",
-		"certPemPath", s.CertPemPath, "keyPemPath", s.KeyPemPath)
 	return nil
 }
 
-func (s *GenerateRootCAStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Rollback")
-	s.populateDefaults(logger)
+// Rollback (old method, to be adapted or used by an executor for a non-spec version)
+func (s *GenerateRootCAStepSpec) Rollback(ctx runtime.StepContext, host connector.Host) error {
+	logger := ctx.GetLogger().With("step", s.GetName(), "host", host.GetName(), "phase", "Rollback")
+	s.populateDefaults(logger) // Ensure defaults are applied
 
 	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
-		return fmt.Errorf("failed to get connector for host %s for rollback of step %s: %w", host.GetName(), s.Name(), err)
+		return fmt.Errorf("failed to get connector for host %s for rollback of step %s: %w", host.GetName(), s.GetName(), err)
 	}
 
 	execOptsSudo := &connector.ExecOptions{Sudo: true}
@@ -291,30 +260,25 @@ func (s *GenerateRootCAStep) Rollback(ctx runtime.StepContext, host connector.Ho
 
 	const clusterRootCACertPathKey = "ClusterRootCACertPath"
 	const clusterRootCAKeyPathKey = "ClusterRootCAKeyPath"
-	const clusterRootCACertPemPathKey = "ClusterRootCACertPemPath"
-	const clusterRootCAKeyPemPathKey = "ClusterRootCAKeyPemPath"
+	// Removed PEM cache key constants
 
-	logger.Info("Attempting to remove CA PEM certificate for rollback.", "path", s.CertPemPath)
-	rmCertPemCmd := fmt.Sprintf("rm -f %s", s.CertPemPath)
-	if _, stderrRmCertPem, errRmCertPem := conn.Exec(ctx.GoContext(), rmCertPemCmd, execOptsSudo); errRmCertPem != nil {
-		logger.Error("Failed to remove CA PEM certificate during rollback.", "path", s.CertPemPath, "stderr", string(stderrRmCertPem), "error", errRmCertPem)
-	}
-
-	logger.Info("Attempting to remove CA PEM key for rollback.", "path", s.KeyPemPath)
-	rmKeyPemCmd := fmt.Sprintf("rm -f %s", s.KeyPemPath)
-	if _, stderrRmKeyPem, errRmKeyPem := conn.Exec(ctx.GoContext(), rmKeyPemCmd, execOptsSudo); errRmKeyPem != nil {
-		logger.Error("Failed to remove CA PEM key during rollback.", "path", s.KeyPemPath, "stderr", string(stderrRmKeyPem), "error", errRmKeyPem)
-	}
+	// Removed PEM file deletion logic
 
 	ctx.ModuleCache().Delete(clusterRootCACertPathKey)
 	ctx.ModuleCache().Delete(clusterRootCAKeyPathKey)
-	ctx.ModuleCache().Delete(clusterRootCACertPemPathKey)
-	ctx.ModuleCache().Delete(clusterRootCAKeyPemPathKey)
-	logger.Debug("Cleaned up CA and CA PEM paths from ModuleCache.")
+	// Removed PEM ModuleCache deletion
+	logger.Debug("Cleaned up CA cert/key paths from ModuleCache.")
 
-	logger.Info("Rollback attempt for CA generation finished (files removed if existed, cache keys deleted).")
+	logger.Info("Rollback attempt for CA generation finished (crt/key files removed if existed, cache keys deleted).")
 	return nil
 }
 
-// Ensure GenerateRootCAStep implements the step.Step interface.
-var _ step.Step = (*GenerateRootCAStep)(nil)
+// Ensure GenerateRootCAStepSpec implements the spec.StepSpec interface (conceptually).
+// Actual interface implementation might be via an ExecutableStepSpec that wraps this data spec.
+// var _ spec.StepSpec = (*GenerateRootCAStepSpec)(nil) // This line won't compile if spec.StepSpec is just GetName/GetDescription
+
+// The following ensures that the old step.Step interface is still implemented by the new Spec object
+// if this code is intended to be gradually refactored and used by an old-style executor temporarily.
+// For a pure spec object, these Precheck/Run/Rollback methods would be removed from the Spec struct
+// and live in a separate StepExecutor struct.
+var _ step.Step = (*GenerateRootCAStepSpec)(nil)

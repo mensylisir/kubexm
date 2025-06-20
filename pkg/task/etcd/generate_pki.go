@@ -48,11 +48,35 @@ func NewGenerateEtcdPkiTaskSpec(
 		pki.NewGenerateEtcdCAStep(
 			"", // InputPKIPathKey (use default from TaskCache)
 			"", // InputKubeConfKey (use default from ModuleCache) - KubeConf seems misnamed here if it's for CA config
-			"", // OutputCACertObjectKey (use default to TaskCache)
-			"", // OutputCACertPathKey (use default to TaskCache)
-			"", // OutputCAKeyPathKey (use default to TaskCache)
+			"", // OutputCACertObjectKey (use default to TaskCache) - e.g., "EtcdCACertObject"
+			"EtcdCACertPath", // OutputCACertPathKey (use default to TaskCache) - Forcing a known key for chaining
+			"EtcdCAKeyPath",  // OutputCAKeyPathKey (use default to TaskCache) - Forcing a known key for chaining
 			"", // Step name (use default)
 		),
+		// Step 3.1: Convert generated Etcd CA to PEM format
+		// This step will read "EtcdCACertPath" and "EtcdCAKeyPath" from TaskCache
+		// and write its output paths (e.g., "ca.pem", "ca-key.pem") also to TaskCache
+		// using default keys like pki.DefaultCertPemCacheKey if not specified.
+		func() spec.StepSpec {
+			// Use default target paths, let populateDefaults in ConvertCertsToPemStepSpec handle them
+			// Default output cache keys (pki.DefaultCertPemCacheKey, pki.DefaultKeyPemCacheKey) will be used by the step
+			// if CertPemCacheKey and KeyPemCacheKey are not set here.
+			convertSpec := pki.NewConvertCertsToPemStepSpec(
+				"Convert Etcd CA to PEM", // name
+				"Converts the generated Etcd CA certificate and key to PEM format.", // description
+				"", // sourceCertPath (use cache)
+				"", // sourceKeyPath (use cache)
+				"", // targetCertPemPath (defaulted by step)
+				"", // targetKeyPemPath (defaulted by step)
+			)
+			// Configure to read from TaskCache keys written by GenerateEtcdCAStep
+			convertSpec.SourceCertPathTaskCacheKey = "EtcdCACertPath"
+			convertSpec.SourceKeyPathTaskCacheKey = "EtcdCAKeyPath"
+			// Optionally, set output keys if subsequent steps need these PEM paths from TaskCache specifically
+			// convertSpec.CertPemCacheKey = "EtcdCaCertPemPath" // Example if needed in TaskCache explicitly
+			// convertSpec.KeyPemCacheKey = "EtcdCaKeyPemPath"   // Example if needed in TaskCache explicitly
+			return convertSpec
+		}(),
 		// Step 4: Generate Etcd Node Certificates (members, clients)
 		pki.NewGenerateEtcdNodeCertsStep(
 			"", // InputPKIPathKey (TaskCache)
