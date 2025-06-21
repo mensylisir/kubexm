@@ -155,7 +155,14 @@ func (g *ExecutionGraph) Validate() error {
 	}
 
 
-	// TODO: Validate ExitNodes (ensure they exist)
+	// Validate ExitNodes: ensure they exist
+	for _, exitID := range g.ExitNodes {
+		if _, exists := g.Nodes[exitID]; !exists {
+			return fmt.Errorf("exit node ID '%s' does not exist in the graph's nodes map", exitID)
+		}
+		// Optionally, one could validate that exit nodes truly have no outgoing dependencies within the graph,
+		// but this is usually guaranteed if the graph construction is correct and cycle validation passes.
+	}
 
-	return nil // Placeholder for more robust validation logic
+	return nil
 }

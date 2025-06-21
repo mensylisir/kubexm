@@ -210,24 +210,29 @@ func (e *dagExecutor) Execute(rtCtx *runtime.Context, g *plan.ExecutionGraph, dr
 				node := g.Nodes[id]
 				nodeRes := result.NodeResults[id] // Already initialized
 
-				rtCtx.Logger.Info("Executing node", "nodeID", id, "nodeName", node.Name, "step", node.StepName, "hosts", node.HostNames)
+				// Prepare host names for logging
+				logHostNames := make([]string, len(node.Hosts))
+				for i, h := range node.Hosts {
+					logHostNames[i] = h.GetName()
+				}
+
+				rtCtx.Logger.Info("Executing node", "nodeID", id, "nodeName", node.Name, "step", node.StepName, "hosts", logHostNames)
 				nodeRes.Status = plan.StatusRunning
-				// nodeRes.StartTime is already set when results map was populated
+				// nodeRes.StartTime is already set by NewNodeResult
 
 				// Execute step on all hosts for this node
-				// Create a new Go context for this node that can be cancelled
-				// if any host operation within the node fails catastrophically (not typical for steps).
-				// runtime.Context itself has a GoContext, use it as parent.
 				nodeGoCtx, nodeCancel := context.WithCancel(rtCtx.GoContext())
-				defer nodeCancel() // Ensure cancellation signal is propagated if node func returns early
+				defer nodeCancel()
 
 				hostGroup, hostCtxGroup := errgroup.WithContext(nodeGoCtx)
 
 				for _, host := range node.Hosts {
 					currentHost := host // Capture range variable
 					hostGroup.Go(func() error {
-						stepRuntimeCtx := runtime.NewContextWithGoContext(hostCtxGroup, rtCtx) // Create StepContext from hostCtxGroup
-						hostRes := e.runStepOnHost(stepRuntimeCtx, currentHost, node.Step)
+						// Create a new *runtime.Context scoped for this host and the hostGroup's Go context.
+						// This new context object itself acts as the runtime.StepContext.
+						hostScopedRuntimeCtx := runtime.NewContextWithGoContext(hostCtxGroup, rtCtx.ForHost(currentHost))
+						hostRes := e.runStepOnHost(hostScopedRuntimeCtx, node.Step) // Pass hostScopedRuntimeCtx
 
 						nodeResLock.Lock()
 						nodeRes.HostResults[currentHost.GetName()] = hostRes
@@ -378,66 +383,64 @@ func (e *dagExecutor) Execute(rtCtx *runtime.Context, g *plan.ExecutionGraph, dr
 
 // propagateSkip is called when a node fails or is skipped. It marks all its direct and
 // indirect dependents as skipped.
-// mu must be locked by the caller if modifications to shared structures (like result.NodeResults, failedNodes)
-// are done without their own locks. Here, nodeRes update is protected by its own access pattern.
-// failedNodes map needs protection.
-func (e *dagExecutor) propagateSkip(rtCtx *runtime.Context, g *plan.ExecutionGraph, failedNodeID plan.NodeID,
-	dependents map[plan.NodeID][]plan.NodeID, result *plan.GraphExecutionResult,
-	failedNodesMap map[plan.NodeID]bool, sharedLock *sync.Mutex, reasonPrefix string) {
+// This function assumes that the caller (the goroutine for the failed/skipped node)
+// holds the `sharedLock` (mu from Execute) before calling it for the first time.
+// The lock protects `result.NodeResults`, `failedNodesMap`, and `processedNodesCount`.
+func (e *dagExecutor) propagateSkipRecursive(rtCtx *runtime.Context, g *plan.ExecutionGraph,
+	failedNodeID plan.NodeID, // The ID of the node that just failed/was skipped, causing this propagation
+	dependents map[plan.NodeID][]plan.NodeID,
+	result *plan.GraphExecutionResult,
+	failedNodesMap map[plan.NodeID]bool, // This map tracks nodes that are part of a "failure chain"
+	processedNodesCount *int, // Pointer to update the global count
+	reasonPrefix string) {
 
-	// Mark the current node as "causally failed" for propagation logic
-	// This needs to be done under sharedLock if failedNodesMap is shared and modified by multiple goroutines.
-	// The caller (node execution goroutine) already locked mu for failedNodesMap update.
-	// If propagateSkip is called from elsewhere, it needs to handle locking.
-	// For simplicity, assume caller handles lock for marking failedNodeID in failedNodesMap.
-	// This function itself will recursively call, so it should not try to re-lock sharedLock.
-
+	// Iterate over direct dependents of the failedNodeID
 	for _, depID := range dependents[failedNodeID] {
-		nodeRes := result.NodeResults[depID] // Assumes result.NodeResults is pre-populated
+		nodeRes := result.NodeResults[depID]
 
-		// Only update if it's still pending. Avoid overwriting a node that already completed/failed.
-		// This needs its own lock or careful state management if multiple goroutines can update NodeResult.
-		// For now, assume NodeResult status updates are atomic or protected.
-		// A better way: use a lock for each NodeResult or for the whole map.
-		// The current structure has nodeResultsLock at the GraphExecutionResult level.
-		// Let's assume we use that, or a finer-grained approach if needed.
-		// For now, let's make a local copy and then update under a shared lock if needed.
-
-		// This function can be called by multiple failing nodes concurrently.
-		// We need to ensure that updates to shared `result` and `failedNodesMap` are safe.
-		// The `sharedLock` (`mu` from Execute) should be used.
-
-		sharedLock.Lock()
+		// Only update and propagate if the node is still Pending or Running.
+		// This prevents overwriting a node that already completed, failed for a different reason,
+		// or was already skipped by another branch of propagation.
 		if nodeRes.Status == plan.StatusPending || nodeRes.Status == plan.StatusRunning {
 			nodeRes.Status = plan.StatusSkipped
-			nodeRes.Message = fmt.Sprintf("%s: node '%s' (%s)", reasonPrefix, failedNodeID, g.Nodes[failedNodeID].Name)
-			if nodeRes.StartTime.IsZero() { nodeRes.StartTime = time.Now() } // Mark start if not already
+			nodeRes.Message = fmt.Sprintf("%s: prerequisite '%s' (%s) failed or was skipped.",
+				reasonPrefix, failedNodeID, g.Nodes[failedNodeID].Name)
+			if nodeRes.StartTime.IsZero() {
+				nodeRes.StartTime = time.Now()
+			}
 			nodeRes.EndTime = time.Now()
-			failedNodesMap[depID] = true // Mark this dependent as also failed for further propagation
 
-			rtCtx.Logger.Info("Propagating skip to node", "targetNodeID", depID, "targetNodeName", g.Nodes[depID].Name, "reason", nodeRes.Message)
+			failedNodesMap[depID] = true // Mark this dependent as part of the failure chain.
+			(*processedNodesCount)++      // This skipped node is now "processed".
 
-			// Recursively propagate
-			// Unlock before recursive call if the recursive call might also try to lock.
-			// Here, recursive call is fine as it doesn't re-lock the same sharedLock.
-			// But the issue is if multiple branches of propagation happen, they all contend for sharedLock.
-			// This is okay.
-			e.propagateSkip(rtCtx, g, depID, dependents, result, failedNodesMap, sharedLock, reasonPrefix)
+			rtCtx.Logger.Info("Propagating skip to node",
+				"targetNodeID", depID, "targetNodeName", g.Nodes[depID].Name,
+				"reason", nodeRes.Message)
+
+			// Recursively propagate the skip to this dependent's own dependents.
+			e.propagateSkipRecursive(rtCtx, g, depID, dependents, result, failedNodesMap, processedNodesCount, reasonPrefix)
 		}
-		sharedLock.Unlock()
 	}
 }
 
 
 // runStepOnHost executes a single step on a single host.
-func (e *dagExecutor) runStepOnHost(stepCtx runtime.StepContext, host connector.Host, s step.Step) *plan.HostResult {
-	hr := plan.NewHostResult(host.GetName()) // Initializes status to Pending and StartTime
+// The stepCtx is a *runtime.Context that has been scoped for the specific host.
+func (e *dagExecutor) runStepOnHost(stepCtx *runtime.Context, s step.Step) *plan.HostResult {
+	currentHost := stepCtx.GetHost() // Get the host this context is scoped for
+	hr := plan.NewHostResult(currentHost.GetName()) // Initializes status to Pending and StartTime
 
-	logger := stepCtx.GetLogger().With("step", s.Meta().Name, "host", host.GetName()) // Use Meta()
+	// The logger from stepCtx is already the main runtime logger.
+	// Steps are expected to create their own contextualized loggers if needed,
+	// e.g., logger := stepCtx.GetLogger().With("step", s.Meta().Name, "host", currentHost.GetName())
+	// For engine logging about the step:
+	engineLogger := stepCtx.GetLogger().With("engine_step_runner", s.Meta().Name, "host", currentHost.GetName())
+
 
 	// Precheck
-	logger.V(1).Info("Running Precheck")
-	isDone, err := s.Precheck(stepCtx, host)
+	engineLogger.V(1).Info("Running Precheck")
+	// Pass stepCtx directly, as it fulfills the runtime.StepContext interface.
+	isDone, err := s.Precheck(stepCtx, currentHost)
 	if err != nil {
 		hr.Status = plan.StatusFailed
 		hr.Message = fmt.Sprintf("Precheck failed: %v", err)
@@ -519,7 +522,7 @@ func (e *dagExecutor) dryRun(rtCtx *runtime.Context, g *plan.ExecutionGraph, res
 			"id", id,
 			"name", node.Name,
 			"step", node.StepName,
-			"hosts", hostNames,
+			"hosts", logHostNames, // Use the prepared logHostNames
 			"dependencies", node.Dependencies,
 		)
 		fmt.Printf("  Node: %s (ID: %s)\n", node.Name, id)

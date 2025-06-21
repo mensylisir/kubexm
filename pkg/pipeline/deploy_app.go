@@ -72,23 +72,18 @@ func (p *DeployAppPipeline) Modules() []module.Module {
 // Plan generates the execution graph for all relevant modules within this pipeline.
 func (p *DeployAppPipeline) Plan(ctx runtime.PipelineContext) (*plan.ExecutionGraph, error) {
 	logger := ctx.GetLogger().With("pipeline", p.Name())
-	finalGraph := plan.NewExecutionGraph(p.Name()) // Assumes this constructor exists
+	finalGraph := plan.NewExecutionGraph(p.Name())
 
 	var previousModuleExitNodes []plan.NodeID
 	isFirstEffectiveModule := true
 
 	for _, mod := range p.Modules() {
-		if mod == nil { // Guard against nil module from constructor placeholder
+		if mod == nil {
 			logger.Warn("Encountered a nil module during planning, skipping.")
 			continue
 		}
-		moduleCtx, ok := ctx.(runtime.ModuleContext)
-		if !ok {
-			return nil, fmt.Errorf("unable to assert PipelineContext to ModuleContext for pipeline %s; context design needs review", p.Name())
-		}
-
 		logger.Info("Planning module", "module", mod.Name())
-		moduleFragment, err := mod.Plan(moduleCtx)
+		moduleFragment, err := mod.Plan(ctx) // Pass PipelineContext directly
 		if err != nil {
 			return nil, fmt.Errorf("planning failed for module %s in pipeline %s: %w", mod.Name(), p.Name(), err)
 		}
@@ -142,18 +137,9 @@ func (p *DeployAppPipeline) Run(rtCtx *runtime.Context, dryRun bool) (*plan.Grap
 	logger := rtCtx.GetLogger().With("pipeline", p.Name())
 	logger.Info("Starting pipeline run...", "dryRun", dryRun)
 
-	pipelinePlanCtx, ok := rtCtx.(runtime.PipelineContext)
-	if !ok {
-		err := fmt.Errorf("full runtime context does not satisfy PipelineContext for planning pipeline %s", p.Name())
-		logger.Error(err, "Context type assertion failed")
-		// Assuming plan.NewGraphExecutionResult exists
-		res := plan.NewGraphExecutionResult(p.Name())
-		res.Status = plan.StatusFailed
-		res.EndTime = time.Now()
-		return res, err
-	}
-
-	executionGraph, err := p.Plan(pipelinePlanCtx)
+	// rtCtx is *runtime.Context which implements runtime.PipelineContext.
+	// No assertion needed to pass it to p.Plan.
+	executionGraph, err := p.Plan(rtCtx)
 	if err != nil {
 		logger.Error(err, "Failed to generate execution plan for pipeline")
 		res := plan.NewGraphExecutionResult(p.Name())
@@ -189,22 +175,6 @@ func (p *DeployAppPipeline) Run(rtCtx *runtime.Context, dryRun bool) (*plan.Grap
 
 	logger.Info("Pipeline run finished.", "status", graphResult.Status)
 	return graphResult, nil
-}
-
-// uniqueNodeIDs helper (copied from create.go, move to common util if widely used)
-func uniqueNodeIDs(ids []plan.NodeID) []plan.NodeID {
-	if len(ids) == 0 {
-		return []plan.NodeID{}
-	}
-	seen := make(map[plan.NodeID]bool)
-	result := []plan.NodeID{}
-	for _, id := range ids {
-		if !seen[id] {
-			seen[id] = true
-			result = append(result, id)
-		}
-	}
-	return result
 }
 
 // Ensure DeployAppPipeline implements the pipeline.Pipeline interface.

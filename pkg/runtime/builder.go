@@ -320,21 +320,26 @@ func (b *RuntimeBuilder) BuildFromConfig(ctx context.Context, clusterConfig *v1a
 	etcdArtifactsBaseDir := filepath.Join(clusterBaseDir, "etcd")
 	log.Info("Ensuring ETCD artifacts base directory exists.", "path", etcdArtifactsBaseDir)
 	if err := util.CreateDir(etcdArtifactsBaseDir); err != nil {
-		// Error handling
+		log.Error(err, "Failed to create ETCD artifacts base directory", "path", etcdArtifactsBaseDir)
+		cleanupFunc()
+		return nil, nil, fmt.Errorf("failed to create ETCD artifacts base directory '%s': %w", etcdArtifactsBaseDir, err)
 	}
 
-	containerRuntimeArtifactsBaseDir := filepath.Join(clusterBaseDir, "container_runtime")
+	containerRuntimeArtifactsBaseDir := filepath.Join(clusterBaseDir, common.DefaultContainerRuntimeDir) // Using common constant
 	log.Info("Ensuring Container Runtime artifacts base directory exists.", "path", containerRuntimeArtifactsBaseDir)
 	if err := util.CreateDir(containerRuntimeArtifactsBaseDir); err != nil {
-		// Error handling
+		log.Error(err, "Failed to create Container Runtime artifacts base directory", "path", containerRuntimeArtifactsBaseDir)
+		cleanupFunc()
+		return nil, nil, fmt.Errorf("failed to create Container Runtime artifacts base directory '%s': %w", containerRuntimeArtifactsBaseDir, err)
 	}
 
-	kubernetesArtifactsBaseDir := filepath.Join(clusterBaseDir, "kubernetes")
+	kubernetesArtifactsBaseDir := filepath.Join(clusterBaseDir, common.DefaultKubernetesDir) // Using common constant
 	log.Info("Ensuring Kubernetes artifacts base directory exists.", "path", kubernetesArtifactsBaseDir)
 	if err := util.CreateDir(kubernetesArtifactsBaseDir); err != nil {
-		// Error handling
+		log.Error(err, "Failed to create Kubernetes artifacts base directory", "path", kubernetesArtifactsBaseDir)
+		cleanupFunc()
+		return nil, nil, fmt.Errorf("failed to create Kubernetes artifacts base directory '%s': %w", kubernetesArtifactsBaseDir, err)
 	}
-
 
 	if runtimeCtx.GlobalConnectionTimeout <= 0 {
 		runtimeCtx.GlobalConnectionTimeout = 30 * time.Second
@@ -344,6 +349,17 @@ func (b *RuntimeBuilder) BuildFromConfig(ctx context.Context, clusterConfig *v1a
 	runtimeCtx.ModuleCache = cache.NewModuleCache()
 	runtimeCtx.TaskCache = cache.NewTaskCache()
 	runtimeCtx.StepCache = cache.NewStepCache()
+
+	// Set the ControlNode in the context
+	if cnHR, ok := hostRuntimes[common.ControlNodeHostName]; ok {
+		runtimeCtx.ControlNode = cnHR.Host
+	} else {
+		// This should ideally not happen if the control node goroutine succeeded
+		err := fmt.Errorf("control node HostRuntime not found after initialization")
+		log.Error(err, "Failed to set ControlNode in runtime context")
+		cleanupFunc()
+		return nil, nil, err
+	}
 
 	log.Info("Runtime environment built successfully.")
 	return runtimeCtx, cleanupFunc, nil
