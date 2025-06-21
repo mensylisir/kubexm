@@ -241,4 +241,4 @@ func uniqueNodeIDs(ids []plan.NodeID) []plan.NodeID {
 }
 
 // Ensure CreateClusterPipeline implements the pipeline.Pipeline interface.
-var _ Pipeline = (*CreateClusterPipeline)(nil)
+var _ pipeline.Pipeline = (*CreateClusterPipeline)(nil)
