@@ -9,12 +9,11 @@ import (
 	"time" // For result.EndTime.Sub(result.StartTime)
 
 	"github.com/spf13/cobra"
-	// Corrected and expected import paths:
-	"github.com/mensylisir/kubexm/pkg/pipeline"
+
+	"github.com/mensylisir/kubexm/pkg/cluster" // For NewCreateClusterPipeline
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
-	// Assuming your logger package is under pkg/logger
-	// "github.com/mensylisir/kubexm/pkg/logger" // This is for the app's own logger, distinct from runtime ctx logger if needed
+	// "github.com/mensylisir/kubexm/pkg/logger" // App's own logger if needed
 )
 
 var (
@@ -71,32 +70,28 @@ func runApply() error {
 	builder := runtime.NewRuntimeBuilder(configFile)
 
 	// Build the runtime context
-	// Using context.Background() for the top-level Go context for the build process
-	// The logger within this ctx is from the runtime package
-	ctx, cleanup, err := builder.Build(context.Background())
+	ctx, cleanup, err := builder.BuildFromFile(context.Background()) // Use BuildFromFile
 	if err != nil {
-		// No ctx.Logger available yet if Build failed early. Use standard log or a pre-build app logger.
-		log.Printf("Error: Failed to build runtime environment: %v\n", err) // Print to stdout/stderr
+		log.Printf("Error: Failed to build runtime environment: %v\n", err)
 		return fmt.Errorf("failed to build runtime environment: %w", err)
 	}
-	defer cleanup() // Ensure cleanup function (e.g., closing connection pool) is called
+	defer cleanup()
 
-	// Instantiate the desired pipeline
-	// Using NewDeployAppPipeline as specified in the issue
-	p := pipeline.NewDeployAppPipeline()
+	// Instantiate the CreateClusterPipeline
+	// NewCreateClusterPipeline now takes *runtime.Context
+	p := cluster.NewCreateClusterPipeline(ctx)
 
 	ctx.Logger.Info("Starting pipeline execution...", "pipeline", p.Name(), "dryRun", dryRun, "configFile", configFile)
 
-	// Run the pipeline
-	result, err := p.Run(ctx, dryRun) // Pass the main runtime context
+	// Run the pipeline. p.Run now returns *plan.GraphExecutionResult
+	result, err := p.Run(ctx, dryRun)
 
 	// Handle results and output formatting
 	if outputFormat == "json" {
 		jsonResult, marshalErr := json.MarshalIndent(result, "", "  ")
 		if marshalErr != nil {
 			ctx.Logger.Error(marshalErr, "Failed to marshal execution result to JSON")
-			// Still print text result if JSON marshalling fails
-			printResultAsText(ctx, result)
+			printResultAsText(ctx, result) // Attempt to print text if JSON fails
 			return fmt.Errorf("failed to marshal result to JSON: %w", marshalErr)
 		}
 		fmt.Println(string(jsonResult))
@@ -106,31 +101,41 @@ func runApply() error {
 
 	if err != nil {
 		ctx.Logger.Error(err, "Pipeline execution finished with errors")
-		return err // Return the error from pipeline.Run
+		// err from p.Run might be an engine execution error, not a business logic failure.
+		// The result.Status reflects business logic outcome.
+		// If err is not nil, it's usually a more fundamental problem.
+		return err
 	}
 
+	// Check the graph execution status
 	if result != nil && result.Status == plan.StatusFailed {
-		ctx.Logger.Info("Pipeline completed with failed status.")
+		ctx.Logger.Info("Pipeline completed with overall status: Failed.")
 		return fmt.Errorf("pipeline %s completed with status: %s", p.Name(), result.Status)
 	}
 
-	ctx.Logger.Info("Pipeline execution completed successfully.", "status", result.Status, "duration", result.EndTime.Sub(result.StartTime).String())
+	if result != nil {
+		ctx.Logger.Info("Pipeline execution completed.", "status", result.Status, "duration", result.EndTime.Sub(result.StartTime).String())
+	} else {
+		// Should not happen if err is nil
+		ctx.Logger.Warn("Pipeline execution returned nil result and nil error.")
+	}
 	return nil
 }
 
-// printResultAsText prints the execution result in a human-readable text format.
-func printResultAsText(ctx *runtime.Context, result *plan.ExecutionResult) {
+// printResultAsText prints the GraphExecutionResult in a human-readable text format.
+func printResultAsText(ctx *runtime.Context, result *plan.GraphExecutionResult) {
 	if result == nil {
 		if ctx != nil && ctx.Logger != nil {
-			ctx.Logger.Warn("Execution result is nil, nothing to print.")
+			ctx.Logger.Warn("Graph execution result is nil, nothing to print.")
 		} else {
-			fmt.Println("Execution result is nil.")
+			fmt.Println("Graph execution result is nil.")
 		}
 		return
 	}
 
 	fmt.Printf("\n--- Execution Summary ---\n")
-	fmt.Printf("Pipeline Status: %s\n", result.Status)
+	fmt.Printf("Graph Name: %s\n", result.GraphName)
+	fmt.Printf("Overall Status: %s\n", result.Status)
 	fmt.Printf("Start Time: %s\n", result.StartTime.Format(time.RFC3339))
 	if !result.EndTime.IsZero() {
 		fmt.Printf("End Time: %s\n", result.EndTime.Format(time.RFC3339))
@@ -138,34 +143,49 @@ func printResultAsText(ctx *runtime.Context, result *plan.ExecutionResult) {
 	}
 	fmt.Println("-------------------------")
 
-	for i, phaseResult := range result.PhaseResults {
-		fmt.Printf("\nPhase %d: %s [%s]\n", i+1, phaseResult.PhaseName, phaseResult.Status)
-		fmt.Println("-------------------------")
-		for j, actionResult := range phaseResult.ActionResults {
-			fmt.Printf("  Action %d.%d: %s [%s]\n", i+1, j+1, actionResult.ActionName, actionResult.Status)
-			if len(actionResult.HostResults) > 0 {
-				fmt.Println("    Hosts:")
-				for hostName, hostResult := range actionResult.HostResults {
+	// Iterate over NodeResults. Order might not be guaranteed for map iteration.
+	// For consistent output, one might sort NodeIDs or collect results in a slice first.
+	// For simplicity here, iterating map directly.
+	if len(result.NodeResults) > 0 {
+		fmt.Println("\nNode Results:")
+		for nodeID, nodeResult := range result.NodeResults {
+			fmt.Printf("\n  Node ID: %s\n", nodeID)
+			fmt.Printf("    Name: %s (Step: %s)\n", nodeResult.NodeName, nodeResult.StepName)
+			fmt.Printf("    Status: %s\n", nodeResult.Status)
+			fmt.Printf("    Start: %s, End: %s\n", nodeResult.StartTime.Format(time.RFC1123Z), nodeResult.EndTime.Format(time.RFC1123Z))
+			if nodeResult.Message != "" {
+				fmt.Printf("    Message: %s\n", nodeResult.Message)
+			}
+
+			if len(nodeResult.HostResults) > 0 {
+				fmt.Println("    Host Results:")
+				for hostName, hostResult := range nodeResult.HostResults {
 					fmt.Printf("      - %s: [%s]\n", hostName, hostResult.Status)
-					if hostResult.Skipped {
+					if hostResult.Message != "" {
 						fmt.Printf("        Message: %s\n", hostResult.Message)
+					}
+					if hostResult.Skipped {
+						// Message for skipped by precheck is usually "Skipped: Precheck condition already met."
 					} else if hostResult.Status == plan.StatusFailed {
-						fmt.Printf("        Error: %s\n", hostResult.Message)
 						if hostResult.Stdout != "" {
-							fmt.Printf("        Stdout: %s\n", hostResult.Stdout)
+							fmt.Printf("        Stdout: %s\n", strings.TrimSpace(hostResult.Stdout))
 						}
 						if hostResult.Stderr != "" {
-							fmt.Printf("        Stderr: %s\n", hostResult.Stderr)
+							fmt.Printf("        Stderr: %s\n", strings.TrimSpace(hostResult.Stderr))
 						}
-					} else { // Success
-						fmt.Printf("        Message: %s\n", hostResult.Message)
-						// Optionally print stdout/stderr for successful steps if verbose
+					} else if hostResult.Status == plan.StatusSuccess {
+						// Optionally print stdout/stderr for successful steps if verbose or needed
+						if ctx.IsVerbose() && hostResult.Stdout != "" { // Example: only if verbose
+							fmt.Printf("        Stdout: %s\n", strings.TrimSpace(hostResult.Stdout))
+						}
 					}
 				}
 			} else {
-				fmt.Println("    No hosts targeted for this action or no results.")
+				fmt.Println("    No host-specific results for this node.")
 			}
 		}
+	} else {
+		fmt.Println("No node results available.")
 	}
 	fmt.Println("\n--- End of Execution Summary ---")
 }

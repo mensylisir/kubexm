@@ -1,10 +1,11 @@
-package step
+package common
 
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec" // Required for spec.StepMeta
+	"github.com/mensylisir/kubexm/pkg/step"  // Required for step.Step interface
 )
 
 // InstallPackagesStep defines a step to install one or more packages.
@@ -16,7 +17,7 @@ type InstallPackagesStep struct {
 // NewInstallPackagesStep creates a new InstallPackagesStep.
 // instanceName is a specific name for this instance of the step, e.g., "Install Nginx Package".
 // If instanceName is empty, a default name will be generated.
-func NewInstallPackagesStep(packages []string, instanceName string) Step {
+func NewInstallPackagesStep(packages []string, instanceName string) step.Step { // Return type is step.Step
 	metaName := instanceName
 	if metaName == "" {
 		metaName = "InstallPackages"
@@ -100,4 +101,4 @@ func (s *InstallPackagesStep) Run(ctx runtime.StepContext, host connector.Host) 
 }
 
 // Ensure InstallPackagesStep implements the Step interface.
-var _ Step = (*InstallPackagesStep)(nil)
+var _ step.Step = (*InstallPackagesStep)(nil) // Interface check uses step.Step
