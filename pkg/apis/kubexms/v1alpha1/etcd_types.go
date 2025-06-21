@@ -6,9 +6,9 @@ import (
 )
 
 const (
-	EtcdTypeKubeXMSInternal = "kubexm"   // Indicates etcd deployed as binaries by KubeXM
-	EtcdTypeExternal        = "external" // Indicates an existing external etcd cluster
-	EtcdTypeInternal        = "kubeadm"  // Indicates etcd deployed as static pods by kubeadm
+	EtcdTypeKubeXMSInternal = "kubexm"   // 表示要使用二进制部署etcd
+	EtcdTypeExternal        = "external" // 表示外部已经有现成的etcd
+	EtcdTypeInternal        = "kubeadm"  // 表示kubeadm部署etcd,即etcd是以静态pod的形式启动的
 )
 
 // EtcdConfig defines the configuration for the Etcd cluster.

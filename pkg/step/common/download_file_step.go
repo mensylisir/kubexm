@@ -12,9 +12,9 @@ import (
 	"strings" // Added for ToLower and EqualFold
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/logger" // For logger.Logger
 	"github.com/mensylisir/kubexm/pkg/spec"
-	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step"   // For step.Step and step.StepContext
 )
 
 // DownloadFileStep downloads a file from a URL to a local path on the target host (usually control node).
@@ -57,9 +57,9 @@ func (s *DownloadFileStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *DownloadFileStep) verifyChecksum(logger runtime.Logger, filePath string) error {
+func (s *DownloadFileStep) verifyChecksum(log logger.Logger, filePath string) error { // Parameter renamed to log to avoid conflict
 	if s.Checksum == "" || s.ChecksumType == "" {
-		logger.Debug("No checksum provided, skipping verification.", "path", filePath)
+		log.Debugf("No checksum provided for %s, skipping verification.", filePath)
 		return nil
 	}
 
@@ -85,14 +85,13 @@ func (s *DownloadFileStep) verifyChecksum(logger runtime.Logger, filePath string
 	if !strings.EqualFold(calculatedChecksum, s.Checksum) {
 		return fmt.Errorf("checksum mismatch for %s: expected %s, got %s", filePath, s.Checksum, calculatedChecksum)
 	}
-	logger.Info("Checksum verified successfully.", "path", filePath)
+	log.Infof("Checksum verified successfully for path: %s", filePath)
 	return nil
 }
 
-func (s *DownloadFileStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
-	// This step runs on the control node, so host connector is LocalConnector.
-	// Runner methods for local operations should directly use os package.
-	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
+func (s *DownloadFileStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
+	// This step runs on the control node.
+	logger := ctx.GetLogger() // Get *logger.Logger
 
 	// For local operations, we don't use runnerSvc.Exists, but os.Stat.
 	// This assumes the StepContext is configured for local execution or can provide a local runner.
@@ -100,43 +99,43 @@ func (s *DownloadFileStep) Precheck(ctx runtime.StepContext, host connector.Host
 	// direct os calls are appropriate.
 	if _, err := os.Stat(s.DestPath); err == nil {
 		// File exists, verify checksum if provided
-		logger.Info("Destination file already exists.", "path", s.DestPath)
-		if err := s.verifyChecksum(logger, s.DestPath); err != nil {
-			logger.Warn("Existing file checksum verification failed, will re-download.", "path", s.DestPath, "error", err)
+		logger.Infof("Destination file already exists. path: %s", s.DestPath)
+		if errVerify := s.verifyChecksum(logger, s.DestPath); errVerify != nil { // Pass logger directly
+			logger.Warnf("Existing file checksum verification failed for path %s, will re-download. error: %v", s.DestPath, errVerify)
 			// Attempt to remove the corrupted/wrong file before re-downloading
 			if removeErr := os.Remove(s.DestPath); removeErr != nil {
-				logger.Error(removeErr, "Failed to remove existing file with bad checksum.", "path", s.DestPath)
+				logger.Errorf("Failed to remove existing file %s with bad checksum: %v", s.DestPath, removeErr)
 				// If removal fails, download might also fail or append.
 			}
 			return false, nil
 		}
-		logger.Info("Existing file is valid. Download step will be skipped.")
+		logger.Infof("Existing file %s is valid. Download step will be skipped.", s.DestPath)
 		return true, nil
 	} else if os.IsNotExist(err) {
-		logger.Info("Destination file does not exist, download required.", "path", s.DestPath)
+		logger.Infof("Destination file does not exist, download required. path: %s", s.DestPath)
 		return false, nil
 	} else { // Other error like permission denied
-		logger.Error(err, "Failed to stat destination file during precheck.", "path", s.DestPath)
+		logger.Errorf("Failed to stat destination file %s during precheck: %v", s.DestPath, err)
 		return false, fmt.Errorf("precheck failed to stat destination file %s: %w", s.DestPath, err)
 	}
 }
 
-func (s *DownloadFileStep) Run(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
+func (s *DownloadFileStep) Run(ctx step.StepContext, host connector.Host) error { // Changed to step.StepContext
+	logger := ctx.GetLogger() // Get *logger.Logger
 
 	if s.Sudo {
 		// This indicates a design issue if sudo is needed for a download to a work_dir.
 		// Downloads should ideally go to paths writable by the kubexm user on the control node.
-		logger.Warn("Sudo is true for DownloadFileStep. This is unusual for control-node work_dir operations.")
+		logger.Warnf("Sudo is true for DownloadFileStep (step: %s, host: %s). This is unusual for control-node work_dir operations.", s.meta.Name, host.GetName())
 	}
 
 	destDir := filepath.Dir(s.DestPath)
-	logger.Info("Ensuring destination directory exists.", "path", destDir)
+	logger.Infof("Ensuring destination directory exists for step %s on host %s. path: %s", s.meta.Name, host.GetName(), destDir)
 	if err := os.MkdirAll(destDir, 0755); err != nil { // 0755 standard for dirs
 		return fmt.Errorf("failed to create destination directory %s: %w", destDir, err)
 	}
 
-	logger.Info("Starting download.", "url", s.URL, "destination", s.DestPath)
+	logger.Infof("Starting download for step %s on host %s. url: %s, destination: %s", s.meta.Name, host.GetName(), s.URL, s.DestPath)
 
 	req, err := http.NewRequestWithContext(ctx.GoContext(), http.MethodGet, s.URL, nil)
 	if err != nil {
@@ -179,22 +178,20 @@ func (s *DownloadFileStep) Run(ctx runtime.StepContext, host connector.Host) err
 		return fmt.Errorf("downloaded file checksum verification failed for %s: %w", s.DestPath, err)
 	}
 
-	logger.Info("File downloaded successfully.", "path", s.DestPath)
+	logger.Infof("File downloaded successfully for step %s on host %s. path: %s", s.meta.Name, host.GetName(), s.DestPath)
 	return nil
 }
 
-func (s *DownloadFileStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
-	logger.Info("Attempting to remove downloaded file.", "path", s.DestPath)
+func (s *DownloadFileStep) Rollback(ctx step.StepContext, host connector.Host) error { // Changed to step.StepContext
+	logger := ctx.GetLogger() // Get *logger.Logger
+	logger.Infof("Attempting to remove downloaded file for step %s on host %s. path: %s", s.meta.Name, host.GetName(), s.DestPath)
 	err := os.Remove(s.DestPath)
 	if err != nil && !os.IsNotExist(err) {
-		logger.Error(err, "Failed to remove downloaded file during rollback.", "path", s.DestPath)
+		logger.Errorf("Failed to remove downloaded file %s during rollback for step %s on host %s: %v", s.DestPath, s.meta.Name, host.GetName(), err)
 		return fmt.Errorf("failed to remove %s during rollback: %w", s.DestPath, err)
 	}
-	logger.Info("Downloaded file removed or was not present.", "path", s.DestPath)
+	logger.Infof("Downloaded file %s removed or was not present for step %s on host %s.", s.DestPath, s.meta.Name, host.GetName())
 	return nil
 }
 
 var _ step.Step = (*DownloadFileStep)(nil)
-
-[end of pkg/step/common/download_file_step.go]

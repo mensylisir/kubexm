@@ -7,8 +7,9 @@ import (
 	"github.com/mensylisir/kubexm/pkg/module/preflight" // Assuming preflight module is ready
 	// TODO: Import other modules like corecomponents, clusterbootstrap, clusterready when they are created
 	"github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/runtime"
-	"github.com/mensylisir/kubexm/pkg/task" // For task.ExecutionFragment and task.UniqueNodeIDs
+	"github.com/mensylisir/kubexm/pkg/runtime" // For *runtime.Context in Run method
+	"github.com/mensylisir/kubexm/pkg/pipeline" // For pipeline.Pipeline and pipeline.PipelineContext
+	"github.com/mensylisir/kubexm/pkg/task"    // For task.ExecutionFragment and task.UniqueNodeIDs
 )
 
 // CreateClusterPipeline defines the pipeline for creating a new Kubernetes cluster.
@@ -55,25 +56,28 @@ func (p *CreateClusterPipeline) Modules() []module.Module {
 
 // Plan generates the final ExecutionGraph for the entire pipeline.
 // It orchestrates module planning and links their ExecutionFragments.
-func (p *CreateClusterPipeline) Plan(ctx runtime.PipelineContext) (*plan.ExecutionGraph, error) {
+func (p *CreateClusterPipeline) Plan(ctx pipeline.PipelineContext) (*plan.ExecutionGraph, error) { // Changed to pipeline.PipelineContext
 	logger := ctx.GetLogger().With("pipeline", p.Name())
 	logger.Info("Planning pipeline...")
 
 	finalGraph := plan.NewExecutionGraph(p.Name()) // Initialize an empty graph
 	var previousModuleExitNodes []plan.NodeID
 
-	moduleCtx, ok := ctx.(runtime.ModuleContext)
+	// TODO: This assertion will need to change when ModuleContext is refactored.
+	// For now, we assume the full runtime.Context (which implements pipeline.PipelineContext)
+	// also implements module.ModuleContext (the new one).
+	moduleCtx, ok := ctx.(module.ModuleContext) // Changed to module.ModuleContext
 	if !ok {
 		// This is a critical setup issue. The context provided to Pipeline.Plan
 		// must also be usable as a ModuleContext for its modules.
 		// This implies the concrete runtime.Context implements all facade interfaces.
-		return nil, fmt.Errorf("pipeline context cannot be asserted to ModuleContext for pipeline %s", p.Name())
+		return nil, fmt.Errorf("pipeline context cannot be asserted to module.ModuleContext for pipeline %s", p.Name())
 	}
 
 	for i, mod := range p.Modules() {
 		logger.Info("Planning module", "module_name", mod.Name(), "module_index", i)
 		// Modules expect ModuleContext.
-		moduleFragment, err := mod.Plan(moduleCtx)
+		moduleFragment, err := mod.Plan(moduleCtx) // mod.Plan now expects module.ModuleContext
 		if err != nil {
 			logger.Error(err, "Failed to plan module", "module", mod.Name())
 			return nil, fmt.Errorf("failed to plan module %s in pipeline %s: %w", mod.Name(), p.Name(), err)

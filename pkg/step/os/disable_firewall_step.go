@@ -5,9 +5,10 @@ import (
 	"strings"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
+	// "github.com/mensylisir/kubexm/pkg/engine" // Removed
+	"github.com/mensylisir/kubexm/pkg/runner" // For runner.Runner type
 	"github.com/mensylisir/kubexm/pkg/spec"
-	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step"   // For step.StepContext
 )
 
 // DisableFirewallStep attempts to disable common firewalls like firewalld and ufw.
@@ -44,11 +45,14 @@ func (s *DisableFirewallStep) Meta() *spec.StepMeta {
 
 // getFirewallStatus checks if a specific firewall service is active.
 // Returns "active", "inactive", "not_found", or "error".
-func (s *DisableFirewallStep) getFirewallStatus(ctx runtime.StepContext, host connector.Host, runnerSvc runtime.Runner, conn connector.Connector, firewallService string) string {
+func (s *DisableFirewallStep) getFirewallStatus(ctx step.StepContext, host connector.Host, runnerSvc runner.Runner, conn connector.Connector, firewallService string) string { // Changed to step.StepContext
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "firewall", firewallService)
 	isActiveCmd := fmt.Sprintf("systemctl is-active %s", firewallService)
 	// We don't want this check command to fail the step if the service doesn't exist.
-	execOpts := &connector.ExecOptions{Sudo: s.Sudo, Check: true, Retries: 0} // Check:true is conceptual for runner
+	// The 'Check' field was conceptual and doesn't exist in ExecOptions.
+	// The command 'systemctl is-active' itself returns specific exit codes for active/inactive/not-found.
+	// The runnerSvc.RunWithOptions should return a CommandError that includes the exit code.
+	execOpts := &connector.ExecOptions{Sudo: s.Sudo, Retries: 0}
 
 	stdoutBytes, _, err := runnerSvc.RunWithOptions(ctx.GoContext(), conn, isActiveCmd, execOpts)
 	statusOutput := strings.TrimSpace(string(stdoutBytes))
@@ -86,7 +90,7 @@ func (s *DisableFirewallStep) getFirewallStatus(ctx runtime.StepContext, host co
 	return statusOutput // "active", "inactive", "activating" etc.
 }
 
-func (s *DisableFirewallStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *DisableFirewallStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) { // Changed to step.StepContext
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -112,7 +116,7 @@ func (s *DisableFirewallStep) Precheck(ctx runtime.StepContext, host connector.H
 	return false, nil
 }
 
-func (s *DisableFirewallStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *DisableFirewallStep) Run(ctx step.StepContext, host connector.Host) error { // Changed to step.StepContext
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -122,7 +126,7 @@ func (s *DisableFirewallStep) Run(ctx runtime.StepContext, host connector.Host) 
 
 	s.originalStatuses = make(map[string]string) // Clear for current run
 
-	for _, fw := originalFirewallLoop := range s.TargetFirewalls {
+	for _, fw := range s.TargetFirewalls { // Corrected loop syntax
 		status := s.getFirewallStatus(ctx, host, runnerSvc, conn, fw)
 		s.originalStatuses[fw] = status // Store for potential rollback
 		logger.Debug("Original status recorded for rollback.", "firewall", fw, "status", status)
@@ -153,7 +157,7 @@ func (s *DisableFirewallStep) Run(ctx runtime.StepContext, host connector.Host) 
 	return nil // Best effort for disabling multiple firewalls
 }
 
-func (s *DisableFirewallStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *DisableFirewallStep) Rollback(ctx step.StepContext, host connector.Host) error { // Changed to step.StepContext
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)

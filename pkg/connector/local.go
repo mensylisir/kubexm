@@ -7,8 +7,8 @@ import (
 	"io"
 	"crypto/sha256" // Added
 	"encoding/hex"  // Added
-	"fmt"
-	"io" // For os.Stat for Mkdir, Remove
+	// "fmt" // Removed duplicate
+	// "io" // Removed duplicate
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -375,6 +375,39 @@ func (l *LocalConnector) GetFileChecksum(ctx context.Context, path string, check
 		return "", fmt.Errorf("unsupported checksum type '%s' for local file %s", checksumType, path)
 	}
 }
+
+// Mkdir creates a directory on the local filesystem.
+// perm is an octal string like "0755".
+func (l *LocalConnector) Mkdir(ctx context.Context, path string, perm string) error {
+	// TODO: Handle context cancellation if os.MkdirAll can be long-running (unlikely for mkdir)
+	mode, err := strconv.ParseUint(perm, 8, 32)
+	if err != nil {
+		return fmt.Errorf("invalid permission format '%s' for Mkdir: %w", perm, err)
+	}
+	return os.MkdirAll(path, os.FileMode(mode))
+}
+
+// Remove removes a file or directory on the local filesystem.
+// For LocalConnector, RemoveOptions are used to control behavior.
+func (l *LocalConnector) Remove(ctx context.Context, path string, opts RemoveOptions) error {
+	// TODO: Handle context cancellation
+	_, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if opts.IgnoreNotExist {
+				return nil
+			}
+			return fmt.Errorf("path %s does not exist: %w", path, err)
+		}
+		return fmt.Errorf("failed to stat path %s before removal: %w", path, err)
+	}
+
+	if opts.Recursive {
+		return os.RemoveAll(path)
+	}
+	return os.Remove(path)
+}
+
 
 // Ensure LocalConnector implements Connector interface
 var _ Connector = &LocalConnector{}

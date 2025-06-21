@@ -3,10 +3,10 @@ package preflight
 import (
 	"fmt"
 
-	"github.com/mensylisir/kubexm/pkg/module" // Alias to avoid collision if task.Module is also used by name
+	"github.com/mensylisir/kubexm/pkg/module" // For module.Module, module.BaseModule, module.ModuleContext
 	"github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/runtime"
-	"github.com/mensylisir/kubexm/pkg/task"
+	// "github.com/mensylisir/kubexm/pkg/runtime" // Removed
+	"github.com/mensylisir/kubexm/pkg/task" // For task.Task, task.ExecutionFragment, task.TaskContext
 	"github.com/mensylisir/kubexm/pkg/task/greeting"
 	"github.com/mensylisir/kubexm/pkg/task/pre"
 	// taskPreflight "github.com/mensylisir/kubexm/pkg/task/preflight" // Keep if SystemChecksTask etc. are still used
@@ -43,7 +43,7 @@ func NewPreflightModule(assumeYes bool) module.Module { // Returns module.Module
 // Plan generates the execution fragment for the preflight module.
 // It orchestrates the fragments from SystemChecksTask and SetupKernelTask,
 // making SetupKernelTask depend on SystemChecksTask.
-func (m *PreflightModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragment, error) {
+func (m *PreflightModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, error) { // Changed to module.ModuleContext
 	logger := ctx.GetLogger().With("module", m.Name())
 	moduleFragment := &task.ExecutionFragment{
 		Nodes:      make(map[plan.NodeID]*plan.ExecutionNode),
@@ -104,7 +104,16 @@ func (m *PreflightModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragme
 		// For now, to make progress, I will assume `ctx` can be used for methods common to both.
 		// If specific TaskContext methods are needed, this will fail compilation later.
 		// Assuming ctx (ModuleContext) is fulfilled by an object that also fulfills TaskContext.
-		taskIsRequired, err := currentTask.IsRequired(ctx)
+
+		// Assert module.ModuleContext to task.TaskContext
+		// This is valid because task.TaskContext embeds module.ModuleContext,
+		// and the concrete *runtime.Context implements task.TaskContext.
+		taskCtx, ok := ctx.(task.TaskContext)
+		if !ok {
+			return nil, fmt.Errorf("failed to assert ModuleContext to TaskContext for task %s in module %s", currentTask.Name(), m.Name())
+		}
+
+		taskIsRequired, err := currentTask.IsRequired(taskCtx)
 		if err != nil {
 			logger.Error(err, "Error checking if task is required", "task", currentTask.Name())
 			return nil, fmt.Errorf("failed to check if task %s is required: %w", currentTask.Name(), err)
@@ -116,7 +125,7 @@ func (m *PreflightModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragme
 
 		logger.Info("Planning task", "task", currentTask.Name())
 		// Same assumption for ctx being passable as TaskContext.
-		taskFragment, err := currentTask.Plan(ctx)
+		taskFragment, err := currentTask.Plan(taskCtx)
 		if err != nil {
 			logger.Error(err, "Failed to plan task", "task", currentTask.Name())
 			return nil, fmt.Errorf("failed to plan task %s: %w", currentTask.Name(), err)
@@ -172,8 +181,8 @@ func (m *PreflightModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragme
 	moduleFragment.ExitNodes = append(moduleFragment.ExitNodes, previousTaskExitNodes...)
 
 	// Deduplicate EntryNodes and ExitNodes for the module fragment
-	moduleFragment.EntryNodes = uniqueNodeIDs(moduleFragment.EntryNodes)
-	moduleFragment.ExitNodes = uniqueNodeIDs(moduleFragment.ExitNodes)
+	moduleFragment.EntryNodes = plan.UniqueNodeIDs(moduleFragment.EntryNodes) // Changed to plan.UniqueNodeIDs
+	moduleFragment.ExitNodes = plan.UniqueNodeIDs(moduleFragment.ExitNodes)   // Changed to plan.UniqueNodeIDs
 
 
 	if len(moduleFragment.Nodes) == 0 {
@@ -185,21 +194,7 @@ func (m *PreflightModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragme
 	return moduleFragment, nil
 }
 
-// uniqueNodeIDs returns a slice with unique NodeIDs.
-func uniqueNodeIDs(ids []plan.NodeID) []plan.NodeID {
-    if len(ids) == 0 {
-        return []plan.NodeID{}
-    }
-    seen := make(map[plan.NodeID]bool)
-    result := []plan.NodeID{}
-    for _, id := range ids {
-        if !seen[id] {
-            seen[id] = true
-            result = append(result, id)
-        }
-    }
-    return result
-}
+// uniqueNodeIDs is now in pkg/plan/graph_plan.go
 
 // Ensure PreflightModule implements the module.Module interface.
 var _ module.Module = (*PreflightModule)(nil)

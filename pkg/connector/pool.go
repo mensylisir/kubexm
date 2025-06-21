@@ -11,7 +11,7 @@ import (
 
 	"errors" // Added for errors.New
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/sync/errgroup"
+	// "golang.org/x/sync/errgroup" // Removed as unused
 )
 
 // ErrPoolExhausted is returned when Get is called and the pool has reached MaxPerKey for that key.
@@ -114,8 +114,18 @@ func generatePoolKey(cfg ConnectionCfg) string {
 		keyParts = append(keyParts, "pwd:true")
 	}
 
-	if cfg.Bastion != nil {
-		keyParts = append(keyParts, "bastion:"+generatePoolKey(*cfg.Bastion)) // Recursive call for bastion
+	if cfg.BastionCfg != nil {
+		bastionConnCfg := ConnectionCfg{
+			Host:           cfg.BastionCfg.Host,
+			Port:           cfg.BastionCfg.Port,
+			User:           cfg.BastionCfg.User,
+			Password:       cfg.BastionCfg.Password,
+			PrivateKey:     cfg.BastionCfg.PrivateKey,
+			PrivateKeyPath: cfg.BastionCfg.PrivateKeyPath,
+			Timeout:        cfg.BastionCfg.Timeout,
+			// Bastion for a bastion is not part of key generation here for simplicity
+		}
+		keyParts = append(keyParts, "bastion:"+generatePoolKey(bastionConnCfg))
 	}
 
 	// Sort parts for consistent key generation regardless of map iteration order (if any were used)
@@ -124,7 +134,7 @@ func generatePoolKey(cfg ConnectionCfg) string {
 }
 
 // Get retrieves an existing connection from the pool or creates a new one if limits allow.
-func (cp *ConnectionPool) Get(ctx context.Context, cfg ConnectionCfg) (*ssh.Client, error) { // Linter might complain ctx is not used if dialSSH is direct.
+func (cp *ConnectionPool) Get(ctx context.Context, cfg ConnectionCfg) (*ssh.Client, error) {
 	poolKey := generatePoolKey(cfg)
 
 	cp.mu.RLock()
@@ -399,7 +409,7 @@ func (cp *ConnectionPool) Shutdown() {
 	defer cp.mu.Unlock()
 
 	// log.Printf("Shutting down connection pool...")
-	for key, hcp := range cp.pools {
+	for _, hcp := range cp.pools { // Changed key to _
 		hcp.Lock()
 		for _, mc := range hcp.connections {
 			mc.client.Close()
@@ -429,13 +439,11 @@ type SSHConnectorWithPool struct {
 // Connect method for the pooled connector.
 func (s *SSHConnectorWithPool) Connect(ctx context.Context, cfg ConnectionCfg) error {
 	// For non-bastion, try to get from pool
-	if cfg.Bastion == nil {
+	if cfg.BastionCfg == nil { // Changed Bastion to BastionCfg
 		client, err := s.Pool.Get(ctx, cfg)
 		if err == nil {
 			s.BaseConnector.client = client // Assign to the base connector's client field
-			s.BaseConnector.sshHost = cfg.Host
-			s.BaseConnector.sshUser = cfg.User
-			s.BaseConnector.sshPort = cfg.Port
+			s.BaseConnector.connCfg = cfg   // Store the ConnectionCfg
 			// Note: Facts would need to be re-evaluated or stored with the connection if needed immediately.
 			// For now, assume Connect sets up the client, and Runner init would get facts.
 			return nil
@@ -452,8 +460,8 @@ func (s *SSHConnectorWithPool) Connect(ctx context.Context, cfg ConnectionCfg) e
 	if err == nil {
 		s.BaseConnector.client = originalConnector.client
 		s.BaseConnector.bastionClient = originalConnector.bastionClient
-		s.BaseConnector.sshHost = originalConnector.sshHost
-		// ... copy other relevant fields
+		s.BaseConnector.connCfg = originalConnector.connCfg // Store the ConnectionCfg from the successfully connected originalConnector
+		// ... copy other relevant fields (ensure originalConnector populates its connCfg correctly)
 	}
 	return err
 }
@@ -576,9 +584,12 @@ func (s *SSHConnectorWithPool) RunWithOptions(ctx context.Context, cmd string, o
 
     // Apply environment variables if any
     if opts != nil && len(opts.Env) > 0 {
-        for key, val := range opts.Env {
-            if err := session.Setenv(key, val); err != nil {
-                return nil, nil, fmt.Errorf("failed to set environment variable %s: %w", key, err)
+        for _, envVar := range opts.Env {
+            parts := strings.SplitN(envVar, "=", 2)
+            if len(parts) == 2 {
+                if err := session.Setenv(parts[0], parts[1]); err != nil {
+                    return nil, nil, fmt.Errorf("failed to set environment variable %s: %w", parts[0], err)
+                }
             }
         }
     }
@@ -598,11 +609,11 @@ func (s *SSHConnectorWithPool) RunWithOptions(ctx context.Context, cmd string, o
 		// Return specific CommandError if possible
 		if exitErr, ok := err.(*ssh.ExitError); ok {
 			return []byte(stdout.String()), []byte(stderr.String()), &CommandError{
-				Command:  cmd,
-				Stdout:   stdout.String(),
-				Stderr:   stderr.String(),
-				Err:      exitErr,
-				ExitCode: exitErr.ExitStatus(),
+				Cmd:        cmd, // Corrected field name
+				Stdout:     stdout.String(),
+				Stderr:     stderr.String(),
+				Underlying: exitErr, // Corrected field name
+				ExitCode:   exitErr.ExitStatus(),
 			}
 		}
         return []byte(stdout.String()), []byte(stderr.String()), fmt.Errorf("command '%s' failed: %w. Stderr: %s", cmd, err, stderr.String())

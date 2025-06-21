@@ -79,6 +79,23 @@ func (g *ExecutionGraph) AddNode(id NodeID, node *ExecutionNode) error {
 	return nil
 }
 
+// UniqueNodeIDs returns a slice with unique NodeIDs from the input.
+// Preserves order of first appearance.
+func UniqueNodeIDs(ids []NodeID) []NodeID {
+	if len(ids) == 0 {
+		return []NodeID{}
+	}
+	seen := make(map[NodeID]bool)
+	result := []NodeID{}
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
 // Validate checks the graph for structural integrity, such as cyclic dependencies
 // and ensures all referenced dependency IDs exist as nodes.
 // This is a crucial step before execution.

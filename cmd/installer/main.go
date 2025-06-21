@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mensylisir/kubexm/pkg/cluster" // For NewCreateClusterPipeline
-	"github.com/mensylisir/kubexm/pkg/engine"  // Added to instantiate engine
+	"github.com/mensylisir/kubexm/pkg/pipeline/cluster" // For NewCreateClusterPipeline
+	"github.com/mensylisir/kubexm/pkg/engine"           // Added to instantiate engine
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	// "github.com/mensylisir/kubexm/pkg/logger" // App's own logger if needed

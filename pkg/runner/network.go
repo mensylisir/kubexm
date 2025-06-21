@@ -20,12 +20,12 @@ func (r *defaultRunner) IsPortOpen(ctx context.Context, conn connector.Connector
 
 	// Determine command based on OS (from facts) or availability
 	cmdToRun := ""
-	useSS := false
+	// useSS := false // Removed unused variable
 
 	// Prefer ss if available
 	if _, err := r.LookPath(ctx, conn, "ss"); err == nil {
 		cmdToRun = fmt.Sprintf("ss -ltn | grep -q ':%d '", port)
-		useSS = true
+		// useSS = true // Removed unused assignment
 	} else {
 		// Fallback to netstat
 		if _, errNetstat := r.LookPath(ctx, conn, "netstat"); errNetstat == nil {
@@ -117,11 +117,12 @@ func (r *defaultRunner) AddHostEntry(ctx context.Context, conn connector.Connect
 
 	allHostnames := []string{fqdn}
 	allHostnames = append(allHostnames, hostnames...)
-	entryLine := fmt.Sprintf("%s %s", ip, strings.Join(allHostnames, " "))
+	entryLine := fmt.Sprintf("%s %s", ip, strings.Join(allHostnames, " ")) // entryLine is used below
 
 	// Check if the exact line already exists
 	// Using WriteFile with a temporary script for robust check and append
-	scriptContent := fmt.Sprintf(`
+	/*
+	scriptContent := fmt.Sprintf(`  // This block was for an old approach
 set -e
 HOSTS_FILE="/etc/hosts"
 ENTRY_LINE="%s"
@@ -134,6 +135,7 @@ else
   exit 0
 fi
 `, entryLine)
+	*/ // Closed the block comment
 
 	// Define a temporary path for the script on the remote host
 	// This path should ideally be in a directory writable by the SSH user,

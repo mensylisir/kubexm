@@ -2,8 +2,8 @@ package module
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/runtime" // For runtime.ModuleContext
-	"github.com/mensylisir/kubexm/pkg/task"    // For task.Task and task.ExecutionFragment
+	// "github.com/mensylisir/kubexm/pkg/runtime" // Removed
+	"github.com/mensylisir/kubexm/pkg/task" // For task.Task and task.ExecutionFragment
 )
 
 // BaseModule provides a common structure for modules.
@@ -40,7 +40,7 @@ func (bm *BaseModule) Tasks() []task.Task {
 
 // Plan is intended to be implemented by concrete module types.
 // This base implementation returns an error, signaling it needs to be overridden.
-func (bm *BaseModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragment, error) {
+func (bm *BaseModule) Plan(ctx ModuleContext) (*task.ExecutionFragment, error) { // Changed to local ModuleContext
 	return nil, fmt.Errorf("Plan() not implemented for module: %s. Concrete module types must implement this method", bm.Name())
 }
 
