@@ -49,6 +49,7 @@ type ServiceInfo struct {
 	DisableCmd      string
 	RestartCmd      string
 	IsActiveCmd     string
+	IsEnabledCmd    string // Added for completeness based on typical needs
 	DaemonReloadCmd string
 }
 
@@ -70,7 +71,7 @@ type Runner interface {
 	Mkdirp(ctx context.Context, conn connector.Connector, path, permissions string, sudo bool) error
 	Remove(ctx context.Context, conn connector.Connector, path string, sudo bool) error
 	Chmod(ctx context.Context, conn connector.Connector, path, permissions string, sudo bool) error
-	Chown(ctx context.Context, conn connector.Connector, path, owner, group string, recursive bool) error
+	Chown(ctx context.Context, conn connector.Connector, path, owner, group string, recursive bool, sudo bool) error // Added sudo to chown
 	GetSHA256(ctx context.Context, conn connector.Connector, path string) (string, error)
 	LookPath(ctx context.Context, conn connector.Connector, file string) (string, error)
 	IsPortOpen(ctx context.Context, conn connector.Connector, facts *Facts, port int) (bool, error)
@@ -80,7 +81,7 @@ type Runner interface {
 	InstallPackages(ctx context.Context, conn connector.Connector, facts *Facts, packages ...string) error
 	RemovePackages(ctx context.Context, conn connector.Connector, facts *Facts, packages ...string) error
 	UpdatePackageCache(ctx context.Context, conn connector.Connector, facts *Facts) error
-	IsPackageInstalled(ctx context.Context, conn connector.Connector, facts *Facts, packageName string) (bool, error)
+	IsPackageInstalled(ctx context.Context, conn connector.Connector, facts *Facts, packageName string) (installed bool, version string, err error) // return installed status, version, error
 	AddRepository(ctx context.Context, conn connector.Connector, facts *Facts, repoConfig string, isFilePath bool) error
 	StartService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) error
 	StopService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) error

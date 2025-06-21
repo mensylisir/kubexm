@@ -1,68 +1,57 @@
 package runner
 
 import (
+	"bufio"
 	"context"
 	"fmt"
-	"io" // Keep for future use, e.g. Render
-	"net" // Keep for future use
-	"path/filepath" // Keep for future use
+	"os" // For stderr output in detect funcs if logger not available
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"text/template"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/utils" // For IsExitCodeIgnored, PathRequiresSudo etc.
 	"golang.org/x/sync/errgroup"
 )
 
-// defaultRunner is a stateless struct that implements the Runner interface.
+// defaultRunner implements the Runner interface.
 type defaultRunner struct{}
 
-// New creates a new stateless Runner service.
+// New creates a new instance of the default Runner.
 func New() Runner {
 	return &defaultRunner{}
 }
 
-// GatherFacts gathers information about the host.
+// GatherFacts collects system information from the host.
 func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connector) (*Facts, error) {
 	facts := &Facts{}
-	var getOSError error // To capture errors from GetOS if it's the first one in errgroup
 
+	osInfo, err := conn.GetOS(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get OS info: %w", err)
+	}
+	facts.OS = osInfo
+
+	// Use an errgroup for concurrent fact gathering that doesn't depend on initial OS info.
 	g, gCtx := errgroup.WithContext(ctx)
 
-	// Get OS information
 	g.Go(func() error {
-		var err error
-		facts.OS, err = conn.GetOS(gCtx) // Use conn from parameter
-		if err != nil {
-			getOSError = fmt.Errorf("failed to get OS info: %w", err)
-			return getOSError // Return error to errgroup
-		}
-		if facts.OS == nil { // Should be caught by GetOS error, but defensive
-			getOSError = fmt.Errorf("conn.GetOS returned nil OS without error")
-			return getOSError
-		}
-		return nil
-	})
-
-	// Get hostname and kernel version
-	g.Go(func() error {
-		// Wait for OS info to be available if needed for OS-specific commands,
-		// or if GetOS fails, errgroup context gCtx will be cancelled.
-		if err := gCtx.Err(); err != nil {
-			return err
-		}
-		hostnameBytes, _, execErr := conn.Exec(gCtx, "hostname -f", nil) // Use conn
+		hostnameBytes, _, execErr := conn.Exec(gCtx, "hostname -f", nil)
 		if execErr != nil {
-			// Fallback to simple hostname if hostname -f fails (e.g. not configured)
 			hostnameBytes, _, execErr = conn.Exec(gCtx, "hostname", nil)
 			if execErr != nil {
-				return fmt.Errorf("failed to get hostname (hostname -f and hostname): %w", execErr)
+				return fmt.Errorf("failed to get hostname: %w", execErr)
 			}
 		}
 		facts.Hostname = strings.TrimSpace(string(hostnameBytes))
+		return nil
+	})
 
-		kernelBytes, _, execErr := conn.Exec(gCtx, "uname -r", nil) // Use conn
+	g.Go(func() error {
+		kernelBytes, _, execErr := conn.Exec(gCtx, "uname -r", nil)
 		if execErr != nil {
 			return fmt.Errorf("failed to get kernel version: %w", execErr)
 		}
@@ -70,256 +59,578 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 		return nil
 	})
 
-	// Get CPU and Memory
 	g.Go(func() error {
-		if err := gCtx.Err(); err != nil {
-			return err
+		var cpuCmd string
+		// OS dependent CPU count. facts.OS is available here.
+		switch strings.ToLower(facts.OS.ID) {
+		case "darwin":
+			cpuCmd = "sysctl -n hw.ncpu"
+		default: // Linux and others
+			cpuCmd = "nproc"
 		}
-		// Ensure facts.OS is populated before attempting OS-specific commands.
-		// This relies on the GetOS goroutine completing successfully first if its result is needed.
-		// If GetOS fails, gCtx.Err() will be non-nil, and this goroutine will return early.
-		// We need a mechanism to wait for facts.OS or handle its potential nilness if GetOS is slow or fails.
-		// For now, we'll assume if GetOS fails, gCtx is cancelled. If it succeeds, facts.OS is set.
-		// A more robust way would be to have dependent goroutines.
-
-		// This temporary read of facts.OS might occur before GetOS goroutine finishes writing to it.
-		// This is a race condition. The GetOS must complete before this goroutine can safely use facts.OS.
-		// The errgroup doesn't guarantee order of execution between goroutines, only that all complete or one fails.
-		// A better pattern: GetOS runs first, then other fact gathering that depends on OS info.
-		// For this refactoring, let's assume facts.OS will be populated OR getOSError will cancel context.
-		// A more robust solution is needed if facts.OS is critical for command choice here AND GetOS can be slow.
-
-		// Given the current errgroup, we cannot reliably use facts.OS here if it's set by another goroutine.
-		// So, for CPU/Mem detection, we'll try generic commands first or make OS-specific logic self-contained
-		// by calling conn.GetOS() *within* this goroutine if needed for command selection.
-		// For simplicity, let's assume generic commands or handle OS variance carefully.
-
-		// CPU detection:
-		cpuCmd := "nproc" // Default for Linux
-		// If we could reliably get facts.OS.ID here, we'd use it.
-		// Tentative OS check (less reliable due to potential race with GetOS goroutine):
-		// Note: This is a simplified approach. A proper solution would ensure GetOS completes first.
-		// For this iteration, we'll proceed with a common command and acknowledge this limitation.
-
-		cpuBytes, _, execErr := conn.Exec(gCtx, cpuCmd, nil) // Use conn
+		cpuBytes, _, execErr := conn.Exec(gCtx, cpuCmd, nil)
 		if execErr == nil {
-			parsedCPU, err := strconv.Atoi(strings.TrimSpace(string(cpuBytes)))
-			if err == nil {
+			parsedCPU, errConv := strconv.Atoi(strings.TrimSpace(string(cpuBytes)))
+			if errConv == nil {
 				facts.TotalCPU = parsedCPU
 			} else {
-				facts.TotalCPU = 0 // Default or mark as unknown
+				facts.TotalCPU = 0 // Mark as unknown or handle error
 			}
 		} else {
-			// Fallback for systems without nproc (e.g., macOS)
-			// This would ideally use facts.OS.ID if available and reliable.
-			// Trying sysctl for macOS as a common fallback.
-			cpuBytesMac, _, execErrMac := conn.Exec(gCtx, "sysctl -n hw.ncpu", nil)
-			if execErrMac == nil {
-				parsedCPUMac, errMac := strconv.Atoi(strings.TrimSpace(string(cpuBytesMac)))
-				if errMac == nil {
-					facts.TotalCPU = parsedCPUMac
-				} else {
-					facts.TotalCPU = 0
-				}
-			} else {
-				facts.TotalCPU = 0 // Default or mark as unknown
-			}
+			facts.TotalCPU = 0 // Mark as unknown or handle error
 		}
+		return nil // Don't let CPU count failure fail all facts
+	})
 
-		// Memory detection:
-		memCmd := "grep MemTotal /proc/meminfo | awk '{print $2}'" // KB, for Linux
-		isKb := true
-		// Similar OS detection issue as above for command choice.
-		// Assuming Linux for /proc/meminfo.
-		memBytes, _, execErr := conn.Exec(gCtx, memCmd, nil) // Use conn
+	g.Go(func() error {
+		var memCmd string
+		isKb := false
+		isBytes := false
+		switch strings.ToLower(facts.OS.ID) {
+		case "darwin":
+			memCmd = "sysctl -n hw.memsize"
+			isBytes = true
+		default: // Linux and others
+			memCmd = "grep MemTotal /proc/meminfo | awk '{print $2}'"
+			isKb = true
+		}
+		memBytes, _, execErr := conn.Exec(gCtx, memCmd, nil)
 		if execErr == nil {
 			memVal, parseErr := strconv.ParseUint(strings.TrimSpace(string(memBytes)), 10, 64)
 			if parseErr == nil {
 				if isKb {
 					facts.TotalMemory = memVal / 1024 // Convert KB to MiB
-				} else {
+				} else if isBytes {
 					facts.TotalMemory = memVal / (1024 * 1024) // Convert Bytes to MiB
+				} else {
+					facts.TotalMemory = memVal // Assume MiB if not KB or Bytes (should not happen)
 				}
 			} else {
-				facts.TotalMemory = 0 // Default
+				facts.TotalMemory = 0
 			}
 		} else {
-			// Fallback for macOS (hw.memsize returns bytes)
-			memBytesMac, _, execErrMac := conn.Exec(gCtx, "sysctl -n hw.memsize", nil)
-			if execErrMac == nil {
-				memValMac, parseErrMac := strconv.ParseUint(strings.TrimSpace(string(memBytesMac)), 10, 64)
-				if parseErrMac == nil {
-					facts.TotalMemory = memValMac / (1024 * 1024) // Bytes to MiB
-				} else {
-					facts.TotalMemory = 0
-				}
-			} else {
-				facts.TotalMemory = 0 // Default
-			}
+			facts.TotalMemory = 0
 		}
-		return nil
+		return nil // Don't let memory count failure fail all facts
 	})
 
-	// Get default IP addresses
 	g.Go(func() error {
-		if err := gCtx.Err(); err != nil {
-			return err
+		// These commands are Linux-specific for IP routing.
+		// For other OS, different commands or libraries would be needed.
+		if strings.ToLower(facts.OS.ID) == "linux" {
+			ip4Cmd := "ip route get 1.1.1.1 | grep -oP 'src \\K\\S+'"
+			ip4Bytes, _, _ := conn.Exec(gCtx, ip4Cmd, nil) // Errors ignored as IPs might not exist
+			facts.IPv4Default = strings.TrimSpace(string(ip4Bytes))
+
+			ip6Cmd := "ip -6 route get 2001:4860:4860::8888 | grep -oP 'src \\K\\S+' | head -n1"
+			ip6Bytes, _, _ := conn.Exec(gCtx, ip6Cmd, nil) // Errors ignored
+			facts.IPv6Default = strings.TrimSpace(string(ip6Bytes))
 		}
-		// These commands are Linux-specific.
-		// Again, OS-specific command selection is hard here without facts.OS reliably.
-		ip4Cmd := "ip -4 route get 8.8.8.8 | awk '{print $7}' | head -n1"
-		ip6Cmd := "ip -6 route get 2001:4860:4860::8888 | awk '{print $10}' | head -n1" // Changed from $NF to $10 based on common ip route output
-
-		ip4Bytes, _, _ := conn.Exec(gCtx, ip4Cmd, nil) // Use conn, errors ignored as IPs might not exist
-		facts.IPv4Default = strings.TrimSpace(string(ip4Bytes))
-
-		ip6Bytes, _, _ := conn.Exec(gCtx, ip6Cmd, nil) // Use conn, errors ignored
-		facts.IPv6Default = strings.TrimSpace(string(ip6Bytes))
 		return nil
 	})
 
 	if err := g.Wait(); err != nil {
-		if getOSError != nil { // Prioritize GetOS error as it's foundational
-			return nil, getOSError
-		}
-		return nil, fmt.Errorf("failed to gather some host facts: %w", err)
+		return nil, fmt.Errorf("failed during concurrent fact gathering: %w", err)
 	}
 
-	// After all goroutines, facts.OS should be reliably set if GetOS was successful.
-	if facts.OS == nil { // Should have been caught by getOSError if GetOS failed and returned error
-	    return nil, fmt.Errorf("critical: OS information is nil after fact gathering")
-	}
-
-	// These must be called after facts.OS is available.
-	var pmErr, initErr error
-	facts.PackageManager, pmErr = r.detectPackageManager(ctx, conn, facts) // Pass original ctx
+	// These depend on facts.OS, so call them sequentially after OS info is confirmed.
+	pmInfo, pmErr := r.detectPackageManager(ctx, conn, facts)
 	if pmErr != nil {
-		// Log or handle error, but don't necessarily fail all fact gathering
-		// For now, we'll let it be nil and proceed.
-		// Consider if this should be a fatal error for GatherFacts.
+		fmt.Fprintf(os.Stderr, "Warning: could not detect package manager for OS %s: %v\n", facts.OS.ID, pmErr)
+		// facts.PackageManager will remain nil or be a minimal unknown struct
+		facts.PackageManager = &PackageInfo{Type: PackageManagerUnknown}
+	} else {
+		facts.PackageManager = pmInfo
 	}
-	facts.InitSystem, initErr = r.detectInitSystem(ctx, conn, facts) // Pass original ctx
+
+	initSystemInfo, initErr := r.detectInitSystem(ctx, conn, facts)
 	if initErr != nil {
-		// Similar handling for init system detection error
+		fmt.Fprintf(os.Stderr, "Warning: could not detect init system for OS %s: %v\n", facts.OS.ID, initErr)
+		facts.InitSystem = &ServiceInfo{Type: InitSystemUnknown}
+	} else {
+		facts.InitSystem = initSystemInfo
 	}
 
 	return facts, nil
 }
 
-// detectPackageManager attempts to identify the package manager on the host.
 func (r *defaultRunner) detectPackageManager(ctx context.Context, conn connector.Connector, facts *Facts) (*PackageInfo, error) {
-	if facts == nil || facts.OS == nil {
-		return nil, fmt.Errorf("OS facts not available, cannot detect package manager")
+	if facts == nil || facts.OS == nil || facts.OS.ID == "" {
+		return nil, fmt.Errorf("OS facts (ID) not available, cannot reliably detect package manager")
 	}
+	osID := strings.ToLower(facts.OS.ID)
 
-	// Define package manager info structures (as in the old runner)
-	aptInfo := PackageInfo{
-		Type: PackageManagerApt, UpdateCmd: "apt-get update -y", InstallCmd: "apt-get install -y %s",
-		RemoveCmd: "apt-get remove -y %s", PkgQueryCmd: "dpkg-query -W -f='${Status}' %s", CacheCleanCmd: "apt-get clean",
+	switch osID {
+	case "ubuntu", "debian", "raspbian", "linuxmint": // Add other debian family OSs
+		if _, err := conn.LookPath(ctx, "apt-get"); err == nil {
+			return &PackageInfo{
+				Type:          PackageManagerApt,
+				UpdateCmd:     "apt-get update -y",
+				InstallCmd:    "apt-get install -y -q --no-install-recommends %s",
+				RemoveCmd:     "apt-get remove -y -q %s",
+				PkgQueryCmd:   "dpkg-query -W -f='${Status}\\n${Version}' %s",
+				CacheCleanCmd: "apt-get clean",
+			}, nil
+		}
+	case "centos", "rhel", "fedora", "almalinux", "rocky": // Add other RHEL family OSs
+		if _, err := conn.LookPath(ctx, "dnf"); err == nil {
+			return &PackageInfo{
+				Type:          PackageManagerDnf,
+				UpdateCmd:     "dnf makecache",
+				InstallCmd:    "dnf install -y %s",
+				RemoveCmd:     "dnf remove -y %s",
+				PkgQueryCmd:   "rpm -q --queryformat '%{NAME}-%{VERSION}-%{RELEASE}' %s",
+				CacheCleanCmd: "dnf clean all",
+			}, nil
+		}
+		if _, err := conn.LookPath(ctx, "yum"); err == nil {
+			return &PackageInfo{
+				Type:          PackageManagerYum,
+				UpdateCmd:     "yum makecache fast",
+				InstallCmd:    "yum install -y %s",
+				RemoveCmd:     "yum remove -y %s",
+				PkgQueryCmd:   "rpm -q --queryformat '%{NAME}-%{VERSION}-%{RELEASE}' %s",
+				CacheCleanCmd: "yum clean all",
+			}, nil
+		}
 	}
-	yumDnfInfoBase := PackageInfo{ // Base for yum/dnf
-		Type: PackageManagerYum, UpdateCmd: "yum update -y", InstallCmd: "yum install -y %s",
-		RemoveCmd: "yum remove -y %s", PkgQueryCmd: "rpm -q %s", CacheCleanCmd: "yum clean all",
-	}
-
-	switch strings.ToLower(facts.OS.ID) {
-	case "ubuntu", "debian", "raspbian", "linuxmint":
-		return &aptInfo, nil
-	case "centos", "rhel", "fedora", "almalinux", "rocky":
-		if _, err := r.LookPath(ctx, conn, "dnf"); err == nil {
-			dnfSpecificInfo := yumDnfInfoBase
-			dnfSpecificInfo.Type = PackageManagerDnf
-			dnfSpecificInfo.UpdateCmd = "dnf update -y"
-			dnfSpecificInfo.InstallCmd = "dnf install -y %s"
-			dnfSpecificInfo.RemoveCmd = "dnf remove -y %s"
-			dnfSpecificInfo.CacheCleanCmd = "dnf clean all"
-			return &dnfSpecificInfo, nil
-		}
-		return &yumDnfInfoBase, nil
-	default:
-		if _, err := r.LookPath(ctx, conn, "apt-get"); err == nil {
-			return &aptInfo, nil
-		}
-		if _, err := r.LookPath(ctx, conn, "dnf"); err == nil {
-			dnfSpecificInfo := yumDnfInfoBase
-			dnfSpecificInfo.Type = PackageManagerDnf; dnfSpecificInfo.UpdateCmd = "dnf update -y"; dnfSpecificInfo.InstallCmd = "dnf install -y %s"; dnfSpecificInfo.RemoveCmd = "dnf remove -y %s"; dnfSpecificInfo.CacheCleanCmd = "dnf clean all"
-			return &dnfSpecificInfo, nil
-		}
-		if _, err := r.LookPath(ctx, conn, "yum"); err == nil {
-			return &yumDnfInfoBase, nil
-		}
-		return nil, fmt.Errorf("unsupported OS or unable to detect package manager for OS ID: %s", facts.OS.ID)
-	}
+	return nil, fmt.Errorf("unsupported OS or package manager for OS ID: %s", osID)
 }
 
-// detectInitSystem attempts to identify the init system on the host.
 func (r *defaultRunner) detectInitSystem(ctx context.Context, conn connector.Connector, facts *Facts) (*ServiceInfo, error) {
-	if facts == nil || facts.OS == nil {
-		return nil, fmt.Errorf("OS facts not available, cannot detect init system")
+	// Systemd is dominant. Check for systemctl.
+	if _, err := conn.LookPath(ctx, "systemctl"); err == nil {
+		// Further check if it's actually systemd running (pid 1 is systemd)
+		// cmd := "stat /proc/1/exe | grep systemd" // This is one way
+		// _, _, errStat := conn.Exec(ctx, cmd, nil)
+		// if errStat == nil { ... }
+		return &ServiceInfo{
+			Type:            InitSystemSystemd,
+			StartCmd:        "systemctl start %s",
+			StopCmd:         "systemctl stop %s",
+			EnableCmd:       "systemctl enable %s",
+			DisableCmd:      "systemctl disable %s",
+			RestartCmd:      "systemctl restart %s",
+			IsActiveCmd:     "systemctl is-active %s",
+			IsEnabledCmd:    "systemctl is-enabled %s",
+			DaemonReloadCmd: "systemctl daemon-reload",
+		}, nil
 	}
+	// Add checks for other init systems like SysV if needed.
+	return nil, fmt.Errorf("init system not detected or unsupported (only systemd currently supported)")
+}
 
-	systemdInfo := ServiceInfo{
-		Type: InitSystemSystemd, StartCmd: "systemctl start %s", StopCmd: "systemctl stop %s",
-		EnableCmd: "systemctl enable %s", DisableCmd: "systemctl disable %s", RestartCmd: "systemctl restart %s",
-		IsActiveCmd: "systemctl is-active --quiet %s", DaemonReloadCmd: "systemctl daemon-reload",
+func (r *defaultRunner) Run(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (string, error) {
+	opts := &connector.ExecOptions{Sudo: sudo}
+	stdout, stderr, err := conn.Exec(ctx, cmd, opts)
+	if err != nil {
+		return string(stdout), fmt.Errorf("command '%s' failed. Stderr: '%s': %w", cmd, string(stderr), err)
 	}
-	sysvinitInfo := ServiceInfo{
-		Type: InitSystemSysV, StartCmd: "service %s start", StopCmd: "service %s stop",
-		EnableCmd: "chkconfig %s on", DisableCmd: "chkconfig %s off", RestartCmd: "service %s restart",
-		IsActiveCmd: "service %s status", DaemonReloadCmd: "",
-	}
+	return string(stdout), nil
+}
 
-	if _, err := r.LookPath(ctx, conn, "systemctl"); err == nil {
-		return &systemdInfo, nil
+func (r *defaultRunner) MustRun(ctx context.Context, conn connector.Connector, cmd string, sudo bool) string {
+	stdout, err := r.Run(ctx, conn, cmd, sudo)
+	if err != nil {
+		panic(fmt.Sprintf("MustRun command '%s' failed: %v. Stdout: %s", cmd, err, stdout))
 	}
-	if _, err := r.LookPath(ctx, conn, "service"); err == nil {
-		return &sysvinitInfo, nil
+	return stdout
+}
+
+func (r *defaultRunner) Check(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (bool, error) {
+	opts := &connector.ExecOptions{Sudo: sudo}
+	_, _, err := conn.Exec(ctx, cmd, opts)
+	if err != nil {
+		if _, ok := err.(*connector.CommandError); ok {
+			return false, nil
+		}
+		return false, err
 	}
-	// Simplified Exists check for /etc/init.d (original runner.Exists uses conn.Stat)
-	if exists, _ := r.Exists(ctx, conn, "/etc/init.d"); exists {
-		return &sysvinitInfo, nil
+	return true, nil
+}
+
+func (r *defaultRunner) RunWithOptions(ctx context.Context, conn connector.Connector, cmd string, opts *connector.ExecOptions) (stdout, stderr []byte, err error) {
+	return conn.Exec(ctx, cmd, opts)
+}
+
+func (r *defaultRunner) Exists(ctx context.Context, conn connector.Connector, path string) (bool, error) {
+	return conn.Exists(ctx, path)
+}
+
+func (r *defaultRunner) IsDir(ctx context.Context, conn connector.Connector, path string) (bool, error) {
+	// Use `test -d` for POSIX environments.
+	cmd := fmt.Sprintf("test -d %s", path)
+	// Sudo typically not needed for `test -d`.
+	_, _, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: false})
+	if err == nil {
+		return true, nil // Exit code 0 means true (it is a directory)
 	}
-	return nil, fmt.Errorf("unable to detect a supported init system (systemd, sysvinit) on OS ID: %s", facts.OS.ID)
+	if e, ok := err.(*connector.CommandError); ok && e.ExitCode == 1 {
+		return false, nil // Exit code 1 means false (not a directory or does not exist)
+	}
+	return false, fmt.Errorf("failed to check if '%s' is a directory: %w", path, err) // Other errors
+}
+
+func (r *defaultRunner) ReadFile(ctx context.Context, conn connector.Connector, path string) ([]byte, error) {
+	return conn.ReadFile(ctx, path)
+}
+
+func (r *defaultRunner) WriteFile(ctx context.Context, conn connector.Connector, content []byte, destPath, permissions string, sudo bool) error {
+	fs := connector.FileStat{Permissions: permissions, Sudo: sudo}
+	return conn.CopyContent(ctx, string(content), destPath, fs)
+}
+
+func (r *defaultRunner) Mkdirp(ctx context.Context, conn connector.Connector, path string, permissions string, sudo bool) error {
+	cmd := fmt.Sprintf("mkdir -p %s", path)
+	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: sudo})
+	if err != nil {
+		return fmt.Errorf("failed to mkdir -p %s (stderr: %s): %w", path, string(stderr), err)
+	}
+	if permissions != "" { // Apply permissions if specified
+		return r.Chmod(ctx, conn, path, permissions, sudo)
+	}
+	return nil
+}
+
+func (r *defaultRunner) Remove(ctx context.Context, conn connector.Connector, path string, sudo bool) error {
+	cmd := fmt.Sprintf("rm -rf %s", path)
+	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: sudo})
+	if err != nil {
+		return fmt.Errorf("failed to remove %s (stderr: %s): %w", path, string(stderr), err)
+	}
+	return nil
+}
+
+func (r *defaultRunner) Chmod(ctx context.Context, conn connector.Connector, path, permissions string, sudo bool) error {
+	cmd := fmt.Sprintf("chmod %s %s", permissions, path)
+	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: sudo})
+	if err != nil {
+		return fmt.Errorf("failed to chmod %s to %s (stderr: %s): %w", path, permissions, string(stderr), err)
+	}
+	return nil
+}
+
+func (r *defaultRunner) Chown(ctx context.Context, conn connector.Connector, path, owner, group string, recursive bool, sudo bool) error {
+	ownerGroup := owner
+	if group != "" {
+		ownerGroup = fmt.Sprintf("%s:%s", owner, group)
+	}
+	recursiveFlag := ""
+	if recursive {
+		recursiveFlag = "-R"
+	}
+	// Ensure no leading/trailing spaces on flags or paths
+	cmd := strings.TrimSpace(fmt.Sprintf("chown %s %s %s", recursiveFlag, ownerGroup, path))
+	cmd = regexp.MustCompile(`\s+`).ReplaceAllString(cmd, " ") // Compact multiple spaces
+
+	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: sudo})
+	if err != nil {
+		return fmt.Errorf("failed to chown %s to %s (stderr: %s): %w", path, ownerGroup, string(stderr), err)
+	}
+	return nil
+}
+
+func (r *defaultRunner) GetSHA256(ctx context.Context, conn connector.Connector, path string) (string, error) {
+    // This command should work on most Linux systems. macOS needs `shasum -a 256`.
+    // For simplicity, assuming Linux environment or that `sha256sum` is available.
+    // A more robust solution would check facts.OS.ID.
+    cmd := fmt.Sprintf("sha256sum %s | awk '{print $1}'", path)
+    stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{})
+    if err != nil {
+        return "", fmt.Errorf("failed to get sha256sum for %s (stderr: %s): %w", path, string(stderr), err)
+    }
+    return strings.TrimSpace(string(stdout)), nil
+}
+
+func (r *defaultRunner) LookPath(ctx context.Context, conn connector.Connector, file string) (string, error) {
+    return conn.LookPath(ctx, file)
+}
+
+func (r *defaultRunner) IsPortOpen(ctx context.Context, conn connector.Connector, facts *Facts, port int) (bool, error) {
+	// This is a simplified check. `ss` is preferred, `netstat` is legacy.
+	// Behavior might differ based on OS.
+	// Example for Linux using ss:
+	if facts.OS != nil && strings.ToLower(facts.OS.ID) == "linux" {
+		// Check TCP and UDP, listening ports. -n for numeric, -l for listening, -p for process (optional), -t for tcp, -u for udp
+		cmd := fmt.Sprintf("ss -nl | grep -q ':%d\\s'", port) // Basic check for listening on port
+		_, _, err := conn.Exec(ctx, cmd, &connector.ExecOptions{})
+		return err == nil, nil // If grep finds it, exit 0 (no error)
+	}
+	return false, fmt.Errorf("IsPortOpen not reliably implemented for OS: %s", facts.OS.ID)
+}
+
+func (r *defaultRunner) WaitForPort(ctx context.Context, conn connector.Connector, facts *Facts, port int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		isOpen, _ := r.IsPortOpen(ctx, conn, facts, port)
+		if isOpen {
+			return nil
+		}
+		time.Sleep(2 * time.Second)
+	}
+	return fmt.Errorf("timed out waiting for port %d to open after %v", port, timeout)
+}
+
+func (r *defaultRunner) SetHostname(ctx context.Context, conn connector.Connector, facts *Facts, hostname string) error {
+	if facts.OS == nil || facts.OS.ID == "" {
+		return fmt.Errorf("cannot set hostname: OS facts unavailable")
+	}
+	var cmd string
+	switch strings.ToLower(facts.OS.ID) {
+	case "ubuntu", "debian", "centos", "rhel", "fedora", "almalinux", "rocky": // Most systemd systems
+		cmd = fmt.Sprintf("hostnamectl set-hostname %s", hostname)
+	default:
+		return fmt.Errorf("SetHostname not implemented for OS: %s", facts.OS.ID)
+	}
+	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true})
+	if err != nil {
+		return fmt.Errorf("failed to set hostname to %s (stderr: %s): %w", hostname, string(stderr), err)
+	}
+	// Also update /etc/hosts for current hostname resolution if possible
+	// This is complex due to various formats of /etc/hosts.
+	// A simple approach: remove old hostname line for 127.0.1.1, add new one.
+	// sed -i '/^127.0.1.1/d' /etc/hosts
+	// echo "127.0.1.1 $(hostname) $(hostname -s)" >> /etc/hosts
+	// This is best handled by a dedicated hosts file management step for robustness.
+	return nil
+}
+
+func (r *defaultRunner) AddHostEntry(ctx context.Context, conn connector.Connector, ip, fqdn string, hostnames ...string) error {
+    if ip == "" || fqdn == "" {
+        return fmt.Errorf("IP address and FQDN must be provided to AddHostEntry")
+    }
+    allNames := []string{fqdn}
+    allNames = append(allNames, hostnames...)
+    entry := fmt.Sprintf("%s %s", ip, strings.Join(allNames, " "))
+
+    // Check if entry already exists to avoid duplicates (simple check)
+    // A more robust check would parse /etc/hosts properly.
+    hostsContent, err := r.ReadFile(ctx, conn, "/etc/hosts")
+    if err == nil { // If file readable
+        if strings.Contains(string(hostsContent), entry) {
+            return nil // Entry seems to exist
+        }
+    }
+
+    // Append entry. Sudo needed for /etc/hosts.
+    // Use shell redirection which requires `sh -c` or similar.
+    // Ensure entry does not contain characters that break the shell command.
+    // For simplicity, assuming entry is safe.
+    appendCmd := fmt.Sprintf("echo '%s' >> /etc/hosts", entry)
+    // The command needs to be run via shell for '>>' redirection if conn.Exec isn't a full shell.
+    // If conn.Exec is like `ssh host cmd`, then `sh -c 'echo ... >> ...'` is needed.
+    // Assuming conn.Exec can handle this or a more direct file append method is available on conn.
+    // If conn.WriteFile appends or can write with append mode, that's better.
+    // For now, a simple echo with append.
+    // This is not robust if multiple operations happen concurrently or if line already exists partially.
+    // A proper /etc/hosts management step (like ManageHostsFileEntryStepSpec) is better.
+    // This is a simplified version.
+    _, stderr, err := conn.Exec(ctx, appendCmd, &connector.ExecOptions{Sudo: true, Shell: "sh"}) // Shell: "sh" to ensure redirection works
+    if err != nil {
+        return fmt.Errorf("failed to add host entry '%s' (stderr: %s): %w", entry, string(stderr), err)
+    }
+    return nil
 }
 
 
-// --- Command Execution (Implementations will be moved from command.go) ---
-// Implementations are now in command.go
-
-
-// --- Archive Operations (Implementations will be moved from archive.go) ---
-// Implementations are now in archive.go
-
-
-// --- File Operations (Implementations will be moved from file.go) ---
-// Implementations are now in file.go
-
-
-// --- Network Operations (Implementations will be moved from network.go) ---
-// Implementations are now in network.go
-
-
-// --- Package Operations (Implementations will be moved from package.go) ---
-// Implementations are now in package.go
-
-
-// --- Service Operations (Implementations will be moved from service.go) ---
-// Implementations are now in service.go
-
-
-// --- Template Operations (Implementations will be moved from template.go) ---
-// Implementation is now in template.go
-
-
-// --- User Operations (Implementations will be moved from user.go) ---
-// Implementations are now in user.go
-
-
-// Ensure connector.Connector has ReadFile and WriteFile methods
-// These are assumed by the defaultRunner implementations of ReadFile/WriteFile.
-// If not, those methods need to be implemented via Exec.
-type extendedConnector interface {
-	connector.Connector
-	ReadFile(ctx context.Context, path string) ([]byte, error)
-	WriteFile(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error
+func (r *defaultRunner) InstallPackages(ctx context.Context, conn connector.Connector, facts *Facts, packages ...string) error {
+	if facts.PackageManager == nil || facts.PackageManager.Type == PackageManagerUnknown {
+		return fmt.Errorf("cannot install packages: package manager unknown for host %s", facts.Hostname)
+	}
+	if len(packages) == 0 { return nil }
+	cmd := fmt.Sprintf(facts.PackageManager.InstallCmd, strings.Join(packages, " "))
+	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true})
+	if err != nil {
+		return fmt.Errorf("failed to install packages '%s' (stderr: %s): %w", strings.Join(packages, " "), string(stderr), err)
+	}
+	return nil
 }
+
+func (r *defaultRunner) RemovePackages(ctx context.Context, conn connector.Connector, facts *Facts, packages ...string) error {
+	if facts.PackageManager == nil || facts.PackageManager.Type == PackageManagerUnknown {
+		return fmt.Errorf("cannot remove packages: package manager unknown for host %s", facts.Hostname)
+	}
+	if len(packages) == 0 { return nil }
+	cmd := fmt.Sprintf(facts.PackageManager.RemoveCmd, strings.Join(packages, " "))
+	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true})
+	if err != nil {
+		return fmt.Errorf("failed to remove packages '%s' (stderr: %s): %w", strings.Join(packages, " "), string(stderr), err)
+	}
+	return nil
+}
+
+func (r *defaultRunner) UpdatePackageCache(ctx context.Context, conn connector.Connector, facts *Facts) error {
+	if facts.PackageManager == nil || facts.PackageManager.Type == PackageManagerUnknown {
+		return fmt.Errorf("cannot update package cache: package manager unknown for host %s", facts.Hostname)
+	}
+	cmd := facts.PackageManager.UpdateCmd
+	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true})
+	if err != nil {
+		return fmt.Errorf("failed to update package cache (stderr: %s): %w", string(stderr), err)
+	}
+	return nil
+}
+
+func (r *defaultRunner) IsPackageInstalled(ctx context.Context, conn connector.Connector, facts *Facts, packageName string) (installed bool, version string, err error) {
+    if facts.PackageManager == nil || facts.PackageManager.Type == PackageManagerUnknown {
+        return false, "", fmt.Errorf("cannot check package installation: package manager unknown for host %s", facts.Hostname)
+    }
+    if facts.PackageManager.PkgQueryCmd == "" {
+        return false, "", fmt.Errorf("package query command not defined for package manager type %s on host %s", facts.PackageManager.Type, facts.Hostname)
+    }
+
+    queryCmd := strings.ReplaceAll(facts.PackageManager.PkgQueryCmd, "%s", packageName)
+
+    stdout, stderr, execErr := conn.Exec(ctx, queryCmd, &connector.ExecOptions{Sudo: false})
+
+    switch facts.PackageManager.Type {
+    case PackageManagerApt:
+        // dpkg-query -W -f='${Status}\n${Version}' <pkg>
+        // Success output: "install ok installed\n<version>"
+        // Not found: exits non-zero.
+        if execErr != nil {
+            return false, "", nil
+        }
+        outputStr := string(stdout)
+        lines := strings.Split(outputStr, "\n")
+        // Expected: "install ok installed" on first line for successfully installed package.
+        // Some systems might just have "installed" or similar. Using "installed".
+        if len(lines) >= 1 && strings.Contains(lines[0], "installed") {
+            if len(lines) >=2 { // Version is on the second line
+                 return true, strings.TrimSpace(lines[1]), nil
+            }
+            return true, "", nil // Installed, but version format unexpected
+        }
+         // If output is not as expected but command succeeded, treat as not installed or version unknown
+        return false, "", fmt.Errorf("unexpected output from dpkg-query for %s: %s", packageName, outputStr)
+
+    case PackageManagerYum, PackageManagerDnf:
+        // rpm -q --queryformat '%{NAME}-%{VERSION}-%{RELEASE}' <pkg> or just '%{VERSION}-%{RELEASE}'
+        // Success output: <name>-<version>-<release> or <version>-<release>
+        // Not found: exits 1.
+        if execErr != nil {
+            if e, ok := execErr.(*connector.CommandError); ok && e.ExitCode == 1 {
+                return false, "", nil // Not installed
+            }
+            return false, "", fmt.Errorf("rpm query for %s failed (stderr: %s): %w", packageName, string(stderr), execErr)
+        }
+        // RPM query format might include name. Try to strip it if present.
+        // Example: mypackage-1.2.3-4.el7 -> 1.2.3-4.el7
+        versionStr := strings.TrimSpace(string(stdout))
+        if strings.HasPrefix(versionStr, packageName+"-") {
+            versionStr = strings.TrimPrefix(versionStr, packageName+"-")
+        }
+        return true, versionStr, nil
+    default:
+        return false, "", fmt.Errorf("IsPackageInstalled not implemented for package manager type %s", facts.PackageManager.Type)
+    }
+}
+
+
+func (r *defaultRunner) AddRepository(ctx context.Context, conn connector.Connector, facts *Facts, repoConfig string, isFilePath bool) error {
+	return fmt.Errorf("AddRepository not yet implemented")
+}
+
+func (r *defaultRunner) serviceCommand(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string, commandTemplate string, useSudo bool) error {
+	if facts.InitSystem == nil || facts.InitSystem.Type == InitSystemUnknown {
+		return fmt.Errorf("cannot manage service '%s': init system unknown for host %s", serviceName, facts.Hostname)
+	}
+	if commandTemplate == "" {
+		return fmt.Errorf("command template empty for service '%s' action on host %s", serviceName, facts.Hostname)
+	}
+	cmd := fmt.Sprintf(commandTemplate, serviceName)
+	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: useSudo})
+	if err != nil {
+		return fmt.Errorf("failed to %s (stderr: %s): %w", cmd, string(stderr), err)
+	}
+	return nil
+}
+
+func (r *defaultRunner) StartService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) error {
+	return r.serviceCommand(ctx, conn, facts, serviceName, facts.InitSystem.StartCmd, true)
+}
+func (r *defaultRunner) StopService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) error {
+	return r.serviceCommand(ctx, conn, facts, serviceName, facts.InitSystem.StopCmd, true)
+}
+func (r *defaultRunner) RestartService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) error {
+	return r.serviceCommand(ctx, conn, facts, serviceName, facts.InitSystem.RestartCmd, true)
+}
+func (r *defaultRunner) EnableService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) error {
+	return r.serviceCommand(ctx, conn, facts, serviceName, facts.InitSystem.EnableCmd, true)
+}
+func (r *defaultRunner) DisableService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) error {
+	return r.serviceCommand(ctx, conn, facts, serviceName, facts.InitSystem.DisableCmd, true)
+}
+func (r *defaultRunner) IsServiceActive(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) (bool, error) {
+	if facts.InitSystem == nil || facts.InitSystem.Type == InitSystemUnknown {
+		return false, fmt.Errorf("cannot check service active status: init system unknown for host %s", facts.Hostname)
+	}
+	cmd := fmt.Sprintf(facts.InitSystem.IsActiveCmd, serviceName)
+	_, _, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true})
+	return err == nil, nil
+}
+func (r *defaultRunner) IsServiceEnabled(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) (bool, error) {
+	if facts.InitSystem == nil || facts.InitSystem.Type == InitSystemUnknown {
+		return false, fmt.Errorf("cannot check service enabled status: init system unknown for host %s", facts.Hostname)
+	}
+	cmd := fmt.Sprintf(facts.InitSystem.IsEnabledCmd, serviceName)
+	_, _, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true})
+	return err == nil, nil
+}
+func (r *defaultRunner) DaemonReload(ctx context.Context, conn connector.Connector, facts *Facts) error {
+	if facts.InitSystem == nil || facts.InitSystem.Type == InitSystemUnknown {
+		return fmt.Errorf("cannot daemon-reload: init system unknown for host %s", facts.Hostname)
+	}
+	cmd := facts.InitSystem.DaemonReloadCmd
+	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true})
+	if err != nil {
+		return fmt.Errorf("failed to daemon-reload (stderr: %s): %w", string(stderr), err)
+	}
+	return nil
+}
+func (r *defaultRunner) Render(ctx context.Context, conn connector.Connector, tmpl *template.Template, data interface{}, destPath, permissions string, sudo bool) error {
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return fmt.Errorf("failed to render template: %w", err)
+	}
+	return r.WriteFile(ctx, conn, buf.Bytes(), destPath, permissions, sudo)
+}
+func (r *defaultRunner) UserExists(ctx context.Context, conn connector.Connector, username string) (bool, error) {
+	cmd := fmt.Sprintf("id -u %s", username)
+	_, _, err := conn.Exec(ctx, cmd, &connector.ExecOptions{})
+	return err == nil, nil // Exit 0 if user exists
+}
+func (r *defaultRunner) GroupExists(ctx context.Context, conn connector.Connector, groupname string) (bool, error) {
+	cmd := fmt.Sprintf("getent group %s", groupname)
+    _, _, err := conn.Exec(ctx, cmd, &connector.ExecOptions{})
+    return err == nil, nil // Exit 0 if group exists
+}
+func (r *defaultRunner) AddUser(ctx context.Context, conn connector.Connector, username, group, shell string, homeDir string, createHome bool, systemUser bool, sudo bool) error {
+	cmdParts := []string{"useradd"}
+	if systemUser { cmdParts = append(cmdParts, "-r") }
+	if createHome { cmdParts = append(cmdParts, "-m") } else { cmdParts = append(cmdParts, "-M") }
+	if shell != "" { cmdParts = append(cmdParts, "-s", shell) }
+	if group != "" { cmdParts = append(cmdParts, "-g", group) }
+	if homeDir != "" { cmdParts = append(cmdParts, "-d", homeDir) }
+	cmdParts = append(cmdParts, username)
+	cmd := strings.Join(cmdParts, " ")
+	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: sudo})
+	if err != nil {
+		return fmt.Errorf("failed to add user %s (stderr: %s): %w", username, string(stderr), err)
+	}
+	return nil
+}
+func (r *defaultRunner) AddGroup(ctx context.Context, conn connector.Connector, groupname string, systemGroup bool, sudo bool) error {
+	cmdParts := []string{"groupadd"}
+	if systemGroup { cmdParts = append(cmdParts, "-r") }
+	cmdParts = append(cmdParts, groupname)
+	cmd := strings.Join(cmdParts, " ")
+	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: sudo})
+	if err != nil {
+		return fmt.Errorf("failed to add group %s (stderr: %s): %w", groupname, string(stderr), err)
+	}
+	return nil
+}
+
+// Ensure defaultRunner implements Runner.
+var _ Runner = (*defaultRunner)(nil)
