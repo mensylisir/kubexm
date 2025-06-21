@@ -33,23 +33,28 @@ type ModuleContext interface {
 type TaskContext interface {
 	ModuleContext // Embed ModuleContext
 	GetHostsByRole(role string) ([]connector.Host, error)
-	GetHostFacts(host connector.Host) (*runner.Facts, error)
+	GetHostFacts(host connector.Host) (*runner.Facts, error) // This is general; a step might need facts for a *different* host.
 	TaskCache() cache.TaskCache     // From 13-runtime设计.md (via Context struct)
+	GetControlNode() (connector.Host, error) // Added for resource management on control node
 	// GetGlobalWorkDir(), GetClusterConfig(), GetLogger(), GoContext(), ModuleCache() are inherited.
 }
 
 // StepContext defines the methods available at the step execution level.
+// It is typically specific to a single host.
 type StepContext interface {
 	// Methods from 13-runtime设计.md's StepContext facade:
 	GoContext() context.Context
 	GetLogger() *logger.Logger
 	// GetRecorder() event.Recorder // Recorder not yet implemented in main Context
 	GetRunner() runner.Runner
-	GetConnectorForHost(host connector.Host) (connector.Connector, error)
-	GetHostFacts(host connector.Host) (*runner.Facts, error) // Note: design doc had GetHostFacts(host connector.Host)
+	GetConnectorForHost(host connector.Host) (connector.Connector, error) // Gets connector for *any* host.
+
+	// Host-specific methods for the current host the step is operating on:
+	GetHost() connector.Host                                // Returns the specific host this step is operating on.
+	GetCurrentHostFacts() (*runner.Facts, error)            // Returns facts for GetHost().
+	GetCurrentHostConnector() (connector.Connector, error)  // Returns connector for GetHost().
 
 	// Additional useful methods often needed by steps, derived from full Context:
-	GetHost() connector.Host    // Returns the specific host this step is operating on
 	StepCache() cache.StepCache
 	TaskCache() cache.TaskCache     // Access to parent task's cache
 	ModuleCache() cache.ModuleCache   // Access to parent module's cache

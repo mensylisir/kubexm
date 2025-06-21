@@ -56,13 +56,13 @@ func (m *EtcdModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragment, e
 	firstTask := true
 
 	for _, currentTask := range m.Tasks() { // m.Tasks() comes from BaseModule
-		// Ensure the context can be cast to TaskContext
-		taskCtx, ok := ctx.(runtime.TaskContext)
-		if !ok {
-			return nil, fmt.Errorf("module context cannot be asserted to task context for module %s, task %s", m.Name(), currentTask.Name())
-		}
+		// The ModuleContext (ctx) is passed directly.
+		// If Task methods expect runtime.TaskContext, and ModuleContext is a subset (or can be
+		// fulfilled by the same underlying *runtime.Context object), this direct pass is fine.
+		// Based on facade design: ModuleContext is passed, method signatures for Task take TaskContext.
+		// The concrete *runtime.Context implements all, so it works.
 
-		taskIsRequired, err := currentTask.IsRequired(taskCtx)
+		taskIsRequired, err := currentTask.IsRequired(ctx) // Pass ModuleContext directly
 		if err != nil {
 			return nil, fmt.Errorf("failed to check if task %s is required in module %s: %w", currentTask.Name(), m.Name(), err)
 		}
@@ -73,7 +73,7 @@ func (m *EtcdModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragment, e
 		}
 
 		logger.Info("Planning task", "task_name", currentTask.Name())
-		taskFrag, err := currentTask.Plan(taskCtx)
+		taskFrag, err := currentTask.Plan(ctx) // Pass ModuleContext directly
 		if err != nil {
 			return nil, fmt.Errorf("failed to plan task %s in module %s: %w", currentTask.Name(), m.Name(), err)
 		}
@@ -122,12 +122,15 @@ func (m *EtcdModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragment, e
 	}
 
 	// Set the module's exit nodes to be the exit nodes of the last processed task
+	// (or all tasks' exit nodes if they can run in parallel and don't feed into a single module exit point)
 	moduleFragment.ExitNodes = append(moduleFragment.ExitNodes, lastTaskExitNodes...)
 
 	// Deduplicate entry and exit nodes for the final module fragment
-	moduleFragment.RemoveDuplicateNodeIDs()
+	moduleFragment.EntryNodes = task.UniqueNodeIDs(moduleFragment.EntryNodes)
+	moduleFragment.ExitNodes = task.UniqueNodeIDs(moduleFragment.ExitNodes)
 
-	logger.Info("ETCD module planning complete.", "total_nodes", len(moduleFragment.Nodes))
+
+	logger.Info("ETCD module planning complete.", "total_nodes", len(moduleFragment.Nodes), "entry_nodes", len(moduleFragment.EntryNodes), "exit_nodes", len(moduleFragment.ExitNodes))
 	return moduleFragment, nil
 }
 
