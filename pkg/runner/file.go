@@ -2,8 +2,9 @@ package runner
 
 import (
 	"context"
+	"errors" // Added for errors.As
 	"fmt"
-	"path/filepath"
+	// "path/filepath" // Removed as unused
 	"strings"
 
 	"github.com/mensylisir/kubexm/pkg/connector" // Corrected import path
@@ -188,8 +189,8 @@ func (r *defaultRunner) GetSHA256(ctx context.Context, conn connector.Connector,
 	if err != nil {
 		// If sha256sum is not found or fails, try shasum -a 256
 		// A more robust check would be on exit code for "command not found" or using LookPath first.
-		var cmdErr *connector.ExitError
-		if融资ok := errors.As(err, &cmdErr);融资ok && (strings.Contains(string(stderr), "not found") || cmdErr.ExitCode() == 127) {
+		var cmdErr *connector.CommandError // Changed to CommandError which has ExitCode
+		if ok := errors.As(err, &cmdErr); ok && (strings.Contains(string(stderr), "not found") || cmdErr.ExitCode == 127) { // Used .ExitCode field
 			cmd = fmt.Sprintf("shasum -a 256 %s", path)
 			stdout, stderr, err = r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: false})
 		}

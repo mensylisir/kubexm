@@ -16,9 +16,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/parser"
 	"github.com/mensylisir/kubexm/pkg/runner"
-	// engine "github.com/mensylisir/kubexm/pkg/engine" // Keep for engine.Engine type if Context needs it, but not for NewExecutor
-	// Actually, Context will need engine.Engine type, so runtime package scope will import engine.
-	// The builder itself just won't call NewExecutor().
+	"github.com/mensylisir/kubexm/pkg/engine" // Added for engine.Engine type
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/common" // Added for constants like KUBEXM
 	"github.com/mensylisir/kubexm/pkg/util"   // Added for CreateDir
@@ -43,7 +41,7 @@ func NewRuntimeBuilder(configFile string) *RuntimeBuilder {
 
 // BuildFromFile constructs and initializes the full runtime Context from a configuration file.
 // It now requires an engine.Engine instance to be passed in.
-func (b *RuntimeBuilder) BuildFromFile(ctx context.Context, eng engine.Engine) (*Context, func(), error) {
+func (b *RuntimeBuilder) BuildFromFile(ctx context.Context, engInst engine.Engine) (*Context, func(), error) { // Renamed eng to engInst
 	initialLog := logger.Get() // Use a general logger for file parsing
 	initialLog.Info("Building runtime environment from file...", "configFile", b.configFile)
 
@@ -52,12 +50,12 @@ func (b *RuntimeBuilder) BuildFromFile(ctx context.Context, eng engine.Engine) (
 		initialLog.Error(err, "Failed to parse cluster configuration")
 		return nil, nil, fmt.Errorf("failed to parse cluster config '%s': %w", b.configFile, err)
 	}
-	return b.BuildFromConfig(ctx, clusterConfig, eng, initialLog)
+	return b.BuildFromConfig(ctx, clusterConfig, engInst, initialLog) // Pass engInst
 }
 
 // BuildFromConfig constructs and initializes the full runtime Context from a parsed Cluster object.
 // It requires an engine.Engine instance. If baseLogger is nil, a new logger will be initialized.
-func (b *RuntimeBuilder) BuildFromConfig(ctx context.Context, clusterConfig *v1alpha1.Cluster, eng engine.Engine, baseLogger *logger.Logger) (*Context, func(), error) {
+func (b *RuntimeBuilder) BuildFromConfig(ctx context.Context, clusterConfig *v1alpha1.Cluster, engInst engine.Engine, baseLogger *logger.Logger) (*Context, func(), error) { // Renamed eng to engInst
 	var log *logger.Logger
 	if baseLogger != nil {
 		log = baseLogger
@@ -66,7 +64,7 @@ func (b *RuntimeBuilder) BuildFromConfig(ctx context.Context, clusterConfig *v1a
 	}
 	log.Info("Building runtime environment from configuration object...")
 
-	if eng == nil {
+	if engInst == nil { // Corrected to engInst
 		return nil, nil, fmt.Errorf("engine instance cannot be nil when building runtime context")
 	}
 
@@ -87,7 +85,7 @@ func (b *RuntimeBuilder) BuildFromConfig(ctx context.Context, clusterConfig *v1a
 
 	// --- Initialize Control Node (Local Host) ---
 	g.Go(func() error {
-		controlNodeHostSpec := v1alpha1.Host{
+		controlNodeHostSpec := v1alpha1.HostSpec{ // Changed to HostSpec
 			Name:    common.ControlNodeHostName, // e.g., "kubexm-control-node"
 			Type:    "local",
 			Address: "127.0.0.1", // Or other loopback
@@ -181,12 +179,12 @@ func (b *RuntimeBuilder) BuildFromConfig(ctx context.Context, clusterConfig *v1a
 			}
 			connectionCfg.PrivateKey = hostPrivateKeyBytes
 
-			if currentHostCfg.ConnectionTimeout > 0 {
-				connectionCfg.Timeout = currentHostCfg.ConnectionTimeout
-			} else if clusterConfig.Spec.Global != nil && clusterConfig.Spec.Global.ConnectionTimeout > 0 {
+			// Timeout is taken from global config or a hardcoded default if global is not set.
+			// HostSpec does not have ConnectionTimeout.
+			if clusterConfig.Spec.Global != nil && clusterConfig.Spec.Global.ConnectionTimeout > 0 {
 				connectionCfg.Timeout = clusterConfig.Spec.Global.ConnectionTimeout
 			} else {
-				connectionCfg.Timeout = connector.DefaultConnectTimeout
+				connectionCfg.Timeout = 30 * time.Second // Default timeout
 			}
 
 			if err := conn.Connect(gCtx, connectionCfg); err != nil {
@@ -232,7 +230,7 @@ func (b *RuntimeBuilder) BuildFromConfig(ctx context.Context, clusterConfig *v1a
 	runtimeCtx := &Context{
 		GoCtx:         ctx,
 		Logger:        log, // Use the logger determined at the start of this function
-		Engine:        eng, // Use the passed-in engine instance
+		Engine:        engInst, // Use the passed-in engine instance
 		Runner:        runnerSvc,
 		ClusterConfig: clusterConfig,
 		HostRuntimes:  hostRuntimes,
@@ -350,10 +348,10 @@ func (b *RuntimeBuilder) BuildFromConfig(ctx context.Context, clusterConfig *v1a
 		runtimeCtx.GlobalConnectionTimeout = 30 * time.Second
 	}
 
-	runtimeCtx.PipelineCache = cache.NewPipelineCache()
-	runtimeCtx.ModuleCache = cache.NewModuleCache()
-	runtimeCtx.TaskCache = cache.NewTaskCache()
-	runtimeCtx.StepCache = cache.NewStepCache()
+	runtimeCtx.internalPipelineCache = cache.NewPipelineCache() // Use renamed field
+	runtimeCtx.internalModuleCache = cache.NewModuleCache()   // Use renamed field
+	runtimeCtx.internalTaskCache = cache.NewTaskCache()     // Use renamed field
+	runtimeCtx.internalStepCache = cache.NewStepCache()     // Use renamed field
 
 	// Set the ControlNode in the context
 	if cnHR, ok := hostRuntimes[common.ControlNodeHostName]; ok {

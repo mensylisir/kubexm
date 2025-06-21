@@ -7,9 +7,10 @@ import (
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/module"
 	"github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/runtime"
+	// "github.com/mensylisir/kubexm/pkg/runtime" // Removed
+	"github.com/mensylisir/kubexm/pkg/engine" // Added for engine.EngineExecuteContext assertion
 	"github.com/mensylisir/kubexm/pkg/task" // For task.ExecutionFragment
-	moduleExample "github.com/mensylisir/kubexm/pkg/module" // Example, assuming webserver is in module root
+	// moduleExample "github.com/mensylisir/kubexm/pkg/module" // Removed unused alias import
 )
 
 // DeployAppPipeline is an example pipeline for deploying an application.
@@ -44,7 +45,7 @@ func NewDeployAppPipeline(cfg *v1alpha1.Cluster) Pipeline { // Implements pipeli
 		// In real scenario, this would be: webServerMod = moduleWebServer.NewWebServerModule(cfg)
 		// For now, this line will be problematic if NewWebServerModule is not defined or takes different args.
 		// Let's assume `moduleExample.NewWebServerModule()` is a valid call for this refactoring context.
-		webServerMod = moduleExample.NewWebServerModulePlaceholder(cfg) // Placeholder
+		webServerMod = NewWebServerModulePlaceholder(cfg) // Placeholder - call local func
 	}
 
 
@@ -70,7 +71,7 @@ func (p *DeployAppPipeline) Modules() []module.Module {
 }
 
 // Plan generates the execution graph for all relevant modules within this pipeline.
-func (p *DeployAppPipeline) Plan(ctx runtime.PipelineContext) (*plan.ExecutionGraph, error) {
+func (p *DeployAppPipeline) Plan(ctx PipelineContext) (*plan.ExecutionGraph, error) { // Changed to local PipelineContext
 	logger := ctx.GetLogger().With("pipeline", p.Name())
 	finalGraph := plan.NewExecutionGraph(p.Name())
 
@@ -83,7 +84,14 @@ func (p *DeployAppPipeline) Plan(ctx runtime.PipelineContext) (*plan.ExecutionGr
 			continue
 		}
 		logger.Info("Planning module", "module", mod.Name())
-		moduleFragment, err := mod.Plan(ctx) // Pass PipelineContext directly
+
+		// Assert ctx to module.ModuleContext, as Module.Plan expects it.
+		// The underlying concrete type (*runtime.Context) implements both.
+		moduleCtx, ok := ctx.(module.ModuleContext)
+		if !ok {
+			return nil, fmt.Errorf("failed to assert PipelineContext to module.ModuleContext for module %s in pipeline %s", mod.Name(), p.Name())
+		}
+		moduleFragment, err := mod.Plan(moduleCtx)
 		if err != nil {
 			return nil, fmt.Errorf("planning failed for module %s in pipeline %s: %w", mod.Name(), p.Name(), err)
 		}
@@ -125,21 +133,20 @@ func (p *DeployAppPipeline) Plan(ctx runtime.PipelineContext) (*plan.ExecutionGr
 	}
 
 	finalGraph.ExitNodes = append(finalGraph.ExitNodes, previousModuleExitNodes...)
-	finalGraph.EntryNodes = uniqueNodeIDs(finalGraph.EntryNodes)
-	finalGraph.ExitNodes = uniqueNodeIDs(finalGraph.ExitNodes)
+	finalGraph.EntryNodes = plan.UniqueNodeIDs(finalGraph.EntryNodes) // Changed to plan.UniqueNodeIDs
+	finalGraph.ExitNodes = plan.UniqueNodeIDs(finalGraph.ExitNodes)   // Changed to plan.UniqueNodeIDs
 
 	logger.Info("Pipeline planning complete.", "totalNodes", len(finalGraph.Nodes))
 	return finalGraph, nil
 }
 
 // Run executes the pipeline.
-func (p *DeployAppPipeline) Run(rtCtx *runtime.Context, dryRun bool) (*plan.GraphExecutionResult, error) {
-	logger := rtCtx.GetLogger().With("pipeline", p.Name())
+func (p *DeployAppPipeline) Run(ctx PipelineContext, dryRun bool) (*plan.GraphExecutionResult, error) { // Changed signature
+	logger := ctx.GetLogger().With("pipeline", p.Name())
 	logger.Info("Starting pipeline run...", "dryRun", dryRun)
 
-	// rtCtx is *runtime.Context which implements runtime.PipelineContext.
-	// No assertion needed to pass it to p.Plan.
-	executionGraph, err := p.Plan(rtCtx)
+	// ctx is PipelineContext. The concrete type *runtime.Context implements this.
+	executionGraph, err := p.Plan(ctx) // Plan expects PipelineContext
 	if err != nil {
 		logger.Error(err, "Failed to generate execution plan for pipeline")
 		res := plan.NewGraphExecutionResult(p.Name())
@@ -148,9 +155,9 @@ func (p *DeployAppPipeline) Run(rtCtx *runtime.Context, dryRun bool) (*plan.Grap
 		return res, fmt.Errorf("pipeline plan generation failed for %s: %w", p.Name(), err)
 	}
 
-	eng := rtCtx.GetEngine()
+	eng := ctx.GetEngine() // GetEngine is now part of PipelineContext
 	if eng == nil {
-		err := fmt.Errorf("engine not found in runtime context for pipeline %s", p.Name())
+		err := fmt.Errorf("engine not found in pipeline context for pipeline %s", p.Name()) // Updated message
 		logger.Error(err, "Cannot execute pipeline")
 		res := plan.NewGraphExecutionResult(p.Name())
 		res.Status = plan.StatusFailed
@@ -159,7 +166,18 @@ func (p *DeployAppPipeline) Run(rtCtx *runtime.Context, dryRun bool) (*plan.Grap
 	}
 
 	logger.Info("Submitting execution graph to engine.", "nodeCount", len(executionGraph.Nodes))
-	graphResult, execErr := eng.Execute(rtCtx, executionGraph, dryRun) // Execute now returns *plan.GraphExecutionResult
+	// eng.Execute expects engine.EngineExecuteContext.
+	// The ctx (PipelineContext) is implemented by *runtime.Context, which also implements EngineExecuteContext.
+	engineExecuteCtx, ok := ctx.(engine.EngineExecuteContext)
+	if !ok {
+		err := fmt.Errorf("pipelineContext cannot be asserted to engine.EngineExecuteContext for pipeline %s", p.Name())
+		logger.Error(err, "Cannot execute pipeline")
+		res := plan.NewGraphExecutionResult(p.Name())
+		res.Status = plan.StatusFailed
+		res.EndTime = time.Now()
+		return res, err
+	}
+	graphResult, execErr := eng.Execute(engineExecuteCtx, executionGraph, dryRun)
 
 	if execErr != nil {
 		logger.Error(execErr, "Engine execution encountered an error for pipeline "+p.Name())
@@ -188,7 +206,7 @@ var _ Pipeline = (*DeployAppPipeline)(nil) // Using unexported Pipeline type fro
 
 // Placeholder for NewWebServerModule to make the example somewhat runnable if webserver.go isn't fully refactored.
 // This should be removed once the actual WebServerModule is correctly defined and imported.
-func (m *moduleExamplePlaceholder) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragment, error) { return &task.ExecutionFragment{}, nil }
+func (m *moduleExamplePlaceholder) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, error) { return &task.ExecutionFragment{}, nil } // Changed to module.ModuleContext
 func (m *moduleExamplePlaceholder) Name() string { return "WebServerModulePlaceholder" }
 func (m *moduleExamplePlaceholder) Tasks() []task.Task { return nil }
 type moduleExamplePlaceholder struct { module.BaseModule }

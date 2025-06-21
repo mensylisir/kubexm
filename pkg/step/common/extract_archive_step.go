@@ -10,9 +10,9 @@ import (
 	"strings"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/logger" // For logger.Logger
 	"github.com/mensylisir/kubexm/pkg/spec"
-	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step"   // For step.Step and step.StepContext
 )
 
 // ExtractArchiveStep extracts an archive (e.g., .tar.gz) to a specified directory.
@@ -216,5 +216,3 @@ func (s *ExtractArchiveStep) Rollback(ctx runtime.StepContext, host connector.Ho
 }
 
 var _ step.Step = (*ExtractArchiveStep)(nil)
-
-[end of pkg/step/common/extract_archive_step.go]
