@@ -43,7 +43,7 @@ package logger
 import (
 	"fmt"
 	"os"
-	"strings"
+	// "strings" // Removed as unused
 	"sync"
 	"time"
 

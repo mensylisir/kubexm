@@ -1,15 +1,15 @@
 package logger
 
 import (
-	"bytes" // Import bytes for Buffer
 	"fmt"
-	"strconv" // For AddXxx methods in tempEncoder and field formatting
+	// "strconv" // Removed as unused
 	"strings"
 	// "sync" // No longer needed directly in this file
 	"time"
 
 	"go.uber.org/zap/buffer" // Keep for _bufferPool
 	"go.uber.org/zap/zapcore"
+	// "bytes" // Removed as unused
 )
 
 const (
@@ -256,7 +256,7 @@ func (enc *colorConsoleEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.
 		case zapcore.Int8Type, zapcore.Int16Type, zapcore.Int32Type, zapcore.Int64Type:
 			line.AppendInt(f.Integer)
 		case zapcore.Uint8Type, zapcore.Uint16Type, zapcore.Uint32Type, zapcore.Uint64Type, zapcore.UintptrType:
-			line.AppendUint(f.Integer) // f.Integer holds uint values as well for these types
+			line.AppendUint(uint64(f.Integer)) // f.Integer holds uint values as well for these types, cast to uint64
 		case zapcore.Float32Type:
 			line.AppendFloat(float64(f.Interface.(float32)), 32) // Use Interface for float
 		case zapcore.Float64Type:
@@ -321,7 +321,7 @@ func (t *tempEncoder) AppendInt32(v int32) { t.buf.AppendInt(int64(v)) }
 func (t *tempEncoder) AppendInt16(v int16) { t.buf.AppendInt(int64(v)) }
 func (t *tempEncoder) AppendInt8(v int8) { t.buf.AppendInt(int64(v)) }
 func (t *tempEncoder) AppendString(v string) { t.buf.AppendString(v) }
-func (t *tempEncoder) AppendTime(v time.Time) { t.buf.AppendTime(v, t.EncoderConfig.EncodeTime.Layout()) } // Use layout from config
+func (t *tempEncoder) AppendTime(v time.Time) { t.buf.AppendTime(v, time.RFC3339) } // Use a fixed format like RFC3339
 func (t *tempEncoder) AppendUint(v uint) { t.buf.AppendUint(uint64(v)) }
 func (t *tempEncoder) AppendUint64(v uint64) { t.buf.AppendUint(v) }
 func (t *tempEncoder) AppendUint32(v uint32) { t.buf.AppendUint(uint64(v)) }

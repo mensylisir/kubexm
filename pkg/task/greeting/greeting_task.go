@@ -36,16 +36,6 @@ func NewGreetingTask() task.Task {
 	}
 }
 
-// Name returns the task's name. (If BaseTask provides it, this can be removed)
-func (t *GreetingTask) Name() string {
-	return t.BaseTask.TaskName // Or directly "DisplayWelcomeGreeting"
-}
-
-// Description returns the task's description. (If BaseTask provides it, this can be removed)
-func (t *GreetingTask) Description() string {
-	return t.BaseTask.TaskDesc // Or directly the description string
-}
-
 // IsRequired for GreetingTask is always true as it's a cosmetic step.
 func (t *GreetingTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 	return true, nil

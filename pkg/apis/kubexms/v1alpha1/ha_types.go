@@ -1,9 +1,9 @@
 package v1alpha1
 
 import (
-	"net" // Add to imports of ha_types.go
+	// "net" // Removed as unused locally, assuming isValidIP is from elsewhere or not used here
 	"strings"
-	"fmt"     // For pathPrefix in validation calls
+	// "fmt"     // Removed as unused locally
 )
 
 // isValidIP helper (if not already present or imported from a shared location)
@@ -120,23 +120,28 @@ func SetDefaults_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig, par
 		b := false // External LB not enabled by default
 		// If parentHA.Type implies external (e.g. "external_lb" or "Managed*"), this could be true.
 		// For now, explicit enable.
-		if parentHA != nil && (strings.Contains(parentHA.Type, "Managed") || parentHA.Type == "UserProvidedExternal") { // Example types
-		   b = true
+		// Default Enabled to true if a specific Type is set for the external LB itself.
+		// This avoids relying on a non-existent parentHA.Type.
+		if cfg.Type != "" && (strings.Contains(cfg.Type, "Managed") || cfg.Type == "UserProvided") {
+			b = true
 		}
 		cfg.Enabled = &b
 	}
 
 	if cfg.Enabled != nil && *cfg.Enabled {
-		if strings.Contains(cfg.Type, "Keepalived") { // Adjusted from parentHA.Type
+		if strings.Contains(cfg.Type, "Keepalived") {
 			if cfg.Keepalived == nil { cfg.Keepalived = &KeepalivedConfig{} }
 			SetDefaults_KeepalivedConfig(cfg.Keepalived)
-			// If Keepalived is used and configured, its VIP might inform ControlPlaneEndpoint.Address
-			if parentHA != nil && parentHA.ControlPlaneEndpoint != nil && parentHA.ControlPlaneEndpoint.Address == "" &&
-			   cfg.Keepalived != nil && parentHA.VIP != "" { // Use top-level VIP for keepalived context
+			// If Keepalived is used, its VIP might inform ControlPlaneEndpoint.Address.
+			// This logic relies on parentHA.VIP and parentHA.ControlPlaneEndpoint.
+			// It's kept for now but might need review if parentHA.VIP is fully deprecated.
+			if parentHA != nil && parentHA.ControlPlaneEndpoint != nil &&
+			   parentHA.ControlPlaneEndpoint.Address == "" && // Only if not already set
+			   cfg.Keepalived != nil && parentHA.VIP != "" { // And VIP is available
 				parentHA.ControlPlaneEndpoint.Address = parentHA.VIP
 			}
 		}
-		if strings.Contains(cfg.Type, "HAProxy") { // Adjusted from parentHA.Type
+		if strings.Contains(cfg.Type, "HAProxy") {
 			if cfg.HAProxy == nil { cfg.HAProxy = &HAProxyConfig{} }
 			SetDefaults_HAProxyConfig(cfg.HAProxy)
 		}

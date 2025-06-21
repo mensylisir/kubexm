@@ -1,62 +1,43 @@
 package preflight
 
 import (
-	"fmt" // For errors and NodeID generation
+	"fmt"
 
-	"github.com/mensylisir/kubexm/pkg/module"
-	"github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // For Cluster config
-	"github.com/mensylisir/kubexm/pkg/common"                 // For common roles
-	"github.com/mensylisir/kubexm/pkg/module"
+	"github.com/mensylisir/kubexm/pkg/module" // Alias to avoid collision if task.Module is also used by name
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
-	taskPreflight "github.com/mensylisir/kubexm/pkg/task/preflight"
+	"github.com/mensylisir/kubexm/pkg/task/greeting"
+	"github.com/mensylisir/kubexm/pkg/task/pre"
+	// taskPreflight "github.com/mensylisir/kubexm/pkg/task/preflight" // Keep if SystemChecksTask etc. are still used
 )
 
 // PreflightModule defines the module for preflight checks and setup.
 type PreflightModule struct {
-	module.BaseModule
-	// cfg *v1alpha1.Cluster // Store cfg if tasks need it at construction and it's passed to NewPreflightModule
+	module.BaseModule // Embed BaseModule
+	AssumeYes         bool
 }
 
 // NewPreflightModule creates a new PreflightModule.
 // It initializes the tasks that this module will orchestrate.
-// cfg is the cluster configuration, used to parameterize tasks.
-func NewPreflightModule(cfg *v1alpha1.Cluster) module.Module { // Returns module.Module interface
-	// Define roles for preflight tasks. Often, these run on all nodes or specific foundational roles.
-	// Example: Run on all nodes that will be part of Kubernetes.
-	// Roles are now passed to the NewSystemChecksTask and NewSetupKernelTask constructors.
-	allKubeNodeRoles := []string{common.MasterRole, common.WorkerRole, common.EtcdRole}
-
-	// cfg is no longer passed to task constructors. Tasks fetch it from runtime.TaskContext.
-	systemChecksTask := taskPreflight.NewSystemChecksTask(allKubeNodeRoles)
-	setupKernelTask := taskPreflight.NewSetupKernelTask() // SetupKernelTask's constructor was simplified to take no args
-	// If SetupKernelTask also needs roles, its constructor and this call would need adjustment.
-	// For now, assuming SetupKernelTask applies to all nodes or determines roles internally based on its logic.
-	// Let's make SetupKernelTask also take roles for consistency in this module.
-	// This means NewSetupKernelTask in pkg/task/preflight/setup_kernel.go needs to be updated.
-
-	// Tasks for this module:
-	modTasks := []task.Task{
-		systemChecksTask, // Runs on allKubeNodeRoles
-		// setupKernelTask will be adjusted to take roles.
-		// For now, let's assume NewSetupKernelTask() is parameterless and applies to all nodes
-		// as per its current refactored state. If role-specific, it would need roles in its constructor.
-		// Let's assume for this module, kernel setup is also for allKubeNodeRoles.
-		// So, NewSetupKernelTask should accept roles.
+func NewPreflightModule(assumeYes bool) module.Module { // Returns module.Module interface
+	// Define the sequence of tasks for this module
+	moduleTasks := []task.Task{
+		greeting.NewGreetingTask(),
+		pre.NewConfirmTask("InitialConfirmation", "Proceed with KubeXM operations?", assumeYes),
+		pre.NewPreTask(), // General pre-flight checks defined in PreTask
+		// TODO: Add taskPreflight.NewSystemChecksTask() if it's distinct from pre.NewPreTask()
+		// TODO: Add taskPreflight.NewSetupKernelTask()
+		// TODO: Add VerifyArtifactsTask (from pkg/task/pre) when created
+		// TODO: Add CreateRepositoryTask (from pkg/task/pre) when created
 	}
-	// Re-checking NewSetupKernelTask: it does not take roles in its current refactored form.
-	// It uses t.BaseTask.RunOnRoles which is empty by default, meaning GetHostsByRole("") -> all hosts.
-	// This is acceptable. If specific roles were needed, the constructor would need to accept them to set in BaseTask.
-	modTasks = append(modTasks, setupKernelTask)
 
-
-	// Example: Add more preflight tasks if they exist and are refactored
-	// setupPrereqsTask := taskPreflight.NewSetupKubernetesPrerequisitesTask(allKubeNodeRoles)
-
-	base := module.NewBaseModule("PreflightChecksAndSetup", modTasks)
-	return &PreflightModule{BaseModule: base}
+	base := module.NewBaseModule("PreflightChecksAndSetup", moduleTasks)
+	pm := &PreflightModule{
+		BaseModule: base,
+		AssumeYes:  assumeYes,
+	}
+	return pm
 }
 
 // Plan generates the execution fragment for the preflight module.
