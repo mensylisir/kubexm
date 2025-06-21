@@ -11,7 +11,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/logger" // For logger.Logger type
 	"github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/runtime" // For runtime.StepContext
+	// runtime.StepContext is no longer used directly, replaced by engine.StepContext from interface.go
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 
@@ -294,8 +294,8 @@ func (e *dagExecutor) Execute(ctx EngineExecuteContext, g *plan.ExecutionGraph, 
 }
 
 // runStepOnHost executes a single step on a single host.
-// It now takes runtime.StepContext.
-func (e *dagExecutor) runStepOnHost(stepCtx runtime.StepContext, s step.Step) *plan.HostResult {
+// It now takes engine.StepContext (defined in engine/interface.go).
+func (e *dagExecutor) runStepOnHost(stepCtx StepContext, s step.Step) *plan.HostResult {
 	currentHost := stepCtx.GetHost()
 	hr := plan.NewHostResult(currentHost.GetName())
 	engineLogger := stepCtx.GetLogger().With("engine_step_runner", s.Meta().Name, "host", currentHost.GetName())

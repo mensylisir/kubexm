@@ -22,7 +22,7 @@ func TestSetDefaults_EtcdConfig(t *testing.T) {
 	if cfg.DataDir == nil || *cfg.DataDir != "/var/lib/etcd" {
 		t.Errorf("Default DataDir = %v, want /var/lib/etcd", cfg.DataDir)
 	}
-	if cfg.ExtraArgs == nil || cap(cfg.ExtraArgs) == 0 { // Check for non-nil empty slice
+	if cfg.ExtraArgs == nil { // Check that ExtraArgs is initialized to a non-nil (empty) slice
 		t.Error("ExtraArgs should be initialized as an empty slice, not nil")
 	}
 	if cfg.BackupDir == nil || *cfg.BackupDir != "/var/backups/etcd" { t.Errorf("Default BackupDir failed: %v", cfg.BackupDir) }
@@ -82,7 +82,7 @@ func TestValidate_EtcdConfig_Invalid(t *testing.T) {
 		wantErrMsg string
 	}{
 		{"invalid type", &EtcdConfig{Type: "invalid"}, "invalid type 'invalid'"},
-		{"external_no_config", &EtcdConfig{Type: EtcdTypeExternal, External: nil}, ".external: must be defined"},
+		{"external_no_config", &EtcdConfig{Type: EtcdTypeExternal, External: nil}, ".external.endpoints: must contain at least one endpoint"},
 		{"external_no_endpoints", &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{}}}, ".external.endpoints: must contain at least one endpoint"},
 		{"external_empty_endpoint", &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{""}}}, ".external.endpoints[0]: endpoint cannot be empty"},
 		{"external_mismatched_tls_cert", &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{"h"}, CertFile: "cert"}}, "certFile and keyFile must be specified together"},

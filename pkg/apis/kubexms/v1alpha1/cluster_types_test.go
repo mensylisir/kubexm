@@ -113,10 +113,11 @@ func newValidV1alpha1ClusterForTest() *Cluster {
 	cfg := &Cluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "valid-cluster"},
 		Spec: ClusterSpec{
-			Global: &GlobalSpec{User: "testuser", Port: 22, WorkDir: "/tmp", ConnectionTimeout: 5 * time.Second},
-			Hosts:  []HostSpec{{Name: "m1", Address: "1.1.1.1", Port: 22, User: "testuser", Roles: []string{"master"}}},
-			// Essential component configs that might be required by Validate_Cluster
-			Kubernetes: &KubernetesConfig{Version: "v1.25.0"}, // Assuming Kubernetes section is mandatory
+			Global: &GlobalSpec{User: "testuser", Port: 22, PrivateKeyPath: "/dev/null", WorkDir: "/tmp", ConnectionTimeout: 5 * time.Second}, // Added PrivateKeyPath to Global for host inheritance
+			Hosts:  []HostSpec{{Name: "m1", Address: "1.1.1.1", Port: 22, User: "testuser", Roles: []string{"master"}}}, // Will inherit PrivateKeyPath
+			Kubernetes: &KubernetesConfig{Version: "v1.25.0", PodSubnet: "10.244.0.0/16"}, // Added PodSubnet
+			Network:    &NetworkConfig{}, // Initialize network, PodSubnet from KubernetesConfig will be used by Validate_NetworkConfig
+			Etcd:       &EtcdConfig{},    // Etcd section is required by Validate_Cluster
 			// Other components can be nil if their sections are optional and their Validate_* funcs handle nil
 		},
 	}

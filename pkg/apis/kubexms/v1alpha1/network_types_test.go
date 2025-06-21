@@ -154,15 +154,15 @@ func TestNetworkConfig_EnableMultusCNI(t *testing.T) {
 
 func TestCalicoConfig_TyphaHelpers(t *testing.T) {
    cfg := &CalicoConfig{}
-   SetDefaults_CalicoConfig(cfg) // Defaults EnableTypha to false
+   SetDefaults_CalicoConfig(cfg, "") // Pass empty string for defaultPoolCIDR
    if cfg.IsTyphaEnabled() != false {t.Error("IsTyphaEnabled default failed")}
    if cfg.GetTyphaReplicas() != 0 {t.Error("GetTyphaReplicas default for disabled Typha failed")}
 
    cfg.EnableTypha = pboolNetworkTest(true)
-   SetDefaults_CalicoConfig(cfg) // Re-default with Typha enabled to set default replicas
+   SetDefaults_CalicoConfig(cfg, "") // Pass empty string for defaultPoolCIDR
    if cfg.IsTyphaEnabled() != true {t.Error("IsTyphaEnabled true failed")}
    if cfg.GetTyphaReplicas() != 2 {t.Errorf("GetTyphaReplicas default for enabled Typha failed, got %d", cfg.GetTyphaReplicas())}
 
-   cfg.TyphaReplicas = pint32NetworkTest(5)
+   cfg.TyphaReplicas = pintNetworkTest(5) // Changed pint32NetworkTest to pintNetworkTest
    if cfg.GetTyphaReplicas() != 5 {t.Errorf("GetTyphaReplicas custom failed, got %d", cfg.GetTyphaReplicas())}
 }

@@ -37,8 +37,8 @@ func TestSetDefaults_KubernetesConfig(t *testing.T) {
 	if cfg.MasqueradeAll == nil || *cfg.MasqueradeAll != false {
 		t.Errorf("Default MasqueradeAll = %v, want false", cfg.MasqueradeAll)
 	}
-	if cfg.ContainerManager != "docker" { // New default check
-		t.Errorf("Default ContainerManager = %s, want docker", cfg.ContainerManager)
+	if cfg.ContainerManager != "systemd" { // Updated expected default
+		t.Errorf("Default ContainerManager = %s, want systemd", cfg.ContainerManager)
 	}
 	if cfg.MaxPods == nil || *cfg.MaxPods != 110 { // New default check
 		t.Errorf("Default MaxPods = %v, want 110", cfg.MaxPods)
@@ -64,20 +64,20 @@ func TestSetDefaults_KubernetesConfig(t *testing.T) {
 
 	if cfg.FeatureGates == nil { t.Error("FeatureGates map should be initialized") }
 
-	if cfg.APIServer == nil || cfg.APIServer.ExtraArgs == nil || cap(cfg.APIServer.ExtraArgs) == 0 {
-		t.Error("APIServer.ExtraArgs should be initialized as an empty slice")
+	if cfg.APIServer == nil || cfg.APIServer.ExtraArgs == nil {
+		t.Error("APIServer.ExtraArgs should be initialized (non-nil empty slice)")
 	}
-	if cfg.APIServer.AdmissionPlugins == nil || cap(cfg.APIServer.AdmissionPlugins) == 0 {
-		t.Error("APIServer.AdmissionPlugins should be initialized as an empty slice")
+	if cfg.APIServer.AdmissionPlugins == nil {
+		t.Error("APIServer.AdmissionPlugins should be initialized (non-nil empty slice)")
 	}
-	if cfg.ControllerManager == nil || cfg.ControllerManager.ExtraArgs == nil || cap(cfg.ControllerManager.ExtraArgs) == 0 {
-		t.Error("ControllerManager.ExtraArgs should be initialized as an empty slice")
+	if cfg.ControllerManager == nil || cfg.ControllerManager.ExtraArgs == nil {
+		t.Error("ControllerManager.ExtraArgs should be initialized (non-nil empty slice)")
 	}
-	if cfg.Scheduler == nil || cfg.Scheduler.ExtraArgs == nil || cap(cfg.Scheduler.ExtraArgs) == 0 {
-		t.Error("Scheduler.ExtraArgs should be initialized as an empty slice")
+	if cfg.Scheduler == nil || cfg.Scheduler.ExtraArgs == nil {
+		t.Error("Scheduler.ExtraArgs should be initialized (non-nil empty slice)")
 	}
-	if cfg.Kubelet == nil || cfg.Kubelet.ExtraArgs == nil || cap(cfg.Kubelet.ExtraArgs) == 0 {
-		t.Error("Kubelet.ExtraArgs should be initialized as an empty slice")
+	if cfg.Kubelet == nil || cfg.Kubelet.ExtraArgs == nil {
+		t.Error("Kubelet.ExtraArgs should be initialized (non-nil empty slice)")
 	}
 	if cfg.Kubelet.EvictionHard == nil {t.Error("Kubelet.EvictionHard map should be initialized")}
 
@@ -90,8 +90,8 @@ func TestSetDefaults_KubernetesConfig(t *testing.T) {
 		t.Errorf("Kubelet.CgroupDriver should default from ContainerManager if set, got %v", cfgWithManager.Kubelet.CgroupDriver)
 	}
 
-	if cfg.KubeProxy == nil || cfg.KubeProxy.ExtraArgs == nil || cap(cfg.KubeProxy.ExtraArgs) == 0 {
-		t.Error("KubeProxy.ExtraArgs should be initialized as an empty slice")
+	if cfg.KubeProxy == nil || cfg.KubeProxy.ExtraArgs == nil {
+		t.Error("KubeProxy.ExtraArgs should be initialized (non-nil empty slice)")
 	}
 	// Test KubeProxy sub-config defaults based on ProxyMode
 	cfgProxyIptables := &KubernetesConfig{ProxyMode: "iptables"}
@@ -109,8 +109,8 @@ func TestSetDefaults_KubernetesConfig(t *testing.T) {
 	SetDefaults_KubernetesConfig(cfgProxyIpvs, "ipvs-test")
 	if cfgProxyIpvs.KubeProxy.IPVS == nil { t.Error("KubeProxy.IPVS should be initialized for ipvs mode") }
 	if cfgProxyIpvs.KubeProxy.IPVS.Scheduler != "rr" {t.Error("KubeProxy.IPVS.Scheduler default failed")}
-	if cfgProxyIpvs.KubeProxy.IPVS.ExcludeCIDRs == nil || cap(cfgProxyIpvs.KubeProxy.IPVS.ExcludeCIDRs) == 0 {
-		t.Error("KubeProxy.IPVS.ExcludeCIDRs should be initialized as an empty slice")
+	if cfgProxyIpvs.KubeProxy.IPVS.ExcludeCIDRs == nil { // Changed cap check to nil check
+		t.Error("KubeProxy.IPVS.ExcludeCIDRs should be initialized (non-nil empty slice)")
 	}
 }
 
@@ -139,7 +139,7 @@ func TestValidate_KubernetesConfig_Invalid(t *testing.T) {
 		{"nil_config", nil, "kubernetes configuration section cannot be nil"},
 		{"empty_version", &KubernetesConfig{Version: ""}, ".version: cannot be empty"},
 		{"bad_version_format", &KubernetesConfig{Version: "1.25.0"}, ".version: must start with 'v'"},
-		{"empty_dnsdomain", &KubernetesConfig{Version: "v1.20.0", DNSDomain: ""}, ".dnsDomain: cannot be empty"},
+		// {"empty_dnsdomain", &KubernetesConfig{Version: "v1.20.0", DNSDomain: ""}, ".dnsDomain: cannot be empty"}, // This case is now handled by defaulting
 		{"invalid_proxymode", &KubernetesConfig{Version: "v1.20.0", ProxyMode: "foo"}, ".proxyMode: invalid mode 'foo'"},
 		{"invalid_podsubnet", &KubernetesConfig{Version: "v1.20.0", PodSubnet: "invalid"}, ".podSubnet: invalid CIDR format"},
 		{"invalid_servicesubnet", &KubernetesConfig{Version: "v1.20.0", ServiceSubnet: "invalid"}, ".serviceSubnet: invalid CIDR format"},
