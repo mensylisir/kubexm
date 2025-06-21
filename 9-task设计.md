@@ -34,6 +34,26 @@ import (
     "github.com/mensylisir/kubexm/pkg/runtime"
 )
 
+// TaskContext defines the methods available at the task execution level.
+type TaskContext interface {
+	// Methods from former embedded ModuleContext (which were from PipelineContext)
+	GoContext() context.Context
+	GetLogger() *logger.Logger
+	GetClusterConfig() *v1alpha1.Cluster
+	PipelineCache() cache.PipelineCache
+	GetGlobalWorkDir() string
+	// GetEngine() engine.Engine // Removed
+
+	// Methods from former embedded ModuleContext (module-specific)
+	ModuleCache() cache.ModuleCache
+
+	// Task-specific methods
+	GetHostsByRole(role string) ([]connector.Host, error)
+	GetHostFacts(host connector.Host) (*runner.Facts, error)
+	TaskCache() cache.TaskCache
+	GetControlNode() (connector.Host, error)
+}
+
 // ExecutionFragment represents a piece of the total execution graph.
 type ExecutionFragment struct {
     Nodes      map[plan.NodeID]*plan.ExecutionNode
@@ -43,6 +63,12 @@ type ExecutionFragment struct {
 
 type Task interface {
     Name() string
+    
+    // Description provides a brief summary of what the task does.
+	// This can be removed if not strictly needed by the new model,
+	// or kept for informational purposes. For now, I'll keep it.
+	Description() string
+
     IsRequired(ctx runtime.TaskContext) (bool, error)
 
     // Plan now generates an ExecutionFragment, a self-contained subgraph

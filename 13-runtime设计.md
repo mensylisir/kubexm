@@ -50,43 +50,6 @@ func NewContextWithGoContext(gCtx context.Context, parent *Context) *Context {
 	return &newCtx
 }
 ```
-#### runtime Facade 接口: 定义了暴露给各层的安全视图。
-##### pkg/runtime/facade.go
-```aiignore
-package runtime
-
-// ... imports ...
-
-type PipelineContext interface {
-    GetLogger() *logger.Logger
-    GetClusterConfig() *v1alpha1.Cluster
-    GoContext() context.Context
-}
-
-type ModuleContext interface {
-    PipelineContext
-    // Module-specific getters can be added here
-}
-
-type TaskContext interface {
-    ModuleContext
-    GetHostsByRole(role string) ([]connector.Host, error)
-    GetHostFacts(host connector.Host) (*runner.Facts, error)
-    GetClusterConfig() *v1alpha1.Cluster
-    GetGlobalWorkDir() string // Expose the main work directory for planning local paths
-}
-
-type StepContext interface {
-    GetLogger() *logger.Logger
-    GetRecorder() *event.Recorder
-    GetRunner() runner.Runner
-    GetConnectorForHost(host connector.Host) (connector.Connector, error)
-    GetHostFacts(host connector.Host) (*runner.Facts, error)
-    GoContext() context.Context
-}
-
-
-```
 
 #### pkg/runtime/builder.go - 运行时构建器 (您的实现 + DAG适配)
 ```aiignore

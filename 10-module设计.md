@@ -11,6 +11,20 @@ import (
     "github.com/mensylisir/kubexm/pkg/task"
 )
 
+// ModuleContext defines the methods available at the module execution level.
+type ModuleContext interface {
+	// Methods previously from pipeline.PipelineContext that modules need:
+	GoContext() context.Context
+	GetLogger() *logger.Logger
+	GetClusterConfig() *v1alpha1.Cluster
+	PipelineCache() cache.PipelineCache
+	GetGlobalWorkDir() string
+	GetEngine() engine.Engine // Consider if modules really need direct engine access
+
+	// Module-specific methods:
+	ModuleCache() cache.ModuleCache
+}
+
 type Module interface {
     Name() string
     Tasks() []task.Task
