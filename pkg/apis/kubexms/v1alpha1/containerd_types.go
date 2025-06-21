@@ -20,6 +20,8 @@ type ContainerRuntimeConfig struct {
 	// Docker holds Docker-specific configurations.
 	// Only applicable if Type is "docker".
 	Docker *DockerConfig `json:"docker,omitempty"`
+
+	Containerd *ContainerdConfig `json:"containerd,omitempty" yaml:"containerd,omitempty"`
 }
 
 // ContainerdConfig defines specific settings for the Containerd runtime.
@@ -82,7 +84,8 @@ func Validate_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig, verrs *Validat
 	isValidType := false
 	for _, vt := range validTypes {
 		if cfg.Type == vt {
-			isValidType = true; break
+			isValidType = true
+			break
 		}
 	}
 	if !isValidType {
@@ -115,12 +118,18 @@ func SetDefaults_ContainerdConfig(cfg *ContainerdConfig) {
 		cfg.UseSystemdCgroup = &defaultUseSystemdCgroup
 	}
 	if cfg.ConfigPath == nil {
-	   defaultPath := "/etc/containerd/config.toml"
-	   cfg.ConfigPath = &defaultPath
+		defaultPath := "/etc/containerd/config.toml"
+		cfg.ConfigPath = &defaultPath
 	}
-	if cfg.DisabledPlugins == nil { cfg.DisabledPlugins = []string{} }
-	if cfg.RequiredPlugins == nil { cfg.RequiredPlugins = []string{"io.containerd.grpc.v1.cri"} } // CRI plugin is typically required
-	if cfg.Imports == nil { cfg.Imports = []string{} }
+	if cfg.DisabledPlugins == nil {
+		cfg.DisabledPlugins = []string{}
+	}
+	if cfg.RequiredPlugins == nil {
+		cfg.RequiredPlugins = []string{"io.containerd.grpc.v1.cri"}
+	} // CRI plugin is typically required
+	if cfg.Imports == nil {
+		cfg.Imports = []string{}
+	}
 }
 
 // Validate_ContainerdConfig validates ContainerdConfig.
@@ -131,34 +140,40 @@ func Validate_ContainerdConfig(cfg *ContainerdConfig, verrs *ValidationErrors, p
 	// Version validation can be added.
 	// For RegistryMirrors, ensure URLs are valid if specified.
 	for reg, mirrors := range cfg.RegistryMirrors {
-	   if strings.TrimSpace(reg) == "" {
-		   verrs.Add("%s.registryMirrors: registry host key cannot be empty", pathPrefix)
-	   }
-	   if len(mirrors) == 0 {
-		   verrs.Add("%s.registryMirrors[\"%s\"]: must contain at least one mirror URL", pathPrefix, reg)
-	   }
-	   for i, mirrorURL := range mirrors {
-		   if strings.TrimSpace(mirrorURL) == "" { // Basic check, URL validation can be more complex
-			   verrs.Add("%s.registryMirrors[\"%s\"][%d]: mirror URL cannot be empty", pathPrefix, reg, i)
-		   }
-	   }
+		if strings.TrimSpace(reg) == "" {
+			verrs.Add("%s.registryMirrors: registry host key cannot be empty", pathPrefix)
+		}
+		if len(mirrors) == 0 {
+			verrs.Add("%s.registryMirrors[\"%s\"]: must contain at least one mirror URL", pathPrefix, reg)
+		}
+		for i, mirrorURL := range mirrors {
+			if strings.TrimSpace(mirrorURL) == "" { // Basic check, URL validation can be more complex
+				verrs.Add("%s.registryMirrors[\"%s\"][%d]: mirror URL cannot be empty", pathPrefix, reg, i)
+			}
+		}
 	}
 	for i, insecureReg := range cfg.InsecureRegistries {
-	   if strings.TrimSpace(insecureReg) == "" {
-		   verrs.Add("%s.insecureRegistries[%d]: registry host cannot be empty", pathPrefix, i)
-	   }
+		if strings.TrimSpace(insecureReg) == "" {
+			verrs.Add("%s.insecureRegistries[%d]: registry host cannot be empty", pathPrefix, i)
+		}
 	}
 	if cfg.ConfigPath != nil && strings.TrimSpace(*cfg.ConfigPath) == "" {
-	   verrs.Add("%s.configPath: cannot be empty if specified", pathPrefix)
+		verrs.Add("%s.configPath: cannot be empty if specified", pathPrefix)
 	}
 	for i, plug := range cfg.DisabledPlugins {
-		if strings.TrimSpace(plug) == "" { verrs.Add("%s.disabledPlugins[%d]: plugin name cannot be empty", pathPrefix, i)}
+		if strings.TrimSpace(plug) == "" {
+			verrs.Add("%s.disabledPlugins[%d]: plugin name cannot be empty", pathPrefix, i)
+		}
 	}
 	for i, plug := range cfg.RequiredPlugins {
-		if strings.TrimSpace(plug) == "" { verrs.Add("%s.requiredPlugins[%d]: plugin name cannot be empty", pathPrefix, i)}
+		if strings.TrimSpace(plug) == "" {
+			verrs.Add("%s.requiredPlugins[%d]: plugin name cannot be empty", pathPrefix, i)
+		}
 	}
 	for i, imp := range cfg.Imports {
-		if strings.TrimSpace(imp) == "" { verrs.Add("%s.imports[%d]: import path cannot be empty", pathPrefix, i)}
+		if strings.TrimSpace(imp) == "" {
+			verrs.Add("%s.imports[%d]: import path cannot be empty", pathPrefix, i)
+		}
 		// Could add path validation, e.g., ensure it's an absolute path or ends with .toml
 	}
 }

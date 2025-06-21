@@ -2,11 +2,11 @@ package v1alpha1
 
 import (
 	"fmt"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"net"
 	"regexp"
 	"strings"
 	"time"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // +genclient
@@ -23,7 +23,7 @@ type Cluster struct {
 	metav1.TypeMeta   `json:",inline" yaml:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 
-	Spec   ClusterSpec   `json:"spec,omitempty" yaml:"spec,omitempty"`
+	Spec ClusterSpec `json:"spec,omitempty" yaml:"spec,omitempty"`
 	// Status ClusterStatus `json:"status,omitempty"` // Add when status is defined
 }
 
@@ -36,34 +36,33 @@ type ClusterSpec struct {
 	// System contains system-level configuration.
 	System *SystemSpec `json:"system,omitempty" yaml:"system,omitempty"`
 
-	Global             *GlobalSpec             `json:"global,omitempty" yaml:"global,omitempty"`
-	Hosts              []HostSpec              `json:"hosts" yaml:"hosts"`
+	Global *GlobalSpec `json:"global,omitempty" yaml:"global,omitempty"`
+	Hosts  []HostSpec  `json:"hosts" yaml:"hosts"`
 
 	// Component configurations - will be pointers to specific config types
-	ContainerRuntime   *ContainerRuntimeConfig `json:"containerRuntime,omitempty" yaml:"containerRuntime,omitempty"`
-	Containerd         *ContainerdConfig       `json:"containerd,omitempty" yaml:"containerd,omitempty"`
-	Etcd               *EtcdConfig             `json:"etcd,omitempty" yaml:"etcd,omitempty"`
-	Kubernetes         *KubernetesConfig       `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"`
-	Network            *NetworkConfig          `json:"network,omitempty" yaml:"network,omitempty"`
-	HighAvailability   *HighAvailabilityConfig `json:"highAvailability,omitempty" yaml:"highAvailability,omitempty"`
-	Preflight          *PreflightConfig        `json:"preflight,omitempty" yaml:"preflight,omitempty"`
-	Kernel             *KernelConfig           `json:"kernel,omitempty" yaml:"kernel,omitempty"`
-	Storage            *StorageConfig          `json:"storage,omitempty" yaml:"storage,omitempty"`
-	Registry           *RegistryConfig         `json:"registry,omitempty" yaml:"registry,omitempty"`
-	OS                 *OSConfig               `json:"os,omitempty" yaml:"os,omitempty"`
-	Addons             []AddonConfig           `json:"addons,omitempty" yaml:"addons,omitempty"`
+	ContainerRuntime *ContainerRuntimeConfig `json:"containerRuntime,omitempty" yaml:"containerRuntime,omitempty"`
+	Etcd             *EtcdConfig             `json:"etcd,omitempty" yaml:"etcd,omitempty"`
+	Kubernetes       *KubernetesConfig       `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"`
+	Network          *NetworkConfig          `json:"network,omitempty" yaml:"network,omitempty"`
+	HighAvailability *HighAvailabilityConfig `json:"highAvailability,omitempty" yaml:"highAvailability,omitempty"`
+	Preflight        *PreflightConfig        `json:"preflight,omitempty" yaml:"preflight,omitempty"`
+	Kernel           *KernelConfig           `json:"kernel,omitempty" yaml:"kernel,omitempty"`
+	Storage          *StorageConfig          `json:"storage,omitempty" yaml:"storage,omitempty"`
+	Registry         *RegistryConfig         `json:"registry,omitempty" yaml:"registry,omitempty"`
+	OS               *OSConfig               `json:"os,omitempty" yaml:"os,omitempty"`
+	Addons           []AddonConfig           `json:"addons,omitempty" yaml:"addons,omitempty"`
 	// HostsCount int `json:"hostsCount,omitempty"` // Example for printcolumn
 }
 
 // RoleGroupsSpec defines the different groups of nodes in the cluster.
 type RoleGroupsSpec struct {
-	Master         MasterRoleSpec   `json:"master,omitempty" yaml:"master,omitempty"`
-	Worker         WorkerRoleSpec   `json:"worker,omitempty" yaml:"worker,omitempty"`
-	Etcd           EtcdRoleSpec     `json:"etcd,omitempty" yaml:"etcd,omitempty"`
-	LoadBalancer   LoadBalancerRoleSpec `json:"loadBalancer,omitempty" yaml:"loadBalancer,omitempty"` // YAML name from example: loadbalancer
-	Storage        StorageRoleSpec  `json:"storage,omitempty" yaml:"storage,omitempty"`
+	Master       MasterRoleSpec       `json:"master,omitempty" yaml:"master,omitempty"`
+	Worker       WorkerRoleSpec       `json:"worker,omitempty" yaml:"worker,omitempty"`
+	Etcd         EtcdRoleSpec         `json:"etcd,omitempty" yaml:"etcd,omitempty"`
+	LoadBalancer LoadBalancerRoleSpec `json:"loadBalancer,omitempty" yaml:"loadBalancer,omitempty"` // YAML name from example: loadbalancer
+	Storage      StorageRoleSpec      `json:"storage,omitempty" yaml:"storage,omitempty"`
 	// Registry       RegistryRoleSpec `json:"registry,omitempty" yaml:"registry,omitempty"` // Assuming a registry role might exist
-	CustomRoles    []CustomRoleSpec `json:"customRoles,omitempty" yaml:"customRoles,omitempty"`
+	CustomRoles []CustomRoleSpec `json:"customRoles,omitempty" yaml:"customRoles,omitempty"`
 }
 
 // MasterRoleSpec defines the configuration for master nodes.
@@ -110,16 +109,15 @@ type ControlPlaneEndpointSpec struct {
 // SystemSpec defines system-level configuration.
 // YAML fields from description: ntpServers, timezone, rpms, debs, preInstall, postInstall, skipConfigureOS
 type SystemSpec struct {
-	PackageManager    string   `json:"packageManager,omitempty" yaml:"packageManager,omitempty"` // e.g., "apt", "yum"
-	NTPServers        []string `json:"ntpServers,omitempty" yaml:"ntpServers,omitempty"`             // New field
-	Timezone          string   `json:"timezone,omitempty" yaml:"timezone,omitempty"`                 // New field
-	RPMs              []string `json:"rpms,omitempty" yaml:"rpms,omitempty"`                         // New field for RPM package names
-	Debs              []string `json:"debs,omitempty" yaml:"debs,omitempty"`                         // New field for Deb package names
-	PreInstallScripts []string `json:"preInstallScripts,omitempty" yaml:"preInstall,omitempty"`      // New field, assuming list of script paths or inline
-	PostInstallScripts[]string `json:"postInstallScripts,omitempty" yaml:"postInstall,omitempty"`    // New field
-	SkipConfigureOS   bool     `json:"skipConfigureOS,omitempty" yaml:"skipConfigureOS,omitempty"`   // New field
+	PackageManager     string   `json:"packageManager,omitempty" yaml:"packageManager,omitempty"`   // e.g., "apt", "yum"
+	NTPServers         []string `json:"ntpServers,omitempty" yaml:"ntpServers,omitempty"`           // New field
+	Timezone           string   `json:"timezone,omitempty" yaml:"timezone,omitempty"`               // New field
+	RPMs               []string `json:"rpms,omitempty" yaml:"rpms,omitempty"`                       // New field for RPM package names
+	Debs               []string `json:"debs,omitempty" yaml:"debs,omitempty"`                       // New field for Deb package names
+	PreInstallScripts  []string `json:"preInstallScripts,omitempty" yaml:"preInstall,omitempty"`    // New field, assuming list of script paths or inline
+	PostInstallScripts []string `json:"postInstallScripts,omitempty" yaml:"postInstall,omitempty"`  // New field
+	SkipConfigureOS    bool     `json:"skipConfigureOS,omitempty" yaml:"skipConfigureOS,omitempty"` // New field
 }
-
 
 // GlobalSpec contains settings applicable to the entire cluster or as defaults for hosts.
 type GlobalSpec struct {
@@ -179,37 +177,57 @@ func SetDefaults_Cluster(cfg *Cluster) {
 		cfg.Spec.Global = &GlobalSpec{}
 	}
 	g := cfg.Spec.Global
-	if g.Port == 0 { g.Port = 22 }
-	if g.ConnectionTimeout == 0 { g.ConnectionTimeout = 30 * time.Second }
-	if g.WorkDir == "" { g.WorkDir = "/tmp/kubexms_work" }
+	if g.Port == 0 {
+		g.Port = 22
+	}
+	if g.ConnectionTimeout == 0 {
+		g.ConnectionTimeout = 30 * time.Second
+	}
+	if g.WorkDir == "" {
+		g.WorkDir = "/tmp/kubexms_work"
+	}
 
 	for i := range cfg.Spec.Hosts {
 		host := &cfg.Spec.Hosts[i]
-		if host.Port == 0 && g != nil { host.Port = g.Port }
-		if host.User == "" && g != nil { host.User = g.User }
-		if host.PrivateKeyPath == "" && g != nil { host.PrivateKeyPath = g.PrivateKeyPath }
-		if host.Type == "" { host.Type = "ssh" }
-		if host.Labels == nil { host.Labels = make(map[string]string) }
-		if host.Taints == nil { host.Taints = []TaintSpec{} }
-		if host.Roles == nil { host.Roles = []string{} }
+		if host.Port == 0 && g != nil {
+			host.Port = g.Port
+		}
+		if host.User == "" && g != nil {
+			host.User = g.User
+		}
+		if host.PrivateKeyPath == "" && g != nil {
+			host.PrivateKeyPath = g.PrivateKeyPath
+		}
+		if host.Type == "" {
+			host.Type = "ssh"
+		}
+		if host.Labels == nil {
+			host.Labels = make(map[string]string)
+		}
+		if host.Taints == nil {
+			host.Taints = []TaintSpec{}
+		}
+		if host.Roles == nil {
+			host.Roles = []string{}
+		}
 	}
 
 	// Initialize component configs if nil (initial placeholder logic)
 	// Integrate ContainerRuntime and Containerd defaulting
 	if cfg.Spec.ContainerRuntime == nil {
-	    cfg.Spec.ContainerRuntime = &ContainerRuntimeConfig{}
+		cfg.Spec.ContainerRuntime = &ContainerRuntimeConfig{}
 	}
 	SetDefaults_ContainerRuntimeConfig(cfg.Spec.ContainerRuntime)
 	if cfg.Spec.ContainerRuntime.Type == ContainerRuntimeContainerd {
-	    if cfg.Spec.Containerd == nil {
-	        cfg.Spec.Containerd = &ContainerdConfig{}
-	    }
-	    SetDefaults_ContainerdConfig(cfg.Spec.Containerd)
+		if cfg.Spec.Containerd == nil {
+			cfg.Spec.Containerd = &ContainerdConfig{}
+		}
+		SetDefaults_ContainerdConfig(cfg.Spec.Containerd)
 	}
 
 	// Integrate EtcdConfig defaulting
 	if cfg.Spec.Etcd == nil {
-	    cfg.Spec.Etcd = &EtcdConfig{}
+		cfg.Spec.Etcd = &EtcdConfig{}
 	}
 	SetDefaults_EtcdConfig(cfg.Spec.Etcd) // Assuming SetDefaults_EtcdConfig exists
 
@@ -227,37 +245,36 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	}
 	// SetDefaults_SystemSpec(cfg.Spec.System) // If it exists
 
-
 	if cfg.Spec.Kubernetes == nil {
-	    cfg.Spec.Kubernetes = &KubernetesConfig{}
+		cfg.Spec.Kubernetes = &KubernetesConfig{}
 	}
 	SetDefaults_KubernetesConfig(cfg.Spec.Kubernetes, cfg.ObjectMeta.Name) // Assuming SetDefaults_KubernetesConfig exists
 
 	if cfg.Spec.Network == nil {
-	    cfg.Spec.Network = &NetworkConfig{}
+		cfg.Spec.Network = &NetworkConfig{}
 	}
 	SetDefaults_NetworkConfig(cfg.Spec.Network) // Assuming SetDefaults_NetworkConfig exists
 
 	if cfg.Spec.HighAvailability == nil {
-	    cfg.Spec.HighAvailability = &HighAvailabilityConfig{}
+		cfg.Spec.HighAvailability = &HighAvailabilityConfig{}
 	}
 	SetDefaults_HighAvailabilityConfig(cfg.Spec.HighAvailability)
 
 	if cfg.Spec.Preflight == nil {
-	    cfg.Spec.Preflight = &PreflightConfig{}
+		cfg.Spec.Preflight = &PreflightConfig{}
 	}
 	SetDefaults_PreflightConfig(cfg.Spec.Preflight)
 
 	if cfg.Spec.Kernel == nil {
-	    cfg.Spec.Kernel = &KernelConfig{}
+		cfg.Spec.Kernel = &KernelConfig{}
 	}
 	SetDefaults_KernelConfig(cfg.Spec.Kernel)
 
 	if cfg.Spec.Addons == nil {
-	    cfg.Spec.Addons = []AddonConfig{}
+		cfg.Spec.Addons = []AddonConfig{}
 	}
 	for i := range cfg.Spec.Addons { // Iterate by index to modify items in place
-	    SetDefaults_AddonConfig(&cfg.Spec.Addons[i])
+		SetDefaults_AddonConfig(&cfg.Spec.Addons[i])
 	}
 
 	if cfg.Spec.Storage == nil {
@@ -290,7 +307,7 @@ func Validate_Cluster(cfg *Cluster) error {
 	}
 	if cfg.Spec.Global != nil {
 		g := cfg.Spec.Global
-		if g.Port !=0 && (g.Port <= 0 || g.Port > 65535) {
+		if g.Port != 0 && (g.Port <= 0 || g.Port > 65535) {
 			verrs.Add("spec.global.port: %d is invalid, must be between 1 and 65535 or 0 for default", g.Port)
 		}
 	}
@@ -304,10 +321,13 @@ func Validate_Cluster(cfg *Cluster) error {
 			pathPrefix = fmt.Sprintf("spec.hosts[%d]", i)
 			verrs.Add("%s.name: cannot be empty", pathPrefix)
 		} else {
-			if _, exists := hostNames[host.Name]; exists { verrs.Add("%s.name: '%s' is duplicated", pathPrefix, host.Name) }
+			if _, exists := hostNames[host.Name]; exists {
+				verrs.Add("%s.name: '%s' is duplicated", pathPrefix, host.Name)
+			}
 			hostNames[host.Name] = true
 		}
-		if strings.TrimSpace(host.Address) == "" { verrs.Add("%s.address: cannot be empty", pathPrefix)
+		if strings.TrimSpace(host.Address) == "" {
+			verrs.Add("%s.address: cannot be empty", pathPrefix)
 		} else {
 			if net.ParseIP(host.Address) == nil {
 				if matched, _ := regexp.MatchString(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`, host.Address); !matched {
@@ -315,8 +335,12 @@ func Validate_Cluster(cfg *Cluster) error {
 				}
 			}
 		}
-		if host.Port <= 0 || host.Port > 65535 { verrs.Add("%s.port: %d is invalid, must be between 1 and 65535", pathPrefix, host.Port) }
-		if strings.TrimSpace(host.User) == "" { verrs.Add("%s.user: cannot be empty (after defaults)", pathPrefix) }
+		if host.Port <= 0 || host.Port > 65535 {
+			verrs.Add("%s.port: %d is invalid, must be between 1 and 65535", pathPrefix, host.Port)
+		}
+		if strings.TrimSpace(host.User) == "" {
+			verrs.Add("%s.user: cannot be empty (after defaults)", pathPrefix)
+		}
 		if strings.ToLower(host.Type) != "local" {
 			if host.Password == "" && host.PrivateKey == "" && host.PrivateKeyPath == "" {
 				verrs.Add("%s: no SSH authentication method provided for non-local host", pathPrefix)
@@ -331,19 +355,19 @@ func Validate_Cluster(cfg *Cluster) error {
 
 	// Integrate ContainerRuntime and Containerd validation
 	if cfg.Spec.ContainerRuntime != nil {
-	    Validate_ContainerRuntimeConfig(cfg.Spec.ContainerRuntime, verrs, "spec.containerRuntime")
-	    if cfg.Spec.ContainerRuntime.Type == ContainerRuntimeContainerd {
-	        if cfg.Spec.Containerd == nil {
-	            verrs.Add("spec.containerd: must be defined if containerRuntime.type is '%s'", ContainerRuntimeContainerd)
-	        } else {
-	            Validate_ContainerdConfig(cfg.Spec.Containerd, verrs, "spec.containerd")
-	        }
-	    }
+		Validate_ContainerRuntimeConfig(cfg.Spec.ContainerRuntime, verrs, "spec.containerRuntime")
+		if cfg.Spec.ContainerRuntime.Type == ContainerRuntimeContainerd {
+			if cfg.Spec.Containerd == nil {
+				verrs.Add("spec.containerd: must be defined if containerRuntime.type is '%s'", ContainerRuntimeContainerd)
+			} else {
+				Validate_ContainerdConfig(cfg.Spec.Containerd, verrs, "spec.containerd")
+			}
+		}
 	}
 
 	// Integrate EtcdConfig validation
 	if cfg.Spec.Etcd != nil { // Changed to pointer, so check for nil
-	    Validate_EtcdConfig(cfg.Spec.Etcd, verrs, "spec.etcd") // Assuming Validate_EtcdConfig exists
+		Validate_EtcdConfig(cfg.Spec.Etcd, verrs, "spec.etcd") // Assuming Validate_EtcdConfig exists
 	} else {
 		verrs.Add("spec.etcd: section is required") // Or handle if truly optional
 	}
@@ -359,48 +383,45 @@ func Validate_Cluster(cfg *Cluster) error {
 		Validate_SystemSpec(cfg.Spec.System, verrs, "spec.system") // Assuming Validate_SystemSpec will be created
 	} // else { verrs.Add("spec.system: section is required"); } // If mandatory
 
-
 	// Integrate KubernetesConfig validation
 	if cfg.Spec.Kubernetes != nil { // Changed to pointer
-	    Validate_KubernetesConfig(cfg.Spec.Kubernetes, verrs, "spec.kubernetes") // Assuming Validate_KubernetesConfig exists
+		Validate_KubernetesConfig(cfg.Spec.Kubernetes, verrs, "spec.kubernetes") // Assuming Validate_KubernetesConfig exists
 	} else {
-	    verrs.Add("spec.kubernetes: section is required")
+		verrs.Add("spec.kubernetes: section is required")
 	}
-
 
 	// Integrate HighAvailability validation
 	if cfg.Spec.HighAvailability != nil {
-	    Validate_HighAvailabilityConfig(cfg.Spec.HighAvailability, verrs, "spec.highAvailability")
+		Validate_HighAvailabilityConfig(cfg.Spec.HighAvailability, verrs, "spec.highAvailability")
 	}
 
 	// Integrate Preflight validation
 	if cfg.Spec.Preflight != nil {
-	    Validate_PreflightConfig(cfg.Spec.Preflight, verrs, "spec.preflight")
+		Validate_PreflightConfig(cfg.Spec.Preflight, verrs, "spec.preflight")
 	}
 
 	// Integrate Kernel validation
 	if cfg.Spec.Kernel != nil {
-	    Validate_KernelConfig(cfg.Spec.Kernel, verrs, "spec.kernel")
+		Validate_KernelConfig(cfg.Spec.Kernel, verrs, "spec.kernel")
 	}
 
 	if cfg.Spec.Addons != nil { // Check if Addons slice itself is nil
-	    for i := range cfg.Spec.Addons {
-	        addonNameForPath := cfg.Spec.Addons[i].Name
-	        if addonNameForPath == "" { // Handle case where addon name might be empty during validation
-	            addonNameForPath = fmt.Sprintf("index_%d", i)
-	        }
-	        addonPathPrefix := fmt.Sprintf("spec.addons[%s]", addonNameForPath)
-	        Validate_AddonConfig(&cfg.Spec.Addons[i], verrs, addonPathPrefix)
-	    }
+		for i := range cfg.Spec.Addons {
+			addonNameForPath := cfg.Spec.Addons[i].Name
+			if addonNameForPath == "" { // Handle case where addon name might be empty during validation
+				addonNameForPath = fmt.Sprintf("index_%d", i)
+			}
+			addonPathPrefix := fmt.Sprintf("spec.addons[%s]", addonNameForPath)
+			Validate_AddonConfig(&cfg.Spec.Addons[i], verrs, addonPathPrefix)
+		}
 	}
 
 	// Integrate NetworkConfig validation
 	if cfg.Spec.Network != nil { // Changed to pointer
-	    Validate_NetworkConfig(cfg.Spec.Network, verrs, "spec.network", cfg.Spec.Kubernetes) // Assuming Validate_NetworkConfig exists
+		Validate_NetworkConfig(cfg.Spec.Network, verrs, "spec.network", cfg.Spec.Kubernetes) // Assuming Validate_NetworkConfig exists
 	} else {
-	    verrs.Add("spec.network: section is required")
+		verrs.Add("spec.network: section is required")
 	}
-
 
 	// Integrate StorageConfig validation
 	if cfg.Spec.Storage != nil { // Changed to pointer
@@ -412,19 +433,28 @@ func Validate_Cluster(cfg *Cluster) error {
 		Validate_RegistryConfig(cfg.Spec.Registry, verrs, "spec.registry") // Assuming Validate_RegistryConfig exists
 	} // else { verrs.Add("spec.registry: section is required"); } // If optional, no error
 
-
 	if cfg.Spec.OS != nil {
 		Validate_OSConfig(cfg.Spec.OS, verrs, "spec.os")
 	}
 
-	if !verrs.IsEmpty() { return verrs }
+	if !verrs.IsEmpty() {
+		return verrs
+	}
 	return nil
 }
 
 // ValidationErrors (simple version, can be moved to a common errors file)
-type ValidationErrors struct { Errors []string }
-func (ve *ValidationErrors) Add(format string, args ...interface{}) { ve.Errors = append(ve.Errors, fmt.Sprintf(format, args...)) }
-func (ve *ValidationErrors) Error() string { if len(ve.Errors) == 0 { return "no validation errors" }; return strings.Join(ve.Errors, "; ") }
+type ValidationErrors struct{ Errors []string }
+
+func (ve *ValidationErrors) Add(format string, args ...interface{}) {
+	ve.Errors = append(ve.Errors, fmt.Sprintf(format, args...))
+}
+func (ve *ValidationErrors) Error() string {
+	if len(ve.Errors) == 0 {
+		return "no validation errors"
+	}
+	return strings.Join(ve.Errors, "; ")
+}
 func (ve *ValidationErrors) IsEmpty() bool { return len(ve.Errors) == 0 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
