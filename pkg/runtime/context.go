@@ -43,6 +43,7 @@ type Context struct {
 	// CurrentHost stores the specific host this context is currently operating on.
 	// This is particularly relevant for StepContext.
 	CurrentHost   connector.Host
+	ControlNode   connector.Host // Represents the control node (where kubexm is running)
 }
 
 // HostRuntime encapsulates all runtime information for a single host.
@@ -184,6 +185,31 @@ func (c *Context) GetConnectorForHost(host connector.Host) (connector.Connector,
 	}
 	return hr.Conn, nil
 }
+
+// GetCurrentHostFacts returns facts for the host currently associated with this StepContext.
+func (c *Context) GetCurrentHostFacts() (*runner.Facts, error) {
+	if c.CurrentHost == nil {
+		return nil, fmt.Errorf("no current host set in context for GetCurrentHostFacts")
+	}
+	return c.GetHostFacts(c.CurrentHost)
+}
+
+// GetCurrentHostConnector returns a connector for the host currently associated with this StepContext.
+func (c *Context) GetCurrentHostConnector() (connector.Connector, error) {
+	if c.CurrentHost == nil {
+		return nil, fmt.Errorf("no current host set in context for GetCurrentHostConnector")
+	}
+	return c.GetConnectorForHost(c.CurrentHost)
+}
+
+// GetControlNode returns the special Host object representing the control node.
+func (c *Context) GetControlNode() (connector.Host, error) {
+	if c.ControlNode == nil {
+		return nil, fmt.Errorf("control node has not been initialized in runtime context")
+	}
+	return c.ControlNode, nil
+}
+
 
 // --- Global Configuration Getters ---
 
