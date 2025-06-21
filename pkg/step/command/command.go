@@ -8,12 +8,13 @@ import (
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/spec" // Added for spec.StepMeta
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 
 // CommandStep executes a shell command on a target host.
 type CommandStep struct {
-	SpecName            string
+	meta                spec.StepMeta // Contains Name and Description
 	Cmd                 string
 	Sudo                bool
 	IgnoreError         bool
@@ -30,9 +31,9 @@ type CommandStep struct {
 // NewCommandStep creates a new CommandStep.
 // Parameters for checkCmd, checkSudo, checkExpectedExitCode, rollbackCmd, rollbackSudo are optional and can be empty/zero.
 func NewCommandStep(
+	instanceName string, // Used for StepMeta.Name
 	cmd string,
 	sudo bool,
-	specName string,
 	ignoreError bool,
 	timeout time.Duration,
 	env []string,
@@ -43,8 +44,20 @@ func NewCommandStep(
 	rollbackCmd string,
 	rollbackSudo bool,
 ) step.Step {
+	metaName := instanceName
+	if metaName == "" {
+		// Generate a default name if instanceName is not provided.
+		if len(cmd) > 30 {
+			metaName = "Exec: " + cmd[:30] + "..."
+		} else {
+			metaName = "Exec: " + cmd
+		}
+	}
 	return &CommandStep{
-		SpecName:            specName,
+		meta: spec.StepMeta{
+			Name:        metaName,
+			Description: fmt.Sprintf("Executes command: '%s'", cmd),
+		},
 		Cmd:                 cmd,
 		Sudo:                sudo,
 		IgnoreError:         ignoreError,
@@ -59,26 +72,14 @@ func NewCommandStep(
 	}
 }
 
-func (s *CommandStep) Name() string {
-	if s.SpecName != "" {
-		return s.SpecName
-	}
-	// Generate a default name if SpecName is not provided.
-	// Shorten Cmd if it's too long for a default name.
-	// This logic was previously in CommandStepSpec.GetName().
-	baseName := "Exec: "
-	if len(s.Cmd) > 30 {
-		return baseName + s.Cmd[:30] + "..."
-	}
-	return baseName + s.Cmd
-}
-
-func (s *CommandStep) Description() string {
-	return fmt.Sprintf("Executes command: '%s'", s.Cmd)
+// Meta returns the step's metadata.
+func (s *CommandStep) Meta() *spec.StepMeta {
+	return &s.meta
 }
 
 func (s *CommandStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Precheck")
+	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", host.GetName(), "phase", "Precheck")
+	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", host.GetName(), "phase", "Precheck")
 
 	if s.CheckCmd == "" {
 		logger.Debug("No CheckCmd defined, main command will run")
@@ -90,7 +91,7 @@ func (s *CommandStep) Precheck(ctx runtime.StepContext, host connector.Host) (bo
 	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
 		logger.Error("Failed to get connector for host", "error", err)
-		return false, fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.Name(), err)
+		return false, fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.Meta().Name, err)
 	}
 
 	opts := &connector.ExecOptions{
@@ -117,7 +118,7 @@ func (s *CommandStep) Precheck(ctx runtime.StepContext, host connector.Host) (bo
 			return false, nil
 		}
 		logger.Error("Failed to execute CheckCmd", "error", runErr, "stderr", checkCmdStderr)
-		return false, fmt.Errorf("check command '%s' execution failed for step %s on host %s: %w. Stderr: %s", s.CheckCmd, s.Name(), host.GetName(), runErr, checkCmdStderr)
+		return false, fmt.Errorf("check command '%s' execution failed for step %s on host %s: %w. Stderr: %s", s.CheckCmd, s.Meta().Name, host.GetName(), runErr, checkCmdStderr)
 	}
 
 	// CheckCmd executed successfully (implicit exit code 0 if not CommandError from Exec)
@@ -131,12 +132,12 @@ func (s *CommandStep) Precheck(ctx runtime.StepContext, host connector.Host) (bo
 }
 
 func (s *CommandStep) Run(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Run")
+	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", host.GetName(), "phase", "Run")
 
 	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
 		logger.Error("Failed to get connector for host", "error", err)
-		return fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.Name(), err)
+		return fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.Meta().Name, err)
 	}
 
 	opts := &connector.ExecOptions{
@@ -175,7 +176,7 @@ func (s *CommandStep) Run(ctx runtime.StepContext, host connector.Host) error {
 		}
 		// Non-CommandError type
 		logger.Error("Failed to execute command (non-CommandError).", "error", runErr, "stdout", string(stdoutBytes), "stderr", string(stderrBytes))
-		return fmt.Errorf("command '%s' failed for step %s on host %s (non-CommandError): %w. Stdout: %s, Stderr: %s", s.Cmd, s.Name(), host.GetName(), runErr, string(stdoutBytes), string(stderrBytes))
+		return fmt.Errorf("command '%s' failed for step %s on host %s (non-CommandError): %w. Stdout: %s, Stderr: %s", s.Cmd, s.Meta().Name, host.GetName(), runErr, string(stdoutBytes), string(stderrBytes))
 	}
 
 	// runErr is nil (command exited 0)
@@ -185,19 +186,20 @@ func (s *CommandStep) Run(ctx runtime.StepContext, host connector.Host) error {
 	}
 
 	// Command exited 0, but a different code was expected.
-	errMsg := fmt.Sprintf("command '%s' exited 0 (stdout: %s, stderr: %s), but expected exit code %d for step %s on host %s", s.Cmd, string(stdoutBytes), string(stderrBytes), s.ExpectedExitCode, s.Name(), host.GetName())
+	errMsg := fmt.Sprintf("command '%s' exited 0 (stdout: %s, stderr: %s), but expected exit code %d for step %s on host %s", s.Cmd, string(stdoutBytes), string(stderrBytes), s.ExpectedExitCode, s.Meta().Name, host.GetName())
 	logger.Error(errMsg)
 	// Create a CommandError to carry the actual exit code (0) and output
 	return &connector.CommandError{
-        Err:      errors.New(errMsg),
-        ExitCode: 0, // Actual exit code
-        Stdout:   string(stdoutBytes),
-        Stderr:   string(stderrBytes),
-    }
+		Cmd:      s.Cmd, // Populate Cmd field in CommandError
+		Underlying: errors.New(errMsg), // Populate Underlying field
+		ExitCode: 0, // Actual exit code
+		Stdout:   string(stdoutBytes),
+		Stderr:   string(stderrBytes),
+	}
 }
 
 func (s *CommandStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Rollback")
+	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", host.GetName(), "phase", "Rollback")
 
 	if s.RollbackCmd == "" {
 		logger.Debug("No RollbackCmd defined for this command step.")
@@ -209,7 +211,7 @@ func (s *CommandStep) Rollback(ctx runtime.StepContext, host connector.Host) err
 	conn, err := ctx.GetConnectorForHost(host)
 	if err != nil {
 		logger.Error("Failed to get connector for host during rollback", "error", err)
-		return fmt.Errorf("failed to get connector for host %s for rollback of step %s: %w", host.GetName(), s.Name(), err)
+		return fmt.Errorf("failed to get connector for host %s for rollback of step %s: %w", host.GetName(), s.Meta().Name, err)
 	}
 
 	opts := &connector.ExecOptions{
@@ -224,13 +226,15 @@ func (s *CommandStep) Rollback(ctx runtime.StepContext, host connector.Host) err
 	if runErr != nil {
 		logger.Error("Rollback command failed.", "command", s.RollbackCmd, "error", runErr, "stdout", string(stdoutBytes), "stderr", string(stderrBytes))
 		// Return a CommandError if possible, or a generic error
-        var cmdErr *connector.CommandError
-        if errors.As(runErr, &cmdErr) {
-            // cmdErr.Stdout = string(stdoutBytes) // Assuming CommandError has these fields
-            // cmdErr.Stderr = string(stderrBytes)
-            return fmt.Errorf("rollback command '%s' failed for step %s on host %s: %w", s.RollbackCmd, s.Name(), host.GetName(), cmdErr)
-        }
-		return fmt.Errorf("rollback command '%s' failed for step %s on host %s: %w. Stdout: %s, Stderr: %s", s.RollbackCmd, s.Name(), host.GetName(), runErr, string(stdoutBytes), string(stderrBytes))
+		var cmdErr *connector.CommandError
+		if errors.As(runErr, &cmdErr) {
+			// Ensure CommandError is fully populated for consistent error reporting
+			// cmdErr.Stdout = string(stdoutBytes)
+			// cmdErr.Stderr = string(stderrBytes)
+			// cmdErr.Cmd = s.RollbackCmd // Add command to the error
+			return fmt.Errorf("rollback command '%s' failed for step %s on host %s: %w", s.RollbackCmd, s.Meta().Name, host.GetName(), cmdErr)
+		}
+		return fmt.Errorf("rollback command '%s' failed for step %s on host %s: %w. Stdout: %s, Stderr: %s", s.RollbackCmd, s.Meta().Name, host.GetName(), runErr, string(stdoutBytes), string(stderrBytes))
 	}
 
 	logger.Info("Rollback command executed successfully.", "command", s.RollbackCmd, "stdout", string(stdoutBytes), "stderr", string(stderrBytes))

@@ -25,6 +25,9 @@ type ExecutionGraph struct {
 	// These are the starting points for execution.
 	// While derivable, storing them can be a convenience for the engine.
 	EntryNodes []NodeID `json:"entryNodes,omitempty"`
+	// ExitNodes are the IDs of nodes in this graph that have no dependents within the graph.
+	// These are the final nodes. Also derivable but potentially useful.
+	ExitNodes []NodeID `json:"exitNodes,omitempty"`
 }
 
 // ExecutionNode represents a single, schedulable unit of work in the graph.
