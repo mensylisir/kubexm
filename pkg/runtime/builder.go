@@ -87,11 +87,12 @@ func (b *RuntimeBuilder) BuildFromConfig(ctx context.Context, clusterConfig *v1a
 	g, gCtx := errgroup.WithContext(ctx)
 
 	if clusterConfig.Spec.Hosts == nil || len(clusterConfig.Spec.Hosts) == 0 {
-		log.Warn("No hosts defined in the cluster configuration.")
+		log.Warn("No remote hosts defined in the cluster configuration. Will proceed with control-node only if applicable.")
 	}
 
+	// Initialize defined remote hosts
 	for _, hostCfg := range clusterConfig.Spec.Hosts {
-		currentHostCfg := hostCfg
+		currentHostCfg := hostCfg // Capture range variable for goroutine
 		g.Go(func() error {
 			// Each goroutine gets a logger derived from the main log, adding host-specific context.
 			hostLogger := log.With("host", currentHostCfg.Name)
