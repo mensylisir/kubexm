@@ -15,10 +15,13 @@ import (
 
 const DefaultContainerdConfigPath = "/etc/containerd/config.toml"
 
+// MirrorConfiguration holds endpoint and rewrite rules for a registry mirror.
+type MirrorConfiguration struct {
+	Endpoints []string
+	Rewrite   map[string]string // Optional: for advanced image name rewriting
+}
+
 // containerdConfigTemplate is the Go template for generating config.toml.
-// Note: The template provided in the prompt has some subtle differences from typical containerd configs,
-// especially around how mirrors and insecure registries are deeply nested.
-// This template is used as-is from the prompt.
 const containerdConfigTemplate = `
 version = 2
 # Ensure CRI plugin is enabled for Kubernetes. Default is often enabled.
@@ -26,6 +29,7 @@ version = 2
 # disabled_plugins = [] # Or ensure "io.containerd.grpc.v1.cri" is not listed if others are disabled.
 
 [plugins."io.containerd.grpc.v1.cri"]
+  sandbox_image = "{{ .SandboxImage }}"
   [plugins."io.containerd.grpc.v1.cri".containerd]
     default_runtime_name = "runc"
     [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
@@ -39,12 +43,18 @@ version = 2
         {{end}}
   # Registry mirrors configuration
   [plugins."io.containerd.grpc.v1.cri".registry]
-    config_path = "" # Set to a directory like "/etc/containerd/certs.d" if using individual host certs/configs.
+    config_path = "{{ .RegistryConfigPath }}" # Set to a directory like "/etc/containerd/certs.d" if using individual host certs/configs.
     {{if .RegistryMirrors}}
     [plugins."io.containerd.grpc.v1.cri".registry.mirrors]
-      {{range $registry, $mirror := .RegistryMirrors}}
+      {{range $registry, $mirrorConfig := .RegistryMirrors}}
       [plugins."io.containerd.grpc.v1.cri".registry.mirrors."{{$registry}}"]
-        endpoint = ["{{$mirror}}"]
+        endpoint = [{{range $i, $ep := $mirrorConfig.Endpoints}}{{if $i}}, {{end}}"{{$ep}}"{{end}}]
+        {{- if $mirrorConfig.Rewrite}}
+        [plugins."io.containerd.grpc.v1.cri".registry.mirrors."{{$registry}}".rewrite]
+          {{- range $pattern, $replacement := $mirrorConfig.Rewrite}}
+          "{{$pattern}}" = "{{$replacement}}"
+          {{- end}}
+        {{- end}}
       {{end}}
     {{end}}
     # Insecure registries configuration
@@ -65,9 +75,11 @@ version = 2
 // ConfigureContainerdStep configures containerd by writing its config.toml.
 type ConfigureContainerdStep struct {
 	meta               spec.StepMeta
-	RegistryMirrors    map[string]string
+	SandboxImage       string
+	RegistryMirrors    map[string]MirrorConfiguration // Changed to MirrorConfiguration struct
 	InsecureRegistries []string
 	ConfigFilePath     string
+	RegistryConfigPath string // For plugins."io.containerd.grpc.v1.cri".registry.config_path
 	ExtraTomlContent   string
 	UseSystemdCgroup   bool
 	Sudo               bool
@@ -76,9 +88,11 @@ type ConfigureContainerdStep struct {
 // NewConfigureContainerdStep creates a new ConfigureContainerdStep.
 func NewConfigureContainerdStep(
 	instanceName string,
-	registryMirrors map[string]string,
+	sandboxImage string,
+	registryMirrors map[string]MirrorConfiguration,
 	insecureRegistries []string,
 	configFilePath string,
+	registryConfigPath string,
 	extraTomlContent string,
 	useSystemdCgroup bool,
 	sudo bool,
@@ -87,6 +101,12 @@ func NewConfigureContainerdStep(
 	if effectivePath == "" {
 		effectivePath = DefaultContainerdConfigPath
 	}
+	effectiveSandboxImage := sandboxImage
+	if effectiveSandboxImage == "" {
+		effectiveSandboxImage = "registry.k8s.io/pause:3.9" // Common default
+	}
+	// effectiveRegistryConfigPath defaults to empty string if not provided, which is fine for the template.
+
 	name := instanceName
 	if name == "" {
 		name = "ConfigureContainerdToml"
@@ -94,11 +114,13 @@ func NewConfigureContainerdStep(
 	return &ConfigureContainerdStep{
 		meta: spec.StepMeta{
 			Name: name,
-			Description: fmt.Sprintf("Configures containerd by writing %s with specified mirrors, insecure registries, and cgroup settings.", effectivePath),
+			Description: fmt.Sprintf("Configures containerd by writing %s with specified mirrors, insecure registries, sandbox image and cgroup settings.", effectivePath),
 		},
+		SandboxImage:       effectiveSandboxImage,
 		RegistryMirrors:    registryMirrors,
 		InsecureRegistries: insecureRegistries,
 		ConfigFilePath:     effectivePath,
+		RegistryConfigPath: registryConfigPath,
 		ExtraTomlContent:   extraTomlContent,
 		UseSystemdCgroup:   useSystemdCgroup,
 		Sudo:               sudo,
@@ -109,6 +131,29 @@ func NewConfigureContainerdStep(
 func (s *ConfigureContainerdStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
+
+// renderExpectedConfig generates the expected config content for precheck comparison.
+func (s *ConfigureContainerdStep) renderExpectedConfig() (string, error) {
+	tmpl, err := template.New("containerdConfig").Parse(containerdConfigTemplate)
+	if err != nil {
+		return "", fmt.Errorf("dev error: failed to parse internal containerd config template: %w", err)
+	}
+	var expectedBuf bytes.Buffer
+	templateData := map[string]interface{}{
+		"SandboxImage":       s.SandboxImage,
+		"RegistryMirrors":    s.RegistryMirrors,
+		"InsecureRegistries": s.InsecureRegistries,
+		"UseSystemdCgroup":   s.UseSystemdCgroup,
+		"RegistryConfigPath": s.RegistryConfigPath,
+		"ExtraTomlContent":   s.ExtraTomlContent,
+	}
+	if err := tmpl.Execute(&expectedBuf, templateData); err != nil {
+		return "", fmt.Errorf("failed to render expected containerd config template: %w", err)
+	}
+	// TrimSpace is important to remove leading/trailing newlines from template rendering
+	return strings.TrimSpace(expectedBuf.String()), nil
+}
+
 
 func (s *ConfigureContainerdStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
@@ -129,82 +174,35 @@ func (s *ConfigureContainerdStep) Precheck(ctx runtime.StepContext, host connect
 		return false, nil
 	}
 
-	if len(s.RegistryMirrors) == 0 && s.ExtraTomlContent == "" && !s.UseSystemdCgroup && len(s.InsecureRegistries) == 0 {
-		logger.Info("No specific containerd configurations in spec to check beyond existence.", "path", s.ConfigFilePath)
+	// Generate expected content
+	expectedContent, err := s.renderExpectedConfig()
+	if err != nil {
+		logger.Error("Failed to render expected config for precheck comparison.", "error", err)
+		return false, err // Propagate error as it's a step logic issue
+	}
+
+	// Read current content
+	currentContentBytes, err := runnerSvc.ReadFile(ctx.GoContext(), conn, s.ConfigFilePath)
+	if err != nil {
+		logger.Warn("Failed to read existing config for comparison. Assuming not configured correctly.", "path", s.ConfigFilePath, "error", err)
+		return false, nil
+	}
+	currentContent := strings.TrimSpace(string(currentContentBytes))
+
+	// Normalize line endings for comparison
+	currentContent = strings.ReplaceAll(currentContent, "\r\n", "\n")
+	// expectedContent is already normalized by TrimSpace and template rendering typically uses \n
+
+	if currentContent == expectedContent {
+		logger.Info("Containerd config file content matches expected configuration.", "path", s.ConfigFilePath)
 		return true, nil
 	}
 
-	contentBytes, err := runnerSvc.ReadFile(ctx.GoContext(), conn, s.ConfigFilePath)
-	if err != nil {
-		logger.Warn("Failed to read config for checking current configuration. Assuming not configured.", "path", s.ConfigFilePath, "error", err)
-		return false, nil
-	}
-	content := string(contentBytes)
-
-	allChecksPass := true // Assume true, set to false on any mismatch
-	for registry, mirror := range s.RegistryMirrors {
-		mirrorEndpoint := fmt.Sprintf(`endpoint = ["%s"]`, mirror)
-		mirrorBlock := fmt.Sprintf("[plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"%s\"]", registry)
-		idx := strings.Index(content, mirrorBlock)
-		if idx == -1 {
-			allChecksPass = false
-			break
-		}
-		scope := content[idx+len(mirrorBlock):]
-		nextBlockStart := strings.Index(scope, "\n[")
-		if nextBlockStart != -1 {
-			scope = scope[:nextBlockStart]
-		}
-		if !strings.Contains(scope, mirrorEndpoint) {
-			allChecksPass = false
-			break
-		}
-	}
-	if !allChecksPass {
-		logger.Debug("Registry mirror check failed.")
-		return false, nil
-	}
-
-	if s.UseSystemdCgroup && !strings.Contains(content, "SystemdCgroup = true") {
-		logger.Debug("SystemdCgroup = true not found.")
-		return false, nil
-	}
-	if !s.UseSystemdCgroup && strings.Contains(content, "SystemdCgroup = true") { // Check if it's set when it shouldn't be
-		logger.Debug("SystemdCgroup = true found, but expected false.")
-		return false, nil
-	}
-
-
-	if s.ExtraTomlContent != "" && !strings.Contains(content, strings.TrimSpace(s.ExtraTomlContent)) {
-		logger.Debug("Extra TOML content snippet not found.")
-		return false, nil
-	}
-
-	for _, insecureReg := range s.InsecureRegistries {
-		insecureBlock := fmt.Sprintf("[plugins.\"io.containerd.grpc.v1.cri\".registry.configs.\"%s\".tls]", insecureReg)
-		skipLine := "insecure_skip_verify = true"
-		idx := strings.Index(content, insecureBlock)
-		if idx == -1 {
-			allChecksPass = false
-			break
-		}
-		scope := content[idx+len(insecureBlock):]
-		nextBlockStart := strings.Index(scope, "\n[")
-		if nextBlockStart != -1 {
-			scope = scope[:nextBlockStart]
-		}
-		if !strings.Contains(scope, skipLine) {
-			allChecksPass = false
-			break
-		}
-	}
-	if !allChecksPass {
-		logger.Debug("Insecure registry check failed.")
-		return false, nil
-	}
-
-	logger.Info("Containerd config file content checks passed.", "path", s.ConfigFilePath)
-	return true, nil
+	logger.Info("Containerd config file content does not match expected configuration. Will regenerate.", "path", s.ConfigFilePath)
+	// For debugging:
+	// logger.Debug("Current content", "value", currentContent)
+	// logger.Debug("Expected content", "value", expectedContent)
+	return false, nil
 }
 
 func (s *ConfigureContainerdStep) Run(ctx runtime.StepContext, host connector.Host) error {
@@ -221,25 +219,12 @@ func (s *ConfigureContainerdStep) Run(ctx runtime.StepContext, host connector.Ho
 		return fmt.Errorf("failed to create directory %s for containerd config on host %s for step %s: %w", parentDir, host.GetName(), s.meta.Name, err)
 	}
 
-	tmpl, err := template.New("containerdConfig").Parse(containerdConfigTemplate)
+	configContent, err := s.renderExpectedConfig() // Use the same rendering logic
 	if err != nil {
-		return fmt.Errorf("dev error: failed to parse internal containerd config template for step %s: %w", s.meta.Name, err)
+		return err // Error from rendering
 	}
 
-	var buf bytes.Buffer
-	templateData := map[string]interface{}{
-		"RegistryMirrors":    s.RegistryMirrors,
-		"InsecureRegistries": s.InsecureRegistries,
-		"UseSystemdCgroup":   s.UseSystemdCgroup,
-		"ExtraTomlContent":   s.ExtraTomlContent,
-	}
-	if err := tmpl.Execute(&buf, templateData); err != nil {
-		return fmt.Errorf("failed to render containerd config template for host %s for step %s: %w", host.GetName(), s.meta.Name, err)
-	}
-
-	configContentBytes := buf.Bytes()
-
-	err = runnerSvc.WriteFile(ctx.GoContext(), conn, configContentBytes, s.ConfigFilePath, "0644", s.Sudo)
+	err = runnerSvc.WriteFile(ctx.GoContext(), conn, []byte(configContent), s.ConfigFilePath, "0644", s.Sudo)
 	if err != nil {
 		return fmt.Errorf("failed to write containerd config to %s on host %s for step %s: %w", s.ConfigFilePath, host.GetName(), s.meta.Name, err)
 	}
