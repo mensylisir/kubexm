@@ -69,12 +69,13 @@ func (s *InstallContainerdStep) populateDefaults() {
 	}
 	if len(s.BinariesToCopy) == 0 {
 		s.BinariesToCopy = map[string]string{
-			"bin/containerd":                "/usr/local/bin/containerd",
-			"bin/containerd-shim":           "/usr/local/bin/containerd-shim",
-			"bin/containerd-shim-runc-v1":   "/usr/local/bin/containerd-shim-runc-v1",
-			"bin/containerd-shim-runc-v2":   "/usr/local/bin/containerd-shim-runc-v2",
-			"bin/ctr":                       "/usr/local/bin/ctr",
-			"bin/runc":                      "/usr/local/sbin/runc", // runc often goes here or /usr/local/bin or /usr/sbin
+			"bin/containerd":              "/usr/local/bin/containerd",
+			"bin/containerd-shim":         "/usr/local/bin/containerd-shim",
+			"bin/containerd-shim-runc-v1": "/usr/local/bin/containerd-shim-runc-v1",
+			"bin/containerd-shim-runc-v2": "/usr/local/bin/containerd-shim-runc-v2",
+			"bin/ctr":                     "/usr/local/bin/ctr",
+			// runc is now handled by a separate InstallRuncBinaryStep
+			// "bin/runc":                      "/usr/local/sbin/runc",
 		}
 	}
 }
