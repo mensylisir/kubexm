@@ -6,8 +6,9 @@ import (
 )
 
 const (
-	EtcdTypeKubeXMSInternal = "stacked"
-	EtcdTypeExternal        = "external"
+	EtcdTypeKubeXMSInternal = "kubexm"   // Indicates etcd deployed as binaries by KubeXM
+	EtcdTypeExternal        = "external" // Indicates an existing external etcd cluster
+	EtcdTypeInternal        = "kubeadm"  // Indicates etcd deployed as static pods by kubeadm
 )
 
 // EtcdConfig defines the configuration for the Etcd cluster.
@@ -61,8 +62,7 @@ func SetDefaults_EtcdConfig(cfg *EtcdConfig) {
 		return
 	}
 	if cfg.Type == "" {
-		// cfg.Type = EtcdTypeKubeXMSInternal // Old default
-		cfg.Type = "kubexm" // As per prompt YAML example
+		cfg.Type = EtcdTypeKubeXMSInternal // Default to KubeXM deploying etcd as binaries
 	}
 	if cfg.ClientPort == nil {
 		defaultPort := 2379
@@ -111,7 +111,7 @@ func Validate_EtcdConfig(cfg *EtcdConfig, verrs *ValidationErrors, pathPrefix st
 	if cfg == nil {
 		return
 	}
-	validTypes := []string{EtcdTypeKubeXMSInternal, EtcdTypeExternal}
+	validTypes := []string{EtcdTypeKubeXMSInternal, EtcdTypeExternal, EtcdTypeInternal}
 	isValidType := false
 	for _, vt := range validTypes {
 		if cfg.Type == vt {
@@ -168,10 +168,8 @@ func Validate_EtcdConfig(cfg *EtcdConfig, verrs *ValidationErrors, pathPrefix st
 	if cfg.QuotaBackendBytes != nil && *cfg.QuotaBackendBytes < 0 { // 0 means default/no quota by some tools
 		verrs.Add("%s.quotaBackendBytes: cannot be negative, got %d", pathPrefix, *cfg.QuotaBackendBytes)
 	}
-	if cfg.MaxRequestBytes != nil && *cfg.MaxRequestBytes <= 0 { // MaxRequestBytes is uint, so only check for > 0 if set
-        // verrs.Add("%s.maxRequestBytes: must be positive if set, got %d", pathPrefix, *cfg.MaxRequestBytes)
-        // A value of 0 might be invalid for MaxRequestBytes depending on etcd, typically it's positive.
-        // For now, allow if set. Validation can be stricter if needed.
+	if cfg.MaxRequestBytes != nil && *cfg.MaxRequestBytes == 0 { // MaxRequestBytes is uint. 0 is generally invalid.
+		verrs.Add("%s.maxRequestBytes: must be positive if set, got %d", pathPrefix, *cfg.MaxRequestBytes)
 	}
 
 	if cfg.Metrics != nil && *cfg.Metrics != "" { // Allow empty for etcd default

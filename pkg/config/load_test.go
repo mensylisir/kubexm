@@ -16,6 +16,7 @@ kind: Cluster
 metadata:
   name: test-cluster
 spec:
+  type: kubexm # Added ClusterSpec type
   global:
     user: "testuser"
     # port: 22 # Defaulted by v1alpha1.SetDefaults_Cluster
@@ -26,6 +27,8 @@ spec:
     roles: ["master", "etcd"]
     # user: "testuser" # Inherited from global by v1alpha1.SetDefaults_Cluster
     # port: 22 # Inherited from global by v1alpha1.SetDefaults_Cluster
+  etcd: # Added etcd spec for default type testing
+    type: kubexm
   kubernetes: # kubernetes section is required by v1alpha1.Validate_Cluster
     version: v1.25.0
     # clusterName will be defaulted by SetDefaults_KubernetesConfig
@@ -73,6 +76,7 @@ kind: Cluster
 metadata:
   name: full-cluster
 spec:
+  type: kubeadm # Testing the other cluster type
   global:
     user: globaluser
     port: 2222
@@ -117,7 +121,7 @@ spec:
     # configPath: "/etc/containerd/custom_config.toml"
     disabledPlugins: ["io.containerd.internal.v1.opt"]
   etcd:
-    type: stacked
+    type: kubeadm # Testing new etcd type
     version: v3.5.9
     clientPort: 2378
     peerPort: 2381 # Different from default
@@ -224,6 +228,15 @@ spec:
         repo: https://kubernetes-sigs.github.io/metrics-server/
         version: 0.6.1
         values: ["args={--kubelet-insecure-tls}"]
+  roleGroups:
+    master:
+      hosts: ["master-1"]
+    worker:
+      hosts: ["worker-1"]
+    etcd:
+      hosts: ["master-1"] # Assuming etcd runs on master for this full config
+    registry:
+      hosts: ["master-1"] # Add registry role to master-1 for testing
   # New sections for Storage, Registry, OS
   storage:
     defaultStorageClass: "openebs-hostpath"
@@ -286,6 +299,17 @@ func TestLoadFromBytes_ValidMinimal(t *testing.T) {
 	}
 	if cfg.Spec.Hosts[0].Port != 22 { // Inherited from global default
 		t.Errorf("Host[0].Port = %d, want 22 (inherited from global default)", cfg.Spec.Hosts[0].Port)
+	}
+	// Check ClusterSpec.Type
+	if cfg.Spec.Type != v1alpha1.ClusterTypeKubeXM {
+		t.Errorf("cfg.Spec.Type = %s, want %s", cfg.Spec.Type, v1alpha1.ClusterTypeKubeXM)
+	}
+	// Check Etcd.Type
+	if cfg.Spec.Etcd == nil {
+		t.Fatal("cfg.Spec.Etcd should be initialized")
+	}
+	if cfg.Spec.Etcd.Type != v1alpha1.EtcdTypeKubeXMSInternal { // "kubexm"
+		t.Errorf("cfg.Spec.Etcd.Type = %s, want %s", cfg.Spec.Etcd.Type, v1alpha1.EtcdTypeKubeXMSInternal)
 	}
 	// Check Kubernetes basic values
 	if cfg.Spec.Kubernetes == nil {
@@ -354,11 +378,24 @@ func TestLoadFromBytes_ValidFull(t *testing.T) {
 	if cfg.Spec.Etcd == nil {
 		t.Fatal("Spec.Etcd is nil")
 	}
-	if cfg.Spec.Etcd.Type != "stacked" {
-		t.Errorf("Etcd.Type = %s, want stacked", cfg.Spec.Etcd.Type)
+	if cfg.Spec.Etcd.Type != v1alpha1.EtcdTypeInternal { // "kubeadm"
+		t.Errorf("Etcd.Type = %s, want %s", cfg.Spec.Etcd.Type, v1alpha1.EtcdTypeInternal)
 	}
 	if cfg.Spec.Etcd.ClientPort == nil || *cfg.Spec.Etcd.ClientPort != 2378 {
 		t.Errorf("Etcd.ClientPort = %v, want 2378", cfg.Spec.Etcd.ClientPort)
+	}
+
+	// Check ClusterSpec.Type
+	if cfg.Spec.Type != v1alpha1.ClusterTypeKubeAdm {
+		t.Errorf("cfg.Spec.Type = %s, want %s", cfg.Spec.Type, v1alpha1.ClusterTypeKubeAdm)
+	}
+
+	// Check RoleGroups including Registry
+	if cfg.Spec.RoleGroups == nil {
+		t.Fatal("Spec.RoleGroups is nil")
+	}
+	if cfg.Spec.RoleGroups.Registry.Hosts == nil || len(cfg.Spec.RoleGroups.Registry.Hosts) != 1 || cfg.Spec.RoleGroups.Registry.Hosts[0] != "master-1" {
+		t.Errorf("RoleGroups.Registry.Hosts not parsed correctly: %v", cfg.Spec.RoleGroups.Registry.Hosts)
 	}
 
 	if cfg.Spec.Kubernetes == nil {
