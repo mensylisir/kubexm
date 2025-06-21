@@ -1,109 +1,226 @@
 package pipeline
 
 import (
-	// "github.com/kubexms/kubexms/pkg/config" // Will be replaced by runtime
-	"github.com/mensylisir/kubexm/pkg/runtime" // For ClusterRuntime
-	"github.com/mensylisir/kubexm/pkg/spec"
+	"fmt" // For errors
+	"time" // For GraphExecutionResult EndTime
 
-	// Import module factories
+	// "github.com/mensylisir/kubexm/pkg/engine"  // Engine is obtained from runtime.Context
+	"github.com/mensylisir/kubexm/pkg/module"
+	"github.com/mensylisir/kubexm/pkg/plan"
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	// "github.com/mensylisir/kubexm/pkg/task" // For task.ExecutionFragment, used by module.Plan
+
+	// Import actual module constructors (assuming they are updated)
 	modulePreflight "github.com/mensylisir/kubexm/pkg/module/preflight"
 	moduleContainerd "github.com/mensylisir/kubexm/pkg/module/containerd"
 	moduleEtcd "github.com/mensylisir/kubexm/pkg/module/etcd"
-	// moduleKubernetes "github.com/kubexms/kubexms/pkg/module/kubernetes" // Placeholder
-	// moduleNetwork "github.com/kubexms/kubexms/pkg/module/network"    // Placeholder
-	// moduleAddons "github.com/kubexms/kubexms/pkg/module/addons"      // Placeholder
-
-	// Import step specs for potential hooks, if using simple commands for hooks
-	// stepCommandSpec "github.com/kubexms/kubexms/pkg/step/command"
+	// ... other module imports like Kubernetes, Network, Addons would go here
 )
 
-// NewCreateClusterPipelineSpec defines the pipeline specification for creating a new Kubernetes cluster.
-// It assembles all necessary modules in the correct order.
-// The clusterRt *runtime.ClusterRuntime parameter provides access to the cluster configuration and runtime context.
-func NewCreateClusterPipelineSpec(clusterRt *runtime.ClusterRuntime) *spec.PipelineSpec {
-	if clusterRt == nil || clusterRt.ClusterConfig == nil {
-		// Or handle error: return nil or an error
-		// For now, returning an empty pipeline spec or panicking might be options
-		// depending on how robust this needs to be for unexpected nil inputs.
-		// Let's assume for now that clusterRt and clusterRt.ClusterConfig are valid.
-		// A robust implementation would return an error or a clearly invalid/empty spec.
-		return &spec.PipelineSpec{Name: "Error: Missing ClusterRuntime or ClusterConfig"}
-	}
-	cfg := clusterRt.ClusterConfig // cfg is *v1alpha1.Cluster
+// CreateClusterPipeline defines the pipeline for creating a new Kubernetes cluster.
+type CreateClusterPipeline struct {
+	pipelineName    string
+	pipelineModules []module.Module
+}
 
-	modules := []*spec.ModuleSpec{
-		// 1. Preflight checks and base system setup
-		modulePreflight.NewPreflightModule(clusterRt),
+// NewCreateClusterPipeline creates a new pipeline instance for cluster creation.
+// It initializes the sequence of modules to be executed.
+// The runtime.Context (rtCtx) is passed to allow modules to be conditionally included
+// or configured based on the overall cluster configuration, if necessary at construction time.
+func NewCreateClusterPipeline(rtCtx runtime.Context) Pipeline { // Returns pipeline.Pipeline
+	// Example: cfg := rtCtx.GetClusterConfig() // If modules depend on config at construction.
+	// For this example, module list is static. In a real scenario, you might use rtCtx
+	// to decide which modules to instantiate or how to configure them.
 
-		// 2. Install and configure container runtime
-		// This module's IsEnabled function should check clusterRt.ClusterConfig to see if containerd is the chosen runtime.
-		moduleContainerd.NewContainerdModule(clusterRt),
-		// TODO: Add logic or separate module factories for other runtimes like Docker,
-		// and select based on cfg.Spec.ContainerRuntime.Type.
-		// e.g., if cfg.Spec.ContainerRuntime != nil && cfg.Spec.ContainerRuntime.Type == "docker": modules = append(modules, moduleDocker.NewDockerModule(clusterRt))
-
-		// 3. (Optional) Setup HA components like Keepalived/HAProxy if specified in cfg.
-		// This would typically be its own module.
-		// Example:
-		// if cfg.Spec.HighAvailability != nil && cfg.Spec.HighAvailability.Type == "keepalived" {
-		//     modules = append(modules, moduleHA.NewKeepalivedModule(clusterRt))
-		// }
-
-		// 4. Deploy Etcd cluster.
-		// The NewEtcdModule's IsEnabled function can check clusterRt.ClusterConfig.Spec.Etcd.Type.
-		moduleEtcd.NewEtcdModule(clusterRt),
-
-		// 5. Deploy Kubernetes control plane components
-		// Example: modules = append(modules, moduleKubernetes.NewControlPlaneModule(clusterRt))
-
-		// 6. Join worker nodes to the cluster
-		// Example: modules = append(modules, moduleKubernetes.NewWorkerNodeModule(cfg))
-
-		// 7. Deploy network plugin (CNI)
-		// Example: modules = append(modules, moduleNetwork.NewCNIModule(cfg)) // CNI choice from cfg
-
-		// 8. (Optional) Deploy cluster addons (e.g., CoreDNS, Metrics Server, Ingress Controller)
-		// Example: modules = append(modules, moduleAddons.NewCoreDNSModule(cfg))
-		// Example: modules = append(modules, moduleAddons.NewMetricsServerModule(cfg))
+	mods := []module.Module{
+		modulePreflight.NewPreflightModule(),     // Assuming constructor is parameterless or takes rtCtx if needed
+		moduleContainerd.NewContainerdModule(), // Assuming constructor is parameterless or takes rtCtx
+		moduleEtcd.NewEtcdModule(),             // Assuming constructor is parameterless or takes rtCtx
+		// TODO: Instantiate and add other modules:
+		// moduleKubernetes.NewControlPlaneModule(rtCtx),
+		// moduleKubernetes.NewWorkerNodeModule(rtCtx),
+		// moduleNetwork.NewCNIModule(rtCtx),
+		// moduleAddons.NewCoreDNSModule(rtCtx),
 	}
 
-	// Filter out nil modules. This is defensive; factories should ideally not return nil.
-	// However, if a factory could return nil (e.g., if a component is entirely optional based on config
-	// and the factory decides not to add a module at all), this handles it.
-	finalModules := make([]*spec.ModuleSpec, 0, len(modules))
-	for _, m := range modules {
-		if m != nil { // Ensure module spec itself isn't nil
-			finalModules = append(finalModules, m)
-		}
-	}
-
-	// Define Pipeline PreRun/PostRun Steps if needed
-	// These are spec.StepSpec instances.
-	// Example using a (hypothetical) CommandStepSpec from a shared step definitions package:
-	// var preRunStep spec.StepSpec = &stepCommandSpec.CommandStepSpec{
-	// 	 SpecName: "Pipeline PreRun: Start Create Cluster",
-	// 	 Cmd:      "echo 'Starting Kubernetes cluster creation pipeline at $(date)'",
-	// 	 Sudo:     false,
-	// }
-	// var postRunStep spec.StepSpec = &stepCommandSpec.CommandStepSpec{
-	// 	 SpecName: "Pipeline PostRun: Create Cluster Finished",
-	// 	 Cmd:      "echo 'Kubernetes cluster creation pipeline finished at $(date). Check logs for details.'",
-	// 	 Sudo:     false,
-	// }
-
-	return &spec.PipelineSpec{
-		Name:    "Create New Kubernetes Cluster",
-		Modules: finalModules,
-		// PreRun:  preRunStep,  // Example if defined
-		// PostRun: postRunStep, // Example if defined
-		PreRun:  nil, // No pipeline-level PreRun hook for this example
-		PostRun: nil, // No pipeline-level PostRun hook for this example
+	return &CreateClusterPipeline{
+		pipelineName:    "CreateNewKubernetesCluster",
+		pipelineModules: mods,
 	}
 }
 
-// TODO: Implement other pipeline factories as needed:
-// - NewScaleUpWorkerPipelineSpec(cfg *config.Cluster, newWorkerConfigs []config.HostSpec) *spec.PipelineSpec
-// - NewScaleUpControlPlanePipelineSpec(cfg *config.Cluster, newCPConfigs []config.HostSpec) *spec.PipelineSpec
-// - NewDeleteNodePipelineSpec(cfg *config.Cluster, nodeNameToDelete string) *spec.PipelineSpec
-// - NewDeleteClusterPipelineSpec(cfg *config.Cluster) *spec.PipelineSpec
-// - NewUpgradeClusterPipelineSpec(cfg *config.Cluster, targetVersion string) *spec.PipelineSpec
+// Name returns the name of the pipeline.
+func (p *CreateClusterPipeline) Name() string {
+	return p.pipelineName
+}
+
+// Modules returns the list of modules in this pipeline.
+func (p *CreateClusterPipeline) Modules() []module.Module {
+	if p.pipelineModules == nil {
+		return []module.Module{}
+	}
+	modsCopy := make([]module.Module, len(p.pipelineModules))
+	copy(modsCopy, p.pipelineModules)
+	return modsCopy
+}
+
+// Plan generates the final, complete ExecutionGraph for the entire pipeline.
+func (p *CreateClusterPipeline) Plan(ctx runtime.PipelineContext) (*plan.ExecutionGraph, error) {
+	logger := ctx.GetLogger().With("pipeline", p.Name())
+	finalGraph := plan.NewExecutionGraph(p.Name())
+
+	var previousModuleExitNodes []plan.NodeID
+	isFirstEffectiveModule := true
+
+	for _, mod := range p.pipelineModules {
+		// The PipelineContext (ctx) should be usable as a ModuleContext if the concrete
+		// runtime context object implements ModuleContext (likely via embedding PipelineContext).
+		moduleCtx, ok := ctx.(runtime.ModuleContext)
+		if !ok {
+			return nil, fmt.Errorf("pipeline context could not be asserted to module context for module %s. Ensure main runtime context implements all facades.", mod.Name())
+		}
+
+		logger.Info("Planning module", "module", mod.Name())
+
+		// Modules could have an IsRequired method, though not in the current module.Module interface.
+		// If they did, it would be checked here:
+		// if required, modIsRequiredErr := mod.IsRequired(moduleCtx); modIsRequiredErr != nil || !required { ... skip ... }
+
+		moduleFragment, err := mod.Plan(moduleCtx)
+		if err != nil {
+			logger.Error(err, "Failed to plan module", "module", mod.Name())
+			return nil, fmt.Errorf("failed to plan module %s: %w", mod.Name(), err)
+		}
+
+		if moduleFragment == nil || len(moduleFragment.Nodes) == 0 {
+			logger.Info("Module returned an empty fragment, skipping", "module", mod.Name())
+			continue
+		}
+
+		for id, node := range moduleFragment.Nodes {
+			if _, exists := finalGraph.Nodes[id]; exists {
+				err := fmt.Errorf("duplicate NodeID '%s' detected when merging fragments from module '%s'", id, mod.Name())
+				logger.Error(err, "NodeID collision")
+				return nil, err
+			}
+			finalGraph.Nodes[id] = node
+		}
+
+		if len(previousModuleExitNodes) > 0 {
+			for _, entryNodeID := range moduleFragment.EntryNodes {
+				entryNode, found := finalGraph.Nodes[entryNodeID]
+				if !found {
+					return nil, fmt.Errorf("internal error: entry node '%s' from module '%s' not found in final graph after merge", entryNodeID, mod.Name())
+				}
+				existingDeps := make(map[plan.NodeID]bool)
+				for _, depID := range entryNode.Dependencies {
+					existingDeps[depID] = true
+				}
+				for _, prevExitNodeID := range previousModuleExitNodes {
+					if !existingDeps[prevExitNodeID] {
+						entryNode.Dependencies = append(entryNode.Dependencies, prevExitNodeID)
+						existingDeps[prevExitNodeID] = true
+					}
+				}
+			}
+		} else if isFirstEffectiveModule { // Only if no preceding module contributed exit nodes
+			finalGraph.EntryNodes = append(finalGraph.EntryNodes, moduleFragment.EntryNodes...)
+		}
+
+		if len(moduleFragment.ExitNodes) > 0 {
+		    previousModuleExitNodes = moduleFragment.ExitNodes
+			isFirstEffectiveModule = false
+		}
+	}
+
+	finalGraph.EntryNodes = uniqueNodeIDs(finalGraph.EntryNodes)
+	// The exit nodes of the graph are the exit nodes of the last module that contributed nodes.
+	finalGraph.ExitNodes = uniqueNodeIDs(previousModuleExitNodes)
+
+	if len(finalGraph.Nodes) == 0 {
+		logger.Info("Pipeline planned no executable nodes.")
+	} else {
+		logger.Info("Pipeline planning complete.", "totalNodes", len(finalGraph.Nodes), "entryNodesCount", len(finalGraph.EntryNodes), "exitNodesCount", len(finalGraph.ExitNodes))
+	}
+
+	return finalGraph, nil
+}
+
+// Run executes the pipeline.
+func (p *CreateClusterPipeline) Run(rtCtx *runtime.Context, dryRun bool) (*plan.GraphExecutionResult, error) {
+	logger := rtCtx.GetLogger().With("pipeline", p.Name())
+	logger.Info("Starting pipeline run...", "dryRun", dryRun)
+
+	// The full runtime.Context (rtCtx) should implement PipelineContext.
+	pipelinePlanCtx, ok := rtCtx.(runtime.PipelineContext)
+	if !ok {
+		err := fmt.Errorf("full runtime context does not satisfy PipelineContext for planning")
+		logger.Error(err, "Context type assertion failed")
+		result := plan.NewGraphExecutionResult(p.Name())
+		result.Status = plan.StatusFailed
+		result.EndTime = time.Now()
+		return result, err
+	}
+
+	executionGraph, err := p.Plan(pipelinePlanCtx)
+	if err != nil {
+		logger.Error(err, "Failed to generate execution plan for pipeline")
+		result := plan.NewGraphExecutionResult(p.Name())
+		result.Status = plan.StatusFailed
+		result.EndTime = time.Now()
+		return result, fmt.Errorf("pipeline plan generation failed: %w", err)
+	}
+
+	// If dryRun is true, the engine's Execute method will handle the dry run logic.
+	// The plan (graph) is still generated.
+
+	eng := rtCtx.GetEngine()
+	if eng == nil {
+		err := fmt.Errorf("engine not found in runtime context")
+		logger.Error(err, "Cannot execute pipeline")
+		result := plan.NewGraphExecutionResult(p.Name())
+		result.Status = plan.StatusFailed
+		result.EndTime = time.Now()
+		return result, err
+	}
+
+	logger.Info("Submitting execution graph to engine.", "nodeCount", len(executionGraph.Nodes))
+	graphResult, execErr := eng.Execute(rtCtx, executionGraph, dryRun)
+
+	if execErr != nil {
+		// This error is from the engine's execution logic itself (e.g., setup error),
+		// not necessarily a failure of a node within the graph (which would be in graphResult.Status).
+		logger.Error(execErr, "Engine execution encountered an error")
+		if graphResult == nil { // Should not happen if engine.Execute respects its contract
+			graphResult = plan.NewGraphExecutionResult(p.Name())
+			graphResult.Status = plan.StatusFailed
+		}
+		// Ensure EndTime is set, even if engine failed to set it.
+		if graphResult.EndTime.IsZero() {
+			graphResult.EndTime = time.Now()
+		}
+		return graphResult, fmt.Errorf("engine execution failed: %w", execErr)
+	}
+
+	logger.Info("Pipeline run finished.", "status", graphResult.Status)
+	return graphResult, nil
+}
+
+// uniqueNodeIDs helper (can be moved to a common utility package if used elsewhere)
+func uniqueNodeIDs(ids []plan.NodeID) []plan.NodeID {
+    if len(ids) == 0 {
+        return []plan.NodeID{}
+    }
+    seen := make(map[plan.NodeID]bool)
+    result := []plan.NodeID{}
+    for _, id := range ids {
+        if !seen[id] {
+            seen[id] = true
+            result = append(result, id)
+        }
+    }
+    return result
+}
+
+// Ensure CreateClusterPipeline implements the pipeline.Pipeline interface.
+var _ Pipeline = (*CreateClusterPipeline)(nil)
