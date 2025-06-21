@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	// Replace {{MODULE_NAME}} with the actual module name of your project
-	"{{MODULE_NAME}}/pkg/apis/kubexms/v1alpha1"
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	// "{{MODULE_NAME}}/pkg/config" // No longer needed as we use v1alpha1.Cluster directly
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -86,7 +86,7 @@ spec:
 			yamlData:    []byte(validYAMLComprehensive),
 			expectError: false,
 			expectedCfg: &v1alpha1.Cluster{ // Changed to v1alpha1.Cluster
-				TypeMeta: metav1.TypeMeta{APIVersion: "kubexms.io/v1alpha1", Kind: "Cluster"},
+				TypeMeta:   metav1.TypeMeta{APIVersion: "kubexms.io/v1alpha1", Kind: "Cluster"},
 				ObjectMeta: metav1.ObjectMeta{Name: "test-cluster-full"},
 				Spec: v1alpha1.ClusterSpec{ // Changed to v1alpha1.ClusterSpec
 					Global: &v1alpha1.GlobalSpec{User: "ubuntu", Port: 2222, WorkDir: "/tmp/kubexms_test"},
@@ -210,7 +210,6 @@ spec: {}
 							t.Errorf("Spec.ControlPlaneEndpoint mismatch: got %+v, want %+v", parsedCfg.Spec.ControlPlaneEndpoint, tc.expectedCfg.Spec.ControlPlaneEndpoint)
 						}
 					}
-
 
 					if !reflect.DeepEqual(parsedCfg.Spec.Network, tc.expectedCfg.Spec.Network) {
 						t.Errorf("Spec.Network mismatch: got %+v, want %+v", parsedCfg.Spec.Network, tc.expectedCfg.Spec.Network)

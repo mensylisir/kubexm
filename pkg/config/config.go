@@ -2,7 +2,7 @@ package config
 
 import (
 	// Import v1alpha1 types
-	"{{MODULE_NAME}}/pkg/apis/kubexms/v1alpha1"
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	// "time" // No longer needed as local structs using it are removed
 	// metav1 "k8s.io/apimachinery/pkg/apis/meta/v1" // No longer needed here
 )
@@ -11,7 +11,7 @@ import (
 // These constants can be used by the calling code to verify the parsed TypeMeta.
 const (
 	DefaultAPIVersion = "kubexms.io/v1alpha1"
-	ClusterKind     = "Cluster"
+	ClusterKind       = "Cluster"
 	// Add other Kinds if more top-level config objects are envisioned
 )
 

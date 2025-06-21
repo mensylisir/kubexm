@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 	// "gopkg.in/yaml.v3" // Not strictly needed if relying on LoadFromBytes
-	"github.com/kubexms/kubexms/pkg/apis/kubexms/v1alpha1"
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 )
 
 const validYAMLMinimal = `
@@ -310,7 +310,9 @@ func TestLoadFromBytes_ValidFull(t *testing.T) {
 	if cfg.ObjectMeta.Name != "full-cluster" { // Changed to ObjectMeta
 		t.Errorf("ObjectMeta.Name = %s, want full-cluster", cfg.ObjectMeta.Name)
 	}
-	if cfg.Spec.Global == nil { t.Fatal("Spec.Global is nil") }
+	if cfg.Spec.Global == nil {
+		t.Fatal("Spec.Global is nil")
+	}
 	if cfg.Spec.Global.User != "globaluser" {
 		t.Errorf("Global.User = %s, want globaluser", cfg.Spec.Global.User)
 	}
@@ -333,11 +335,15 @@ func TestLoadFromBytes_ValidFull(t *testing.T) {
 		t.Errorf("Host[1].Port = %d, want 2222 (inherited)", cfg.Spec.Hosts[1].Port)
 	}
 
-	if cfg.Spec.ContainerRuntime == nil { t.Fatal("Spec.ContainerRuntime is nil") }
+	if cfg.Spec.ContainerRuntime == nil {
+		t.Fatal("Spec.ContainerRuntime is nil")
+	}
 	if cfg.Spec.ContainerRuntime.Type != "containerd" {
 		t.Errorf("ContainerRuntime.Type = %s, want containerd", cfg.Spec.ContainerRuntime.Type)
 	}
-	if cfg.Spec.Containerd == nil { t.Fatal("Spec.Containerd is nil") }
+	if cfg.Spec.Containerd == nil {
+		t.Fatal("Spec.Containerd is nil")
+	}
 	if mirrors, ok := cfg.Spec.Containerd.RegistryMirrors["docker.io"]; !ok || len(mirrors) != 2 {
 		t.Error("Containerd mirrors for docker.io not parsed correctly")
 	}
@@ -345,7 +351,9 @@ func TestLoadFromBytes_ValidFull(t *testing.T) {
 		t.Error("Containerd.UseSystemdCgroup should be true")
 	}
 
-	if cfg.Spec.Etcd == nil { t.Fatal("Spec.Etcd is nil") }
+	if cfg.Spec.Etcd == nil {
+		t.Fatal("Spec.Etcd is nil")
+	}
 	if cfg.Spec.Etcd.Type != "stacked" {
 		t.Errorf("Etcd.Type = %s, want stacked", cfg.Spec.Etcd.Type)
 	}
@@ -353,7 +361,9 @@ func TestLoadFromBytes_ValidFull(t *testing.T) {
 		t.Errorf("Etcd.ClientPort = %v, want 2378", cfg.Spec.Etcd.ClientPort)
 	}
 
-	if cfg.Spec.Kubernetes == nil { t.Fatal("Spec.Kubernetes is nil") }
+	if cfg.Spec.Kubernetes == nil {
+		t.Fatal("Spec.Kubernetes is nil")
+	}
 	if cfg.Spec.Kubernetes.ClusterName != "my-k8s-cluster" {
 		t.Errorf("Kubernetes.ClusterName = %s, want my-k8s-cluster", cfg.Spec.Kubernetes.ClusterName)
 	}
@@ -365,64 +375,105 @@ func TestLoadFromBytes_ValidFull(t *testing.T) {
 	if k8sCfg.APIServer == nil || len(k8sCfg.APIServer.ExtraArgs) == 0 || k8sCfg.APIServer.ExtraArgs[0] != "--audit-log-maxage=30" {
 		t.Errorf("Kubernetes.APIServer.ExtraArgs not parsed correctly: %v", k8sCfg.APIServer.ExtraArgs)
 	}
-	if k8sCfg.ContainerManager != "systemd" {t.Errorf("K8s ContainerManager failed: %s", k8sCfg.ContainerManager)}
-	if k8sCfg.MaxPods == nil || *k8sCfg.MaxPods != 150 {t.Errorf("K8s MaxPods failed: %v", k8sCfg.MaxPods)}
-	if k8sCfg.FeatureGates == nil || !k8sCfg.FeatureGates["EphemeralContainers"] {t.Error("K8s FeatureGates failed")}
-	if k8sCfg.APIServer == nil || len(k8sCfg.APIServer.AdmissionPlugins) == 0 {t.Error("K8s APIServer.AdmissionPlugins failed")}
-	if k8sCfg.Kubelet == nil || k8sCfg.Kubelet.CgroupDriver == nil || *k8sCfg.Kubelet.CgroupDriver != "systemd" {t.Errorf("K8s Kubelet.CgroupDriver failed: %v", k8sCfg.Kubelet.CgroupDriver)}
-	if k8sCfg.Kubelet.EvictionHard == nil || k8sCfg.Kubelet.EvictionHard["memory.available"] != "5%" {t.Error("K8s Kubelet.EvictionHard failed")}
-	if k8sCfg.KubeletConfiguration == nil || len(k8sCfg.KubeletConfiguration.Raw) == 0 {t.Error("K8s KubeletConfiguration failed")}
-	if k8sCfg.KubeProxy == nil || k8sCfg.KubeProxy.IPVS == nil || k8sCfg.KubeProxy.IPVS.Scheduler != "wrr" {t.Error("K8s KubeProxy.IPVS.Scheduler failed")}
-	if k8sCfg.Audit == nil || k8sCfg.Audit.Enabled == nil || !*k8sCfg.Audit.Enabled {t.Error("K8s Audit.Enabled failed")}
-
+	if k8sCfg.ContainerManager != "systemd" {
+		t.Errorf("K8s ContainerManager failed: %s", k8sCfg.ContainerManager)
+	}
+	if k8sCfg.MaxPods == nil || *k8sCfg.MaxPods != 150 {
+		t.Errorf("K8s MaxPods failed: %v", k8sCfg.MaxPods)
+	}
+	if k8sCfg.FeatureGates == nil || !k8sCfg.FeatureGates["EphemeralContainers"] {
+		t.Error("K8s FeatureGates failed")
+	}
+	if k8sCfg.APIServer == nil || len(k8sCfg.APIServer.AdmissionPlugins) == 0 {
+		t.Error("K8s APIServer.AdmissionPlugins failed")
+	}
+	if k8sCfg.Kubelet == nil || k8sCfg.Kubelet.CgroupDriver == nil || *k8sCfg.Kubelet.CgroupDriver != "systemd" {
+		t.Errorf("K8s Kubelet.CgroupDriver failed: %v", k8sCfg.Kubelet.CgroupDriver)
+	}
+	if k8sCfg.Kubelet.EvictionHard == nil || k8sCfg.Kubelet.EvictionHard["memory.available"] != "5%" {
+		t.Error("K8s Kubelet.EvictionHard failed")
+	}
+	if k8sCfg.KubeletConfiguration == nil || len(k8sCfg.KubeletConfiguration.Raw) == 0 {
+		t.Error("K8s KubeletConfiguration failed")
+	}
+	if k8sCfg.KubeProxy == nil || k8sCfg.KubeProxy.IPVS == nil || k8sCfg.KubeProxy.IPVS.Scheduler != "wrr" {
+		t.Error("K8s KubeProxy.IPVS.Scheduler failed")
+	}
+	if k8sCfg.Audit == nil || k8sCfg.Audit.Enabled == nil || !*k8sCfg.Audit.Enabled {
+		t.Error("K8s Audit.Enabled failed")
+	}
 
 	netCfg := cfg.Spec.Network
-	if netCfg == nil {t.Fatal("Spec.Network is nil")}
+	if netCfg == nil {
+		t.Fatal("Spec.Network is nil")
+	}
 	if netCfg.Plugin != "calico" {
 		t.Errorf("Network.Plugin = %s, want calico", netCfg.Plugin)
 	}
-    if netCfg.PodSubnet != "10.244.0.0/16" {
-        t.Errorf("Network.PodSubnet = %s, want 10.244.0.0/16", netCfg.PodSubnet)
-    }
-    if netCfg.Calico == nil {
-        t.Fatal("Spec.Network.Calico should not be nil for plugin 'calico'")
-    }
-    if netCfg.Calico.LogSeverityScreen == nil || *netCfg.Calico.LogSeverityScreen != "Info" {
-        t.Errorf("Calico LogSeverityScreen = %v, want 'Info'", netCfg.Calico.LogSeverityScreen)
-    }
-    if netCfg.Calico.VethMTU == nil || *netCfg.Calico.VethMTU != 1420 {t.Errorf("Calico VethMTU failed: %v", netCfg.Calico.VethMTU)}
+	if netCfg.PodSubnet != "10.244.0.0/16" {
+		t.Errorf("Network.PodSubnet = %s, want 10.244.0.0/16", netCfg.PodSubnet)
+	}
+	if netCfg.Calico == nil {
+		t.Fatal("Spec.Network.Calico should not be nil for plugin 'calico'")
+	}
+	if netCfg.Calico.LogSeverityScreen == nil || *netCfg.Calico.LogSeverityScreen != "Info" {
+		t.Errorf("Calico LogSeverityScreen = %v, want 'Info'", netCfg.Calico.LogSeverityScreen)
+	}
+	if netCfg.Calico.VethMTU == nil || *netCfg.Calico.VethMTU != 1420 {
+		t.Errorf("Calico VethMTU failed: %v", netCfg.Calico.VethMTU)
+	}
 
-    if len(netCfg.Calico.IPPools) != 2 {
-        t.Fatalf("Expected 2 Calico IPPools, got %d", len(netCfg.Calico.IPPools))
-    }
-    pool1 := netCfg.Calico.IPPools[0]
-    if pool1.Name != "mypool-1" { t.Errorf("IPPool[0].Name = %s, want mypool-1", pool1.Name) }
-    if pool1.CIDR != "192.168.100.0/24" { t.Errorf("IPPool[0].CIDR = %s", pool1.CIDR) }
-    if pool1.Encapsulation != "VXLAN" { t.Errorf("IPPool[0].Encapsulation = %s", pool1.Encapsulation) }
-    if pool1.NatOutgoing == nil || !*pool1.NatOutgoing { t.Error("IPPool[0].NatOutgoing should be true") }
-    if pool1.BlockSize == nil || *pool1.BlockSize != 27 { t.Errorf("IPPool[0].BlockSize = %v, want 27", pool1.BlockSize) }
+	if len(netCfg.Calico.IPPools) != 2 {
+		t.Fatalf("Expected 2 Calico IPPools, got %d", len(netCfg.Calico.IPPools))
+	}
+	pool1 := netCfg.Calico.IPPools[0]
+	if pool1.Name != "mypool-1" {
+		t.Errorf("IPPool[0].Name = %s, want mypool-1", pool1.Name)
+	}
+	if pool1.CIDR != "192.168.100.0/24" {
+		t.Errorf("IPPool[0].CIDR = %s", pool1.CIDR)
+	}
+	if pool1.Encapsulation != "VXLAN" {
+		t.Errorf("IPPool[0].Encapsulation = %s", pool1.Encapsulation)
+	}
+	if pool1.NatOutgoing == nil || !*pool1.NatOutgoing {
+		t.Error("IPPool[0].NatOutgoing should be true")
+	}
+	if pool1.BlockSize == nil || *pool1.BlockSize != 27 {
+		t.Errorf("IPPool[0].BlockSize = %v, want 27", pool1.BlockSize)
+	}
 
-    pool2 := netCfg.Calico.IPPools[1]
-    if pool2.Name != "mypool-2-default-blockSize" {t.Errorf("IPPool[1].Name incorrect")}
-    if pool2.BlockSize == nil || *pool2.BlockSize != 26 {
-         t.Errorf("IPPool[1].BlockSize = %v, want 26 (default)", pool2.BlockSize)
-    }
+	pool2 := netCfg.Calico.IPPools[1]
+	if pool2.Name != "mypool-2-default-blockSize" {
+		t.Errorf("IPPool[1].Name incorrect")
+	}
+	if pool2.BlockSize == nil || *pool2.BlockSize != 26 {
+		t.Errorf("IPPool[1].BlockSize = %v, want 26 (default)", pool2.BlockSize)
+	}
 
 	haCfg := cfg.Spec.HighAvailability
-	if haCfg == nil {t.Fatal("Spec.HighAvailability is nil")}
+	if haCfg == nil {
+		t.Fatal("Spec.HighAvailability is nil")
+	}
 	if haCfg.Type != "keepalived" {
 		t.Errorf("HighAvailability.Type = %s, want keepalived", haCfg.Type)
 	}
-    if haCfg.VIP != "192.168.1.100" {
-        t.Errorf("HighAvailability.VIP = %s, want 192.168.1.100", haCfg.VIP)
-    }
-    if haCfg.ControlPlaneEndpointDomain != "k8s-api.internal.example.com" {t.Errorf("HA ControlPlaneEndpointDomain failed: %s", haCfg.ControlPlaneEndpointDomain)}
-    if haCfg.ControlPlaneEndpointPort == nil || *haCfg.ControlPlaneEndpointPort != 8443 {t.Errorf("HA ControlPlaneEndpointPort failed: %v", haCfg.ControlPlaneEndpointPort)}
+	if haCfg.VIP != "192.168.1.100" {
+		t.Errorf("HighAvailability.VIP = %s, want 192.168.1.100", haCfg.VIP)
+	}
+	if haCfg.ControlPlaneEndpointDomain != "k8s-api.internal.example.com" {
+		t.Errorf("HA ControlPlaneEndpointDomain failed: %s", haCfg.ControlPlaneEndpointDomain)
+	}
+	if haCfg.ControlPlaneEndpointPort == nil || *haCfg.ControlPlaneEndpointPort != 8443 {
+		t.Errorf("HA ControlPlaneEndpointPort failed: %v", haCfg.ControlPlaneEndpointPort)
+	}
 
 	if haCfg.Type != "keepalived+haproxy" {
 		t.Errorf("HighAvailability.Type = %s, want keepalived+haproxy", haCfg.Type)
 	}
-	if haCfg.Keepalived == nil { t.Fatal("HA.Keepalived section is nil") }
+	if haCfg.Keepalived == nil {
+		t.Fatal("HA.Keepalived section is nil")
+	}
 	if haCfg.Keepalived.Interface == nil || *haCfg.Keepalived.Interface != "eth1" {
 		t.Errorf("HA.Keepalived.Interface = %v, want 'eth1'", haCfg.Keepalived.Interface)
 	}
@@ -431,36 +482,50 @@ func TestLoadFromBytes_ValidFull(t *testing.T) {
 	}
 	// ... more Keepalived assertions (priority, authType, authPass)
 
-	if haCfg.HAProxy == nil { t.Fatal("HA.HAProxy section is nil") }
+	if haCfg.HAProxy == nil {
+		t.Fatal("HA.HAProxy section is nil")
+	}
 	if haCfg.HAProxy.BalanceAlgorithm == nil || *haCfg.HAProxy.BalanceAlgorithm != "leastconn" {
 		t.Errorf("HA.HAProxy.BalanceAlgorithm = %v, want 'leastconn'", haCfg.HAProxy.BalanceAlgorithm)
 	}
 	if len(haCfg.HAProxy.BackendServers) != 1 || haCfg.HAProxy.BackendServers[0].Name != "master-1-backend" {
-		 t.Errorf("HA.HAProxy.BackendServers not parsed as expected: %v", haCfg.HAProxy.BackendServers)
+		t.Errorf("HA.HAProxy.BackendServers not parsed as expected: %v", haCfg.HAProxy.BackendServers)
 	}
 	// Check that HAProxy.FrontendPort defaulted correctly
 	// Current SetDefaults_HAProxyConfig defaults FrontendPort to 6443.
 	if haCfg.HAProxy.FrontendPort == nil || *haCfg.HAProxy.FrontendPort != 6443 {
-		 t.Errorf("HA.HAProxy.FrontendPort = %v, want 6443 (HAProxy default)", haCfg.HAProxy.FrontendPort)
+		t.Errorf("HA.HAProxy.FrontendPort = %v, want 6443 (HAProxy default)", haCfg.HAProxy.FrontendPort)
 	}
 
-
-	if cfg.Spec.Preflight == nil { t.Fatal("Spec.Preflight is nil")}
+	if cfg.Spec.Preflight == nil {
+		t.Fatal("Spec.Preflight is nil")
+	}
 	if cfg.Spec.Preflight.DisableSwap == nil || !*cfg.Spec.Preflight.DisableSwap {
 		t.Error("Preflight.DisableSwap should be true")
 	}
-    if cfg.Spec.Preflight.MinCPUCores == nil || *cfg.Spec.Preflight.MinCPUCores != 2 {
-        t.Errorf("Preflight.MinCPUCores = %v, want 2", cfg.Spec.Preflight.MinCPUCores)
-    }
+	if cfg.Spec.Preflight.MinCPUCores == nil || *cfg.Spec.Preflight.MinCPUCores != 2 {
+		t.Errorf("Preflight.MinCPUCores = %v, want 2", cfg.Spec.Preflight.MinCPUCores)
+	}
 
 	etcdCfg := cfg.Spec.Etcd
-	if etcdCfg == nil {t.Fatal("Etcd config is nil")}
-	if etcdCfg.PeerPort == nil || *etcdCfg.PeerPort != 2381 {t.Errorf("Etcd PeerPort failed, got %v", etcdCfg.PeerPort)}
-	if etcdCfg.DataDir == nil || *etcdCfg.DataDir != "/mnt/etcd_data_custom" {t.Errorf("Etcd DataDir failed, got %v", etcdCfg.DataDir)}
-	if len(etcdCfg.ExtraArgs) != 2 || etcdCfg.ExtraArgs[0] != "--election-timeout=1200" {t.Errorf("Etcd ExtraArgs failed: %v", etcdCfg.ExtraArgs)}
-	if etcdCfg.BackupDir == nil || *etcdCfg.BackupDir != "/opt/etcd_backup" {t.Errorf("Etcd BackupDir failed: %v", etcdCfg.BackupDir)}
-	if etcdCfg.LogLevel == nil || *etcdCfg.LogLevel != "debug" {t.Errorf("Etcd LogLevel failed: %v", etcdCfg.LogLevel)}
-
+	if etcdCfg == nil {
+		t.Fatal("Etcd config is nil")
+	}
+	if etcdCfg.PeerPort == nil || *etcdCfg.PeerPort != 2381 {
+		t.Errorf("Etcd PeerPort failed, got %v", etcdCfg.PeerPort)
+	}
+	if etcdCfg.DataDir == nil || *etcdCfg.DataDir != "/mnt/etcd_data_custom" {
+		t.Errorf("Etcd DataDir failed, got %v", etcdCfg.DataDir)
+	}
+	if len(etcdCfg.ExtraArgs) != 2 || etcdCfg.ExtraArgs[0] != "--election-timeout=1200" {
+		t.Errorf("Etcd ExtraArgs failed: %v", etcdCfg.ExtraArgs)
+	}
+	if etcdCfg.BackupDir == nil || *etcdCfg.BackupDir != "/opt/etcd_backup" {
+		t.Errorf("Etcd BackupDir failed: %v", etcdCfg.BackupDir)
+	}
+	if etcdCfg.LogLevel == nil || *etcdCfg.LogLevel != "debug" {
+		t.Errorf("Etcd LogLevel failed: %v", etcdCfg.LogLevel)
+	}
 
 	if len(cfg.Spec.Addons) != 2 {
 		t.Fatalf("Expected 2 addons, got %d", len(cfg.Spec.Addons))
@@ -471,33 +536,57 @@ func TestLoadFromBytes_ValidFull(t *testing.T) {
 	if cfg.Spec.Addons[0].Enabled == nil || !*cfg.Spec.Addons[0].Enabled {
 		t.Error("Addon coredns should be enabled")
 	}
-    if cfg.Spec.Addons[1].Name != "metrics-server" {
-        t.Errorf("Addon[1].Name = %s, want metrics-server", cfg.Spec.Addons[1].Name)
-    }
-    if cfg.Spec.Addons[1].Sources.Chart == nil || cfg.Spec.Addons[1].Sources.Chart.Name != "metrics-server" {
-        t.Error("Addon metrics-server chart source not parsed correctly")
-    }
+	if cfg.Spec.Addons[1].Name != "metrics-server" {
+		t.Errorf("Addon[1].Name = %s, want metrics-server", cfg.Spec.Addons[1].Name)
+	}
+	if cfg.Spec.Addons[1].Sources.Chart == nil || cfg.Spec.Addons[1].Sources.Chart.Name != "metrics-server" {
+		t.Error("Addon metrics-server chart source not parsed correctly")
+	}
 
 	storageCfg := cfg.Spec.Storage
-	if storageCfg == nil {t.Fatal("Storage config is nil")}
-	if storageCfg.DefaultStorageClass == nil || *storageCfg.DefaultStorageClass != "openebs-hostpath" {t.Errorf("Storage DefaultStorageClass failed: %v", storageCfg.DefaultStorageClass)}
-	if storageCfg.OpenEBS == nil || storageCfg.OpenEBS.Enabled == nil || !*storageCfg.OpenEBS.Enabled {t.Error("Storage OpenEBS.Enabled failed")}
-	if storageCfg.OpenEBS.Version == nil || *storageCfg.OpenEBS.Version != "3.3.0" {t.Errorf("Storage OpenEBS.Version failed: %v", storageCfg.OpenEBS.Version)}
+	if storageCfg == nil {
+		t.Fatal("Storage config is nil")
+	}
+	if storageCfg.DefaultStorageClass == nil || *storageCfg.DefaultStorageClass != "openebs-hostpath" {
+		t.Errorf("Storage DefaultStorageClass failed: %v", storageCfg.DefaultStorageClass)
+	}
+	if storageCfg.OpenEBS == nil || storageCfg.OpenEBS.Enabled == nil || !*storageCfg.OpenEBS.Enabled {
+		t.Error("Storage OpenEBS.Enabled failed")
+	}
+	if storageCfg.OpenEBS.Version == nil || *storageCfg.OpenEBS.Version != "3.3.0" {
+		t.Errorf("Storage OpenEBS.Version failed: %v", storageCfg.OpenEBS.Version)
+	}
 	if storageCfg.OpenEBS.Engines == nil || storageCfg.OpenEBS.Engines.LocalHostPath == nil || storageCfg.OpenEBS.Engines.LocalHostPath.Enabled == nil || !*storageCfg.OpenEBS.Engines.LocalHostPath.Enabled {
 		t.Error("Storage OpenEBS.Engines.LocalHostPath.Enabled failed")
 	}
 
 	registryCfg := cfg.Spec.Registry
-	if registryCfg == nil {t.Fatal("Registry config is nil")}
-	if registryCfg.PrivateRegistry != "myreg.local:5000" {t.Errorf("Registry PrivateRegistry failed: %s", registryCfg.PrivateRegistry)}
-	if len(registryCfg.InsecureRegistries) == 0 || registryCfg.InsecureRegistries[0] != "myreg.local:5000" {t.Error("Registry InsecureRegistries failed")}
-	if auth, ok := registryCfg.Auths["myreg.local:5000"]; !ok || auth.Username != "reguser" {t.Error("Registry Auths failed")}
+	if registryCfg == nil {
+		t.Fatal("Registry config is nil")
+	}
+	if registryCfg.PrivateRegistry != "myreg.local:5000" {
+		t.Errorf("Registry PrivateRegistry failed: %s", registryCfg.PrivateRegistry)
+	}
+	if len(registryCfg.InsecureRegistries) == 0 || registryCfg.InsecureRegistries[0] != "myreg.local:5000" {
+		t.Error("Registry InsecureRegistries failed")
+	}
+	if auth, ok := registryCfg.Auths["myreg.local:5000"]; !ok || auth.Username != "reguser" {
+		t.Error("Registry Auths failed")
+	}
 
 	osCfg := cfg.Spec.OS
-	if osCfg == nil {t.Fatal("OS config is nil")}
-	if len(osCfg.NtpServers) != 2 || osCfg.NtpServers[0] != "ntp1.example.com" {t.Error("OS NtpServers failed")}
-	if osCfg.Timezone == nil || *osCfg.Timezone != "America/Los_Angeles" {t.Errorf("OS Timezone failed: %v", osCfg.Timezone)}
-	if osCfg.SkipConfigureOS == nil || *osCfg.SkipConfigureOS != false {t.Error("OS SkipConfigureOS failed")}
+	if osCfg == nil {
+		t.Fatal("OS config is nil")
+	}
+	if len(osCfg.NtpServers) != 2 || osCfg.NtpServers[0] != "ntp1.example.com" {
+		t.Error("OS NtpServers failed")
+	}
+	if osCfg.Timezone == nil || *osCfg.Timezone != "America/Los_Angeles" {
+		t.Errorf("OS Timezone failed: %v", osCfg.Timezone)
+	}
+	if osCfg.SkipConfigureOS == nil || *osCfg.SkipConfigureOS != false {
+		t.Error("OS SkipConfigureOS failed")
+	}
 }
 
 func TestLoadFromBytes_MalformedYAML(t *testing.T) {
@@ -559,7 +648,9 @@ func TestLoadFromBytes_ValidDockerRuntime(t *testing.T) {
 	if cfg.ObjectMeta.Name != "docker-cluster" {
 		t.Errorf("ObjectMeta.Name = %s, want docker-cluster", cfg.ObjectMeta.Name)
 	}
-	if cfg.Spec.ContainerRuntime == nil {t.Fatal("Spec.ContainerRuntime is nil")}
+	if cfg.Spec.ContainerRuntime == nil {
+		t.Fatal("Spec.ContainerRuntime is nil")
+	}
 	if cfg.Spec.ContainerRuntime.Type != "docker" {
 		t.Errorf("ContainerRuntime.Type = %s, want docker", cfg.Spec.ContainerRuntime.Type)
 	}
@@ -567,7 +658,9 @@ func TestLoadFromBytes_ValidDockerRuntime(t *testing.T) {
 		t.Errorf("ContainerRuntime.Version = %s, want 20.10.17", cfg.Spec.ContainerRuntime.Version)
 	}
 	dockerCfg := cfg.Spec.ContainerRuntime.Docker
-	if dockerCfg == nil {t.Fatal("Spec.ContainerRuntime.Docker is nil")}
+	if dockerCfg == nil {
+		t.Fatal("Spec.ContainerRuntime.Docker is nil")
+	}
 	if dockerCfg.DataRoot == nil || *dockerCfg.DataRoot != "/var/lib/docker-custom" {
 		t.Errorf("Docker.DataRoot = %v, want /var/lib/docker-custom", dockerCfg.DataRoot)
 	}
@@ -577,9 +670,11 @@ func TestLoadFromBytes_ValidDockerRuntime(t *testing.T) {
 	if len(dockerCfg.ExecOpts) == 0 || dockerCfg.ExecOpts[0] != "native.cgroupdriver=systemd" {
 		t.Errorf("Docker.ExecOpts = %v, want [\"native.cgroupdriver=systemd\"]", dockerCfg.ExecOpts)
 	}
-	if cfg.Spec.Kubernetes == nil {t.Fatal("Spec.Kubernetes is nil")}
+	if cfg.Spec.Kubernetes == nil {
+		t.Fatal("Spec.Kubernetes is nil")
+	}
 	if cfg.Spec.Kubernetes.ContainerManager != "systemd" {
-	   t.Errorf("Kubernetes.ContainerManager = %s, want systemd for Docker with systemd cgroup", cfg.Spec.Kubernetes.ContainerManager)
+		t.Errorf("Kubernetes.ContainerManager = %s, want systemd for Docker with systemd cgroup", cfg.Spec.Kubernetes.ContainerManager)
 	}
 	if dockerCfg.InstallCRIDockerd == nil || !*dockerCfg.InstallCRIDockerd {
 		t.Errorf("Docker.InstallCRIDockerd expected true, got %v", dockerCfg.InstallCRIDockerd)
