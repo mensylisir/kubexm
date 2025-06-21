@@ -86,15 +86,59 @@ func (b *RuntimeBuilder) BuildFromConfig(ctx context.Context, clusterConfig *v1a
 
 	g, gCtx := errgroup.WithContext(ctx)
 
+	// --- Initialize Control Node (Local Host) ---
+	g.Go(func() error {
+		controlNodeHostSpec := v1alpha1.Host{
+			Name:    common.ControlNodeHostName, // e.g., "kubexm-control-node"
+			Type:    "local",
+			Address: "127.0.0.1", // Or other loopback
+			Roles:   []string{common.ControlNodeRole}, // e.g., "control-node"
+			// Other fields like User, Port, PrivateKeyPath are not relevant for local.
+		}
+		hostLogger := log.With("host", controlNodeHostSpec.Name)
+		hostLogger.Info("Initializing runtime for local control-node...")
+
+		conn := &connector.LocalConnector{}
+		hostLogger.Info("Using LocalConnector for control-node.")
+
+		// Connect (no-op for local but good for consistency)
+		if err := conn.Connect(gCtx, connector.ConnectionCfg{Host: controlNodeHostSpec.Address}); err != nil {
+			// Should not happen for local connector, but handle defensively
+			hostLogger.Error(err, "Failed to 'connect' local control-node connector")
+			return fmt.Errorf("failed to connect local control-node connector: %w", err)
+		}
+		hostLogger.Info("Successfully 'connected' to local control-node.")
+
+		hostLogger.Info("Gathering facts for local control-node...")
+		facts, err := runnerSvc.GatherFacts(gCtx, conn)
+		if err != nil {
+			conn.Close() // Should be no-op for local
+			hostLogger.Error(err, "Failed to gather facts for local control-node")
+			return fmt.Errorf("failed to gather facts for local control-node %s: %w", controlNodeHostSpec.Name, err)
+		}
+		hostLogger.Info("Successfully gathered facts for local control-node.", "OS", facts.OS.PrettyName)
+
+		host := connector.NewHostFromSpec(controlNodeHostSpec)
+		hr := &HostRuntime{
+			Host:  host,
+			Conn:  conn,
+			Facts: facts,
+		}
+		mu.Lock()
+		hostRuntimes[hr.Host.GetName()] = hr
+		mu.Unlock()
+		hostLogger.Info("Runtime initialized for local control-node.")
+		return nil
+	})
+
+	// --- Initialize Defined Remote Hosts ---
 	if clusterConfig.Spec.Hosts == nil || len(clusterConfig.Spec.Hosts) == 0 {
-		log.Warn("No remote hosts defined in the cluster configuration. Will proceed with control-node only if applicable.")
+		log.Info("No remote hosts defined in the cluster configuration.") // Changed from Warn
 	}
 
-	// Initialize defined remote hosts
 	for _, hostCfg := range clusterConfig.Spec.Hosts {
 		currentHostCfg := hostCfg // Capture range variable for goroutine
 		g.Go(func() error {
-			// Each goroutine gets a logger derived from the main log, adding host-specific context.
 			hostLogger := log.With("host", currentHostCfg.Name)
 			hostLogger.Info("Initializing runtime for host...")
 

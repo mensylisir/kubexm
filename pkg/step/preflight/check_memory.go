@@ -9,36 +9,45 @@ import (
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/spec" // Added for StepMeta
 	"github.com/mensylisir/kubexm/pkg/step"
-	// spec is no longer needed
 )
 
 // CheckMemoryStep checks if the host meets the minimum memory requirement.
 type CheckMemoryStep struct {
-	MinMemoryMB uint64
-	StepName    string
-	// Internal field to store result of check from Precheck to Run
+	meta           spec.StepMeta
+	MinMemoryMB    uint64
+	Sudo           bool // For running commands, though usually not needed for memory checks.
 	actualMemoryMB uint64
 	checkError     error
 }
 
 // NewCheckMemoryStep creates a new CheckMemoryStep.
-func NewCheckMemoryStep(minMemoryMB uint64, stepName string) step.Step {
-	name := stepName
+func NewCheckMemoryStep(instanceName string, minMemoryMB uint64, sudo bool) step.Step {
+	name := instanceName
 	if name == "" {
-		name = fmt.Sprintf("Check Memory (minimum %d MB)", minMemoryMB)
+		name = fmt.Sprintf("CheckMemoryMinimum%dMB", minMemoryMB)
 	}
 	return &CheckMemoryStep{
+		meta: spec.StepMeta{
+			Name:        name,
+			Description: fmt.Sprintf("Checks if the host has at least %d MB memory.", minMemoryMB),
+		},
 		MinMemoryMB: minMemoryMB,
-		StepName:    name,
+		Sudo:        sudo,
 	}
 }
 
+// Meta returns the step's metadata.
+func (s *CheckMemoryStep) Meta() *spec.StepMeta {
+	return &s.meta
+}
+
 func (s *CheckMemoryStep) determineActualMemoryMB(ctx runtime.StepContext, host connector.Host) (uint64, error) {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName())
+	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName())
 
 	facts, errFacts := ctx.GetHostFacts(host)
-	if errFacts == nil && facts != nil && facts.TotalMemory > 0 { // TotalMemory in facts is expected to be in MiB
+	if errFacts == nil && facts != nil && facts.TotalMemory > 0 {
 		logger.Debug("Using memory size from facts.", "memoryMB", facts.TotalMemory)
 		return facts.TotalMemory, nil
 	}
@@ -48,6 +57,7 @@ func (s *CheckMemoryStep) determineActualMemoryMB(ctx runtime.StepContext, host 
 		logger.Debug("Memory facts not available or zero, attempting to get memory via command.")
 	}
 
+	runnerSvc := ctx.GetRunner()
 	conn, errConn := ctx.GetConnectorForHost(host)
 	if errConn != nil {
 		return 0, fmt.Errorf("failed to get connector for host %s: %w", host.GetName(), errConn)
@@ -56,23 +66,23 @@ func (s *CheckMemoryStep) determineActualMemoryMB(ctx runtime.StepContext, host 
 	var cmd string
 	var isKb, isBytes bool
 
-	osID := "linux" // Default assumption
-	// Try to get OS ID from facts if available, to adjust command if necessary
+	osID := "linux"
 	if facts != nil && facts.OS != nil && facts.OS.ID != "" {
 		osID = strings.ToLower(facts.OS.ID)
 	} else {
 		logger.Debug("OS ID not available from facts, defaulting to Linux for memory check command.")
 	}
 
-	if osID == "darwin" { // macOS
+	if osID == "darwin" {
 		cmd = "sysctl -n hw.memsize"
 		isBytes = true
-	} else { // Assuming Linux-like for /proc/meminfo
+	} else {
 		cmd = "grep MemTotal /proc/meminfo | awk '{print $2}'"
 		isKb = true
 	}
 
-	stdoutBytes, stderrBytes, execErr := conn.Exec(ctx.GoContext(), cmd, &connector.ExecOptions{})
+	execOpts := &connector.ExecOptions{Sudo: s.Sudo}
+	stdoutBytes, stderrBytes, execErr := runnerSvc.RunWithOptions(ctx.GoContext(), conn, cmd, execOpts)
 	if execErr != nil {
 		return 0, fmt.Errorf("failed to execute command ('%s') on host %s to get memory info (stderr: %s): %w", cmd, host.GetName(), string(stderrBytes), execErr)
 	}
@@ -85,12 +95,10 @@ func (s *CheckMemoryStep) determineActualMemoryMB(ctx runtime.StepContext, host 
 
 	var calculatedMemoryMB uint64
 	if isKb {
-		calculatedMemoryMB = memVal / 1024 // Convert KB to MB
+		calculatedMemoryMB = memVal / 1024
 	} else if isBytes {
-		calculatedMemoryMB = memVal / (1024 * 1024) // Convert Bytes to MB
+		calculatedMemoryMB = memVal / (1024 * 1024)
 	} else {
-		// This case should ideally not be reached if osID logic correctly sets isKb or isBytes.
-		// If it does, it implies memVal is already in MB or unit is unknown.
 		logger.Warn("Memory unit flag (isKb/isBytes) not set after command execution; assuming value is in MB.", "value", memVal)
 		calculatedMemoryMB = memVal
 	}
@@ -98,20 +106,12 @@ func (s *CheckMemoryStep) determineActualMemoryMB(ctx runtime.StepContext, host 
 	return calculatedMemoryMB, nil
 }
 
-func (s *CheckMemoryStep) Name() string {
-	return s.StepName
-}
-
-func (s *CheckMemoryStep) Description() string {
-	return fmt.Sprintf("Checks if the host has at least %d MB memory.", s.MinMemoryMB)
-}
-
 func (s *CheckMemoryStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Precheck")
+	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 
 	if host == nil {
-	    s.checkError = fmt.Errorf("host is nil in Precheck for %s", s.Name())
-	    logger.Error(s.checkError.Error())
+		s.checkError = fmt.Errorf("host is nil in Precheck for %s", s.meta.Name)
+		logger.Error(s.checkError.Error())
 		return false, s.checkError
 	}
 
@@ -121,30 +121,40 @@ func (s *CheckMemoryStep) Precheck(ctx runtime.StepContext, host connector.Host)
 
 	if err != nil {
 		logger.Error("Error determining memory size during precheck.", "error", err)
-		return false, err
+		return false, nil // Let Run report the error from determineActualMemoryMB
 	}
 
 	if actualMemoryMB >= s.MinMemoryMB {
 		logger.Info("Memory requirement met.", "actualMB", actualMemoryMB, "minimumMB", s.MinMemoryMB)
+		s.checkError = nil // Clear any previous non-fatal error
 		return true, nil
 	}
 
 	errMsg := fmt.Sprintf("Host has %d MB memory, but minimum requirement is %d MB.", actualMemoryMB, s.MinMemoryMB)
 	logger.Info(errMsg + " (Precheck determined failure, Run will report this error)")
-	s.checkError = errors.New(errMsg) // Store specific failure error for Run
+	s.checkError = errors.New(errMsg)
 	return false, nil
 }
 
 func (s *CheckMemoryStep) Run(ctx runtime.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.Name(), "host", host.GetName(), "phase", "Run")
+	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 
 	if s.checkError != nil {
-	    logger.Error("Memory check failed.", "reason", s.checkError)
+		logger.Error("Memory check failed.", "reason", s.checkError.Error()) // Use Error() for consistent message
 		return s.checkError
 	}
 
-	// This case implies Precheck returned (true, nil).
-	logger.Info("Memory requirement already met (unexpectedly in Run).", "actualMB", s.actualMemoryMB, "minimumMB", s.MinMemoryMB)
+	// This case implies Precheck returned (true, nil) or Precheck didn't set s.checkError to a failure.
+	// If Precheck was true, Run shouldn't be called. If it is, it's a no-op success.
+	if s.actualMemoryMB >= s.MinMemoryMB {
+		logger.Info("Memory requirement already met (Run called after Precheck returned true or did not set failure).", "actualMB", s.actualMemoryMB, "minimumMB", s.MinMemoryMB)
+		return nil
+	}
+	// Fallback if logic error in Precheck and s.checkError was not set for failure
+	return fmt.Errorf("host has %d MB memory, but minimum requirement is %d MB for step %s on host %s", s.actualMemoryMB, s.MinMemoryMB, s.meta.Name, host.GetName())
+}
+
+func (s *CheckMemoryStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
 	return nil
 }
 

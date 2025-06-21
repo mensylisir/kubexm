@@ -59,11 +59,12 @@ func (bt *BaseTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 
 // Plan is intended to be implemented by concrete task types.
 // BaseTask.Plan returns an error indicating it's not implemented.
-func (bt *BaseTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionPlan, error) {
+// Concrete tasks embedding BaseTask must provide their own Plan method.
+func (bt *BaseTask) Plan(ctx runtime.TaskContext) (*ExecutionFragment, error) { // Changed return type
 	return nil, fmt.Errorf("Plan() not implemented for task: %s. Concrete task types must implement this method", bt.Name())
 }
 
-// Ensure BaseTask itself doesn't fully satisfy the interface if Plan is meant to be abstract,
+// Ensure BaseTask itself doesn't fully satisfy the Interface if Plan is meant to be abstract,
 // but methods it does implement are helpful.
 // A concrete task struct will embed BaseTask and add its own Plan method.
 // var _ Interface = (*SomeConcreteTask)(nil) // This would be in the concrete task's file

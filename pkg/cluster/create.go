@@ -1,66 +1,82 @@
-package pipeline
+package cluster // Changed package name
 
 import (
-	"fmt" // For errors
-	"time" // For GraphExecutionResult EndTime
+	"fmt"
+	"time"
 
-	// "github.com/mensylisir/kubexm/pkg/engine"  // Engine is obtained from runtime.Context
 	"github.com/mensylisir/kubexm/pkg/module"
 	"github.com/mensylisir/kubexm/pkg/plan"
+	"github.com/mensylisir/kubexm/pkg/pipeline" // Import for pipeline.Pipeline interface
 	"github.com/mensylisir/kubexm/pkg/runtime"
-	// "github.com/mensylisir/kubexm/pkg/task" // For task.ExecutionFragment, used by module.Plan
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 
-	// Import actual module constructors (assuming they are updated)
+
+	// Import actual module constructors
 	modulePreflight "github.com/mensylisir/kubexm/pkg/module/preflight"
 	moduleContainerd "github.com/mensylisir/kubexm/pkg/module/containerd"
 	moduleEtcd "github.com/mensylisir/kubexm/pkg/module/etcd"
-	// ... other module imports like Kubernetes, Network, Addons would go here
+	// TODO: Add other necessary module imports:
+	// moduleKubeComponents "github.com/mensylisir/kubexm/pkg/module/kube_components"
+	// moduleKubernetes "github.com/mensylisir/kubexm/pkg/module/kubernetes"
+	// moduleNetwork "github.com/mensylisir/kubexm/pkg/module/network"
+	// moduleAddons "github.com/mensylisir/kubexm/pkg/module/addons"
 )
 
 // CreateClusterPipeline defines the pipeline for creating a new Kubernetes cluster.
 type CreateClusterPipeline struct {
-	pipelineName    string
-	pipelineModules []module.Module
+	// Consider embedding a BasePipeline if common methods like Name() and Modules() are extracted.
+	// For now, direct implementation.
+	name    string
+	modules []module.Module
 }
 
 // NewCreateClusterPipeline creates a new pipeline instance for cluster creation.
 // It initializes the sequence of modules to be executed.
-// The runtime.Context (rtCtx) is passed to allow modules to be conditionally included
-// or configured based on the overall cluster configuration, if necessary at construction time.
-func NewCreateClusterPipeline(rtCtx runtime.Context) Pipeline { // Returns pipeline.Pipeline
-	// Example: cfg := rtCtx.GetClusterConfig() // If modules depend on config at construction.
-	// For this example, module list is static. In a real scenario, you might use rtCtx
-	// to decide which modules to instantiate or how to configure them.
+// rtCtx is the full runtime context, from which cluster configuration can be obtained.
+func NewCreateClusterPipeline(rtCtx runtime.Context) pipeline.Pipeline { // Returns pipeline.Pipeline
+	clusterCfg := rtCtx.GetClusterConfig()
+	if clusterCfg == nil {
+		// This should ideally not happen if runtime context is built correctly.
+		// Handle error: log and return a nil pipeline or a pipeline that will error out.
+		// For now, let's assume GetClusterConfig always returns a valid config or panics if not set.
+		// A robust app might:
+		// rtCtx.GetLogger().Error("ClusterConfig not found in runtime context during pipeline creation")
+		// return &CreateClusterPipeline{name: "ErrorPipeline", modules: []module.Module{}}
+	}
 
+	// Instantiate modules, passing the cluster configuration.
+	// Assumes module constructors are updated to accept *v1alpha1.Cluster.
 	mods := []module.Module{
-		modulePreflight.NewPreflightModule(),     // Assuming constructor is parameterless or takes rtCtx if needed
-		moduleContainerd.NewContainerdModule(), // Assuming constructor is parameterless or takes rtCtx
-		moduleEtcd.NewEtcdModule(),             // Assuming constructor is parameterless or takes rtCtx
-		// TODO: Instantiate and add other modules:
-		// moduleKubernetes.NewControlPlaneModule(rtCtx),
-		// moduleKubernetes.NewWorkerNodeModule(rtCtx),
-		// moduleNetwork.NewCNIModule(rtCtx),
-		// moduleAddons.NewCoreDNSModule(rtCtx),
+		modulePreflight.NewPreflightModule(clusterCfg),
+		moduleContainerd.NewContainerdModule(clusterCfg),
+		moduleEtcd.NewEtcdModule(clusterCfg),
+		// TODO: Instantiate and add other modules, passing clusterCfg:
+		// moduleKubeComponents.NewKubeComponentsModule(clusterCfg),
+		// moduleKubernetes.NewControlPlaneModule(clusterCfg),
+		// moduleKubernetes.NewWorkerNodeModule(clusterCfg),
+		// moduleNetwork.NewNetworkModule(clusterCfg), // Assuming a generic network module
+		// moduleAddons.NewAddonsModule(clusterCfg),   // Assuming a generic addons module
 	}
 
 	return &CreateClusterPipeline{
-		pipelineName:    "CreateNewKubernetesCluster",
-		pipelineModules: mods,
+		name:    "CreateNewKubernetesCluster", // Or derive from clusterCfg.Name
+		modules: mods,
 	}
 }
 
 // Name returns the name of the pipeline.
 func (p *CreateClusterPipeline) Name() string {
-	return p.pipelineName
+	return p.name
 }
 
 // Modules returns the list of modules in this pipeline.
 func (p *CreateClusterPipeline) Modules() []module.Module {
-	if p.pipelineModules == nil {
+	if p.modules == nil {
 		return []module.Module{}
 	}
-	modsCopy := make([]module.Module, len(p.pipelineModules))
-	copy(modsCopy, p.pipelineModules)
+	// Return a copy to prevent external modification
+	modsCopy := make([]module.Module, len(p.modules))
+	copy(modsCopy, p.modules)
 	return modsCopy
 }
 
