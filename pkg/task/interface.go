@@ -20,6 +20,33 @@ type ExecutionFragment struct {
 	ExitNodes []plan.NodeID
 }
 
+// NewEmptyFragment creates an empty execution fragment.
+// Useful for tasks that determine no work needs to be done.
+func NewEmptyFragment() *ExecutionFragment {
+	return &ExecutionFragment{
+		Nodes:      make(map[plan.NodeID]*plan.ExecutionNode),
+		EntryNodes: []plan.NodeID{},
+		ExitNodes:  []plan.NodeID{},
+	}
+}
+
+// UniqueNodeIDs returns a slice with unique NodeIDs from the input.
+// Preserves order of first appearance.
+func UniqueNodeIDs(ids []plan.NodeID) []plan.NodeID {
+	if len(ids) == 0 {
+		return []plan.NodeID{}
+	}
+	seen := make(map[plan.NodeID]bool)
+	result := []plan.NodeID{}
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
 // Task defines the methods that all concrete task types must implement.
 // Tasks are responsible for planning a subgraph of operations (ExecutionFragment)
 // to achieve a specific part of a module's goal.

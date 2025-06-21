@@ -79,7 +79,6 @@ func (s *CommandStep) Meta() *spec.StepMeta {
 
 func (s *CommandStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", host.GetName(), "phase", "Precheck")
-	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", host.GetName(), "phase", "Precheck")
 
 	if s.CheckCmd == "" {
 		logger.Debug("No CheckCmd defined, main command will run")

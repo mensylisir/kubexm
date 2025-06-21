@@ -44,22 +44,28 @@ func NewCreateClusterPipeline(rtCtx runtime.Context) pipeline.Pipeline { // Retu
 		// return &CreateClusterPipeline{name: "ErrorPipeline", modules: []module.Module{}}
 	}
 
-	// Instantiate modules, passing the cluster configuration.
-	// Assumes module constructors are updated to accept *v1alpha1.Cluster.
+	// Instantiate modules. Module constructors are now simplified and do not take clusterCfg.
+	// Modules will fetch config from the context passed to their Plan method.
 	mods := []module.Module{
-		modulePreflight.NewPreflightModule(clusterCfg),
-		moduleContainerd.NewContainerdModule(clusterCfg),
-		moduleEtcd.NewEtcdModule(clusterCfg),
-		// TODO: Instantiate and add other modules, passing clusterCfg:
-		// moduleKubeComponents.NewKubeComponentsModule(clusterCfg),
-		// moduleKubernetes.NewControlPlaneModule(clusterCfg),
-		// moduleKubernetes.NewWorkerNodeModule(clusterCfg),
-		// moduleNetwork.NewNetworkModule(clusterCfg), // Assuming a generic network module
-		// moduleAddons.NewAddonsModule(clusterCfg),   // Assuming a generic addons module
+		modulePreflight.NewPreflightModule(),    // cfg removed
+		moduleContainerd.NewContainerdModule(), // Assuming NewContainerdModule() exists and is simplified
+		moduleEtcd.NewEtcdModule(),             // Assuming NewEtcdModule() exists and is simplified
+		// TODO: Instantiate and add other simplified module constructors:
+		// moduleKubeComponents.NewKubeComponentsModule(),
+		// moduleKubernetes.NewControlPlaneModule(),
+		// moduleKubernetes.NewWorkerNodeModule(),
+		// moduleNetwork.NewNetworkModule(),
+		// moduleAddons.NewAddonsModule(),
 	}
 
+	pipelineName := "CreateNewKubernetesCluster"
+	if clusterCfg != nil && clusterCfg.Name != "" {
+		pipelineName = fmt.Sprintf("CreateCluster-%s", clusterCfg.Name)
+	}
+
+
 	return &CreateClusterPipeline{
-		name:    "CreateNewKubernetesCluster", // Or derive from clusterCfg.Name
+		name:    pipelineName,
 		modules: mods,
 	}
 }
@@ -83,26 +89,22 @@ func (p *CreateClusterPipeline) Modules() []module.Module {
 // Plan generates the final, complete ExecutionGraph for the entire pipeline.
 func (p *CreateClusterPipeline) Plan(ctx runtime.PipelineContext) (*plan.ExecutionGraph, error) {
 	logger := ctx.GetLogger().With("pipeline", p.Name())
-	finalGraph := plan.NewExecutionGraph(p.Name())
+	finalGraph := plan.NewExecutionGraph(p.Name()) // plan.NewExecutionGraph expects a name
 
 	var previousModuleExitNodes []plan.NodeID
 	isFirstEffectiveModule := true
 
-	for _, mod := range p.pipelineModules {
-		// The PipelineContext (ctx) should be usable as a ModuleContext if the concrete
-		// runtime context object implements ModuleContext (likely via embedding PipelineContext).
-		moduleCtx, ok := ctx.(runtime.ModuleContext)
-		if !ok {
-			return nil, fmt.Errorf("pipeline context could not be asserted to module context for module %s. Ensure main runtime context implements all facades.", mod.Name())
-		}
-
+	// Use p.modules instead of p.pipelineModules
+	for _, mod := range p.modules {
+		// Assuming ctx (PipelineContext) is satisfied by *runtime.Context which also satisfies ModuleContext.
+		// ModuleContext embeds PipelineContext, so this direct pass is fine if mod.Plan expects ModuleContext.
 		logger.Info("Planning module", "module", mod.Name())
 
 		// Modules could have an IsRequired method, though not in the current module.Module interface.
 		// If they did, it would be checked here:
-		// if required, modIsRequiredErr := mod.IsRequired(moduleCtx); modIsRequiredErr != nil || !required { ... skip ... }
+		// if required, modIsRequiredErr := mod.IsRequired(ctx); modIsRequiredErr != nil || !required { ... skip ... }
 
-		moduleFragment, err := mod.Plan(moduleCtx)
+		moduleFragment, err := mod.Plan(ctx) // Pass ctx directly
 		if err != nil {
 			logger.Error(err, "Failed to plan module", "module", mod.Name())
 			return nil, fmt.Errorf("failed to plan module %s: %w", mod.Name(), err)

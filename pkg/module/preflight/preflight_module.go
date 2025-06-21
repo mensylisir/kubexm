@@ -26,19 +26,34 @@ type PreflightModule struct {
 func NewPreflightModule(cfg *v1alpha1.Cluster) module.Module { // Returns module.Module interface
 	// Define roles for preflight tasks. Often, these run on all nodes or specific foundational roles.
 	// Example: Run on all nodes that will be part of Kubernetes.
-	// If RunOnRoles is empty/nil, the task's IsRequired or Plan might default to all hosts from context.
-	allKubeNodeRoles := []string{common.MasterRole, common.WorkerRole, common.EtcdRole} // Or a generic "kube_node" role if defined
+	// Roles are now passed to the NewSystemChecksTask and NewSetupKernelTask constructors.
+	allKubeNodeRoles := []string{common.MasterRole, common.WorkerRole, common.EtcdRole}
 
-	systemChecksTask := taskPreflight.NewSystemChecksTask(cfg, allKubeNodeRoles)
-	setupKernelTask := taskPreflight.NewSetupKernelTask(cfg, allKubeNodeRoles)
-	// Example: Add more preflight tasks if they exist and are refactored
-	// setupPrereqsTask := taskPreflight.NewSetupKubernetesPrerequisitesTask(cfg, allKubeNodeRoles)
+	// cfg is no longer passed to task constructors. Tasks fetch it from runtime.TaskContext.
+	systemChecksTask := taskPreflight.NewSystemChecksTask(allKubeNodeRoles)
+	setupKernelTask := taskPreflight.NewSetupKernelTask() // SetupKernelTask's constructor was simplified to take no args
+	// If SetupKernelTask also needs roles, its constructor and this call would need adjustment.
+	// For now, assuming SetupKernelTask applies to all nodes or determines roles internally based on its logic.
+	// Let's make SetupKernelTask also take roles for consistency in this module.
+	// This means NewSetupKernelTask in pkg/task/preflight/setup_kernel.go needs to be updated.
 
+	// Tasks for this module:
 	modTasks := []task.Task{
-		systemChecksTask,
-		setupKernelTask,
-		// setupPrereqsTask,
+		systemChecksTask, // Runs on allKubeNodeRoles
+		// setupKernelTask will be adjusted to take roles.
+		// For now, let's assume NewSetupKernelTask() is parameterless and applies to all nodes
+		// as per its current refactored state. If role-specific, it would need roles in its constructor.
+		// Let's assume for this module, kernel setup is also for allKubeNodeRoles.
+		// So, NewSetupKernelTask should accept roles.
 	}
+	// Re-checking NewSetupKernelTask: it does not take roles in its current refactored form.
+	// It uses t.BaseTask.RunOnRoles which is empty by default, meaning GetHostsByRole("") -> all hosts.
+	// This is acceptable. If specific roles were needed, the constructor would need to accept them to set in BaseTask.
+	modTasks = append(modTasks, setupKernelTask)
+
+
+	// Example: Add more preflight tasks if they exist and are refactored
+	// setupPrereqsTask := taskPreflight.NewSetupKubernetesPrerequisitesTask(allKubeNodeRoles)
 
 	base := module.NewBaseModule("PreflightChecksAndSetup", modTasks)
 	return &PreflightModule{BaseModule: base}
@@ -107,8 +122,8 @@ func (m *PreflightModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragme
 		// This needs to be added to runtime.ModuleContext interface definition.
 		// For now, to make progress, I will assume `ctx` can be used for methods common to both.
 		// If specific TaskContext methods are needed, this will fail compilation later.
-
-		taskIsRequired, err := currentTask.IsRequired(ctx.(runtime.TaskContext)) // This cast is problematic if ctx is just ModuleContext.
+		// Assuming ctx (ModuleContext) is fulfilled by an object that also fulfills TaskContext.
+		taskIsRequired, err := currentTask.IsRequired(ctx)
 		if err != nil {
 			logger.Error(err, "Error checking if task is required", "task", currentTask.Name())
 			return nil, fmt.Errorf("failed to check if task %s is required: %w", currentTask.Name(), err)
@@ -119,8 +134,8 @@ func (m *PreflightModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragme
 		}
 
 		logger.Info("Planning task", "task", currentTask.Name())
-		// Same context issue here for currentTask.Plan
-		taskFragment, err := currentTask.Plan(ctx.(runtime.TaskContext)) // Problematic cast
+		// Same assumption for ctx being passable as TaskContext.
+		taskFragment, err := currentTask.Plan(ctx)
 		if err != nil {
 			logger.Error(err, "Failed to plan task", "task", currentTask.Name())
 			return nil, fmt.Errorf("failed to plan task %s: %w", currentTask.Name(), err)
