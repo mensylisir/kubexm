@@ -20,29 +20,27 @@ type PipelineContext interface {
 	GoContext() context.Context
 	GetLogger() *logger.Logger
 	GetClusterConfig() *v1alpha1.Cluster
-	PipelineCache() cache.PipelineCache // Assuming cache.PipelineCache exists
+	PipelineCache() cache.PipelineCache
 	GetGlobalWorkDir() string
 }
 
 // ModuleContext defines the methods available at the module execution level.
 type ModuleContext interface {
-	GoContext() context.Context
-	GetLogger() *logger.Logger
-	GetClusterConfig() *v1alpha1.Cluster
-	ModuleCache() cache.ModuleCache // Assuming cache.ModuleCache exists
-	GetGlobalWorkDir() string
+	PipelineContext // Embed PipelineContext
+	ModuleCache() cache.ModuleCache
 }
 
 // TaskContext defines the methods available at the task execution level.
 type TaskContext interface {
-	GoContext() context.Context
-	GetLogger() *logger.Logger
-	GetClusterConfig() *v1alpha1.Cluster
+	ModuleContext // Embed ModuleContext
 	GetHostsByRole(role string) ([]connector.Host, error)
 	GetHostFacts(host connector.Host) (*runner.Facts, error)
-	TaskCache() cache.TaskCache // Assuming cache.TaskCache exists
-	ModuleCache() cache.ModuleCache // Tasks can access parent module's cache
-	GetGlobalWorkDir() string
+	TaskCache() cache.TaskCache
+	// GetGlobalWorkDir() is inherited
+	// GetClusterConfig() is inherited
+	// GetLogger() is inherited
+	// GoContext() is inherited
+	// ModuleCache() is inherited (though also directly listed for clarity if needed by Task itself)
 }
 
 // StepContext defines the methods available at the step execution level.
@@ -51,12 +49,13 @@ type StepContext interface {
 	GetLogger() *logger.Logger
 	GetRunner() runner.Runner
 	GetHost() connector.Host // Current host for the step
-	GetHostFacts(host connector.Host) (*runner.Facts, error)
+	GetHostFacts(host connector.Host) (*runner.Facts, error) // Facts for the specific host step is running on
 	GetConnectorForHost(host connector.Host) (connector.Connector, error)
-	StepCache() cache.StepCache     // Assuming cache.StepCache exists
+	StepCache() cache.StepCache
 	TaskCache() cache.TaskCache     // Steps can access parent task's cache
 	ModuleCache() cache.ModuleCache   // Steps can access parent module's cache
-	GetGlobalWorkDir() string
+	GetGlobalWorkDir() string         // Useful for steps needing to know the base work dir
+	// GetRecorder() event.Recorder // Example: if event recording is added
 }
 
 // Context is the global container for all runtime dependencies and state.
@@ -147,6 +146,11 @@ func (c *Context) GetClusterConfig() *v1alpha1.Cluster {
 // GetRunner returns the runner instance.
 func (c *Context) GetRunner() runner.Runner {
 	return c.Runner
+}
+
+// GetEngine returns the engine instance.
+func (c *Context) GetEngine() engine.Engine {
+	return c.Engine
 }
 
 // GetHostsByRole returns hosts matching a given role.
