@@ -1,20 +1,44 @@
 package step
 
-// This file is intentionally left sparse.
-// The primary interface `Step` is defined in `interface.go`.
-// This file can be used for concrete step implementations or package-level helper functions if needed in the future.
-
-// Imports will be automatically cleaned up by go fmt / goimports if they are unused.
-// For now, we can keep potentially used ones by other (future) concrete step files in this package,
-// or remove them if we are sure. Given the refactoring, most are likely unused *in this specific file*.
-
 import (
-	// "fmt" // Likely unused now
-	// "reflect" // Likely unused now
-	// "sync" // Likely unused now
-	// "time" // Likely unused now
-
-	// "github.com/mensylisir/kubexm/pkg/connector" // Likely unused now
-	// "github.com/mensylisir/kubexm/pkg/runtime" // Likely unused now
-	// "github.com/mensylisir/kubexm/pkg/spec" // Likely unused now
+	"github.com/mensylisir/kubexm/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/spec"
 )
+
+// NoOpStep provides a base implementation for steps that might not need
+// to implement all methods of the Step interface (e.g., no rollback).
+// Concrete steps can embed NoOpStep to inherit default no-op behaviors.
+type NoOpStep struct{}
+
+// Meta should be implemented by the embedding struct.
+// This default implementation returns an empty StepMeta, which is generally not useful.
+// It's a placeholder to satisfy the interface if a step forgets to implement it,
+// though linters would ideally catch an unimplemented interface method.
+func (s *NoOpStep) Meta() *spec.StepMeta {
+	return &spec.StepMeta{
+		Name:        "NoOpStep",
+		Description: "This is a no-operation step.",
+	}
+}
+
+// Precheck by default indicates the step needs to run.
+// Returns false (not done), nil (no error).
+func (s *NoOpStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+	return false, nil
+}
+
+// Run by default does nothing and succeeds.
+// Returns nil (no error).
+func (s *NoOpStep) Run(ctx runtime.StepContext, host connector.Host) error {
+	return nil
+}
+
+// Rollback by default does nothing and succeeds.
+// Returns nil (no error).
+func (s *NoOpStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+	return nil
+}
+
+// Ensure NoOpStep implements the Step interface.
+var _ Step = (*NoOpStep)(nil)

@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"hash"
+	"strings" // Added for ToLower and EqualFold
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -27,21 +28,28 @@ type DownloadFileStep struct {
 }
 
 // NewDownloadFileStep creates a new DownloadFileStep.
+// instanceName is optional; if empty, a default name will be generated.
 func NewDownloadFileStep(instanceName, url, destPath, checksum, checksumType string, sudo bool) step.Step {
-	name := instanceName
-	if name == "" {
-		name = fmt.Sprintf("DownloadFile-%s", filepath.Base(destPath))
+	metaName := instanceName
+	if metaName == "" {
+		metaName = fmt.Sprintf("DownloadFileTo-%s", filepath.Base(destPath))
 	}
+	// Default checksumType to sha256 if a checksum is provided but type is empty
+	effectiveChecksumType := checksumType
+	if checksum != "" && effectiveChecksumType == "" {
+		effectiveChecksumType = "sha256"
+	}
+
 	return &DownloadFileStep{
 		meta: spec.StepMeta{
-			Name:        name,
+			Name:        metaName,
 			Description: fmt.Sprintf("Downloads file from %s to %s", url, destPath),
 		},
 		URL:          url,
 		DestPath:     destPath,
 		Checksum:     checksum,
-		ChecksumType: checksumType,
-		Sudo:         sudo, // Typically false for control-node downloads to work_dir
+		ChecksumType: effectiveChecksumType,
+		Sudo:         sudo,
 	}
 }
 

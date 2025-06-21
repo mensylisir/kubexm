@@ -64,3 +64,22 @@ func (h *hostImpl) GetRoles() []string {
 func (h *hostImpl) GetHostSpec() v1alpha1.HostSpec {
 	return h.spec // Returns a copy of the spec
 }
+
+// GetArch returns the architecture of the host from the spec.
+// It normalizes common variations like x86_64 to amd64 and aarch64 to arm64.
+// It defaults to "amd64" if the Arch field in the spec is empty.
+func (h *hostImpl) GetArch() string {
+	arch := h.spec.Arch
+	if arch == "x86_64" {
+		return "amd64"
+	}
+	if arch == "aarch64" {
+		return "arm64"
+	}
+	if arch == "" {
+		// It's better if the spec defaulting sets a common default like "amd64".
+		// Relying on facts is more robust but Host interface is for configured/spec data.
+		return "amd64" // Default if not specified in spec.
+	}
+	return arch
+}

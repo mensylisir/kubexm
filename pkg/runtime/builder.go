@@ -13,10 +13,12 @@ import (
 
 	"github.com/mensylisir/kubexm/pkg/cache" // Added for cache initialization
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/engine"
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/parser"
 	"github.com/mensylisir/kubexm/pkg/runner"
+	// engine "github.com/mensylisir/kubexm/pkg/engine" // Keep for engine.Engine type if Context needs it, but not for NewExecutor
+	// Actually, Context will need engine.Engine type, so runtime package scope will import engine.
+	// The builder itself just won't call NewExecutor().
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/common" // Added for constants like KUBEXM
 	"github.com/mensylisir/kubexm/pkg/util"   // Added for CreateDir
@@ -40,7 +42,8 @@ func NewRuntimeBuilder(configFile string) *RuntimeBuilder {
 }
 
 // BuildFromFile constructs and initializes the full runtime Context from a configuration file.
-func (b *RuntimeBuilder) BuildFromFile(ctx context.Context) (*Context, func(), error) {
+// It now requires an engine.Engine instance to be passed in.
+func (b *RuntimeBuilder) BuildFromFile(ctx context.Context, eng engine.Engine) (*Context, func(), error) {
 	initialLog := logger.Get() // Use a general logger for file parsing
 	initialLog.Info("Building runtime environment from file...", "configFile", b.configFile)
 
@@ -49,16 +52,12 @@ func (b *RuntimeBuilder) BuildFromFile(ctx context.Context) (*Context, func(), e
 		initialLog.Error(err, "Failed to parse cluster configuration")
 		return nil, nil, fmt.Errorf("failed to parse cluster config '%s': %w", b.configFile, err)
 	}
-
-	// Pass nil for baseLogger, so BuildFromConfig uses logger.Get() internally or a logger derived from it.
-	// Or, we could pass initialLog here if we want the file parsing log to be the base.
-	// For now, let BuildFromConfig decide its logger if nil is passed.
-	return b.BuildFromConfig(ctx, clusterConfig, initialLog)
+	return b.BuildFromConfig(ctx, clusterConfig, eng, initialLog)
 }
 
 // BuildFromConfig constructs and initializes the full runtime Context from a parsed Cluster object.
-// If baseLogger is nil, a new logger will be initialized.
-func (b *RuntimeBuilder) BuildFromConfig(ctx context.Context, clusterConfig *v1alpha1.Cluster, baseLogger *logger.Logger) (*Context, func(), error) {
+// It requires an engine.Engine instance. If baseLogger is nil, a new logger will be initialized.
+func (b *RuntimeBuilder) BuildFromConfig(ctx context.Context, clusterConfig *v1alpha1.Cluster, eng engine.Engine, baseLogger *logger.Logger) (*Context, func(), error) {
 	var log *logger.Logger
 	if baseLogger != nil {
 		log = baseLogger
@@ -67,12 +66,12 @@ func (b *RuntimeBuilder) BuildFromConfig(ctx context.Context, clusterConfig *v1a
 	}
 	log.Info("Building runtime environment from configuration object...")
 
-	// Assuming defaults and validation are handled by the parser or called here if needed.
-	// v1alpha1.SetDefaults_Cluster(clusterConfig)
-	// if err := v1alpha1.Validate_Cluster(clusterConfig); err != nil { ... }
+	if eng == nil {
+		return nil, nil, fmt.Errorf("engine instance cannot be nil when building runtime context")
+	}
 
 	runnerSvc := runner.New()
-	engineSvc := engine.NewExecutor()
+	// engineSvc := engine.NewExecutor() // No longer instantiated here
 	poolConfig := connector.DefaultPoolConfig()
 	pool := connector.NewConnectionPool(poolConfig)
 
@@ -233,7 +232,7 @@ func (b *RuntimeBuilder) BuildFromConfig(ctx context.Context, clusterConfig *v1a
 	runtimeCtx := &Context{
 		GoCtx:         ctx,
 		Logger:        log, // Use the logger determined at the start of this function
-		Engine:        engineSvc,
+		Engine:        eng, // Use the passed-in engine instance
 		Runner:        runnerSvc,
 		ClusterConfig: clusterConfig,
 		HostRuntimes:  hostRuntimes,
@@ -247,38 +246,51 @@ func (b *RuntimeBuilder) BuildFromConfig(ctx context.Context, clusterConfig *v1a
 		runtimeCtx.GlobalConnectionTimeout = clusterConfig.Spec.Global.ConnectionTimeout
 	}
 
+	// Determine and create the GlobalWorkDir (e.g., $(pwd)/.kubexm)
+	// This is the root for all local operations and artifacts before distribution.
 	if runtimeCtx.GlobalWorkDir == "" {
-		// Generate default GlobalWorkDir based on current working directory
 		cwd, err := os.Getwd()
 		if err != nil {
 			log.Error(err, "Failed to get current working directory for GlobalWorkDir generation")
 			cleanupFunc()
 			return nil, nil, fmt.Errorf("failed to get current working directory: %w", err)
 		}
-		defaultWorkDir := filepath.Join(cwd, common.KUBEXM) // Base is .kubexm
-		log.Info("Global.WorkDir not set, using default base.", "path", defaultWorkDir)
-		runtimeCtx.GlobalWorkDir = defaultWorkDir
+		runtimeCtx.GlobalWorkDir = filepath.Join(cwd, common.KUBEXM) // Default: $(pwd)/.kubexm
+		log.Info("Global.WorkDir not specified, using default.", "path", runtimeCtx.GlobalWorkDir)
 	}
-
-	// Ensure GlobalWorkDir (e.g., $(pwd)/.kubexm) exists
-	log.Info("Ensuring GlobalWorkDir (base for all operations) exists.", "path", runtimeCtx.GlobalWorkDir)
+	log.Info("Ensuring GlobalWorkDir exists.", "path", runtimeCtx.GlobalWorkDir)
 	if err := util.CreateDir(runtimeCtx.GlobalWorkDir); err != nil {
 		log.Error(err, "Failed to create GlobalWorkDir", "path", runtimeCtx.GlobalWorkDir)
 		cleanupFunc()
 		return nil, nil, fmt.Errorf("failed to create global work directory '%s': %w", runtimeCtx.GlobalWorkDir, err)
 	}
 
-	// Cluster specific base directory: $(pwd)/.kubexm/${cluster_name}
-	clusterBaseDir := filepath.Join(runtimeCtx.GlobalWorkDir, clusterConfig.Name)
-	log.Info("Ensuring cluster-specific base directory exists.", "path", clusterBaseDir)
-	if err := util.CreateDir(clusterBaseDir); err != nil {
-		log.Error(err, "Failed to create cluster-specific base directory", "path", clusterBaseDir)
-		cleanupFunc()
-		return nil, nil, fmt.Errorf("failed to create cluster-specific base directory '%s': %w", clusterBaseDir, err)
+	// Create HostWorkDir for each host: $(pwd)/.kubexm/${hostname}
+	// This is for program's local, host-specific (but not cluster-artifact-specific) files.
+	for _, hr := range hostRuntimes {
+		// This includes the control-node, which will have a directory like .kubexm/kubexm-control-node
+		hostSpecificWorkDir := filepath.Join(runtimeCtx.GlobalWorkDir, hr.Host.GetName())
+		log.Info("Ensuring host-specific work directory exists (local to program execution).", "host", hr.Host.GetName(), "path", hostSpecificWorkDir)
+		if err := util.CreateDir(hostSpecificWorkDir); err != nil {
+			log.Error(err, "Failed to create host-specific work directory", "host", hr.Host.GetName(), "path", hostSpecificWorkDir)
+			cleanupFunc()
+			return nil, nil, fmt.Errorf("failed to create host-specific work directory '%s' for host '%s': %w", hostSpecificWorkDir, hr.Host.GetName(), err)
+		}
 	}
 
-	// Logs directory: $(pwd)/.kubexm/${cluster_name}/logs
-	logDir := filepath.Join(clusterBaseDir, common.DefaultLogsDir)
+	// Cluster specific base directory for artifacts: ${GlobalWorkDir}/${cluster_name}
+	// e.g., $(pwd)/.kubexm/mycluster
+	clusterArtifactsBaseDir := filepath.Join(runtimeCtx.GlobalWorkDir, clusterConfig.Name)
+	runtimeCtx.ClusterArtifactsDir = clusterArtifactsBaseDir // Store this in context
+	log.Info("Ensuring cluster-specific artifacts base directory exists.", "path", clusterArtifactsBaseDir)
+	if err := util.CreateDir(clusterArtifactsBaseDir); err != nil {
+		log.Error(err, "Failed to create cluster-specific artifacts base directory", "path", clusterArtifactsBaseDir)
+		cleanupFunc()
+		return nil, nil, fmt.Errorf("failed to create cluster-specific artifacts base directory '%s': %w", clusterArtifactsBaseDir, err)
+	}
+
+	// Logs directory: ${GlobalWorkDir}/${cluster_name}/logs
+	logDir := filepath.Join(clusterArtifactsBaseDir, common.DefaultLogsDir)
 	log.Info("Ensuring log directory exists.", "path", logDir)
 	if err := util.CreateDir(logDir); err != nil {
 		log.Error(err, "Failed to create log directory", "path", logDir)
@@ -286,8 +298,17 @@ func (b *RuntimeBuilder) BuildFromConfig(ctx context.Context, clusterConfig *v1a
 		return nil, nil, fmt.Errorf("failed to create log directory '%s': %w", logDir, err)
 	}
 
-	// ETCD certs directory: $(pwd)/.kubexm/${cluster_name}/certs/etcd/
-	etcdCertsDir := filepath.Join(clusterBaseDir, "certs", "etcd")
+	// Base directories for different types of artifacts within the cluster's artifact directory
+	// Certs base: ${GlobalWorkDir}/${cluster_name}/certs
+	certsBaseDir := filepath.Join(clusterArtifactsBaseDir, common.DefaultCertsDir)
+	log.Info("Ensuring certificates base directory exists.", "path", certsBaseDir)
+	if err := util.CreateDir(certsBaseDir); err != nil {
+		log.Error(err, "Failed to create certificates base directory", "path", certsBaseDir)
+		cleanupFunc()
+		return nil, nil, fmt.Errorf("failed to create certificates base directory '%s': %w", certsBaseDir, err)
+	}
+	// ETCD certs directory: ${GlobalWorkDir}/${cluster_name}/certs/etcd
+	etcdCertsDir := filepath.Join(certsBaseDir, "etcd")
 	log.Info("Ensuring ETCD certificates directory exists.", "path", etcdCertsDir)
 	if err := util.CreateDir(etcdCertsDir); err != nil {
 		log.Error(err, "Failed to create ETCD certificates directory", "path", etcdCertsDir)
@@ -295,50 +316,34 @@ func (b *RuntimeBuilder) BuildFromConfig(ctx context.Context, clusterConfig *v1a
 		return nil, nil, fmt.Errorf("failed to create ETCD certificates directory '%s': %w", etcdCertsDir, err)
 	}
 
-	// Host-specific work directories: $(pwd)/.kubexm/${hostname}
-	// These are general per-host directories, not necessarily tied to a cluster's artifacts.
-	// This seems to be a separate requirement from the artifact paths.
-	for _, hr := range hostRuntimes {
-		// It's possible the control-node itself might not need a dedicated directory under .kubexm/${hostname}
-		// if all its "work" is within the cluster-specific paths.
-		// For now, creating for all, including control-node.
-		hostSpecificBaseDir := filepath.Join(runtimeCtx.GlobalWorkDir, hr.Host.GetName())
-		log.Info("Ensuring host-specific work directory exists.", "host", hr.Host.GetName(), "path", hostSpecificBaseDir)
-		if err := util.CreateDir(hostSpecificBaseDir); err != nil {
-			log.Error(err, "Failed to create host-specific work directory", "host", hr.Host.GetName(), "path", hostSpecificBaseDir)
-			cleanupFunc()
-			return nil, nil, fmt.Errorf("failed to create host-specific work directory '%s' for host '%s': %w", hostSpecificBaseDir, hr.Host.GetName(), err)
-		}
+	// ETCD binaries base directory: ${GlobalWorkDir}/${cluster_name}/etcd
+	// Specific versions/arch will be subdirectories: etcd/${etcd_version}/${arch}/
+	etcdArtifactsCompDir := filepath.Join(clusterArtifactsBaseDir, "etcd")
+	log.Info("Ensuring ETCD component artifacts base directory exists.", "path", etcdArtifactsCompDir)
+	if err := util.CreateDir(etcdArtifactsCompDir); err != nil {
+		log.Error(err, "Failed to create ETCD component artifacts base directory", "path", etcdArtifactsCompDir)
+		cleanupFunc()
+		return nil, nil, fmt.Errorf("failed to create ETCD component artifacts base directory '%s': %w", etcdArtifactsCompDir, err)
 	}
 
-	// Artifact directories (per cluster, per component, per version, per arch)
-	// These will be created on demand by resource handles or steps, but the base paths can be prepared or logged.
-	// Example: ETCD binaries path structure
-	// $(pwd)/.kubexm/${cluster_name}/etcd/${etcd_version}/${arch}/
-	// This level of granularity (version, arch) is usually handled when the actual artifact is processed.
-	// The builder can ensure the component base exists: $(pwd)/.kubexm/${cluster_name}/etcd/
-	etcdArtifactsBaseDir := filepath.Join(clusterBaseDir, "etcd")
-	log.Info("Ensuring ETCD artifacts base directory exists.", "path", etcdArtifactsBaseDir)
-	if err := util.CreateDir(etcdArtifactsBaseDir); err != nil {
-		log.Error(err, "Failed to create ETCD artifacts base directory", "path", etcdArtifactsBaseDir)
+	// Container Runtime binaries base directory: ${GlobalWorkDir}/${cluster_name}/container_runtime
+	// Specific name/versions/arch will be subdirectories
+	containerRuntimeArtifactsCompDir := filepath.Join(clusterArtifactsBaseDir, common.DefaultContainerRuntimeDir)
+	log.Info("Ensuring Container Runtime component artifacts base directory exists.", "path", containerRuntimeArtifactsCompDir)
+	if err := util.CreateDir(containerRuntimeArtifactsCompDir); err != nil {
+		log.Error(err, "Failed to create Container Runtime component artifacts base directory", "path", containerRuntimeArtifactsCompDir)
 		cleanupFunc()
-		return nil, nil, fmt.Errorf("failed to create ETCD artifacts base directory '%s': %w", etcdArtifactsBaseDir, err)
+		return nil, nil, fmt.Errorf("failed to create Container Runtime component artifacts base directory '%s': %w", containerRuntimeArtifactsCompDir, err)
 	}
 
-	containerRuntimeArtifactsBaseDir := filepath.Join(clusterBaseDir, common.DefaultContainerRuntimeDir) // Using common constant
-	log.Info("Ensuring Container Runtime artifacts base directory exists.", "path", containerRuntimeArtifactsBaseDir)
-	if err := util.CreateDir(containerRuntimeArtifactsBaseDir); err != nil {
-		log.Error(err, "Failed to create Container Runtime artifacts base directory", "path", containerRuntimeArtifactsBaseDir)
+	// Kubernetes binaries base directory: ${GlobalWorkDir}/${cluster_name}/kubernetes
+	// Specific versions/arch will be subdirectories
+	kubernetesArtifactsCompDir := filepath.Join(clusterArtifactsBaseDir, common.DefaultKubernetesDir)
+	log.Info("Ensuring Kubernetes component artifacts base directory exists.", "path", kubernetesArtifactsCompDir)
+	if err := util.CreateDir(kubernetesArtifactsCompDir); err != nil {
+		log.Error(err, "Failed to create Kubernetes component artifacts base directory", "path", kubernetesArtifactsCompDir)
 		cleanupFunc()
-		return nil, nil, fmt.Errorf("failed to create Container Runtime artifacts base directory '%s': %w", containerRuntimeArtifactsBaseDir, err)
-	}
-
-	kubernetesArtifactsBaseDir := filepath.Join(clusterBaseDir, common.DefaultKubernetesDir) // Using common constant
-	log.Info("Ensuring Kubernetes artifacts base directory exists.", "path", kubernetesArtifactsBaseDir)
-	if err := util.CreateDir(kubernetesArtifactsBaseDir); err != nil {
-		log.Error(err, "Failed to create Kubernetes artifacts base directory", "path", kubernetesArtifactsBaseDir)
-		cleanupFunc()
-		return nil, nil, fmt.Errorf("failed to create Kubernetes artifacts base directory '%s': %w", kubernetesArtifactsBaseDir, err)
+		return nil, nil, fmt.Errorf("failed to create Kubernetes component artifacts base directory '%s': %w", kubernetesArtifactsCompDir, err)
 	}
 
 	if runtimeCtx.GlobalConnectionTimeout <= 0 {
