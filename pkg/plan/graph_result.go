@@ -22,11 +22,30 @@ type GraphExecutionResult struct {
 	EndTime      time.Time              `json:"endTime"`
 	Status       Status                 `json:"status"`
 	NodeResults  map[NodeID]*NodeResult `json:"nodeResults"`
-	// Consider adding an overall error message for the graph execution itself
-	// ErrorMessage string                 `json:"errorMessage,omitempty"`
+	// ErrorMessage provides a summary if the overall graph execution failed (e.g., engine error, validation error).
+	ErrorMessage string `json:"errorMessage,omitempty"`
 }
 
-// NewGraphExecutionResult creates a new GraphExecutionResult with default values.
+// NewNodeResult creates a new NodeResult with default values.
+func NewNodeResult(nodeName, stepName string) *NodeResult {
+	return &NodeResult{
+		NodeName:    nodeName,
+		StepName:    stepName,
+		Status:      StatusPending, // Default to Pending
+		StartTime:   time.Now(),    // Set StartTime on creation for active nodes
+		HostResults: make(map[string]*HostResult),
+	}
+}
+
+// NewHostResult creates a new HostResult with default values.
+func NewHostResult(hostName string) *HostResult {
+	return &HostResult{
+		HostName:  hostName,
+		Status:    StatusPending, // Default to Pending
+		StartTime: time.Now(),    // Set StartTime on creation
+		Skipped:   false,
+	}
+}
 func NewGraphExecutionResult(graphName string) *GraphExecutionResult {
 	return &GraphExecutionResult{
 		GraphName:   graphName,
