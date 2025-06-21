@@ -133,7 +133,7 @@ func SetDefaults_KubernetesConfig(cfg *KubernetesConfig, clusterMetaName string)
 	if cfg.MasqueradeAll == nil { b := false; cfg.MasqueradeAll = &b } // YAML: false
 	if cfg.MaxPods == nil { mp := int32(110); cfg.MaxPods = &mp } // YAML: 110
 	if cfg.NodeCidrMaskSize == nil { ncms := int32(24); cfg.NodeCidrMaskSize = &ncms } // YAML: 24
-	if cfg.ContainerManager == "" { cfg.ContainerManager = "docker" } // YAML: docker. Note: Kubelet.CgroupDriver defaults based on this or to systemd.
+	if cfg.ContainerManager == "" { cfg.ContainerManager = "systemd" } // Changed default to systemd
 
 	if cfg.Nodelocaldns == nil { cfg.Nodelocaldns = &NodelocaldnsConfig{} }
 	if cfg.Nodelocaldns.Enabled == nil { b := true; cfg.Nodelocaldns.Enabled = &b }

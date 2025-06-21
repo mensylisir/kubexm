@@ -7,10 +7,30 @@ package v1alpha1
 
 // Validate_RoleGroupsSpec is a placeholder.
 func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *ValidationErrors, pathPrefix string) {
-	// TODO: Implement actual validation for RoleGroupsSpec if not defined elsewhere
-	if cfg == nil && verrs != nil {
-		// verrs.Add("%s: roleGroups section cannot be nil if present in spec", pathPrefix)
+	if cfg == nil {
+		// If RoleGroups is optional and not provided, this might be fine.
+		// If it's mandatory (even if empty), then this check would be:
+		// verrs.Add("%s: roleGroups section cannot be nil", pathPrefix)
+		return
 	}
+
+	// Example validation for RegistryRoleSpec: Ensure Hosts is not nil if Registry group is defined.
+	// A more thorough validation would check if host names in Registry.Hosts exist in the main Spec.Hosts list.
+	// That requires passing the list of all valid host names to this function.
+	// For now, a simple structural check:
+	// Note: A nil Hosts slice is often the default and acceptable for an empty group.
+	// This validation might be too strict depending on desired behavior.
+	// if cfg.Registry.Hosts == nil { // This would fail if registry: {} is provided (Hosts would be nil)
+	// 	verrs.Add("%s.registry.hosts: hosts list cannot be nil if registry role is specified", pathPrefix)
+	// }
+
+	// A more common validation is to check each host name in the lists if the list of all host names is available.
+	// e.g. for _, hostName := range cfg.Master.Hosts { if !allHostNames[hostName] { verrs.Add(...) } }
+	// This kind of validation is typically done in Validate_Cluster where allHostNames is available.
+
+	// For now, this placeholder will just ensure the function is called.
+	// Actual structural validations for each role group's Hosts (e.g., no empty strings if list is not empty)
+	// could be added here if desired.
 }
 
 // Validate_ControlPlaneEndpointSpec is a placeholder.
