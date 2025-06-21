@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
@@ -53,7 +54,7 @@ func (r *defaultRunner) Check(ctx context.Context, conn connector.Connector, cmd
 	// Assuming connector.ExitError is the type for non-zero exits.
 	// This needs to be defined in your connector package.
 	var exitError *connector.ExitError
-	if融资ok := errors.As(err, &exitError);融资ok {
+	if ok := errors.As(err, &exitError); ok {
 		return false, nil // Command ran, exited non-zero, so check is "false" but no operational error.
 	}
 	return false, err // Other operational error (e.g., connection issue).
@@ -65,7 +66,7 @@ func (r *defaultRunner) RunWithOptions(ctx context.Context, conn connector.Conne
 		return nil, nil, fmt.Errorf("connector cannot be nil")
 	}
 	if opts == nil {
-	    opts = &connector.ExecOptions{}
+		opts = &connector.ExecOptions{}
 	}
 	return conn.Exec(ctx, cmd, opts)
 }

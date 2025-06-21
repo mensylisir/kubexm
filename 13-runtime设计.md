@@ -1,5 +1,6 @@
-pkg/runtime - 上下文与状态管理
-runtime.Context 结构体: 系统的“上帝对象”，持有所有状态和依赖。
+### pkg/runtime - 上下文与状态管理
+#### runtime.Context 结构体: 系统的“上帝对象”，持有所有状态和依赖。
+#### pkg/runtime/context.go
 ```aiignore
 package runtime
 
@@ -49,7 +50,8 @@ func NewContextWithGoContext(gCtx context.Context, parent *Context) *Context {
 	return &newCtx
 }
 ```
-runtime Facade 接口: 定义了暴露给各层的安全视图。
+#### runtime Facade 接口: 定义了暴露给各层的安全视图。
+##### pkg/runtime/facade.go
 ```aiignore
 package runtime
 
@@ -86,7 +88,7 @@ type StepContext interface {
 
 ```
 
-pkg/runtime/builder.go - 运行时构建器 (您的实现 + DAG适配)
+#### pkg/runtime/builder.go - 运行时构建器 (您的实现 + DAG适配)
 ```aiignore
 package runtime
 
@@ -279,9 +281,9 @@ func (b *RuntimeBuilder) setupWorkDirs(ctx *Context) error {
 	return nil
 }
 ```
-设计优化点:
-逻辑重构: 将主 Build 函数的逻辑拆分到辅助函数 initializeHost 和 setupWorkDirs 中，使得 Build 函数本身更清晰，只负责编排。
-拥抱DAG模型: 在 Build 函数中，明确地、程序化地创建了一个特殊的 control-node 主机。这是我们之前讨论的将本地操作统一到执行模型中的关键一步。现在 Builder 负责创建这个虚拟节点。
-日志上下文: initializeHost 为每个goroutine创建了带有主机名的日志记录器，这在并发执行时对于调试至关重要。
-健壮性: 使用了 for i := range ... 的方式来正确捕获循环变量，避免了常见的goroutine陷阱。
-清晰的职责: setupWorkDirs 专门负责所有文件系统目录的创建，职责单一。
+#### 设计优化点:
+- 逻辑重构: 将主 Build 函数的逻辑拆分到辅助函数 initializeHost 和 setupWorkDirs 中，使得 Build 函数本身更清晰，只负责编排。
+- 拥抱DAG模型: 在 Build 函数中，明确地、程序化地创建了一个特殊的 control-node 主机。这是我们之前讨论的将本地操作统一到执行模型中的关键一步。现在 Builder 负责创建这个虚拟节点。
+- 日志上下文: initializeHost 为每个goroutine创建了带有主机名的日志记录器，这在并发执行时对于调试至关重要。
+- 健壮性: 使用了 for i := range ... 的方式来正确捕获循环变量，避免了常见的goroutine陷阱。
+- 清晰的职责: setupWorkDirs 专门负责所有文件系统目录的创建，职责单一。
