@@ -3,6 +3,7 @@ package v1alpha1
 import (
 	"fmt"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"net"
 	"regexp"
 	"strings"
@@ -15,53 +16,59 @@ import (
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:path=clusters,scope=Namespaced,shortName=kc
 // +kubebuilder:printcolumn:name="Version",type="string",JSONPath=".spec.kubernetes.version",description="Kubernetes Version"
-// +kubebuilder:printcolumn:name="Hosts",type="integer",JSONPath=".spec.hostsCount",description="Number of hosts" // Example, need field
+// +kubebuilder:printcolumn:name="Hosts",type="integer",JSONPath=".spec.hostsCount",description="Number of hosts"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // Cluster is the top-level configuration object.
 type Cluster struct {
 	metav1.TypeMeta   `json:",inline" yaml:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty" yaml:"metadata,omitempty"`
-
-	Spec ClusterSpec `json:"spec,omitempty" yaml:"spec,omitempty"`
-	// Status ClusterStatus `json:"status,omitempty"` // Add when status is defined
+	Spec              ClusterSpec `json:"spec,omitempty" yaml:"spec,omitempty"`
 }
 
 // ClusterSpec defines the desired state of the Kubernetes cluster.
 type ClusterSpec struct {
-	// RoleGroups defines the different groups of nodes in the cluster.
-	RoleGroups *RoleGroupsSpec `json:"roleGroups,omitempty" yaml:"roleGroups,omitempty"`
-	// ControlPlaneEndpoint defines the endpoint for the Kubernetes API server.
+	RoleGroups           *RoleGroupsSpec           `json:"roleGroups,omitempty" yaml:"roleGroups,omitempty"`
 	ControlPlaneEndpoint *ControlPlaneEndpointSpec `json:"controlPlaneEndpoint,omitempty" yaml:"controlPlaneEndpoint,omitempty"`
-	// System contains system-level configuration.
-	System *SystemSpec `json:"system,omitempty" yaml:"system,omitempty"`
-
-	Global *GlobalSpec `json:"global,omitempty" yaml:"global,omitempty"`
-	Hosts  []HostSpec  `json:"hosts" yaml:"hosts"`
-
-	// Component configurations - will be pointers to specific config types
-	ContainerRuntime *ContainerRuntimeConfig `json:"containerRuntime,omitempty" yaml:"containerRuntime,omitempty"`
-	Etcd             *EtcdConfig             `json:"etcd,omitempty" yaml:"etcd,omitempty"`
-	Kubernetes       *KubernetesConfig       `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"`
-	Network          *NetworkConfig          `json:"network,omitempty" yaml:"network,omitempty"`
-	HighAvailability *HighAvailabilityConfig `json:"highAvailability,omitempty" yaml:"highAvailability,omitempty"`
-	Preflight        *PreflightConfig        `json:"preflight,omitempty" yaml:"preflight,omitempty"`
-	Kernel           *KernelConfig           `json:"kernel,omitempty" yaml:"kernel,omitempty"`
-	Storage          *StorageConfig          `json:"storage,omitempty" yaml:"storage,omitempty"`
-	Registry         *RegistryConfig         `json:"registry,omitempty" yaml:"registry,omitempty"`
-	OS               *OSConfig               `json:"os,omitempty" yaml:"os,omitempty"`
-	Addons           []AddonConfig           `json:"addons,omitempty" yaml:"addons,omitempty"`
-	// HostsCount int `json:"hostsCount,omitempty"` // Example for printcolumn
+	System               *SystemSpec               `json:"system,omitempty" yaml:"system,omitempty"`
+	Global               *GlobalSpec               `json:"global,omitempty" yaml:"global,omitempty"`
+	Hosts                []HostSpec                `json:"hosts" yaml:"hosts"`
+	ContainerRuntime     *ContainerRuntimeConfig   `json:"containerRuntime,omitempty" yaml:"containerRuntime,omitempty"`
+	Etcd                 *EtcdConfig               `json:"etcd,omitempty" yaml:"etcd,omitempty"`
+	Kubernetes           *KubernetesConfig         `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"`
+	Network              *NetworkConfig            `json:"network,omitempty" yaml:"network,omitempty"`
+	HighAvailability     *HighAvailabilityConfig   `json:"highAvailability,omitempty" yaml:"highAvailability,omitempty"`
+	Preflight            *PreflightConfig          `json:"preflight,omitempty" yaml:"preflight,omitempty"`
+	Kernel               *KernelConfig             `json:"kernel,omitempty" yaml:"kernel,omitempty"`
+	Storage              *StorageConfig            `json:"storage,omitempty" yaml:"storage,omitempty"`
+	Registry             *RegistryConfig           `json:"registry,omitempty" yaml:"registry,omitempty"`
+	OS                   *OSConfig                 `json:"os,omitempty" yaml:"os,omitempty"`
+	Addons               []AddonConfig             `json:"addons,omitempty" yaml:"addons,omitempty"`
 }
 
+// HostSpec defines the configuration for a single host.
+type HostSpec struct {
+	Name            string            `json:"name" yaml:"name"`
+	Address         string            `json:"address" yaml:"address"`
+	InternalAddress string            `json:"internalAddress,omitempty" yaml:"internalAddress,omitempty"`
+	Port            int               `json:"port,omitempty" yaml:"port,omitempty"`
+	User            string            `json:"user,omitempty" yaml:"user,omitempty"`
+	Password        string            `json:"password,omitempty" yaml:"password,omitempty"`
+	PrivateKey      string            `json:"privateKey,omitempty" yaml:"privateKey,omitempty"`
+	PrivateKeyPath  string            `json:"privateKeyPath,omitempty" yaml:"privateKeyPath,omitempty"`
+	Roles           []string          `json:"roles,omitempty" yaml:"roles,omitempty"`
+	Labels          map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
+	Taints          []TaintSpec       `json:"taints,omitempty" yaml:"taints,omitempty"`
+	Type            string            `json:"type,omitempty" yaml:"type,omitempty"`
+	Arch            string            `json:"arch,omitempty" yaml:"arch,omitempty"`
+}
 // RoleGroupsSpec defines the different groups of nodes in the cluster.
 type RoleGroupsSpec struct {
 	Master       MasterRoleSpec       `json:"master,omitempty" yaml:"master,omitempty"`
 	Worker       WorkerRoleSpec       `json:"worker,omitempty" yaml:"worker,omitempty"`
 	Etcd         EtcdRoleSpec         `json:"etcd,omitempty" yaml:"etcd,omitempty"`
-	LoadBalancer LoadBalancerRoleSpec `json:"loadBalancer,omitempty" yaml:"loadBalancer,omitempty"` // YAML name from example: loadbalancer
+	LoadBalancer LoadBalancerRoleSpec `json:"loadBalancer,omitempty" yaml:"loadBalancer,omitempty"`
 	Storage      StorageRoleSpec      `json:"storage,omitempty" yaml:"storage,omitempty"`
-	// Registry       RegistryRoleSpec `json:"registry,omitempty" yaml:"registry,omitempty"` // Assuming a registry role might exist
 	CustomRoles []CustomRoleSpec `json:"customRoles,omitempty" yaml:"customRoles,omitempty"`
 }
 
@@ -97,26 +104,24 @@ type CustomRoleSpec struct {
 }
 
 // ControlPlaneEndpointSpec defines the endpoint for the Kubernetes API server.
-// YAML fields from description: internalLoadbalancer, externalDNS, domain, address, port
 type ControlPlaneEndpointSpec struct {
-	Host                 string `json:"host,omitempty" yaml:"address,omitempty"` // Maps to 'address' in YAML
+	Host                 string `json:"host,omitempty" yaml:"address,omitempty"`
 	Port                 int    `json:"port,omitempty" yaml:"port,omitempty"`
-	InternalLoadbalancer string `json:"internalLoadbalancer,omitempty" yaml:"internalLoadbalancer,omitempty"` // New field
-	ExternalDNS          bool   `json:"externalDNS,omitempty" yaml:"externalDNS,omitempty"`                   // New field
-	Domain               string `json:"domain,omitempty" yaml:"domain,omitempty"`                             // New field
+	InternalLoadbalancer string `json:"internalLoadbalancer,omitempty" yaml:"internalLoadbalancer,omitempty"`
+	ExternalDNS          bool   `json:"externalDNS,omitempty" yaml:"externalDNS,omitempty"`
+	Domain               string `json:"domain,omitempty" yaml:"domain,omitempty"`
 }
 
 // SystemSpec defines system-level configuration.
-// YAML fields from description: ntpServers, timezone, rpms, debs, preInstall, postInstall, skipConfigureOS
 type SystemSpec struct {
-	PackageManager     string   `json:"packageManager,omitempty" yaml:"packageManager,omitempty"`   // e.g., "apt", "yum"
-	NTPServers         []string `json:"ntpServers,omitempty" yaml:"ntpServers,omitempty"`           // New field
-	Timezone           string   `json:"timezone,omitempty" yaml:"timezone,omitempty"`               // New field
-	RPMs               []string `json:"rpms,omitempty" yaml:"rpms,omitempty"`                       // New field for RPM package names
-	Debs               []string `json:"debs,omitempty" yaml:"debs,omitempty"`                       // New field for Deb package names
-	PreInstallScripts  []string `json:"preInstallScripts,omitempty" yaml:"preInstall,omitempty"`    // New field, assuming list of script paths or inline
-	PostInstallScripts []string `json:"postInstallScripts,omitempty" yaml:"postInstall,omitempty"`  // New field
-	SkipConfigureOS    bool     `json:"skipConfigureOS,omitempty" yaml:"skipConfigureOS,omitempty"` // New field
+	PackageManager     string   `json:"packageManager,omitempty" yaml:"packageManager,omitempty"`
+	NTPServers         []string `json:"ntpServers,omitempty" yaml:"ntpServers,omitempty"`
+	Timezone           string   `json:"timezone,omitempty" yaml:"timezone,omitempty"`
+	RPMs               []string `json:"rpms,omitempty" yaml:"rpms,omitempty"`
+	Debs               []string `json:"debs,omitempty" yaml:"debs,omitempty"`
+	PreInstallScripts  []string `json:"preInstallScripts,omitempty" yaml:"preInstall,omitempty"`
+	PostInstallScripts []string `json:"postInstallScripts,omitempty" yaml:"postInstall,omitempty"`
+	SkipConfigureOS    bool     `json:"skipConfigureOS,omitempty" yaml:"skipConfigureOS,omitempty"`
 }
 
 // GlobalSpec contains settings applicable to the entire cluster or as defaults for hosts.
@@ -133,39 +138,12 @@ type GlobalSpec struct {
 	SkipPreflight     bool          `json:"skipPreflight,omitempty" yaml:"skipPreflight,omitempty"`
 }
 
-// HostSpec defines the configuration for a single host.
-type HostSpec struct {
-	Name            string            `json:"name" yaml:"name"`
-	Address         string            `json:"address" yaml:"address"`
-	InternalAddress string            `json:"internalAddress,omitempty" yaml:"internalAddress,omitempty"`
-	Port            int               `json:"port,omitempty" yaml:"port,omitempty"`
-	User            string            `json:"user,omitempty" yaml:"user,omitempty"`
-	Password        string            `json:"password,omitempty" yaml:"password,omitempty"`
-	PrivateKey      string            `json:"privateKey,omitempty" yaml:"privateKey,omitempty"`
-	PrivateKeyPath  string            `json:"privateKeyPath,omitempty" yaml:"privateKeyPath,omitempty"`
-	Roles           []string          `json:"roles,omitempty" yaml:"roles,omitempty"`
-	Labels          map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
-	Taints          []TaintSpec       `json:"taints,omitempty" yaml:"taints,omitempty"`
-	Type            string            `json:"type,omitempty" yaml:"type,omitempty"`
-}
-
 // TaintSpec defines a Kubernetes node taint.
 type TaintSpec struct {
 	Key    string `json:"key" yaml:"key"`
 	Value  string `json:"value" yaml:"value"`
 	Effect string `json:"effect" yaml:"effect"`
 }
-
-// Placeholder structs for component configs (initial version)
-// Removed placeholder ContainerRuntimeConfig
-// Removed placeholder ContainerdConfig
-// Removed placeholder EtcdConfig
-// Removed placeholder KubernetesConfig (should be in kubernetes_types.go)
-// Removed placeholder HighAvailabilityConfig (should be in ha_types.go)
-// Removed placeholder PreflightConfig (should be in preflight_types.go)
-// Removed placeholder KernelConfig (should be in kernel_types.go)
-// Removed placeholder NetworkConfig
-// Removed placeholder AddonConfig
 
 // SetDefaults_Cluster sets default values for the Cluster configuration.
 func SetDefaults_Cluster(cfg *Cluster) {
@@ -201,6 +179,9 @@ func SetDefaults_Cluster(cfg *Cluster) {
 		if host.Type == "" {
 			host.Type = "ssh"
 		}
+		if host.Arch == "" {
+			host.Arch = "amd64"
+		}
 		if host.Labels == nil {
 			host.Labels = make(map[string]string)
 		}
@@ -212,81 +193,65 @@ func SetDefaults_Cluster(cfg *Cluster) {
 		}
 	}
 
-	// Initialize component configs if nil (initial placeholder logic)
-	// Integrate ContainerRuntime and Containerd defaulting
 	if cfg.Spec.ContainerRuntime == nil {
 		cfg.Spec.ContainerRuntime = &ContainerRuntimeConfig{}
 	}
 	SetDefaults_ContainerRuntimeConfig(cfg.Spec.ContainerRuntime)
 	if cfg.Spec.ContainerRuntime.Type == ContainerRuntimeContainerd {
-		if cfg.Spec.Containerd == nil {
-			cfg.Spec.Containerd = &ContainerdConfig{}
+		if cfg.Spec.ContainerRuntime.Containerd == nil {
+			cfg.Spec.ContainerRuntime.Containerd = &ContainerdConfig{}
 		}
-		SetDefaults_ContainerdConfig(cfg.Spec.Containerd)
+		SetDefaults_ContainerdConfig(cfg.Spec.ContainerRuntime.Containerd)
 	}
 
-	// Integrate EtcdConfig defaulting
 	if cfg.Spec.Etcd == nil {
 		cfg.Spec.Etcd = &EtcdConfig{}
 	}
-	SetDefaults_EtcdConfig(cfg.Spec.Etcd) // Assuming SetDefaults_EtcdConfig exists
+	SetDefaults_EtcdConfig(cfg.Spec.Etcd)
 
-	// SetDefaults for RoleGroups, ControlPlaneEndpoint, System
 	if cfg.Spec.RoleGroups == nil {
 		cfg.Spec.RoleGroups = &RoleGroupsSpec{}
 	}
-	// SetDefaults_RoleGroupsSpec(cfg.Spec.RoleGroups) // If it exists
 	if cfg.Spec.ControlPlaneEndpoint == nil {
 		cfg.Spec.ControlPlaneEndpoint = &ControlPlaneEndpointSpec{}
 	}
-	// SetDefaults_ControlPlaneEndpointSpec(cfg.Spec.ControlPlaneEndpoint) // If it exists
 	if cfg.Spec.System == nil {
 		cfg.Spec.System = &SystemSpec{}
 	}
-	// SetDefaults_SystemSpec(cfg.Spec.System) // If it exists
-
 	if cfg.Spec.Kubernetes == nil {
 		cfg.Spec.Kubernetes = &KubernetesConfig{}
 	}
-	SetDefaults_KubernetesConfig(cfg.Spec.Kubernetes, cfg.ObjectMeta.Name) // Assuming SetDefaults_KubernetesConfig exists
-
+	SetDefaults_KubernetesConfig(cfg.Spec.Kubernetes, cfg.ObjectMeta.Name)
 	if cfg.Spec.Network == nil {
 		cfg.Spec.Network = &NetworkConfig{}
 	}
-	SetDefaults_NetworkConfig(cfg.Spec.Network) // Assuming SetDefaults_NetworkConfig exists
-
+	SetDefaults_NetworkConfig(cfg.Spec.Network)
 	if cfg.Spec.HighAvailability == nil {
 		cfg.Spec.HighAvailability = &HighAvailabilityConfig{}
 	}
 	SetDefaults_HighAvailabilityConfig(cfg.Spec.HighAvailability)
-
 	if cfg.Spec.Preflight == nil {
 		cfg.Spec.Preflight = &PreflightConfig{}
 	}
 	SetDefaults_PreflightConfig(cfg.Spec.Preflight)
-
 	if cfg.Spec.Kernel == nil {
 		cfg.Spec.Kernel = &KernelConfig{}
 	}
 	SetDefaults_KernelConfig(cfg.Spec.Kernel)
-
 	if cfg.Spec.Addons == nil {
 		cfg.Spec.Addons = []AddonConfig{}
 	}
-	for i := range cfg.Spec.Addons { // Iterate by index to modify items in place
+	for i := range cfg.Spec.Addons {
 		SetDefaults_AddonConfig(&cfg.Spec.Addons[i])
 	}
-
 	if cfg.Spec.Storage == nil {
 		cfg.Spec.Storage = &StorageConfig{}
 	}
-	SetDefaults_StorageConfig(cfg.Spec.Storage) // Assuming SetDefaults_StorageConfig exists
-
+	SetDefaults_StorageConfig(cfg.Spec.Storage)
 	if cfg.Spec.Registry == nil {
 		cfg.Spec.Registry = &RegistryConfig{}
 	}
-	SetDefaults_RegistryConfig(cfg.Spec.Registry) // Assuming SetDefaults_RegistryConfig exists
-
+	SetDefaults_RegistryConfig(cfg.Spec.Registry)
 	if cfg.Spec.OS == nil {
 		cfg.Spec.OS = &OSConfig{}
 	}
@@ -347,92 +312,70 @@ func Validate_Cluster(cfg *Cluster) error {
 			}
 		}
 	}
-	// Initial basic validation for Kubernetes (will be expanded when kubernetes_types.go is integrated)
-	// This specific validation is now moved to Validate_KubernetesConfig
-	// if cfg.Spec.Kubernetes != nil && strings.TrimSpace(cfg.Spec.Kubernetes.Version) == "" {
-	//    verrs.Add("spec.kubernetes.version: cannot be empty")
-	// }
 
-	// Integrate ContainerRuntime and Containerd validation
 	if cfg.Spec.ContainerRuntime != nil {
 		Validate_ContainerRuntimeConfig(cfg.Spec.ContainerRuntime, verrs, "spec.containerRuntime")
 		if cfg.Spec.ContainerRuntime.Type == ContainerRuntimeContainerd {
-			if cfg.Spec.Containerd == nil {
-				verrs.Add("spec.containerd: must be defined if containerRuntime.type is '%s'", ContainerRuntimeContainerd)
+			if cfg.Spec.ContainerRuntime.Containerd == nil {
+				verrs.Add("spec.containerRuntime.containerd: must be defined if containerRuntime.type is '%s'", ContainerRuntimeContainerd)
 			} else {
-				Validate_ContainerdConfig(cfg.Spec.Containerd, verrs, "spec.containerd")
+				Validate_ContainerdConfig(cfg.Spec.ContainerRuntime.Containerd, verrs, "spec.containerRuntime.containerd")
 			}
 		}
 	}
 
-	// Integrate EtcdConfig validation
-	if cfg.Spec.Etcd != nil { // Changed to pointer, so check for nil
-		Validate_EtcdConfig(cfg.Spec.Etcd, verrs, "spec.etcd") // Assuming Validate_EtcdConfig exists
+	if cfg.Spec.Etcd != nil {
+		Validate_EtcdConfig(cfg.Spec.Etcd, verrs, "spec.etcd")
 	} else {
-		verrs.Add("spec.etcd: section is required") // Or handle if truly optional
+		verrs.Add("spec.etcd: section is required")
 	}
 
-	// Validate RoleGroups, ControlPlaneEndpoint, System
 	if cfg.Spec.RoleGroups != nil {
-		Validate_RoleGroupsSpec(cfg.Spec.RoleGroups, verrs, "spec.roleGroups") // Assuming Validate_RoleGroupsSpec will be created
-	} // else { verrs.Add("spec.roleGroups: section is required"); } // If mandatory
+		Validate_RoleGroupsSpec(cfg.Spec.RoleGroups, verrs, "spec.roleGroups")
+	}
 	if cfg.Spec.ControlPlaneEndpoint != nil {
-		Validate_ControlPlaneEndpointSpec(cfg.Spec.ControlPlaneEndpoint, verrs, "spec.controlPlaneEndpoint") // Assuming Validate_ControlPlaneEndpointSpec will be created
-	} // else { verrs.Add("spec.controlPlaneEndpoint: section is required"); } // If mandatory
+		Validate_ControlPlaneEndpointSpec(cfg.Spec.ControlPlaneEndpoint, verrs, "spec.controlPlaneEndpoint")
+	}
 	if cfg.Spec.System != nil {
-		Validate_SystemSpec(cfg.Spec.System, verrs, "spec.system") // Assuming Validate_SystemSpec will be created
-	} // else { verrs.Add("spec.system: section is required"); } // If mandatory
+		Validate_SystemSpec(cfg.Spec.System, verrs, "spec.system")
+	}
 
-	// Integrate KubernetesConfig validation
-	if cfg.Spec.Kubernetes != nil { // Changed to pointer
-		Validate_KubernetesConfig(cfg.Spec.Kubernetes, verrs, "spec.kubernetes") // Assuming Validate_KubernetesConfig exists
+	if cfg.Spec.Kubernetes != nil {
+		Validate_KubernetesConfig(cfg.Spec.Kubernetes, verrs, "spec.kubernetes")
 	} else {
 		verrs.Add("spec.kubernetes: section is required")
 	}
 
-	// Integrate HighAvailability validation
 	if cfg.Spec.HighAvailability != nil {
 		Validate_HighAvailabilityConfig(cfg.Spec.HighAvailability, verrs, "spec.highAvailability")
 	}
-
-	// Integrate Preflight validation
 	if cfg.Spec.Preflight != nil {
 		Validate_PreflightConfig(cfg.Spec.Preflight, verrs, "spec.preflight")
 	}
-
-	// Integrate Kernel validation
 	if cfg.Spec.Kernel != nil {
 		Validate_KernelConfig(cfg.Spec.Kernel, verrs, "spec.kernel")
 	}
-
-	if cfg.Spec.Addons != nil { // Check if Addons slice itself is nil
+	if cfg.Spec.Addons != nil {
 		for i := range cfg.Spec.Addons {
 			addonNameForPath := cfg.Spec.Addons[i].Name
-			if addonNameForPath == "" { // Handle case where addon name might be empty during validation
+			if addonNameForPath == "" {
 				addonNameForPath = fmt.Sprintf("index_%d", i)
 			}
 			addonPathPrefix := fmt.Sprintf("spec.addons[%s]", addonNameForPath)
 			Validate_AddonConfig(&cfg.Spec.Addons[i], verrs, addonPathPrefix)
 		}
 	}
-
-	// Integrate NetworkConfig validation
-	if cfg.Spec.Network != nil { // Changed to pointer
-		Validate_NetworkConfig(cfg.Spec.Network, verrs, "spec.network", cfg.Spec.Kubernetes) // Assuming Validate_NetworkConfig exists
+	if cfg.Spec.Network != nil {
+		Validate_NetworkConfig(cfg.Spec.Network, verrs, "spec.network", cfg.Spec.Kubernetes)
 	} else {
 		verrs.Add("spec.network: section is required")
 	}
-
-	// Integrate StorageConfig validation
-	if cfg.Spec.Storage != nil { // Changed to pointer
-		Validate_StorageConfig(cfg.Spec.Storage, verrs, "spec.storage") // Assuming Validate_StorageConfig exists
-	} // else { verrs.Add("spec.storage: section is required"); } // If optional, no error
-
-	// Integrate RegistryConfig validation
-	if cfg.Spec.Registry != nil { // Changed to pointer
-		Validate_RegistryConfig(cfg.Spec.Registry, verrs, "spec.registry") // Assuming Validate_RegistryConfig exists
-	} // else { verrs.Add("spec.registry: section is required"); } // If optional, no error
-
+	if cfg.Spec.Storage != nil {
+		Validate_StorageConfig(cfg.Spec.Storage, verrs, "spec.storage")
+	}
+	if cfg.Spec.Registry != nil {
+		Validate_RegistryConfig(cfg.Spec.Registry, verrs, "spec.registry")
+	}
 	if cfg.Spec.OS != nil {
 		Validate_OSConfig(cfg.Spec.OS, verrs, "spec.os")
 	}
@@ -443,23 +386,227 @@ func Validate_Cluster(cfg *Cluster) error {
 	return nil
 }
 
-// ValidationErrors (simple version, can be moved to a common errors file)
+// ValidationErrors defines a type to collect multiple validation errors.
 type ValidationErrors struct{ Errors []string }
 
+// Add records an error.
 func (ve *ValidationErrors) Add(format string, args ...interface{}) {
 	ve.Errors = append(ve.Errors, fmt.Sprintf(format, args...))
 }
+
+// Error returns a concatenated string of all errors, or a default message if none.
 func (ve *ValidationErrors) Error() string {
 	if len(ve.Errors) == 0 {
 		return "no validation errors"
 	}
 	return strings.Join(ve.Errors, "; ")
 }
+
+// IsEmpty checks if any errors were recorded.
 func (ve *ValidationErrors) IsEmpty() bool { return len(ve.Errors) == 0 }
+
+// DeepCopyObject implements runtime.Object.
+func (c *Cluster) DeepCopyObject() runtime.Object {
+	if c == nil {
+		return nil
+	}
+	out := new(Cluster)
+	c.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto is a manually implemented deepcopy function, copying the receiver, writing into out.
+// WARNING: This is a simplified implementation. For full correctness, especially with nested pointers and slices,
+// a code generator (like controller-gen) should be used to create these methods.
+func (in *Cluster) DeepCopyInto(out *Cluster) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+
+	// Create a new ClusterSpec and copy primitive fields
+	newSpec := ClusterSpec{
+		// Copy primitive types directly
+	}
+
+	// Deep copy pointer fields in Spec
+	if in.Spec.RoleGroups != nil {
+		newSpec.RoleGroups = new(RoleGroupsSpec)
+		*newSpec.RoleGroups = *in.Spec.RoleGroups // Shallow copy for sub-fields of RoleGroupsSpec for now
+	}
+	if in.Spec.ControlPlaneEndpoint != nil {
+		newSpec.ControlPlaneEndpoint = new(ControlPlaneEndpointSpec)
+		*newSpec.ControlPlaneEndpoint = *in.Spec.ControlPlaneEndpoint
+	}
+	if in.Spec.System != nil {
+		newSpec.System = new(SystemSpec)
+		*newSpec.System = *in.Spec.System
+	}
+	if in.Spec.Global != nil {
+		newSpec.Global = new(GlobalSpec)
+		*newSpec.Global = *in.Spec.Global
+	}
+	// Deep copy slice of HostSpec
+	if in.Spec.Hosts != nil {
+		newSpec.Hosts = make([]HostSpec, len(in.Spec.Hosts))
+		for i := range in.Spec.Hosts {
+			// HostSpec also needs a DeepCopyInto if it has complex fields
+			newSpec.Hosts[i] = in.Spec.Hosts[i] // Shallow copy of HostSpec contents for now
+		}
+	}
+    if in.Spec.ContainerRuntime != nil {
+        newSpec.ContainerRuntime = new(ContainerRuntimeConfig)
+        // Assuming ContainerRuntimeConfig has DeepCopyInto or is simple enough for shallow
+        *newSpec.ContainerRuntime = *in.Spec.ContainerRuntime
+    }
+    if in.Spec.Etcd != nil {
+        newSpec.Etcd = new(EtcdConfig)
+        *newSpec.Etcd = *in.Spec.Etcd
+    }
+    if in.Spec.Kubernetes != nil {
+        newSpec.Kubernetes = new(KubernetesConfig)
+        *newSpec.Kubernetes = *in.Spec.Kubernetes
+    }
+    if in.Spec.Network != nil {
+        newSpec.Network = new(NetworkConfig)
+        *newSpec.Network = *in.Spec.Network
+    }
+    if in.Spec.HighAvailability != nil {
+        newSpec.HighAvailability = new(HighAvailabilityConfig)
+        *newSpec.HighAvailability = *in.Spec.HighAvailability
+    }
+    if in.Spec.Preflight != nil {
+        newSpec.Preflight = new(PreflightConfig)
+        *newSpec.Preflight = *in.Spec.Preflight
+    }
+    if in.Spec.Kernel != nil {
+        newSpec.Kernel = new(KernelConfig)
+        *newSpec.Kernel = *in.Spec.Kernel
+    }
+    if in.Spec.Storage != nil {
+        newSpec.Storage = new(StorageConfig)
+        *newSpec.Storage = *in.Spec.Storage
+    }
+    if in.Spec.Registry != nil {
+        newSpec.Registry = new(RegistryConfig)
+        *newSpec.Registry = *in.Spec.Registry
+    }
+    if in.Spec.OS != nil {
+        newSpec.OS = new(OSConfig)
+        *newSpec.OS = *in.Spec.OS
+    }
+	if in.Spec.Addons != nil {
+		newSpec.Addons = make([]AddonConfig, len(in.Spec.Addons))
+		for i := range in.Spec.Addons {
+			// AddonConfig also needs DeepCopyInto if complex
+			newSpec.Addons[i] = in.Spec.Addons[i] // Shallow copy of AddonConfig contents
+		}
+	}
+	out.Spec = newSpec
+}
+
+// DeepCopy is a deepcopy function, copying the receiver, creating a new Cluster.
+func (in *Cluster) DeepCopy() *Cluster {
+	if in == nil {
+		return nil
+	}
+	out := new(Cluster)
+	in.DeepCopyInto(out)
+	return out
+}
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type ClusterList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Cluster `json:"items"`
+}
+
+// DeepCopyObject implements runtime.Object.
+func (cl *ClusterList) DeepCopyObject() runtime.Object {
+	if cl == nil {
+		return nil
+	}
+	out := new(ClusterList)
+	cl.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto is a manually implemented copy for compilation.
+func (in *ClusterList) DeepCopyInto(out *ClusterList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		inItems := in.Items
+		out.Items = make([]Cluster, len(inItems))
+		for i := range inItems {
+			inItems[i].DeepCopyInto(&out.Items[i])
+		}
+	}
+}
+
+// DeepCopy is a deepcopy function, copying the receiver, creating a new ClusterList.
+func (in *ClusterList) DeepCopy() *ClusterList {
+	if in == nil {
+		return nil
+	}
+	out := new(ClusterList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// Constants and placeholder types (assuming these are not defined elsewhere yet for compilation)
+const (
+    ContainerRuntimeContainerd = "containerd"
+    ContainerRuntimeDocker     = "docker"
+    // ContainerRuntimeCRIO       = "cri-o" // Example
+)
+type ContainerRuntimeConfig struct {
+    Type       string          `json:"type,omitempty" yaml:"type,omitempty"`
+    Version    string          `json:"version,omitempty" yaml:"version,omitempty"`
+    Containerd *ContainerdConfig `json:"containerd,omitempty" yaml:"containerd,omitempty"`
+	Docker     *DockerConfig     `json:"docker,omitempty" yaml:"docker,omitempty"`
+}
+type ContainerdConfig struct { // Placeholder
+    RegistryMirrors    []string `json:"registryMirrors,omitempty" yaml:"registryMirrors,omitempty"`
+	InsecureRegistries []string `json:"insecureRegistries,omitempty" yaml:"insecureRegistries,omitempty"`
+}
+type DockerConfig struct { // Placeholder
+    RegistryMirrors    []string `json:"registryMirrors,omitempty" yaml:"registryMirrors,omitempty"`
+	InsecureRegistries []string `json:"insecureRegistries,omitempty" yaml:"insecureRegistries,omitempty"`
+}
+type EtcdConfig struct { // Placeholder
+    Type    string `json:"type,omitempty" yaml:"type,omitempty"`
+	DataDir string `json:"dataDir,omitempty" yaml:"dataDir,omitempty"`
+}
+type KubernetesConfig struct { // Placeholder
+    Version       string `json:"version,omitempty" yaml:"version,omitempty"`
+	PodSubnet     string `json:"podSubnet,omitempty" yaml:"podSubnet,omitempty"`
+	ServiceSubnet string `json:"serviceSubnet,omitempty" yaml:"serviceSubnet,omitempty"`
+}
+type PreflightConfig struct{ /* TODO */ }
+type KernelConfig struct{ /* TODO */ }
+type AddonConfig struct { Name string /* TODO */ }
+type StorageConfig struct { /* TODO */ }
+type OpenEBSConfig struct { /* TODO */ }
+type RegistryConfig struct { /* TODO */ }
+type OSConfig struct { /* TODO */ }
+
+// Placeholder SetDefaults functions
+func SetDefaults_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig) { if cfg.Type == "" { cfg.Type = ContainerRuntimeContainerd} }
+func SetDefaults_ContainerdConfig(cfg *ContainerdConfig) {}
+func SetDefaults_EtcdConfig(cfg *EtcdConfig) { if cfg.Type == "" {cfg.Type = "kubexm"} }
+func SetDefaults_KubernetesConfig(cfg *KubernetesConfig, clusterName string) { if cfg.Version == "" { cfg.Version = "latest" }}
+func SetDefaults_HighAvailabilityConfig(cfg *HighAvailabilityConfig) {}
+func SetDefaults_PreflightConfig(cfg *PreflightConfig) {}
+func SetDefaults_KernelConfig(cfg *KernelConfig) {}
+func SetDefaults_AddonConfig(cfg *AddonConfig) {}
+func SetDefaults_StorageConfig(cfg *StorageConfig) {}
+func SetDefaults_RegistryConfig(cfg *RegistryConfig) {}
+func SetDefaults_OSConfig(cfg *OSConfig) {}
+
+// isValidCIDR placeholder if not imported or defined elsewhere
+func isValidCIDR(cidr string) bool {
+	_, _, err := net.ParseCIDR(cidr)
+	return err == nil
 }

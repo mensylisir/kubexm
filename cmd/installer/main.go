@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mensylisir/kubexm/pkg/cluster" // For NewCreateClusterPipeline
+	"github.com/mensylisir/kubexm/pkg/engine"  // Added to instantiate engine
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	// "github.com/mensylisir/kubexm/pkg/logger" // App's own logger if needed
@@ -19,6 +20,7 @@ import (
 var (
 	configFile   string
 	dryRun       bool
+	assumeYes    bool // Added for --yes flag
 	logLevel     string // This would be for configuring the logger instance
 	outputFormat string
 )
@@ -59,6 +61,7 @@ func init() {
 
 	// Flags specific to the apply command
 	applyCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Execute in dry run mode without making any changes")
+	applyCmd.Flags().BoolVar(&assumeYes, "yes", false, "Assume yes to all prompts (e.g., for user confirmation steps)")
 	applyCmd.Flags().StringVarP(&outputFormat, "output", "o", "text", "Output format for the result (text, json)")
 
 	rootCmd.AddCommand(applyCmd)
@@ -70,37 +73,44 @@ func runApply() error {
 	builder := runtime.NewRuntimeBuilder(configFile)
 
 	// Build the runtime context
-	ctx, cleanup, err := builder.BuildFromFile(context.Background()) // Use BuildFromFile
+	// TODO: If --log-level is to be honored by the runtime's logger,
+	// the logger should be initialized here and passed into BuildFromConfig.
+	// For now, runtime logger uses its default configuration.
+
+	// Instantiate the engine here
+	eng := engine.NewExecutor()
+
+	rtCtx, cleanup, err := builder.BuildFromFile(context.Background(), eng) // Pass engine to builder
 	if err != nil {
+		// Use standard log here as rtCtx.Logger might not be initialized.
 		log.Printf("Error: Failed to build runtime environment: %v\n", err)
 		return fmt.Errorf("failed to build runtime environment: %w", err)
 	}
 	defer cleanup()
 
-	// Instantiate the CreateClusterPipeline
-	// NewCreateClusterPipeline now takes *runtime.Context
-	p := cluster.NewCreateClusterPipeline(ctx)
+	// Instantiate the CreateClusterPipeline, passing the assumeYes flag value
+	p := cluster.NewCreateClusterPipeline(assumeYes)
 
-	ctx.Logger.Info("Starting pipeline execution...", "pipeline", p.Name(), "dryRun", dryRun, "configFile", configFile)
+	rtCtx.Logger.Info("Starting pipeline execution...", "pipeline", p.Name(), "dryRun", dryRun, "assumeYes", assumeYes, "configFile", configFile)
 
 	// Run the pipeline. p.Run now returns *plan.GraphExecutionResult
-	result, err := p.Run(ctx, dryRun)
+	result, err := p.Run(rtCtx, dryRun) // Use rtCtx here
 
 	// Handle results and output formatting
 	if outputFormat == "json" {
 		jsonResult, marshalErr := json.MarshalIndent(result, "", "  ")
 		if marshalErr != nil {
-			ctx.Logger.Error(marshalErr, "Failed to marshal execution result to JSON")
-			printResultAsText(ctx, result) // Attempt to print text if JSON fails
+			rtCtx.Logger.Error(marshalErr, "Failed to marshal execution result to JSON")
+			printResultAsText(rtCtx, result) // Attempt to print text if JSON fails
 			return fmt.Errorf("failed to marshal result to JSON: %w", marshalErr)
 		}
 		fmt.Println(string(jsonResult))
 	} else {
-		printResultAsText(ctx, result)
+		printResultAsText(rtCtx, result) // Use rtCtx here
 	}
 
 	if err != nil {
-		ctx.Logger.Error(err, "Pipeline execution finished with errors")
+		rtCtx.Logger.Error(err, "Pipeline execution finished with errors")
 		// err from p.Run might be an engine execution error, not a business logic failure.
 		// The result.Status reflects business logic outcome.
 		// If err is not nil, it's usually a more fundamental problem.
@@ -109,24 +119,24 @@ func runApply() error {
 
 	// Check the graph execution status
 	if result != nil && result.Status == plan.StatusFailed {
-		ctx.Logger.Info("Pipeline completed with overall status: Failed.")
+		rtCtx.Logger.Info("Pipeline completed with overall status: Failed.")
 		return fmt.Errorf("pipeline %s completed with status: %s", p.Name(), result.Status)
 	}
 
 	if result != nil {
-		ctx.Logger.Info("Pipeline execution completed.", "status", result.Status, "duration", result.EndTime.Sub(result.StartTime).String())
+		rtCtx.Logger.Info("Pipeline execution completed.", "status", result.Status, "duration", result.EndTime.Sub(result.StartTime).String())
 	} else {
 		// Should not happen if err is nil
-		ctx.Logger.Warn("Pipeline execution returned nil result and nil error.")
+		rtCtx.Logger.Warn("Pipeline execution returned nil result and nil error.")
 	}
 	return nil
 }
 
 // printResultAsText prints the GraphExecutionResult in a human-readable text format.
-func printResultAsText(ctx *runtime.Context, result *plan.GraphExecutionResult) {
+func printResultAsText(rtCtx *runtime.Context, result *plan.GraphExecutionResult) { // Parameter name changed
 	if result == nil {
-		if ctx != nil && ctx.Logger != nil {
-			ctx.Logger.Warn("Graph execution result is nil, nothing to print.")
+		if rtCtx != nil && rtCtx.Logger != nil { // Use rtCtx
+			rtCtx.Logger.Warn("Graph execution result is nil, nothing to print.")
 		} else {
 			fmt.Println("Graph execution result is nil.")
 		}

@@ -59,4 +59,7 @@ type StepContext interface {
 	TaskCache() cache.TaskCache     // Access to parent task's cache
 	ModuleCache() cache.ModuleCache   // Access to parent module's cache
 	GetGlobalWorkDir() string         // Access to global work directory
+
+	// WithGoContext returns a new StepContext that uses the provided Go context.
+	WithGoContext(goCtx context.Context) StepContext
 }
