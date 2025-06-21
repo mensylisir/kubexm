@@ -10,7 +10,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/utils" // For DownloadFileWithConnector
+	"github.com/mensylisir/kubexm/pkg/util" // Corrected path
 )
 
 // Constants for Task Cache keys

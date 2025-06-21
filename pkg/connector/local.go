@@ -5,6 +5,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"crypto/sha256" // Added
+	"encoding/hex"  // Added
+	"fmt"
+	"io" // For os.Stat for Mkdir, Remove
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -246,7 +250,7 @@ func (l *LocalConnector) Stat(ctx context.Context, path string) (*FileStat, erro
 	return &FileStat{
 		Name:    fi.Name(),
 		Size:    fi.Size(),
-		Mode:    fi.Mode(),
+		Mode:    fi.Mode(), // Use directly as fs.FileMode
 		ModTime: fi.ModTime(),
 		IsDir:   fi.IsDir(),
 		IsExist: true,
@@ -289,8 +293,8 @@ func (l *LocalConnector) GetOS(ctx context.Context) (*OS, error) {
 						osInfo.ID = val // Override with more specific ID
 					case "VERSION_ID":
 						osInfo.VersionID = val
-					case "VERSION_CODENAME":
-						osInfo.Codename = val
+					// case "VERSION_CODENAME": // OS struct does not have Codename
+					// 	osInfo.Codename = val
 					}
 				}
 			}
@@ -310,6 +314,66 @@ func (l *LocalConnector) GetOS(ctx context.Context) (*OS, error) {
 
 	l.cachedOS = osInfo
 	return l.cachedOS, nil
+}
+
+// ReadFile reads a file from the local filesystem.
+func (l *LocalConnector) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	// TODO: Consider context cancellation/timeout for large file reads if necessary.
+	return os.ReadFile(path)
+}
+
+// WriteFile writes content to a local file.
+// Permissions are applied after writing. Sudo is complex for local writes
+// and usually means the process itself needs privileges or uses a helper.
+// For simplicity, this WriteFile does not implement sudo move logic like remote might.
+func (l *LocalConnector) WriteFile(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error {
+	if sudo {
+		// Local sudo for WriteFile is tricky. Typically means writing to a restricted path.
+		// This would require writing to temp and then `sudo mv` and `sudo chmod`.
+		// For now, returning an error if sudo is requested for local write,
+		// as it implies a privileged operation not directly handled here.
+		return fmt.Errorf("sudo not implemented for LocalConnector.WriteFile, target path %s may require privileges", destPath)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		return fmt.Errorf("failed to create parent directory for %s: %w", destPath, err)
+	}
+
+	err := os.WriteFile(destPath, content, 0666) // Write with temp broad permissions
+	if err != nil {
+		return fmt.Errorf("failed to write file %s: %w", destPath, err)
+	}
+
+	if permissions != "" {
+		permVal, parseErr := strconv.ParseUint(permissions, 8, 32)
+		if parseErr != nil {
+			return fmt.Errorf("invalid permissions format '%s': %w", permissions, parseErr)
+		}
+		if chmodErr := os.Chmod(destPath, os.FileMode(permVal)); chmodErr != nil {
+			return fmt.Errorf("failed to chmod file %s to %s: %w", destPath, permissions, chmodErr)
+		}
+	}
+	return nil
+}
+
+
+// GetFileChecksum calculates the checksum of a local file.
+// Currently supports "sha256".
+func (l *LocalConnector) GetFileChecksum(ctx context.Context, path string, checksumType string) (string, error) {
+	// TODO: Context cancellation for large files
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read local file %s for checksum: %w", path, err)
+	}
+
+	switch strings.ToLower(checksumType) {
+	case "sha256":
+		hash := sha256.Sum256(data)
+		return hex.EncodeToString(hash[:]), nil
+	// Add other checksum types (md5, sha1) if needed
+	default:
+		return "", fmt.Errorf("unsupported checksum type '%s' for local file %s", checksumType, path)
+	}
 }
 
 // Ensure LocalConnector implements Connector interface

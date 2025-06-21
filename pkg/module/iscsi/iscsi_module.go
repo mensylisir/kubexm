@@ -5,7 +5,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime" // For ClusterRuntime
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // For v1alpha1.Cluster type
 	"github.com/mensylisir/kubexm/pkg/spec"
-	taskISCSI "github.com/mensylisir/kubexm/pkg/task/iscsi" // Import for new task constructors
+	// taskISCSI "github.com/mensylisir/kubexm/pkg/task/iscsi" // Temporarily commented out
 	// No direct step imports needed if tasks encapsulate all steps
 )
 
@@ -18,21 +18,22 @@ func NewISCSIModule(clusterRt *runtime.ClusterRuntime) *spec.ModuleSpec {
 			Tasks:     []*spec.TaskSpec{},
 		}
 	}
-	cfg := clusterRt.ClusterConfig // cfg is *v1alpha1.Cluster
+	// cfg := clusterRt.ClusterConfig // cfg is *v1alpha1.Cluster
 
 	allTasks := []*spec.TaskSpec{}
 
-	// Install and Enable iSCSI Client Task
-	installTask := taskISCSI.NewInstallAndEnableISCSITask(cfg)
-	if installTask != nil {
-		allTasks = append(allTasks, installTask)
-	}
+	// TODO: Implement iSCSI tasks and uncomment the following lines.
+	// // Install and Enable iSCSI Client Task
+	// installTask := taskISCSI.NewInstallAndEnableISCSITask(cfg)
+	// if installTask != nil {
+	// 	allTasks = append(allTasks, installTask)
+	// }
 
-	// Disable and Uninstall iSCSI Client Task
-	uninstallTask := taskISCSI.NewDisableAndUninstallISCSITask(cfg)
-	if uninstallTask != nil {
-		allTasks = append(allTasks, uninstallTask)
-	}
+	// // Disable and Uninstall iSCSI Client Task
+	// uninstallTask := taskISCSI.NewDisableAndUninstallISCSITask(cfg)
+	// if uninstallTask != nil {
+	// 	allTasks = append(allTasks, uninstallTask)
+	// }
 
 	return &spec.ModuleSpec{
 		Name: "iSCSI Client Management",

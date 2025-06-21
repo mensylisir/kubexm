@@ -3,11 +3,11 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"context"
-	"fmt"
-	"time" // Added for time.Duration
+	"path/filepath" // Added for artifact path helpers
+	"time"          // Added for time.Duration
 
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // Corrected path
+	"github.com/mensylisir/kubexm/pkg/common"                // Added for common.Default*Dir constants
 	"github.com/mensylisir/kubexm/pkg/cache"
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/engine"
@@ -286,6 +286,85 @@ var _ PipelineContext = (*Context)(nil)
 var _ ModuleContext = (*Context)(nil)
 var _ TaskContext = (*Context)(nil)
 var _ StepContext = (*Context)(nil)
+var _ engine.EngineExecuteContext = (*Context)(nil) // Ensure Context implements EngineExecuteContext
+
+// WithGoContext returns a new Context (which is a StepContext) using the provided Go context.
+// This is primarily used by the engine to propagate cancellation from errgroup contexts to steps.
+func (c *Context) WithGoContext(goCtx context.Context) StepContext {
+	newCtx := *c // Shallow copy
+	newCtx.GoCtx = goCtx
+	// CurrentHost should already be set correctly if this c is from a ForHost() call
+	return &newCtx
+}
+
+
+// --- Artifact Path Helper Methods ---
+
+// GetClusterArtifactsDir returns the base directory for all cluster-specific artifacts.
+// Path: ${GlobalWorkDir}/${cluster_name}
+func (c *Context) GetClusterArtifactsDir() string {
+	return c.ClusterArtifactsDir
+}
+
+// GetCertsDir returns the base directory for all certificates.
+// Path: ${GlobalWorkDir}/${cluster_name}/certs
+func (c *Context) GetCertsDir() string {
+	return filepath.Join(c.ClusterArtifactsDir, common.DefaultCertsDir)
+}
+
+// GetEtcdCertsDir returns the directory for ETCD certificates.
+// Path: ${GlobalWorkDir}/${cluster_name}/certs/etcd
+func (c *Context) GetEtcdCertsDir() string {
+	return filepath.Join(c.GetCertsDir(), common.DefaultEtcdDir)
+}
+
+// GetComponentArtifactsDir returns the base directory for a specific component's artifacts.
+// Path: ${GlobalWorkDir}/${cluster_name}/${componentName}
+func (c *Context) GetComponentArtifactsDir(componentName string) string {
+	return filepath.Join(c.ClusterArtifactsDir, componentName)
+}
+
+// GetEtcdArtifactsDir returns the base directory for ETCD artifacts (binaries, etc.).
+// Path: ${GlobalWorkDir}/${cluster_name}/etcd
+func (c *Context) GetEtcdArtifactsDir() string {
+	return c.GetComponentArtifactsDir(common.DefaultEtcdDir)
+}
+
+// GetContainerRuntimeArtifactsDir returns the base directory for container runtime artifacts.
+// Path: ${GlobalWorkDir}/${cluster_name}/container_runtime
+func (c *Context) GetContainerRuntimeArtifactsDir() string {
+	return c.GetComponentArtifactsDir(common.DefaultContainerRuntimeDir)
+}
+
+// GetKubernetesArtifactsDir returns the base directory for Kubernetes component artifacts.
+// Path: ${GlobalWorkDir}/${cluster_name}/kubernetes
+func (c *Context) GetKubernetesArtifactsDir() string {
+	return c.GetComponentArtifactsDir(common.DefaultKubernetesDir)
+}
+
+// GetFileDownloadPath returns the standardized local path for a downloaded file,
+// typically structured as:
+// ${GlobalWorkDir}/${cluster_name}/${componentName}/${version}/${arch}/${filename}
+// If version or arch are empty, they are omitted from the path.
+func (c *Context) GetFileDownloadPath(componentName, version, arch, filename string) string {
+	baseDir := c.GetComponentArtifactsDir(componentName)
+	pathParts := []string{baseDir}
+	if version != "" {
+		pathParts = append(pathParts, version)
+	}
+	if arch != "" {
+		pathParts = append(pathParts, arch)
+	}
+	pathParts = append(pathParts, filename)
+	return filepath.Join(pathParts...)
+}
+
+// GetHostDir returns the host-specific working directory on the local machine.
+// Path: ${GlobalWorkDir}/${hostname}
+// This is for local storage related to a specific host, not necessarily cluster artifacts.
+func (c *Context) GetHostDir(hostname string) string {
+	return filepath.Join(c.GlobalWorkDir, hostname)
+}
 	"github.com/mensylisir/kubexm/pkg/engine"
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/runner"
@@ -318,6 +397,11 @@ type Context struct {
 	// CurrentHost stores the specific host this context is currently operating on.
 	// This is particularly relevant for StepContext.
 	CurrentHost   connector.Host
+	ControlNode   connector.Host // Represents the control node (where kubexm is running)
+
+	// ClusterArtifactsDir stores the base path for all artifacts related to the current cluster
+	// e.g., $(pwd)/.kubexm/${cluster_name}
+	ClusterArtifactsDir string
 }
 
 // HostRuntime encapsulates all runtime information for a single host.
