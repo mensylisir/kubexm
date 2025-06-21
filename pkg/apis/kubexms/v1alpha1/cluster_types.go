@@ -555,58 +555,6 @@ func (in *ClusterList) DeepCopy() *ClusterList {
 	return out
 }
 
-// Constants and placeholder types (assuming these are not defined elsewhere yet for compilation)
-const (
-    ContainerRuntimeContainerd = "containerd"
-    ContainerRuntimeDocker     = "docker"
-    // ContainerRuntimeCRIO       = "cri-o" // Example
-)
-type ContainerRuntimeConfig struct {
-    Type       string          `json:"type,omitempty" yaml:"type,omitempty"`
-    Version    string          `json:"version,omitempty" yaml:"version,omitempty"`
-    Containerd *ContainerdConfig `json:"containerd,omitempty" yaml:"containerd,omitempty"`
-	Docker     *DockerConfig     `json:"docker,omitempty" yaml:"docker,omitempty"`
-}
-type ContainerdConfig struct { // Placeholder
-    RegistryMirrors    []string `json:"registryMirrors,omitempty" yaml:"registryMirrors,omitempty"`
-	InsecureRegistries []string `json:"insecureRegistries,omitempty" yaml:"insecureRegistries,omitempty"`
-}
-type DockerConfig struct { // Placeholder
-    RegistryMirrors    []string `json:"registryMirrors,omitempty" yaml:"registryMirrors,omitempty"`
-	InsecureRegistries []string `json:"insecureRegistries,omitempty" yaml:"insecureRegistries,omitempty"`
-}
-type EtcdConfig struct { // Placeholder
-    Type    string `json:"type,omitempty" yaml:"type,omitempty"`
-	DataDir string `json:"dataDir,omitempty" yaml:"dataDir,omitempty"`
-}
-type KubernetesConfig struct { // Placeholder
-    Version       string `json:"version,omitempty" yaml:"version,omitempty"`
-	PodSubnet     string `json:"podSubnet,omitempty" yaml:"podSubnet,omitempty"`
-	ServiceSubnet string `json:"serviceSubnet,omitempty" yaml:"serviceSubnet,omitempty"`
-}
-type PreflightConfig struct{ /* TODO */ }
-type KernelConfig struct{ /* TODO */ }
-type AddonConfig struct { Name string /* TODO */ }
-type StorageConfig struct { /* TODO */ }
-type OpenEBSConfig struct { /* TODO */ }
-type RegistryConfig struct { /* TODO */ }
-type OSConfig struct { /* TODO */ }
-
-// Placeholder SetDefaults functions
-func SetDefaults_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig) { if cfg.Type == "" { cfg.Type = ContainerRuntimeContainerd} }
-func SetDefaults_ContainerdConfig(cfg *ContainerdConfig) {}
-func SetDefaults_EtcdConfig(cfg *EtcdConfig) { if cfg.Type == "" {cfg.Type = "kubexm"} }
-func SetDefaults_KubernetesConfig(cfg *KubernetesConfig, clusterName string) { if cfg.Version == "" { cfg.Version = "latest" }}
-func SetDefaults_HighAvailabilityConfig(cfg *HighAvailabilityConfig) {}
-func SetDefaults_PreflightConfig(cfg *PreflightConfig) {}
-func SetDefaults_KernelConfig(cfg *KernelConfig) {}
-func SetDefaults_AddonConfig(cfg *AddonConfig) {}
-func SetDefaults_StorageConfig(cfg *StorageConfig) {}
-func SetDefaults_RegistryConfig(cfg *RegistryConfig) {}
-func SetDefaults_OSConfig(cfg *OSConfig) {}
-
-// isValidCIDR placeholder if not imported or defined elsewhere
-func isValidCIDR(cidr string) bool {
-	_, _, err := net.ParseCIDR(cidr)
-	return err == nil
-}
+// All placeholder types and functions below were causing redeclaration errors
+// and have been removed. The actual definitions reside in their respective
+// xxx_types.go files within the same package.
