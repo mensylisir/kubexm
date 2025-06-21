@@ -1,9 +1,10 @@
-核心思想:
+### 核心思想:
 节点 (Node): 执行计划的基本单元是一个“节点”，每个节点代表一个 Action（即一个 Step 在一组 Host 上执行）。
 边 (Edge): 节点之间的“边”代表依赖关系。一个节点必须等待其所有依赖的父节点都成功执行后才能开始。
 无环 (Acyclic): 整个图必须是“有向无环图 (DAG)”，以避免循环依赖和死锁。
 pkg/plan/graph_plan.go - 执行图计划定义
 这个文件定义了要做什么 (What to do)，但以图的形式来组织。
+##### pkg/plan/graph_plan.go
 ```aiignore
 package plan
 
@@ -75,7 +76,7 @@ func (g *ExecutionGraph) Validate() error {
 	return nil // Placeholder for actual validation logic
 }
 ```
-设计优化点:
+### 设计优化点:
 从 Phase 到 Graph: ExecutionPlan 被 ExecutionGraph 替代，Phase 被完全移除。Action 的概念被 ExecutionNode 取代。
 显式依赖: ExecutionNode 包含一个 Dependencies 字段，这是一个 NodeID 的切片。这明确地定义了执行顺序，取代了隐式的 Phase 顺序。
 唯一标识符 (NodeID): 每个节点都有一个唯一的 NodeID，用于在图中引用它。这通常可以就是节点的 Name，但使用独立的类型 NodeID 提供了更大的灵活性。
@@ -84,6 +85,7 @@ func (g *ExecutionGraph) Validate() error {
 
 pkg/plan/graph_result.go - 执行图结果定义
 这个文件定义了图执行后发生了什么 (What happened)。结果的结构也需要相应地调整，以反映图的结构。
+##### pkg/plan/graph_result.go
 ```aiignore
 package plan
 
@@ -136,27 +138,27 @@ type HostResult struct {
 	Skipped   bool      `json:"skipped"` // Skipped due to precheck, not dependency failure.
 }
 ```
-设计优化点:
+#### 设计优化点:
 从 PhaseResult 到 NodeResult: 结果的顶层结构现在是一个 map[NodeID]*NodeResult，直接反映了图的节点集合，而不是线性的阶段列表。
 更丰富的 Skipped 语义: StatusSkipped 现在可以有两种含义：
-在 HostResult 中，Skipped: true 意味着 Precheck 成功，该主机上的操作被跳过。
-在 NodeResult 中，Status: StatusSkipped 意味着该节点因为其依赖的父节点失败而根本没有被调度执行。NodeResult.Message 字段可以用来解释这一点。
-结果扁平化: 结果结构是扁平的 map，这使得查询特定节点的结果变得非常高效（O(1) 时间复杂度）。
+- 在 HostResult 中，Skipped: true 意味着 Precheck 成功，该主机上的操作被跳过。
+- 在 NodeResult 中，Status: StatusSkipped 意味着该节点因为其依赖的父节点失败而根本没有被调度执行。NodeResult.Message 字段可以用来解释这一点。
+- 结果扁平化: 结果结构是扁平的 map，这使得查询特定节点的结果变得非常高效（O(1) 时间复杂度）。
 对其他层的影响
-这个改变对 pkg/plan 之外的层级有明确的影响：
-pkg/task (决策层):
-Task 的 Plan 方法现在需要返回 *plan.ExecutionGraph 而不是 *plan.ExecutionPlan。
-Task 的核心职责变为：创建节点 (ExecutionNode) 并定义它们之间的依赖关系 (Dependencies)。例如，"Upload-Binary" 节点的 Dependencies 必须包含 "Download-Binary" 节点的ID。
-pkg/engine (执行引擎):
-引擎的实现需要从一个简单的循环迭代器升级为一个图调度器 (Graph Scheduler)。
-核心算法:
-调用 graph.Validate() 确保无环。
-计算每个节点的入度（即依赖数量）。
-将所有入度为 0 的节点放入一个“可执行队列”。
-当有计算资源时，从队列中取出一个节点来执行。
-节点执行并发进行（可以使用 worker pool 或 errgroup）。
-当一个节点成功执行完毕后，遍历图中所有以它为依赖的下游节点，将它们的入度减 1。
-如果某个下游节点的入度变为 0，则将其放入“可执行队列”。
-如果一个节点执行失败，所有直接或间接依赖于它的下游节点的状态都将被标记为 Skipped，并且不会被执行。
-当队列为空且没有正在运行的节点时，整个图执行完毕。
-这个基于执行图的设计是业界领先的部署和编排工具（如 a lot of CI/CD systems, Airflow, etc.）所采用的核心模型，它提供了无与伦比的灵活性和执行效率。
+- 这个改变对 pkg/plan 之外的层级有明确的影响：
+  - pkg/task (决策层):
+  - Task 的 Plan 方法现在需要返回 *plan.ExecutionGraph 而不是 *plan.ExecutionPlan。
+  - Task 的核心职责变为：创建节点 (ExecutionNode) 并定义它们之间的依赖关系 (Dependencies)。例如，"Upload-Binary" 节点的 Dependencies 必须包含 "Download-Binary" 节点的ID。
+  - pkg/engine (执行引擎):
+    - 引擎的实现需要从一个简单的循环迭代器升级为一个图调度器 (Graph Scheduler)。
+    - 核心算法:
+      - 调用 graph.Validate() 确保无环。
+      - 计算每个节点的入度（即依赖数量）。
+      - 将所有入度为 0 的节点放入一个“可执行队列”。
+      - 当有计算资源时，从队列中取出一个节点来执行。
+      - 节点执行并发进行（可以使用 worker pool 或 errgroup）。
+      - 当一个节点成功执行完毕后，遍历图中所有以它为依赖的下游节点，将它们的入度减 1。
+      - 如果某个下游节点的入度变为 0，则将其放入“可执行队列”。
+      - 如果一个节点执行失败，所有直接或间接依赖于它的下游节点的状态都将被标记为 Skipped，并且不会被执行。
+      - 当队列为空且没有正在运行的节点时，整个图执行完毕。
+      - 这个基于执行图的设计是业界领先的部署和编排工具（如 a lot of CI/CD systems, Airflow, etc.）所采用的核心模型，它提供了无与伦比的灵活性和执行效率。

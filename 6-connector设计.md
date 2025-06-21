@@ -1,6 +1,6 @@
 pkg/connector已存在，已经实现
 
-# interface.go
+### interface.go
 ```aiignore
 package connector
 
@@ -148,7 +148,7 @@ type ExtendedConnector interface {
 
 ```
 
-# options.go
+### options.go
 ```aiignore
 package connector
 
@@ -201,7 +201,8 @@ type FileTransferOptions struct {
 
 ```
 
-同时实现了ssh.go支持远程执行
+### 同时实现了ssh.go支持远程执行
+### ssh.go
 ```aiignore
 package connector
 
@@ -883,7 +884,8 @@ func dialSSH(ctx context.Context, cfg ConnectionCfg, effectiveConnectTimeout tim
 }
 
 ```
-local.go支持本地执行
+### local.go支持本地执行
+### local.go
 ```aiignore
 package connector
 
@@ -1203,7 +1205,8 @@ func (l *LocalConnector) GetOS(ctx context.Context) (*OS, error) {
 var _ Connector = &LocalConnector{}
 
 ```
-同时还实现了pool.go支持ssh连接池
+### 同时还实现了pool.go支持ssh连接池
+### pool.go
 ```aiignore
 package connector
 
@@ -1864,7 +1867,8 @@ func (cfg *ConnectionCfg) ToSSHClientConfig() (*ssh.ClientConfig, error) {
 }
 
 ```
-error.go支持CommandError，这个结构体是所有失败的命令执行返回的标准化错误对象，包含足够的信息以便上层进行诊断和决策。
+### error.go支持CommandError，这个结构体是所有失败的命令执行返回的标准化错误对象，包含足够的信息以便上层进行诊断和决策。
+### error.go
 ```aiignore
 package connector
 
@@ -1896,7 +1900,8 @@ func (e *ConnectionError) Error() string {
 }
 
 ```
-host_impl.go引用v1alpha1.HostSpec
+### host_impl.go引用v1alpha1.HostSpec
+### host_impl.go
 ```aiignore
 package connector
 

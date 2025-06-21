@@ -1,7 +1,8 @@
-pkg/task - 战术规划单元 (设计变更)
-Task 不再生成一个自包含的、线性的 ExecutionPlan。相反，它现在生成一个子图 (sub-graph)，并返回这个子图的入口节点 (entry points)和出口节点 (exit points)。这使得上层 (Module) 可以将多个 Task 的子图“链接”起来。
-task.ExecutionFragment 结构体 (新增):
-这是一个新的数据结构，用于表示 Task 生成的规划结果。
+### pkg/task - 战术规划单元 (设计变更)
+#### Task 不再生成一个自包含的、线性的 ExecutionPlan。相反，它现在生成一个子图 (sub-graph)，并返回这个子图的入口节点 (entry points)和出口节点 (exit points)。这使得上层 (Module) 可以将多个 Task 的子图“链接”起来。
+#### task.ExecutionFragment 结构体 (新增):
+##### 这是一个新的数据结构，用于表示 Task 生成的规划结果。
+###### task_excution_fragment.go
 ```aiignore
 package task
 
@@ -23,8 +24,9 @@ type ExecutionFragment struct {
 }
 
 ```
-task.Task 接口 (变更):
-Plan 方法的返回值类型发生了根本性变化。
+### task.Task 接口 (变更):
+##### Plan 方法的返回值类型发生了根本性变化。
+###### interface.go
 ```aiignore
 package task
 
@@ -49,13 +51,13 @@ type Task interface {
 }
 
 ```
-设计解读:
-Task 现在是一个独立的“图构建器”。它构建一个包含内部依赖关系的小型图。
+#### 设计解读:
+- Task 现在是一个独立的“图构建器”。它构建一个包含内部依赖关系的小型图。
 通过暴露 EntryNodes 和 ExitNodes，Task 为上层提供了“连接点”，使得多个Task的图可以被组装成一个更大的图。
 
 
-职责:
-读取配置: 从 ctx.GetClusterConfig() 获取用户定义的参数，如版本号、特性开关等。
-条件性规划 (Conditional Planning): 根据配置决定是否需要执行某些操作。例如，如果 cluster.spec.monitoring.enabled 为 false，那么“安装Prometheus”的 Task 的 IsRequired 方法就可以直接返回 false。
-参数化节点 (Parameterized Nodes): 使用配置中的值来参数化 Step。例如，下载 etcd 的 Step 的 URL 会根据 cluster.spec.etcd.version 来动态构建。
-结构性规划 (Structural Planning): 配置还可以影响图的结构。例如，如果 cluster.spec.etcd.external 为 true，则“安装Etcd”的 Task 可能会跳过所有与etcd相关的节点。
+#### 职责:
+- 读取配置: 从 ctx.GetClusterConfig() 获取用户定义的参数，如版本号、特性开关等。
+- 条件性规划 (Conditional Planning): 根据配置决定是否需要执行某些操作。例如，如果 cluster.spec.monitoring.enabled 为 false，那么“安装Prometheus”的 Task 的 IsRequired 方法就可以直接返回 false。
+- 参数化节点 (Parameterized Nodes): 使用配置中的值来参数化 Step。例如，下载 etcd 的 Step 的 URL 会根据 cluster.spec.etcd.version 来动态构建。
+- 结构性规划 (Structural Planning): 配置还可以影响图的结构。例如，如果 cluster.spec.etcd.external 为 true，则“安装Etcd”的 Task 可能会跳过所有与etcd相关的节点。
