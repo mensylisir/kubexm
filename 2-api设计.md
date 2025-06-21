@@ -1,0 +1,1 @@
+pkg/apis/kubexms/v1alpha1已存在，已经设计好了
