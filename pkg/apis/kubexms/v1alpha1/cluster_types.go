@@ -10,6 +10,16 @@ import (
 	"time"
 )
 
+const (
+	// ClusterTypeKubeXM indicates a cluster where core components (kube-apiserver,
+	// kube-controller-manager, kube-scheduler, kube-proxy) are deployed as binaries.
+	ClusterTypeKubeXM = "kubexm"
+
+	// ClusterTypeKubeadm indicates a cluster where core components are deployed as static Pods
+	// managed by kubeadm.
+	ClusterTypeKubeadm = "kubeadm"
+)
+
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:object:root=true
@@ -28,6 +38,7 @@ type Cluster struct {
 
 // ClusterSpec defines the desired state of the Kubernetes cluster.
 type ClusterSpec struct {
+	Type                 string                    `json:"type,omitempty" yaml:"type,omitempty"` // "kubexm" or "kubeadm"
 	RoleGroups           *RoleGroupsSpec           `json:"roleGroups,omitempty" yaml:"roleGroups,omitempty"`
 	ControlPlaneEndpoint *ControlPlaneEndpointSpec `json:"controlPlaneEndpoint,omitempty" yaml:"controlPlaneEndpoint,omitempty"`
 	System               *SystemSpec               `json:"system,omitempty" yaml:"system,omitempty"`
@@ -69,6 +80,7 @@ type RoleGroupsSpec struct {
 	Etcd         EtcdRoleSpec         `json:"etcd,omitempty" yaml:"etcd,omitempty"`
 	LoadBalancer LoadBalancerRoleSpec `json:"loadBalancer,omitempty" yaml:"loadBalancer,omitempty"`
 	Storage      StorageRoleSpec      `json:"storage,omitempty" yaml:"storage,omitempty"`
+	Registry     RegistryRoleSpec     `json:"registry,omitempty" yaml:"registry,omitempty"`
 	CustomRoles []CustomRoleSpec `json:"customRoles,omitempty" yaml:"customRoles,omitempty"`
 }
 
@@ -94,6 +106,11 @@ type LoadBalancerRoleSpec struct {
 
 // StorageRoleSpec defines the configuration for storage nodes.
 type StorageRoleSpec struct {
+	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
+}
+
+// RegistryRoleSpec defines the configuration for registry nodes.
+type RegistryRoleSpec struct {
 	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
@@ -151,6 +168,11 @@ func SetDefaults_Cluster(cfg *Cluster) {
 		return
 	}
 	cfg.SetGroupVersionKind(SchemeGroupVersion.WithKind("Cluster"))
+
+	if cfg.Spec.Type == "" {
+		cfg.Spec.Type = ClusterTypeKubeXM // Default to kubexm type
+	}
+
 	if cfg.Spec.Global == nil {
 		cfg.Spec.Global = &GlobalSpec{}
 	}
@@ -270,6 +292,19 @@ func Validate_Cluster(cfg *Cluster) error {
 	if strings.TrimSpace(cfg.ObjectMeta.Name) == "" {
 		verrs.Add("metadata.name: cannot be empty")
 	}
+
+	validClusterTypes := []string{ClusterTypeKubeXM, ClusterTypeKubeadm}
+	isValidClusterType := false
+	for _, vt := range validClusterTypes {
+		if cfg.Spec.Type == vt {
+			isValidClusterType = true
+			break
+		}
+	}
+	if !isValidClusterType {
+		verrs.Add("spec.type: invalid cluster type '%s', must be one of %v", cfg.Spec.Type, validClusterTypes)
+	}
+
 	if cfg.Spec.Global != nil {
 		g := cfg.Spec.Global
 		if g.Port != 0 && (g.Port <= 0 || g.Port > 65535) {

@@ -57,12 +57,12 @@ func (e *dagExecutor) Execute(ctx EngineExecuteContext, g *plan.ExecutionGraph, 
 		logger.Error(err, "Execution graph validation failed")
 		return result, fmt.Errorf("graph validation failed: %w", err)
 	}
-	logger.V(1).Info("Execution graph validated successfully.")
+	logger.Debugf("Execution graph validated successfully.") // Changed V(1).Info to Debugf
 
 	inDegree := make(map[plan.NodeID]int)
 	dependents := make(map[plan.NodeID][]plan.NodeID)
 	queue := make([]plan.NodeID, 0)
-	nodeResultsLock := new(sync.Mutex)
+	nodeResultsLock := new(sync.Mutex) // This lock will be used
 
 	for id, node := range g.Nodes {
 		inDegree[id] = len(node.Dependencies)
@@ -82,7 +82,7 @@ func (e *dagExecutor) Execute(ctx EngineExecuteContext, g *plan.ExecutionGraph, 
 		result.EndTime = time.Now()
 		return result, fmt.Errorf(msg)
 	}
-	logger.V(1).Info("Initial execution queue populated.", "queueSize", len(queue), "initialQueue", queue)
+	logger.Debugf("Initial execution queue populated. queueSize: %d, initialQueue: %v", len(queue), queue) // Changed V(1).Info to Debugf
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, e.maxWorkers)
@@ -180,9 +180,9 @@ func (e *dagExecutor) Execute(ctx EngineExecuteContext, g *plan.ExecutionGraph, 
 						finalStepCtxForHost := stepCtxForHost.WithGoContext(hostCtxGroup)
 
 						hostRes := e.runStepOnHost(finalStepCtxForHost, node.Step)
-						nodeResLock.Lock()
+						nodeResultsLock.Lock() // Corrected typo: nodeResLock -> nodeResultsLock
 						nodeRes.HostResults[currentHost.GetName()] = hostRes
-						nodeResLock.Unlock()
+						nodeResultsLock.Unlock() // Corrected typo: nodeResLock -> nodeResultsLock
 						if hostRes.Status == plan.StatusFailed {
 							return fmt.Errorf("step '%s' on host '%s' failed: %s", node.StepName, currentHost.GetName(), hostRes.Message)
 						}
@@ -242,7 +242,7 @@ func (e *dagExecutor) Execute(ctx EngineExecuteContext, g *plan.ExecutionGraph, 
 						if !failedNodes[dependentID] && result.NodeResults[dependentID].Status == plan.StatusPending {
 							inDegree[dependentID]--
 							if inDegree[dependentID] == 0 {
-								logger.V(1).Info("Adding node to execution queue", "nodeID", dependentID, "nodeName", g.Nodes[dependentID].Name)
+								logger.Debugf("Adding node to execution queue. nodeID: %s, nodeName: %s", dependentID, g.Nodes[dependentID].Name) // Changed V(1).Info to Debugf
 								queue = append(queue, dependentID)
 							}
 						}
@@ -294,13 +294,13 @@ func (e *dagExecutor) Execute(ctx EngineExecuteContext, g *plan.ExecutionGraph, 
 }
 
 // runStepOnHost executes a single step on a single host.
-// It now takes engine.StepContext (defined in engine/interface.go).
-func (e *dagExecutor) runStepOnHost(stepCtx StepContext, s step.Step) *plan.HostResult {
+// It now takes step.StepContext (defined in step/interface.go).
+func (e *dagExecutor) runStepOnHost(stepCtx step.StepContext, s step.Step) *plan.HostResult {
 	currentHost := stepCtx.GetHost()
 	hr := plan.NewHostResult(currentHost.GetName())
 	engineLogger := stepCtx.GetLogger().With("engine_step_runner", s.Meta().Name, "host", currentHost.GetName())
 
-	engineLogger.V(1).Info("Running Precheck")
+	engineLogger.Debugf("Running Precheck") // Changed V(1).Info to Debugf
 	isDone, err := s.Precheck(stepCtx, currentHost) // Pass currentHost, stepCtx is already host-scoped conceptually
 	if err != nil {
 		hr.Status = plan.StatusFailed

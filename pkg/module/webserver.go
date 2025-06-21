@@ -2,9 +2,10 @@ package module
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/plan"    // Updated import path
-	"github.com/mensylisir/kubexm/pkg/runtime" // Updated import path
-	"github.com/mensylisir/kubexm/pkg/task"    // Updated import path
+	// "github.com/mensylisir/kubexm/pkg/plan" // REMOVED as unused
+	// "github.com/mensylisir/kubexm/pkg/runtime" // REMOVED
+	"github.com/mensylisir/kubexm/pkg/task" // Updated import path for task.Task, task.TaskContext
+	// "github.com/mensylisir/kubexm/pkg/module" // Not needed if ModuleContext is local
 )
 
 // WebServerModule is an example module for managing a web server.
@@ -17,7 +18,7 @@ type WebServerModule struct {
 func NewWebServerModule() Module {
 	return &WebServerModule{
 		tasks: []task.Task{
-			task.NewInstallNginxTask(), // Assumes NewInstallNginxTask is available in package task
+			// task.NewInstallNginxTask(), // TODO: This task needs to be defined or found
 		},
 	}
 }
@@ -31,8 +32,9 @@ func (m *WebServerModule) Tasks() []task.Task {
 }
 
 // Plan generates the execution plan for all relevant tasks within this module.
-func (m *WebServerModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionPlan, error) {
-	modulePlan := &plan.ExecutionPlan{Phases: []plan.Phase{}}
+func (m *WebServerModule) Plan(ctx ModuleContext) (*task.ExecutionFragment, error) { // Changed return type to *task.ExecutionFragment
+	// modulePlan := &plan.ExecutionPlan{Phases: []plan.Phase{}} // Old plan structure
+	moduleFragment := task.NewEmptyFragment() // Initialize with an empty fragment
 
 	// The issue description implies ModuleContext can be asserted to TaskContext.
 	// This might need refinement if the context hierarchy is different.
@@ -53,10 +55,13 @@ func (m *WebServerModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionPlan, 
 	// This means ModuleContext must be an interface that TaskContext implements,
 	// or ModuleContext and TaskContext are the same, or TaskContext is embedded.
 	// We will proceed with the example's approach.
-	// If runtime.ModuleContext is not directly assertable to runtime.TaskContext,
-	// this code will fail at runtime. The runtime context design needs to ensure this is valid.
+	// runtime.TaskContext has been moved to task.TaskContext.
+	// ModuleContext is now local to pkg/module.
+	// task.TaskContext embeds module.ModuleContext.
+	// So, the concrete type *runtime.Context implements task.TaskContext.
+	// If ctx is module.ModuleContext, we need to assert it to task.TaskContext.
 
-	taskCtx, ok := ctx.(runtime.TaskContext)
+	taskCtx, ok := ctx.(task.TaskContext) // Changed to task.TaskContext
 	if !ok {
 		// This is a critical design point. If ModuleContext is not a TaskContext,
 		// then the way tasks get their specific context needs to be defined.
@@ -77,15 +82,35 @@ func (m *WebServerModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionPlan, 
 		}
 
 		// Get the plan for the task
-		taskPlan, err := t.Plan(taskCtx)
+		taskFragment, err := t.Plan(taskCtx) // t.Plan now returns *task.ExecutionFragment
 		if err != nil {
 			return nil, fmt.Errorf("planning failed for task %s in module %s: %w", t.Name(), m.Name(), err)
 		}
 
-		// Append the task's phases to the module's plan
-		if taskPlan != nil && len(taskPlan.Phases) > 0 {
-			modulePlan.Phases = append(modulePlan.Phases, taskPlan.Phases...)
+		// Append the task's fragment to the module's fragment
+		// This requires merging nodes and managing EntryNodes/ExitNodes, similar to PreflightModule.Plan
+		// For now, if tasks are empty, this loop doesn't run.
+		// If tasks were present, proper fragment merging would be needed here.
+		// Example (simplified, assumes tasks are sequential and no complex linking):
+		if taskFragment != nil && len(taskFragment.Nodes) > 0 {
+			for id, node := range taskFragment.Nodes {
+				if _, exists := moduleFragment.Nodes[id]; exists {
+					return nil, fmt.Errorf("duplicate NodeID %s from task %s", id, t.Name())
+				}
+				moduleFragment.Nodes[id] = node
+			}
+			// Basic sequential linking:
+			// if len(moduleFragment.ExitNodes) > 0 { // If not the first task fragment
+			//    for _, entry := range taskFragment.EntryNodes {
+			//        // Add deps from moduleFragment.ExitNodes to entry
+			//    }
+			// } else {
+			//    moduleFragment.EntryNodes = append(moduleFragment.EntryNodes, taskFragment.EntryNodes...)
+			// }
+			// moduleFragment.ExitNodes = taskFragment.ExitNodes // Overwrite with last task's exits
 		}
 	}
-	return modulePlan, nil
+	// TODO: Implement proper fragment merging logic if tasks are added back.
+	// For now, with no tasks, it returns an empty fragment.
+	return moduleFragment, nil
 }

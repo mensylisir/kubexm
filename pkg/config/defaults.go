@@ -2,7 +2,9 @@ package config
 
 import (
 	"time"
+	// "fmt" // Removed as unused
 	// "strings" // May be needed for some default logic
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // Added import for v1alpha1 types
 )
 
 // SetDefaults applies default values to the Cluster configuration
@@ -22,8 +24,8 @@ func SetDefaults(cfg *Cluster) {
 	}
 
 	// Default Metadata if not set (e.g., Name might be required by validation later if still empty)
-	if cfg.Metadata.Name == "" {
-		// cfg.Metadata.Name = "kubexms-cluster" // Example default name, validation might enforce presence
+	if cfg.ObjectMeta.Name == "" { // Changed Metadata to ObjectMeta
+		// cfg.ObjectMeta.Name = "kubexms-cluster" // Example default name, validation might enforce presence
 	}
 
 	// GlobalSpec defaults
@@ -56,12 +58,7 @@ func SetDefaults(cfg *Cluster) {
 		if host.PrivateKeyPath == "" {
 			host.PrivateKeyPath = cfg.Spec.Global.PrivateKeyPath // Inherit from global
 		}
-		if host.WorkDir == "" {
-			host.WorkDir = cfg.Spec.Global.WorkDir // Inherit from global
-			if host.WorkDir == "" { // Fallback if global was also empty
-				host.WorkDir = fmt.Sprintf("/tmp/kubexms_work_%s", host.Name) // Host-specific fallback
-			}
-		}
+		// host.WorkDir removed as it's not in v1alpha1.HostSpec
 		if host.Type == "" {
 			host.Type = "ssh" // Default host type
 		}
@@ -73,23 +70,23 @@ func SetDefaults(cfg *Cluster) {
 		    host.Labels = make(map[string]string)
 		}
 		if host.Taints == nil {
-		    host.Taints = []TaintSpec{}
+		    host.Taints = []v1alpha1.TaintSpec{} // Changed to v1alpha1.TaintSpec
 		}
 	}
 
 	// ContainerRuntime defaults
 	if cfg.Spec.ContainerRuntime == nil {
-		cfg.Spec.ContainerRuntime = &ContainerRuntimeSpec{}
+		cfg.Spec.ContainerRuntime = &v1alpha1.ContainerRuntimeConfig{} // Changed to v1alpha1.ContainerRuntimeConfig
 	}
 	if cfg.Spec.ContainerRuntime.Type == "" {
-		cfg.Spec.ContainerRuntime.Type = "containerd" // Default runtime
+		cfg.Spec.ContainerRuntime.Type = v1alpha1.ContainerRuntimeContainerd // Default runtime using const
 	}
 	// cfg.Spec.ContainerRuntime.Version could default here if desired.
 
 	// ContainerdSpec defaults (if containerd is the type)
-	if cfg.Spec.ContainerRuntime.Type == "containerd" {
-		if cfg.Spec.Containerd == nil {
-			cfg.Spec.Containerd = &ContainerdSpec{} // Initialize if nil
+	if cfg.Spec.ContainerRuntime.Type == v1alpha1.ContainerRuntimeContainerd { // Using const
+		if cfg.Spec.ContainerRuntime.Containerd == nil { // Field name is Containerd in v1alpha1.ContainerRuntimeConfig
+			cfg.Spec.ContainerRuntime.Containerd = &v1alpha1.ContainerdConfig{} // Changed to v1alpha1.ContainerdConfig
 		}
 		// UseSystemdCgroup is a bool, defaults to false if not set.
 		// If a true default is desired when the ContainerdSpec section is present:
@@ -99,32 +96,33 @@ func SetDefaults(cfg *Cluster) {
 		// when `containerd:` section exists, we can't distinguish "omitted" from "false".
 		// Let's assume steps will default it to true if not specified, or config must be explicit.
 		// Here, we just initialize maps/slices.
-		if cfg.Spec.Containerd.RegistryMirrors == nil { // Was RegistryMirrorsConfig
-		    cfg.Spec.Containerd.RegistryMirrors = make(map[string][]string)
+		// Accessing through cfg.Spec.ContainerRuntime.Containerd
+		if cfg.Spec.ContainerRuntime.Containerd.RegistryMirrors == nil {
+		    cfg.Spec.ContainerRuntime.Containerd.RegistryMirrors = make(map[string][]string)
 		}
-		if cfg.Spec.Containerd.InsecureRegistries == nil {
-		    cfg.Spec.Containerd.InsecureRegistries = []string{}
+		if cfg.Spec.ContainerRuntime.Containerd.InsecureRegistries == nil {
+		    cfg.Spec.ContainerRuntime.Containerd.InsecureRegistries = []string{}
 		}
 	}
 
 	// EtcdSpec defaults
 	if cfg.Spec.Etcd == nil {
-		cfg.Spec.Etcd = &EtcdSpec{}
+		cfg.Spec.Etcd = &v1alpha1.EtcdConfig{} // Changed to v1alpha1.EtcdConfig
 	}
 	if cfg.Spec.Etcd.Type == "" {
-		cfg.Spec.Etcd.Type = "stacked" // Default to stacked etcd
+		cfg.Spec.Etcd.Type = v1alpha1.EtcdTypeKubeXMSInternal // Default to stacked etcd using const
 	}
-	if cfg.Spec.Etcd.Nodes == nil {
-	    cfg.Spec.Etcd.Nodes = []string{}
-	}
+	// v1alpha1.EtcdConfig does not have a direct Nodes []string field.
+	// External Etcd has Endpoints. Stacked Etcd nodes are derived from HostSpec roles.
+	// So, initializing cfg.Spec.Etcd.Nodes is removed.
 
 
 	// KubernetesSpec defaults
 	if cfg.Spec.Kubernetes == nil {
-		cfg.Spec.Kubernetes = &KubernetesSpec{}
+		cfg.Spec.Kubernetes = &v1alpha1.KubernetesConfig{} // Changed to v1alpha1.KubernetesConfig
 	}
-	if cfg.Spec.Kubernetes.ClusterName == "" && cfg.Metadata.Name != "" {
-		cfg.Spec.Kubernetes.ClusterName = cfg.Metadata.Name
+	if cfg.Spec.Kubernetes.ClusterName == "" && cfg.ObjectMeta.Name != "" { // Changed Metadata to ObjectMeta
+		cfg.Spec.Kubernetes.ClusterName = cfg.ObjectMeta.Name // Changed Metadata to ObjectMeta
 	}
 	if cfg.Spec.Kubernetes.PodSubnet == "" {
 		// cfg.Spec.Kubernetes.PodSubnet = "10.244.0.0/16" // Common default, but better set by user or CNI
@@ -136,16 +134,16 @@ func SetDefaults(cfg *Cluster) {
 	    cfg.Spec.Kubernetes.FeatureGates = make(map[string]bool)
 	}
 	// Initialize sub-specs if nil
-	if cfg.Spec.Kubernetes.APIServer == nil { cfg.Spec.Kubernetes.APIServer = &APIServerSpec{} }
-	if cfg.Spec.Kubernetes.ControllerManager == nil { cfg.Spec.Kubernetes.ControllerManager = &CMKSpec{} }
-	if cfg.Spec.Kubernetes.Scheduler == nil { cfg.Spec.Kubernetes.Scheduler = &SchedulerSpec{} }
-	if cfg.Spec.Kubernetes.Kubelet == nil { cfg.Spec.Kubernetes.Kubelet = &KubeletSpec{} }
-	if cfg.Spec.Kubernetes.KubeProxy == nil { cfg.Spec.Kubernetes.KubeProxy = &KubeProxySpec{} }
+	if cfg.Spec.Kubernetes.APIServer == nil { cfg.Spec.Kubernetes.APIServer = &v1alpha1.APIServerConfig{} } // Changed
+	if cfg.Spec.Kubernetes.ControllerManager == nil { cfg.Spec.Kubernetes.ControllerManager = &v1alpha1.ControllerManagerConfig{} } // Changed
+	if cfg.Spec.Kubernetes.Scheduler == nil { cfg.Spec.Kubernetes.Scheduler = &v1alpha1.SchedulerConfig{} } // Changed
+	if cfg.Spec.Kubernetes.Kubelet == nil { cfg.Spec.Kubernetes.Kubelet = &v1alpha1.KubeletConfig{} } // Changed
+	if cfg.Spec.Kubernetes.KubeProxy == nil { cfg.Spec.Kubernetes.KubeProxy = &v1alpha1.KubeProxyConfig{} } // Changed
 
 
 	// NetworkSpec defaults
 	if cfg.Spec.Network == nil {
-		cfg.Spec.Network = &NetworkSpec{}
+		cfg.Spec.Network = &v1alpha1.NetworkConfig{} // Changed
 	}
 	if cfg.Spec.Network.Plugin == "" {
 		// cfg.Spec.Network.Plugin = "calico" // Example default CNI
@@ -153,7 +151,7 @@ func SetDefaults(cfg *Cluster) {
 
 	// HighAvailabilitySpec defaults
 	if cfg.Spec.HighAvailability == nil {
-		cfg.Spec.HighAvailability = &HighAvailabilitySpec{}
+		cfg.Spec.HighAvailability = &v1alpha1.HighAvailabilityConfig{} // Changed
 	}
 	// Example: Default HA type if multiple control plane nodes and no external LB specified
 	// This requires more complex logic based on other fields (e.g. APIServerSpec.ExternalLoadBalancer)
@@ -167,25 +165,13 @@ func SetDefaults(cfg *Cluster) {
 
 	// Addons: Initialize slices if nil
 	if cfg.Spec.Addons == nil {
-	    cfg.Spec.Addons = []AddonSpec{}
+	    cfg.Spec.Addons = []v1alpha1.AddonConfig{} // Changed
 	}
 	// Defaults for individual addon fields (like Enabled) are usually handled by the addon's own logic/spec.
 }
 
-// Helper method (example, could be on ClusterSpec) to get control plane hosts
-// Used for HA defaulting logic example.
-func (cs *ClusterSpec) GetControlPlaneHosts() []HostSpec {
-    var cpHosts []HostSpec
-    for _, h := range cs.Hosts {
-        for _, role := range h.Roles {
-            if role == "master" || role == "control-plane" {
-                cpHosts = append(cpHosts, h)
-                break
-            }
-        }
-    }
-    return cpHosts
-}
+// Removed GetControlPlaneHosts helper function as it was unused and incorrectly defined.
+// If needed later, it can be implemented correctly as a standalone function or method on the appropriate type.
 
 // Helper method (example) for APIServerSpec, if it had an ExternalLoadBalancer field
 // func (as *APIServerSpec) ExternalLoadBalancer() string {
