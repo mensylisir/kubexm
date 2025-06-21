@@ -1,10 +1,25 @@
 package pipeline
 
 import (
+	"context" // Added
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // Added
+	"github.com/mensylisir/kubexm/pkg/cache"                // Added
+	"github.com/mensylisir/kubexm/pkg/logger" // Added
 	"github.com/mensylisir/kubexm/pkg/module"
-	"github.com/mensylisir/kubexm/pkg/plan"    // Uses plan.ExecutionGraph and plan.GraphExecutionResult
-	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/plan"  // Uses plan.ExecutionGraph and plan.GraphExecutionResult
+	"github.com/mensylisir/kubexm/pkg/engine" // Added for GetEngine method in PipelineContext
+	// "github.com/mensylisir/kubexm/pkg/runtime" // REMOVED to break cycle
 )
+
+// PipelineContext defines the methods available at the pipeline execution level.
+type PipelineContext interface {
+	GoContext() context.Context
+	GetLogger() *logger.Logger
+	GetClusterConfig() *v1alpha1.Cluster
+	PipelineCache() cache.PipelineCache
+	GetGlobalWorkDir() string
+	GetEngine() engine.Engine // Added
+}
 
 // Pipeline defines the methods that all concrete pipeline types must implement.
 // Pipelines are responsible for orchestrating multiple Modules to generate
@@ -19,11 +34,11 @@ type Pipeline interface {
 
 	// Plan now generates the final, complete ExecutionGraph for the entire pipeline
 	// by orchestrating and linking ExecutionFragments from its modules.
-	Plan(ctx runtime.PipelineContext) (*plan.ExecutionGraph, error)
+	Plan(ctx PipelineContext) (*plan.ExecutionGraph, error) // Changed to local PipelineContext
 
 	// Run now takes the full runtime Context and a dryRun flag.
 	// It will call its Plan() method to get the ExecutionGraph,
 	// then pass this graph to the Engine for execution.
 	// It returns a GraphExecutionResult.
-	Run(ctx *runtime.Context, dryRun bool) (*plan.GraphExecutionResult, error)
+	Run(ctx PipelineContext, dryRun bool) (*plan.GraphExecutionResult, error) // Changed signature
 }

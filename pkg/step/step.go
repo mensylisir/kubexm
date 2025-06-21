@@ -2,7 +2,7 @@ package step
 
 import (
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
+	// engine import removed, StepContext is now local to pkg/step
 	"github.com/mensylisir/kubexm/pkg/spec"
 )
 
@@ -24,19 +24,19 @@ func (s *NoOpStep) Meta() *spec.StepMeta {
 
 // Precheck by default indicates the step needs to run.
 // Returns false (not done), nil (no error).
-func (s *NoOpStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *NoOpStep) Precheck(ctx StepContext, host connector.Host) (bool, error) { // Changed to StepContext
 	return false, nil
 }
 
 // Run by default does nothing and succeeds.
 // Returns nil (no error).
-func (s *NoOpStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *NoOpStep) Run(ctx StepContext, host connector.Host) error { // Changed to StepContext
 	return nil
 }
 
 // Rollback by default does nothing and succeeds.
 // Returns nil (no error).
-func (s *NoOpStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *NoOpStep) Rollback(ctx StepContext, host connector.Host) error { // Changed to StepContext
 	return nil
 }
 

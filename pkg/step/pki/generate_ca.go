@@ -6,9 +6,10 @@ import (
 	"strings" // For strings.ReplaceAll in subject formatting
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime" // For runtime.Logger and runtime.StepContext
-	"github.com/mensylisir/kubexm/pkg/spec"    // Added for StepMeta
-	"github.com/mensylisir/kubexm/pkg/step"
+	// "github.com/mensylisir/kubexm/pkg/engine" // Removed
+	"github.com/mensylisir/kubexm/pkg/logger" // For logger.Logger type
+	"github.com/mensylisir/kubexm/pkg/spec"   // Added for StepMeta
+	"github.com/mensylisir/kubexm/pkg/step"   // For step.StepContext
 )
 
 // GenerateRootCAStep generates a root Certificate Authority.
@@ -43,7 +44,7 @@ func NewGenerateRootCAStep(instanceName, certPath, keyPath, commonName string, v
 	return s
 }
 
-func (s *GenerateRootCAStep) populateDefaults(logger runtime.Logger) {
+func (s *GenerateRootCAStep) populateDefaults(logger logger.Logger) { // Changed to logger.Logger
 	defaultBaseDir := "/etc/kubexms/pki" // This could be configurable via ClusterSpec
 	if s.CertPath == "" {
 		s.CertPath = filepath.Join(defaultBaseDir, "ca.crt")
@@ -78,7 +79,7 @@ func (s *GenerateRootCAStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *GenerateRootCAStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *GenerateRootCAStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) { // Changed to step.StepContext
 	// populateDefaults needs to be called first to ensure paths are set for check
 	// and logger uses the final step name.
 	s.populateDefaults(ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "populateDefaults.Precheck"))
@@ -118,7 +119,7 @@ func (s *GenerateRootCAStep) Precheck(ctx runtime.StepContext, host connector.Ho
 	return false, nil
 }
 
-func (s *GenerateRootCAStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *GenerateRootCAStep) Run(ctx step.StepContext, host connector.Host) error { // Changed to step.StepContext
 	s.populateDefaults(ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "populateDefaults.Run"))
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 
@@ -178,7 +179,7 @@ func (s *GenerateRootCAStep) Run(ctx runtime.StepContext, host connector.Host) e
 	return nil
 }
 
-func (s *GenerateRootCAStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *GenerateRootCAStep) Rollback(ctx step.StepContext, host connector.Host) error { // Changed to step.StepContext
 	s.populateDefaults(ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "populateDefaults.Rollback"))
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 

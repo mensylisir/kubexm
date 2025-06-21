@@ -5,9 +5,9 @@ import (
 	// "context" // No longer directly needed by BaseTask if Run is gone
 
 	"github.com/mensylisir/kubexm/pkg/connector" // For connector.Host in Filter
-	"github.com/mensylisir/kubexm/pkg/plan"      // For plan.ExecutionPlan
+	// "github.com/mensylisir/kubexm/pkg/plan"      // Removed as unused
 	"github.com/mensylisir/kubexm/pkg/runner"    // For runner.Facts in Filter
-	"github.com/mensylisir/kubexm/pkg/runtime"   // For runtime.TaskContext
+	// "github.com/mensylisir/kubexm/pkg/runtime" // Removed
 	// Unused imports like sync, time, errgroup, spec, step, logger will be removed
 )
 
@@ -53,14 +53,14 @@ func (bt *BaseTask) Description() string {
 
 // IsRequired determines if the task's plan should be generated.
 // Default implementation returns true. Concrete tasks can override this.
-func (bt *BaseTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
+func (bt *BaseTask) IsRequired(ctx TaskContext) (bool, error) { // Changed to local TaskContext
 	return true, nil
 }
 
 // Plan is intended to be implemented by concrete task types.
 // BaseTask.Plan returns an error indicating it's not implemented.
 // Concrete tasks embedding BaseTask must provide their own Plan method.
-func (bt *BaseTask) Plan(ctx runtime.TaskContext) (*ExecutionFragment, error) { // Changed return type
+func (bt *BaseTask) Plan(ctx TaskContext) (*ExecutionFragment, error) { // Changed to local TaskContext
 	return nil, fmt.Errorf("Plan() not implemented for task: %s. Concrete task types must implement this method", bt.Name())
 }
 

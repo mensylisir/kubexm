@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	// "time" // Not directly needed for validation logic itself, but for some types
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // Added import
 )
 
 // ValidationErrors holds a list of validation errors found.
@@ -64,7 +65,7 @@ func Validate(cfg *Cluster) error {
 		verrs.Add("kind: must be %s, got %s", ClusterKind, cfg.Kind)
 	}
 
-	if strings.TrimSpace(cfg.Metadata.Name) == "" {
+	if strings.TrimSpace(cfg.ObjectMeta.Name) == "" { // Changed Metadata to ObjectMeta
 		verrs.Add("metadata.name: cannot be empty")
 	}
 
@@ -139,11 +140,11 @@ func Validate(cfg *Cluster) error {
 		if cfg.Spec.ContainerRuntime.Type != "" && !isRuntimeValid  {
 			verrs.Add("spec.containerRuntime.type: invalid type '%s', must be one of %v (or empty for default 'containerd')", cfg.Spec.ContainerRuntime.Type, validRuntimeTypes)
 		}
-		if cfg.Spec.ContainerRuntime.Type == "containerd" {
-			if cfg.Spec.Containerd == nil {
+		if cfg.Spec.ContainerRuntime.Type == v1alpha1.ContainerRuntimeContainerd { // Use const
+			if cfg.Spec.ContainerRuntime.Containerd == nil { // Check correct path
 				// SetDefaults initializes this if ContainerRuntime.Type is "containerd".
 				// So, this should not be nil if type is containerd after defaults.
-				// verrs.Add("spec.containerd: must be defined if containerRuntime.type is 'containerd'")
+				// verrs.Add("spec.containerRuntime.containerd: must be defined if containerRuntime.type is 'containerd'")
 			} else {
 				// Validate ContainerdSpec fields if any, e.g., version format
 			}
@@ -215,11 +216,11 @@ func Validate(cfg *Cluster) error {
 
 	// HighAvailability validation
 	if cfg.Spec.HighAvailability != nil { // HighAvailabilitySpec is a pointer
-		if cfg.Spec.HighAvailability.Type != "" {
+		// if cfg.Spec.HighAvailability.Type != "" { // .Type does not exist directly on HighAvailabilityConfig
 			// Example: if cfg.Spec.HighAvailability.Type == "keepalived" && cfg.Spec.HighAvailability.VIP == "" {
 			// 	verrs.Add("spec.highAvailability.vip: must be set if type is 'keepalived'")
 			// }
-		}
+		// }
 	}
 
 	if !verrs.IsEmpty() {
