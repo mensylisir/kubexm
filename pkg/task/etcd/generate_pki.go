@@ -3,14 +3,12 @@ package etcd
 import (
 	"fmt"
 
-	// "github.com/mensylisir/kubexm/pkg/config" // No longer used
-	"github.com/mensylisir/kubexm/pkg/connector" // For connector.Host in plan.Action, even if nil
+	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
-	// We will use step factories from pkg/step/pki.
-	"github.com/mensylisir/kubexm/pkg/step/pki"
+	"github.com/mensylisir/kubexm/pkg/step/pki" // Assuming this is the correct path for PKI steps
 	"github.com/mensylisir/kubexm/pkg/task"
-	// "github.com/mensylisir/kubexm/pkg/spec" // No longer used
 )
 
 // GenerateEtcdPkiTask orchestrates the generation of etcd PKI.
@@ -19,24 +17,20 @@ type GenerateEtcdPkiTask struct {
 	AltNameHosts         []pki.HostSpecForAltNames // Used by GenerateEtcdAltNamesStep
 	ControlPlaneEndpoint string                  // Used by GenerateEtcdAltNamesStep
 	DefaultLBDomain      string                  // Used by GenerateEtcdAltNamesStep
-	// Other parameters like PKI base paths, CA details might be sourced from ModuleCache
-	// set by SetupEtcdPkiDataContextTask.
 }
 
 // NewGenerateEtcdPkiTask creates a new task for generating etcd PKI.
-// Parameters like altNameHosts, cpEndpoint, and defaultLBDomain are typically
-// derived by the module from the main cluster configuration.
 func NewGenerateEtcdPkiTask(
 	altNameHosts []pki.HostSpecForAltNames,
 	cpEndpoint string,
 	defaultLBDomain string,
-) task.Interface {
+) task.Task { // Return task.Task
 	base := task.NewBaseTask(
 		"GenerateEtcdPki",
 		"Generates all necessary etcd PKI (CA, member, client certificates).",
-		nil,   // This task and its steps are typically local/host-agnostic for planning.
-		nil,   // No specific host filter at this task level.
-		false, // Not ignoring errors by default.
+		[]string{common.ControlNodeRole}, // Explicitly target control-node role for these local steps
+		nil,
+		false,
 	)
 	return &GenerateEtcdPkiTask{
 		BaseTask:             &base,
@@ -46,81 +40,105 @@ func NewGenerateEtcdPkiTask(
 	}
 }
 
-// Name is inherited from BaseTask.
-// func (t *GenerateEtcdPkiTask) Name() string { return t.BaseTask.Name() }
+// Plan generates the execution fragment for creating etcd PKI.
+func (t *GenerateEtcdPkiTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
+	logger := ctx.GetLogger().With("task", t.Name())
+	nodes := make(map[plan.NodeID]*plan.ExecutionNode)
 
-// Description is inherited from BaseTask.
-// func (t *GenerateEtcdPkiTask) Description() string { return t.BaseTask.Description() }
-
-// IsRequired is inherited from BaseTask (defaults to true).
-// This task usually runs if etcd is being set up or PKI needs regeneration.
-// func (t *GenerateEtcdPkiTask) IsRequired(ctx runtime.TaskContext) (bool, error) { return true, nil }
-
-
-// Plan generates the execution plan for creating etcd PKI.
-func (t *GenerateEtcdPkiTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionPlan, error) {
-	logger := ctx.GetLogger().With("task", t.Name(), "phase", "Plan")
-	execPlan := &plan.ExecutionPlan{}
+	// Get the control node host
+	controlNodeHosts, err := ctx.GetHostsByRole(common.ControlNodeRole)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get control node host for PKI generation: %w", err)
+	}
+	if len(controlNodeHosts) == 0 {
+		return nil, fmt.Errorf("control node host with role '%s' not found", common.ControlNodeRole)
+	}
+	// PKI steps typically run on one control node, even if multiple are defined (though unusual).
+	// Taking the first one.
+	controlHost := []connector.Host{controlNodeHosts[0]}
+	controlHostName := []string{controlNodeHosts[0].GetName()}
 
 	// Step 1: Determine/Ensure Etcd PKI Path
-	// Assumes pki.NewDetermineEtcdPKIPathStep exists and uses default cache keys if empty strings are passed.
-	step1 := pki.NewDetermineEtcdPKIPathStep(
-		"", // PKIPathToEnsureSharedDataKey (input from ModuleCache, use default key in step)
-		"", // OutputPKIPathSharedDataKey (output to TaskCache, use default key in step)
-		"", // Step name (use default in step)
+	// Assuming PKI step constructors now take an instance name as their last string argument.
+	step1_determinePath := pki.NewDetermineEtcdPKIPathStep(
+		"", // PKIPathToEnsureSharedDataKey
+		"", // OutputPKIPathSharedDataKey
+		"DetermineEtcdPKIPath", // Instance name for the step
 	)
+	node1_ID := plan.NodeID(fmt.Sprintf("%s-%s", t.Name(), step1_determinePath.Meta().Name))
+	nodes[node1_ID] = &plan.ExecutionNode{
+		Name:         step1_determinePath.Meta().Name,
+		Step:         step1_determinePath,
+		Hosts:        controlHost,
+		HostNames:    controlHostName,
+		StepName:     step1_determinePath.Meta().Name,
+		Dependencies: []plan.NodeID{},
+	}
 
 	// Step 2: Generate Etcd AltNames
-	// Assumes pki.NewGenerateEtcdAltNamesStep exists.
-	step2 := pki.NewGenerateEtcdAltNamesStep(
+	step2_altNames := pki.NewGenerateEtcdAltNamesStep(
 		t.AltNameHosts,
 		t.ControlPlaneEndpoint,
 		t.DefaultLBDomain,
-		"", // Output key for AltNames (use default in step)
-		"", // Step name (use default in step)
+		"", // Output key for AltNames
+		"GenerateEtcdCertAltNames", // Instance name
 	)
+	node2_ID := plan.NodeID(fmt.Sprintf("%s-%s", t.Name(), step2_altNames.Meta().Name))
+	nodes[node2_ID] = &plan.ExecutionNode{
+		Name:         step2_altNames.Meta().Name,
+		Step:         step2_altNames,
+		Hosts:        controlHost,
+		HostNames:    controlHostName,
+		StepName:     step2_altNames.Meta().Name,
+		Dependencies: []plan.NodeID{node1_ID}, // Depends on PKI path being determined
+	}
 
 	// Step 3: Generate Etcd CA Certificate
-	// Assumes pki.NewGenerateEtcdCAStep exists.
-	step3 := pki.NewGenerateEtcdCAStep(
-		"", // Input PKIPath key (use default from TaskCache)
-		"", // Input KubeConf key (use default from ModuleCache)
-		"", // Output CA Cert Object key (use default to TaskCache)
-		"", // Output CA Cert Path key (use default to TaskCache)
-		"", // Output CA Key Path key (use default to TaskCache)
-		"", // Step name (use default)
+	step3_genCA := pki.NewGenerateEtcdCAStep(
+		"", // Input PKIPath key
+		"", // Input KubeConf key
+		"", // Output CA Cert Object key
+		"", // Output CA Cert Path key
+		"", // Output CA Key Path key
+		"GenerateEtcdCA", // Instance name
 	)
+	node3_ID := plan.NodeID(fmt.Sprintf("%s-%s", t.Name(), step3_genCA.Meta().Name))
+	nodes[node3_ID] = &plan.ExecutionNode{
+		Name:         step3_genCA.Meta().Name,
+		Step:         step3_genCA,
+		Hosts:        controlHost,
+		HostNames:    controlHostName,
+		StepName:     step3_genCA.Meta().Name,
+		Dependencies: []plan.NodeID{node1_ID, node2_ID}, // Depends on PKI path and AltNames
+	}
 
 	// Step 4: Generate Etcd Node Certificates (members, clients)
-	// Assumes pki.NewGenerateEtcdNodeCertsStep exists.
-	step4 := pki.NewGenerateEtcdNodeCertsStep(
-		"", // Input PKIPath key (TaskCache)
-		"", // Input AltNames key (TaskCache)
-		"", // Input CA Cert Object key (TaskCache)
-		"", // Input KubeConf key (ModuleCache)
-		"", // Input Hosts key (ModuleCache)
-		"", // Output Generated Files List key (TaskCache)
-		"", // Step name (use default)
+	step4_genNodeCerts := pki.NewGenerateEtcdNodeCertsStep(
+		"", // Input PKIPath key
+		"", // Input AltNames key
+		"", // Input CA Cert Object key
+		"", // Input KubeConf key
+		"", // Input Hosts key
+		"", // Output Generated Files List key
+		"GenerateEtcdNodeCertificates", // Instance name
 	)
-
-	// All these PKI generation steps are typically local operations (no specific remote host target).
-	// Actions will have Hosts: nil, indicating they run on the control/local node context.
-	actions := []plan.Action{
-		{Name: "Determine/Ensure Etcd PKI Path", Step: step1, Hosts: nil},
-		{Name: "Generate Etcd Certificate AltNames", Step: step2, Hosts: nil},
-		{Name: "Generate Etcd CA", Step: step3, Hosts: nil},
-		{Name: "Generate Etcd Node Certificates", Step: step4, Hosts: nil},
+	node4_ID := plan.NodeID(fmt.Sprintf("%s-%s", t.Name(), step4_genNodeCerts.Meta().Name))
+	nodes[node4_ID] = &plan.ExecutionNode{
+		Name:         step4_genNodeCerts.Meta().Name,
+		Step:         step4_genNodeCerts,
+		Hosts:        controlHost,
+		HostNames:    controlHostName,
+		StepName:     step4_genNodeCerts.Meta().Name,
+		Dependencies: []plan.NodeID{node1_ID, node2_ID, node3_ID}, // Depends on PKI path, AltNames, and CA
 	}
 
-	phase := plan.Phase{
-		Name:    "Generate Etcd PKI Assets",
-		Actions: actions,
-	}
-	execPlan.Phases = append(execPlan.Phases, phase)
-
-	logger.Info("Planned steps for Etcd PKI generation.")
-	return execPlan, nil
+	logger.Info("Planned steps for Etcd PKI generation on control-node.")
+	return &task.ExecutionFragment{
+		Nodes:      nodes,
+		EntryNodes: []plan.NodeID{node1_ID},
+		ExitNodes:  []plan.NodeID{node4_ID},
+	}, nil
 }
 
-// Ensure GenerateEtcdPkiTask implements the task.Interface.
-var _ task.Interface = (*GenerateEtcdPkiTask)(nil)
+// Ensure GenerateEtcdPkiTask implements the new task.Task interface.
+var _ task.Task = (*GenerateEtcdPkiTask)(nil)

@@ -3,16 +3,14 @@ package step
 import (
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/runtime" // For StepContext
+	"github.com/mensylisir/kubexm/pkg/spec"    // For spec.StepMeta
 )
 
 // Step defines the interface that all concrete steps must implement.
 // Steps are designed to be idempotent.
 type Step interface {
-	// Name returns a unique identifier for the step type.
-	Name() string
-
-	// Description provides a human-readable summary of what the step does.
-	Description() string
+	// Meta returns the step's metadata, including its name and description.
+	Meta() *spec.StepMeta
 
 	// Precheck determines if the step's conditions are already met or if execution is required.
 	// It is called by the Engine before Run.
