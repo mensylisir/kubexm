@@ -13,6 +13,16 @@ import (
     "github.com/mensylisir/kubexm/pkg/runtime"
 )
 
+// PipelineContext defines the methods available at the pipeline execution level.
+type PipelineContext interface {
+	GoContext() context.Context
+	GetLogger() *logger.Logger
+	GetClusterConfig() *v1alpha1.Cluster
+	PipelineCache() cache.PipelineCache
+	GetGlobalWorkDir() string
+	GetEngine() engine.Engine // Added
+}
+
 type Pipeline interface {
     Name() string
     Modules() []module.Module

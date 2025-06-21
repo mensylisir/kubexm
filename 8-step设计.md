@@ -9,6 +9,46 @@ import (
     "github.com/mensylisir/kubexm/pkg/runtime"
     "github.com/mensylisir/kubexm/pkg/spec"
 )
+// StepContext defines the context passed to individual steps.
+// It is implemented by the runtime and provided by the engine.
+type StepContext interface {
+	GoContext() context.Context
+	GetLogger() *logger.Logger
+	GetHost() connector.Host // The current host this context is for
+	GetRunner() runner.Runner // To execute commands, etc.
+	GetClusterConfig() *v1alpha1.Cluster
+	StepCache() cache.StepCache
+	TaskCache() cache.TaskCache
+	ModuleCache() cache.ModuleCache
+
+	// Host and cluster information access
+	GetHostsByRole(role string) ([]connector.Host, error)
+	GetHostFacts(host connector.Host) (*runner.Facts, error) // Get facts for any host
+	GetCurrentHostFacts() (*runner.Facts, error)             // Convenience for current host
+	GetConnectorForHost(host connector.Host) (connector.Connector, error) // Get connector for any host
+	GetCurrentHostConnector() (connector.Connector, error) // Convenience for current host
+	GetControlNode() (connector.Host, error)
+
+	// Global configurations
+	GetGlobalWorkDir() string
+	IsVerbose() bool
+	ShouldIgnoreErr() bool
+	GetGlobalConnectionTimeout() time.Duration
+
+	// Artifact path helpers
+	GetClusterArtifactsDir() string
+	GetCertsDir() string
+	GetEtcdCertsDir() string
+	GetComponentArtifactsDir(componentName string) string
+	GetEtcdArtifactsDir() string
+	GetContainerRuntimeArtifactsDir() string
+	GetKubernetesArtifactsDir() string
+	GetFileDownloadPath(componentName, version, arch, filename string) string
+	GetHostDir(hostname string) string // Local workdir for a given host
+
+	// WithGoContext is needed by the engine to propagate errgroup's context.
+	WithGoContext(goCtx context.Context) StepContext
+}
 
 // Step defines an atomic, idempotent execution unit.
 type Step interface {
