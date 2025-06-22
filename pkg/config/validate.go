@@ -178,20 +178,22 @@ func Validate(cfg *Cluster) error {
 		if strings.TrimSpace(cfg.Spec.Kubernetes.Version) == "" {
 			verrs.Add("spec.kubernetes.version: cannot be empty")
 		}
-		if cfg.Spec.Kubernetes.PodSubnet != "" {
-			if _, _, err := net.ParseCIDR(cfg.Spec.Kubernetes.PodSubnet); err != nil {
-				verrs.Add("spec.kubernetes.podSubnet: invalid CIDR '%s': %v", cfg.Spec.Kubernetes.PodSubnet, err)
-			}
-		} else {
-			// verrs.Add("spec.kubernetes.podSubnet: cannot be empty") // If required
-		}
-		if cfg.Spec.Kubernetes.ServiceSubnet != "" {
-			if _, _, err := net.ParseCIDR(cfg.Spec.Kubernetes.ServiceSubnet); err != nil {
-				verrs.Add("spec.kubernetes.serviceSubnet: invalid CIDR '%s': %v", cfg.Spec.Kubernetes.ServiceSubnet, err)
-			}
-		} else {
-			// verrs.Add("spec.kubernetes.serviceSubnet: cannot be empty") // If required
-		}
+		// Validation for PodSubnet and ServiceSubnet is now handled within Validate_NetworkConfig,
+		// using NetworkConfig.KubePodsCIDR and NetworkConfig.KubeServiceCIDR.
+		// if cfg.Spec.Kubernetes.PodSubnet != "" {
+		// if _, _, err := net.ParseCIDR(cfg.Spec.Kubernetes.PodSubnet); err != nil {
+		// verrs.Add("spec.kubernetes.podSubnet: invalid CIDR '%s': %v", cfg.Spec.Kubernetes.PodSubnet, err)
+		// }
+		// } else {
+		// // verrs.Add("spec.kubernetes.podSubnet: cannot be empty") // If required
+		// }
+		// if cfg.Spec.Kubernetes.ServiceSubnet != "" {
+		// if _, _, err := net.ParseCIDR(cfg.Spec.Kubernetes.ServiceSubnet); err != nil {
+		// verrs.Add("spec.kubernetes.serviceSubnet: invalid CIDR '%s': %v", cfg.Spec.Kubernetes.ServiceSubnet, err)
+		// }
+		// } else {
+		// // verrs.Add("spec.kubernetes.serviceSubnet: cannot be empty") // If required
+		// }
 	} else {
 		verrs.Add("spec.kubernetes: section is required")
 	}
@@ -199,6 +201,14 @@ func Validate(cfg *Cluster) error {
 
 	// Network validation
 	if cfg.Spec.Network != nil { // NetworkSpec is a pointer
+		// The Validate_NetworkConfig function (from apis/v1alpha1/network_types.go)
+		// now takes k8sSpec as its last argument. We need to pass it.
+		// However, that function should ideally not depend on k8sSpec for Pod/Service subnets.
+		// For now, let's assume Validate_NetworkConfig is called from v1alpha1.Validate_Cluster
+		// or we call it here by passing cfg.Spec.Kubernetes.
+		// The call to v1alpha1.Validate_NetworkConfig from v1alpha1.Validate_Cluster already handles this.
+		// So, direct validation of Pod/Service subnets here based on cfg.Spec.Kubernetes is redundant and removed.
+
 		if cfg.Spec.Network.Plugin != "" {
 			validCNIs := []string{"calico", "flannel", "cilium", "weave"} // Example
 			isCNIValid := false

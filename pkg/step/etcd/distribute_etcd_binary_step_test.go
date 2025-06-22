@@ -72,12 +72,13 @@ func (m *MockTestRunner) EnableService(ctx context.Context, conn connector.Conne
 func (m *MockTestRunner) DisableService(ctx context.Context, conn connector.Connector, facts *runner.Facts, serviceName string) error { return nil }
 func (m *MockTestRunner) IsServiceActive(ctx context.Context, conn connector.Connector, facts *runner.Facts, serviceName string) (bool, error) { return false, nil }
 func (m *MockTestRunner) DaemonReload(ctx context.Context, conn connector.Connector, facts *runner.Facts) error { return nil }
+/*
 func (m *MockTestRunner) Render(ctx context.Context, conn connector.Connector, tmpl *text.template.Template, data interface{}, destPath, permissions string, sudo bool) error { return nil }
 func (m *MockTestRunner) UserExists(ctx context.Context, conn connector.Connector, username string) (bool, error) { return false, nil }
 func (m *MockTestRunner) GroupExists(ctx context.Context, conn connector.Connector, groupname string) (bool, error) { return false, nil }
 func (m *MockTestRunner) AddUser(ctx context.Context, conn connector.Connector, username, group, shell string, homeDir string, createHome bool, systemUser bool) error { return nil }
 func (m *MockTestRunner) AddGroup(ctx context.Context, conn connector.Connector, groupname string, systemGroup bool) error { return nil }
-
+*/
 
 // newTestStepEtcdContext (copied from copy_etcd_binaries_to_path_test.go, consider moving to a shared test helper)
 func newTestStepEtcdContext(t *testing.T, mockRunner *MockTestRunner, cacheValues map[string]interface{}) runtime.StepContext {

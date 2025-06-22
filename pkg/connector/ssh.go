@@ -290,7 +290,7 @@ func (s *SSHConnector) GetOS(ctx context.Context) (*OS, error) {
 		if archErr == nil {
 			osInfo.Arch = strings.TrimSpace(string(archStdout))
 		}
-		kernelStdout, _, kernelErr := s.Exec(ctx, "uname -r", nil)
+		kernelStdout, _, kernelErr = s.Exec(ctx, "uname -r", nil) // Corrected from := to =
 		if kernelErr == nil {
 			osInfo.Kernel = strings.TrimSpace(string(kernelStdout))
 		}

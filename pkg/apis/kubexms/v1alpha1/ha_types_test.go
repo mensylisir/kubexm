@@ -21,13 +21,13 @@ func TestSetDefaults_HighAvailabilityConfig(t *testing.T) {
 	// 	t.Errorf("Default Type = %s, want empty or specific default", cfg.Type)
 	// }
 
-	// Check ControlPlaneEndpoint defaults
-	if cfg.ControlPlaneEndpoint == nil {
-		t.Fatal("ControlPlaneEndpoint should be initialized by defaults")
-	}
-	if cfg.ControlPlaneEndpoint.Port == nil || *cfg.ControlPlaneEndpoint.Port != 6443 {
-		t.Errorf("Default ControlPlaneEndpoint.Port = %v, want 6443", cfg.ControlPlaneEndpoint.Port)
-	}
+	// ControlPlaneEndpoint is no longer part of HighAvailabilityConfig, so these checks are removed.
+	// if cfg.ControlPlaneEndpoint == nil {
+	// 	t.Fatal("ControlPlaneEndpoint should be initialized by defaults")
+	// }
+	// if cfg.ControlPlaneEndpoint.Port == nil || *cfg.ControlPlaneEndpoint.Port != 6443 {
+	// 	t.Errorf("Default ControlPlaneEndpoint.Port = %v, want 6443", cfg.ControlPlaneEndpoint.Port)
+	// }
 
 	t.Run("default with external ManagedKeepalivedHAProxy type", func(t *testing.T) {
 		enabled := true
@@ -107,16 +107,16 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 		expectErr  bool
 	}{
 		{
-			name: "valid external ManagedKeepalivedHAProxy with VIP and endpoint IP",
-			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true), VIP: "192.168.1.100",
-				ControlPlaneEndpoint: &ControlPlaneEndpointConfig{Address: "192.168.1.100"},
+		name: "valid external ManagedKeepalivedHAProxy with endpoint IP (VIP removed, CPE moved)",
+		// VIP is removed from HighAvailabilityConfig. ControlPlaneEndpoint is part of ClusterSpec.
+		// This test should focus on validating HAConfig structure, not CPE content here.
+		cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
 				External: &ExternalLoadBalancerConfig{Type: "ManagedKeepalivedHAProxy", Enabled: boolPtr(true), Keepalived: &KeepalivedConfig{}, HAProxy: &HAProxyConfig{}}},
 			expectErr: false,
 		},
 		{
-			name: "valid external UserProvided with endpoint domain",
+		name: "valid external UserProvided (CPE validation is at Cluster level)",
 			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-				ControlPlaneEndpoint: &ControlPlaneEndpointConfig{Domain: "lb.example.com"},
 				External: &ExternalLoadBalancerConfig{Type: "UserProvided", Enabled: boolPtr(true)}},
 			expectErr: false,
 		},
@@ -144,50 +144,49 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 			wantErrMsg: ".external.keepalived: section must be present if type includes 'Keepalived'",
 			expectErr:  true,
 		},
-		{
-			name: "invalid VIP format",
-			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true), VIP: "invalid-ip",
-				External: &ExternalLoadBalancerConfig{Type: "ManagedKeepalivedHAProxy", Enabled: boolPtr(true), Keepalived: &KeepalivedConfig{}}},
-			wantErrMsg: ".vip: invalid IP address format 'invalid-ip'",
-			expectErr:  true,
-		},
-		{
-			name: "invalid ControlPlaneEndpoint.Address format",
-			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-				ControlPlaneEndpoint: &ControlPlaneEndpointConfig{Address: "invalid-ip-too"}},
-			wantErrMsg: ".controlPlaneEndpoint.address: invalid IP address format 'invalid-ip-too'",
-			expectErr:  true,
-		},
-		{
-			name: "invalid ControlPlaneEndpoint.Port low",
-			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-				ControlPlaneEndpoint: &ControlPlaneEndpointConfig{Port: pintHA(0)}},
-			wantErrMsg: ".controlPlaneEndpoint.port: invalid port 0",
-			expectErr:  true,
-		},
-		{
-			name: "invalid ControlPlaneEndpoint.Port high",
-			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-				ControlPlaneEndpoint: &ControlPlaneEndpointConfig{Port: pintHA(70000)}},
-			wantErrMsg: ".controlPlaneEndpoint.port: invalid port 70000",
-			expectErr:  true,
-		},
+		// { // VIP validation removed as VIP field is removed
+		// 	name: "invalid VIP format",
+		// 	cfg: &HighAvailabilityConfig{Enabled: boolPtr(true), VIP: "invalid-ip",
+		// 		External: &ExternalLoadBalancerConfig{Type: "ManagedKeepalivedHAProxy", Enabled: boolPtr(true), Keepalived: &KeepalivedConfig{}}},
+		// 	wantErrMsg: ".vip: invalid IP address format 'invalid-ip'",
+		// 	expectErr:  true,
+		// },
+		// ControlPlaneEndpoint validation is now done at the ClusterSpec level, not within HAConfig validation directly.
+		// {
+		// 	name: "invalid ControlPlaneEndpoint.Address format",
+		// 	cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
+		// 		/* ControlPlaneEndpoint moved */},
+		// 	wantErrMsg: ".controlPlaneEndpoint.address: invalid IP address format 'invalid-ip-too'",
+		// 	expectErr:  true,
+		// },
+		// {
+		// 	name: "invalid ControlPlaneEndpoint.Port low",
+		// 	cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
+		// 		/* ControlPlaneEndpoint moved */},
+		// 	wantErrMsg: ".controlPlaneEndpoint.port: invalid port 0",
+		// 	expectErr:  true,
+		// },
+		// {
+		// 	name: "invalid ControlPlaneEndpoint.Port high",
+		// 	cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
+		// 		/* ControlPlaneEndpoint moved */},
+		// 	wantErrMsg: ".controlPlaneEndpoint.port: invalid port 70000",
+		// 	expectErr:  true,
+		// },
 		{
 			name: "keepalived_config_present_external_type_mismatch",
 			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
 				External: &ExternalLoadBalancerConfig{Type: "UserProvided", Enabled: boolPtr(true), Keepalived: &KeepalivedConfig{VRID: pintHA(1)}}},
-			// This validation is in Validate_ExternalLoadBalancerConfig, path will be .external.type or .external.keepalived
-			wantErrMsg: ".external.keepalived: should not be set for UserProvided external LB type", // Or type mismatch
+			wantErrMsg: ".external.keepalived: should not be set for UserProvided external LB type",
 			expectErr:  true,
 		},
-		{
-			name: "UserProvided external LB missing endpoint details",
-			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-				ControlPlaneEndpoint: &ControlPlaneEndpointConfig{Address: "", Domain: ""}, // Explicitly empty
-				External: &ExternalLoadBalancerConfig{Type: "UserProvided", Enabled: boolPtr(true)}},
-			wantErrMsg: ".external: if type is UserProvided, parent controlPlaneEndpoint address or domain must be set",
-			expectErr:  true,
-		},
+		// { // This validation now depends on ClusterSpec.ControlPlaneEndpoint, tested at higher level.
+		// 	name: "UserProvided external LB missing endpoint details",
+		// 	cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
+		// 		External: &ExternalLoadBalancerConfig{Type: "UserProvided", Enabled: boolPtr(true)}},
+		// 	wantErrMsg: "if type is UserProvided, a corresponding ControlPlaneEndpoint", // Message might change
+		// 	expectErr:  true,
+		// },
 		// Add more tests for Internal Load Balancer types and their validations
 		{
 			name: "valid internal KubeVIP",

@@ -81,10 +81,12 @@ func TestSetDefaults_NetworkConfig_Overall(t *testing.T) {
 
 // --- Test Validate_NetworkConfig & Sub-configs ---
 func TestValidate_NetworkConfig_Valid(t *testing.T) {
-	k8sCfg := &KubernetesConfig{PodSubnet: "10.244.0.0/16", ServiceSubnet: "10.96.0.0/12"}
+	// k8sCfg is passed to Validate_NetworkConfig but no longer used for Pod/Service CIDR derivation by it.
+	// Can be an empty struct or nil if Validate_NetworkConfig signature changes to remove it.
+	k8sCfg := &KubernetesConfig{}
 	cfg := &NetworkConfig{
 		Plugin:          "calico",
-		KubePodsCIDR:    "10.244.0.0/16", // Can be same as k8sCfg or different if overriding
+		KubePodsCIDR:    "10.244.0.0/16",
 		KubeServiceCIDR: "10.96.0.0/12",
 		Calico: &CalicoConfig{IPIPMode: "Always", VXLANMode: "Never"},
 	}
@@ -97,41 +99,43 @@ func TestValidate_NetworkConfig_Valid(t *testing.T) {
 }
 
 func TestValidate_NetworkConfig_Invalid(t *testing.T) {
-	k8sCfg := &KubernetesConfig{PodSubnet: "10.244.0.0/16", ServiceSubnet: "10.96.0.0/12"}
+	// k8sCfg is passed to Validate_NetworkConfig but its PodSubnet/ServiceSubnet are not used by it anymore.
+	// Providing a default empty one for the signature.
+	defaultK8sCfg := &KubernetesConfig{}
 	tests := []struct {
 		name        string
 		cfg         *NetworkConfig
-		k8sForTest  *KubernetesConfig // Optional k8s config for specific test cases
+		k8sForTest  *KubernetesConfig // Optional k8s config for specific test cases, mostly can be defaultK8sCfg
 		wantErrMsg  string
 	}{
-		{"nil_config", nil, k8sCfg, "network configuration section cannot be nil"},
-		{"empty_pod_cidr_if_k8s_also_empty", &NetworkConfig{Plugin: "calico", KubePodsCIDR: ""}, &KubernetesConfig{PodSubnet:""}, ".kubePodsCIDR: (or kubernetes.podSubnet) cannot be empty"},
-		{"invalid_pod_cidr", &NetworkConfig{Plugin: "calico", KubePodsCIDR: "invalid"}, k8sCfg, ".kubePodsCIDR: invalid CIDR format"},
-		{"calico_nil_if_plugin_calico", &NetworkConfig{Plugin: "calico", Calico: nil}, k8sCfg, ".calico: calico configuration section cannot be nil"},
-		{"calico_invalid_ipip", &NetworkConfig{Plugin: "calico", Calico: &CalicoConfig{IPIPMode: "bad"}}, k8sCfg, ".calico.ipipMode: invalid mode 'bad'"},
-		{"flannel_nil_if_plugin_flannel", &NetworkConfig{Plugin: "flannel", Flannel: nil}, k8sCfg, ".flannel: flannel configuration section cannot be nil"},
-		{"flannel_invalid_backend", &NetworkConfig{Plugin: "flannel", Flannel: &FlannelConfig{BackendMode: "bad"}}, k8sCfg, ".flannel.backendMode: invalid mode 'bad'"},
-		{"kubeovn_invalid_tunneltype", &NetworkConfig{Plugin: "kubeovn", KubeOvn: &KubeOvnConfig{Enabled: pboolNetworkTest(true), TunnelType: pstrNetworkTest("bad")}}, k8sCfg, ".kubeovn.tunnelType: invalid type 'bad'"},
-		{"kubeovn_invalid_joincidr", &NetworkConfig{Plugin: "kubeovn", KubeOvn: &KubeOvnConfig{Enabled: pboolNetworkTest(true), JoinCIDR: pstrNetworkTest("invalid")}}, k8sCfg, ".kubeovn.joinCIDR: invalid CIDR format"},
-		{"hybridnet_invalid_networktype", &NetworkConfig{Plugin: "hybridnet", Hybridnet: &HybridnetConfig{Enabled: pboolNetworkTest(true), DefaultNetworkType: pstrNetworkTest("bad")}}, k8sCfg, ".hybridnet.defaultNetworkType: invalid type 'bad'"},
-		{"calico_invalid_logseverity", &NetworkConfig{Plugin: "calico", Calico: &CalicoConfig{LogSeverityScreen: pstrNetworkTest("trace")}}, k8sCfg, ".calico.logSeverityScreen: invalid: 'trace'"},
-		{"calico_ippool_empty_cidr", &NetworkConfig{Plugin: "calico", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name: "p1", CIDR: ""}}}}, k8sCfg, ".calico.ipPools[0:p1].cidr: cannot be empty"},
-		{"calico_ippool_invalid_cidr", &NetworkConfig{Plugin: "calico", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name: "p1", CIDR: "invalid"}}}}, k8sCfg, ".calico.ipPools[0:p1].cidr: invalid CIDR 'invalid'"},
-		{"calico_ippool_bad_blocksize_low", &NetworkConfig{Plugin: "calico", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name:"p1",CIDR:"1.1.1.0/24",BlockSize: pintNetworkTest(19)}}}}, k8sCfg, ".calico.ipPools[0:p1].blockSize: must be between 20 and 32"},
-		{"calico_ippool_bad_blocksize_high", &NetworkConfig{Plugin: "calico", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name:"p1",CIDR:"1.1.1.0/24",BlockSize: pintNetworkTest(33)}}}}, k8sCfg, ".calico.ipPools[0:p1].blockSize: must be between 20 and 32"},
-		{"calico_ippool_bad_encap", &NetworkConfig{Plugin: "calico", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name:"p1",CIDR:"1.1.1.0/24",Encapsulation: "bad"}}}}, k8sCfg, ".calico.ipPools[0:p1].encapsulation: invalid: 'bad'"},
+		{"nil_config", nil, defaultK8sCfg, "network configuration section cannot be nil"},
+		{"empty_pod_cidr", &NetworkConfig{Plugin: "calico", KubePodsCIDR: ""}, defaultK8sCfg, ".kubePodsCIDR: cannot be empty"},
+		{"invalid_pod_cidr", &NetworkConfig{Plugin: "calico", KubePodsCIDR: "invalid"}, defaultK8sCfg, ".kubePodsCIDR: invalid CIDR format"},
+		{"calico_nil_if_plugin_calico", &NetworkConfig{Plugin: "calico", Calico: nil}, defaultK8sCfg, ".calico: calico configuration section cannot be nil"},
+		{"calico_invalid_ipip", &NetworkConfig{Plugin: "calico", Calico: &CalicoConfig{IPIPMode: "bad"}}, defaultK8sCfg, ".calico.ipipMode: invalid mode 'bad'"},
+		{"flannel_nil_if_plugin_flannel", &NetworkConfig{Plugin: "flannel", Flannel: nil}, defaultK8sCfg, ".flannel: flannel configuration section cannot be nil"},
+		{"flannel_invalid_backend", &NetworkConfig{Plugin: "flannel", Flannel: &FlannelConfig{BackendMode: "bad"}}, defaultK8sCfg, ".flannel.backendMode: invalid mode 'bad'"},
+		{"kubeovn_invalid_tunneltype", &NetworkConfig{Plugin: "kubeovn", KubeOvn: &KubeOvnConfig{Enabled: pboolNetworkTest(true), TunnelType: pstrNetworkTest("bad")}}, defaultK8sCfg, ".kubeovn.tunnelType: invalid type 'bad'"},
+		{"kubeovn_invalid_joincidr", &NetworkConfig{Plugin: "kubeovn", KubeOvn: &KubeOvnConfig{Enabled: pboolNetworkTest(true), JoinCIDR: pstrNetworkTest("invalid")}}, defaultK8sCfg, ".kubeovn.joinCIDR: invalid CIDR format"},
+		{"hybridnet_invalid_networktype", &NetworkConfig{Plugin: "hybridnet", Hybridnet: &HybridnetConfig{Enabled: pboolNetworkTest(true), DefaultNetworkType: pstrNetworkTest("bad")}}, defaultK8sCfg, ".hybridnet.defaultNetworkType: invalid type 'bad'"},
+		{"calico_invalid_logseverity", &NetworkConfig{Plugin: "calico", Calico: &CalicoConfig{LogSeverityScreen: pstrNetworkTest("trace")}}, defaultK8sCfg, ".calico.logSeverityScreen: invalid: 'trace'"},
+		{"calico_ippool_empty_cidr", &NetworkConfig{Plugin: "calico", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name: "p1", CIDR: ""}}}}, defaultK8sCfg, ".calico.ipPools[0:p1].cidr: cannot be empty"},
+		{"calico_ippool_invalid_cidr", &NetworkConfig{Plugin: "calico", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name: "p1", CIDR: "invalid"}}}}, defaultK8sCfg, ".calico.ipPools[0:p1].cidr: invalid CIDR 'invalid'"},
+		{"calico_ippool_bad_blocksize_low", &NetworkConfig{Plugin: "calico", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name:"p1",CIDR:"1.1.1.0/24",BlockSize: pintNetworkTest(19)}}}}, defaultK8sCfg, ".calico.ipPools[0:p1].blockSize: must be between 20 and 32"},
+		{"calico_ippool_bad_blocksize_high", &NetworkConfig{Plugin: "calico", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name:"p1",CIDR:"1.1.1.0/24",BlockSize: pintNetworkTest(33)}}}}, defaultK8sCfg, ".calico.ipPools[0:p1].blockSize: must be between 20 and 32"},
+		{"calico_ippool_bad_encap", &NetworkConfig{Plugin: "calico", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name:"p1",CIDR:"1.1.1.0/24",Encapsulation: "bad"}}}}, defaultK8sCfg, ".calico.ipPools[0:p1].encapsulation: invalid: 'bad'"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			currentK8sCfg := tt.k8sForTest
-			if currentK8sCfg == nil { // Use default if not specified by test case
-			   currentK8sCfg = k8sCfg
+			currentK8sCfgToUse := tt.k8sForTest // Use the one from test case if specified
+			if currentK8sCfgToUse == nil {
+			   currentK8sCfgToUse = defaultK8sCfg // Fallback to the default empty k8sCfg
 			}
 			if tt.cfg != nil { SetDefaults_NetworkConfig(tt.cfg) }
 
 			verrs := &ValidationErrors{}
-			Validate_NetworkConfig(tt.cfg, verrs, "spec.network", currentK8sCfg)
+			Validate_NetworkConfig(tt.cfg, verrs, "spec.network", currentK8sCfgToUse)
 			if verrs.IsEmpty() {
 				t.Fatalf("Validate_NetworkConfig expected error for %s, got none", tt.name)
 			}
@@ -154,12 +158,12 @@ func TestNetworkConfig_EnableMultusCNI(t *testing.T) {
 
 func TestCalicoConfig_TyphaHelpers(t *testing.T) {
    cfg := &CalicoConfig{}
-   SetDefaults_CalicoConfig(cfg, "") // Pass empty string for defaultPoolCIDR
+   SetDefaults_CalicoConfig(cfg, "", nil) // Pass nil for globalDefaultBlockSize
    if cfg.IsTyphaEnabled() != false {t.Error("IsTyphaEnabled default failed")}
    if cfg.GetTyphaReplicas() != 0 {t.Error("GetTyphaReplicas default for disabled Typha failed")}
 
    cfg.EnableTypha = pboolNetworkTest(true)
-   SetDefaults_CalicoConfig(cfg, "") // Pass empty string for defaultPoolCIDR
+   SetDefaults_CalicoConfig(cfg, "", nil) // Pass nil for globalDefaultBlockSize
    if cfg.IsTyphaEnabled() != true {t.Error("IsTyphaEnabled true failed")}
    if cfg.GetTyphaReplicas() != 2 {t.Errorf("GetTyphaReplicas default for enabled Typha failed, got %d", cfg.GetTyphaReplicas())}
 

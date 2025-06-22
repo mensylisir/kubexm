@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"fmt"
+	"os" // Added for os.Stderr
 	// "io" // Removed as unused
 	// "net" // Removed as unused
 	// "path/filepath" // Removed as unused

@@ -180,9 +180,19 @@ func TestRuntimeBuilder_BuildFromConfig_HostInitialization(t *testing.T) {
     // Mock runner.New to return our mock runner
     mockRun := &mockRunnerForBuilderTest{}
     mockRun.GatherFactsFunc = func(ctx context.Context, conn connector.Connector) (*runner.Facts, error) {
-        return &runner.Facts{Hostname: conn.(*mockConnectorForBuilderTest).ConnectFunc // Hacky way to see which host this is for
-			OS: &connector.OS{ID: "mocklinux", Arch: "amd64", PrettyName: "Mocked OS via Runner"},
-		}, nil
+        // Determine hostname based on the connector type or a passed-in value if possible
+        var hostname string
+        if mc, ok := conn.(*mockConnectorForBuilderTest); ok {
+            // If mockConnectorForBuilderTest had a field for host spec, we could use it.
+            // For now, use a fixed name or the one from the spec this mock is for.
+            hostname = node1Spec.Name // Assuming this mock is specifically for node1
+        } else {
+            hostname = "mocked-host-for-runner"
+        }
+        return &runner.Facts{
+			Hostname: hostname, // Corrected: Assign a string
+			OS:       &connector.OS{ID: "mocklinux", Arch: "amd64", PrettyName: "Mocked OS via Runner"},
+		}, nil // Added comma here
     }
     runner.New = func() runner.Runner { return mockRun }
 

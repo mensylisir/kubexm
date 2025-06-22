@@ -2,7 +2,7 @@ package connector
 
 import (
 	"context"
-	"fmt"
+	// "fmt" // Removed as unused
 	"io/fs" // For fs.FileMode
 	"time"
 
