@@ -38,23 +38,49 @@ type Cluster struct {
 
 // ClusterSpec defines the desired state of the Kubernetes cluster.
 type ClusterSpec struct {
-	Type                 string                    `json:"type,omitempty" yaml:"type,omitempty"` // "kubexm" or "kubeadm"
-	RoleGroups           *RoleGroupsSpec           `json:"roleGroups,omitempty" yaml:"roleGroups,omitempty"`
-	ControlPlaneEndpoint *ControlPlaneEndpointSpec `json:"controlPlaneEndpoint,omitempty" yaml:"controlPlaneEndpoint,omitempty"`
-	System               *SystemSpec               `json:"system,omitempty" yaml:"system,omitempty"`
-	Global               *GlobalSpec               `json:"global,omitempty" yaml:"global,omitempty"`
+	// Type field from the original struct, representing the overall cluster deployment type.
+	// The YAML example has type settings within etcd and kubernetes specs.
+	// This top-level type's usage needs clarification or alignment.
+	Type                 string                    `json:"type,omitempty" yaml:"type,omitempty"`
 	Hosts                []HostSpec                `json:"hosts" yaml:"hosts"`
-	ContainerRuntime     *ContainerRuntimeConfig   `json:"containerRuntime,omitempty" yaml:"containerRuntime,omitempty"`
-	Etcd                 *EtcdConfig               `json:"etcd,omitempty" yaml:"etcd,omitempty"`
+	RoleGroups           *RoleGroupsSpec           `json:"roleGroups,omitempty" yaml:"roleGroups,omitempty"`
+
+	// Global settings, affects default behaviors for hosts or overall cluster.
+	Global               *GlobalSpec               `json:"global,omitempty" yaml:"global,omitempty"`
+
+	// System-level configurations for nodes. Corresponds to `system` block in YAML.
+	// Merged OSConfig and KernelConfig into this.
+	System               *SystemSpec               `json:"system,omitempty" yaml:"system,omitempty"`
+
+	// Kubernetes specific configurations. Corresponds to `kubernetes` block in YAML.
 	Kubernetes           *KubernetesConfig         `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"`
+
+	// Etcd specific configurations. Corresponds to `etcd` block in YAML.
+	Etcd                 *EtcdConfig               `json:"etcd,omitempty" yaml:"etcd,omitempty"`
+
+	// Network configurations (CNI plugin, CIDRs). Corresponds to `network` block in YAML.
 	Network              *NetworkConfig            `json:"network,omitempty" yaml:"network,omitempty"`
+
+	// ControlPlaneEndpoint defines how to access the Kubernetes API server.
+	// Corresponds to `controlPlaneEndpoint` block in YAML.
+	ControlPlaneEndpoint *ControlPlaneEndpointSpec `json:"controlPlaneEndpoint,omitempty" yaml:"controlPlaneEndpoint,omitempty"`
+
+	// HighAvailability settings. Relationship with ControlPlaneEndpoint needs to be clear.
 	HighAvailability     *HighAvailabilityConfig   `json:"highAvailability,omitempty" yaml:"highAvailability,omitempty"`
-	Preflight            *PreflightConfig          `json:"preflight,omitempty" yaml:"preflight,omitempty"`
-	Kernel               *KernelConfig             `json:"kernel,omitempty" yaml:"kernel,omitempty"`
+
+	// Storage configurations. Corresponds to `storage` block in YAML.
 	Storage              *StorageConfig            `json:"storage,omitempty" yaml:"storage,omitempty"`
+
+	// Registry configurations. Corresponds to `registry` block in YAML.
 	Registry             *RegistryConfig           `json:"registry,omitempty" yaml:"registry,omitempty"`
-	OS                   *OSConfig                 `json:"os,omitempty" yaml:"os,omitempty"`
-	Addons               []AddonConfig             `json:"addons,omitempty" yaml:"addons,omitempty"`
+
+	// Addons to be installed. Corresponds to `addons` list in YAML.
+	Addons               []string                  `json:"addons,omitempty" yaml:"addons,omitempty"`
+
+	// Preflight checks configuration. No direct YAML block, might be implicitly configured or part of Global/System.
+	Preflight            *PreflightConfig          `json:"preflight,omitempty" yaml:"preflight,omitempty"`
+
+	// Kernel *KernelConfig and OS *OSConfig are removed, their fields are merged into SystemSpec.
 }
 
 // HostSpec defines the configuration for a single host.
@@ -125,15 +151,32 @@ type CustomRoleSpec struct {
 // as they are in the same package.
 
 // SystemSpec defines system-level configuration.
+// It now incorporates fields previously in OSConfig and KernelConfig.
 type SystemSpec struct {
-	PackageManager     string   `json:"packageManager,omitempty" yaml:"packageManager,omitempty"`
+	// NTP servers for time synchronization. Corresponds to `system.ntpServers` in YAML.
 	NTPServers         []string `json:"ntpServers,omitempty" yaml:"ntpServers,omitempty"`
+	// Timezone to set on hosts. Corresponds to `system.timezone` in YAML.
 	Timezone           string   `json:"timezone,omitempty" yaml:"timezone,omitempty"`
+	// RPM packages to install. Corresponds to `system.rpms` in YAML.
 	RPMs               []string `json:"rpms,omitempty" yaml:"rpms,omitempty"`
+	// DEB packages to install. Corresponds to `system.debs` in YAML.
 	Debs               []string `json:"debs,omitempty" yaml:"debs,omitempty"`
+
+	// PackageManager allows specifying the package manager to use, overriding auto-detection.
+	PackageManager     string   `json:"packageManager,omitempty" yaml:"packageManager,omitempty"`
+	// PreInstallScripts are commands/scripts to run before main component installation.
+	// YAML tag "preInstall" as per 21-其他说明.md.
 	PreInstallScripts  []string `json:"preInstallScripts,omitempty" yaml:"preInstall,omitempty"`
+	// PostInstallScripts are commands/scripts to run after main component installation.
+	// YAML tag "postInstall" as per 21-其他说明.md.
 	PostInstallScripts []string `json:"postInstallScripts,omitempty" yaml:"postInstall,omitempty"`
+	// SkipConfigureOS, if true, skips OS configuration steps like NTP, timezone. Defaults to false.
 	SkipConfigureOS    bool     `json:"skipConfigureOS,omitempty" yaml:"skipConfigureOS,omitempty"`
+
+	// Modules is a list of kernel modules to be loaded. (From former KernelConfig)
+	Modules            []string          `json:"modules,omitempty" yaml:"modules,omitempty"`
+	// SysctlParams is a map of sysctl parameters to set. (From former KernelConfig)
+	SysctlParams       map[string]string `json:"sysctlParams,omitempty" yaml:"sysctlParams,omitempty"`
 }
 
 // GlobalSpec contains settings applicable to the entire cluster or as defaults for hosts.
@@ -238,6 +281,11 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	if cfg.Spec.System == nil {
 		cfg.Spec.System = &SystemSpec{}
 	}
+	if cfg.Spec.System == nil { // Ensure SystemSpec is initialized before setting its defaults
+		cfg.Spec.System = &SystemSpec{}
+	}
+	SetDefaults_SystemSpec(cfg.Spec.System) // Call the new centralized System defaults
+
 	if cfg.Spec.Kubernetes == nil {
 		cfg.Spec.Kubernetes = &KubernetesConfig{}
 	}
@@ -254,16 +302,16 @@ func SetDefaults_Cluster(cfg *Cluster) {
 		cfg.Spec.Preflight = &PreflightConfig{}
 	}
 	SetDefaults_PreflightConfig(cfg.Spec.Preflight)
-	if cfg.Spec.Kernel == nil {
-		cfg.Spec.Kernel = &KernelConfig{}
-	}
-	SetDefaults_KernelConfig(cfg.Spec.Kernel)
+
+	// SetDefaults_KernelConfig and SetDefaults_OSConfig calls are removed
+	// Their logic is now part of SetDefaults_SystemSpec.
+
+	// Addons in ClusterSpec is now []string, so no SetDefaults_AddonConfig directly here.
+	// If individual addons had complex types and defaults, that would be handled differently.
 	if cfg.Spec.Addons == nil {
-		cfg.Spec.Addons = []AddonConfig{}
+		cfg.Spec.Addons = []string{}
 	}
-	for i := range cfg.Spec.Addons {
-		SetDefaults_AddonConfig(&cfg.Spec.Addons[i])
-	}
+
 	if cfg.Spec.Storage == nil {
 		cfg.Spec.Storage = &StorageConfig{}
 	}
@@ -272,10 +320,107 @@ func SetDefaults_Cluster(cfg *Cluster) {
 		cfg.Spec.Registry = &RegistryConfig{}
 	}
 	SetDefaults_RegistryConfig(cfg.Spec.Registry)
-	if cfg.Spec.OS == nil {
-		cfg.Spec.OS = &OSConfig{}
+	// OS field removed from ClusterSpec
+}
+
+// SetDefaults_SystemSpec sets default values for SystemSpec.
+// Incorporates logic from former SetDefaults_OSConfig and SetDefaults_KernelConfig.
+func SetDefaults_SystemSpec(cfg *SystemSpec) {
+	if cfg == nil {
+		return
 	}
-	SetDefaults_OSConfig(cfg.Spec.OS)
+	// Defaults from OSConfig
+	if cfg.NTPServers == nil {
+		cfg.NTPServers = []string{}
+	}
+	// Timezone: No default, let OS default prevail if not set by user.
+	if cfg.RPMs == nil {
+		cfg.RPMs = []string{}
+	}
+	if cfg.Debs == nil {
+		cfg.Debs = []string{}
+	}
+	// SkipConfigureOS (bool) defaults to false (its zero value).
+
+	// Defaults from KernelConfig
+	if cfg.Modules == nil {
+		cfg.Modules = []string{}
+	}
+	if cfg.SysctlParams == nil {
+		cfg.SysctlParams = make(map[string]string)
+	}
+	// Example default sysctl param:
+	// if _, exists := cfg.SysctlParams["net.bridge.bridge-nf-call-iptables"]; !exists {
+	//    cfg.SysctlParams["net.bridge.bridge-nf-call-iptables"] = "1"
+	// }
+
+	// Defaults for new fields in SystemSpec
+	if cfg.PreInstallScripts == nil {
+		cfg.PreInstallScripts = []string{}
+	}
+	if cfg.PostInstallScripts == nil {
+		cfg.PostInstallScripts = []string{}
+	}
+	// PackageManager: No default, allow auto-detection by runner if empty.
+}
+
+// Validate_SystemSpec validates SystemSpec.
+// Incorporates logic from former Validate_OSConfig and Validate_KernelConfig.
+func Validate_SystemSpec(cfg *SystemSpec, verrs *ValidationErrors, pathPrefix string) {
+	if cfg == nil {
+		return
+	}
+
+	// Validations from OSConfig
+	for i, ntp := range cfg.NTPServers {
+		if strings.TrimSpace(ntp) == "" {
+			verrs.Add("%s.ntpServers[%d]: NTP server address cannot be empty", pathPrefix, i)
+		}
+		// Could add validation for hostname/IP format for NTP servers
+	}
+	if cfg.Timezone != "" && strings.TrimSpace(cfg.Timezone) == "" { // Check if set to only whitespace
+		verrs.Add("%s.timezone: cannot be only whitespace if specified", pathPrefix)
+		// Could validate against a list of known timezones if necessary (complex)
+	}
+	for i, rpm := range cfg.RPMs {
+		if strings.TrimSpace(rpm) == "" {
+			verrs.Add("%s.rpms[%d]: RPM package name cannot be empty", pathPrefix, i)
+		}
+	}
+	for i, deb := range cfg.Debs {
+		if strings.TrimSpace(deb) == "" {
+			verrs.Add("%s.debs[%d]: DEB package name cannot be empty", pathPrefix, i)
+		}
+	}
+	// SkipConfigureOS (bool) has no specific validation other than type.
+
+	// Validations from KernelConfig
+	for i, module := range cfg.Modules {
+		if strings.TrimSpace(module) == "" {
+			verrs.Add("%s.modules[%d]: module name cannot be empty", pathPrefix, i)
+		}
+	}
+	for key, val := range cfg.SysctlParams {
+		if strings.TrimSpace(key) == "" {
+			verrs.Add("%s.sysctlParams: sysctl key cannot be empty (value: '%s')", pathPrefix, val)
+		}
+		// Could also validate that val is not empty if that's a requirement
+	}
+
+	// Validations for new fields in SystemSpec
+	if cfg.PackageManager != "" && strings.TrimSpace(cfg.PackageManager) == "" { // Check if set to only whitespace
+		verrs.Add("%s.packageManager: cannot be only whitespace if specified", pathPrefix)
+	}
+	for i, script := range cfg.PreInstallScripts {
+		if strings.TrimSpace(script) == "" {
+			verrs.Add("%s.preInstallScripts[%d]: script cannot be empty", pathPrefix, i)
+		}
+	}
+	for i, script := range cfg.PostInstallScripts {
+		if strings.TrimSpace(script) == "" {
+			verrs.Add("%s.postInstallScripts[%d]: script cannot be empty", pathPrefix, i)
+		}
+	}
 }
 
 // Validate_Cluster validates the Cluster configuration.
@@ -370,7 +515,7 @@ func Validate_Cluster(cfg *Cluster) error {
 		Validate_ControlPlaneEndpointSpec(cfg.Spec.ControlPlaneEndpoint, verrs, "spec.controlPlaneEndpoint")
 	}
 	if cfg.Spec.System != nil {
-		Validate_SystemSpec(cfg.Spec.System, verrs, "spec.system")
+		Validate_SystemSpec(cfg.Spec.System, verrs, "spec.system") // Call the new centralized System validation
 	}
 
 	if cfg.Spec.Kubernetes != nil {
@@ -385,19 +530,19 @@ func Validate_Cluster(cfg *Cluster) error {
 	if cfg.Spec.Preflight != nil {
 		Validate_PreflightConfig(cfg.Spec.Preflight, verrs, "spec.preflight")
 	}
-	if cfg.Spec.Kernel != nil {
-		Validate_KernelConfig(cfg.Spec.Kernel, verrs, "spec.kernel")
-	}
-	if cfg.Spec.Addons != nil {
-		for i := range cfg.Spec.Addons {
-			addonNameForPath := cfg.Spec.Addons[i].Name
-			if addonNameForPath == "" {
-				addonNameForPath = fmt.Sprintf("index_%d", i)
+	// Validate_KernelConfig and Validate_OSConfig calls are removed.
+	// Their logic will be part of Validate_SystemSpec called earlier for cfg.Spec.System.
+
+	// Addons in ClusterSpec is now []string. Validation might involve checking if addon names are known/valid if there's a predefined list.
+	// For now, just ensure no empty strings if the list itself isn't empty.
+	if cfg.Spec.Addons != nil { // It's defaulted to []string{}, so never nil
+		for i, addonName := range cfg.Spec.Addons {
+			if strings.TrimSpace(addonName) == "" {
+				verrs.Add("spec.addons[%d]: addon name cannot be empty", i)
 			}
-			addonPathPrefix := fmt.Sprintf("spec.addons[%s]", addonNameForPath)
-			Validate_AddonConfig(&cfg.Spec.Addons[i], verrs, addonPathPrefix)
 		}
 	}
+
 	if cfg.Spec.Network != nil {
 		Validate_NetworkConfig(cfg.Spec.Network, verrs, "spec.network", cfg.Spec.Kubernetes)
 	} else {
@@ -409,9 +554,7 @@ func Validate_Cluster(cfg *Cluster) error {
 	if cfg.Spec.Registry != nil {
 		Validate_RegistryConfig(cfg.Spec.Registry, verrs, "spec.registry")
 	}
-	if cfg.Spec.OS != nil {
-		Validate_OSConfig(cfg.Spec.OS, verrs, "spec.os")
-	}
+	// OS field removed from ClusterSpec
 
 	if !verrs.IsEmpty() {
 		return verrs

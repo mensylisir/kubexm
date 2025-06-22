@@ -17,6 +17,12 @@ type NetworkConfig struct {
 	KubeOvn   *KubeOvnConfig   `json:"kubeovn,omitempty" yaml:"kubeovn,omitempty"`
 	Multus    *MultusCNIConfig `json:"multus,omitempty" yaml:"multus,omitempty"`
 	Hybridnet *HybridnetConfig `json:"hybridnet,omitempty" yaml:"hybridnet,omitempty"`
+	IPPool    *IPPoolConfig    `json:"ippool,omitempty" yaml:"ippool,omitempty"` // Added for network.ippool.blockSize
+}
+
+// IPPoolConfig holds general IP pool configuration, currently just BlockSize from YAML.
+type IPPoolConfig struct {
+	BlockSize *int `json:"blockSize,omitempty" yaml:"blockSize,omitempty"`
 }
 
 // CalicoIPPool defines an IP address pool for Calico.
@@ -77,11 +83,24 @@ func SetDefaults_NetworkConfig(cfg *NetworkConfig) {
 		cfg.Plugin = "calico" // Default plugin to Calico
 	}
 
+	if cfg.IPPool == nil {
+		cfg.IPPool = &IPPoolConfig{}
+	}
+	if cfg.IPPool.BlockSize == nil {
+		defaultBlockSize := 26 // Default from YAML example
+		cfg.IPPool.BlockSize = &defaultBlockSize
+	}
+
 	if cfg.Plugin == "calico" {
 		if cfg.Calico == nil {
 			cfg.Calico = &CalicoConfig{}
 		}
-		SetDefaults_CalicoConfig(cfg.Calico, cfg.KubePodsCIDR)
+		// Pass the globally configured default blockSize to Calico defaults
+		var defaultCalicoBlockSize *int
+		if cfg.IPPool != nil { // IPPool is already defaulted above
+			defaultCalicoBlockSize = cfg.IPPool.BlockSize
+		}
+		SetDefaults_CalicoConfig(cfg.Calico, cfg.KubePodsCIDR, defaultCalicoBlockSize)
 	}
 	if cfg.Plugin == "flannel" {
 		if cfg.Flannel == nil {
@@ -109,7 +128,7 @@ func SetDefaults_NetworkConfig(cfg *NetworkConfig) {
 	SetDefaults_HybridnetConfig(cfg.Hybridnet)
 }
 
-func SetDefaults_CalicoConfig(cfg *CalicoConfig, defaultPoolCIDR string) {
+func SetDefaults_CalicoConfig(cfg *CalicoConfig, defaultPoolCIDR string, globalDefaultBlockSize *int) {
 	if cfg == nil {
 		return
 	}
@@ -148,13 +167,20 @@ func SetDefaults_CalicoConfig(cfg *CalicoConfig, defaultPoolCIDR string) {
 	}
 
 	if len(cfg.IPPools) == 0 && cfg.DefaultIPPOOL != nil && *cfg.DefaultIPPOOL && defaultPoolCIDR != "" {
-		defaultBlockSize := 26
+		var bs *int
+		if globalDefaultBlockSize != nil {
+			bs = globalDefaultBlockSize // Use global default if provided
+		} else {
+			// Fallback if globalDefaultBlockSize is nil, though SetDefaults_NetworkConfig should provide it
+			defaultInternalBlockSize := 26
+			bs = &defaultInternalBlockSize
+		}
 		cfg.IPPools = append(cfg.IPPools, CalicoIPPool{
 			Name:          "default-ipv4-ippool",
 			CIDR:          defaultPoolCIDR,
-			Encapsulation: cfg.IPIPMode,
+			Encapsulation: cfg.IPIPMode, // Default encapsulation based on Calico settings
 			NatOutgoing:   cfg.IPv4NatOutgoing,
-			BlockSize:     &defaultBlockSize,
+			BlockSize:     bs,
 		})
 	}
 	for i := range cfg.IPPools {
@@ -284,6 +310,24 @@ func Validate_NetworkConfig(cfg *NetworkConfig, verrs *ValidationErrors, pathPre
 	}
 	if cfg.Hybridnet != nil && cfg.Hybridnet.Enabled != nil && *cfg.Hybridnet.Enabled {
 		Validate_HybridnetConfig(cfg.Hybridnet, verrs, pathPrefix+".hybridnet")
+	}
+	if cfg.IPPool != nil {
+		Validate_IPPoolConfig(cfg.IPPool, verrs, pathPrefix+".ippool")
+	}
+}
+
+// Validate_IPPoolConfig validates IPPoolConfig.
+func Validate_IPPoolConfig(cfg *IPPoolConfig, verrs *ValidationErrors, pathPrefix string) {
+	if cfg == nil {
+		return
+	}
+	if cfg.BlockSize != nil {
+		// Calico block size typically must be between 20 and 32.
+		// Allow 0 as "not set" or "use Calico default" if that's desired,
+		// but YAML example has 26, so we assume if set, it must be valid.
+		if *cfg.BlockSize < 20 || *cfg.BlockSize > 32 {
+			verrs.Add("%s.blockSize: must be between 20 and 32 if specified, got %d", pathPrefix, *cfg.BlockSize)
+		}
 	}
 }
 
