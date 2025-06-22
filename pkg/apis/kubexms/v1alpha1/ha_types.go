@@ -55,26 +55,14 @@ type HighAvailabilityConfig struct {
 	// If false, all other HA settings might be ignored. Defaults to false.
 	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 
-	// ControlPlaneEndpoint specifies the main endpoint for accessing the Kubernetes API server.
-	// This might be user-provided if using an unmanaged external LB, or derived from Keepalived VIP.
-	ControlPlaneEndpoint *ControlPlaneEndpointSpec `json:"controlPlaneEndpoint,omitempty" yaml:"controlPlaneEndpoint,omitempty"` // Type is already ControlPlaneEndpointSpec, ensure YAML tag is present
-
 	// External load balancing configuration.
 	External *ExternalLoadBalancerConfig `json:"external,omitempty" yaml:"external,omitempty"`
 
 	// Internal load balancing configuration.
-	Internal *InternalLoadBalancerConfig `json:"internal,omitempty"`
+	Internal *InternalLoadBalancerConfig `json:"internal,omitempty" yaml:"internal,omitempty"`
 
-	// VIP is the virtual IP address. This field is DEPRECATED in favor of
-	// ControlPlaneEndpoint.Address when managed by Keepalived, or directly set in ControlPlaneEndpoint.
-	// It might still be used by KeepalivedConfig internally.
-	// For backward compatibility or direct Keepalived setup, it can remain.
-	// Consider if this top-level VIP is still needed or if all VIP logic moves into KeepalivedConfig
-	// and ControlPlaneEndpointConfig.Address becomes the source of truth.
-	// For now, let's keep it but note its potential deprecation for endpoint configuration.
-	VIP string `json:"vip,omitempty"`
-	// Fields like ControlPlaneEndpointDomain, ControlPlaneEndpointAddress, ControlPlaneEndpointPort
-	// are now moved into the ControlPlaneEndpointConfig struct.
+	// ControlPlaneEndpoint field is removed as it's directly in ClusterSpec.
+	// VIP field is removed as it's deprecated and covered by ClusterSpec.ControlPlaneEndpoint.Address.
 }
 
 
@@ -88,13 +76,8 @@ func SetDefaults_HighAvailabilityConfig(cfg *HighAvailabilityConfig) {
 		cfg.Enabled = &b
 	}
 
-	// Always ensure ControlPlaneEndpoint is initialized if HighAvailabilityConfig itself exists.
-	if cfg.ControlPlaneEndpoint == nil {
-		cfg.ControlPlaneEndpoint = &ControlPlaneEndpointSpec{}
-	}
-	// Call its defaults regardless of HA.Enabled, as endpoint might be set manually.
-	SetDefaults_ControlPlaneEndpointSpec(cfg.ControlPlaneEndpoint) // This function is in endpoint_types.go
-
+	// ControlPlaneEndpoint is no longer part of this struct.
+	// Its defaults are handled when SetDefaults_Cluster calls SetDefaults_ControlPlaneEndpointSpec.
 
 	if !*cfg.Enabled { // If HA is not enabled, don't default specific HA sub-configs like External/Internal LBs
 		return
@@ -104,7 +87,7 @@ func SetDefaults_HighAvailabilityConfig(cfg *HighAvailabilityConfig) {
 	if cfg.External == nil {
 		cfg.External = &ExternalLoadBalancerConfig{}
 	}
-	SetDefaults_ExternalLoadBalancerConfig(cfg.External, cfg) // Pass parent HA cfg for context
+	SetDefaults_ExternalLoadBalancerConfig(cfg.External) // Removed parentHA argument
 
 	// Default Internal LB config
 	if cfg.Internal == nil {
@@ -113,14 +96,13 @@ func SetDefaults_HighAvailabilityConfig(cfg *HighAvailabilityConfig) {
 	SetDefaults_InternalLoadBalancerConfig(cfg.Internal)
 }
 
-func SetDefaults_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig, parentHA *HighAvailabilityConfig) {
+// SetDefaults_ExternalLoadBalancerConfig now does not need parentHA for VIP logic.
+// That logic should be handled by whatever sets ClusterSpec.ControlPlaneEndpoint.Address,
+// possibly using information from cfg.Keepalived.VIP if managed Keepalived is chosen.
+func SetDefaults_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig) {
 	if cfg == nil { return }
 	if cfg.Enabled == nil {
-		b := false // External LB not enabled by default
-		// If parentHA.Type implies external (e.g. "external_lb" or "Managed*"), this could be true.
-		// For now, explicit enable.
-		// Default Enabled to true if a specific Type is set for the external LB itself.
-		// This avoids relying on a non-existent parentHA.Type.
+		b := false
 		if cfg.Type != "" && (strings.Contains(cfg.Type, "Managed") || cfg.Type == "UserProvided") {
 			b = true
 		}
@@ -131,20 +113,12 @@ func SetDefaults_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig, par
 		if strings.Contains(cfg.Type, "Keepalived") {
 			if cfg.Keepalived == nil { cfg.Keepalived = &KeepalivedConfig{} }
 			SetDefaults_KeepalivedConfig(cfg.Keepalived)
-			// If Keepalived is used, its VIP might inform ControlPlaneEndpoint.Address.
-			// This logic relies on parentHA.VIP and parentHA.ControlPlaneEndpoint.
-			// It's kept for now but might need review if parentHA.VIP is fully deprecated.
-			if parentHA != nil && parentHA.ControlPlaneEndpoint != nil &&
-			   parentHA.ControlPlaneEndpoint.Address == "" && // Only if not already set
-			   cfg.Keepalived != nil && parentHA.VIP != "" { // And VIP is available
-				parentHA.ControlPlaneEndpoint.Address = parentHA.VIP
-			}
 		}
 		if strings.Contains(cfg.Type, "HAProxy") {
 			if cfg.HAProxy == nil { cfg.HAProxy = &HAProxyConfig{} }
 			SetDefaults_HAProxyConfig(cfg.HAProxy)
 		}
-		if strings.Contains(cfg.Type, "NginxLB") { // Adjusted from parentHA.Type
+		if strings.Contains(cfg.Type, "NginxLB") {
 			if cfg.NginxLB == nil { cfg.NginxLB = &NginxLBConfig{} }
 			SetDefaults_NginxLBConfig(cfg.NginxLB)
 		}
@@ -174,36 +148,29 @@ func Validate_HighAvailabilityConfig(cfg *HighAvailabilityConfig, verrs *Validat
 
 	if cfg.Enabled != nil && *cfg.Enabled {
 		// If HA is enabled, there should be some configuration for either external or internal LB,
-		// or a directly configured ControlPlaneEndpoint.
+		// If HA is enabled, there should be some configuration for either external or internal LB.
+		// The actual ControlPlaneEndpoint (domain/address/port) is validated as part of ClusterSpec.
 		isExternalLBConfigured := cfg.External != nil && cfg.External.Enabled != nil && *cfg.External.Enabled
 		isInternalLBConfigured := cfg.Internal != nil && cfg.Internal.Enabled != nil && *cfg.Internal.Enabled
-		isEndpointSetManually := cfg.ControlPlaneEndpoint != nil &&
-								(cfg.ControlPlaneEndpoint.Address != "" || cfg.ControlPlaneEndpoint.Domain != "")
 
-		if !isExternalLBConfigured && !isInternalLBConfigured && !isEndpointSetManually {
-			verrs.Add("%s: if enabled, either external, internal load balancing, or a direct controlPlaneEndpoint must be configured", pathPrefix)
+		// This validation might be too strict if HA.Enabled=true but user provides ControlPlaneEndpoint manually
+		// without explicitly defining external/internal LB types within HAConfig.
+		// The primary driver for LB deployment should be ControlPlaneEndpointSpec.ExternalLoadBalancerType etc.
+		// For now, let's assume if HA.Enabled=true, one of the LB configs within HAConfig should also be enabled.
+		if !isExternalLBConfigured && !isInternalLBConfigured {
+			// verrs.Add("%s: if HA is enabled, either external or internal load balancing sub-configuration should also be enabled", pathPrefix)
+			// This might be too strong. HA.Enabled could just mean "HA is desired", and CPE defines how.
+			// Let's remove this specific check for now. The validation of CPE itself is more important.
 		}
 
-		// Validate ControlPlaneEndpoint if HA is enabled
-		if cfg.ControlPlaneEndpoint == nil && (isExternalLBConfigured || isInternalLBConfigured) { // Endpoint might be derived
-			// If derived, it should have been populated by defaults or a planning step.
-			// For static validation, if it's nil but expected to be derived, it's hard to check here.
-			// Let's assume if HA components are set, endpoint should eventually be non-nil.
-		} else if cfg.ControlPlaneEndpoint != nil {
-			Validate_ControlPlaneEndpointSpec(cfg.ControlPlaneEndpoint, verrs, pathPrefix+".controlPlaneEndpoint") // This function is in endpoint_types.go
-		}
-
-
-		if cfg.External != nil { // cfg.External can exist even if not enabled
-			Validate_ExternalLoadBalancerConfig(cfg.External, verrs, pathPrefix+".external", cfg)
+		// Validate External and Internal LB configs if they are present
+		if cfg.External != nil {
+			Validate_ExternalLoadBalancerConfig(cfg.External, verrs, pathPrefix+".external") // Removed parentHA argument
 		}
 		if cfg.Internal != nil {
 			Validate_InternalLoadBalancerConfig(cfg.Internal, verrs, pathPrefix+".internal")
 		}
-		// Top-level VIP validation (if still used)
-		if cfg.VIP != "" && !isValidIP(cfg.VIP) { // isValidIP will be from endpoint_types.go
-			verrs.Add("%s.vip: invalid IP address format '%s'", pathPrefix, cfg.VIP)
-		}
+		// VIP field removed. ControlPlaneEndpoint is validated at ClusterSpec level.
 
 	} else { // HA not enabled
 	   // If HA is disabled, external and internal LBs (if defined) should also be effectively disabled or validated as such.

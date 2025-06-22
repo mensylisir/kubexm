@@ -35,7 +35,7 @@ type EtcdConfig struct {
 	HeartbeatIntervalMillis      *int    `json:"heartbeatIntervalMillis,omitempty" yaml:"heartbeatInterval,omitempty"`
 	ElectionTimeoutMillis        *int    `json:"electionTimeoutMillis,omitempty" yaml:"electionTimeout,omitempty"`
 	SnapshotCount                *uint64 `json:"snapshotCount,omitempty" yaml:"snapshotCount,omitempty"`
-	AutoCompactionRetentionHours *int    `json:"autoCompactionRetentionHours,omitempty" yaml:"autoCompactionRetention,omitempty"`
+	AutoCompactionRetentionHours *int    `json:"autoCompactionRetentionHours,omitempty" yaml:"autoCompactionRetention,omitempty"` // YAML: autoCompactionRetention
 
 	// Resource management
 	QuotaBackendBytes *int64 `json:"quotaBackendBytes,omitempty" yaml:"quotaBackendBytes,omitempty"`
@@ -44,8 +44,8 @@ type EtcdConfig struct {
 	// Operational settings
 	Metrics            *string `json:"metrics,omitempty" yaml:"metrics,omitempty"`
 	LogLevel           *string `json:"logLevel,omitempty" yaml:"logLevel,omitempty"`
-	MaxSnapshotsToKeep *uint   `json:"maxSnapshotsToKeep,omitempty" yaml:"maxSnapshots,omitempty"`
-	MaxWALsToKeep      *uint   `json:"maxWALsToKeep,omitempty" yaml:"maxWals,omitempty"`
+	MaxSnapshotsToKeep *uint   `json:"maxSnapshotsToKeep,omitempty" yaml:"maxSnapshots,omitempty"` // YAML: maxSnapshots
+	MaxWALsToKeep      *uint   `json:"maxWALsToKeep,omitempty" yaml:"maxWals,omitempty"`         // YAML: maxWals
 }
 
 // ExternalEtcdConfig describes how to connect to an external etcd cluster.

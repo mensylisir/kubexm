@@ -9,20 +9,21 @@ import (
 
 // KubernetesConfig defines the configuration for Kubernetes components.
 type KubernetesConfig struct {
-	Version                string            `json:"version" yaml:"version"`
-	ClusterName            string            `json:"clusterName,omitempty" yaml:"clusterName,omitempty"`
-	DNSDomain              string            `json:"dnsDomain,omitempty" yaml:"dnsDomain,omitempty"`
-	DisableKubeProxy       *bool             `json:"disableKubeProxy,omitempty" yaml:"disableKubeProxy,omitempty"`
-	MasqueradeAll          *bool             `json:"masqueradeAll,omitempty" yaml:"masqueradeAll,omitempty"`
-	MaxPods                *int32            `json:"maxPods,omitempty" yaml:"maxPods,omitempty"`
-	NodeCidrMaskSize       *int32            `json:"nodeCidrMaskSize,omitempty" yaml:"nodeCidrMaskSize,omitempty"` // YAML might be nodeCIDRMaskSize
-	ApiserverCertExtraSans []string          `json:"apiserverCertExtraSans,omitempty" yaml:"apiserverCertExtraSans,omitempty"` // YAML might be apiServerCertExtraSANs
-	ProxyMode              string            `json:"proxyMode,omitempty" yaml:"proxyMode,omitempty"`
-	AutoRenewCerts         *bool             `json:"autoRenewCerts,omitempty" yaml:"autoRenewCerts,omitempty"`
-	ContainerManager       string            `json:"containerManager,omitempty" yaml:"containerManager,omitempty"`
-	PodSubnet              string            `json:"podSubnet,omitempty" yaml:"podSubnet,omitempty"` // Often kubePodsCIDR in network section
-	ServiceSubnet          string            `json:"serviceSubnet,omitempty" yaml:"serviceSubnet,omitempty"` // Often kubeServiceCIDR in network section
-	FeatureGates           map[string]bool   `json:"featureGates,omitempty" yaml:"featureGates,omitempty"`
+	Type                   string                    `json:"type,omitempty" yaml:"type,omitempty"` // "kubexm" or "kubeadm"
+	Version                string                    `json:"version" yaml:"version"`
+	ContainerRuntime       *ContainerRuntimeConfig   `json:"containerRuntime,omitempty" yaml:"containerRuntime,omitempty"`
+	ClusterName            string                    `json:"clusterName,omitempty" yaml:"clusterName,omitempty"`
+	DNSDomain              string                    `json:"dnsDomain,omitempty" yaml:"dnsDomain,omitempty"`
+	DisableKubeProxy       *bool                     `json:"disableKubeProxy,omitempty" yaml:"disableKubeProxy,omitempty"`
+	MasqueradeAll          *bool                     `json:"masqueradeAll,omitempty" yaml:"masqueradeAll,omitempty"`
+	MaxPods                *int32                    `json:"maxPods,omitempty" yaml:"maxPods,omitempty"`
+	NodeCidrMaskSize       *int32                    `json:"nodeCidrMaskSize,omitempty" yaml:"nodeCidrMaskSize,omitempty"`
+	ApiserverCertExtraSans []string                  `json:"apiserverCertExtraSans,omitempty" yaml:"apiserverCertExtraSans,omitempty"`
+	ProxyMode              string                    `json:"proxyMode,omitempty" yaml:"proxyMode,omitempty"`
+	AutoRenewCerts         *bool                     `json:"autoRenewCerts,omitempty" yaml:"autoRenewCerts,omitempty"`
+	ContainerManager       string                    `json:"containerManager,omitempty" yaml:"containerManager,omitempty"`
+	// PodSubnet and ServiceSubnet are removed as they belong to NetworkConfig (as KubePodsCIDR, KubeServiceCIDR)
+	FeatureGates           map[string]bool           `json:"featureGates,omitempty" yaml:"featureGates,omitempty"`
 
 	APIServer            *APIServerConfig            `json:"apiServer,omitempty" yaml:"apiServer,omitempty"`
 	ControllerManager    *ControllerManagerConfig    `json:"controllerManager,omitempty" yaml:"controllerManager,omitempty"`
@@ -66,6 +67,7 @@ type KubeletConfig struct {
 	CgroupDriver     *string             `json:"cgroupDriver,omitempty" yaml:"cgroupDriver,omitempty"`
 	EvictionHard     map[string]string   `json:"evictionHard,omitempty" yaml:"evictionHard,omitempty"`
 	HairpinMode      *string             `json:"hairpinMode,omitempty" yaml:"hairpinMode,omitempty"`
+	PodPidsLimit     *int64              `json:"podPidsLimit,omitempty" yaml:"podPidsLimit,omitempty"` // Added field
 }
 
 // KubeProxyIPTablesConfig defines specific configuration for KubeProxy in IPTables mode.
@@ -119,6 +121,16 @@ func SetDefaults_KubernetesConfig(cfg *KubernetesConfig, clusterMetaName string)
 	if cfg == nil {
 		return
 	}
+
+	if cfg.Type == "" {
+		cfg.Type = ClusterTypeKubeXM // Default Kubernetes deployment type
+	}
+
+	if cfg.ContainerRuntime == nil {
+		cfg.ContainerRuntime = &ContainerRuntimeConfig{}
+	}
+	SetDefaults_ContainerRuntimeConfig(cfg.ContainerRuntime) // Call defaults for the nested struct
+
 	if cfg.ClusterName == "" && clusterMetaName != "" {
 		cfg.ClusterName = clusterMetaName
 	}
@@ -126,17 +138,17 @@ func SetDefaults_KubernetesConfig(cfg *KubernetesConfig, clusterMetaName string)
 		cfg.DNSDomain = "cluster.local"
 	}
 	if cfg.ProxyMode == "" {
-		cfg.ProxyMode = "iptables"
+		cfg.ProxyMode = "ipvs" // Changed default to ipvs as per YAML
 	}
-	if cfg.AutoRenewCerts == nil { b := false; cfg.AutoRenewCerts = &b }
+	if cfg.AutoRenewCerts == nil { b := true; cfg.AutoRenewCerts = &b } // YAML: true
 	if cfg.DisableKubeProxy == nil { b := false; cfg.DisableKubeProxy = &b }
-	if cfg.MasqueradeAll == nil { b := false; cfg.MasqueradeAll = &b } // YAML: false
-	if cfg.MaxPods == nil { mp := int32(110); cfg.MaxPods = &mp } // YAML: 110
-	if cfg.NodeCidrMaskSize == nil { ncms := int32(24); cfg.NodeCidrMaskSize = &ncms } // YAML: 24
-	if cfg.ContainerManager == "" { cfg.ContainerManager = "systemd" } // Changed default to systemd
+	if cfg.MasqueradeAll == nil { b := false; cfg.MasqueradeAll = &b }
+	if cfg.MaxPods == nil { mp := int32(110); cfg.MaxPods = &mp }
+	if cfg.NodeCidrMaskSize == nil { ncms := int32(24); cfg.NodeCidrMaskSize = &ncms }
+	if cfg.ContainerManager == "" { cfg.ContainerManager = "systemd" }
 
 	if cfg.Nodelocaldns == nil { cfg.Nodelocaldns = &NodelocaldnsConfig{} }
-	if cfg.Nodelocaldns.Enabled == nil { b := true; cfg.Nodelocaldns.Enabled = &b }
+	if cfg.Nodelocaldns.Enabled == nil { b := true; cfg.Nodelocaldns.Enabled = &b } // Assuming default true if not specified
 
 	if cfg.Audit == nil { cfg.Audit = &AuditConfig{} }
 	if cfg.Audit.Enabled == nil { b := false; cfg.Audit.Enabled = &b }
@@ -147,45 +159,78 @@ func SetDefaults_KubernetesConfig(cfg *KubernetesConfig, clusterMetaName string)
 	if cfg.NodeFeatureDiscovery == nil { cfg.NodeFeatureDiscovery = &NodeFeatureDiscoveryConfig{} }
 	if cfg.NodeFeatureDiscovery.Enabled == nil { b := false; cfg.NodeFeatureDiscovery.Enabled = &b }
 
-	if cfg.FeatureGates == nil { cfg.FeatureGates = make(map[string]bool) }
+	if cfg.FeatureGates == nil {
+		cfg.FeatureGates = make(map[string]bool)
+		// Default FeatureGates from YAML
+		defaultFGs := map[string]bool{
+			"ExpandCSIVolumes":             true,
+			"RotateKubeletServerCertificate": true,
+			"CSIStorageCapacity":           true,
+			"TTLAfterFinished":             true,
+		}
+		for k, v := range defaultFGs {
+			cfg.FeatureGates[k] = v
+		}
+	}
+
 
 	if cfg.APIServer == nil { cfg.APIServer = &APIServerConfig{} }
 	if cfg.APIServer.ExtraArgs == nil { cfg.APIServer.ExtraArgs = []string{} }
 	if cfg.APIServer.AdmissionPlugins == nil { cfg.APIServer.AdmissionPlugins = []string{} }
+	// SetDefaults_APIServerConfig(cfg.APIServer) // If APIServerConfig had its own defaults func
 
 	if cfg.ControllerManager == nil { cfg.ControllerManager = &ControllerManagerConfig{} }
 	if cfg.ControllerManager.ExtraArgs == nil { cfg.ControllerManager.ExtraArgs = []string{} }
+	// SetDefaults_ControllerManagerConfig(cfg.ControllerManager)
 
 	if cfg.Scheduler == nil { cfg.Scheduler = &SchedulerConfig{} }
 	if cfg.Scheduler.ExtraArgs == nil { cfg.Scheduler.ExtraArgs = []string{} }
+	// SetDefaults_SchedulerConfig(cfg.Scheduler)
 
 	if cfg.Kubelet == nil { cfg.Kubelet = &KubeletConfig{} }
-	if cfg.Kubelet.ExtraArgs == nil { cfg.Kubelet.ExtraArgs = []string{} }
-	if cfg.Kubelet.EvictionHard == nil { cfg.Kubelet.EvictionHard = make(map[string]string) }
-	// Default Kubelet CgroupDriver based on ContainerManager if set
-	if cfg.Kubelet.CgroupDriver == nil && cfg.ContainerManager != "" {
-		cfg.Kubelet.CgroupDriver = &cfg.ContainerManager
-	} else if cfg.Kubelet.CgroupDriver == nil {
-		defDriver := "systemd"; cfg.Kubelet.CgroupDriver = &defDriver // Fallback default
-	}
+	SetDefaults_KubeletConfig(cfg.Kubelet, cfg.ContainerManager) // Pass ContainerManager for CgroupDriver default
 
 	if cfg.KubeProxy == nil { cfg.KubeProxy = &KubeProxyConfig{} }
 	if cfg.KubeProxy.ExtraArgs == nil { cfg.KubeProxy.ExtraArgs = []string{} }
-	if cfg.ProxyMode == "iptables" && cfg.KubeProxy.IPTables == nil { // Default IPTables config if mode is iptables
+	if cfg.ProxyMode == "iptables" && cfg.KubeProxy.IPTables == nil {
 		 cfg.KubeProxy.IPTables = &KubeProxyIPTablesConfig{}
 	}
-	if cfg.KubeProxy.IPTables != nil {
-		 if cfg.KubeProxy.IPTables.MasqueradeAll == nil { b := true; cfg.KubeProxy.IPTables.MasqueradeAll = &b } // KubeProxy default
-		 if cfg.KubeProxy.IPTables.MasqueradeBit == nil { mb := int32(14); cfg.KubeProxy.IPTables.MasqueradeBit = &mb } // KubeProxy default
+	if cfg.KubeProxy.IPTables != nil { // Defaults for IPTables specific config
+		 if cfg.KubeProxy.IPTables.MasqueradeAll == nil { b := true; cfg.KubeProxy.IPTables.MasqueradeAll = &b }
+		 if cfg.KubeProxy.IPTables.MasqueradeBit == nil { mb := int32(14); cfg.KubeProxy.IPTables.MasqueradeBit = &mb }
 	}
-	if cfg.ProxyMode == "ipvs" && cfg.KubeProxy.IPVS == nil { // Default IPVS config if mode is ipvs
+	if cfg.ProxyMode == "ipvs" && cfg.KubeProxy.IPVS == nil {
 		 cfg.KubeProxy.IPVS = &KubeProxyIPVSConfig{}
 	}
-	if cfg.KubeProxy.IPVS != nil {
-		 if cfg.KubeProxy.IPVS.Scheduler == "" { sched := "rr"; cfg.KubeProxy.IPVS.Scheduler = sched }
+	if cfg.KubeProxy.IPVS != nil { // Defaults for IPVS specific config
+		 if cfg.KubeProxy.IPVS.Scheduler == "" { sched := "rr"; cfg.KubeProxy.IPVS.Scheduler = sched } // common default for ipvs scheduler
 		 if cfg.KubeProxy.IPVS.ExcludeCIDRs == nil { cfg.KubeProxy.IPVS.ExcludeCIDRs = []string{} }
 	}
+	// SetDefaults_KubeProxyConfig(cfg.KubeProxy, cfg.ProxyMode) // If KubeProxyConfig had its own defaults func
 }
+
+// SetDefaults_KubeletConfig sets default values for KubeletConfig.
+func SetDefaults_KubeletConfig(cfg *KubeletConfig, containerManager string) {
+	if cfg == nil {
+		return
+	}
+	if cfg.ExtraArgs == nil { cfg.ExtraArgs = []string{} }
+	if cfg.EvictionHard == nil { cfg.EvictionHard = make(map[string]string) }
+
+	if cfg.PodPidsLimit == nil {
+		defaultPidsLimit := int64(10000) // From YAML example
+		cfg.PodPidsLimit = &defaultPidsLimit
+	}
+
+	if cfg.CgroupDriver == nil {
+		if containerManager != "" { // Default from KubernetesConfig.ContainerManager if set
+			cfg.CgroupDriver = &containerManager
+		} else { // Fallback default if ContainerManager also not set
+			defDriver := "systemd"; cfg.CgroupDriver = &defDriver
+		}
+	}
+}
+
 
 // --- Validation Functions ---
 
@@ -195,10 +240,19 @@ func Validate_KubernetesConfig(cfg *KubernetesConfig, verrs *ValidationErrors, p
 		verrs.Add("%s: kubernetes configuration section cannot be nil", pathPrefix)
 		return
 	}
+
+	validK8sTypes := []string{ClusterTypeKubeXM, ClusterTypeKubeadm, ""} // Allow empty for default
+	if !contains(validK8sTypes, cfg.Type) { // uses common contains helper
+		verrs.Add("%s.type: invalid type '%s', must be one of %v or empty for default", pathPrefix, cfg.Type, validK8sTypes)
+	}
+
 	if strings.TrimSpace(cfg.Version) == "" {
 		verrs.Add("%s.version: cannot be empty", pathPrefix)
 	} else if !strings.HasPrefix(cfg.Version, "v") {
-		verrs.Add("%s.version: must start with 'v' (e.g., v1.23.4), got '%s'", pathPrefix, cfg.Version)
+		// While "v" prefix is conventional, some tools/APIs might accept without.
+		// For strictness, keeping this check.
+		// verrs.Add("%s.version: must start with 'v' (e.g., v1.23.4), got '%s'", pathPrefix, cfg.Version)
+		// Allowing no "v" prefix for now as ParseGeneric in IsAtLeastVersion handles it.
 	}
 	if strings.TrimSpace(cfg.DNSDomain) == "" {
 		verrs.Add("%s.dnsDomain: cannot be empty", pathPrefix)
@@ -211,11 +265,12 @@ func Validate_KubernetesConfig(cfg *KubernetesConfig, verrs *ValidationErrors, p
 		verrs.Add("%s.proxyMode: invalid mode '%s', must be one of %v or empty for default", pathPrefix, cfg.ProxyMode, validProxyModes)
 	}
 
-	if cfg.PodSubnet != "" && !isValidCIDR(cfg.PodSubnet) {
-	   verrs.Add("%s.podSubnet: invalid CIDR format '%s'", pathPrefix, cfg.PodSubnet)
-	}
-	if cfg.ServiceSubnet != "" && !isValidCIDR(cfg.ServiceSubnet) {
-	   verrs.Add("%s.serviceSubnet: invalid CIDR format '%s'", pathPrefix, cfg.ServiceSubnet)
+	// PodSubnet and ServiceSubnet validation removed from here, belongs to NetworkConfig validation.
+
+	if cfg.ContainerRuntime != nil {
+		Validate_ContainerRuntimeConfig(cfg.ContainerRuntime, verrs, pathPrefix+".containerRuntime")
+	} else {
+		verrs.Add("%s.containerRuntime: section cannot be nil", pathPrefix) // Defaulted, so should not be nil
 	}
 
 	if cfg.APIServer != nil { Validate_APIServerConfig(cfg.APIServer, verrs, pathPrefix+".apiServer") }
@@ -254,9 +309,13 @@ func Validate_KubeletConfig(cfg *KubeletConfig, verrs *ValidationErrors, pathPre
 	if cfg.CgroupDriver != nil && *cfg.CgroupDriver != "cgroupfs" && *cfg.CgroupDriver != "systemd" {
 	   verrs.Add("%s.cgroupDriver: must be 'cgroupfs' or 'systemd' if specified, got '%s'", pathPrefix, *cfg.CgroupDriver)
 	}
-	validHairpinModes := []string{"promiscuous-bridge", "hairpin-veth", "none", ""}
-	if cfg.HairpinMode != nil && !contains(validHairpinModes, *cfg.HairpinMode) { // contains() from network_types.go
-	   verrs.Add("%s.hairpinMode: invalid mode '%s'", pathPrefix, *cfg.HairpinMode)
+	validHairpinModes := []string{"promiscuous-bridge", "hairpin-veth", "none", ""} // Allow empty for default
+	if cfg.HairpinMode != nil && *cfg.HairpinMode != "" && !contains(validHairpinModes, *cfg.HairpinMode) {
+		verrs.Add("%s.hairpinMode: invalid mode '%s'", pathPrefix, *cfg.HairpinMode)
+	}
+
+	if cfg.PodPidsLimit != nil && *cfg.PodPidsLimit <= 0 && *cfg.PodPidsLimit != -1 { // -1 means unlimited
+		verrs.Add("%s.podPidsLimit: must be positive or -1 (unlimited), got %d", pathPrefix, *cfg.PodPidsLimit)
 	}
 	// Validate EvictionHard map keys/values if needed
 }
