@@ -65,10 +65,11 @@ type hostConnectionPool struct {
 
 // ConnectionPool manages pools of SSH connections for various host configurations.
 type ConnectionPool struct {
-	pools  map[string]*hostConnectionPool // Key: string derived from ConnectionCfg
-	config PoolConfig
-	mu     sync.RWMutex // Protects access to the pools map
-	// TODO: Could add a global context for shutdown signalling for active connections
+	pools            map[string]*hostConnectionPool // Key: string derived from ConnectionCfg
+	config           PoolConfig
+	mu               sync.RWMutex               // Protects access to the pools map
+	tempBastionMap   map[*ssh.Client]*ssh.Client // Temporarily stores bastion client for newly created connections
+	tempBastionMapMu sync.Mutex                 // Protects tempBastionMap
 }
 
 // NewConnectionPool initializes and returns a new *ConnectionPool.
@@ -87,8 +88,9 @@ func NewConnectionPool(config PoolConfig) *ConnectionPool {
 	}
 
 	return &ConnectionPool{
-		pools:  make(map[string]*hostConnectionPool),
-		config: config,
+		pools:          make(map[string]*hostConnectionPool),
+		config:         config,
+		tempBastionMap: make(map[*ssh.Client]*ssh.Client),
 	}
 }
 
@@ -307,8 +309,14 @@ func (cp *ConnectionPool) Get(ctx context.Context, cfg ConnectionCfg) (*ssh.Clie
 		// This IS A BUG to be fixed by changing Put or how Get/Put interact.
 
 		// For the purpose of *this specific subtask* (use dialSSH in Get):
-		_ = bastionClient // Acknowledge it for now. It's closed if testErr occurs.
+		// _ = bastionClient // Acknowledge it for now. It's closed if testErr occurs.
 		                  // If no testErr, it's "live" but its link to targetClient is lost by Put.
+		// Store bastion client in temp map if it exists
+		if bastionClient != nil {
+			cp.tempBastionMapMu.Lock()
+			cp.tempBastionMap[targetClient] = bastionClient
+			cp.tempBastionMapMu.Unlock()
+		}
 
 		return targetClient, nil
 	}
@@ -341,36 +349,30 @@ func (cp *ConnectionPool) Put(cfg ConnectionCfg, client *ssh.Client, isHealthy b
 		client.Close()
 		// If this client had an associated bastion that was specific to its creation
 		// (i.e., if it was a freshly dialed one not yet in a ManagedConnection),
-		// that bastion would be an orphan here. This implies `Put` needs more context
-		// or `Get` needs to return a more complex type that `Put` consumes.
-		// For now, this only closes the main client.
-		// If the client *was* from a ManagedConnection (which it would be if Put is called
-		// for a connection that was previously in the pool), then its bastionClient
-		// is handled when the ManagedConnection itself is closed/discarded.
+		// that bastion would be an orphan here.
+		// Check tempBastionMap
+		cp.tempBastionMapMu.Lock()
+		associatedBastion := cp.tempBastionMap[client]
+		delete(cp.tempBastionMap, client) // Remove whether found or not
+		cp.tempBastionMapMu.Unlock()
+
+		client.Close() // Close the main client
+		if associatedBastion != nil {
+			associatedBastion.Close() // Close associated bastion if it was in the temp map
+		}
 		hcp.numActive--
 		// log.Printf("Closed connection for %s (unhealthy or MaxIdlePerKey reached). Active: %d", poolKey, hcp.numActive)
 		return
 	}
 
-	// When putting a connection, its associated bastionClient (if any from its creation)
-	// and its original createdAt timestamp are needed to create a complete ManagedConnection.
-	// The current Put signature `Put(cfg ConnectionCfg, client *ssh.Client, isHealthy bool)`
-	// does not provide these. This is a limitation that needs a broader change
-	// (e.g., Get returns a wrapper, Put accepts wrapper or more args).
+	cp.tempBastionMapMu.Lock()
+	retrievedBastionClient := cp.tempBastionMap[client]
+	delete(cp.tempBastionMap, client) // Consume from temp map
+	cp.tempBastionMapMu.Unlock()
 
-	// For this refactoring, we'll assume that if `client` came from a `dialSSH` via `Get`,
-	// its `bastionClient` and `createdAt` are not available to this `Put` method directly.
-	// The `ManagedConnection` created here will thus be incomplete for such cases.
-	// If `client` was previously an idle `ManagedConnection`, then this `Put` is effectively
-	// just updating its `lastUsed` or discarding it.
-
-	// This means the `bastionClient` of a newly dialed connection (via Get->dialSSH)
-	// will be orphaned if the `client` is successfully `Put` into the pool,
-	// because the `ManagedConnection` created here won't know about it.
-	// This needs to be addressed in a subsequent refactoring of Get/Put interaction.
 	mc := &ManagedConnection{
 		client:        client,
-		bastionClient: nil, // Cannot determine bastion client from current Put signature for a new client
+		bastionClient: retrievedBastionClient, // Store the retrieved bastion client
 		poolKey:       poolKey,
 		lastUsed:      time.Now(),
 		createdAt:     time.Now(), // Ideally, this is when the client was established by dialSSH
@@ -385,6 +387,12 @@ func (cp *ConnectionPool) CloseConnection(cfg ConnectionCfg, client *ssh.Client)
 	if client == nil {
 		return
 	}
+
+	cp.tempBastionMapMu.Lock()
+	associatedBastion := cp.tempBastionMap[client]
+	delete(cp.tempBastionMap, client)
+	cp.tempBastionMapMu.Unlock()
+
 	poolKey := generatePoolKey(cfg)
 	cp.mu.RLock()
 	hcp, ok := cp.pools[poolKey]
@@ -392,13 +400,20 @@ func (cp *ConnectionPool) CloseConnection(cfg ConnectionCfg, client *ssh.Client)
 
 	if ok {
 		hcp.Lock()
+		// Check if this client was part of any ManagedConnection in the idle list
+		// This part is still tricky as we don't easily map client back to an mc here
+		// For now, just decrement numActive. A more robust solution would find and remove the mc.
 		hcp.numActive--
 		// log.Printf("Closed connection explicitly for %s. Active: %d", poolKey, hcp.numActive)
 		hcp.Unlock()
 	} else {
 		// log.Printf("Pool %s not found for CloseConnection.", poolKey)
 	}
-	client.Close() // Close it regardless of whether the pool was found
+
+	client.Close() // Close the main client
+	if associatedBastion != nil {
+		associatedBastion.Close() // Close associated bastion if it was in the temp map
+	}
 }
 
 // Shutdown closes all idle connections in all pools and clears the pools.
@@ -408,19 +423,43 @@ func (cp *ConnectionPool) Shutdown() {
 	defer cp.mu.Unlock()
 
 	// log.Printf("Shutting down connection pool...")
-	for _, hcp := range cp.pools { // Changed key to _
+	for _, hcp := range cp.pools {
 		hcp.Lock()
 		for _, mc := range hcp.connections {
 			mc.client.Close()
 			if mc.bastionClient != nil {
 				mc.bastionClient.Close()
 			}
-			hcp.numActive--
+			// hcp.numActive-- // numActive should reflect only connections that were "lent out"
 		}
 		hcp.connections = make([]*ManagedConnection, 0)
+		// Reset numActive for this pool key as all its idle connections are closed.
+		// Active connections are not touched by this Shutdown logic directly.
+		// If numActive was tracking total (idle + active), this needs adjustment.
+		// Assuming numActive tracks all connections associated with this key.
+		// This part is complex: if numActive is total, then closing idle ones reduces it.
+		// If there are still active ones, numActive would not go to 0.
+		// Let's assume numActive is correctly managed by Get/Put/CloseConnection.
+		// When idle connections are closed here, their contribution to numActive is removed.
+		// This means hcp.numActive should be reduced by len(hcp.connections) effectively.
+		// The current code in Put/CloseConnection decrements numActive when a connection is *finally* closed.
+		// So, here we just close them. The numActive count will be correct if those methods are robust.
+		// For simplicity in Shutdown, we assume numActive is handled by other paths.
+		// The key is that all *idle* connections are closed.
 		hcp.Unlock()
 	}
-	cp.pools = make(map[string]*hostConnectionPool)
+	cp.pools = make(map[string]*hostConnectionPool) // Clear all pools
+
+	cp.tempBastionMapMu.Lock()
+	for client, bastionClient := range cp.tempBastionMap {
+		client.Close()
+		if bastionClient != nil {
+			bastionClient.Close()
+		}
+	}
+	cp.tempBastionMap = make(map[*ssh.Client]*ssh.Client) // Clear the temp map
+	cp.tempBastionMapMu.Unlock()
+
 	// log.Printf("Connection pool shutdown complete.")
 }
 

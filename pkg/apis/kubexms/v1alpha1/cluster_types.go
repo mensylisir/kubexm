@@ -78,10 +78,10 @@ type RoleGroupsSpec struct {
 	Master       MasterRoleSpec       `json:"master,omitempty" yaml:"master,omitempty"`
 	Worker       WorkerRoleSpec       `json:"worker,omitempty" yaml:"worker,omitempty"`
 	Etcd         EtcdRoleSpec         `json:"etcd,omitempty" yaml:"etcd,omitempty"`
-	LoadBalancer LoadBalancerRoleSpec `json:"loadBalancer,omitempty" yaml:"loadBalancer,omitempty"`
+	LoadBalancer LoadBalancerRoleSpec `json:"loadbalancer,omitempty" yaml:"loadbalancer,omitempty"`
 	Storage      StorageRoleSpec      `json:"storage,omitempty" yaml:"storage,omitempty"`
 	Registry     RegistryRoleSpec     `json:"registry,omitempty" yaml:"registry,omitempty"`
-	CustomRoles []CustomRoleSpec `json:"customRoles,omitempty" yaml:"customRoles,omitempty"`
+	CustomRoles  []CustomRoleSpec     `json:"customRoles,omitempty" yaml:"customRoles,omitempty"`
 }
 
 // MasterRoleSpec defines the configuration for master nodes.
@@ -120,14 +120,9 @@ type CustomRoleSpec struct {
 	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
-// ControlPlaneEndpointSpec defines the endpoint for the Kubernetes API server.
-type ControlPlaneEndpointSpec struct {
-	Host                 string `json:"host,omitempty" yaml:"address,omitempty"`
-	Port                 int    `json:"port,omitempty" yaml:"port,omitempty"`
-	InternalLoadbalancer string `json:"internalLoadbalancer,omitempty" yaml:"internalLoadbalancer,omitempty"`
-	ExternalDNS          bool   `json:"externalDNS,omitempty" yaml:"externalDNS,omitempty"`
-	Domain               string `json:"domain,omitempty" yaml:"domain,omitempty"`
-}
+// ControlPlaneEndpointSpec is now defined in endpoint_types.go.
+// The type *ControlPlaneEndpointSpec for ClusterSpec.ControlPlaneEndpoint will refer to that definition
+// as they are in the same package.
 
 // SystemSpec defines system-level configuration.
 type SystemSpec struct {
@@ -235,8 +230,11 @@ func SetDefaults_Cluster(cfg *Cluster) {
 		cfg.Spec.RoleGroups = &RoleGroupsSpec{}
 	}
 	if cfg.Spec.ControlPlaneEndpoint == nil {
-		cfg.Spec.ControlPlaneEndpoint = &ControlPlaneEndpointSpec{}
+		cfg.Spec.ControlPlaneEndpoint = &ControlPlaneEndpointSpec{} // This will use the one from endpoint_types.go
 	}
+	// Call SetDefaults_ControlPlaneEndpointSpec for the endpoint
+	SetDefaults_ControlPlaneEndpointSpec(cfg.Spec.ControlPlaneEndpoint)
+
 	if cfg.Spec.System == nil {
 		cfg.Spec.System = &SystemSpec{}
 	}
