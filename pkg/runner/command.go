@@ -51,13 +51,20 @@ func (r *defaultRunner) Check(ctx context.Context, conn connector.Connector, cmd
 	if err == nil {
 		return true, nil
 	}
-	// Assuming connector.ExitError is the type for non-zero exits.
-	// This needs to be defined in your connector package.
-	var exitError *connector.ExitError
-	if ok := errors.As(err, &exitError); ok {
-		return false, nil // Command ran, exited non-zero, so check is "false" but no operational error.
+	// Assuming connector.CommandError is the type for non-zero exits
+	// from the connector's Exec method.
+	var cmdError *connector.CommandError
+	if errors.As(err, &cmdError) { // Check if the error is a CommandError
+		// Non-zero exit code means the command executed but "failed" the check.
+		// This is not an operational error of the Check method itself.
+		return false, nil
 	}
-	return false, err // Other operational error (e.g., connection issue).
+	// If err is not nil and not a CommandError, it's an operational error (e.g., connection issue).
+	if err != nil {
+		return false, err
+	}
+	// If err is nil, command exited 0.
+	return true, nil
 }
 
 // RunWithOptions provides full control over connector.ExecOptions.

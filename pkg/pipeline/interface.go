@@ -36,9 +36,11 @@ type Pipeline interface {
 	// by orchestrating and linking ExecutionFragments from its modules.
 	Plan(ctx PipelineContext) (*plan.ExecutionGraph, error) // Changed to local PipelineContext
 
-	// Run now takes the full runtime Context and a dryRun flag.
+	// Run now takes the full runtime Context (which implements all necessary sub-contexts
+	// like PipelineContext, ModuleContext, TaskContext, StepContext, and EngineExecuteContext)
+	// and a dryRun flag.
 	// It will call its Plan() method to get the ExecutionGraph,
-	// then pass this graph to the Engine for execution.
+	// then pass this graph and the full context to the Engine for execution.
 	// It returns a GraphExecutionResult.
-	Run(ctx PipelineContext, dryRun bool) (*plan.GraphExecutionResult, error) // Changed signature
+	Run(ctx *runtime.Context, dryRun bool) (*plan.GraphExecutionResult, error)
 }
