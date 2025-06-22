@@ -401,22 +401,4 @@ func ArchAlias(arch string) string {
 	}
 }
 
-// RenderTemplate executes a Go template with the given data.
-// This function is needed by GetBinaryInfo and was previously assumed to be in common or util.
-// Adding it here for now to make binary_info.go self-contained for template rendering.
-// TODO: Consolidate with any existing common.RenderTemplate or ensure it's available.
-func RenderTemplate(tmplStr string, data interface{}) (string, error) {
-	// Use a unique name for the template to avoid conflicts if this function is called multiple times
-	// with different template strings within the same execution (though less likely for this specific use).
-	// For safety, a simple counter or random element could be added to the template name.
-	// However, for typical usage here (fixed templates in knownBinaryDetails), "binaryInfoTemplate" is likely fine.
-	tmpl, err := template.New("binaryInfoTemplate").Parse(tmplStr)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse template: %w", err)
-	}
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("failed to execute template: %w", err)
-	}
-	return buf.String(), nil
-}
+// RenderTemplate is defined in template.go

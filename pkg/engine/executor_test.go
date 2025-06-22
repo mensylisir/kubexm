@@ -15,18 +15,22 @@ import (
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/runtime"
+	// "github.com/mensylisir/kubexm/pkg/runtime" // REMOVE THIS IMPORT
+	"github.com/mensylisir/kubexm/pkg/runner" // Added for runner.Facts, runner.Runner
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1" // Added
+	"path/filepath"                               // Added
+	"github.com/mensylisir/kubexm/pkg/cache"      // Added
 )
 
 // --- Mock Step Implementation ---
 type mockEngineTestStep struct {
 	step.NoOpStep
 	name              string
-	precheckFunc      func(ctx runtime.StepContext, host connector.Host) (bool, error)
-	runFunc           func(ctx runtime.StepContext, host connector.Host) error
-	rollbackFunc      func(ctx runtime.StepContext, host connector.Host) error
+	precheckFunc      func(ctx step.StepContext, host connector.Host) (bool, error)
+	runFunc           func(ctx step.StepContext, host connector.Host) error
+	rollbackFunc      func(ctx step.StepContext, host connector.Host) error
 	runDuration       time.Duration
 	precheckWillBeDone bool
 	runWillFail       bool
@@ -42,7 +46,7 @@ func (m *mockEngineTestStep) Meta() *spec.StepMeta {
 	return &spec.StepMeta{Name: m.name, Description: "Mock step for engine tests"}
 }
 
-func (m *mockEngineTestStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (m *mockEngineTestStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	m.hostMutex.Lock()
 	if m.hostExecutions == nil {
 		m.hostExecutions = make(map[string]int)
@@ -62,7 +66,7 @@ func (m *mockEngineTestStep) Precheck(ctx runtime.StepContext, host connector.Ho
 	return m.precheckWillBeDone, nil
 }
 
-func (m *mockEngineTestStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (m *mockEngineTestStep) Run(ctx step.StepContext, host connector.Host) error {
 	m.hostMutex.Lock()
 	if m.hostExecutions == nil {
 		m.hostExecutions = make(map[string]int)
@@ -85,7 +89,7 @@ func (m *mockEngineTestStep) Run(ctx runtime.StepContext, host connector.Host) e
 	return nil
 }
 
-func (m *mockEngineTestStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (m *mockEngineTestStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	m.hostMutex.Lock()
 	if m.hostExecutions == nil {
 		m.hostExecutions = make(map[string]int)
@@ -105,55 +109,166 @@ func (m *mockEngineTestStep) Rollback(ctx runtime.StepContext, host connector.Ho
 	return nil
 }
 
-// --- Test Runtime Context Setup ---
-func newTestEngineRuntimeContext(t *testing.T, hostsSpec ...v1alpha1.Host) *runtime.Context {
-	t.Helper()
-	l, _ := logger.New(logger.DefaultConfig())
+// --- Mock Contexts for Engine Test ---
 
-	hostRuntimes := make(map[string]*runtime.HostRuntime)
-	var clusterHosts []*v1alpha1.Host
+type mockExecutorTestStepContext struct {
+	goCtx         context.Context
+	logger        *logger.Logger
+	currentHost   connector.Host
+	runner        runner.Runner // Changed to runner.Runner
+	clusterConfig *v1alpha1.Cluster
+	// Simplified caches for testing
+	internalStepCache   cache.Cache
+	internalTaskCache   cache.Cache
+	internalModuleCache cache.Cache
+}
 
-	// Ensure control node is always present
-	ctrlHostSpec := v1alpha1.Host{Name: common.ControlNodeHostName, Type: "local", Address: "127.0.0.1", Roles: []string{common.ControlNodeRole}}
-	ctrlHost := connector.NewHostFromSpec(ctrlHostSpec) // This is connector.Host
-	hostRuntimes[common.ControlNodeHostName] = &runtime.HostRuntime{
-		Host:  ctrlHost,
-		Conn:  &connector.LocalConnector{}, // Mock connector, or LocalConnector for tests
-		Facts: &runner.Facts{OS: &connector.OS{Arch: "amd64"}},
-	}
-	clusterHosts = append(clusterHosts, &ctrlHostSpec)
-
-
-	for _, hs := range hostsSpec {
-		specCopy := hs // Capture range variable
-		h := connector.NewHostFromSpec(specCopy)
-		hostRuntimes[hs.Name] = &runtime.HostRuntime{
-			Host:  h,
-			Conn:  &connector.LocalConnector{}, // Using LocalConnector for simplicity in engine tests
-			Facts: &runner.Facts{OS: &connector.OS{Arch: "amd64"}},
-		}
-		clusterHosts = append(clusterHosts, &specCopy)
-	}
-
-	return &runtime.Context{
-		GoCtx:  context.Background(),
-		Logger: l,
-		// Runner and Engine are not directly used by what dagExecutor calls on context,
-		// but steps might use runner via StepContext.
-		Runner: runner.New(), // Real runner, steps will use its methods on the mock/local connectors.
-		Engine: nil,       // Engine doesn't call itself.
-		ClusterConfig: &v1alpha1.Cluster{
-			ObjectMeta: v1alpha1.ObjectMeta{Name: "engine-test-cluster"},
-			Spec:       v1alpha1.ClusterSpec{Hosts: clusterHosts},
-		},
-		HostRuntimes: hostRuntimes,
-		ControlNode: ctrlHost, // Set the control node
+func newMockExecutorTestStepContext(logger *logger.Logger, host connector.Host, cfg *v1alpha1.Cluster, goCtx context.Context) *mockExecutorTestStepContext {
+	return &mockExecutorTestStepContext{
+		goCtx: goCtx, logger: logger, currentHost: host, clusterConfig: cfg, runner: runner.New(), // Use real runner for now, can be mocked
+		internalStepCache:   cache.NewMemoryCache(), // Assuming NewMemoryCache returns cache.Cache
+		internalTaskCache:   cache.NewMemoryCache(),
+		internalModuleCache: cache.NewMemoryCache(),
 	}
 }
 
+func (m *mockExecutorTestStepContext) GoContext() context.Context                        { return m.goCtx }
+func (m *mockExecutorTestStepContext) GetLogger() *logger.Logger                         { return m.logger }
+func (m *mockExecutorTestStepContext) GetHost() connector.Host                         { return m.currentHost }
+func (m *mockExecutorTestStepContext) GetRunner() runner.Runner                          { return m.runner }
+func (m *mockExecutorTestStepContext) GetClusterConfig() *v1alpha1.Cluster               { return m.clusterConfig }
+func (m *mockExecutorTestStepContext) StepCache() cache.StepCache                       { return m.internalStepCache }
+func (m *mockExecutorTestStepContext) TaskCache() cache.TaskCache                       { return m.internalTaskCache }
+func (m *mockExecutorTestStepContext) ModuleCache() cache.ModuleCache                     { return m.internalModuleCache }
+func (m *mockExecutorTestStepContext) GetHostsByRole(role string) ([]connector.Host, error) {
+	var hosts []connector.Host
+	// Define the control node spec within this function's scope or as a package-level test helper
+	controlNodeSpec := v1alpha1.HostSpec{Name: common.ControlNodeHostName, Type: "local", Address: "127.0.0.1", Roles: []string{common.ControlNodeRole}}
+	controlNode := connector.NewHostFromSpec(controlNodeSpec)
+
+	if m.clusterConfig != nil && m.clusterConfig.Spec.Hosts != nil {
+		for _, hSpec := range m.clusterConfig.Spec.Hosts {
+			// Check if this host spec is the control node to avoid double-adding
+			if hSpec.Name == common.ControlNodeHostName {
+				// If roles match, add it and mark control node as found in spec
+				isRoleMatched := false
+				for _, r := range hSpec.Roles {
+					if r == role {
+						isRoleMatched = true
+						break
+					}
+				}
+				if isRoleMatched {
+					// Ensure we use the unified controlNode object if it's the one from spec
+					hosts = append(hosts, connector.NewHostFromSpec(hSpec))
+				}
+				continue // Skip further processing for this host if it's the control node from spec
+			}
+
+			// For other hosts
+			for _, r := range hSpec.Roles {
+				if r == role {
+					hosts = append(hosts, connector.NewHostFromSpec(hSpec))
+					break
+				}
+			}
+		}
+	}
+
+	// Handle explicit request for ControlNodeRole if not found in Spec.Hosts
+	if role == common.ControlNodeRole {
+		alreadyAdded := false
+		for _, h := range hosts {
+			if h.GetName() == common.ControlNodeHostName {
+				alreadyAdded = true
+				break
+			}
+		}
+		if !alreadyAdded {
+			hosts = append(hosts, controlNode)
+		}
+	}
+	return hosts, nil
+}
+func (m *mockExecutorTestStepContext) GetHostFacts(host connector.Host) (*runner.Facts, error) { return &runner.Facts{OS: &connector.OS{Arch: "amd64"}}, nil }
+func (m *mockExecutorTestStepContext) GetCurrentHostFacts() (*runner.Facts, error)             { return m.GetHostFacts(m.currentHost) }
+func (m *mockExecutorTestStepContext) GetConnectorForHost(host connector.Host) (connector.Connector, error) { return &connector.LocalConnector{}, nil }
+func (m *mockExecutorTestStepContext) GetCurrentHostConnector() (connector.Connector, error) { return &connector.LocalConnector{}, nil }
+func (m *mockExecutorTestStepContext) GetControlNode() (connector.Host, error) {
+	// Consistently return a control node, similar to how RuntimeBuilder ensures one.
+	controlNodeSpec := v1alpha1.HostSpec{Name: common.ControlNodeHostName, Type: "local", Address: "127.0.0.1", Roles: []string{common.ControlNodeRole}}
+	return connector.NewHostFromSpec(controlNodeSpec), nil
+}
+func (m *mockExecutorTestStepContext) GetGlobalWorkDir() string                        { return "/tmp/_kubexm_engine_test" }
+func (m *mockExecutorTestStepContext) IsVerbose() bool                               { return false }
+func (m *mockExecutorTestStepContext) ShouldIgnoreErr() bool                         { return false }
+func (m *mockExecutorTestStepContext) GetGlobalConnectionTimeout() time.Duration         { return 30 * time.Second }
+func (m *mockExecutorTestStepContext) GetClusterArtifactsDir() string                  { return filepath.Join(m.GetGlobalWorkDir(), m.clusterConfig.Name) }
+func (m *mockExecutorTestStepContext) GetCertsDir() string                           { return filepath.Join(m.GetClusterArtifactsDir(), "certs") }
+func (m *mockExecutorTestStepContext) GetEtcdCertsDir() string                       { return filepath.Join(m.GetCertsDir(), "etcd") }
+func (m *mockExecutorTestStepContext) GetComponentArtifactsDir(name string) string     { return filepath.Join(m.GetClusterArtifactsDir(), name) }
+func (m *mockExecutorTestStepContext) GetEtcdArtifactsDir() string                   { return m.GetComponentArtifactsDir("etcd") }
+func (m *mockExecutorTestStepContext) GetContainerRuntimeArtifactsDir() string         { return m.GetComponentArtifactsDir("container_runtime") }
+func (m *mockExecutorTestStepContext) GetKubernetesArtifactsDir() string               { return m.GetComponentArtifactsDir("kubernetes") }
+func (m *mockExecutorTestStepContext) GetFileDownloadPath(c, v, a, f string) string      { return filepath.Join(m.GetComponentArtifactsDir(c), v, a, f) }
+func (m *mockExecutorTestStepContext) GetHostDir(hostname string) string               { return filepath.Join(m.GetGlobalWorkDir(), hostname) }
+func (m *mockExecutorTestStepContext) WithGoContext(gCtx context.Context) step.StepContext {
+	copyCtx := *m
+	copyCtx.goCtx = gCtx
+	return &copyCtx
+}
+
+var _ step.StepContext = (*mockExecutorTestStepContext)(nil) // Ensure interface is implemented
+
+type mockEngineTestEngineExecuteContext struct {
+	logger        *logger.Logger
+	clusterConfig *v1alpha1.Cluster
+	hosts         []v1alpha1.HostSpec // Changed to HostSpec
+}
+
+func newTestEngineExecuteContext(t *testing.T, hostsSpec ...v1alpha1.HostSpec) *mockEngineTestEngineExecuteContext { // Changed to HostSpec
+	t.Helper()
+	l, _ := logger.New(logger.DefaultConfig())
+
+	allHostSpecs := append([]v1alpha1.HostSpec{ // Changed to HostSpec
+		{Name: common.ControlNodeHostName, Type: "local", Address: "127.0.0.1", Roles: []string{common.ControlNodeRole}}},
+		hostsSpec...)
+
+	return &mockEngineTestEngineExecuteContext{
+		logger: l,
+		clusterConfig: &v1alpha1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{Name: "engine-test-cluster"}, // Changed to metav1.ObjectMeta
+			Spec:       v1alpha1.ClusterSpec{Hosts: allHostSpecs},
+		},
+		hosts: allHostSpecs,
+	}
+}
+
+func (m *mockEngineTestEngineExecuteContext) GoContext() context.Context                        { return context.Background() }
+func (m *mockEngineTestEngineExecuteContext) GetLogger() *logger.Logger                         { return m.logger }
+func (m *mockEngineTestEngineExecuteContext) GetClusterConfig() *v1alpha1.Cluster               { return m.clusterConfig }
+func (m *mockEngineTestEngineExecuteContext) ForHost(host connector.Host) step.StepContext {
+	var foundHostSpec v1alpha1.HostSpec // Changed to HostSpec
+	for _, hs := range m.hosts {
+		if hs.Name == host.GetName() {
+			foundHostSpec = hs
+			break
+		}
+	}
+	// Note: foundHostSpec is not directly used in newMockExecutorTestStepContext,
+	// but the loop is good for verifying the host exists in the test setup.
+	// The clusterConfig passed to newMockExecutorTestStepContext contains all hosts.
+	if foundHostSpec.Name == "" && host.GetName() != common.ControlNodeHostName { // Allow control node not in m.hosts explicitly
+		panic(fmt.Sprintf("Host %s not found in mock context setup", host.GetName()))
+	}
+	return newMockExecutorTestStepContext(m.logger.With("host", host.GetName()), host, m.clusterConfig, context.Background())
+}
+
+var _ EngineExecuteContext = (*mockEngineTestEngineExecuteContext)(nil) // Ensure interface is implemented
+
 // Helper to create a simple host spec for tests
-func testHost(name string, roles ...string) v1alpha1.Host {
-	return v1alpha1.Host{Name: name, Address: "127.0.0.1", Type: "local", Roles: roles}
+func testHost(name string, roles ...string) v1alpha1.HostSpec { // Changed to return HostSpec
+	return v1alpha1.HostSpec{Name: name, Address: "127.0.0.1", Type: "local", Roles: roles, Port: 22, User: "test"}
 }
 func testConnectorHost(name string, roles ...string) connector.Host {
 	return connector.NewHostFromSpec(testHost(name, roles...))
@@ -162,7 +277,7 @@ func testConnectorHost(name string, roles ...string) connector.Host {
 
 // --- Basic Tests ---
 func TestEngine_Execute_EmptyGraph(t *testing.T) {
-	rtCtx := newTestEngineRuntimeContext(t)
+	rtCtx := newTestEngineExecuteContext(t)
 	executor := NewExecutor().(*dagExecutor)
 
 	graph := plan.NewExecutionGraph("EmptyTestGraph")
@@ -176,7 +291,7 @@ func TestEngine_Execute_EmptyGraph(t *testing.T) {
 
 func TestEngine_Execute_SingleNode_Success(t *testing.T) {
 	host1 := testConnectorHost("host1")
-	rtCtx := newTestEngineRuntimeContext(t, testHost("host1")) // Add host1 to runtime
+	rtCtx := newTestEngineExecuteContext(t, testHost("host1")) // Add host1 to runtime
 	executor := NewExecutor().(*dagExecutor)
 
 	execOrder := []string{}
@@ -201,7 +316,7 @@ func TestEngine_Execute_SingleNode_Success(t *testing.T) {
 
 func TestEngine_Execute_SingleNode_StepRunFails(t *testing.T) {
 	host1 := testConnectorHost("host1")
-	rtCtx := newTestEngineRuntimeContext(t, testHost("host1"))
+	rtCtx := newTestEngineExecuteContext(t, testHost("host1"))
 	executor := NewExecutor().(*dagExecutor)
 
 	execOrder := []string{}
@@ -228,7 +343,7 @@ func TestEngine_Execute_SingleNode_StepRunFails(t *testing.T) {
 
 func TestEngine_Execute_SingleNode_PrecheckDone(t *testing.T) {
 	host1 := testConnectorHost("host1")
-	rtCtx := newTestEngineRuntimeContext(t, testHost("host1"))
+	rtCtx := newTestEngineExecuteContext(t, testHost("host1"))
 	executor := NewExecutor().(*dagExecutor)
 
 	execOrder := []string{}
@@ -254,7 +369,7 @@ func TestEngine_Execute_SingleNode_PrecheckDone(t *testing.T) {
 
 func TestEngine_Execute_SequentialNodes(t *testing.T) {
 	host1 := testConnectorHost("host1")
-	rtCtx := newTestEngineRuntimeContext(t, testHost("host1"))
+	rtCtx := newTestEngineExecuteContext(t, testHost("host1"))
 	executor := NewExecutor().(*dagExecutor)
 	execOrder := []string{}
 
@@ -280,7 +395,7 @@ func TestEngine_Execute_SequentialNodes(t *testing.T) {
 
 func TestEngine_Execute_ParallelNodes(t *testing.T) {
 	host1 := testConnectorHost("host1")
-	rtCtx := newTestEngineRuntimeContext(t, testHost("host1"))
+	rtCtx := newTestEngineExecuteContext(t, testHost("host1"))
 	executor := NewExecutor().(*dagExecutor)
 	executor.maxWorkers = 2 // Allow parallel execution
 
@@ -294,14 +409,14 @@ func TestEngine_Execute_ParallelNodes(t *testing.T) {
 	}
 
 	stepA := &mockEngineTestStep{name: "StepA", runDuration: 50 * time.Millisecond,
-		executionOrder: &execOrder, orderMarker:"A", // This direct append won't work well for parallel, use runFunc
-		runFunc: func(ctx runtime.StepContext, host connector.Host) error { appender("A_run_"+host.GetName()); return nil},
-		precheckFunc: func(ctx runtime.StepContext, host connector.Host) (bool, error) {appender("A_precheck_"+host.GetName()); return false, nil},
+		// executionOrder: &execOrder, orderMarker:"A", // This direct append won't work well for parallel, use runFunc
+		runFunc: func(ctx step.StepContext, host connector.Host) error { appender("A_run_"+host.GetName()); return nil},
+		precheckFunc: func(ctx step.StepContext, host connector.Host) (bool, error) {appender("A_precheck_"+host.GetName()); return false, nil},
 	}
 	stepB := &mockEngineTestStep{name: "StepB", runDuration: 50 * time.Millisecond,
-		executionOrder: &execOrder, orderMarker:"B",
-		runFunc: func(ctx runtime.StepContext, host connector.Host) error { appender("B_run_"+host.GetName()); return nil},
-		precheckFunc: func(ctx runtime.StepContext, host connector.Host) (bool, error) {appender("B_precheck_"+host.GetName()); return false, nil},
+		// executionOrder: &execOrder, orderMarker:"B",
+		runFunc: func(ctx step.StepContext, host connector.Host) error { appender("B_run_"+host.GetName()); return nil},
+		precheckFunc: func(ctx step.StepContext, host connector.Host) (bool, error) {appender("B_precheck_"+host.GetName()); return false, nil},
 	}
 
 
@@ -325,7 +440,7 @@ func TestEngine_Execute_ParallelNodes(t *testing.T) {
 
 func TestEngine_Execute_FailurePropagation(t *testing.T) {
 	host1 := testConnectorHost("host1")
-	rtCtx := newTestEngineRuntimeContext(t, testHost("host1"))
+	rtCtx := newTestEngineExecuteContext(t, testHost("host1"))
 	executor := NewExecutor().(*dagExecutor)
 
 	stepA := &mockEngineTestStep{name: "StepA", runWillFail: true} // Step A will fail
@@ -357,7 +472,7 @@ func TestEngine_Execute_FailurePropagation(t *testing.T) {
 
 func TestEngine_Execute_DryRun(t *testing.T) {
 	host1 := testConnectorHost("host1")
-	rtCtx := newTestEngineRuntimeContext(t, testHost("host1"))
+	rtCtx := newTestEngineExecuteContext(t, testHost("host1"))
 	executor := NewExecutor().(*dagExecutor)
 
 	stepA := &mockEngineTestStep{name: "StepA"}

@@ -165,7 +165,7 @@ func Validate_HighAvailabilityConfig(cfg *HighAvailabilityConfig, verrs *Validat
 
 		// Validate External and Internal LB configs if they are present
 		if cfg.External != nil {
-			Validate_ExternalLoadBalancerConfig(cfg.External, verrs, pathPrefix+".external") // Removed parentHA argument
+			Validate_ExternalLoadBalancerConfig(cfg.External, verrs, pathPrefix+".external")
 		}
 		if cfg.Internal != nil {
 			Validate_InternalLoadBalancerConfig(cfg.Internal, verrs, pathPrefix+".internal")
@@ -184,7 +184,10 @@ func Validate_HighAvailabilityConfig(cfg *HighAvailabilityConfig, verrs *Validat
 	}
 }
 
-func Validate_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig, verrs *ValidationErrors, pathPrefix string, parentHA *HighAvailabilityConfig) {
+// Validate_ExternalLoadBalancerConfig validates ExternalLoadBalancerConfig.
+// The parentHA argument has been removed as ControlPlaneEndpoint is now part of ClusterSpec.
+// Cross-validation with ControlPlaneEndpoint should occur at a higher level if needed.
+func Validate_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig, verrs *ValidationErrors, pathPrefix string) { // Ensure this has 3 parameters
 	if cfg == nil || cfg.Enabled == nil || !*cfg.Enabled { return } // Only validate if explicitly enabled
 
 	// Type validation now uses ControlPlaneEndpointConfig.ExternalLoadBalancerType
@@ -202,9 +205,8 @@ func Validate_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig, verrs 
 		}
 	}
 	if cfg.Type == "UserProvided" {
-		if parentHA == nil || parentHA.ControlPlaneEndpoint == nil || (parentHA.ControlPlaneEndpoint.Address == "" && parentHA.ControlPlaneEndpoint.Domain == "") {
-			verrs.Add("%s: if type is UserProvided, parent controlPlaneEndpoint address or domain must be set", pathPrefix)
-		}
+		// Validation for ControlPlaneEndpoint being set for UserProvided LBs should be done
+		// at a higher level where ClusterSpec.ControlPlaneEndpoint is accessible.
 		if cfg.Keepalived != nil { verrs.Add("%s.keepalived: should not be set for UserProvided external LB type", pathPrefix) }
 		if cfg.HAProxy != nil { verrs.Add("%s.haproxy: should not be set for UserProvided external LB type", pathPrefix) }
 		if cfg.NginxLB != nil { verrs.Add("%s.nginxLB: should not be set for UserProvided external LB type", pathPrefix) }

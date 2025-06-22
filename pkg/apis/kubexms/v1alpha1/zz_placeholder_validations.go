@@ -33,14 +33,6 @@ func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *ValidationErrors, pathP
 	// could be added here if desired.
 }
 
-// Validate_SystemSpec is a placeholder.
-func Validate_SystemSpec(cfg *SystemSpec, verrs *ValidationErrors, pathPrefix string) {
-	// TODO: Implement actual validation for SystemSpec if not defined elsewhere
-	if cfg == nil && verrs != nil {
-		// verrs.Add("%s: system section cannot be nil if present in spec", pathPrefix)
-	}
-}
-
 // Removed placeholders for functions that are expected to be in their respective type files:
 // Validate_ContainerRuntimeConfig
 // Validate_ContainerdConfig
