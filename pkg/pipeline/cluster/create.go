@@ -9,7 +9,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime" // For *runtime.Context in Run method
 	"github.com/mensylisir/kubexm/pkg/pipeline" // For pipeline.Pipeline and pipeline.PipelineContext
-	"github.com/mensylisir/kubexm/pkg/task"    // For task.ExecutionFragment and task.UniqueNodeIDs
+	// task.UniqueNodeIDs is removed, will use plan.UniqueNodeIDs
 )
 
 // CreateClusterPipeline defines the pipeline for creating a new Kubernetes cluster.
@@ -102,7 +102,7 @@ func (p *CreateClusterPipeline) Plan(ctx pipeline.PipelineContext) (*plan.Execut
 		if len(previousModuleExitNodes) > 0 {
 			for _, entryNodeID := range moduleFragment.EntryNodes {
 				if node, ok := finalGraph.Nodes[entryNodeID]; ok {
-					node.Dependencies = task.UniqueNodeIDs(append(node.Dependencies, previousModuleExitNodes...))
+					node.Dependencies = plan.UniqueNodeIDs(append(node.Dependencies, previousModuleExitNodes...)) // Use plan.UniqueNodeIDs
 					logger.Debug("Linked module entry node to previous module exits", "entry_node", entryNodeID, "dependencies", node.Dependencies)
 				} else {
 					logger.Warn("EntryNodeID from module fragment not found in merged graph nodes map", "node_id", entryNodeID, "module", mod.Name())

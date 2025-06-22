@@ -2,20 +2,21 @@ package connector
 
 import (
 	"context"
-	"fmt"      // Added for ExitError.Error
-	"io/fs"    // For fs.FileMode
-	// "os"       // For os.FileMode, can use fs.FileMode consistently. Let's remove direct os import if fs.FileMode is used.
+	"fmt"
+	"io/fs" // For fs.FileMode
 	"time"
+
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 )
 
 // OS represents operating system details.
 type OS struct {
-	ID         string
-	VersionID  string
-	PrettyName string
-	Arch       string
-	Kernel     string
+	ID         string // e.g., "ubuntu", "centos", "windows"
+	VersionID  string // e.g., "20.04", "7", "10.0.19042"
+	PrettyName string // e.g., "Ubuntu 20.04.3 LTS"
+	Codename   string // e.g., "focal", "bionic"
+	Arch       string // e.g., "amd64", "arm64"
+	Kernel     string // e.g., "5.4.0-80-generic"
 }
 
 // BastionCfg defines configuration for a bastion/jump host.
@@ -31,7 +32,7 @@ type BastionCfg struct {
 
 // ProxyCfg defines proxy configuration.
 type ProxyCfg struct {
-	URL string
+	URL string `json:"url,omitempty" yaml:"url,omitempty"`
 }
 
 // ConnectionCfg holds all parameters needed to establish a connection.
@@ -43,7 +44,7 @@ type ConnectionCfg struct {
 	PrivateKey        []byte
 	PrivateKeyPath    string
 	Timeout           time.Duration
-	BastionCfg        *BastionCfg
+	BastionCfg        *BastionCfg // Renamed from Bastion in design doc to match existing code and be clearer
 	ProxyCfg          *ProxyCfg
 }
 
@@ -54,30 +55,10 @@ type ConnectionCfg struct {
 type FileStat struct {
 	Name    string
 	Size    int64
-	Mode    fs.FileMode // Using fs.FileMode consistently
+	Mode    fs.FileMode // Using fs.FileMode consistently as per existing code
 	ModTime time.Time
 	IsDir   bool
 	IsExist bool
-}
-
-// ExitError is an error type that includes the exit code of a command.
-type ExitError struct {
-	Err      error
-	ExitCode int
-	Stdout   string
-	Stderr   string
-	Cmd      string
-}
-
-func (e *ExitError) Error() string {
-	if e.Cmd != "" {
-		return fmt.Sprintf("command '%s' failed with exit code %d: %s (stderr: %s)", e.Cmd, e.ExitCode, e.Err, e.Stderr)
-	}
-	return fmt.Sprintf("command failed with exit code %d: %s (stderr: %s)", e.ExitCode, e.Err, e.Stderr)
-}
-
-func (e *ExitError) Unwrap() error {
-	return e.Err
 }
 
 // Connector defines the interface for connecting to and interacting with a host.

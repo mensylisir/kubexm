@@ -44,56 +44,46 @@ func (t *PreTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, error)
 		return nil, fmt.Errorf("failed to get control node for %s: %w", t.Name(), err)
 	}
 
-	// Get all unique hosts from all roles to run checks on them.
-	// This avoids running the same check multiple times on a host if it has multiple roles.
-	allTargetHostsMap := make(map[string]connector.Host)
-	rolesToFetch := []string{"etcd", "master", "worker", "registry", "loadbalancer"} // Add all relevant roles
+	// Get all unique remote hosts from relevant roles to run checks on them.
+	allRemoteHostsMap := make(map[string]connector.Host)
 
-	if ctx.GetClusterConfig() != nil && ctx.GetClusterConfig().Spec.RoleGroups != nil {
-		for roleName := range ctx.GetClusterConfig().Spec.RoleGroups {
-			// This is a simplification. RoleGroups is map[string][]string.
-			// We need to iterate through the actual node names listed in those roles.
-			// For now, using a placeholder for fetching all hosts.
-			// A more robust way is to iterate Spec.Hosts and check their roles.
-			// Or iterate Spec.RoleGroups and then Spec.Hosts to match names.
+	// Define roles that should typically undergo pre-flight checks.
+	// These should align with roles defined in your common constants or config.
+	rolesToCheck := []string{
+		common.RoleEtcd,
+		common.RoleMaster,
+		common.RoleWorker,
+		// Add other roles if they exist and need checks, e.g. common.RoleRegistry, common.RoleLoadBalancer
+	}
+	// Ensure common.RoleRegistry and common.RoleLoadBalancer exist or adjust list.
+	// For now, assuming the primary three.
+	// If RoleRegistry and RoleLoadBalancer are defined in common, you can add them:
+	// rolesToCheck = append(rolesToCheck, common.RoleRegistry, common.RoleLoadBalancer)
+
+
+	for _, role := range rolesToCheck {
+		hostsInRole, err := ctx.GetHostsByRole(role)
+		if err != nil {
+			// Log or handle error, e.g., if a role is defined but no hosts assigned.
+			logger.Warn("Could not get hosts for role, skipping for pre-flight checks.", "role", role, "error", err)
+			continue
+		}
+		for _, h := range hostsInRole {
+			// Pre-flight checks are typically for all nodes part of the cluster,
+			// excluding the control node itself if it's not part of the cluster roles.
+			// The GetHostsByRole should ideally return only actual cluster members.
+			allRemoteHostsMap[h.GetName()] = h
 		}
 	}
-
-	// Fallback: Get all hosts if role groups are complex to parse here directly
-	// A better way is to have a TaskContext method like ctx.GetAllTargetHosts()
-	if len(allTargetHostsMap) == 0 && ctx.GetClusterConfig() != nil {
-		for _, hostSpec := range ctx.GetClusterConfig().Spec.Hosts {
-			// This is creating new host objects. We should use what's in HostRuntimes.
-			// host := connector.NewHostFromSpec(*hostSpec) // This creates a new instance.
-			// We need to fetch the existing connector.Host from runtime.
-			// For now, let's assume TaskContext can give us all unique target hosts.
-			// This part needs a robust way to get all *connector.Host* objects
-			// that are part of the cluster definition, excluding the control node if checks are remote.
-		}
-	}
-	// Placeholder: for now, we'll assume a method on context or manually get them.
-	// This part is crucial and needs to correctly identify all remote hosts.
-	// For simplicity in this step, let's assume we get a list of all hosts from HostRuntimes
-	// excluding the control node.
 
 	var allRemoteHosts []connector.Host
-	for _, hr := range ctx.GetClusterConfig().Spec.Hosts { // Iterating specs, then need to find matching connector.Host
-		// This is still not ideal. The TaskContext should provide a way to get all configured *connector.Host* instances.
-		// Let's assume such a method exists or is added to TaskContext later.
-		// For now, we'll try to get them by iterating HostRuntimes.
-		// This will include the control node if it was added to HostRuntimes, so we might need to filter it out
-		// if checks are meant to be only on "remote" cluster nodes.
-		// However, some preflight checks (like local binary availability) might run on control node.
+	for _, h := range allRemoteHostsMap {
+		allRemoteHosts = append(allRemoteHosts, h)
 	}
 
-	for hostName, hostRuntime := range ctx.HostRuntimes() { // Assuming HostRuntimes() gives map[string]*HostRuntime
-		if hostRuntime.Host.GetName() != common.ControlNodeHostName {
-			allRemoteHosts = append(allRemoteHosts, hostRuntime.Host)
-		}
-	}
 	if len(allRemoteHosts) == 0 {
-		logger.Info("No remote hosts found to run pre-flight checks on (other than control node).")
-		// Still might proceed with local checks or a report.
+		logger.Info("No remote target hosts found to run pre-flight checks on.")
+		// The task might still create local checks for the controlNode or an empty report.
 	}
 
 	// --- Define Check Commands ---
@@ -190,11 +180,11 @@ func (t *PreTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, error)
 		Step:         reportStep,
 		Hosts:        []connector.Host{controlHost},
 		StepName:     reportStep.Meta().Name,
-		Dependencies: task.UniqueNodeIDs(checkNodeIDs), // Depends on all checks
+		Dependencies: plan.UniqueNodeIDs(checkNodeIDs), // Depends on all checks
 	}
 
 	if len(checkNodeIDs) > 0 {
-		fragment.EntryNodes = task.UniqueNodeIDs(checkNodeIDs)
+		fragment.EntryNodes = plan.UniqueNodeIDs(checkNodeIDs) // Use plan.UniqueNodeIDs
 		fragment.ExitNodes = []plan.NodeID{reportNodeID}
 	} else {
 		// If no checks were planned (e.g., no remote hosts and no local checks defined)

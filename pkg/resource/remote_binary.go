@@ -209,7 +209,7 @@ func (h *RemoteBinaryHandle) EnsurePlan(ctx runtime.TaskContext) (*task.Executio
 		Name:     fmt.Sprintf("Download %s archive (%s %s %s)", h.ComponentName, h.Version, h.OS, h.Arch),
 		Step:     downloadStep,
 		Hosts:    []connector.Host{controlNode},
-		StepName: "DownloadFile", // TODO: Replace with step.Meta().Name
+		StepName: downloadStep.Meta().Name,
 	}
 	entryNodes = append(entryNodes, downloadNodeID)
 
@@ -225,7 +225,7 @@ func (h *RemoteBinaryHandle) EnsurePlan(ctx runtime.TaskContext) (*task.Executio
 		Step:         extractStep,
 		Hosts:        []connector.Host{controlNode},
 		Dependencies: []plan.NodeID{downloadNodeID},
-		StepName:     "ExtractArchive", // TODO: Replace with step.Meta().Name
+		StepName:     extractStep.Meta().Name,
 	}
 
 	// 3. Finalize Binary Step (Copy from extraction path to final path and ensure executable)
@@ -244,7 +244,7 @@ func (h *RemoteBinaryHandle) EnsurePlan(ctx runtime.TaskContext) (*task.Executio
 		Step:         finalizeStep,
 		Hosts:        []connector.Host{controlNode},
 		Dependencies: []plan.NodeID{extractNodeID},
-		StepName:     "Command", // TODO: Replace with step.Meta().Name
+		StepName:     finalizeStep.Meta().Name,
 	}
 	exitNodes = append(exitNodes, finalizeNodeID)
 
