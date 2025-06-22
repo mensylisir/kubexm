@@ -119,8 +119,7 @@ func TestValidate_KubernetesConfig_Valid(t *testing.T) {
 	cfg := &KubernetesConfig{
 		Version:     "v1.25.0",
 		DNSDomain:   "my.cluster.local",
-		PodSubnet:   "10.244.0.0/16",
-		ServiceSubnet: "10.96.0.0/12",
+		// PodSubnet and ServiceSubnet are part of NetworkConfig
 	}
 	SetDefaults_KubernetesConfig(cfg, "valid-k8s-cluster") // Apply defaults
 	verrs := &ValidationErrors{}
@@ -141,8 +140,8 @@ func TestValidate_KubernetesConfig_Invalid(t *testing.T) {
 		{"bad_version_format", &KubernetesConfig{Version: "1.25.0"}, ".version: must start with 'v'"},
 		// {"empty_dnsdomain", &KubernetesConfig{Version: "v1.20.0", DNSDomain: ""}, ".dnsDomain: cannot be empty"}, // This case is now handled by defaulting
 		{"invalid_proxymode", &KubernetesConfig{Version: "v1.20.0", ProxyMode: "foo"}, ".proxyMode: invalid mode 'foo'"},
-		{"invalid_podsubnet", &KubernetesConfig{Version: "v1.20.0", PodSubnet: "invalid"}, ".podSubnet: invalid CIDR format"},
-		{"invalid_servicesubnet", &KubernetesConfig{Version: "v1.20.0", ServiceSubnet: "invalid"}, ".serviceSubnet: invalid CIDR format"},
+		// {"invalid_podsubnet", &KubernetesConfig{Version: "v1.20.0", PodSubnet: "invalid"}, ".podSubnet: invalid CIDR format"}, // Moved to NetworkConfig validation
+		// {"invalid_servicesubnet", &KubernetesConfig{Version: "v1.20.0", ServiceSubnet: "invalid"}, ".serviceSubnet: invalid CIDR format"}, // Moved to NetworkConfig validation
 		{"invalid_containerManager", &KubernetesConfig{Version: "v1.20.0", ContainerManager: "rkt"}, ".containerManager: must be 'cgroupfs' or 'systemd'"},
 		{"empty_kubeletConfiguration_raw", &KubernetesConfig{Version: "v1.20.0", KubeletConfiguration: &runtime.RawExtension{Raw: []byte("")}}, ".kubeletConfiguration: raw data cannot be empty"},
 		{"empty_kubeProxyConfiguration_raw", &KubernetesConfig{Version: "v1.20.0", KubeProxyConfiguration: &runtime.RawExtension{Raw: []byte("")}}, ".kubeProxyConfiguration: raw data cannot be empty"},

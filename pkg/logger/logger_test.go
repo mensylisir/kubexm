@@ -11,34 +11,51 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
+	// "time" // No longer needed if captureStdout doesn't use it
 
 	"go.uber.org/zap" // For adding fields in test
 	"go.uber.org/zap/zapcore"
 )
 
-// captureStdout (as previously defined)
+// captureStdout (refined version with buffered channel and WaitGroup)
 func captureStdout(f func()) (string, error) {
-	r, w, err := os.Pipe(); if err != nil { return "", err };
+	r, w, err := os.Pipe()
+	if err != nil {
+		return "", err
+	}
 	originalStdout := os.Stdout
 	os.Stdout = w
 
-	outC := make(chan string)
+	outC := make(chan string, 1) // Buffered channel of size 1
+	var wg sync.WaitGroup
+	wg.Add(1) // For the reading goroutine
+
 	go func() {
+		defer wg.Done() // Signal completion when goroutine exits
 		var buf bytes.Buffer
 		_, _ = io.Copy(&buf, r)
-		r.Close() // Close reader a bit earlier
+		r.Close()
 		outC <- buf.String()
 	}()
 
-	f()
-	os.Stdout = originalStdout // Restore stdout
-	errClose := w.Close() // Close writer to signal EOF to reader goroutine.
+	f() // Execute the function that writes to stdout
+
+	os.Stdout = originalStdout
+
+	errClose := w.Close()
+
+	wg.Wait()
+	close(outC)
 
 	output := <-outC
-	return output, errClose // Return error from closing the writer if any
+
+	return output, errClose
 }
 
+func TestHelloWorld(t *testing.T) {
+	fmt.Println("Hello via fmt from TestHelloWorld")
+	t.Log("Hello via t.Log from TestHelloWorld")
+}
 
 // TestNewLogger_ConsoleOutput (as previously defined, ensure it still passes or adapt)
 func TestNewLogger_ConsoleOutput(t *testing.T) {

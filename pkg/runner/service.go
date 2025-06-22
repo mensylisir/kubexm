@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors" // Added
 	"fmt"
 	"strings"
 

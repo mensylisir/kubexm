@@ -124,12 +124,14 @@ func SetDefaults(cfg *Cluster) {
 	if cfg.Spec.Kubernetes.ClusterName == "" && cfg.ObjectMeta.Name != "" { // Changed Metadata to ObjectMeta
 		cfg.Spec.Kubernetes.ClusterName = cfg.ObjectMeta.Name // Changed Metadata to ObjectMeta
 	}
-	if cfg.Spec.Kubernetes.PodSubnet == "" {
-		// cfg.Spec.Kubernetes.PodSubnet = "10.244.0.0/16" // Common default, but better set by user or CNI
-	}
-	if cfg.Spec.Kubernetes.ServiceSubnet == "" {
-		// cfg.Spec.Kubernetes.ServiceSubnet = "10.96.0.0/12" // Common default
-	}
+	// PodSubnet and ServiceSubnet are now in NetworkConfig (KubePodsCIDR, KubeServiceCIDR)
+	// Their defaults should be handled by SetDefaults_NetworkConfig if any.
+	// if cfg.Spec.Kubernetes.PodSubnet == "" {
+	// // cfg.Spec.Kubernetes.PodSubnet = "10.244.0.0/16" // Common default, but better set by user or CNI
+	// }
+	// if cfg.Spec.Kubernetes.ServiceSubnet == "" {
+	// // cfg.Spec.Kubernetes.ServiceSubnet = "10.96.0.0/12" // Common default
+	// }
 	if cfg.Spec.Kubernetes.FeatureGates == nil {
 	    cfg.Spec.Kubernetes.FeatureGates = make(map[string]bool)
 	}
@@ -165,7 +167,7 @@ func SetDefaults(cfg *Cluster) {
 
 	// Addons: Initialize slices if nil
 	if cfg.Spec.Addons == nil {
-	    cfg.Spec.Addons = []v1alpha1.AddonConfig{} // Changed
+	    cfg.Spec.Addons = []string{} // Corrected type to []string
 	}
 	// Defaults for individual addon fields (like Enabled) are usually handled by the addon's own logic/spec.
 }
