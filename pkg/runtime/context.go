@@ -267,16 +267,51 @@ func (c *Context) GetKubernetesArtifactsDir() string {
 }
 
 func (c *Context) GetFileDownloadPath(componentName, version, arch, filename string) string {
-	baseDir := c.GetComponentArtifactsDir(componentName)
-	pathParts := []string{baseDir}
+	var typeDir string
+	// Normalize componentName for matching if needed, though current common constants are lowercase.
+	// cnLower := strings.ToLower(componentName)
+
+	// Determine the top-level type directory based on the component name.
+	// This mapping should align with how directories are created in RuntimeBuilder
+	// and how components are categorized.
+	switch componentName {
+	case common.DefaultEtcdDir: // "etcd"
+		typeDir = common.DefaultEtcdDir
+	case "containerd", "docker", "runc", "cri-dockerd", "cni-plugins": // Group common container runtime related tools
+		typeDir = common.DefaultContainerRuntimeDir // "container_runtime"
+	case "kubeadm", "kubelet", "kubectl", "kube-proxy", "kube-scheduler", "kube-controller-manager", "kube-apiserver", "helm", "crictl":
+		typeDir = common.DefaultKubernetesDir // "kubernetes"
+	// Add cases for other specific components if they have dedicated type directories
+	// e.g., registry, harbor might go into a "registry_tools" or similar typeDir
+	default:
+		// Fallback for components not explicitly categorized.
+		// This could mean they are placed directly under ClusterArtifactsDir/componentName
+		// or a generic "binaries" directory.
+		// For now, consistent with the explicit paths in 21-其他说明.md,
+		// we expect components to map to one of the main type dirs.
+		// If a component doesn't fit, this indicates a potential need to update this mapping
+		// or the directory structure itself.
+		c.Logger.Warnf("Component '%s' does not have a predefined type directory mapping for downloads. Placing under its own name.", componentName)
+		typeDir = componentName // Or perhaps a common.DefaultBinariesDir
+	}
+
+	// Construct the path: GlobalWorkDir/.kubexm/cluster_name/TYPE_DIR/COMPONENT_NAME/VERSION/ARCH/FILENAME
+	// This structure ensures that even if multiple components fall under "kubernetes" type_dir,
+	// they each get their own subfolder (e.g., kubernetes/kubelet/v1.23.5/amd64/kubelet)
+
+	pathSegments := []string{c.GetClusterArtifactsDir()} // GlobalWorkDir/.kubexm/cluster_name
+	pathSegments = append(pathSegments, typeDir)         // TYPE_DIR
+	pathSegments = append(pathSegments, componentName)   // ACTUAL_COMPONENT_NAME
 	if version != "" {
-		pathParts = append(pathParts, version)
+		pathSegments = append(pathSegments, version)
 	}
 	if arch != "" {
-		pathParts = append(pathParts, arch)
+		pathSegments = append(pathSegments, arch)
 	}
-	pathParts = append(pathParts, filename)
-	return filepath.Join(pathParts...)
+	if filename != "" { // filename can be empty if we just want the directory up to arch
+		pathSegments = append(pathSegments, filename)
+	}
+	return filepath.Join(pathSegments...)
 }
 
 func (c *Context) GetHostDir(hostname string) string {

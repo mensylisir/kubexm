@@ -32,20 +32,20 @@ type EtcdConfig struct {
 	BackupScriptPath    *string `json:"backupScriptPath,omitempty" yaml:"backupScriptPath,omitempty"`    // Path to a custom backup script
 
 	// Performance and tuning
-	HeartbeatIntervalMillis *int    `json:"heartbeatIntervalMillis,omitempty" yaml:"heartbeatInterval,omitempty"` // Leader heartbeat interval in milliseconds
-	ElectionTimeoutMillis   *int    `json:"electionTimeoutMillis,omitempty" yaml:"electionTimeout,omitempty"`   // Election timeout in milliseconds
-	SnapshotCount           *uint64 `json:"snapshotCount,omitempty" yaml:"snapshotCount,omitempty"`           // Number of committed transactions to trigger a snapshot
-	AutoCompactionRetentionHours *int `json:"autoCompactionRetentionHours,omitempty" yaml:"autoCompactionRetention,omitempty"` // Auto compaction retention in hours (0 to disable)
+	HeartbeatIntervalMillis      *int    `json:"heartbeatIntervalMillis,omitempty" yaml:"heartbeatInterval,omitempty"`
+	ElectionTimeoutMillis        *int    `json:"electionTimeoutMillis,omitempty" yaml:"electionTimeout,omitempty"`
+	SnapshotCount                *uint64 `json:"snapshotCount,omitempty" yaml:"snapshotCount,omitempty"`
+	AutoCompactionRetentionHours *int    `json:"autoCompactionRetentionHours,omitempty" yaml:"autoCompactionRetention,omitempty"`
 
 	// Resource management
-	QuotaBackendBytes   *int64 `json:"quotaBackendBytes,omitempty" yaml:"quotaBackendBytes,omitempty"` // Etcd storage quota in bytes (0 for no quota)
-	MaxRequestBytes     *uint  `json:"maxRequestBytes,omitempty" yaml:"maxRequestBytes,omitempty"`   // Maximum client request size in bytes
+	QuotaBackendBytes *int64 `json:"quotaBackendBytes,omitempty" yaml:"quotaBackendBytes,omitempty"`
+	MaxRequestBytes   *uint  `json:"maxRequestBytes,omitempty" yaml:"maxRequestBytes,omitempty"`
 
 	// Operational settings
-	Metrics             *string `json:"metrics,omitempty" yaml:"metrics,omitempty"`             // Metrics exposure level: "basic" or "extensive"
-	LogLevel            *string `json:"logLevel,omitempty" yaml:"logLevel,omitempty"`            // Log level: "debug", "info", "warn", "error", "panic", "fatal"
-	MaxSnapshotsToKeep  *uint   `json:"maxSnapshotsToKeep,omitempty" yaml:"maxSnapshots,omitempty"`  // Maximum number of snapshot files to keep (0 for unlimited)
-	MaxWALsToKeep       *uint   `json:"maxWALsToKeep,omitempty" yaml:"maxWals,omitempty"`       // Maximum number of WAL files to keep (0 for unlimited)
+	Metrics            *string `json:"metrics,omitempty" yaml:"metrics,omitempty"`
+	LogLevel           *string `json:"logLevel,omitempty" yaml:"logLevel,omitempty"`
+	MaxSnapshotsToKeep *uint   `json:"maxSnapshotsToKeep,omitempty" yaml:"maxSnapshots,omitempty"`
+	MaxWALsToKeep      *uint   `json:"maxWALsToKeep,omitempty" yaml:"maxWals,omitempty"`
 }
 
 // ExternalEtcdConfig describes how to connect to an external etcd cluster.

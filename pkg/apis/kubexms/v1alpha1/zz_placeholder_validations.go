@@ -33,17 +33,6 @@ func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *ValidationErrors, pathP
 	// could be added here if desired.
 }
 
-// Validate_ControlPlaneEndpointSpec is a placeholder.
-func Validate_ControlPlaneEndpointSpec(cfg *ControlPlaneEndpointSpec, verrs *ValidationErrors, pathPrefix string) {
-	// TODO: Implement actual validation for ControlPlaneEndpointSpec if not defined elsewhere
-	if cfg == nil && verrs != nil {
-		// verrs.Add("%s: controlPlaneEndpoint section cannot be nil if present in spec", pathPrefix)
-	}
-	if cfg != nil && cfg.Port != 0 && (cfg.Port <= 0 || cfg.Port > 65535) {
-         verrs.Add("%s.port: invalid port number %d", pathPrefix, cfg.Port)
-    }
-}
-
 // Validate_SystemSpec is a placeholder.
 func Validate_SystemSpec(cfg *SystemSpec, verrs *ValidationErrors, pathPrefix string) {
 	// TODO: Implement actual validation for SystemSpec if not defined elsewhere
