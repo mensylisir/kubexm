@@ -119,9 +119,12 @@ func (r *defaultRunner) IsServiceActive(ctx context.Context, conn connector.Conn
 			// This part can be refined. If exit code 0 means "definitely running" for target SysV scripts, this is fine.
 			return true, nil // Defaulting to true if exit 0 for SysV status.
 		}
-		if _, ok := execErr.(*connector.ExitError); ok { // Non-zero exit from status command
-			return false, nil
+		// Check if the error is a CommandError, indicating the command ran but exited non-zero.
+		var cmdError *connector.CommandError
+		if errors.As(execErr, &cmdError) { // Non-zero exit from status command
+			return false, nil // Service is not active
 		}
+		// Other errors (e.g., command not found, connection issues)
 		return false, fmt.Errorf("failed to check SysV service status for %s: %w", serviceName, execErr)
 	}
 	return false, fmt.Errorf("IsServiceActive not fully implemented for init system type: %s", svcInfo.Type)

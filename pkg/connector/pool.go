@@ -9,9 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"errors" // Added for errors.New
+	"errors"
 	"golang.org/x/crypto/ssh"
-	// "golang.org/x/sync/errgroup" // Removed as unused
 )
 
 // ErrPoolExhausted is returned when Get is called and the pool has reached MaxPerKey for that key.

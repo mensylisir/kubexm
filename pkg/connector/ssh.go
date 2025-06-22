@@ -293,51 +293,116 @@ func (s *SSHConnector) GetOS(ctx context.Context) (*OS, error) {
 	if err == nil { osInfo.Arch = strings.TrimSpace(string(archStdout)) }
 	kernelStdout, _, err := s.Exec(ctx, "uname -r", nil)
 	if err == nil { osInfo.Kernel = strings.TrimSpace(string(kernelStdout)) }
+	osInfo := &OS{}
+	content, stderr, err := s.Exec(ctx, "cat /etc/os-release", nil)
+	if err != nil {
+		// Attempt to get at least Arch and Kernel if /etc/os-release fails
+		archStdout, _, archErr := s.Exec(ctx, "uname -m", nil)
+		if archErr == nil {
+			osInfo.Arch = strings.TrimSpace(string(archStdout))
+		}
+		kernelStdout, _, kernelErr := s.Exec(ctx, "uname -r", nil)
+		if kernelErr == nil {
+			osInfo.Kernel = strings.TrimSpace(string(kernelStdout))
+		}
+		return osInfo, fmt.Errorf("failed to cat /etc/os-release on host %s: %w (stderr: %s)", s.connCfg.Host, err, string(stderr))
+	}
+
+	lines := strings.Split(string(content), "\n")
+	vars := make(map[string]string)
+	for _, line := range lines {
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			val := strings.Trim(strings.TrimSpace(parts[1]), "\"")
+			vars[key] = val
+		}
+	}
+	osInfo.ID = vars["ID"]
+	osInfo.VersionID = vars["VERSION_ID"]
+	osInfo.PrettyName = vars["PRETTY_NAME"]
+	osInfo.Codename = vars["VERSION_CODENAME"] // Populate Codename
+
+	archStdout, _, archErr := s.Exec(ctx, "uname -m", nil)
+	if archErr == nil {
+		osInfo.Arch = strings.TrimSpace(string(archStdout))
+	} else {
+		fmt.Fprintf(os.Stderr, "Warning: failed to get arch for host %s: %v\n", s.connCfg.Host, archErr)
+	}
+
+	kernelStdout, _, kernelErr := s.Exec(ctx, "uname -r", nil)
+	if kernelErr == nil {
+		osInfo.Kernel = strings.TrimSpace(string(kernelStdout))
+	} else {
+		fmt.Fprintf(os.Stderr, "Warning: failed to get kernel for host %s: %v\n", s.connCfg.Host, kernelErr)
+	}
+
 	s.cachedOS = osInfo
 	return s.cachedOS, nil
 }
 
 func (s *SSHConnector) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	if err := s.ensureSftp(); err != nil {
-		return nil, fmt.Errorf("sftp client not available for ReadFile: %w", err)
+		return nil, fmt.Errorf("sftp client not available for ReadFile on host %s: %w", s.connCfg.Host, err)
 	}
 	file, err := s.sftpClient.Open(path)
-	if err != nil { return nil, fmt.Errorf("failed to open remote file %s via sftp: %w", path, err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to open remote file %s via sftp on host %s: %w", path, s.connCfg.Host, err)
+	}
 	defer file.Close()
-	content, err := io.ReadAll(file)
-	if err != nil { return nil, fmt.Errorf("failed to read remote file %s via sftp: %w", path, err) }
-	return content, nil
+
+	contentBytes, err := io.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read remote file %s via sftp on host %s: %w", path, s.connCfg.Host, err)
+	}
+	return contentBytes, nil
 }
 
 func (s *SSHConnector) WriteFile(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error {
 	if err := s.ensureSftp(); err != nil {
-		return fmt.Errorf("sftp client not available for WriteFile: %w", err)
+		return fmt.Errorf("sftp client not available for WriteFile on host %s: %w", s.connCfg.Host, err)
 	}
 	if sudo {
-		fmt.Fprintf(os.Stderr, "Warning: WriteFile with sudo=true for SSH connector attempts direct SFTP write to %s; this may fail for restricted paths.\n", destPath)
+		// This warning is appropriate as direct SFTP write with sudo is not really a thing.
+		// True sudo write would involve temp file and `sudo mv` via Exec.
+		fmt.Fprintf(os.Stderr, "Warning: WriteFile with sudo=true for SSH connector attempts direct SFTP write to %s on host %s; this may fail for restricted paths.\n", destPath, s.connCfg.Host)
 	}
 
-	file, err := s.sftpClient.Create(destPath)
-	if err != nil {
-		parentDir := filepath.Dir(destPath)
-		if parentDir != "." && parentDir != "/" {
-			_ = s.sftpClient.Mkdir(parentDir) // Best effort mkdir
-		}
-		file, err = s.sftpClient.Create(destPath) // Retry create
-		if err != nil {
-			return fmt.Errorf("failed to create/truncate remote file %s via sftp: %w", destPath, err)
+	// Attempt to create parent directory if it doesn't exist. Best effort.
+	parentDir := filepath.Dir(destPath)
+	if parentDir != "." && parentDir != "/" {
+		// Stat parent first to avoid unnecessary mkdir attempts or errors if it exists.
+		_, statErr := s.sftpClient.Stat(parentDir)
+		if statErr != nil {
+			if os.IsNotExist(statErr) {
+				// MkdirAll equivalent is not directly in sftp, so we do it simply.
+				// For complex cases, an Exec("mkdir -p") might be more robust.
+				if err := s.sftpClient.Mkdir(parentDir); err != nil {
+					// Log or print warning, but proceed to create file, maybe it's a deeper path issue.
+					fmt.Fprintf(os.Stderr, "Warning: failed to SFTP mkdir parent %s on host %s, continuing write attempt: %v\n", parentDir, s.connCfg.Host, err)
+				}
+			}
 		}
 	}
+
+	file, err := s.sftpClient.Create(destPath) // Create will truncate if file exists
+	if err != nil {
+		return fmt.Errorf("failed to create/truncate remote file %s via sftp on host %s: %w", destPath, s.connCfg.Host, err)
+	}
 	defer file.Close()
+
 	_, err = file.Write(content)
-	if err != nil { return fmt.Errorf("failed to write content to remote file %s via sftp: %w", destPath, err) }
+	if err != nil {
+		return fmt.Errorf("failed to write content to remote file %s via sftp on host %s: %w", destPath, s.connCfg.Host, err)
+	}
+
 	if permissions != "" {
 		permVal, parseErr := strconv.ParseUint(permissions, 8, 32)
 		if parseErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Invalid permissions format '%s' for SFTP WriteFile to %s, skipping chmod: %v\n", permissions, destPath, parseErr)
+			fmt.Fprintf(os.Stderr, "Warning: Invalid permissions format '%s' for SFTP WriteFile to %s on host %s, skipping chmod: %v\n", permissions, destPath, s.connCfg.Host, parseErr)
 		} else {
 			if chmodErr := s.sftpClient.Chmod(destPath, os.FileMode(permVal)); chmodErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: Failed to chmod remote file %s to %s via SFTP: %v\n", destPath, permissions, chmodErr)
+				fmt.Fprintf(os.Stderr, "Warning: Failed to chmod remote file %s to %s via SFTP on host %s: %v\n", destPath, permissions, s.connCfg.Host, chmodErr)
 			}
 		}
 	}
@@ -345,16 +410,28 @@ func (s *SSHConnector) WriteFile(ctx context.Context, content []byte, destPath, 
 }
 
 func (s *SSHConnector) Mkdir(ctx context.Context, path string, perm string) error {
-	cmd := fmt.Sprintf("mkdir -p %s", path)
-	_, stderr, err := s.Exec(ctx, cmd, &ExecOptions{Sudo: false})
+	// Construct the command with sudo if needed, though typically mkdir -p handles permissions well.
+	// For simplicity, assuming Runner handles sudo if path requires it.
+	// Connector's Mkdir itself won't use sudo directly unless ExecOptions are passed.
+	cmd := fmt.Sprintf("mkdir -p %s", path) // -p makes it idempotent
+	_, stderrBytes, err := s.Exec(ctx, cmd, &ExecOptions{Sudo: false}) // Assuming no sudo for basic mkdir by connector
 	if err != nil {
-		return fmt.Errorf("failed to create directory %s on %s: %w (stderr: %s)", path, s.connCfg.Host, err, string(stderr))
+		// Check if it's CommandError to provide more details
+		if cmdErr, ok := err.(*CommandError); ok {
+			return fmt.Errorf("failed to create directory %s on %s (exit code %d): %w (stderr: %s)", path, s.connCfg.Host, cmdErr.ExitCode, err, cmdErr.Stderr)
+		}
+		return fmt.Errorf("failed to create directory %s on %s: %w (stderr: %s)", path, s.connCfg.Host, err, string(stderrBytes))
 	}
+
 	if perm != "" {
 		chmodCmd := fmt.Sprintf("chmod %s %s", perm, path)
-		_, stderrChmod, errChmod := s.Exec(ctx, chmodCmd, &ExecOptions{Sudo: false})
-		if errChmod != nil {
-			return fmt.Errorf("failed to chmod directory %s on %s to %s: %w (stderr: %s)", path, s.connCfg.Host, perm, errChmod, string(stderrChmod))
+		// Pass Sudo false, as chmod on a directory usually depends on ownership or prior sudo for mkdir.
+		_, chmodStderrBytes, chmodErr := s.Exec(ctx, chmodCmd, &ExecOptions{Sudo: false})
+		if chmodErr != nil {
+			if cmdErr, ok := chmodErr.(*CommandError); ok {
+				return fmt.Errorf("failed to chmod directory %s on %s to %s (exit code %d): %w (stderr: %s)", path, s.connCfg.Host, perm, cmdErr.ExitCode, chmodErr, cmdErr.Stderr)
+			}
+			return fmt.Errorf("failed to chmod directory %s on %s to %s: %w (stderr: %s)", path, s.connCfg.Host, perm, chmodErr, string(chmodStderrBytes))
 		}
 	}
 	return nil
@@ -362,32 +439,57 @@ func (s *SSHConnector) Mkdir(ctx context.Context, path string, perm string) erro
 
 func (s *SSHConnector) Remove(ctx context.Context, path string, opts RemoveOptions) error {
 	var cmd string
-	if opts.Recursive { cmd = fmt.Sprintf("rm -rf %s", path)
-	} else { cmd = fmt.Sprintf("rm -f %s", path) }
-	_, stderr, err := s.Exec(ctx, cmd, &ExecOptions{Sudo: false})
+	flags := "-f" // Default to force, helps with idempotency if file doesn't exist with -f
+	if opts.Recursive {
+		flags += "r"
+	}
+	cmd = fmt.Sprintf("rm %s %s", flags, path)
+
+	// Assuming no sudo for basic remove by connector. Runner would apply sudo if needed.
+	_, stderrBytes, err := s.Exec(ctx, cmd, &ExecOptions{Sudo: false})
 	if err != nil {
-		if opts.IgnoreNotExist && (strings.Contains(string(stderr), "No such file or directory") || strings.Contains(string(stderr), "cannot remove") && strings.Contains(string(stderr), "No such file or directory")) {
-			return nil
+		// If IgnoreNotExist is true, and error indicates "No such file or directory"
+		// This check can be fragile based on OS and rm version stderr messages.
+		// A more robust way might be to Stat first if IgnoreNotExist is true.
+		if opts.IgnoreNotExist {
+			// A common pattern for "No such file or directory"
+			// This is a heuristic and might need adjustment based on target OS.
+			if cmdErr, ok := err.(*CommandError); ok && (strings.Contains(cmdErr.Stderr, "No such file or directory") || (cmdErr.ExitCode == 1 && cmdErr.Stderr == "")) {
+				return nil // Suppress error as requested
+			}
 		}
-		return fmt.Errorf("failed to remove %s on %s: %w (stderr: %s)", path, s.connCfg.Host, err, string(stderr))
+		if cmdErr, ok := err.(*CommandError); ok {
+			return fmt.Errorf("failed to remove %s on %s (exit code %d): %w (stderr: %s)", path, s.connCfg.Host, cmdErr.ExitCode, err, cmdErr.Stderr)
+		}
+		return fmt.Errorf("failed to remove %s on %s: %w (stderr: %s)", path, s.connCfg.Host, err, string(stderrBytes))
 	}
 	return nil
 }
 
 func (s *SSHConnector) GetFileChecksum(ctx context.Context, path string, checksumType string) (string, error) {
-	var cmd string
+	var checksumCmd string
 	switch strings.ToLower(checksumType) {
-	case "sha256": cmd = fmt.Sprintf("sha256sum %s", path)
-	case "md5": cmd = fmt.Sprintf("md5sum %s", path)
-	default: return "", fmt.Errorf("unsupported checksum type '%s' for remote file %s", checksumType, path)
+	case "sha256":
+		checksumCmd = fmt.Sprintf("sha256sum %s", path)
+	case "md5":
+		checksumCmd = fmt.Sprintf("md5sum %s", path)
+	default:
+		return "", fmt.Errorf("unsupported checksum type '%s' for remote file %s on host %s", checksumType, path, s.connCfg.Host)
 	}
-	stdout, stderr, err := s.Exec(ctx, cmd, &ExecOptions{Sudo: false})
+
+	stdoutBytes, stderrBytes, err := s.Exec(ctx, checksumCmd, &ExecOptions{Sudo: false}) // Assuming no sudo for checksum
 	if err != nil {
-		return "", fmt.Errorf("failed to execute checksum command '%s' on %s for %s: %w (stderr: %s)", cmd, s.connCfg.Host, path, err, string(stderr))
+		if cmdErr, ok := err.(*CommandError); ok {
+			return "", fmt.Errorf("failed to execute checksum command '%s' on %s for %s (exit code %d): %w (stderr: %s)", checksumCmd, s.connCfg.Host, path, cmdErr.ExitCode, err, cmdErr.Stderr)
+		}
+		return "", fmt.Errorf("failed to execute checksum command '%s' on %s for %s: %w (stderr: %s)", checksumCmd, s.connCfg.Host, path, err, string(stderrBytes))
 	}
-	parts := strings.Fields(string(stdout))
-	if len(parts) > 0 { return parts[0], nil }
-	return "", fmt.Errorf("failed to parse checksum from command output: '%s'", string(stdout))
+
+	parts := strings.Fields(string(stdoutBytes))
+	if len(parts) > 0 {
+		return parts[0], nil
+	}
+	return "", fmt.Errorf("failed to parse checksum from command output for %s on host %s: '%s'", path, s.connCfg.Host, string(stdoutBytes))
 }
 
 var _ Connector = &SSHConnector{}

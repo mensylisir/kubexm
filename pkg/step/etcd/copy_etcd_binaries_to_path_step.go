@@ -84,11 +84,19 @@ func (s *CopyEtcdBinariesToPathStep) Precheck(ctx runtime.StepContext, host conn
 				versionCmd = fmt.Sprintf("%s version", binPath)
 			}
 
-			stdoutBytes, stderrBytes, execErr := runnerSvc.RunWithOptions(ctx.GoContext(), conn, versionCmd, &connector.ExecOptions{Sudo: false, Check: true})
-			output := string(stdoutBytes) + string(stderrBytes)
+			// Expect version commands to exit 0. If they error, we can't confirm version.
+			stdoutBytes, stderrBytes, execErr := runnerSvc.RunWithOptions(ctx.GoContext(), conn, versionCmd, &connector.ExecOptions{Sudo: false})
+			output := string(stdoutBytes) // Combine stdout for parsing
+			if len(stderrBytes) > 0 {
+				// Some tools print version to stderr or errors that might still be parsable
+				// output += "\nStderr: " + string(stderrBytes) // Keep it simple for now, just stdout primarily
+			}
+
+			fullOutput := string(stdoutBytes) + string(stderrBytes)
+
 
 			if execErr != nil {
-				logger.Warn("Failed to get version of existing binary, assuming not correct.", "path", binPath, "error", execErr, "output", output)
+				logger.Warn("Failed to get version of existing binary, assuming not correct.", "path", binPath, "error", execErr, "output", fullOutput)
 				return false, nil
 			}
 

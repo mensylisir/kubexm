@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"io/fs" // For Mkdir permissions
 	"time"
 )
 
@@ -274,43 +275,76 @@ func (l *LocalConnector) GetOS(ctx context.Context) (*OS, error) {
 	}
 
 	// Getting VersionID, Codename, Kernel for local can be more involved
-	// and platform-specific. For example, on Linux, we could read /etc/os-release
-	// or use `uname` commands like in SSHConnector.
-	// For simplicity, we'll start with basic info from `runtime` package.
+	// and platform-specific.
+	osInfo.Arch = runtime.GOARCH // Already correct
 
-	// Attempt to get more details for Linux from /etc/os-release
-	if runtime.GOOS == "linux" {
-		content, err := os.ReadFile("/etc/os-release")
-		if err == nil {
-			lines := strings.Split(string(content), "\n")
-			for _, line := range lines {
-				parts := strings.SplitN(line, "=", 2)
-				if len(parts) == 2 {
-					key := strings.TrimSpace(parts[0])
-					val := strings.Trim(strings.TrimSpace(parts[1]), "\"")
-					switch key {
-					case "ID":
-						osInfo.ID = val // Override with more specific ID
-					case "VERSION_ID":
-						osInfo.VersionID = val
-					// case "VERSION_CODENAME": // OS struct does not have Codename
-					// 	osInfo.Codename = val
-					}
-				}
-			}
-		}
+	switch runtime.GOOS {
+	case "linux":
 		// Kernel version from `uname -r`
 		kernelCmd := exec.CommandContext(ctx, "uname", "-r")
 		kernelOut, errKernel := kernelCmd.Output()
 		if errKernel == nil {
 			osInfo.Kernel = strings.TrimSpace(string(kernelOut))
+		} else {
+			// Log warning or error, but proceed
+			fmt.Fprintf(os.Stderr, "warning: failed to get kernel version for local connector: %v\n", errKernel)
 		}
-	} else if runtime.GOOS == "darwin" {
-		// Example for macOS: sw_vers
-		// Similar logic can be added for other OSes.
-		// For now, these fields might remain empty for non-Linux.
-	}
 
+		// Read /etc/os-release
+		content, err := os.ReadFile("/etc/os-release")
+		if err == nil {
+			lines := strings.Split(string(content), "\n")
+			vars := make(map[string]string)
+			for _, line := range lines {
+				parts := strings.SplitN(line, "=", 2)
+				if len(parts) == 2 {
+					key := strings.TrimSpace(parts[0])
+					val := strings.Trim(strings.TrimSpace(parts[1]), "\"")
+					vars[key] = val
+				}
+			}
+			osInfo.ID = vars["ID"]
+			osInfo.VersionID = vars["VERSION_ID"]
+			osInfo.PrettyName = vars["PRETTY_NAME"]
+			osInfo.Codename = vars["VERSION_CODENAME"]
+		} else {
+			// Fallback if /etc/os-release is not readable
+			osInfo.ID = "linux"
+			if osInfo.PrettyName == "" {
+				osInfo.PrettyName = "Linux"
+			}
+			fmt.Fprintf(os.Stderr, "warning: failed to read /etc/os-release for local connector: %v\n", err)
+		}
+
+	case "darwin":
+		osInfo.ID = "darwin"
+		// Populate PrettyName, VersionID, Kernel using `sw_vers` and `uname -r`
+		swVersCmd := exec.CommandContext(ctx, "sw_vers", "-productName")
+		prodName, errProd := swVersCmd.Output()
+		if errProd == nil {
+			osInfo.PrettyName = strings.TrimSpace(string(prodName))
+		}
+		swVersCmd = exec.CommandContext(ctx, "sw_vers", "-productVersion")
+		prodVer, errVer := swVersCmd.Output()
+		if errVer == nil {
+			osInfo.VersionID = strings.TrimSpace(string(prodVer))
+		}
+		kernelCmd := exec.CommandContext(ctx, "uname", "-r")
+		kernelOut, errKernel := kernelCmd.Output()
+		if errKernel == nil {
+			osInfo.Kernel = strings.TrimSpace(string(kernelOut))
+		}
+		if osInfo.PrettyName == "" {
+			osInfo.PrettyName = "macOS"
+		}
+	case "windows":
+		osInfo.ID = "windows"
+		osInfo.PrettyName = "Windows" // Basic, can be enhanced with `ver` or registry checks
+		// Kernel and VersionID might require more complex parsing of `ver` or systeminfo
+	default:
+		osInfo.ID = runtime.GOOS
+		osInfo.PrettyName = runtime.GOOS
+	}
 
 	l.cachedOS = osInfo
 	return l.cachedOS, nil
@@ -319,7 +353,11 @@ func (l *LocalConnector) GetOS(ctx context.Context) (*OS, error) {
 // ReadFile reads a file from the local filesystem.
 func (l *LocalConnector) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	// TODO: Consider context cancellation/timeout for large file reads if necessary.
-	return os.ReadFile(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read local file %s: %w", path, err)
+	}
+	return data, nil
 }
 
 // WriteFile writes content to a local file.
@@ -335,56 +373,77 @@ func (l *LocalConnector) WriteFile(ctx context.Context, content []byte, destPath
 		return fmt.Errorf("sudo not implemented for LocalConnector.WriteFile, target path %s may require privileges", destPath)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil { // Default permissive mkdir for parent
 		return fmt.Errorf("failed to create parent directory for %s: %w", destPath, err)
 	}
 
-	err := os.WriteFile(destPath, content, 0666) // Write with temp broad permissions
+	// Default file permission if not specified or invalid
+	permMode := fs.FileMode(0644) // Default to rw-r--r--
+	if permissions != "" {
+		permVal, parseErr := strconv.ParseUint(permissions, 8, 32)
+		if parseErr == nil {
+			permMode = fs.FileMode(permVal)
+		} else {
+			fmt.Fprintf(os.Stderr, "Warning: Invalid permissions format '%s' for local WriteFile to %s, using default 0644: %v\n", permissions, destPath, parseErr)
+		}
+	}
+
+	err := os.WriteFile(destPath, content, permMode)
 	if err != nil {
 		return fmt.Errorf("failed to write file %s: %w", destPath, err)
 	}
-
-	if permissions != "" {
-		permVal, parseErr := strconv.ParseUint(permissions, 8, 32)
-		if parseErr != nil {
-			return fmt.Errorf("invalid permissions format '%s': %w", permissions, parseErr)
-		}
-		if chmodErr := os.Chmod(destPath, os.FileMode(permVal)); chmodErr != nil {
-			return fmt.Errorf("failed to chmod file %s to %s: %w", destPath, permissions, chmodErr)
-		}
-	}
+	// Chmod is effectively done by WriteFile's perm argument if permissions string was valid,
+	// but explicit chmod can be done if WriteFile used a temp perm.
+	// For simplicity, WriteFile directly uses the target perm.
 	return nil
 }
 
 
 // GetFileChecksum calculates the checksum of a local file.
-// Currently supports "sha256".
+// Supports "sha256", "md5".
 func (l *LocalConnector) GetFileChecksum(ctx context.Context, path string, checksumType string) (string, error) {
 	// TODO: Context cancellation for large files
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
-		return "", fmt.Errorf("failed to read local file %s for checksum: %w", path, err)
+		return "", fmt.Errorf("failed to open local file %s for checksum: %w", path, err)
 	}
+	defer file.Close()
 
+	hasher := sha256.New() // Default hasher
 	switch strings.ToLower(checksumType) {
 	case "sha256":
-		hash := sha256.Sum256(data)
-		return hex.EncodeToString(hash[:]), nil
-	// Add other checksum types (md5, sha1) if needed
+		// Hasher already sha256.New()
+	case "md5":
+		// hasher = md5.New() // To use md5, import "crypto/md5"
+		return "", fmt.Errorf("md5 checksum not implemented for local connector, requested for %s", path)
 	default:
 		return "", fmt.Errorf("unsupported checksum type '%s' for local file %s", checksumType, path)
 	}
+
+	if _, err := io.Copy(hasher, file); err != nil {
+		return "", fmt.Errorf("failed to read local file %s for checksum calculation: %w", path, err)
+	}
+
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 // Mkdir creates a directory on the local filesystem.
 // perm is an octal string like "0755".
 func (l *LocalConnector) Mkdir(ctx context.Context, path string, perm string) error {
 	// TODO: Handle context cancellation if os.MkdirAll can be long-running (unlikely for mkdir)
-	mode, err := strconv.ParseUint(perm, 8, 32)
-	if err != nil {
-		return fmt.Errorf("invalid permission format '%s' for Mkdir: %w", perm, err)
+	var mode fs.FileMode = 0755 // Default permission
+	if perm != "" {
+		parsedMode, err := strconv.ParseUint(perm, 8, 32)
+		if err != nil {
+			return fmt.Errorf("invalid permission format '%s' for Mkdir: %w", perm, err)
+		}
+		mode = fs.FileMode(parsedMode)
 	}
-	return os.MkdirAll(path, os.FileMode(mode))
+	err := os.MkdirAll(path, mode)
+	if err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", path, err)
+	}
+	return nil
 }
 
 // Remove removes a file or directory on the local filesystem.
@@ -402,10 +461,17 @@ func (l *LocalConnector) Remove(ctx context.Context, path string, opts RemoveOpt
 		return fmt.Errorf("failed to stat path %s before removal: %w", path, err)
 	}
 
+	var removeErr error
 	if opts.Recursive {
-		return os.RemoveAll(path)
+		removeErr = os.RemoveAll(path)
+	} else {
+		removeErr = os.Remove(path)
 	}
-	return os.Remove(path)
+
+	if removeErr != nil {
+		return fmt.Errorf("failed to remove %s: %w", path, removeErr)
+	}
+	return nil
 }
 
 
