@@ -13,7 +13,14 @@ type CommandError struct {
 
 // Error returns a string representation of the CommandError.
 func (e *CommandError) Error() string {
-	return fmt.Sprintf("command '%s' failed with exit code %d: %s", e.Cmd, e.ExitCode, e.Stderr)
+	errMsg := fmt.Sprintf("command '%s' failed with exit code %d", e.Cmd, e.ExitCode)
+	if e.Stderr != "" {
+		errMsg = fmt.Sprintf("%s: %s", errMsg, e.Stderr)
+	}
+	if e.Underlying != nil {
+		errMsg = fmt.Sprintf("%s (underlying error: %v)", errMsg, e.Underlying)
+	}
+	return errMsg
 }
 
 // ConnectionError represents a failure to establish a connection.

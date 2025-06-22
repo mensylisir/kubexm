@@ -26,134 +26,109 @@ func New() Runner {
 // GatherFacts gathers information about the host.
 func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connector) (*Facts, error) {
 	facts := &Facts{}
-	var getOSError error // To capture errors from GetOS if it's the first one in errgroup
+	var err error
 
+	// Step 1: Get OS information synchronously as other facts may depend on it.
+	facts.OS, err = conn.GetOS(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get OS info: %w", err)
+	}
+	if facts.OS == nil {
+		return nil, fmt.Errorf("conn.GetOS returned nil OS without error")
+	}
+
+	// Step 2: Gather other facts, potentially in parallel if they are independent.
 	g, gCtx := errgroup.WithContext(ctx)
 
-	// Get OS information
+	// Get hostname
 	g.Go(func() error {
-		var err error
-		facts.OS, err = conn.GetOS(gCtx) // Use conn from parameter
-		if err != nil {
-			getOSError = fmt.Errorf("failed to get OS info: %w", err)
-			return getOSError // Return error to errgroup
-		}
-		if facts.OS == nil { // Should be caught by GetOS error, but defensive
-			getOSError = fmt.Errorf("conn.GetOS returned nil OS without error")
-			return getOSError
-		}
-		return nil
-	})
-
-	// Get hostname and kernel version
-	g.Go(func() error {
-		// Wait for OS info to be available if needed for OS-specific commands,
-		// or if GetOS fails, errgroup context gCtx will be cancelled.
-		if err := gCtx.Err(); err != nil {
-			return err
-		}
-		hostnameBytes, _, execErr := conn.Exec(gCtx, "hostname -f", nil) // Use conn
+		hostnameBytes, _, execErr := conn.Exec(gCtx, "hostname -f", nil)
 		if execErr != nil {
-			// Fallback to simple hostname if hostname -f fails (e.g. not configured)
+			// Fallback to simple hostname if hostname -f fails
 			hostnameBytes, _, execErr = conn.Exec(gCtx, "hostname", nil)
 			if execErr != nil {
-				return fmt.Errorf("failed to get hostname (hostname -f and hostname): %w", execErr)
+				return fmt.Errorf("failed to get hostname: %w", execErr)
 			}
 		}
 		facts.Hostname = strings.TrimSpace(string(hostnameBytes))
-
-		kernelBytes, _, execErr := conn.Exec(gCtx, "uname -r", nil) // Use conn
-		if execErr != nil {
-			return fmt.Errorf("failed to get kernel version: %w", execErr)
-		}
-		facts.Kernel = strings.TrimSpace(string(kernelBytes))
 		return nil
 	})
 
+	// Get kernel version (already part of facts.OS.Kernel, but can be re-verified or kept if OS.Kernel is minimal)
+	// For now, we assume facts.OS.Kernel is sufficient. If not, this can be added:
+	/*
+		g.Go(func() error {
+			kernelBytes, _, execErr := conn.Exec(gCtx, "uname -r", nil)
+			if execErr != nil {
+				return fmt.Errorf("failed to get kernel version: %w", execErr)
+			}
+			facts.Kernel = strings.TrimSpace(string(kernelBytes)) // This might override OS.Kernel
+			return nil
+		})
+	*/
+	// If facts.OS.Kernel is populated by conn.GetOS, facts.Kernel field in Facts struct might be redundant
+	// or should be explicitly set from facts.OS.Kernel.
+	// For now, let's ensure facts.Kernel is set from facts.OS.Kernel.
+	facts.Kernel = facts.OS.Kernel
+
 	// Get CPU and Memory
 	g.Go(func() error {
-		if err := gCtx.Err(); err != nil {
-			return err
+		var cpuCmd, memCmd string
+		memIsKb := false
+
+		// Use facts.OS.ID for OS-specific commands
+		switch strings.ToLower(facts.OS.ID) {
+		case "linux", "ubuntu", "debian", "centos", "rhel", "fedora", "almalinux", "rocky", "raspbian", "linuxmint":
+			cpuCmd = "nproc"
+			memCmd = "grep MemTotal /proc/meminfo | awk '{print $2}'" // Output is in KB
+			memIsKb = true
+		case "darwin":
+			cpuCmd = "sysctl -n hw.ncpu"
+			memCmd = "sysctl -n hw.memsize" // Output is in Bytes
+			memIsKb = false
+		default:
+			// Fallback or error for unsupported OS for CPU/Mem
+			// Try generic, but they might fail.
+			cpuCmd = "nproc" // Attempt Linux default
+			memCmd = "grep MemTotal /proc/meminfo | awk '{print $2}'" // Attempt Linux default
+			memIsKb = true
+			// Or return an error/warning:
+			// fmt.Fprintf(os.Stderr, "Warning: Unsupported OS '%s' for specific CPU/Mem fact gathering, attempting defaults.\n", facts.OS.ID)
 		}
-		// Ensure facts.OS is populated before attempting OS-specific commands.
-		// This relies on the GetOS goroutine completing successfully first if its result is needed.
-		// If GetOS fails, gCtx.Err() will be non-nil, and this goroutine will return early.
-		// We need a mechanism to wait for facts.OS or handle its potential nilness if GetOS is slow or fails.
-		// For now, we'll assume if GetOS fails, gCtx is cancelled. If it succeeds, facts.OS is set.
-		// A more robust way would be to have dependent goroutines.
 
-		// This temporary read of facts.OS might occur before GetOS goroutine finishes writing to it.
-		// This is a race condition. The GetOS must complete before this goroutine can safely use facts.OS.
-		// The errgroup doesn't guarantee order of execution between goroutines, only that all complete or one fails.
-		// A better pattern: GetOS runs first, then other fact gathering that depends on OS info.
-		// For this refactoring, let's assume facts.OS will be populated OR getOSError will cancel context.
-		// A more robust solution is needed if facts.OS is critical for command choice here AND GetOS can be slow.
-
-		// Given the current errgroup, we cannot reliably use facts.OS here if it's set by another goroutine.
-		// So, for CPU/Mem detection, we'll try generic commands first or make OS-specific logic self-contained
-		// by calling conn.GetOS() *within* this goroutine if needed for command selection.
-		// For simplicity, let's assume generic commands or handle OS variance carefully.
-
-		// CPU detection:
-		cpuCmd := "nproc" // Default for Linux
-		// If we could reliably get facts.OS.ID here, we'd use it.
-		// Tentative OS check (less reliable due to potential race with GetOS goroutine):
-		// Note: This is a simplified approach. A proper solution would ensure GetOS completes first.
-		// For this iteration, we'll proceed with a common command and acknowledge this limitation.
-
-		cpuBytes, _, execErr := conn.Exec(gCtx, cpuCmd, nil) // Use conn
-		if execErr == nil {
-			parsedCPU, err := strconv.Atoi(strings.TrimSpace(string(cpuBytes)))
-			if err == nil {
-				facts.TotalCPU = parsedCPU
-			} else {
-				facts.TotalCPU = 0 // Default or mark as unknown
-			}
-		} else {
-			// Fallback for systems without nproc (e.g., macOS)
-			// This would ideally use facts.OS.ID if available and reliable.
-			// Trying sysctl for macOS as a common fallback.
-			cpuBytesMac, _, execErrMac := conn.Exec(gCtx, "sysctl -n hw.ncpu", nil)
-			if execErrMac == nil {
-				parsedCPUMac, errMac := strconv.Atoi(strings.TrimSpace(string(cpuBytesMac)))
-				if errMac == nil {
-					facts.TotalCPU = parsedCPUMac
+		if cpuCmd != "" {
+			cpuBytes, _, execErr := conn.Exec(gCtx, cpuCmd, nil)
+			if execErr == nil {
+				parsedCPU, parseErr := strconv.Atoi(strings.TrimSpace(string(cpuBytes)))
+				if parseErr == nil {
+					facts.TotalCPU = parsedCPU
 				} else {
-					facts.TotalCPU = 0
+					fmt.Fprintf(os.Stderr, "Warning: failed to parse CPU output for %s on %s: %v\n", facts.OS.ID, facts.Hostname, parseErr)
+					facts.TotalCPU = 0 // Default or mark as unknown
 				}
 			} else {
+				fmt.Fprintf(os.Stderr, "Warning: failed to exec CPU command '%s' for %s on %s: %v\n", cpuCmd, facts.OS.ID, facts.Hostname, execErr)
 				facts.TotalCPU = 0 // Default or mark as unknown
 			}
 		}
 
-		// Memory detection:
-		memCmd := "grep MemTotal /proc/meminfo | awk '{print $2}'" // KB, for Linux
-		isKb := true
-		// Similar OS detection issue as above for command choice.
-		// Assuming Linux for /proc/meminfo.
-		memBytes, _, execErr := conn.Exec(gCtx, memCmd, nil) // Use conn
-		if execErr == nil {
-			memVal, parseErr := strconv.ParseUint(strings.TrimSpace(string(memBytes)), 10, 64)
-			if parseErr == nil {
-				if isKb {
-					facts.TotalMemory = memVal / 1024 // Convert KB to MiB
+
+		if memCmd != "" {
+			memBytes, _, execErr := conn.Exec(gCtx, memCmd, nil)
+			if execErr == nil {
+				memVal, parseErr := strconv.ParseUint(strings.TrimSpace(string(memBytes)), 10, 64)
+				if parseErr == nil {
+					if memIsKb {
+						facts.TotalMemory = memVal / 1024 // Convert KB to MiB
+					} else { // Assumed Bytes
+						facts.TotalMemory = memVal / (1024 * 1024) // Convert Bytes to MiB
+					}
 				} else {
-					facts.TotalMemory = memVal / (1024 * 1024) // Convert Bytes to MiB
+					fmt.Fprintf(os.Stderr, "Warning: failed to parse Memory output for %s on %s: %v\n", facts.OS.ID, facts.Hostname, parseErr)
+					facts.TotalMemory = 0 // Default
 				}
 			} else {
-				facts.TotalMemory = 0 // Default
-			}
-		} else {
-			// Fallback for macOS (hw.memsize returns bytes)
-			memBytesMac, _, execErrMac := conn.Exec(gCtx, "sysctl -n hw.memsize", nil)
-			if execErrMac == nil {
-				memValMac, parseErrMac := strconv.ParseUint(strings.TrimSpace(string(memBytesMac)), 10, 64)
-				if parseErrMac == nil {
-					facts.TotalMemory = memValMac / (1024 * 1024) // Bytes to MiB
-				} else {
-					facts.TotalMemory = 0
-				}
-			} else {
+				fmt.Fprintf(os.Stderr, "Warning: failed to exec Memory command '%s' for %s on %s: %v\n", memCmd, facts.OS.ID, facts.Hostname, execErr)
 				facts.TotalMemory = 0 // Default
 			}
 		}
@@ -162,45 +137,50 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 
 	// Get default IP addresses
 	g.Go(func() error {
-		if err := gCtx.Err(); err != nil {
-			return err
+		var ip4Cmd, ip6Cmd string
+		// Use facts.OS.ID for OS-specific commands
+		switch strings.ToLower(facts.OS.ID) {
+		case "linux", "ubuntu", "debian", "centos", "rhel", "fedora", "almalinux", "rocky", "raspbian", "linuxmint":
+			ip4Cmd = "ip -4 route get 8.8.8.8 | awk '{print $7}' | head -n1"
+			ip6Cmd = "ip -6 route get 2001:4860:4860::8888 | awk '{print $10}' | head -n1"
+		case "darwin":
+			// For macOS, `route get default | grep interface | awk '{print $2}'` gets interface, then `ipconfig getifaddr <iface>`
+			// This is more complex; for simplicity, we might leave it or use a simpler heuristic if available.
+			// Example: ipconfig getifaddr en0 (but en0 might not be the default)
+			// For now, let's keep it Linux-focused for IPs or accept it might be empty for others.
+			// A common way:
+			// ip4Cmd = "route -n get default | grep 'interface:' | awk '{print $2}' | xargs -I {} ipconfig getifaddr {}" (very basic)
+		default:
+			// fmt.Fprintf(os.Stderr, "Warning: OS '%s' not specifically handled for IP fact gathering.\n", facts.OS.ID)
 		}
-		// These commands are Linux-specific.
-		// Again, OS-specific command selection is hard here without facts.OS reliably.
-		ip4Cmd := "ip -4 route get 8.8.8.8 | awk '{print $7}' | head -n1"
-		ip6Cmd := "ip -6 route get 2001:4860:4860::8888 | awk '{print $10}' | head -n1" // Changed from $NF to $10 based on common ip route output
 
-		ip4Bytes, _, _ := conn.Exec(gCtx, ip4Cmd, nil) // Use conn, errors ignored as IPs might not exist
-		facts.IPv4Default = strings.TrimSpace(string(ip4Bytes))
-
-		ip6Bytes, _, _ := conn.Exec(gCtx, ip6Cmd, nil) // Use conn, errors ignored
-		facts.IPv6Default = strings.TrimSpace(string(ip6Bytes))
+		if ip4Cmd != "" {
+			ip4Bytes, _, _ := conn.Exec(gCtx, ip4Cmd, nil) // Errors ignored as IPs might not exist or command fails
+			facts.IPv4Default = strings.TrimSpace(string(ip4Bytes))
+		}
+		if ip6Cmd != "" {
+			ip6Bytes, _, _ := conn.Exec(gCtx, ip6Cmd, nil) // Errors ignored
+			facts.IPv6Default = strings.TrimSpace(string(ip6Bytes))
+		}
 		return nil
 	})
 
 	if err := g.Wait(); err != nil {
-		if getOSError != nil { // Prioritize GetOS error as it's foundational
-			return nil, getOSError
-		}
-		return nil, fmt.Errorf("failed to gather some host facts: %w", err)
+		// Log individual errors from goroutines if needed, errgroup returns the first non-nil error.
+		return facts, fmt.Errorf("failed during concurrent fact gathering: %w", err) // Return partially filled facts
 	}
 
-	// After all goroutines, facts.OS should be reliably set if GetOS was successful.
-	if facts.OS == nil { // Should have been caught by getOSError if GetOS failed and returned error
-	    return nil, fmt.Errorf("critical: OS information is nil after fact gathering")
-	}
-
-	// These must be called after facts.OS is available.
+	// Step 3: Detect package manager and init system (these depend on facts.OS).
 	var pmErr, initErr error
-	facts.PackageManager, pmErr = r.detectPackageManager(ctx, conn, facts) // Pass original ctx
+	facts.PackageManager, pmErr = r.detectPackageManager(ctx, conn, facts)
 	if pmErr != nil {
-		// Log or handle error, but don't necessarily fail all fact gathering
-		// For now, we'll let it be nil and proceed.
-		// Consider if this should be a fatal error for GatherFacts.
+		fmt.Fprintf(os.Stderr, "Warning: failed to detect package manager for host %s (%s): %v\n", facts.Hostname, facts.OS.ID, pmErr)
+		// facts.PackageManager will be nil, subsequent package operations will fail gracefully.
 	}
-	facts.InitSystem, initErr = r.detectInitSystem(ctx, conn, facts) // Pass original ctx
+	facts.InitSystem, initErr = r.detectInitSystem(ctx, conn, facts)
 	if initErr != nil {
-		// Similar handling for init system detection error
+		fmt.Fprintf(os.Stderr, "Warning: failed to detect init system for host %s (%s): %v\n", facts.Hostname, facts.OS.ID, initErr)
+		// facts.InitSystem will be nil, subsequent service operations will fail gracefully.
 	}
 
 	return facts, nil

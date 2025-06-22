@@ -25,14 +25,8 @@ func (r *defaultRunner) Exists(ctx context.Context, conn connector.Connector, pa
 		// "existence cannot be confirmed" or "does not exist".
 		// A more robust connector would return a specific error type for "not found".
 		// For now, let's assume if Stat returns an error, we can't confirm existence.
-		// If the connector's Stat returns (nil, err) for "not found", this logic needs adjustment.
-		// Based on typical Stat behavior, a "not found" error IS an error.
-		// The prompt's placeholder had: return false, nil for "not found", which implies
-		// conn.Stat should return a FileStat with IsExist=false and err=nil for "not found".
-		if se, ok := err.(interface{ IsNotExist() bool }); ok && se.IsNotExist() {
-			return false, nil
-		}
-		return false, err // Other types of errors (permission denied, connection issue)
+		// conn.Stat now returns FileStat{IsExist: false}, nil for "not found"
+		return false, fmt.Errorf("failed to stat path %s: %w", path, err)
 	}
 	return stat.IsExist, nil
 }
@@ -44,12 +38,12 @@ func (r *defaultRunner) IsDir(ctx context.Context, conn connector.Connector, pat
 	}
 	stat, err := conn.Stat(ctx, path)
 	if err != nil {
-		if se, ok := err.(interface{ IsNotExist() bool }); ok && se.IsNotExist() {
-			return false, nil // Path doesn't exist, so not a directory
-		}
-		return false, err
+		// conn.Stat now returns FileStat{IsExist: false}, nil for "not found"
+		// So, if err is not nil here, it's a genuine error.
+		return false, fmt.Errorf("failed to stat path %s: %w", path, err)
 	}
-	if !stat.IsExist { // If it doesn't exist (according to FileStat struct), it's not a directory
+	// If IsExist is false (and err was nil), it's not a directory.
+	if !stat.IsExist {
 		return false, nil
 	}
 	return stat.IsDir, nil
@@ -188,11 +182,35 @@ func (r *defaultRunner) GetSHA256(ctx context.Context, conn connector.Connector,
 
 	if err != nil {
 		// If sha256sum is not found or fails, try shasum -a 256
-		// A more robust check would be on exit code for "command not found" or using LookPath first.
-		var cmdErr *connector.CommandError // Changed to CommandError which has ExitCode
-		if ok := errors.As(err, &cmdErr); ok && (strings.Contains(string(stderr), "not found") || cmdErr.ExitCode == 127) { // Used .ExitCode field
+		var cmdErr *connector.CommandError
+		if errors.As(err, &cmdErr) && (strings.Contains(cmdErr.Stderr, "not found") || cmdErr.ExitCode == 127 || (cmdErr.ExitCode == 1 && cmdErr.Stderr == "")) {
+			// Try shasum as a fallback
 			cmd = fmt.Sprintf("shasum -a 256 %s", path)
 			stdout, stderr, err = r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: false})
+		}
+	}
+
+	if err != nil {
+		// If we are here, both attempts failed or the first error was not "command not found"
+		return "", fmt.Errorf("failed to get SHA256 for %s (tried sha256sum and shasum): %w (last stderr: %s)", path, err, string(stderr))
+	}
+
+	// Output of both sha256sum and shasum is typically "checksum  filename"
+	parts := strings.Fields(string(stdout))
+	if len(parts) > 0 {
+		return parts[0], nil
+	}
+	return "", fmt.Errorf("could not parse SHA256 output: '%s'", string(stdout))
+}
+
+// LookPath searches for an executable in the remote host's PATH.
+func (r *defaultRunner) LookPath(ctx context.Context, conn connector.Connector, file string) (string, error) {
+	if conn == nil {
+		return "", fmt.Errorf("connector cannot be nil")
+	}
+	// Delegate directly to connector's LookPath
+	return conn.LookPath(ctx, file)
+}
 		}
 	}
 
