@@ -37,3 +37,23 @@ type Pipeline interface {
 ### 设计解读:
 - Pipeline 的 Plan 方法是图构建的最后一站。它调用 Module 的 Plan 方法，进行最后的链接，并最终生成一个可以被 Engine 执行的、完整的 ExecutionGraph 对象。
 - Run 方法的签名也更新了，以反映新的计划和结果类型。
+
+### pipeline结构如下
+```aiignore
+pkg/pipeline/
+├── interface.go
+├── cluster/
+│   ├── create.go       # 对应 'kubexm create cluster -f config.yaml'
+│   ├── delete.go       # 对应 'kubexm delete cluster -f config.yaml'
+│   ├── list.go         # 对应 'kubexm list cluster '
+│   ├── upgrade.go      # 对应 'kubexm upgrade cluster -f config.yaml'
+│   ├── add_nodes.go
+│   └── delete_nodes.go
+├── node/
+│   ├── list_nodes.go
+│   ├── cordon_node.go
+│   └── drain_node.go
+├─certs/
+│   ├──check_certs_expiration.go
+└── └──rotate_certs.go
+```
