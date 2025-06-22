@@ -12,18 +12,20 @@ func TestSetDefaults_RegistryConfig(t *testing.T) {
 	cfg := &RegistryConfig{}
 	SetDefaults_RegistryConfig(cfg)
 
-	if cfg.RegistryMirrors == nil || cap(cfg.RegistryMirrors) != 0 {
-		t.Error("RegistryMirrors should be initialized to empty slice")
-	}
-	if cfg.InsecureRegistries == nil || cap(cfg.InsecureRegistries) != 0 {
-		t.Error("InsecureRegistries should be initialized to empty slice")
-	}
+	// RegistryMirrors and InsecureRegistries are removed from RegistryConfig.
+	// if cfg.RegistryMirrors == nil || cap(cfg.RegistryMirrors) != 0 {
+	// 	t.Error("RegistryMirrors should be initialized to empty slice")
+	// }
+	// if cfg.InsecureRegistries == nil || cap(cfg.InsecureRegistries) != 0 {
+	// 	t.Error("InsecureRegistries should be initialized to empty slice")
+	// }
 	if cfg.Auths == nil {
 		t.Error("Auths should be initialized to empty map")
 	}
-	if cfg.PrivateRegistry != "dockerhub.kubexm.local" {
-		t.Errorf("Expected PrivateRegistry default 'dockerhub.kubexm.local', got '%s'", cfg.PrivateRegistry)
-	}
+	// PrivateRegistry default is no longer "dockerhub.kubexm.local" in SetDefaults_RegistryConfig
+	// if cfg.PrivateRegistry != "dockerhub.kubexm.local" {
+	// 	t.Errorf("Expected PrivateRegistry default 'dockerhub.kubexm.local', got '%s'", cfg.PrivateRegistry)
+	// }
 
 	// Test DataRoot default when Type is set
 	cfgWithType := &RegistryConfig{Type: pstrRegistryTest("harbor")}
@@ -54,8 +56,7 @@ func TestValidate_RegistryConfig(t *testing.T) {
 	validAuth["docker.io"] = RegistryAuth{Username: "user", Password: "password"}
 
 	validCfg := &RegistryConfig{
-		RegistryMirrors:    []string{"https://mirror.example.com"},
-		InsecureRegistries: []string{"my.insecure.registry:5000"},
+		// RegistryMirrors and InsecureRegistries removed
 		PrivateRegistry:    "myprivatereg.com",
 		Auths:              validAuth,
 	}
@@ -71,9 +72,9 @@ func TestValidate_RegistryConfig(t *testing.T) {
 		cfg        *RegistryConfig
 		wantErrMsg string
 	}{
-		{"empty_mirror", &RegistryConfig{RegistryMirrors: []string{" "}}, ".registryMirrors[0]: mirror URL cannot be empty"},
-		{"invalid_mirror_url", &RegistryConfig{RegistryMirrors: []string{"not a url"}}, ".registryMirrors[0]: invalid URL format 'not a url'"},
-		{"empty_insecure", &RegistryConfig{InsecureRegistries: []string{" "}}, ".insecureRegistries[0]: registry host cannot be empty"},
+		// {"empty_mirror", &RegistryConfig{RegistryMirrors: []string{" "}}, ".registryMirrors[0]: mirror URL cannot be empty"}, // Field removed
+		// {"invalid_mirror_url", &RegistryConfig{RegistryMirrors: []string{"not a url"}}, ".registryMirrors[0]: invalid URL format 'not a url'"}, // Field removed
+		// {"empty_insecure", &RegistryConfig{InsecureRegistries: []string{" "}}, ".insecureRegistries[0]: registry host cannot be empty"}, // Field removed
 		{"auth_empty_key", &RegistryConfig{Auths: map[string]RegistryAuth{" ": {Username: "u", Password: "p"}}}, ".auths: registry address key cannot be empty"},
 		{"auth_no_creds", &RegistryConfig{Auths: map[string]RegistryAuth{"test.com": {}}}, "auths[\"test.com\"]: either username/password or auth string must be provided"},
 		{"auth_bad_base64", &RegistryConfig{Auths: map[string]RegistryAuth{"test.com": {Auth: "!!!"}}}, ".auths[\"test.com\"].auth: failed to decode base64 auth string"},

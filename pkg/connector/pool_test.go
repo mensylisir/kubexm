@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"errors" // Added
 	"fmt"
 	"sync"
 	"testing"

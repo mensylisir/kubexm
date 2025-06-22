@@ -211,26 +211,5 @@ func (r *defaultRunner) LookPath(ctx context.Context, conn connector.Connector, 
 	// Delegate directly to connector's LookPath
 	return conn.LookPath(ctx, file)
 }
-		}
-	}
 
-	if err != nil {
-		return "", fmt.Errorf("failed to get SHA256 for %s: %w (stderr: %s)", path, err, string(stderr))
-	}
-
-	// Output of both sha256sum and shasum is typically "checksum  filename"
-	parts := strings.Fields(string(stdout))
-	if len(parts) > 0 {
-		return parts[0], nil
-	}
-	return "", fmt.Errorf("could not parse SHA256 output: '%s'", string(stdout))
-}
-
-// LookPath searches for an executable in the remote host's PATH.
-func (r *defaultRunner) LookPath(ctx context.Context, conn connector.Connector, file string) (string, error) {
-	if conn == nil {
-		return "", fmt.Errorf("connector cannot be nil")
-	}
-	// Delegate directly to connector's LookPath
-	return conn.LookPath(ctx, file)
-}
+// Removed duplicated LookPath and misplaced code block that was here.

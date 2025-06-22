@@ -36,3 +36,23 @@ func ParseFromFile(filePath string) (*v1alpha1.Cluster, error) {
 
 	return clusterConfig, nil
 }
+
+// ParseFromBytes reads YAML data from a byte slice, parses it into a v1alpha1.Cluster object,
+// sets default values, and validates the configuration.
+func ParseFromBytes(yamlData []byte) (*v1alpha1.Cluster, error) {
+	clusterConfig := &v1alpha1.Cluster{}
+	err := yaml.Unmarshal(yamlData, clusterConfig)
+	if err != nil {
+		// Adding more context to the error message for byte parsing
+		return nil, fmt.Errorf("failed to unmarshal YAML from bytes: %w", err)
+	}
+
+	v1alpha1.SetDefaults_Cluster(clusterConfig)
+
+	if err := v1alpha1.Validate_Cluster(clusterConfig); err != nil {
+		// Adding more context for byte parsing validation
+		return nil, fmt.Errorf("cluster configuration validation failed for data parsed from bytes: %w", err)
+	}
+
+	return clusterConfig, nil
+}

@@ -272,22 +272,22 @@ func Validate_NetworkConfig(cfg *NetworkConfig, verrs *ValidationErrors, pathPre
 		return
 	}
 
-	podsCIDR := cfg.KubePodsCIDR
-	if podsCIDR == "" && k8sSpec != nil {
-		podsCIDR = k8sSpec.PodSubnet
-	}
-	if strings.TrimSpace(podsCIDR) == "" {
-		verrs.Add("%s.kubePodsCIDR: (or kubernetes.podSubnet) cannot be empty", pathPrefix)
-	} else if !isValidCIDR(podsCIDR) {
-		verrs.Add("%s.kubePodsCIDR: invalid CIDR format '%s'", pathPrefix, podsCIDR)
+	// podsCIDR := cfg.KubePodsCIDR // This line is fine
+	// if podsCIDR == "" && k8sSpec != nil { // k8sSpec no longer provides PodSubnet
+	//	podsCIDR = k8sSpec.PodSubnet
+	// }
+	if strings.TrimSpace(cfg.KubePodsCIDR) == "" {
+		verrs.Add("%s.kubePodsCIDR: cannot be empty", pathPrefix)
+	} else if !isValidCIDR(cfg.KubePodsCIDR) {
+		verrs.Add("%s.kubePodsCIDR: invalid CIDR format '%s'", pathPrefix, cfg.KubePodsCIDR)
 	}
 
-	serviceCIDR := cfg.KubeServiceCIDR
-	if serviceCIDR == "" && k8sSpec != nil {
-		serviceCIDR = k8sSpec.ServiceSubnet
-	}
-	if serviceCIDR != "" && !isValidCIDR(serviceCIDR) {
-		verrs.Add("%s.kubeServiceCIDR: invalid CIDR format '%s'", pathPrefix, serviceCIDR)
+	// serviceCIDR := cfg.KubeServiceCIDR // This line is fine
+	// if serviceCIDR == "" && k8sSpec != nil { // k8sSpec no longer provides ServiceSubnet
+	//	serviceCIDR = k8sSpec.ServiceSubnet
+	// }
+	if cfg.KubeServiceCIDR != "" && !isValidCIDR(cfg.KubeServiceCIDR) { // KubeServiceCIDR can be empty (e.g. if using hostNetwork for services or other advanced setups)
+		verrs.Add("%s.kubeServiceCIDR: invalid CIDR format '%s'", pathPrefix, cfg.KubeServiceCIDR)
 	}
 
 	if cfg.Plugin == "calico" {

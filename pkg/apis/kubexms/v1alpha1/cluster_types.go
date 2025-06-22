@@ -58,6 +58,9 @@ type ClusterSpec struct {
 	// Etcd specific configurations. Corresponds to `etcd` block in YAML.
 	Etcd                 *EtcdConfig               `json:"etcd,omitempty" yaml:"etcd,omitempty"`
 
+	// ContainerRuntime specific configurations. Corresponds to `containerRuntime` block in YAML.
+	ContainerRuntime     *ContainerRuntimeConfig   `json:"containerRuntime,omitempty" yaml:"containerRuntime,omitempty"`
+
 	// Network configurations (CNI plugin, CIDRs). Corresponds to `network` block in YAML.
 	Network              *NetworkConfig            `json:"network,omitempty" yaml:"network,omitempty"`
 
@@ -654,10 +657,6 @@ func (in *Cluster) DeepCopyInto(out *Cluster) {
         newSpec.Preflight = new(PreflightConfig)
         *newSpec.Preflight = *in.Spec.Preflight
     }
-    if in.Spec.Kernel != nil {
-        newSpec.Kernel = new(KernelConfig)
-        *newSpec.Kernel = *in.Spec.Kernel
-    }
     if in.Spec.Storage != nil {
         newSpec.Storage = new(StorageConfig)
         *newSpec.Storage = *in.Spec.Storage
@@ -666,16 +665,9 @@ func (in *Cluster) DeepCopyInto(out *Cluster) {
         newSpec.Registry = new(RegistryConfig)
         *newSpec.Registry = *in.Spec.Registry
     }
-    if in.Spec.OS != nil {
-        newSpec.OS = new(OSConfig)
-        *newSpec.OS = *in.Spec.OS
-    }
 	if in.Spec.Addons != nil {
-		newSpec.Addons = make([]AddonConfig, len(in.Spec.Addons))
-		for i := range in.Spec.Addons {
-			// AddonConfig also needs DeepCopyInto if complex
-			newSpec.Addons[i] = in.Spec.Addons[i] // Shallow copy of AddonConfig contents
-		}
+		newSpec.Addons = make([]string, len(in.Spec.Addons))
+		copy(newSpec.Addons, in.Spec.Addons)
 	}
 	out.Spec = newSpec
 }

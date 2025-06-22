@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
-	"net/url" // For validating registry URLs
+	// "net/url" // For validating registry URLs - Removed as not used
 )
 
 // RegistryConfig defines configurations related to container image registries.

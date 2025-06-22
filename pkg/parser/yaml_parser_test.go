@@ -94,7 +94,7 @@ spec:
 					RoleGroups: &v1alpha1.RoleGroupsSpec{
 						Master: v1alpha1.MasterRoleSpec{Hosts: []string{"master1"}},
 					},
-					ControlPlaneEndpoint: &v1alpha1.ControlPlaneEndpointSpec{Host: "192.168.1.10", Port: 6443}, // Struct field is Host, YAML field 'address' maps to it
+					ControlPlaneEndpoint: &v1alpha1.ControlPlaneEndpointSpec{Address: "192.168.1.10", Port: 6443}, // Changed Host to Address
 					System:               &v1alpha1.SystemSpec{PackageManager: "apt"},
 					Kubernetes:           &v1alpha1.KubernetesConfig{Version: "1.25.3", ClusterName: "k8s-test-cluster"},
 					Network:              &v1alpha1.NetworkConfig{Plugin: "calico", KubePodsCIDR: "10.244.0.0/16"}, // field name in v1alpha1 is KubePodsCIDR
@@ -142,7 +142,7 @@ spec: {}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			parsedCfg, err := ParseClusterYAML(tc.yamlData) // Now returns *v1alpha1.Cluster
+			parsedCfg, err := ParseFromBytes(tc.yamlData) // Changed to ParseFromBytes
 
 			if tc.expectError {
 				if err == nil {
@@ -198,8 +198,8 @@ spec: {}
 						if parsedCfg.Spec.ControlPlaneEndpoint == nil {
 							t.Errorf("Expected ControlPlaneEndpoint to be non-nil")
 						} else {
-							if parsedCfg.Spec.ControlPlaneEndpoint.Host != tc.expectedCfg.Spec.ControlPlaneEndpoint.Host {
-								t.Errorf("Expected ControlPlaneEndpoint.Host %q, got %q", tc.expectedCfg.Spec.ControlPlaneEndpoint.Host, parsedCfg.Spec.ControlPlaneEndpoint.Host)
+							if parsedCfg.Spec.ControlPlaneEndpoint.Address != tc.expectedCfg.Spec.ControlPlaneEndpoint.Address {
+								t.Errorf("Expected ControlPlaneEndpoint.Address %q, got %q", tc.expectedCfg.Spec.ControlPlaneEndpoint.Address, parsedCfg.Spec.ControlPlaneEndpoint.Address)
 							}
 							if parsedCfg.Spec.ControlPlaneEndpoint.Port != tc.expectedCfg.Spec.ControlPlaneEndpoint.Port {
 								t.Errorf("Expected ControlPlaneEndpoint.Port %d, got %d", tc.expectedCfg.Spec.ControlPlaneEndpoint.Port, parsedCfg.Spec.ControlPlaneEndpoint.Port)

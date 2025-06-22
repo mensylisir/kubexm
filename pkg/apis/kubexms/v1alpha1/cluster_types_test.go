@@ -102,7 +102,7 @@ func TestSetDefaults_Cluster_ComponentStructsInitialization(t *testing.T) {
 	if cfg.Spec.Network == nil { t.Error("Spec.Network is nil after SetDefaults_Cluster") }
 	if cfg.Spec.HighAvailability == nil { t.Error("Spec.HighAvailability is nil after SetDefaults_Cluster") }
 	if cfg.Spec.Preflight == nil { t.Error("Spec.Preflight is nil after SetDefaults_Cluster") }
-	if cfg.Spec.Kernel == nil { t.Error("Spec.Kernel is nil after SetDefaults_Cluster") }
+	if cfg.Spec.System == nil { t.Error("Spec.System (which includes former Kernel) is nil after SetDefaults_Cluster") } // Changed Kernel to System
 	if cfg.Spec.Addons == nil { t.Error("Spec.Addons should be initialized to empty slice, not nil") }
 }
 
@@ -115,8 +115,8 @@ func newValidV1alpha1ClusterForTest() *Cluster {
 		Spec: ClusterSpec{
 			Global: &GlobalSpec{User: "testuser", Port: 22, PrivateKeyPath: "/dev/null", WorkDir: "/tmp", ConnectionTimeout: 5 * time.Second}, // Added PrivateKeyPath to Global for host inheritance
 			Hosts:  []HostSpec{{Name: "m1", Address: "1.1.1.1", Port: 22, User: "testuser", Roles: []string{"master"}}}, // Will inherit PrivateKeyPath
-			Kubernetes: &KubernetesConfig{Version: "v1.25.0", PodSubnet: "10.244.0.0/16"}, // Added PodSubnet
-			Network:    &NetworkConfig{}, // Initialize network, PodSubnet from KubernetesConfig will be used by Validate_NetworkConfig
+			Kubernetes: &KubernetesConfig{Version: "v1.25.0"}, // PodSubnet removed
+			Network:    &NetworkConfig{KubePodsCIDR: "10.244.0.0/16"}, // PodSubnet equivalent moved here
 			Etcd:       &EtcdConfig{},    // Etcd section is required by Validate_Cluster
 			// Other components can be nil if their sections are optional and their Validate_* funcs handle nil
 		},

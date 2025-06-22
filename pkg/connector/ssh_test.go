@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"os/user" // Added for user.Current()
 )
 
 // IMPORTANT: These tests for SSHConnector are integration tests and require a local SSH server
@@ -45,11 +46,11 @@ func setupSSHTest(t *testing.T) *SSHConnector {
 		}
 		sshTestUser = filepath.Base(currentUser) // often the username
 		if sshTestUser == "." || sshTestUser == "/" { // if UserHomeDir returns something like "/home"
-			u, _ := os.UserCurrent()
-			if u != nil && u.Username != ""{
+			u, errCurrent := user.Current() // Corrected to user.Current()
+			if errCurrent == nil && u != nil && u.Username != ""{
 				sshTestUser = u.Username
 			} else {
-				t.Fatal("SSH_TEST_USER not set and could not reliably determine current user")
+				t.Fatalf("SSH_TEST_USER not set and could not reliably determine current user: %v", errCurrent)
 			}
 		}
 		fmt.Printf("SSH_TEST_USER not set, defaulting to: %s. Please ensure this user can SSH to localhost.\n", sshTestUser)
@@ -214,29 +215,35 @@ func TestSSHConnector_FileOperations(t *testing.T) {
 		t.Fatalf("Failed to write local source file: %v", err)
 	}
 
-	// 2. Test Copy
-	err = sc.Copy(ctx, localSrcFilePath, remoteDstFilePath, &FileTransferOptions{Permissions: "0600"})
+	// 2. Test WriteFile (simulating Copy from local by reading then writing)
+	// Or, if CopyContent is preferred for raw bytes:
+	// err = sc.CopyContent(ctx, fileContent, remoteDstFilePath, &FileTransferOptions{Permissions: "0600"})
+	err = sc.WriteFile(ctx, fileContent, remoteDstFilePath, "0600", false) // Assuming sudo=false for this test
 	if err != nil {
-		t.Fatalf("Copy() to %s error = %v", remoteDstFilePath, err)
+		t.Fatalf("WriteFile() to %s error = %v", remoteDstFilePath, err)
 	}
 	stdoutCopy, _, errCopy := sc.Exec(ctx, "cat "+remoteDstFilePath, nil)
 	if errCopy != nil {
-		t.Fatalf("Exec cat after Copy error = %v", errCopy)
+		t.Fatalf("Exec cat after WriteFile error = %v", errCopy)
 	}
 	if string(stdoutCopy) != string(fileContent) {
-		t.Errorf("Copy() content mismatch: got %q, want %q", string(stdoutCopy), string(fileContent))
+		t.Errorf("WriteFile() content mismatch: got %q, want %q", string(stdoutCopy), string(fileContent))
 	}
 	// TODO: Verify permissions
 
 
-	// 3. Test Fetch
-	err = sc.Fetch(ctx, remoteDstFilePath, localFetchFilePath)
+	// 3. Test ReadFile (simulating Fetch to local)
+	remoteReadBytes, err := sc.ReadFile(ctx, remoteDstFilePath)
 	if err != nil {
-		t.Fatalf("Fetch() from %s error = %v", remoteDstFilePath, err)
+		t.Fatalf("ReadFile() from %s error = %v", remoteDstFilePath, err)
 	}
-	readFetch, _ := os.ReadFile(localFetchFilePath)
-	if string(readFetch) != string(fileContent) {
-		t.Errorf("Fetch() content mismatch: got %q, want %q", string(readFetch), string(fileContent))
+	if string(remoteReadBytes) != string(fileContent) {
+		t.Errorf("ReadFile() content mismatch: got %q, want %q", string(remoteReadBytes), string(fileContent))
+	}
+	// Optionally write to localFetchFilePath to fully simulate Fetch
+	err = os.WriteFile(localFetchFilePath, remoteReadBytes, 0666)
+	if err != nil {
+		t.Fatalf("Failed to write fetched content to local file %s: %v", localFetchFilePath, err)
 	}
 
 	// 4. Test Stat

@@ -19,7 +19,7 @@ func TestGetBinaryInfo(t *testing.T) {
 	testWorkDir := "/testwork"
 	testClusterName := "mycluster"
 
-	defaultArch := "amd64"
+	// defaultArch := "amd64" // Removed as unused
 	// Logic to get host architecture for tests if needed, or assume defaultArch.
 	// For simplicity, we'll use defaultArch when arch is passed as empty.
 	// In real GetBinaryInfo, it tries to get control node facts. We can't do that easily in unit test
