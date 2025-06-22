@@ -274,30 +274,19 @@ func (s *SSHConnector) LookPath(ctx context.Context, file string) (string, error
 
 func (s *SSHConnector) GetOS(ctx context.Context) (*OS, error) {
 	if s.cachedOS != nil { return s.cachedOS, nil }
-	stdout, _, err := s.Exec(ctx, "cat /etc/os-release", nil)
-	if err != nil { return nil, fmt.Errorf("failed to cat /etc/os-release: %w", err) }
-	osInfo := &OS{}
-	lines := strings.Split(string(stdout), "\n")
-	for _, line := range lines {
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) == 2 {
-			key, val := strings.TrimSpace(parts[0]), strings.Trim(strings.TrimSpace(parts[1]), "\"")
-			switch key {
-			case "ID": osInfo.ID = val
-			case "VERSION_ID": osInfo.VersionID = val
-			case "PRETTY_NAME": osInfo.PrettyName = val
-			}
-		}
-	}
-	archStdout, _, err := s.Exec(ctx, "uname -m", nil)
-	if err == nil { osInfo.Arch = strings.TrimSpace(string(archStdout)) }
-	kernelStdout, _, err := s.Exec(ctx, "uname -r", nil)
-	if err == nil { osInfo.Kernel = strings.TrimSpace(string(kernelStdout)) }
-	osInfo := &OS{}
-	content, stderr, err := s.Exec(ctx, "cat /etc/os-release", nil)
+
+	osInfo := &OS{} // Initialize osInfo at the beginning
+	var content, stderr []byte // Declare content and stderr
+	var err error             // Declare err
+
+	content, stderr, err = s.Exec(ctx, "cat /etc/os-release", nil)
+
 	if err != nil {
 		// Attempt to get at least Arch and Kernel if /etc/os-release fails
-		archStdout, _, archErr := s.Exec(ctx, "uname -m", nil)
+		var archStdout, kernelStdout []byte // Declare variables for this block
+		var archErr, kernelErr error    // Declare error variables for this block
+
+		archStdout, _, archErr = s.Exec(ctx, "uname -m", nil)
 		if archErr == nil {
 			osInfo.Arch = strings.TrimSpace(string(archStdout))
 		}
