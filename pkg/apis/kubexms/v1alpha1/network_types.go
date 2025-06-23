@@ -17,15 +17,17 @@ type NetworkConfig struct {
 	KubeOvn   *KubeOvnConfig   `json:"kubeovn,omitempty" yaml:"kubeovn,omitempty"`
 	Multus    *MultusCNIConfig `json:"multus,omitempty" yaml:"multus,omitempty"`
 	Hybridnet *HybridnetConfig `json:"hybridnet,omitempty" yaml:"hybridnet,omitempty"`
-	IPPool    *IPPoolConfig    `json:"ippool,omitempty" yaml:"ippool,omitempty"` // Added for network.ippool.blockSize
+	IPPool    *IPPoolConfig    `json:"ippool,omitempty" yaml:"ippool,omitempty"`
 }
 
-// IPPoolConfig holds general IP pool configuration, currently just BlockSize from YAML.
+// IPPoolConfig holds general IP pool configuration.
+// Corresponds to `network.ippool` in YAML.
 type IPPoolConfig struct {
 	BlockSize *int `json:"blockSize,omitempty" yaml:"blockSize,omitempty"`
 }
 
 // CalicoIPPool defines an IP address pool for Calico.
+// Corresponds to entries in `network.calico.ipPools` in YAML.
 type CalicoIPPool struct {
 	Name          string `json:"name,omitempty" yaml:"name,omitempty"`
 	CIDR          string `json:"cidr" yaml:"cidr"`

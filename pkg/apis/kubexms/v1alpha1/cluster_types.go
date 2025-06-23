@@ -38,55 +38,26 @@ type Cluster struct {
 
 // ClusterSpec defines the desired state of the Kubernetes cluster.
 type ClusterSpec struct {
-	// Type field from the original struct, representing the overall cluster deployment type.
-	// The YAML example has type settings within etcd and kubernetes specs.
-	// This top-level type's usage needs clarification or alignment.
-	Type                 string                    `json:"type,omitempty" yaml:"type,omitempty"`
+	Type                 string                    `json:"type,omitempty" yaml:"type,omitempty"` // "kubexm" or "kubeadm"
 	Hosts                []HostSpec                `json:"hosts" yaml:"hosts"`
 	RoleGroups           *RoleGroupsSpec           `json:"roleGroups,omitempty" yaml:"roleGroups,omitempty"`
-
-	// Global settings, affects default behaviors for hosts or overall cluster.
 	Global               *GlobalSpec               `json:"global,omitempty" yaml:"global,omitempty"`
-
-	// System-level configurations for nodes. Corresponds to `system` block in YAML.
-	// Merged OSConfig and KernelConfig into this.
 	System               *SystemSpec               `json:"system,omitempty" yaml:"system,omitempty"`
-
-	// Kubernetes specific configurations. Corresponds to `kubernetes` block in YAML.
 	Kubernetes           *KubernetesConfig         `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"`
-
-	// Etcd specific configurations. Corresponds to `etcd` block in YAML.
 	Etcd                 *EtcdConfig               `json:"etcd,omitempty" yaml:"etcd,omitempty"`
-
-	// ContainerRuntime specific configurations. Corresponds to `containerRuntime` block in YAML.
 	ContainerRuntime     *ContainerRuntimeConfig   `json:"containerRuntime,omitempty" yaml:"containerRuntime,omitempty"`
-
-	// Network configurations (CNI plugin, CIDRs). Corresponds to `network` block in YAML.
 	Network              *NetworkConfig            `json:"network,omitempty" yaml:"network,omitempty"`
-
-	// ControlPlaneEndpoint defines how to access the Kubernetes API server.
-	// Corresponds to `controlPlaneEndpoint` block in YAML.
 	ControlPlaneEndpoint *ControlPlaneEndpointSpec `json:"controlPlaneEndpoint,omitempty" yaml:"controlPlaneEndpoint,omitempty"`
-
-	// HighAvailability settings. Relationship with ControlPlaneEndpoint needs to be clear.
-	HighAvailability     *HighAvailabilityConfig   `json:"highAvailability,omitempty" yaml:"highAvailability,omitempty"`
-
-	// Storage configurations. Corresponds to `storage` block in YAML.
+	HighAvailability     *HighAvailabilityConfig   `json:"highAvailability,omitempty" yaml:"highAvailability,omitempty"` // This might be deprecated or merged into ControlPlaneEndpoint
 	Storage              *StorageConfig            `json:"storage,omitempty" yaml:"storage,omitempty"`
-
-	// Registry configurations. Corresponds to `registry` block in YAML.
 	Registry             *RegistryConfig           `json:"registry,omitempty" yaml:"registry,omitempty"`
-
-	// Addons to be installed. Corresponds to `addons` list in YAML.
 	Addons               []string                  `json:"addons,omitempty" yaml:"addons,omitempty"`
-
-	// Preflight checks configuration. No direct YAML block, might be implicitly configured or part of Global/System.
 	Preflight            *PreflightConfig          `json:"preflight,omitempty" yaml:"preflight,omitempty"`
-
-	// Kernel *KernelConfig and OS *OSConfig are removed, their fields are merged into SystemSpec.
+	// Additional fields from YAML not explicitly in existing structs will be added here or to relevant sub-specs.
 }
 
 // HostSpec defines the configuration for a single host.
+// Note: 'arch' field was already present.
 type HostSpec struct {
 	Name            string            `json:"name" yaml:"name"`
 	Address         string            `json:"address" yaml:"address"`
