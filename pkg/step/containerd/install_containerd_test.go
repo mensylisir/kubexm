@@ -4,134 +4,264 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/mensylisir/kubexm/pkg/config" // For config.Cluster in test helper
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
+	"github.com/mensylisir/kubexm/pkg/cache"
+	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/runner"
 	"github.com/mensylisir/kubexm/pkg/runtime"
-	"github.com/mensylisir/kubexm/pkg/spec" // For spec.StepSpec
-	"github.com/mensylisir/kubexm/pkg/step" // For step.Result and mock helpers
+	"github.com/mensylisir/kubexm/pkg/step"
 )
 
-// newTestContextForContainerd is a helper for containerd step tests.
-func newTestContextForContainerd(t *testing.T, mockConn *step.MockStepConnector, osID string) *runtime.Context {
+// mockStepContextForInstallContainerd is a helper to create a StepContext for testing.
+func mockStepContextForInstallContainerd(t *testing.T, mockRunner runner.Runner, hostName string, taskCacheValues map[string]interface{}) step.StepContext {
 	t.Helper()
-	if mockConn == nil {
-		mockConn = step.NewMockStepConnector()
-	}
-	currentOS := &connector.OS{ID: osID, Arch: "amd64", VersionID: "test-os-version"} // Provide a default Arch
-
-	// Override GetOSFunc for package manager detection within the step's runner.
-	mockConn.GetOSFunc = func(ctx context.Context) (*connector.OS, error) {
-		return currentOS, nil
-	}
-
-	// Mock LookPath for package manager tool detection (apt-get, yum, dnf)
-	// and version checking tools (apt-cache, rpm, dpkg-query).
-	mockConn.LookPathFunc = func(ctx context.Context, file string) (string, error) {
-		isUbuntu := (osID == "ubuntu" || osID == "debian")
-		isCentOS := (osID == "centos" || osID == "rhel")
-		isFedora := (osID == "fedora")
-
-		if isUbuntu && (file == "apt-get" || file == "dpkg-query" || file == "apt-cache") {
-			return "/usr/bin/" + file, nil
-		}
-		if isCentOS && (file == "yum" || file == "rpm") {
-			return "/usr/bin/" + file, nil
-		}
-		if isFedora && (file == "dnf" || file == "rpm") {
-			return "/usr/bin/" + file, nil
-		}
-		// For init system detection by EnableAndStartContainerdStep if tested through this context
-		if file == "systemctl" { return "/usr/bin/systemctl", nil }
-
-		return "", errors.New("LookPath mock: command '" + file + "' not configured for OS " + osID)
+	l, _ := logger.New(logger.DefaultOptions())
+	mainCtx := &runtime.Context{
+		GoCtx:         context.Background(),
+		Logger:        l,
+		ClusterConfig: &v1alpha1.Cluster{ObjectMeta: v1alpha1.ObjectMeta{Name: "test-cluster-install-ctd"}},
+		Runner:        mockRunner,
+		StepCache:     cache.NewStepCache(),
+		TaskCache:     cache.NewTaskCache(),
+		GlobalWorkDir: "/tmp/kubexm_install_ctd_test",
+		hostInfoMap:   make(map[string]*runtime.HostRuntimeInfo),
 	}
 
-	facts := &runner.Facts{OS: currentOS, Hostname: "containerd-test-host"}
-	// Use the shared helper from pkg/step to create the context
-	return step.newTestContextForStep(t, mockConn, facts)
+	if hostName == "" {
+		hostName = "test-host-install-ctd"
+	}
+	hostSpec := v1alpha1.HostSpec{Name: hostName, Address: "127.0.0.1", Type: "local"}
+	currentHost := connector.NewHostFromSpec(hostSpec)
+	mainCtx.GetHostInfoMap()[hostName] = &runtime.HostRuntimeInfo{
+		Host:  currentHost,
+		Conn:  &connector.LocalConnector{},
+		Facts: &runner.Facts{OS: &connector.OS{ID: "linux"}},
+	}
+	mainCtx.SetCurrentHost(currentHost)
+	mainCtx.SetControlNode(currentHost)
+
+	if taskCacheValues != nil {
+		for k, v := range taskCacheValues {
+			mainCtx.TaskCache().Set(k, v)
+		}
+	}
+	return mainCtx
 }
 
-
-func TestInstallContainerdStepExecutor_Execute_SuccessApt(t *testing.T) {
-	mockConn := step.NewMockStepConnector()
-	ctx := newTestContextForContainerd(t, mockConn, "ubuntu")
-
-	installSpec := &InstallContainerdStepSpec{Version: "1.6.9-1"} // Specific APT version
-	executor := step.GetExecutor(step.GetSpecTypeName(installSpec))
-	if executor == nil {t.Fatal("Executor not registered for InstallContainerdStepSpec")}
-
-	var updateCalled, installCalled bool
-	mockConn.ExecFunc = func(ctxGo context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
-		mockConn.ExecHistory = append(mockConn.ExecHistory, cmd)
-		if cmd == "apt-get update -y" && options.Sudo {
-			updateCalled = true; return nil, nil, nil
-		}
-		// Runner's InstallPackages will format this based on detected PM
-		// For apt, it becomes containerd.io=1.6.9-1
-		expectedInstallPkg := fmt.Sprintf("containerd.io=%s", installSpec.Version)
-		if cmd == fmt.Sprintf("apt-get install -y %s", expectedInstallPkg) && options.Sudo {
-			installCalled = true; return nil, nil, nil
-		}
-		return nil, nil, fmt.Errorf("InstallContainerd apt unexpected cmd: %s", cmd)
-	}
-
-	res := executor.Execute(installSpec, ctx)
-	if res.Status != "Succeeded" {
-		t.Errorf("Execute status = %s, want Succeeded. Msg: %s, Err: %v", res.Status, res.Message, res.Error)
-	}
-	if !updateCalled {t.Error("apt-get update not called")}
-	if !installCalled {t.Error("apt-get install for containerd.io not called correctly")}
+// mockRunnerForInstallContainerd provides a mock implementation of runner.Runner.
+type mockRunnerForInstallContainerd struct {
+	runner.Runner
+	ExistsFunc func(ctx context.Context, conn connector.Connector, path string) (bool, error)
+	MkdirpFunc func(ctx context.Context, conn connector.Connector, path, permissions string, sudo bool) error
+	RunFunc    func(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (string, error)
+	ChmodFunc  func(ctx context.Context, conn connector.Connector, path, permissions string, sudo bool) error
+	RemoveFunc func(ctx context.Context, conn connector.Connector, path string, sudo bool) error
 }
 
-func TestInstallContainerdStepExecutor_Check_InstalledCorrectVersion_Apt(t *testing.T) {
-	mockConn := step.NewMockStepConnector()
-	ctx := newTestContextForContainerd(t, mockConn, "ubuntu")
-
-	// Version for check should match what apt-cache policy might return for the prefix.
-	installSpec := &InstallContainerdStepSpec{Version: "1.6.9"}
-	executor := step.GetExecutor(step.GetSpecTypeName(installSpec))
-	if executor == nil {t.Fatal("Executor not registered")}
-
-	callCount := 0
-	mockConn.ExecFunc = func(ctxGo context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
-		mockConn.ExecHistory = append(mockConn.ExecHistory, cmd)
-		callCount++
-		// Order of calls by IsPackageInstalled then version check by InstallContainerdStepExecutor.Check
-		if callCount == 1 && strings.Contains(cmd, "dpkg-query -W -f='${Status}' containerd.io") {
-			return []byte("install ok installed"), nil, nil // Simulate installed
-		}
-		if callCount == 2 && strings.Contains(cmd, "apt-cache policy containerd.io") {
-			return []byte("  Installed: 1.6.9-1ubuntu1\n  Candidate: 1.7.0-0ubuntu1\n"), nil, nil // Matches "1.6.9" prefix
-		}
-		return nil, nil, fmt.Errorf("InstallContainerd.Check unexpected cmd call #%d: %s", callCount, cmd)
+func (m *mockRunnerForInstallContainerd) Exists(ctx context.Context, conn connector.Connector, path string) (bool, error) {
+	if m.ExistsFunc != nil {
+		return m.ExistsFunc(ctx, conn, path)
 	}
-
-	isDone, err := executor.Check(installSpec, ctx)
-	if err != nil {t.Fatalf("Check() error = %v", err)}
-	if !isDone {t.Error("Check() = false, want true (correct version prefix installed)")}
-	if callCount != 2 { t.Errorf("Expected 2 exec calls for Check, got %d", callCount)}
+	return false, fmt.Errorf("ExistsFunc not implemented")
+}
+func (m *mockRunnerForInstallContainerd) Mkdirp(ctx context.Context, conn connector.Connector, path, permissions string, sudo bool) error {
+	if m.MkdirpFunc != nil {
+		return m.MkdirpFunc(ctx, conn, path, permissions, sudo)
+	}
+	return fmt.Errorf("MkdirpFunc not implemented")
+}
+func (m *mockRunnerForInstallContainerd) Run(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (string, error) {
+	if m.RunFunc != nil {
+		return m.RunFunc(ctx, conn, cmd, sudo)
+	}
+	return "", fmt.Errorf("RunFunc not implemented")
+}
+func (m *mockRunnerForInstallContainerd) Chmod(ctx context.Context, conn connector.Connector, path, permissions string, sudo bool) error {
+	if m.ChmodFunc != nil {
+		return m.ChmodFunc(ctx, conn, path, permissions, sudo)
+	}
+	return fmt.Errorf("ChmodFunc not implemented")
+}
+func (m *mockRunnerForInstallContainerd) Remove(ctx context.Context, conn connector.Connector, path string, sudo bool) error {
+	if m.RemoveFunc != nil {
+		return m.RemoveFunc(ctx, conn, path, sudo)
+	}
+	return fmt.Errorf("RemoveFunc not implemented")
 }
 
-func TestInstallContainerdStepExecutor_Check_NotInstalled_Apt(t *testing.T) {
-	mockConn := step.NewMockStepConnector()
-	ctx := newTestContextForContainerd(t, mockConn, "ubuntu")
-	installSpec := &InstallContainerdStepSpec{Version: "1.6.9"}
-	executor := step.GetExecutor(step.GetSpecTypeName(installSpec))
-	if executor == nil {t.Fatal("Executor not registered")}
+func TestInstallContainerdStep_New(t *testing.T) {
+	binaries := map[string]string{"bin/ctr": "/usr/local/bin/ctr-custom"}
+	s := NewInstallContainerdStep("TestInstallCtd", "srcKey", binaries, "custom.service", "/opt/systemd/custom.service", true)
+	require.NotNil(t, s)
+	meta := s.Meta()
+	assert.Equal(t, "TestInstallCtd", meta.Name)
+	assert.Contains(t, meta.Description, "srcKey")
 
-	mockConn.ExecFunc = func(ctxGo context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
-		mockConn.ExecHistory = append(mockConn.ExecHistory, cmd)
-		if strings.Contains(cmd, "dpkg-query -W -f='${Status}' containerd.io") {
-			return nil, []byte("package 'containerd.io' is not installed"), &connector.CommandError{ExitCode: 1}
+	ics, ok := s.(*InstallContainerdStep)
+	require.True(t, ok)
+	assert.Equal(t, "srcKey", ics.SourceExtractedPathSharedDataKey)
+	assert.Equal(t, binaries, ics.BinariesToCopy)
+	assert.Equal(t, "custom.service", ics.SystemdUnitFileSourceRelPath)
+	assert.Equal(t, "/opt/systemd/custom.service", ics.SystemdUnitFileTargetPath)
+	assert.True(t, ics.Sudo)
+
+	sDefaults := NewInstallContainerdStep("", "", nil, "", "", false)
+	icsDefaults, _ := sDefaults.(*InstallContainerdStep)
+	assert.Equal(t, "InstallContainerdFromExtracted", icsDefaults.Meta().Name)
+	assert.Equal(t, "DefaultExtractedContainerdPath", icsDefaults.SourceExtractedPathSharedDataKey)
+	assert.NotEmpty(t, icsDefaults.BinariesToCopy)
+	assert.Equal(t, "containerd.service", icsDefaults.SystemdUnitFileSourceRelPath)
+	assert.Equal(t, "/usr/lib/systemd/system/containerd.service", icsDefaults.SystemdUnitFileTargetPath)
+	assert.False(t, icsDefaults.Sudo)
+}
+
+func TestInstallContainerdStep_Precheck_AllExist(t *testing.T) {
+	mockRunner := &mockRunnerForInstallContainerd{}
+	mockCtx := mockStepContextForInstallContainerd(t, mockRunner, "host-ctd-precheck-exists", nil)
+
+	s := NewInstallContainerdStep("", "srcKey", nil, "containerd.service", "/etc/systemd/system/containerd.service", true).(*InstallContainerdStep)
+
+	mockRunner.ExistsFunc = func(ctx context.Context, conn connector.Connector, path string) (bool, error) {
+		for _, defaultBinTarget := range s.BinariesToCopy {
+			if path == defaultBinTarget {
+				return true, nil
+			}
 		}
-		return nil, nil, fmt.Errorf("unexpected cmd: %s", cmd)
+		if path == s.SystemdUnitFileTargetPath {
+			return true, nil
+		}
+		return false, fmt.Errorf("unexpected Exists call for path: %s", path)
 	}
-	isDone, err := executor.Check(installSpec, ctx)
-	if err != nil {t.Fatalf("Check() error = %v", err)}
-	if isDone {t.Error("Check() = true, want false (not installed)")}
+
+	done, err := s.Precheck(mockCtx, mockCtx.GetHost())
+	require.NoError(t, err)
+	assert.True(t, done, "Precheck should be done if all items exist")
+}
+
+func TestInstallContainerdStep_Run_Success(t *testing.T) {
+	mockRunner := &mockRunnerForInstallContainerd{}
+	extractedPath := "/tmp/extracted_ctd_content"
+	taskCache := map[string]interface{}{"srcKey": extractedPath}
+	mockCtx := mockStepContextForInstallContainerd(t, mockRunner, "host-run-install-ctd", taskCache)
+
+	binaries := map[string]string{"bin/containerd": "/usr/local/bin/containerd", "bin/ctr": "/usr/local/bin/ctr"}
+	systemdSrcRel := "lib/systemd/system/containerd.service" // Relative to extractedPath
+	systemdTarget := "/etc/systemd/system/containerd.service"
+	s := NewInstallContainerdStep("", "srcKey", binaries, systemdSrcRel, systemdTarget, true).(*InstallContainerdStep)
+
+	var mkdirPaths, cpCmds, chmodPaths []string
+	mockRunner.MkdirpFunc = func(ctx context.Context, conn connector.Connector, path, permissions string, sudo bool) error {
+		mkdirPaths = append(mkdirPaths, path)
+		assert.True(t, sudo)
+		return nil
+	}
+	mockRunner.ExistsFunc = func(ctx context.Context, conn connector.Connector, path string) (bool, error) {
+		// Assume source files exist in the extracted directory
+		if strings.HasPrefix(path, extractedPath) {
+			return true, nil
+		}
+		return false, nil
+	}
+	mockRunner.RunFunc = func(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (string, error) {
+		if strings.HasPrefix(cmd, "cp -fp") || strings.HasPrefix(cmd, "cp -f") {
+			cpCmds = append(cpCmds, cmd)
+			assert.True(t, sudo)
+			return "", nil
+		}
+		return "", fmt.Errorf("unexpected Run call: %s", cmd)
+	}
+	mockRunner.ChmodFunc = func(ctx context.Context, conn connector.Connector, path, permissions string, sudo bool) error {
+		chmodPaths = append(chmodPaths, path+":"+permissions)
+		assert.True(t, sudo)
+		return nil
+	}
+
+	err := s.Run(mockCtx, mockCtx.GetHost())
+	require.NoError(t, err)
+
+	assert.Contains(t, mkdirPaths, "/usr/local/bin")
+	assert.Contains(t, mkdirPaths, "/etc/systemd/system")
+
+	assert.Contains(t, cpCmds, fmt.Sprintf("cp -fp %s %s", filepath.Join(extractedPath, "bin/containerd"), "/usr/local/bin/containerd"))
+	assert.Contains(t, cpCmds, fmt.Sprintf("cp -fp %s %s", filepath.Join(extractedPath, "bin/ctr"), "/usr/local/bin/ctr"))
+	assert.Contains(t, cpCmds, fmt.Sprintf("cp -f %s %s", filepath.Join(extractedPath, systemdSrcRel), systemdTarget))
+
+	assert.Contains(t, chmodPaths, "/usr/local/bin/containerd:0755")
+	assert.Contains(t, chmodPaths, "/usr/local/bin/ctr:0755")
+	assert.Contains(t, chmodPaths, systemdTarget+":0644")
+}
+
+func TestInstallContainerdStep_Rollback(t *testing.T) {
+	mockRunner := &mockRunnerForInstallContainerd{}
+	mockCtx := mockStepContextForInstallContainerd(t, mockRunner, "host-rollback-install-ctd", nil)
+
+	binaries := map[string]string{"bin/containerd": "/usr/local/bin/containerd"}
+	systemdTarget := "/etc/systemd/system/containerd.service"
+	s := NewInstallContainerdStep("", "srcKey", binaries, "containerd.service", systemdTarget, true).(*InstallContainerdStep)
+
+	var removedPaths []string
+	mockRunner.RemoveFunc = func(ctx context.Context, conn connector.Connector, path string, sudo bool) error {
+		removedPaths = append(removedPaths, path)
+		assert.True(t, sudo)
+		return nil
+	}
+
+	err := s.Rollback(mockCtx, mockCtx.GetHost())
+	require.NoError(t, err)
+	assert.Contains(t, removedPaths, "/usr/local/bin/containerd")
+	assert.Contains(t, removedPaths, systemdTarget)
+}
+
+var _ runner.Runner = (*mockRunnerForInstallContainerd)(nil)
+var _ step.StepContext = (*mockStepContextForInstallContainerd)(t, nil, "", nil, nil)
+
+// Dummy implementations for other runner.Runner methods
+func (m *mockRunnerForInstallContainerd) GatherFacts(ctx context.Context, conn connector.Connector) (*runner.Facts, error) { return nil, nil }
+func (m *mockRunnerForInstallContainerd) MustRun(ctx context.Context, conn connector.Connector, cmd string, sudo bool) string { return "" }
+func (m *mockRunnerForInstallContainerd) Check(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (bool, error) { return false, nil }
+func (m *mockRunnerForInstallContainerd) RunWithOptions(ctx context.Context, conn connector.Connector, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) { return nil,nil, nil }
+func (m *mockRunnerForInstallContainerd) Download(ctx context.Context, conn connector.Connector, facts *runner.Facts, url, destPath string, sudo bool) error { return nil }
+func (m *mockRunnerForInstallContainerd) Extract(ctx context.Context, conn connector.Connector, facts *runner.Facts, archivePath, destDir string, sudo bool) error { return nil }
+func (m *mockRunnerForInstallContainerd) DownloadAndExtract(ctx context.Context, conn connector.Connector, facts *runner.Facts, url, destDir string, sudo bool) error { return nil }
+func (m *mockRunnerForInstallContainerd) IsDir(ctx context.Context, conn connector.Connector, path string) (bool, error) { return false, nil }
+func (m *mockRunnerForInstallContainerd) ReadFile(ctx context.Context, conn connector.Connector, path string) ([]byte, error) { return nil, nil }
+func (m *mockRunnerForInstallContainerd) WriteFile(ctx context.Context, conn connector.Connector, content []byte, destPath, permissions string, sudo bool) error { return nil }
+func (m *mockRunnerForInstallContainerd) Chown(ctx context.Context, conn connector.Connector, path, owner, group string, recursive bool) error { return nil }
+func (m *mockRunnerForInstallContainerd) GetSHA256(ctx context.Context, conn connector.Connector, path string) (string, error) { return "", nil }
+func (m *mockRunnerForInstallContainerd) LookPath(ctx context.Context, conn connector.Connector, file string) (string, error) { return "", nil }
+func (m *mockRunnerForInstallContainerd) IsPortOpen(ctx context.Context, conn connector.Connector, facts *runner.Facts, port int) (bool, error) { return false, nil }
+func (m *mockRunnerForInstallContainerd) WaitForPort(ctx context.Context, conn connector.Connector, facts *runner.Facts, port int, timeout time.Duration) error { return nil }
+func (m *mockRunnerForInstallContainerd) SetHostname(ctx context.Context, conn connector.Connector, facts *runner.Facts, hostname string) error { return nil }
+func (m *mockRunnerForInstallContainerd) AddHostEntry(ctx context.Context, conn connector.Connector, ip, fqdn string, hostnames ...string) error { return nil }
+func (m *mockRunnerForInstallContainerd) InstallPackages(ctx context.Context, conn connector.Connector, facts *runner.Facts, packages ...string) error { return nil }
+func (m *mockRunnerForInstallContainerd) RemovePackages(ctx context.Context, conn connector.Connector, facts *runner.Facts, packages ...string) error { return nil }
+func (m *mockRunnerForInstallContainerd) UpdatePackageCache(ctx context.Context, conn connector.Connector, facts *runner.Facts) error { return nil }
+func (m *mockRunnerForInstallContainerd) IsPackageInstalled(ctx context.Context, conn connector.Connector, facts *runner.Facts, packageName string) (bool, error) { return false, nil }
+func (m *mockRunnerForInstallContainerd) AddRepository(ctx context.Context, conn connector.Connector, facts *runner.Facts, repoConfig string, isFilePath bool) error { return nil }
+func (m *mockRunnerForInstallContainerd) StartService(ctx context.Context, conn connector.Connector, facts *runner.Facts, serviceName string) error { return nil }
+func (m *mockRunnerForInstallContainerd) StopService(ctx context.Context, conn connector.Connector, facts *runner.Facts, serviceName string) error { return nil }
+func (m *mockRunnerForInstallContainerd) RestartService(ctx context.Context, conn connector.Connector, facts *runner.Facts, serviceName string) error { return nil }
+func (m *mockRunnerForInstallContainerd) EnableService(ctx context.Context, conn connector.Connector, facts *runner.Facts, serviceName string) error { return nil }
+func (m *mockRunnerForInstallContainerd) DisableService(ctx context.Context, conn connector.Connector, facts *runner.Facts, serviceName string) error { return nil }
+func (m *mockRunnerForInstallContainerd) IsServiceActive(ctx context.Context, conn connector.Connector, facts *runner.Facts, serviceName string) (bool, error) { return false, nil }
+func (m *mockRunnerForInstallContainerd) DaemonReload(ctx context.Context, conn connector.Connector, facts *runner.Facts) error { return nil }
+func (m *mockRunnerForInstallContainerd) Render(ctx context.Context, conn connector.Connector, tmpl *template.Template, data interface{}, destPath, permissions string, sudo bool) error { return nil }
+func (m *mockRunnerForInstallContainerd) UserExists(ctx context.Context, conn connector.Connector, username string) (bool, error) { return false, nil }
+func (m *mockRunnerForInstallContainerd) GroupExists(ctx context.Context, conn connector.Connector, groupname string) (bool, error) { return false, nil }
+func (m *mockRunnerForInstallContainerd) AddUser(ctx context.Context, conn connector.Connector, username, group, shell string, homeDir string, createHome bool, systemUser bool) error { return nil }
+func (m *mockRunnerForInstallContainerd) AddGroup(ctx context.Context, conn connector.Connector, groupname string, systemGroup bool) error { return nil }
+func (m *mockRunnerForInstallContainerd) GetPipelineCache() cache.PipelineCache { return nil }
+
+func TestMockContextImplementation_InstallCtd(t *testing.T) {
+	var _ step.StepContext = mockStepContextForInstallContainerd(t, &mockRunnerForInstallContainerd{}, "dummy", nil)
 }
