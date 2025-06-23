@@ -2,104 +2,45 @@ package v1alpha1
 
 import "strings"
 
-const (
-	ContainerRuntimeContainerd = "containerd"
-	ContainerRuntimeDocker     = "docker"
-	// Add other supported runtimes if any
-)
-
-// ContainerRuntimeConfig specifies the container runtime settings for the cluster.
-type ContainerRuntimeConfig struct {
-	// Type of container runtime. Supported values: "containerd", "docker".
-	// Defaults to "containerd".
-	Type string `json:"type,omitempty"`
-
-	// Version of the container runtime.
-	Version string `json:"version,omitempty"`
-
-	// Docker holds Docker-specific configurations.
-	// Only applicable if Type is "docker".
-	Docker *DockerConfig `json:"docker,omitempty"`
-
-	Containerd *ContainerdConfig `json:"containerd,omitempty" yaml:"containerd,omitempty"`
-}
-
 // ContainerdConfig defines specific settings for the Containerd runtime.
-// These settings are only applicable if ContainerRuntimeConfig.Type is "containerd".
+// Corresponds to `kubernetes.containerRuntime.containerd` in YAML.
 type ContainerdConfig struct {
 	// Version of Containerd to install or manage.
-	// If ContainerRuntimeConfig.Version is set and this is empty, this might inherit from there.
-	Version string `json:"version,omitempty"`
+	// This can be different from ContainerRuntimeConfig.Version if user wants to specify explicitly here.
+	Version string `json:"version,omitempty" yaml:"version,omitempty"`
 
 	// RegistryMirrors maps registry hosts to their mirror URLs.
 	// Example: {"docker.io": ["https://mirror.example.com"]}
-	RegistryMirrors map[string][]string `json:"registryMirrors,omitempty"`
+	// Corresponds to `registryMirrors` in YAML.
+	RegistryMirrors map[string][]string `json:"registryMirrors,omitempty" yaml:"registryMirrors,omitempty"`
 
 	// InsecureRegistries is a list of registries that should be treated as insecure.
-	InsecureRegistries []string `json:"insecureRegistries,omitempty"`
+	// Corresponds to `insecureRegistries` in YAML.
+	InsecureRegistries []string `json:"insecureRegistries,omitempty" yaml:"insecureRegistries,omitempty"`
 
 	// UseSystemdCgroup specifies whether to configure containerd to use systemd cgroup driver.
 	// Defaults to true.
-	UseSystemdCgroup *bool `json:"useSystemdCgroup,omitempty"`
+	// No direct YAML field, typically a best practice applied by the tool.
+	UseSystemdCgroup *bool `json:"useSystemdCgroup,omitempty" yaml:"useSystemdCgroup,omitempty"`
 
 	// ExtraTomlConfig allows appending custom TOML configuration to containerd's config.toml.
-	ExtraTomlConfig string `json:"extraTomlConfig,omitempty"`
+	// Corresponds to `extraTomlConfig` in YAML.
+	ExtraTomlConfig string `json:"extraTomlConfig,omitempty" yaml:"extraTomlConfig,omitempty"`
 
 	// ConfigPath is the path to the main containerd configuration file.
 	// Defaults to "/etc/containerd/config.toml".
-	ConfigPath *string `json:"configPath,omitempty"`
+	ConfigPath *string `json:"configPath,omitempty" yaml:"configPath,omitempty"`
+
 	// DisabledPlugins is a list of plugins to disable in containerd.
 	// Example: ["cri", "diff", "events"]
-	DisabledPlugins []string `json:"disabledPlugins,omitempty"`
+	DisabledPlugins []string `json:"disabledPlugins,omitempty" yaml:"disabledPlugins,omitempty"`
+
 	// RequiredPlugins is a list of plugins that must be enabled. Useful for validation.
 	// Example: ["io.containerd.grpc.v1.cri"]
-	RequiredPlugins []string `json:"requiredPlugins,omitempty"`
+	RequiredPlugins []string `json:"requiredPlugins,omitempty" yaml:"requiredPlugins,omitempty"`
+
 	// Imports are additional .toml files to import into the main config.
-	Imports []string `json:"imports,omitempty"`
-}
-
-// SetDefaults_ContainerRuntimeConfig sets default values for ContainerRuntimeConfig.
-func SetDefaults_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig) {
-	if cfg == nil {
-		return
-	}
-	if cfg.Type == "" {
-		cfg.Type = ContainerRuntimeContainerd
-	}
-
-	if cfg.Type == ContainerRuntimeDocker {
-		if cfg.Docker == nil {
-			cfg.Docker = &DockerConfig{}
-		}
-		SetDefaults_DockerConfig(cfg.Docker)
-	}
-}
-
-// Validate_ContainerRuntimeConfig validates ContainerRuntimeConfig.
-func Validate_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig, verrs *ValidationErrors, pathPrefix string) {
-	if cfg == nil {
-		return
-	}
-	validTypes := []string{ContainerRuntimeContainerd, ContainerRuntimeDocker}
-	isValidType := false
-	for _, vt := range validTypes {
-		if cfg.Type == vt {
-			isValidType = true
-			break
-		}
-	}
-	if !isValidType {
-		verrs.Add("%s.type: invalid type '%s', must be one of %v", pathPrefix, cfg.Type, validTypes)
-	}
-	// Version validation can be added if specific formats or ranges are required.
-
-	if cfg.Type == ContainerRuntimeDocker {
-		if cfg.Docker == nil {
-			verrs.Add("%s.docker: docker configuration section cannot be nil if containerRuntime.type is '%s'", pathPrefix, ContainerRuntimeDocker)
-		} else {
-			Validate_DockerConfig(cfg.Docker, verrs, pathPrefix+".docker")
-		}
-	}
+	Imports []string `json:"imports,omitempty" yaml:"imports,omitempty"`
 }
 
 // SetDefaults_ContainerdConfig sets default values for ContainerdConfig.
@@ -125,11 +66,14 @@ func SetDefaults_ContainerdConfig(cfg *ContainerdConfig) {
 		cfg.DisabledPlugins = []string{}
 	}
 	if cfg.RequiredPlugins == nil {
+		// CRI plugin is essential for Kubernetes integration.
 		cfg.RequiredPlugins = []string{"io.containerd.grpc.v1.cri"}
-	} // CRI plugin is typically required
+	}
 	if cfg.Imports == nil {
 		cfg.Imports = []string{}
 	}
+	// Version: No default here; should be inherited from ContainerRuntimeConfig.Version if empty,
+	// or explicitly set by user. The installer logic will handle this.
 }
 
 // Validate_ContainerdConfig validates ContainerdConfig.
@@ -137,8 +81,9 @@ func Validate_ContainerdConfig(cfg *ContainerdConfig, verrs *ValidationErrors, p
 	if cfg == nil {
 		return
 	}
-	// Version validation can be added.
-	// For RegistryMirrors, ensure URLs are valid if specified.
+	// Version validation: Can be empty if it's meant to inherit from parent ContainerRuntimeConfig.Version.
+	// If not empty, could validate format (e.g., semantic versioning).
+
 	for reg, mirrors := range cfg.RegistryMirrors {
 		if strings.TrimSpace(reg) == "" {
 			verrs.Add("%s.registryMirrors: registry host key cannot be empty", pathPrefix)
@@ -147,14 +92,16 @@ func Validate_ContainerdConfig(cfg *ContainerdConfig, verrs *ValidationErrors, p
 			verrs.Add("%s.registryMirrors[\"%s\"]: must contain at least one mirror URL", pathPrefix, reg)
 		}
 		for i, mirrorURL := range mirrors {
-			if strings.TrimSpace(mirrorURL) == "" { // Basic check, URL validation can be more complex
+			if strings.TrimSpace(mirrorURL) == "" {
 				verrs.Add("%s.registryMirrors[\"%s\"][%d]: mirror URL cannot be empty", pathPrefix, reg, i)
+				// Could add more robust URL validation here.
 			}
 		}
 	}
 	for i, insecureReg := range cfg.InsecureRegistries {
 		if strings.TrimSpace(insecureReg) == "" {
 			verrs.Add("%s.insecureRegistries[%d]: registry host cannot be empty", pathPrefix, i)
+			// Could add validation for valid hostname/IP:port format.
 		}
 	}
 	if cfg.ConfigPath != nil && strings.TrimSpace(*cfg.ConfigPath) == "" {
@@ -174,6 +121,6 @@ func Validate_ContainerdConfig(cfg *ContainerdConfig, verrs *ValidationErrors, p
 		if strings.TrimSpace(imp) == "" {
 			verrs.Add("%s.imports[%d]: import path cannot be empty", pathPrefix, i)
 		}
-		// Could add path validation, e.g., ensure it's an absolute path or ends with .toml
 	}
+	// ExtraTomlConfig is a string, specific TOML validation is complex and usually skipped here.
 }
