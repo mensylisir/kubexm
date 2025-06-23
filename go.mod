@@ -4,6 +4,7 @@ go 1.24.3
 
 require (
 	github.com/Masterminds/sprig/v3 v3.3.0
+	github.com/fatih/color v1.15.0
 	github.com/olekukonko/tablewriter v1.0.7
 	github.com/pkg/sftp v1.13.9
 	github.com/spf13/cobra v1.9.1
@@ -24,7 +25,6 @@ require (
 	github.com/Masterminds/semver/v3 v3.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emicklei/go-restful/v3 v3.11.0 // indirect
-	github.com/fatih/color v1.15.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
