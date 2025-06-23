@@ -20,13 +20,14 @@ type ControlPlaneEndpointSpec struct {
 
 	// Port is the port number for the control plane endpoint.
 	// Defaults to 6443.
-	Port int `json:"port,omitempty" yaml:"port,omitempty"` // Changed to int
+	Port int `json:"port,omitempty" yaml:"port,omitempty"`
 
 	// ExternalDNS indicates if an external DNS record should be assumed or managed for the domain.
 	// This field might influence how the endpoint is resolved or advertised.
-	ExternalDNS bool `json:"externalDNS,omitempty" yaml:"externalDNS,omitempty"` // Changed to bool
+	ExternalDNS bool `json:"externalDNS,omitempty" yaml:"externalDNS,omitempty"`
 
 	// ExternalLoadBalancerType specifies the type of external load balancer used or to be deployed by KubeXMS.
+	// Corresponds to `externalLoadBalancer` in YAML.
 	// Examples from YAML: "kubexm" (managed by KubeXMS), "external" (user-provided).
 	// This field helps determine behavior for HA setup.
 	ExternalLoadBalancerType string `json:"externalLoadBalancerType,omitempty" yaml:"externalLoadBalancer,omitempty"`

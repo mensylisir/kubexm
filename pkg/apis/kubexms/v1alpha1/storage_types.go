@@ -5,37 +5,51 @@ import "strings"
 // StorageConfig defines the storage configurations for the cluster.
 // For now, it primarily includes OpenEBS settings based on KubeKey examples.
 // This can be expanded to include other storage provisioners or settings.
+// Corresponds to `storage` in YAML.
 type StorageConfig struct {
+	// OpenEBS configuration. Corresponds to `storage.openebs` in YAML.
 	OpenEBS             *OpenEBSConfig `json:"openebs,omitempty" yaml:"openebs,omitempty"`
+	// DefaultStorageClass to be set for the cluster.
+	// Corresponds to `storage.defaultStorageClass` in YAML.
 	DefaultStorageClass *string        `json:"defaultStorageClass,omitempty" yaml:"defaultStorageClass,omitempty"`
 }
 
 // OpenEBSConfig defines settings for OpenEBS storage provisioner.
+// Corresponds to `storage.openebs` in YAML.
 type OpenEBSConfig struct {
+	// BasePath for OpenEBS LocalPV. Corresponds to `basePath` in YAML.
 	BasePath string                   `json:"basePath,omitempty" yaml:"basePath,omitempty"`
+	// Enabled flag for OpenEBS. Corresponds to `enabled` in YAML (though not explicitly shown in example, it's typical).
 	Enabled  *bool                    `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	Version  *string                  `json:"version,omitempty" yaml:"version,omitempty"`
+	Version  *string                  `json:"version,omitempty" yaml:"version,omitempty"` // Not in YAML example, but common for managed addons
+	// Engines configuration for OpenEBS. No direct YAML equivalent in the example,
+	// but allows for future expansion if different OpenEBS engines are configurable.
 	Engines  *OpenEBSEngineConfig     `json:"engines,omitempty" yaml:"engines,omitempty"`
 }
 
+// OpenEBSEngineConfig allows specifying configurations for different OpenEBS storage engines.
 type OpenEBSEngineConfig struct {
 	Mayastor      *OpenEBSEngineMayastorConfig      `json:"mayastor,omitempty" yaml:"mayastor,omitempty"`
 	Jiva          *OpenEBSEngineJivaConfig          `json:"jiva,omitempty" yaml:"jiva,omitempty"`
-	cStor         *OpenEBSEnginecStorConfig         `json:"cstor,omitempty" yaml:"cstor,omitempty"`
+	CStor         *OpenEBSEnginecStorConfig         `json:"cstor,omitempty" yaml:"cstor,omitempty"` // Renamed from cStor to CStor for Go convention
 	LocalHostPath *OpenEBSEngineLocalHostPathConfig `json:"localHostPath,omitempty" yaml:"localHostPath,omitempty"`
 }
 
+// OpenEBSEngineMayastorConfig holds Mayastor specific settings.
 type OpenEBSEngineMayastorConfig struct {
-	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"` /* TODO: Mayastor specific fields */
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
+// OpenEBSEngineJivaConfig holds Jiva specific settings.
 type OpenEBSEngineJivaConfig struct {
-	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"` /* TODO: Jiva specific fields */
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
-type OpenEBSEnginecStorConfig struct {
-	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"` /* TODO: cStor specific fields */
+// OpenEBSEnginecStorConfig holds cStor specific settings.
+type OpenEBSEnginecStorConfig struct { // Name kept as OpenEBSEnginecStorConfig due to existing references
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
+// OpenEBSEngineLocalHostPathConfig holds LocalHostPath specific settings.
 type OpenEBSEngineLocalHostPathConfig struct {
-	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"` /* BasePath above is related */
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
 
 // --- Defaulting Functions ---
