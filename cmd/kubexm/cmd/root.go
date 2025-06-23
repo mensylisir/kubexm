@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/mensylisir/kubexm/cmd/kubexm/cmd/cluster" // Import the cluster package
+	"github.com/mensylisir/kubexm/cmd/kubexm/cmd/node"    // Import the node package
 	"github.com/spf13/cobra"
 	// Homedir will be needed if we add config file handling later
 	// homedir "github.com/mitchellh/go-homedir"
@@ -50,6 +51,8 @@ func init() {
 
 	// Add cluster command group
 	rootCmd.AddCommand(cluster.ClusterCmd)
+	// Add node command group
+	node.AddNodeCommand(rootCmd) // Using the exported function from node package
 	// viper.SetDefault("author", "NAME HERE <EMAIL ADDRESS>")
 	// viper.SetDefault("license", "apache")
 
