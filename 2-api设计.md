@@ -138,6 +138,7 @@ Etcd 集群配置。
         *   `ipipMode`, `vxlanMode` (string)。
         *   `vethMTU` (*int)。
         *   `ipPools` ([]CalicoIPPool): 自定义 IP 池。
+    *    `Cilium *CiliumConfig` `json:"cilium,omitempty"`
     *   `flannel` (*FlannelConfig, optional): Flannel 特定配置 (`backendMode`)。
     *   `multus` (*MultusCNIConfig, optional): Multus CNI 配置 (`enabled`)。
 
