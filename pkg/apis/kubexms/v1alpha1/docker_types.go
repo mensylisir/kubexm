@@ -14,37 +14,42 @@ type DockerAddressPool struct {
 
 // DockerConfig defines specific settings for the Docker runtime.
 // These settings are only applicable if ContainerRuntimeConfig.Type is "docker".
+// Corresponds to `kubernetes.containerRuntime.docker` in YAML.
 type DockerConfig struct {
-	RegistryMirrors     []string            `json:"registryMirrors,omitempty"`
-	InsecureRegistries  []string            `json:"insecureRegistries,omitempty"`
-	DataRoot            *string             `json:"dataRoot,omitempty"`            // Docker's root directory
-	ExecOpts            []string            `json:"execOpts,omitempty"`            // e.g., ["native.cgroupdriver=systemd"]
-	LogDriver           *string             `json:"logDriver,omitempty"`           // e.g., "json-file", "journald"
-	LogOpts             map[string]string   `json:"logOpts,omitempty"`             // e.g., {"max-size": "100m"}
-	BIP                 *string             `json:"bip,omitempty"`                 // For the docker0 bridge IP and netmask
-	FixedCIDR           *string             `json:"fixedCIDR,omitempty"`           // Restrict the IP range for the docker0 bridge
-	DefaultAddressPools []DockerAddressPool `json:"defaultAddressPools,omitempty"` // Default address pools for networks
-	Experimental        *bool               `json:"experimental,omitempty"`
-	IPTables            *bool               `json:"ipTables,omitempty"`            // Note: case difference from KubeKey's yaml
-	IPMasq              *bool               `json:"ipMasq,omitempty"`              // Note: case difference from KubeKey's yaml
-	StorageDriver       *string             `json:"storageDriver,omitempty"`
-	StorageOpts         []string            `json:"storageOpts,omitempty"`
-	DefaultRuntime      *string             `json:"defaultRuntime,omitempty"` // e.g., "runc"
-	Runtimes            map[string]DockerRuntime `json:"runtimes,omitempty"` // For configuring other runtimes like kata, nvidia
-	MaxConcurrentDownloads *int `json:"maxConcurrentDownloads,omitempty"`
-	MaxConcurrentUploads   *int `json:"maxConcurrentUploads,omitempty"`
-	Bridge                 *string `json:"bridge,omitempty"`
+	// RegistryMirrors for Docker. Corresponds to `registryMirrors` in YAML.
+	RegistryMirrors     []string            `json:"registryMirrors,omitempty" yaml:"registryMirrors,omitempty"`
+	// InsecureRegistries for Docker. Corresponds to `insecureRegistries` in YAML.
+	InsecureRegistries  []string            `json:"insecureRegistries,omitempty" yaml:"insecureRegistries,omitempty"`
+	// DataRoot is Docker's root directory. Corresponds to `dataRoot` in YAML.
+	DataRoot            *string             `json:"dataRoot,omitempty" yaml:"dataRoot,omitempty"`
+	// ExecOpts for Docker daemon. Corresponds to `execOpts` in YAML.
+	ExecOpts            []string            `json:"execOpts,omitempty" yaml:"execOpts,omitempty"`
+	LogDriver           *string             `json:"logDriver,omitempty" yaml:"logDriver,omitempty"`
+	LogOpts             map[string]string   `json:"logOpts,omitempty" yaml:"logOpts,omitempty"`
+	BIP                 *string             `json:"bip,omitempty" yaml:"bip,omitempty"`
+	FixedCIDR           *string             `json:"fixedCIDR,omitempty" yaml:"fixedCIDR,omitempty"`
+	DefaultAddressPools []DockerAddressPool `json:"defaultAddressPools,omitempty" yaml:"defaultAddressPools,omitempty"`
+	Experimental        *bool               `json:"experimental,omitempty" yaml:"experimental,omitempty"`
+	IPTables            *bool               `json:"ipTables,omitempty" yaml:"ipTables,omitempty"` // YAML might use 'iptables'
+	IPMasq              *bool               `json:"ipMasq,omitempty" yaml:"ipMasq,omitempty"`    // YAML might use 'ip-masq'
+	StorageDriver       *string             `json:"storageDriver,omitempty" yaml:"storageDriver,omitempty"`
+	StorageOpts         []string            `json:"storageOpts,omitempty" yaml:"storageOpts,omitempty"`
+	DefaultRuntime      *string             `json:"defaultRuntime,omitempty" yaml:"defaultRuntime,omitempty"`
+	Runtimes            map[string]DockerRuntime `json:"runtimes,omitempty" yaml:"runtimes,omitempty"`
+	MaxConcurrentDownloads *int `json:"maxConcurrentDownloads,omitempty" yaml:"maxConcurrentDownloads,omitempty"`
+	MaxConcurrentUploads   *int `json:"maxConcurrentUploads,omitempty" yaml:"maxConcurrentUploads,omitempty"`
+	Bridge                 *string `json:"bridge,omitempty" yaml:"bridge,omitempty"`
 
 	// InstallCRIDockerd indicates whether to install cri-dockerd shim.
-	// Required for using Docker with Kubernetes versions that have removed dockershim.
-	// Defaults to true if Docker is the selected runtime.
-	InstallCRIDockerd *bool `json:"installCRIDockerd,omitempty"`
+	// Corresponds to `installCRIDockerd` in YAML.
+	InstallCRIDockerd *bool `json:"installCRIDockerd,omitempty" yaml:"installCRIDockerd,omitempty"`
 
 	// CRIDockerdVersion specifies the version of cri-dockerd to install.
-	// If empty, the installation logic may choose a default compatible version.
-	CRIDockerdVersion *string `json:"criDockerdVersion,omitempty"`
+	// No direct YAML field, usually determined by installer based on K8s version or a default.
+	CRIDockerdVersion *string `json:"criDockerdVersion,omitempty" yaml:"criDockerdVersion,omitempty"`
 }
 
+// DockerRuntime defines a custom runtime for Docker.
 type DockerRuntime struct {
 	Path string `json:"path"`
 	RuntimeArgs []string `json:"runtimeArgs,omitempty"`

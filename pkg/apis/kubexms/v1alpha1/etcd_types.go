@@ -22,33 +22,33 @@ type EtcdConfig struct {
 	DataDir             *string             `json:"dataDir,omitempty" yaml:"dataDir,omitempty"`    // Default: "/var/lib/etcd"
 
 	// ExtraArgs for etcd process, as a list of strings (e.g., "--initial-cluster-token=mytoken").
-	// Changed from map[string]string to []string for flag flexibility.
 	ExtraArgs           []string            `json:"extraArgs,omitempty" yaml:"extraArgs,omitempty"`
 
 	// Backup configuration
-	BackupDir           *string `json:"backupDir,omitempty" yaml:"backupDir,omitempty"`           // Directory to store etcd backups
-	BackupPeriodHours   *int    `json:"backupPeriodHours,omitempty" yaml:"backupPeriodHours,omitempty"`   // Interval in hours for backups
-	KeepBackupNumber    *int    `json:"keepBackupNumber,omitempty" yaml:"keepBackupNumber,omitempty"`    // Number of backups to retain
-	BackupScriptPath    *string `json:"backupScriptPath,omitempty" yaml:"backupScriptPath,omitempty"`    // Path to a custom backup script
+	BackupDir           *string `json:"backupDir,omitempty" yaml:"backupDir,omitempty"`
+	BackupPeriodHours   *int    `json:"backupPeriodHours,omitempty" yaml:"backupPeriodHours,omitempty"`
+	KeepBackupNumber    *int    `json:"keepBackupNumber,omitempty" yaml:"keepBackupNumber,omitempty"`
+	BackupScriptPath    *string `json:"backupScriptPath,omitempty" yaml:"backupScriptPath,omitempty"`
 
-	// Performance and tuning
-	HeartbeatIntervalMillis      *int    `json:"heartbeatIntervalMillis,omitempty" yaml:"heartbeatInterval,omitempty"`
-	ElectionTimeoutMillis        *int    `json:"electionTimeoutMillis,omitempty" yaml:"electionTimeout,omitempty"`
-	SnapshotCount                *uint64 `json:"snapshotCount,omitempty" yaml:"snapshotCount,omitempty"`
+	// Performance and tuning - tags match YAML fields
+	HeartbeatIntervalMillis      *int    `json:"heartbeatIntervalMillis,omitempty" yaml:"heartbeatInterval,omitempty"` // YAML: heartbeatInterval
+	ElectionTimeoutMillis        *int    `json:"electionTimeoutMillis,omitempty" yaml:"electionTimeout,omitempty"`   // YAML: electionTimeout
+	SnapshotCount                *uint64 `json:"snapshotCount,omitempty" yaml:"snapshotCount,omitempty"`             // YAML: snapshotCount
 	AutoCompactionRetentionHours *int    `json:"autoCompactionRetentionHours,omitempty" yaml:"autoCompactionRetention,omitempty"` // YAML: autoCompactionRetention
 
 	// Resource management
-	QuotaBackendBytes *int64 `json:"quotaBackendBytes,omitempty" yaml:"quotaBackendBytes,omitempty"`
-	MaxRequestBytes   *uint  `json:"maxRequestBytes,omitempty" yaml:"maxRequestBytes,omitempty"`
+	QuotaBackendBytes *int64 `json:"quotaBackendBytes,omitempty" yaml:"quotaBackendBytes,omitempty"` // YAML: quotaBackendBytes
+	MaxRequestBytes   *uint  `json:"maxRequestBytes,omitempty" yaml:"maxRequestBytes,omitempty"`     // YAML: maxRequestBytes
 
 	// Operational settings
-	Metrics            *string `json:"metrics,omitempty" yaml:"metrics,omitempty"`
-	LogLevel           *string `json:"logLevel,omitempty" yaml:"logLevel,omitempty"`
-	MaxSnapshotsToKeep *uint   `json:"maxSnapshotsToKeep,omitempty" yaml:"maxSnapshots,omitempty"` // YAML: maxSnapshots
-	MaxWALsToKeep      *uint   `json:"maxWALsToKeep,omitempty" yaml:"maxWals,omitempty"`         // YAML: maxWals
+	Metrics            *string `json:"metrics,omitempty" yaml:"metrics,omitempty"`                         // YAML: metrics
+	LogLevel           *string `json:"logLevel,omitempty" yaml:"logLevel,omitempty"`                       // YAML: logLevel
+	MaxSnapshotsToKeep *uint   `json:"maxSnapshotsToKeep,omitempty" yaml:"maxSnapshots,omitempty"`         // YAML: maxSnapshots
+	MaxWALsToKeep      *uint   `json:"maxWALsToKeep,omitempty" yaml:"maxWals,omitempty"`                   // YAML: maxWals
 }
 
 // ExternalEtcdConfig describes how to connect to an external etcd cluster.
+// Corresponds to etcd.external in YAML.
 type ExternalEtcdConfig struct {
 	Endpoints []string `json:"endpoints" yaml:"endpoints"`
 	CAFile    string   `json:"caFile,omitempty" yaml:"caFile,omitempty"`

@@ -13,34 +13,42 @@ type KubernetesConfig struct {
 	Version                string                    `json:"version" yaml:"version"`
 	ContainerRuntime       *ContainerRuntimeConfig   `json:"containerRuntime,omitempty" yaml:"containerRuntime,omitempty"`
 	ClusterName            string                    `json:"clusterName,omitempty" yaml:"clusterName,omitempty"`
-	DNSDomain              string                    `json:"dnsDomain,omitempty" yaml:"dnsDomain,omitempty"`
+	DNSDomain              string                    `json:"dnsDomain,omitempty" yaml:"dnsDomain,omitempty"` // Default "cluster.local"
 	DisableKubeProxy       *bool                     `json:"disableKubeProxy,omitempty" yaml:"disableKubeProxy,omitempty"`
-	MasqueradeAll          *bool                     `json:"masqueradeAll,omitempty" yaml:"masqueradeAll,omitempty"`
-	MaxPods                *int32                    `json:"maxPods,omitempty" yaml:"maxPods,omitempty"`
-	NodeCidrMaskSize       *int32                    `json:"nodeCidrMaskSize,omitempty" yaml:"nodeCidrMaskSize,omitempty"`
+	MasqueradeAll          *bool                     `json:"masqueradeAll,omitempty" yaml:"masqueradeAll,omitempty"` // Default false
+	MaxPods                *int32                    `json:"maxPods,omitempty" yaml:"maxPods,omitempty"` // Default 110
+	NodeCidrMaskSize       *int32                    `json:"nodeCidrMaskSize,omitempty" yaml:"nodeCidrMaskSize,omitempty"` // Default 24
 	ApiserverCertExtraSans []string                  `json:"apiserverCertExtraSans,omitempty" yaml:"apiserverCertExtraSans,omitempty"`
-	ProxyMode              string                    `json:"proxyMode,omitempty" yaml:"proxyMode,omitempty"`
-	AutoRenewCerts         *bool                     `json:"autoRenewCerts,omitempty" yaml:"autoRenewCerts,omitempty"`
-	ContainerManager       string                    `json:"containerManager,omitempty" yaml:"containerManager,omitempty"`
-	// PodSubnet and ServiceSubnet are removed as they belong to NetworkConfig (as KubePodsCIDR, KubeServiceCIDR)
+	ProxyMode              string                    `json:"proxyMode,omitempty" yaml:"proxyMode,omitempty"` // Default "ipvs"
+	AutoRenewCerts         *bool                     `json:"autoRenewCerts,omitempty" yaml:"autoRenewCerts,omitempty"` // Default true
+	ContainerManager       string                    `json:"containerManager,omitempty" yaml:"containerManager,omitempty"` // No specific field in YAML, usually inferred or part of Kubelet config
 	FeatureGates           map[string]bool           `json:"featureGates,omitempty" yaml:"featureGates,omitempty"`
 
-	APIServer            *APIServerConfig            `json:"apiServer,omitempty" yaml:"apiServer,omitempty"`
-	ControllerManager    *ControllerManagerConfig    `json:"controllerManager,omitempty" yaml:"controllerManager,omitempty"`
-	Scheduler            *SchedulerConfig            `json:"scheduler,omitempty" yaml:"scheduler,omitempty"`
-	Kubelet              *KubeletConfig              `json:"kubelet,omitempty" yaml:"kubelet,omitempty"`
-	KubeProxy            *KubeProxyConfig            `json:"kubeProxy,omitempty" yaml:"kubeProxy,omitempty"`
-	KubeletConfiguration *runtime.RawExtension       `json:"kubeletConfiguration,omitempty" yaml:"kubeletConfiguration,omitempty"`
-	KubeProxyConfiguration *runtime.RawExtension     `json:"kubeProxyConfiguration,omitempty" yaml:"kubeProxyConfiguration,omitempty"`
-	Nodelocaldns         *NodelocaldnsConfig         `json:"nodelocaldns,omitempty" yaml:"nodelocaldns,omitempty"`
-	Audit                *AuditConfig                `json:"audit,omitempty" yaml:"audit,omitempty"`
-	Kata                 *KataConfig                 `json:"kata,omitempty" yaml:"kata,omitempty"`
-	NodeFeatureDiscovery *NodeFeatureDiscoveryConfig `json:"nodeFeatureDiscovery,omitempty" yaml:"nodeFeatureDiscovery,omitempty"`
+	// KubeletConfiguration and KubeProxyConfiguration are kept as RawExtension
+	// to allow passthrough of complex, version-specific structures.
+	// However, the YAML provides specific fields for KubeProxy (kubeProxyConfiguration.ipvs.excludeCIDRs)
+	// which implies we might want to model some parts of it directly.
+	// For now, direct fields for KubeProxy are in KubeProxyConfig.
+	APIServer              *APIServerConfig            `json:"apiServer,omitempty" yaml:"apiServer,omitempty"`
+	ControllerManager      *ControllerManagerConfig    `json:"controllerManager,omitempty" yaml:"controllerManager,omitempty"`
+	Scheduler              *SchedulerConfig            `json:"scheduler,omitempty" yaml:"scheduler,omitempty"`
+	Kubelet                *KubeletConfig              `json:"kubelet,omitempty" yaml:"kubelet,omitempty"`
+	KubeProxy              *KubeProxyConfig            `json:"kubeProxy,omitempty" yaml:"kubeProxy,omitempty"` // This will hold structured KubeProxy settings
+	KubeletConfiguration   *runtime.RawExtension       `json:"kubeletConfiguration,omitempty" yaml:"kubeletConfiguration,omitempty"` // For Kubelet's own config file
+	KubeProxyConfiguration *runtime.RawExtension       `json:"kubeProxyConfiguration,omitempty" yaml:"kubeProxyConfiguration,omitempty"` // For KubeProxy's own config file, if not using structured fields above
+	Nodelocaldns           *NodelocaldnsConfig         `json:"nodelocaldns,omitempty" yaml:"nodelocaldns,omitempty"`
+	Audit                  *AuditConfig                `json:"audit,omitempty" yaml:"audit,omitempty"`
+	Kata                   *KataConfig                 `json:"kata,omitempty" yaml:"kata,omitempty"`
+	NodeFeatureDiscovery   *NodeFeatureDiscoveryConfig `json:"nodeFeatureDiscovery,omitempty" yaml:"nodeFeatureDiscovery,omitempty"`
 }
 
 // APIServerConfig holds configuration for the Kubernetes API Server.
+// Corresponds to kubernetes.apiServer in YAML.
 type APIServerConfig struct {
 	ExtraArgs            []string `json:"extraArgs,omitempty" yaml:"extraArgs,omitempty"`
+	// EtcdServers, EtcdCAFile, EtcdCertFile, EtcdKeyFile are usually configured
+	// by the installer based on EtcdConfig, not directly in APIServerConfig by user.
+	// They are kept here if direct user override is desired, but typically not in YAML.
 	EtcdServers          []string `json:"etcdServers,omitempty" yaml:"etcdServers,omitempty"`
 	EtcdCAFile           string   `json:"etcdCAFile,omitempty" yaml:"etcdCAFile,omitempty"`
 	EtcdCertFile         string   `json:"etcdCertFile,omitempty" yaml:"etcdCertFile,omitempty"`
@@ -50,6 +58,7 @@ type APIServerConfig struct {
 }
 
 // ControllerManagerConfig holds configuration for the Kubernetes Controller Manager.
+// Corresponds to kubernetes.controllerManager in YAML.
 type ControllerManagerConfig struct {
 	ExtraArgs                    []string `json:"extraArgs,omitempty" yaml:"extraArgs,omitempty"`
 	ServiceAccountPrivateKeyFile string   `json:"serviceAccountPrivateKeyFile,omitempty" yaml:"serviceAccountPrivateKeyFile,omitempty"`

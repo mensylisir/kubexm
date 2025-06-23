@@ -10,25 +10,42 @@ import (
 // RegistryConfig defines configurations related to container image registries.
 type RegistryConfig struct {
 	// RegistryMirrors and InsecureRegistries are removed as they belong to ContainerRuntime config.
+	// PrivateRegistry is the FQDN of the private registry.
+	// Corresponds to `privateRegistry` in YAML.
 	PrivateRegistry   string                  `json:"privateRegistry,omitempty" yaml:"privateRegistry,omitempty"`
+	// NamespaceOverride to prepend to all images if the private registry doesn't support nested namespaces.
+	// Corresponds to `namespaceOverride` in YAML.
 	NamespaceOverride string                  `json:"namespaceOverride,omitempty" yaml:"namespaceOverride,omitempty"`
+	// Auths provides authentication details for registries.
+	// The key is the registry address. Corresponds to `auths` in YAML.
 	Auths             map[string]RegistryAuth `json:"auths,omitempty" yaml:"auths,omitempty"`
-	Type              *string                 `json:"type,omitempty" yaml:"type,omitempty"` // For local registry deployment (e.g., "registry", "harbor")
-	DataRoot          *string                 `json:"dataRoot,omitempty" yaml:"registryDataDir,omitempty"` // For local registry deployment data, matches "registryDataDir" from YAML notes
-	NamespaceRewrite  *NamespaceRewriteConfig `json:"namespaceRewrite,omitempty" yaml:"namespaceRewrite,omitempty"`
+	// Type specifies the type of local registry to deploy (e.g., "registry", "harbor").
+	// Corresponds to `type` in YAML (under `registry` block).
+	Type              *string                 `json:"type,omitempty" yaml:"type,omitempty"`
+	// DataRoot for the local registry if deployed by KubeXMS.
+	// Corresponds to `registryDataDir` in YAML.
+	DataRoot          *string                 `json:"dataRoot,omitempty" yaml:"registryDataDir,omitempty"`
+	NamespaceRewrite  *NamespaceRewriteConfig `json:"namespaceRewrite,omitempty" yaml:"namespaceRewrite,omitempty"` // Not in provided YAML, but a common feature
 }
 
 // RegistryAuth defines authentication credentials for a specific registry.
+// Corresponds to an entry in `registry.auths` in YAML.
 type RegistryAuth struct {
 	Username      string `json:"username,omitempty" yaml:"username,omitempty"`
 	Password      string `json:"password,omitempty" yaml:"password,omitempty"`
 	Auth          string `json:"auth,omitempty" yaml:"auth,omitempty"` // Base64 encoded "username:password"
+	// SkipTLSVerify allows contacting registries over HTTPS with failed TLS verification.
+	// Corresponds to `skipTLSVerify` in YAML.
 	SkipTLSVerify *bool  `json:"skipTLSVerify,omitempty" yaml:"skipTLSVerify,omitempty"`
+	// PlainHTTP allows contacting registries over HTTP.
+	// Corresponds to `plainHTTP` in YAML.
 	PlainHTTP     *bool  `json:"plainHTTP,omitempty" yaml:"plainHTTP,omitempty"`
+	// CertsPath to use certificates at path (*.crt, *.cert, *.key) to connect to the registry.
+	// Corresponds to `certsPath` in YAML.
 	CertsPath     string `json:"certsPath,omitempty" yaml:"certsPath,omitempty"`
 }
 
-// NamespaceRewriteConfig defines rules for rewriting image namespaces.
+// NamespaceRewriteConfig defines rules for rewriting image namespaces. (Advanced feature, not in provided YAML)
 type NamespaceRewriteConfig struct {
 	Enabled bool                   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 	Rules   []NamespaceRewriteRule `json:"rules,omitempty" yaml:"rules,omitempty"`
