@@ -4,17 +4,18 @@ import (
 	"fmt"
 
 	"github.com/mensylisir/kubexm/pkg/module"
-	"github.com/mensylisir/kubexm/pkg/module/preflight" // Assuming preflight module is ready
-	// TODO: Import other modules like corecomponents, clusterbootstrap, clusterready when they are created
+	"github.com/mensylisir/kubexm/pkg/module/preflight"
+	"github.com/mensylisir/kubexm/pkg/module/etcd"
+	"github.com/mensylisir/kubexm/pkg/module/containerd"
+	k8sModule "github.com/mensylisir/kubexm/pkg/module/kubernetes" // Alias for kubernetes modules
+	"github.com/mensylisir/kubexm/pkg/module/cni"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime" // For *runtime.Context in Run method
 	"github.com/mensylisir/kubexm/pkg/pipeline" // For pipeline.Pipeline and pipeline.PipelineContext
-	// task.UniqueNodeIDs is removed, will use plan.UniqueNodeIDs
 )
 
 // CreateClusterPipeline defines the pipeline for creating a new Kubernetes cluster.
 type CreateClusterPipeline struct {
-	// No BasePipeline struct to embed for now, directly implement interface.
 	PipelineName    string
 	PipelineModules []module.Module
 }
@@ -22,18 +23,29 @@ type CreateClusterPipeline struct {
 // NewCreateClusterPipeline creates a new CreateClusterPipeline.
 // It initializes the modules that this pipeline will orchestrate.
 func NewCreateClusterPipeline(assumeYes bool) pipeline.Pipeline {
-	// Instantiate modules. For now, only PreflightModule.
-	// Others will be added as they are developed.
-	pfModule := preflight.NewPreflightModule(assumeYes)
-	// coreModule := corecomponents.NewCoreComponentsModule()
-	// bootstrapModule := clusterbootstrap.NewClusterBootstrapModule()
-	// readyModule := clusterready.NewClusterReadyModule()
+	// Instantiate modules in their logical execution order.
+	preflightModule := preflight.NewPreflightModule(assumeYes)
+	etcdModule := etcd.NewEtcdModule()
+	// Assuming NewContainerdModule() is suitable as per prior check.
+	// If Docker support is also primary, a selector logic or separate pipeline might be needed.
+	// For now, defaulting to containerd.
+	containerdModule := containerd.NewContainerdModule()
+	controlPlaneModule := k8sModule.NewControlPlaneModule()
+	kubeletModule := k8sModule.NewKubeletModule()
+	// Example CNI module - Calico. This might take specific config later,
+	// or a factory method could choose the CNI module based on clusterConfig.
+	cniModule := cni.NewCalicoModule() // Assuming Calico for now.
 
 	return &CreateClusterPipeline{
 		PipelineName: "CreateNewCluster",
 		PipelineModules: []module.Module{
-			pfModule,
-			// TODO: Add coreModule, bootstrapModule, readyModule here in order
+			preflightModule,
+			etcdModule,
+			containerdModule,
+			controlPlaneModule,
+			kubeletModule,
+			cniModule,
+			// TODO: Add modules for DNS, Storage, LoadBalancer (Metallb) etc. later
 		},
 	}
 }
