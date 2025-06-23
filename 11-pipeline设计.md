@@ -31,7 +31,7 @@ type Pipeline interface {
     Plan(ctx runtime.PipelineContext) (*plan.ExecutionGraph, error)
 
     // Run now takes an ExecutionGraph and a GraphExecutionResult.
-    Run(ctx *runtime.Context, dryRun bool) (*plan.GraphExecutionResult, error)
+    Run(ctx Pipeline.Context, graph *plan.ExecutionGraph, dryRun bool) (*plan.GraphExecutionResult, error)
 }
 ```
 ### 设计解读:
