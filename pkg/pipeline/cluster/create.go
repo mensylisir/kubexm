@@ -4,14 +4,11 @@ import (
 	"fmt"
 
 	"github.com/mensylisir/kubexm/pkg/module"
-	"github.com/mensylisir/kubexm/pkg/module/preflight"
 	"github.com/mensylisir/kubexm/pkg/module/etcd"
-	"github.com/mensylisir/kubexm/pkg/module/containerd"
-	k8sModule "github.com/mensylisir/kubexm/pkg/module/kubernetes" // Alias for kubernetes modules
-	"github.com/mensylisir/kubexm/pkg/module/cni"
+	"github.com/mensylisir/kubexm/pkg/module/preflight"
+	"github.com/mensylisir/kubexm/pkg/pipeline" // For pipeline.Pipeline and pipeline.PipelineContext
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime" // For *runtime.Context in Run method
-	"github.com/mensylisir/kubexm/pkg/pipeline" // For pipeline.Pipeline and pipeline.PipelineContext
 )
 
 // CreateClusterPipeline defines the pipeline for creating a new Kubernetes cluster.
@@ -29,23 +26,27 @@ func NewCreateClusterPipeline(assumeYes bool) pipeline.Pipeline {
 	// Assuming NewContainerdModule() is suitable as per prior check.
 	// If Docker support is also primary, a selector logic or separate pipeline might be needed.
 	// For now, defaulting to containerd.
-	containerdModule := containerd.NewContainerdModule()
-	controlPlaneModule := k8sModule.NewControlPlaneModule()
-	kubeletModule := k8sModule.NewKubeletModule()
-	// Example CNI module - Calico. This might take specific config later,
-	// or a factory method could choose the CNI module based on clusterConfig.
-	cniModule := cni.NewCalicoModule() // Assuming Calico for now.
+	// containerdModule := containerd.NewContainerdModule() // Replaced by CoreComponentsModule
+	// etcdModule := etcd.NewEtcdModule() // Replaced by CoreComponentsModule
+	// controlPlaneModule := k8sModule.NewControlPlaneModule() // Replaced by CoreComponentsModule or ClusterBootstrapModule
+	// kubeletModule := k8sModule.NewKubeletModule() // Replaced by CoreComponentsModule or ClusterBootstrapModule
+	// cniModule := cni.NewCalicoModule() // Replaced by ClusterReadyModule which includes network
+
+	// Instantiate new conceptual modules
+	// Note: AssumeYes is primarily for PreflightModule's ConfirmTask. Other modules
+	// will get configuration from the runtime context during their Plan phase.
+	coreComponentsModule := module.NewCoreComponentsModule()
+	clusterBootstrapModule := module.NewClusterBootstrapModule()
+	clusterReadyModule := module.NewClusterReadyModule()
+	// PreflightModule is already instantiated above.
 
 	return &CreateClusterPipeline{
 		PipelineName: "CreateNewCluster",
 		PipelineModules: []module.Module{
-			preflightModule,
-			etcdModule,
-			containerdModule,
-			controlPlaneModule,
-			kubeletModule,
-			cniModule,
-			// TODO: Add modules for DNS, Storage, LoadBalancer (Metallb) etc. later
+			preflightModule,        // Phase 1: Greetings, Pre-checks, Confirmation, Offline Prep
+			coreComponentsModule,   // Phase 2: Runtime, Etcd, K8s Binaries, Images
+			clusterBootstrapModule, // Phase 3: Kubeadm Init, Join Masters, Join Workers
+			clusterReadyModule,     // Phase 4: CNI, Post-Scripts, Addons
 		},
 	}
 }
@@ -158,8 +159,8 @@ func (p *CreateClusterPipeline) Run(ctx *runtime.Context, dryRun bool) (*plan.Gr
 		logger.Info("Pipeline planned no executable nodes. Nothing to run.")
 		// Return an empty but successful result
 		return &plan.GraphExecutionResult{
-			GraphName: p.Name(),
-			Status:    plan.StatusSuccess, // Or a specific "NoOp" status if defined
+			GraphName:   p.Name(),
+			Status:      plan.StatusSuccess, // Or a specific "NoOp" status if defined
 			NodeResults: make(map[plan.NodeID]*plan.NodeResult),
 		}, nil
 	}

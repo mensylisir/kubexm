@@ -37,7 +37,7 @@ func (h *LocalCertificateHandle) ID() string {
 }
 
 // getControlNode retrieves and caches the control node host object.
-func (h *LocalCertificateHandle) getControlNode(ctx runtime.TaskContext) ([]connector.Host, error) {
+func (h *LocalCertificateHandle) getControlNode(ctx task.TaskContext) ([]connector.Host, error) {
 	if h.controlNodeHost != nil {
 		return h.controlNodeHost, nil
 	}
@@ -85,7 +85,7 @@ func (h *LocalCertificateHandle) Path(ctx runtime.TaskContext) (string, error) {
 	// For a generic cert, it should be runtime.Context.GetCertsDir() + h.ResourceName + h.CertFileName.
 	// Let's assume runtime.TaskContext has a GetCertsDir() method.
 	certsBaseDir := filepath.Join(ctx.GetGlobalWorkDir(), common.DefaultCertsDir) // GlobalWorkDir/certs
-	resourceCertsDir := filepath.Join(certsBaseDir, h.ResourceName)             // GlobalWorkDir/certs/etcd
+	resourceCertsDir := filepath.Join(certsBaseDir, h.ResourceName)               // GlobalWorkDir/certs/etcd
 	return filepath.Join(resourceCertsDir, h.CertFileName), nil
 }
 

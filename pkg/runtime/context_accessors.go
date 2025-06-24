@@ -19,6 +19,7 @@ import (
 	// Let's try to make this work by having the context implementations here
 	// and the interfaces defined in their respective packages.
 	// The actual interface satisfaction will be checked by the compiler.
+	// "k8s.io/client-go/tools/record" // Already in context.go, not needed here unless used directly
 )
 
 // baseContext provides common fields and methods for all context implementations.
@@ -39,12 +40,16 @@ func NewPipelineContext(mainCtx *Context) *pipelineContextImpl {
 	return &pipelineContextImpl{baseContext{mainCtx: mainCtx}}
 }
 
-func (ctx *pipelineContextImpl) GoContext() context.Context                 { return ctx.mainCtx.GoCtx }
-func (ctx *pipelineContextImpl) GetLogger() *logger.Logger                  { return ctx.mainCtx.Logger }
-func (ctx *pipelineContextImpl) GetClusterConfig() *v1alpha1.Cluster        { return ctx.mainCtx.ClusterConfig }
-func (ctx *pipelineContextImpl) GetPipelineCache() cache.PipelineCache      { return ctx.mainCtx.PipelineCache } // Note: Direct access to mainCtx.PipelineCache
-func (ctx *pipelineContextImpl) GetGlobalWorkDir() string                   { return ctx.mainCtx.GlobalWorkDir }
-func (ctx *pipelineContextImpl) GetEngine() engine.Engine                   { return ctx.mainCtx.Engine }
+func (ctx *pipelineContextImpl) GoContext() context.Context { return ctx.mainCtx.GoCtx }
+func (ctx *pipelineContextImpl) GetLogger() *logger.Logger  { return ctx.mainCtx.Logger }
+func (ctx *pipelineContextImpl) GetClusterConfig() *v1alpha1.Cluster {
+	return ctx.mainCtx.ClusterConfig
+}
+func (ctx *pipelineContextImpl) GetPipelineCache() cache.PipelineCache {
+	return ctx.mainCtx.PipelineCache
+}                                                         // Note: Direct access to mainCtx.PipelineCache
+func (ctx *pipelineContextImpl) GetGlobalWorkDir() string { return ctx.mainCtx.GlobalWorkDir }
+func (ctx *pipelineContextImpl) GetEngine() engine.Engine { return ctx.mainCtx.Engine }
 
 // --- ModuleContext Implementation ---
 
@@ -58,13 +63,15 @@ func NewModuleContext(mainCtx *Context) *moduleContextImpl {
 	return &moduleContextImpl{baseContext{mainCtx: mainCtx}}
 }
 
-func (ctx *moduleContextImpl) GoContext() context.Context                 { return ctx.mainCtx.GoCtx }
-func (ctx *moduleContextImpl) GetLogger() *logger.Logger                  { return ctx.mainCtx.Logger }
-func (ctx *moduleContextImpl) GetClusterConfig() *v1alpha1.Cluster        { return ctx.mainCtx.ClusterConfig }
-func (ctx *moduleContextImpl) GetPipelineCache() cache.PipelineCache      { return ctx.mainCtx.PipelineCache }
-func (ctx *moduleContextImpl) GetModuleCache() cache.ModuleCache          { return ctx.mainCtx.ModuleCache } // Note: Direct access
-func (ctx *moduleContextImpl) GetGlobalWorkDir() string                   { return ctx.mainCtx.GlobalWorkDir }
-func (ctx *moduleContextImpl) GetEngine() engine.Engine { return ctx.mainCtx.Engine } // Module might need engine to plan sub-tasks if design changes
+func (ctx *moduleContextImpl) GoContext() context.Context          { return ctx.mainCtx.GoCtx }
+func (ctx *moduleContextImpl) GetLogger() *logger.Logger           { return ctx.mainCtx.Logger }
+func (ctx *moduleContextImpl) GetClusterConfig() *v1alpha1.Cluster { return ctx.mainCtx.ClusterConfig }
+func (ctx *moduleContextImpl) GetPipelineCache() cache.PipelineCache {
+	return ctx.mainCtx.PipelineCache
+}
+func (ctx *moduleContextImpl) GetModuleCache() cache.ModuleCache { return ctx.mainCtx.ModuleCache } // Note: Direct access
+func (ctx *moduleContextImpl) GetGlobalWorkDir() string          { return ctx.mainCtx.GlobalWorkDir }
+func (ctx *moduleContextImpl) GetEngine() engine.Engine          { return ctx.mainCtx.Engine } // Module might need engine to plan sub-tasks if design changes
 
 // --- TaskContext Implementation ---
 
@@ -78,18 +85,25 @@ func NewTaskContext(mainCtx *Context) *taskContextImpl {
 	return &taskContextImpl{baseContext{mainCtx: mainCtx}}
 }
 
-func (ctx *taskContextImpl) GoContext() context.Context                                          { return ctx.mainCtx.GoCtx }
-func (ctx *taskContextImpl) GetLogger() *logger.Logger                                           { return ctx.mainCtx.Logger }
-func (ctx *taskContextImpl) GetClusterConfig() *v1alpha1.Cluster                                 { return ctx.mainCtx.ClusterConfig }
-func (ctx *taskContextImpl) GetPipelineCache() cache.PipelineCache                               { return ctx.mainCtx.PipelineCache }
-func (ctx *taskContextImpl) GetModuleCache() cache.ModuleCache                                   { return ctx.mainCtx.ModuleCache }
-func (ctx *taskContextImpl) GetTaskCache() cache.TaskCache                                     { return ctx.mainCtx.TaskCache } // Note: Direct access
-func (ctx *taskContextImpl) GetHostsByRole(role string) ([]connector.Host, error)                { return ctx.mainCtx.GetHostsByRole(role) }
-func (ctx *taskContextImpl) GetHostFacts(host connector.Host) (*runner.Facts, error)             { return ctx.mainCtx.GetHostFacts(host) }
-func (ctx *taskContextImpl) GetControlNode() (connector.Host, error)                             { return ctx.mainCtx.GetControlNode() }
-func (ctx *taskContextImpl) GetGlobalWorkDir() string                                            { return ctx.mainCtx.GlobalWorkDir }
-func (ctx *taskContextImpl) GetConnectorForHost(host connector.Host) (connector.Connector, error) { return ctx.mainCtx.GetConnectorForHost(host) }
-
+func (ctx *taskContextImpl) GoContext() context.Context            { return ctx.mainCtx.GoCtx }
+func (ctx *taskContextImpl) GetLogger() *logger.Logger             { return ctx.mainCtx.Logger }
+func (ctx *taskContextImpl) GetClusterConfig() *v1alpha1.Cluster   { return ctx.mainCtx.ClusterConfig }
+func (ctx *taskContextImpl) GetPipelineCache() cache.PipelineCache { return ctx.mainCtx.PipelineCache }
+func (ctx *taskContextImpl) GetModuleCache() cache.ModuleCache     { return ctx.mainCtx.ModuleCache }
+func (ctx *taskContextImpl) GetTaskCache() cache.TaskCache         { return ctx.mainCtx.TaskCache } // Note: Direct access
+func (ctx *taskContextImpl) GetHostsByRole(role string) ([]connector.Host, error) {
+	return ctx.mainCtx.GetHostsByRole(role)
+}
+func (ctx *taskContextImpl) GetHostFacts(host connector.Host) (*runner.Facts, error) {
+	return ctx.mainCtx.GetHostFacts(host)
+}
+func (ctx *taskContextImpl) GetControlNode() (connector.Host, error) {
+	return ctx.mainCtx.GetControlNode()
+}
+func (ctx *taskContextImpl) GetGlobalWorkDir() string { return ctx.mainCtx.GlobalWorkDir }
+func (ctx *taskContextImpl) GetConnectorForHost(host connector.Host) (connector.Connector, error) {
+	return ctx.mainCtx.GetConnectorForHost(host)
+}
 
 // --- StepContext Implementation ---
 
@@ -110,40 +124,65 @@ func NewStepContext(mainCtx *Context, host connector.Host, goCtx context.Context
 	}
 }
 
-func (ctx *stepContextImpl) GoContext() context.Context                 { return ctx.currentGoCtx }
-func (ctx *stepContextImpl) GetLogger() *logger.Logger                  { return ctx.mainCtx.Logger.With("host", ctx.currentHost.GetName()) }
-func (ctx *stepContextImpl) GetHost() connector.Host                    { return ctx.currentHost }
-func (ctx *stepContextImpl) GetRunner() runner.Runner                   { return ctx.mainCtx.Runner }
-func (ctx *stepContextImpl) GetClusterConfig() *v1alpha1.Cluster        { return ctx.mainCtx.ClusterConfig }
-func (ctx *stepContextImpl) GetStepCache() cache.StepCache                { return ctx.mainCtx.StepCache } // Note: Direct access
-func (ctx *stepContextImpl) GetTaskCache() cache.TaskCache                { return ctx.mainCtx.TaskCache }
-func (ctx *stepContextImpl) GetModuleCache() cache.ModuleCache            { return ctx.mainCtx.ModuleCache }
+func (ctx *stepContextImpl) GoContext() context.Context { return ctx.currentGoCtx }
+func (ctx *stepContextImpl) GetLogger() *logger.Logger {
+	return ctx.mainCtx.Logger.With("host", ctx.currentHost.GetName())
+}
+func (ctx *stepContextImpl) GetHost() connector.Host             { return ctx.currentHost }
+func (ctx *stepContextImpl) GetRunner() runner.Runner            { return ctx.mainCtx.Runner }
+func (ctx *stepContextImpl) GetClusterConfig() *v1alpha1.Cluster { return ctx.mainCtx.ClusterConfig }
+func (ctx *stepContextImpl) GetStepCache() cache.StepCache       { return ctx.mainCtx.StepCache } // Note: Direct access
+func (ctx *stepContextImpl) GetTaskCache() cache.TaskCache       { return ctx.mainCtx.TaskCache }
+func (ctx *stepContextImpl) GetModuleCache() cache.ModuleCache   { return ctx.mainCtx.ModuleCache }
 
+func (ctx *stepContextImpl) GetHostsByRole(role string) ([]connector.Host, error) {
+	return ctx.mainCtx.GetHostsByRole(role)
+}
+func (ctx *stepContextImpl) GetHostFacts(host connector.Host) (*runner.Facts, error) {
+	return ctx.mainCtx.GetHostFacts(host)
+}
+func (ctx *stepContextImpl) GetCurrentHostFacts() (*runner.Facts, error) {
+	return ctx.mainCtx.GetHostFacts(ctx.currentHost)
+}
+func (ctx *stepContextImpl) GetConnectorForHost(host connector.Host) (connector.Connector, error) {
+	return ctx.mainCtx.GetConnectorForHost(host)
+}
+func (ctx *stepContextImpl) GetCurrentHostConnector() (connector.Connector, error) {
+	return ctx.mainCtx.GetConnectorForHost(ctx.currentHost)
+}
+func (ctx *stepContextImpl) GetControlNode() (connector.Host, error) {
+	return ctx.mainCtx.GetControlNode()
+}
 
-func (ctx *stepContextImpl) GetHostsByRole(role string) ([]connector.Host, error)           { return ctx.mainCtx.GetHostsByRole(role) }
-func (ctx *stepContextImpl) GetHostFacts(host connector.Host) (*runner.Facts, error)          { return ctx.mainCtx.GetHostFacts(host) }
-func (ctx *stepContextImpl) GetCurrentHostFacts() (*runner.Facts, error)                      { return ctx.mainCtx.GetHostFacts(ctx.currentHost) }
-func (ctx *stepContextImpl) GetConnectorForHost(host connector.Host) (connector.Connector, error) { return ctx.mainCtx.GetConnectorForHost(host) }
-func (ctx *stepContextImpl) GetCurrentHostConnector() (connector.Connector, error)            { return ctx.mainCtx.GetConnectorForHost(ctx.currentHost) }
-func (ctx *stepContextImpl) GetControlNode() (connector.Host, error)                          { return ctx.mainCtx.GetControlNode() }
-
-func (ctx *stepContextImpl) GetGlobalWorkDir() string                                         { return ctx.mainCtx.GlobalWorkDir }
-func (ctx *stepContextImpl) IsVerbose() bool                                                  { return ctx.mainCtx.GlobalVerbose }
-func (ctx *stepContextImpl) ShouldIgnoreErr() bool                                            { return ctx.mainCtx.GlobalIgnoreErr }
-func (ctx *stepContextImpl) GetGlobalConnectionTimeout() time.Duration                        { return ctx.mainCtx.GlobalConnectionTimeout }
+func (ctx *stepContextImpl) GetGlobalWorkDir() string { return ctx.mainCtx.GlobalWorkDir }
+func (ctx *stepContextImpl) IsVerbose() bool          { return ctx.mainCtx.GlobalVerbose }
+func (ctx *stepContextImpl) ShouldIgnoreErr() bool    { return ctx.mainCtx.GlobalIgnoreErr }
+func (ctx *stepContextImpl) GetGlobalConnectionTimeout() time.Duration {
+	return ctx.mainCtx.GlobalConnectionTimeout
+}
 
 // Artifact path helpers
-func (ctx *stepContextImpl) GetClusterArtifactsDir() string          { return ctx.mainCtx.GetClusterArtifactsDir() }
-func (ctx *stepContextImpl) GetCertsDir() string                     { return ctx.mainCtx.GetCertsDir() }
-func (ctx *stepContextImpl) GetEtcdCertsDir() string                 { return ctx.mainCtx.GetEtcdCertsDir() }
-func (ctx *stepContextImpl) GetComponentArtifactsDir(componentName string) string { return ctx.mainCtx.GetComponentArtifactsDir(componentName) }
-func (ctx *stepContextImpl) GetEtcdArtifactsDir() string             { return ctx.mainCtx.GetEtcdArtifactsDir() }
-func (ctx *stepContextImpl) GetContainerRuntimeArtifactsDir() string { return ctx.mainCtx.GetContainerRuntimeArtifactsDir() }
-func (ctx *stepContextImpl) GetKubernetesArtifactsDir() string       { return ctx.mainCtx.GetKubernetesArtifactsDir() }
+func (ctx *stepContextImpl) GetClusterArtifactsDir() string {
+	return ctx.mainCtx.GetClusterArtifactsDir()
+}
+func (ctx *stepContextImpl) GetCertsDir() string     { return ctx.mainCtx.GetCertsDir() }
+func (ctx *stepContextImpl) GetEtcdCertsDir() string { return ctx.mainCtx.GetEtcdCertsDir() }
+func (ctx *stepContextImpl) GetComponentArtifactsDir(componentName string) string {
+	return ctx.mainCtx.GetComponentArtifactsDir(componentName)
+}
+func (ctx *stepContextImpl) GetEtcdArtifactsDir() string { return ctx.mainCtx.GetEtcdArtifactsDir() }
+func (ctx *stepContextImpl) GetContainerRuntimeArtifactsDir() string {
+	return ctx.mainCtx.GetContainerRuntimeArtifactsDir()
+}
+func (ctx *stepContextImpl) GetKubernetesArtifactsDir() string {
+	return ctx.mainCtx.GetKubernetesArtifactsDir()
+}
 func (ctx *stepContextImpl) GetFileDownloadPath(componentName, version, arch, fileName string) string {
 	return ctx.mainCtx.GetFileDownloadPath(componentName, version, arch, fileName)
 }
-func (ctx *stepContextImpl) GetHostDir(hostname string) string { return ctx.mainCtx.GetHostDir(hostname) }
+func (ctx *stepContextImpl) GetHostDir(hostname string) string {
+	return ctx.mainCtx.GetHostDir(hostname)
+}
 
 // WithGoContext for step.StepContext to allow engine to set per-step go context.
 // This method needs to return the step.StepContext interface type.

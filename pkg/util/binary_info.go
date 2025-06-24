@@ -16,21 +16,21 @@ type BinaryType string
 
 // Constants for BinaryType
 const (
-	ETCD        BinaryType = "etcd"
-	KUBE        BinaryType = "kubernetes" // For kubeadm, kubelet, kubectl, etc.
-	CNI         BinaryType = "cni"
-	HELM        BinaryType = "helm"
-	DOCKER      BinaryType = "docker"
-	CRIDOCKERD  BinaryType = "cri-dockerd"
-	CRICTL      BinaryType = "crictl"
-	K3S         BinaryType = "k3s"        // K3S is a KUBE type distribution
-	K8E         BinaryType = "k8e"        // K8E is a KUBE type distribution
-	REGISTRY    BinaryType = "registry"   // For local registry components like 'registry' or 'harbor'
-	BUILD       BinaryType = "build"      // For build tools like 'buildx'
-	CONTAINERD  BinaryType = "containerd" // For containerd itself
-	RUNC        BinaryType = "runc"       // For runc
-	CALICOCTL   BinaryType = "calicoctl"  // For calicoctl CLI
-	UNKNOWN     BinaryType = "unknown"    // Fallback type
+	ETCD       BinaryType = "etcd"
+	KUBE       BinaryType = "kubernetes" // For kubeadm, kubelet, kubectl, etc.
+	CNI        BinaryType = "cni"
+	HELM       BinaryType = "helm"
+	DOCKER     BinaryType = "docker"
+	CRIDOCKERD BinaryType = "cri-dockerd"
+	CRICTL     BinaryType = "crictl"
+	K3S        BinaryType = "k3s"        // K3S is a KUBE type distribution
+	K8E        BinaryType = "k8e"        // K8E is a KUBE type distribution
+	REGISTRY   BinaryType = "registry"   // For local registry components like 'registry' or 'harbor'
+	BUILD      BinaryType = "build"      // For build tools like 'buildx'
+	CONTAINERD BinaryType = "containerd" // For containerd itself
+	RUNC       BinaryType = "runc"       // For runc
+	CALICOCTL  BinaryType = "calicoctl"  // For calicoctl CLI
+	UNKNOWN    BinaryType = "unknown"    // Fallback type
 )
 
 // Constants for component names, matching keys in knownBinaryDetails
@@ -58,6 +58,7 @@ const (
 	ComponentCalicoCtl             = "calicoctl"
 	ComponentBuildx                = "buildx"
 )
+
 // Directory name constants under CLUSTER_NAME path
 const (
 	DirNameCerts            = "certs"
@@ -66,21 +67,20 @@ const (
 	DirNameKubernetes       = common.DefaultKubernetesDir       // "kubernetes"
 )
 
-
 // BinaryInfo holds information about a downloadable binary component.
 type BinaryInfo struct {
 	Component    string     // User-friendly name, e.g., "etcd", "kubeadm"
 	Type         BinaryType // Type of the component
 	Version      string
 	Arch         string
-	OS           string     // Operating system, e.g., "linux"
-	Zone         string     // Download zone, e.g., "cn" or "" for default
-	FileName     string     // Filename of the download, e.g., "etcd-v3.5.9-linux-amd64.tar.gz"
-	URL          string     // Download URL
-	IsArchive    bool       // True if the downloaded file is an archive (.tar.gz, .tgz, .zip)
-	BaseDir      string     // Base directory for storing this binary type locally: ${WORK_DIR}/.kubexm/${CLUSTER_NAME}/${TypeDirName}/
-	ComponentDir string     // Specific directory for this component: ${BaseDir}/${ComponentSubDir}/${Version}/${Arch}/ or ${BaseDir}/${Version}/${Arch}/
-	FilePath     string     // Full local path to the downloaded file: ${ComponentDir}/${FileName}
+	OS           string // Operating system, e.g., "linux"
+	Zone         string // Download zone, e.g., "cn" or "" for default
+	FileName     string // Filename of the download, e.g., "etcd-v3.5.9-linux-amd64.tar.gz"
+	URL          string // Download URL
+	IsArchive    bool   // True if the downloaded file is an archive (.tar.gz, .tgz, .zip)
+	BaseDir      string // Base directory for storing this binary type locally: ${WORK_DIR}/.kubexm/${CLUSTER_NAME}/${TypeDirName}/
+	ComponentDir string // Specific directory for this component: ${BaseDir}/${ComponentSubDir}/${Version}/${Arch}/ or ${BaseDir}/${Version}/${Arch}/
+	FilePath     string // Full local path to the downloaded file: ${ComponentDir}/${FileName}
 }
 
 // knownBinaryDetails maps component names to their specific download attributes.
@@ -103,49 +103,49 @@ var knownBinaryDetails = map[string]struct {
 	ComponentKubeadm: {
 		binaryType:       KUBE,
 		urlTemplate:      "https://dl.k8s.io/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kubeadm",
-		cnURLTemplate:    "https://dl.k8s.io/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kubeadm", // storage.googleapis.com is often blocked or slow directly
+		cnURLTemplate:    "https://kubernetes-release.pek3b.qingstor.com/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kubeadm",
 		fileNameTemplate: "kubeadm",
 		isArchive:        false, defaultOS: "linux",
 	},
 	ComponentKubelet: {
 		binaryType:       KUBE,
 		urlTemplate:      "https://dl.k8s.io/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kubelet",
-		cnURLTemplate:    "https://dl.k8s.io/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kubelet",
+		cnURLTemplate:    "https://kubernetes-release.pek3b.qingstor.com/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kubelet",
 		fileNameTemplate: "kubelet",
 		isArchive:        false, defaultOS: "linux",
 	},
 	ComponentKubectl: {
 		binaryType:       KUBE,
 		urlTemplate:      "https://dl.k8s.io/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kubectl",
-		cnURLTemplate:    "https://dl.k8s.io/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kubectl",
+		cnURLTemplate:    "https://kubernetes-release.pek3b.qingstor.com/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kubectl",
 		fileNameTemplate: "kubectl",
 		isArchive:        false, defaultOS: "linux",
 	},
 	ComponentKubeProxy: {
 		binaryType:       KUBE,
 		urlTemplate:      "https://dl.k8s.io/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kube-proxy",
-		cnURLTemplate:    "https://dl.k8s.io/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kube-proxy",
+		cnURLTemplate:    "https://kubernetes-release.pek3b.qingstor.com/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kube-proxy",
 		fileNameTemplate: "kube-proxy",
 		isArchive:        false, defaultOS: "linux",
 	},
 	ComponentKubeScheduler: {
 		binaryType:       KUBE,
 		urlTemplate:      "https://dl.k8s.io/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kube-scheduler",
-		cnURLTemplate:    "https://dl.k8s.io/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kube-scheduler",
+		cnURLTemplate:    "https://kubernetes-release.pek3b.qingstor.com/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kube-scheduler",
 		fileNameTemplate: "kube-scheduler",
 		isArchive:        false, defaultOS: "linux",
 	},
 	ComponentKubeControllerManager: {
 		binaryType:       KUBE,
 		urlTemplate:      "https://dl.k8s.io/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kube-controller-manager",
-		cnURLTemplate:    "https://dl.k8s.io/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kube-controller-manager",
+		cnURLTemplate:    "https://kubernetes-release.pek3b.qingstor.com/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kube-controller-manager",
 		fileNameTemplate: "kube-controller-manager",
 		isArchive:        false, defaultOS: "linux",
 	},
 	ComponentKubeApiServer: {
 		binaryType:       KUBE,
 		urlTemplate:      "https://dl.k8s.io/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kube-apiserver",
-		cnURLTemplate:    "https://dl.k8s.io/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kube-apiserver",
+		cnURLTemplate:    "https://kubernetes-release.pek3b.qingstor.com/release/{{.Version}}/bin/{{.OS}}/{{.Arch}}/kube-apiserver",
 		fileNameTemplate: "kube-apiserver",
 		isArchive:        false, defaultOS: "linux",
 	},
@@ -164,19 +164,19 @@ var knownBinaryDetails = map[string]struct {
 		isArchive:        true, defaultOS: "linux",
 	},
 	ComponentDocker: {
-		binaryType:          DOCKER,
-		urlTemplate:         "https://download.docker.com/linux/static/stable/{{.ArchAlias}}/docker-{{.VersionNoV}}.tgz",
-		cnURLTemplate:       "https://mirrors.aliyun.com/docker-ce/linux/static/stable/{{.ArchAlias}}/docker-{{.VersionNoV}}.tgz",
-		fileNameTemplate:    "docker-{{.VersionNoV}}.tgz",
-		isArchive:           true, defaultOS: "linux",
+		binaryType:       DOCKER,
+		urlTemplate:      "https://download.docker.com/linux/static/stable/{{.ArchAlias}}/docker-{{.VersionNoV}}.tgz",
+		cnURLTemplate:    "https://mirrors.aliyun.com/docker-ce/linux/static/stable/{{.ArchAlias}}/docker-{{.VersionNoV}}.tgz",
+		fileNameTemplate: "docker-{{.VersionNoV}}.tgz",
+		isArchive:        true, defaultOS: "linux",
 		componentNameForDir: "docker",
 	},
 	ComponentCriDockerd: {
-		binaryType:          CRIDOCKERD,
-		urlTemplate:         "https://github.com/Mirantis/cri-dockerd/releases/download/v{{.VersionNoV}}/cri-dockerd-{{.VersionNoV}}.{{.Arch}}.tgz",
-		cnURLTemplate:       "https://kubernetes-release.pek3b.qingstor.com/cri-dockerd/releases/download/v{{.VersionNoV}}/cri-dockerd-{{.VersionNoV}}.{{.Arch}}.tgz",
-		fileNameTemplate:    "cri-dockerd-{{.VersionNoV}}.{{.Arch}}.tgz",
-		isArchive:           true, defaultOS: "linux",
+		binaryType:       CRIDOCKERD,
+		urlTemplate:      "https://github.com/Mirantis/cri-dockerd/releases/download/v{{.VersionNoV}}/cri-dockerd-{{.VersionNoV}}.{{.Arch}}.tgz",
+		cnURLTemplate:    "https://kubernetes-release.pek3b.qingstor.com/cri-dockerd/releases/download/v{{.VersionNoV}}/cri-dockerd-{{.VersionNoV}}.{{.Arch}}.tgz",
+		fileNameTemplate: "cri-dockerd-{{.VersionNoV}}.{{.Arch}}.tgz",
+		isArchive:        true, defaultOS: "linux",
 		componentNameForDir: "cri-dockerd",
 	},
 	ComponentCriCtl: {
@@ -201,43 +201,43 @@ var knownBinaryDetails = map[string]struct {
 		isArchive:        false, defaultOS: "linux",
 	},
 	ComponentRegistry: {
-		binaryType:          REGISTRY,
-		urlTemplate:         "https://github.com/kubesphere/kubekey/releases/download/v2.0.0-alpha.1/registry-{{.VersionNoV}}-{{.OS}}-{{.Arch}}.tar.gz",
-		cnURLTemplate:       "https://kubernetes-release.pek3b.qingstor.com/registry/{{.VersionNoV}}/registry-{{.VersionNoV}}-{{.OS}}-{{.Arch}}.tar.gz",
-		fileNameTemplate:    "registry-{{.VersionNoV}}-{{.OS}}-{{.Arch}}.tar.gz",
-		isArchive:           true, defaultOS: "linux",
+		binaryType:       REGISTRY,
+		urlTemplate:      "https://github.com/kubesphere/kubekey/releases/download/v2.0.0-alpha.1/registry-{{.VersionNoV}}-{{.OS}}-{{.Arch}}.tar.gz",
+		cnURLTemplate:    "https://kubernetes-release.pek3b.qingstor.com/registry/{{.VersionNoV}}/registry-{{.VersionNoV}}-{{.OS}}-{{.Arch}}.tar.gz",
+		fileNameTemplate: "registry-{{.VersionNoV}}-{{.OS}}-{{.Arch}}.tar.gz",
+		isArchive:        true, defaultOS: "linux",
 		componentNameForDir: "registry",
 	},
 	ComponentHarbor: {
-		binaryType:          REGISTRY,
-		urlTemplate:         "https://github.com/goharbor/harbor/releases/download/{{.Version}}/harbor-offline-installer-{{.Version}}.tgz",
-		cnURLTemplate:       "https://kubernetes-release.pek3b.qingstor.com/harbor/releases/download/{{.Version}}/harbor-offline-installer-{{.Version}}.tgz",
-		fileNameTemplate:    "harbor-offline-installer-{{.Version}}.tgz",
-		isArchive:           true, defaultOS: "linux",
+		binaryType:       REGISTRY,
+		urlTemplate:      "https://github.com/goharbor/harbor/releases/download/{{.Version}}/harbor-offline-installer-{{.Version}}.tgz",
+		cnURLTemplate:    "https://kubernetes-release.pek3b.qingstor.com/harbor/releases/download/{{.Version}}/harbor-offline-installer-{{.Version}}.tgz",
+		fileNameTemplate: "harbor-offline-installer-{{.Version}}.tgz",
+		isArchive:        true, defaultOS: "linux",
 		componentNameForDir: "harbor",
 	},
 	ComponentCompose: {
-		binaryType:          REGISTRY, // Or consider a new type like TOOLS
-		urlTemplate:         "https://github.com/docker/compose/releases/download/{{.Version}}/docker-compose-{{.OS}}-{{.ArchAlias}}",
-		cnURLTemplate:       "https://kubernetes-release.pek3b.qingstor.com/docker/compose/releases/download/{{.Version}}/docker-compose-{{.OS}}-{{.ArchAlias}}",
-		fileNameTemplate:    "docker-compose-{{.OS}}-{{.ArchAlias}}",
-		isArchive:           false, defaultOS: "linux",
+		binaryType:       REGISTRY, // Or consider a new type like TOOLS
+		urlTemplate:      "https://github.com/docker/compose/releases/download/{{.Version}}/docker-compose-{{.OS}}-{{.ArchAlias}}",
+		cnURLTemplate:    "https://kubernetes-release.pek3b.qingstor.com/docker/compose/releases/download/{{.Version}}/docker-compose-{{.OS}}-{{.ArchAlias}}",
+		fileNameTemplate: "docker-compose-{{.OS}}-{{.ArchAlias}}",
+		isArchive:        false, defaultOS: "linux",
 		componentNameForDir: "compose",
 	},
 	ComponentContainerd: {
-		binaryType:          CONTAINERD,
-		urlTemplate:         "https://github.com/containerd/containerd/releases/download/v{{.VersionNoV}}/containerd-{{.VersionNoV}}-{{.OS}}-{{.Arch}}.tar.gz",
-		cnURLTemplate:       "https://kubernetes-release.pek3b.qingstor.com/containerd/containerd/releases/download/v{{.VersionNoV}}/containerd-{{.VersionNoV}}-{{.OS}}-{{.Arch}}.tar.gz",
-		fileNameTemplate:    "containerd-{{.VersionNoV}}-{{.OS}}-{{.Arch}}.tar.gz",
-		isArchive:           true, defaultOS: "linux",
+		binaryType:       CONTAINERD,
+		urlTemplate:      "https://github.com/containerd/containerd/releases/download/v{{.VersionNoV}}/containerd-{{.VersionNoV}}-{{.OS}}-{{.Arch}}.tar.gz",
+		cnURLTemplate:    "https://kubernetes-release.pek3b.qingstor.com/containerd/containerd/releases/download/v{{.VersionNoV}}/containerd-{{.VersionNoV}}-{{.OS}}-{{.Arch}}.tar.gz",
+		fileNameTemplate: "containerd-{{.VersionNoV}}-{{.OS}}-{{.Arch}}.tar.gz",
+		isArchive:        true, defaultOS: "linux",
 		componentNameForDir: "containerd",
 	},
 	ComponentRunc: {
-		binaryType:          RUNC,
-		urlTemplate:         "https://github.com/opencontainers/runc/releases/download/{{.Version}}/runc.{{.Arch}}",
-		cnURLTemplate:       "https://kubernetes-release.pek3b.qingstor.com/opencontainers/runc/releases/download/{{.Version}}/runc.{{.Arch}}",
-		fileNameTemplate:    "runc.{{.Arch}}",
-		isArchive:           false, defaultOS: "linux",
+		binaryType:       RUNC,
+		urlTemplate:      "https://github.com/opencontainers/runc/releases/download/{{.Version}}/runc.{{.Arch}}",
+		cnURLTemplate:    "https://kubernetes-release.pek3b.qingstor.com/opencontainers/runc/releases/download/{{.Version}}/runc.{{.Arch}}",
+		fileNameTemplate: "runc.{{.Arch}}",
+		isArchive:        false, defaultOS: "linux",
 		componentNameForDir: "runc",
 	},
 	ComponentCalicoCtl: {
@@ -309,7 +309,6 @@ func GetBinaryInfo(componentName, version, arch, zone, workDir, clusterName stri
 		// k3s/k8e versions in URLs often look like "v1.20.0+k3s1"
 		// The `version` param should already be in this format if needed.
 	}
-
 
 	td := templateData{
 		Version:         version,
@@ -400,7 +399,6 @@ func GetBinaryInfo(componentName, version, arch, zone, workDir, clusterName stri
 		FilePath:     filePath,
 	}, nil
 }
-
 
 // GetZone retrieves the download zone from the KXZONE environment variable.
 func GetZone() string {
