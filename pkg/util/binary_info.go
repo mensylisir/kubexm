@@ -344,7 +344,7 @@ func GetBinaryInfo(componentName, version, arch, zone, workDir, clusterName stri
 		return nil, fmt.Errorf("clusterName cannot be empty for generating binary path")
 	}
 
-	kubexmRoot := filepath.Join(workDir, common.KubeXMRootDir) // ".kubexm"
+	kubexmRoot := filepath.Join(workDir, common.KUBEXM) // ".kubexm"
 	clusterBaseDir := filepath.Join(kubexmRoot, clusterName)
 
 	var typeSpecificBaseDir string

@@ -1,7 +1,7 @@
 package util
 
 import (
-	"fmt"
+	"github.com/mensylisir/kubexm/pkg/common"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,7 +89,7 @@ func TestGetBinaryInfo(t *testing.T) {
 			expectedFileName:    "containerd-1.7.1-linux-arm64.tar.gz",
 			expectedURLContains: "kubernetes-release.pek3b.qingstor.com/containerd/containerd/releases/download/v1.7.1/containerd-1.7.1-linux-arm64.tar.gz",
 			// Path: workdir/.kubexm/${cluster_name}/container_runtime/${containerd_component_name}/${version}/${arch}/
-			expectedFilePath:  filepath.Join(testWorkDir, ".kubexm", testClusterName, "containerd", "containerd", "1.7.1", "arm64", "containerd-1.7.1-linux-arm64.tar.gz"),
+			expectedFilePath:  filepath.Join(testWorkDir, ".kubexm", testClusterName, common.DefaultContainerRuntimeDir, "containerd", "1.7.1", "arm64", "containerd-1.7.1-linux-arm64.tar.gz"),
 			expectedIsArchive: true,
 		},
 		{
@@ -102,7 +102,7 @@ func TestGetBinaryInfo(t *testing.T) {
 			expectedArch:        "amd64",
 			expectedFileName:    "docker-20.10.17.tgz",
 			expectedURLContains: "download.docker.com/linux/static/stable/x86_64/docker-20.10.17.tgz",
-			expectedFilePath:    filepath.Join(testWorkDir, ".kubexm", testClusterName, "docker", "docker", "20.10.17", "amd64", "docker-20.10.17.tgz"),
+			expectedFilePath:    filepath.Join(testWorkDir, ".kubexm", testClusterName, common.DefaultContainerRuntimeDir, "docker", "20.10.17", "amd64", "docker-20.10.17.tgz"),
 			expectedIsArchive:   true,
 		},
 		{
@@ -115,7 +115,7 @@ func TestGetBinaryInfo(t *testing.T) {
 			expectedArch:        "amd64",
 			expectedFileName:    "runc.amd64",
 			expectedURLContains: "github.com/opencontainers/runc/releases/download/v1.1.12/runc.amd64",
-			expectedFilePath:    filepath.Join(testWorkDir, ".kubexm", testClusterName, "runc", "runc", "v1.1.12", "amd64", "runc.amd64"),
+			expectedFilePath:    filepath.Join(testWorkDir, ".kubexm", testClusterName, common.DefaultContainerRuntimeDir, "runc", "v1.1.12", "amd64", "runc.amd64"),
 			expectedIsArchive:   false,
 		},
 		{
@@ -218,7 +218,9 @@ func TestGetBinaryInfo(t *testing.T) {
 				// Find componentNameForDir from knownBinaryDetails
 				details, _ := knownBinaryDetails[strings.ToLower(tt.componentName)]
 				compDirName := details.componentNameForDir
-				if compDirName == "" {compDirName = tt.componentName}
+				if compDirName == "" {
+					compDirName = tt.componentName
+				}
 				expectedComponentDir = filepath.Join(expectedBaseDir, compDirName, tt.version, tt.expectedArch)
 			} else {
 				expectedComponentDir = filepath.Join(expectedBaseDir, tt.version, tt.expectedArch)

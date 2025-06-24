@@ -8,23 +8,23 @@ import "strings"
 // Corresponds to `storage` in YAML.
 type StorageConfig struct {
 	// OpenEBS configuration. Corresponds to `storage.openebs` in YAML.
-	OpenEBS             *OpenEBSConfig `json:"openebs,omitempty" yaml:"openebs,omitempty"`
+	OpenEBS *OpenEBSConfig `json:"openebs,omitempty" yaml:"openebs,omitempty"`
 	// DefaultStorageClass to be set for the cluster.
 	// Corresponds to `storage.defaultStorageClass` in YAML.
-	DefaultStorageClass *string        `json:"defaultStorageClass,omitempty" yaml:"defaultStorageClass,omitempty"`
+	DefaultStorageClass *string `json:"defaultStorageClass,omitempty" yaml:"defaultStorageClass,omitempty"`
 }
 
 // OpenEBSConfig defines settings for OpenEBS storage provisioner.
 // Corresponds to `storage.openebs` in YAML.
 type OpenEBSConfig struct {
 	// BasePath for OpenEBS LocalPV. Corresponds to `basePath` in YAML.
-	BasePath string                   `json:"basePath,omitempty" yaml:"basePath,omitempty"`
+	BasePath string `json:"basePath,omitempty" yaml:"basePath,omitempty"`
 	// Enabled flag for OpenEBS. Corresponds to `enabled` in YAML (though not explicitly shown in example, it's typical).
-	Enabled  *bool                    `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	Version  *string                  `json:"version,omitempty" yaml:"version,omitempty"` // Not in YAML example, but common for managed addons
+	Enabled *bool   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Version *string `json:"version,omitempty" yaml:"version,omitempty"` // Not in YAML example, but common for managed addons
 	// Engines configuration for OpenEBS. No direct YAML equivalent in the example,
 	// but allows for future expansion if different OpenEBS engines are configurable.
-	Engines  *OpenEBSEngineConfig     `json:"engines,omitempty" yaml:"engines,omitempty"`
+	Engines *OpenEBSEngineConfig `json:"engines,omitempty" yaml:"engines,omitempty"`
 }
 
 // OpenEBSEngineConfig allows specifying configurations for different OpenEBS storage engines.
@@ -39,14 +39,17 @@ type OpenEBSEngineConfig struct {
 type OpenEBSEngineMayastorConfig struct {
 	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
+
 // OpenEBSEngineJivaConfig holds Jiva specific settings.
 type OpenEBSEngineJivaConfig struct {
 	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
+
 // OpenEBSEnginecStorConfig holds cStor specific settings.
 type OpenEBSEnginecStorConfig struct { // Name kept as OpenEBSEnginecStorConfig due to existing references
 	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
+
 // OpenEBSEngineLocalHostPathConfig holds LocalHostPath specific settings.
 type OpenEBSEngineLocalHostPathConfig struct {
 	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
@@ -75,7 +78,7 @@ func SetDefaults_StorageConfig(cfg *StorageConfig) {
 	}
 	// If OpenEBS section exists (even if empty), apply its defaults.
 	if cfg.OpenEBS != nil {
-	   SetDefaults_OpenEBSConfig(cfg.OpenEBS)
+		SetDefaults_OpenEBSConfig(cfg.OpenEBS)
 	}
 	// No default for DefaultStorageClass, it's purely optional.
 }
@@ -88,8 +91,8 @@ func SetDefaults_OpenEBSConfig(cfg *OpenEBSConfig) {
 	// If the openebs block is present in YAML, cfg won't be nil.
 	// In this case, we default Enabled to true if it's not specified by the user.
 	if cfg.Enabled == nil {
-	   b := true // Default OpenEBS to enabled if the 'openebs:' block exists
-	   cfg.Enabled = &b
+		b := true // Default OpenEBS to enabled if the 'openebs:' block exists
+		cfg.Enabled = &b
 	}
 
 	if cfg.Enabled != nil && *cfg.Enabled { // If OpenEBS is effectively enabled
@@ -97,25 +100,43 @@ func SetDefaults_OpenEBSConfig(cfg *OpenEBSConfig) {
 			// Only default BasePath if OpenEBS is being enabled and no path is set.
 			cfg.BasePath = "/var/openebs/local"
 		}
-		if cfg.Engines == nil { cfg.Engines = &OpenEBSEngineConfig{} }
-		if cfg.Engines.LocalHostPath == nil { cfg.Engines.LocalHostPath = &OpenEBSEngineLocalHostPathConfig{} }
+		if cfg.Engines == nil {
+			cfg.Engines = &OpenEBSEngineConfig{}
+		}
+		if cfg.Engines.LocalHostPath == nil {
+			cfg.Engines.LocalHostPath = &OpenEBSEngineLocalHostPathConfig{}
+		}
 		if cfg.Engines.LocalHostPath.Enabled == nil {
-			defEngine := true; // Default LocalHostPath engine to true if OpenEBS is enabled
+			defEngine := true // Default LocalHostPath engine to true if OpenEBS is enabled
 			cfg.Engines.LocalHostPath.Enabled = &defEngine
 		}
 		// Mayastor, Jiva, cStor default to disabled unless specified by user
-		if cfg.Engines.Mayastor == nil { cfg.Engines.Mayastor = &OpenEBSEngineMayastorConfig{Enabled: pboolStorage(false)} }
-		if cfg.Engines.Jiva == nil { cfg.Engines.Jiva = &OpenEBSEngineJivaConfig{Enabled: pboolStorage(false)} }
-		if cfg.Engines.cStor == nil { cfg.Engines.cStor = &OpenEBSEnginecStorConfig{Enabled: pboolStorage(false)} }
+		if cfg.Engines.Mayastor == nil {
+			cfg.Engines.Mayastor = &OpenEBSEngineMayastorConfig{Enabled: pboolStorage(false)}
+		}
+		if cfg.Engines.Jiva == nil {
+			cfg.Engines.Jiva = &OpenEBSEngineJivaConfig{Enabled: pboolStorage(false)}
+		}
+		if cfg.Engines.CStor == nil {
+			cfg.Engines.CStor = &OpenEBSEnginecStorConfig{Enabled: pboolStorage(false)}
+		}
 	} else { // OpenEBS is explicitly disabled (cfg.Enabled is not nil and is false)
 		// If OpenEBS is disabled, ensure sub-engines are also marked as disabled if they exist.
 		// This handles the case where a user might have `enabled: false` at top level
 		// but still has engine blocks defined.
 		if cfg.Engines != nil {
-			if cfg.Engines.LocalHostPath != nil { cfg.Engines.LocalHostPath.Enabled = pboolStorage(false) }
-			if cfg.Engines.Mayastor != nil { cfg.Engines.Mayastor.Enabled = pboolStorage(false) }
-			if cfg.Engines.Jiva != nil { cfg.Engines.Jiva.Enabled = pboolStorage(false) }
-			if cfg.Engines.cStor != nil { cfg.Engines.cStor.Enabled = pboolStorage(false) }
+			if cfg.Engines.LocalHostPath != nil {
+				cfg.Engines.LocalHostPath.Enabled = pboolStorage(false)
+			}
+			if cfg.Engines.Mayastor != nil {
+				cfg.Engines.Mayastor.Enabled = pboolStorage(false)
+			}
+			if cfg.Engines.Jiva != nil {
+				cfg.Engines.Jiva.Enabled = pboolStorage(false)
+			}
+			if cfg.Engines.CStor != nil {
+				cfg.Engines.CStor.Enabled = pboolStorage(false)
+			}
 		}
 	}
 }
@@ -143,11 +164,11 @@ func Validate_OpenEBSConfig(cfg *OpenEBSConfig, verrs *ValidationErrors, pathPre
 		return
 	}
 	if cfg.Enabled != nil && *cfg.Enabled {
-	   if strings.TrimSpace(cfg.BasePath) == "" {
-		   verrs.Add("%s.basePath: cannot be empty if OpenEBS is enabled", pathPrefix)
-	   }
-	   // Could add validation for path format if necessary.
-	   // No specific validation for Engines sub-fields yet, beyond them being optional.
+		if strings.TrimSpace(cfg.BasePath) == "" {
+			verrs.Add("%s.basePath: cannot be empty if OpenEBS is enabled", pathPrefix)
+		}
+		// Could add validation for path format if necessary.
+		// No specific validation for Engines sub-fields yet, beyond them being optional.
 	}
 }
 
