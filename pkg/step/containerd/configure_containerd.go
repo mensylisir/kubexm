@@ -8,7 +8,6 @@ import (
 	"text/template" // For template rendering
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec" // Added for StepMeta
 	"github.com/mensylisir/kubexm/pkg/step"
 )
@@ -113,7 +112,7 @@ func NewConfigureContainerdStep(
 	}
 	return &ConfigureContainerdStep{
 		meta: spec.StepMeta{
-			Name: name,
+			Name:        name,
 			Description: fmt.Sprintf("Configures containerd by writing %s with specified mirrors, insecure registries, sandbox image and cgroup settings.", effectivePath),
 		},
 		SandboxImage:       effectiveSandboxImage,
@@ -154,8 +153,7 @@ func (s *ConfigureContainerdStep) renderExpectedConfig() (string, error) {
 	return strings.TrimSpace(expectedBuf.String()), nil
 }
 
-
-func (s *ConfigureContainerdStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *ConfigureContainerdStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 
 	runnerSvc := ctx.GetRunner()
@@ -205,7 +203,7 @@ func (s *ConfigureContainerdStep) Precheck(ctx runtime.StepContext, host connect
 	return false, nil
 }
 
-func (s *ConfigureContainerdStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *ConfigureContainerdStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 
 	runnerSvc := ctx.GetRunner()
@@ -233,7 +231,7 @@ func (s *ConfigureContainerdStep) Run(ctx runtime.StepContext, host connector.Ho
 	return nil
 }
 
-func (s *ConfigureContainerdStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *ConfigureContainerdStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 
 	runnerSvc := ctx.GetRunner()

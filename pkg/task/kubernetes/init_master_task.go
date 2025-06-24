@@ -1,10 +1,6 @@
 package kubernetes
 
 import (
-	// "fmt"
-	// "github.com/mensylisir/kubexm/pkg/connector"
-	// "github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
 	// kubernetessteps "github.com/mensylisir/kubexm/pkg/step/kubernetes"
 	// commonsteps "github.com/mensylisir/kubexm/pkg/step/common"
@@ -33,13 +29,13 @@ func NewInitMasterTask( /*kubeadmConfigPathLocal, kubeadmConfigPathRemote, ignor
 	}
 }
 
-func (t *InitMasterTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
+func (t *InitMasterTask) IsRequired(ctx task.TaskContext) (bool, error) {
 	// Required if setting up a new cluster and this is the first master.
 	// Logic to determine "first master" would be in module or pipeline.
 	return true, nil // Placeholder
 }
 
-func (t *InitMasterTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
+func (t *InitMasterTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
 	// Plan would involve:
 	// 1. Identify the first master node (e.g., from ctx or task config).
 	// 2. Step: Render kubeadm config template (if it's a template) on control node.

@@ -1,10 +1,6 @@
 package kubernetes
 
 import (
-	// "fmt"
-	// "github.com/mensylisir/kubexm/pkg/connector"
-	// "github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
 	// resource "github.com/mensylisir/kubexm/pkg/resource"
 )
@@ -30,13 +26,13 @@ func NewPullImagesTask( /*images []string, registryOverride string*/ ) task.Task
 	}
 }
 
-func (t *PullImagesTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
+func (t *PullImagesTask) IsRequired(ctx task.TaskContext) (bool, error) {
 	// Could be optional if images are already available or air-gapped install.
 	// Example: return !ctx.GetClusterConfig().Spec.OfflineInstall, nil
 	return true, nil // Placeholder
 }
 
-func (t *PullImagesTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
+func (t *PullImagesTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
 	// Plan would involve:
 	// For each target host:
 	//  For each image in t.Images:

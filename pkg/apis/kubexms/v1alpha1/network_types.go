@@ -12,7 +12,11 @@ type NetworkConfig struct {
 	KubePodsCIDR    string `json:"kubePodsCIDR,omitempty" yaml:"kubePodsCIDR,omitempty"`
 	KubeServiceCIDR string `json:"kubeServiceCIDR,omitempty" yaml:"kubeServiceCIDR,omitempty"`
 
-	Calico    *CalicoConfig    `json:"calico,omitempty" yaml:"calico,omitempty"`
+	Calico *CalicoConfig `json:"calico,omitempty" yaml:"calico,omitempty"`
+	// Cilium specific configuration.
+	// Only used when Plugin is "cilium".
+	// +optional
+	Cilium    *CiliumConfig    `json:"cilium,omitempty"` // [!code ++]
 	Flannel   *FlannelConfig   `json:"flannel,omitempty" yaml:"flannel,omitempty"`
 	KubeOvn   *KubeOvnConfig   `json:"kubeovn,omitempty" yaml:"kubeovn,omitempty"`
 	Multus    *MultusCNIConfig `json:"multus,omitempty" yaml:"multus,omitempty"`
@@ -48,6 +52,40 @@ type CalicoConfig struct {
 	TyphaNodeSelector map[string]string `json:"typhaNodeSelector,omitempty" yaml:"typhaNodeSelector,omitempty"`
 	LogSeverityScreen *string           `json:"logSeverityScreen,omitempty" yaml:"logSeverityScreen,omitempty"`
 	IPPools           []CalicoIPPool    `json:"ipPools,omitempty" yaml:"ipPools,omitempty"`
+}
+
+// CiliumConfig holds the specific configuration for the Cilium CNI plugin.
+// [!code ++]
+type CiliumConfig struct {
+	// TunnelingMode specifies the encapsulation mode for traffic between nodes.
+	// Supported values: "vxlan" (default), "geneve", "disabled" (direct routing).
+	// +optional
+	TunnelingMode string `json:"tunnelingMode,omitempty"`
+
+	// KubeProxyReplacement enables Cilium's eBPF-based kube-proxy replacement.
+	// This provides better performance and features.
+	// Supported values: "probe", "strict" (default), "disabled".
+	// +optional
+	KubeProxyReplacement string `json:"kubeProxyReplacement,omitempty"`
+
+	// EnableHubble enables the Hubble observability platform.
+	// +optional
+	EnableHubble bool `json:"enableHubble,omitempty"`
+
+	// HubbleUI enables the deployment of the Hubble UI.
+	// Requires EnableHubble to be true.
+	// +optional
+	HubbleUI bool `json:"hubbleUI,omitempty"`
+
+	// EnableBPFMasquerade enables eBPF-based masquerading for traffic leaving the cluster.
+	// This is more efficient than traditional iptables-based masquerading.
+	// +optional
+	EnableBPFMasquerade bool `json:"enableBPFMasquerade,omitempty"`
+
+	// IdentityAllocationMode specifies how Cilium identities are allocated.
+	// "crd" is the standard mode. "kvstore" can be used for very large clusters.
+	// +optional
+	IdentityAllocationMode string `json:"identityAllocationMode,omitempty"`
 }
 
 // FlannelConfig defines settings specific to the Flannel CNI plugin.

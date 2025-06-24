@@ -54,6 +54,8 @@ type Context struct {
 	currentHost    connector.Host
 	controlNode    connector.Host            // Represents the machine running Kubexm CLI
 	ConnectionPool *connector.ConnectionPool // Added connection pool
+
+	ClusterArtifactsDir string
 }
 
 // HostRuntimeInfo holds connection and facts for a specific host.
@@ -230,7 +232,7 @@ func (c *Context) GetClusterArtifactsDir() string {
 	if c.ClusterConfig == nil || c.ClusterConfig.Name == "" {
 		c.Logger.Error(nil, "ClusterConfig or ClusterConfig.Name is not set when trying to get cluster artifacts directory")
 		// Return a non-nil but clearly invalid path to make errors more obvious downstream.
-		return filepath.Join(c.GlobalWorkDir, common.KubeXMRootDir, "_INVALID_CLUSTER_NAME_")
+		return filepath.Join(c.GlobalWorkDir, common.KUBEXM, "_INVALID_CLUSTER_NAME_")
 	}
 	// This path is typically GlobalWorkDir itself, as GlobalWorkDir is already cluster-specific.
 	// The structure is $(pwd)/.kubexm/${cluster_name}
@@ -288,7 +290,7 @@ func (c *Context) GetFileDownloadPath(componentName, version, arch, fileName str
 	// For now, using util.GetZone() as it's a global setting.
 	binInfo, err := util.GetBinaryInfo(componentName, version, arch, util.GetZone(), pwdSuperDir, c.ClusterConfig.Name)
 	if err != nil {
-		c.Logger.Errorf(err, "Failed to get binary info for path construction",
+		c.Logger.Errorf(err.Error(), "Failed to get binary info for path construction",
 			"component", componentName, "version", version, "arch", arch, "fileName", fileName)
 		// Return a best-effort path or an empty string to indicate failure
 		// Constructing a path that's clearly an error might be better than empty.

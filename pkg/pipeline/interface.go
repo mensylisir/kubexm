@@ -1,13 +1,14 @@
 package pipeline
 
 import (
-	"context" // Added
+	"context"                                                // Added
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // Added
-	"github.com/mensylisir/kubexm/pkg/cache"                // Added
-	"github.com/mensylisir/kubexm/pkg/logger" // Added
+	"github.com/mensylisir/kubexm/pkg/cache"                 // Added
+	"github.com/mensylisir/kubexm/pkg/engine"                // Added for GetEngine method in PipelineContext
+	"github.com/mensylisir/kubexm/pkg/logger"                // Added
 	"github.com/mensylisir/kubexm/pkg/module"
-	"github.com/mensylisir/kubexm/pkg/plan"  // Uses plan.ExecutionGraph and plan.GraphExecutionResult
-	"github.com/mensylisir/kubexm/pkg/engine" // Added for GetEngine method in PipelineContext
+	"github.com/mensylisir/kubexm/pkg/plan" // Uses plan.ExecutionGraph and plan.GraphExecutionResult
+	"github.com/mensylisir/kubexm/pkg/runtime"
 	// "github.com/mensylisir/kubexm/pkg/runtime" // REMOVED to break cycle
 )
 
@@ -16,7 +17,7 @@ type PipelineContext interface {
 	GoContext() context.Context
 	GetLogger() *logger.Logger
 	GetClusterConfig() *v1alpha1.Cluster
-	PipelineCache() cache.PipelineCache
+	GetPipelineCache() cache.PipelineCache
 	GetGlobalWorkDir() string
 	GetEngine() engine.Engine // Added
 }

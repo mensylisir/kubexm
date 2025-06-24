@@ -6,38 +6,37 @@
 //
 // import "github.com/mensylisir/kubexm/pkg/logger" // Adjust import path
 //
-// func main() {
-//   // Initialize the global logger once at the start of your application.
-//   // Default options log INFO+ to console (colored) and DEBUG+ to "app.log" (JSON, if enabled).
-//   logOpts := logger.DefaultOptions()
-//   logOpts.FileOutput = true // Enable file logging for this example
-//   logOpts.LogFilePath = "my_application.log"
-//   logOpts.ConsoleLevel = logger.DebugLevel // Show debug messages on console
-//   logger.Init(logOpts)
+//	func main() {
+//	  // Initialize the global logger once at the start of your application.
+//	  // Default options log INFO+ to console (colored) and DEBUG+ to "app.log" (JSON, if enabled).
+//	  logOpts := logger.DefaultOptions()
+//	  logOpts.FileOutput = true // Enable file logging for this example
+//	  logOpts.LogFilePath = "my_application.log"
+//	  logOpts.ConsoleLevel = logger.DebugLevel // Show debug messages on console
+//	  logger.Init(logOpts)
 //
-//   defer logger.SyncGlobal() // Flush buffered logs before exiting
+//	  defer logger.SyncGlobal() // Flush buffered logs before exiting
 //
-//   logger.Debug("This is a debug message.")
-//   logger.Info("Application starting...")
-//   logger.Success("Deployment successful!")
-//   logger.Warn("Configuration value is unusual.")
-//   logger.Error("Failed to connect to database: %s", "connection refused")
-//   // logger.Fail("Critical system failure, exiting.") // This would os.Exit(1)
-// }
+//	  logger.Debug("This is a debug message.")
+//	  logger.Info("Application starting...")
+//	  logger.Success("Deployment successful!")
+//	  logger.Warn("Configuration value is unusual.")
+//	  logger.Error("Failed to connect to database: %s", "connection refused")
+//	  // logger.Fail("Critical system failure, exiting.") // This would os.Exit(1)
+//	}
 //
 // Instance-based Logger:
 //
-//   opts := logger.DefaultOptions()
-//   opts.ConsoleLevel = logger.InfoLevel
-//   opts.LogFilePath = "module_specific.log"
-//   opts.FileOutput = true
-//   myModuleLogger, err := logger.NewLogger(opts)
-//   if err != nil {
-//     // Handle error
-//   }
-//   defer myModuleLogger.Sync()
-//   myModuleLogger.Infof("Special logs for my module.")
-//
+//	opts := logger.DefaultOptions()
+//	opts.ConsoleLevel = logger.InfoLevel
+//	opts.LogFilePath = "module_specific.log"
+//	opts.FileOutput = true
+//	myModuleLogger, err := logger.NewLogger(opts)
+//	if err != nil {
+//	  // Handle error
+//	}
+//	defer myModuleLogger.Sync()
+//	myModuleLogger.Infof("Special logs for my module.")
 package logger
 
 import (
@@ -199,8 +198,8 @@ func Init(opts Options) {
 			fmt.Fprintf(os.Stderr, "Failed to initialize global logger: %v. Falling back to basic console logging.\n", err)
 			cfg := zap.NewDevelopmentConfig()
 			cfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder // Basic colored output
-			l, _ := cfg.Build(zap.AddCallerSkip(1)) // Skip this Init frame
-			globalLogger = &Logger{SugaredLogger: l.Sugar(), opts: Options{ConsoleOutput:true, ConsoleLevel: InfoLevel, ColorConsole: true}}
+			l, _ := cfg.Build(zap.AddCallerSkip(1))                          // Skip this Init frame
+			globalLogger = &Logger{SugaredLogger: l.Sugar(), opts: Options{ConsoleOutput: true, ConsoleLevel: InfoLevel, ColorConsole: true}}
 		}
 	})
 }
@@ -319,14 +318,14 @@ func NewLogger(opts Options) (*Logger, error) {
 
 	if len(cores) == 0 {
 		// If no outputs are configured (e.g. both ConsoleOutput and FileOutput are false),
-        // Zap's default is to use a no-op logger. We can explicitly return a no-op logger
-        // or rely on the caller to handle this. The Init function provides a fallback,
-        // so this path might not be hit if NewLogger is only called via Init or with valid options.
-        // However, to be robust, if NewLogger is called directly with no outputs,
-        // we return a logger that essentially does nothing to prevent nil pointer issues.
+		// Zap's default is to use a no-op logger. We can explicitly return a no-op logger
+		// or rely on the caller to handle this. The Init function provides a fallback,
+		// so this path might not be hit if NewLogger is only called via Init or with valid options.
+		// However, to be robust, if NewLogger is called directly with no outputs,
+		// we return a logger that essentially does nothing to prevent nil pointer issues.
 		fmt.Fprintln(os.Stderr, "Warning: No logger output (console or file) configured. Logger will be a no-op.")
-        zapNopLogger := zap.NewNop()
-        return &Logger{SugaredLogger: zapNopLogger.Sugar(), opts: opts}, nil
+		zapNopLogger := zap.NewNop()
+		return &Logger{SugaredLogger: zapNopLogger.Sugar(), opts: opts}, nil
 	}
 
 	core := zapcore.NewTee(cores...)
@@ -347,8 +346,12 @@ func (l *Logger) logWithCustomLevel(level Level, template string, args ...interf
 		// which Get() and Init() try to prevent for the global logger.
 		// For instance-based loggers, the user should check the error from NewLogger.
 		fmt.Fprintf(os.Stderr, "Logger not initialized. Message: %s "+template+"\n", level.CapitalString(), fmt.Sprintf(template, args...))
-		if level == FailLevel || level == FatalLevel { os.Exit(1)}
-		if level == PanicLevel { panic(fmt.Sprintf(template,args...))}
+		if level == FailLevel || level == FatalLevel {
+			os.Exit(1)
+		}
+		if level == PanicLevel {
+			panic(fmt.Sprintf(template, args...))
+		}
 		return
 	}
 
@@ -358,7 +361,6 @@ func (l *Logger) logWithCustomLevel(level Level, template string, args ...interf
 	customLevelField := zap.String("customlevel", level.CapitalString())
 	// Add a hidden field for the original numeric level for sorting/filtering if needed by encoder later
 	customNumericLevelField := zap.Int8("customlevel_num", int8(level))
-
 
 	// Use WithOptions to adjust caller skip for each log call from these wrappers.
 	// AddCallerSkip(1) here means the original call site (e.g., user calling logger.Infof)
@@ -391,7 +393,6 @@ func (l *Logger) logWithCustomLevel(level Level, template string, args ...interf
 		loggerWithSkip.Infow(msg, customLevelField, customNumericLevelField, zap.String("unknownlevel", level.String()))
 	}
 }
-
 
 // Debugf logs a message at DebugLevel.
 func (l *Logger) Debugf(template string, args ...interface{}) {
@@ -445,6 +446,19 @@ func (l *Logger) Sync() error {
 	return l.SugaredLogger.Sync()
 }
 
+func (l *Logger) With(args ...interface{}) *Logger {
+	// Call the embedded SugaredLogger's With method
+	newSugaredLogger := l.SugaredLogger.With(args...)
+
+	// Create a new *Logger instance, wrapping the new SugaredLogger.
+	// We also carry over the original options.
+	return &Logger{
+		SugaredLogger: newSugaredLogger,
+		opts:          l.opts,
+		// mu is not copied as the new logger is a distinct instance.
+	}
+}
+
 // Global logging functions that use the globalLogger instance.
 // These provide convenient package-level access to logging functionality
 // once the global logger is initialized via Init().
@@ -453,30 +467,37 @@ func (l *Logger) Sync() error {
 func Debug(template string, args ...interface{}) {
 	Get().logWithCustomLevel(DebugLevel, template, args...)
 }
+
 // Info logs a message at InfoLevel using the global logger.
 func Info(template string, args ...interface{}) {
 	Get().logWithCustomLevel(InfoLevel, template, args...)
 }
+
 // Success logs a message at SuccessLevel using the global logger.
 func Success(template string, args ...interface{}) {
 	Get().logWithCustomLevel(SuccessLevel, template, args...)
 }
+
 // Warn logs a message at WarnLevel using the global logger.
 func Warn(template string, args ...interface{}) {
 	Get().logWithCustomLevel(WarnLevel, template, args...)
 }
+
 // Error logs a message at ErrorLevel using the global logger.
 func Error(template string, args ...interface{}) {
 	Get().logWithCustomLevel(ErrorLevel, template, args...)
 }
+
 // Fail logs a message at FailLevel then calls os.Exit(1) using the global logger.
 func Fail(template string, args ...interface{}) {
 	Get().logWithCustomLevel(FailLevel, template, args...)
 }
+
 // Panic logs a message at PanicLevel then panics using the global logger.
 func Panic(template string, args ...interface{}) {
 	Get().logWithCustomLevel(PanicLevel, template, args...)
 }
+
 // Fatal logs a message at FatalLevel then calls os.Exit(1) using the global logger.
 func Fatal(template string, args ...interface{}) {
 	Get().logWithCustomLevel(FatalLevel, template, args...)

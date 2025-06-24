@@ -2,11 +2,11 @@ package module
 
 import (
 	// "github.com/mensylisir/kubexm/pkg/plan" // No longer directly returns ExecutionPlan
-	"context"                                               // Added
+	"context"                                                // Added
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // Added
-	"github.com/mensylisir/kubexm/pkg/cache"                // For cache.ModuleCache and cache.PipelineCache
-	"github.com/mensylisir/kubexm/pkg/engine"               // Added for engine.Engine (if GetEngine is kept)
-	"github.com/mensylisir/kubexm/pkg/logger"               // Added
+	"github.com/mensylisir/kubexm/pkg/cache"                 // For cache.ModuleCache and cache.PipelineCache
+	"github.com/mensylisir/kubexm/pkg/engine"                // Added for engine.Engine (if GetEngine is kept)
+	"github.com/mensylisir/kubexm/pkg/logger"                // Added
 	// "github.com/mensylisir/kubexm/pkg/pipeline" // REMOVED to break module <-> pipeline cycle
 	"github.com/mensylisir/kubexm/pkg/task" // Uses task.Task and task.ExecutionFragment
 )
@@ -17,12 +17,12 @@ type ModuleContext interface {
 	GoContext() context.Context
 	GetLogger() *logger.Logger
 	GetClusterConfig() *v1alpha1.Cluster
-	PipelineCache() cache.PipelineCache
+	GetPipelineCache() cache.PipelineCache
 	GetGlobalWorkDir() string
 	GetEngine() engine.Engine // Consider if modules really need direct engine access
 
 	// Module-specific methods:
-	ModuleCache() cache.ModuleCache
+	GetModuleCache() cache.ModuleCache
 }
 
 // Module defines the methods that all concrete module types must implement.

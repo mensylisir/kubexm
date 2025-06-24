@@ -1,10 +1,6 @@
 package pre
 
 import (
-	// "fmt"
-	// "github.com/mensylisir/kubexm/pkg/connector"
-	// "github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
 	// commonsteps "github.com/mensylisir/kubexm/pkg/step/common"
 )
@@ -32,7 +28,7 @@ func NewCreateRepositoryTask( /*isoPath, remoteMountPoint, repoConfigTemplate st
 	}
 }
 
-func (t *CreateRepositoryTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
+func (t *CreateRepositoryTask) IsRequired(ctx task.TaskContext) (bool, error) {
 	// Required if offline installation mode is specified and ISO path is configured.
 	// Example:
 	// clusterCfg := ctx.GetClusterConfig()
@@ -40,7 +36,7 @@ func (t *CreateRepositoryTask) IsRequired(ctx runtime.TaskContext) (bool, error)
 	return true, nil // Placeholder
 }
 
-func (t *CreateRepositoryTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
+func (t *CreateRepositoryTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
 	// Plan would involve:
 	// 1. UploadFileStep: Upload ISO from control node to each target host (if not already present via shared storage).
 	//    (This step itself implies the ISO is first available on control node, e.g. via a resource.Handle)

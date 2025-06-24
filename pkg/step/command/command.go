@@ -3,29 +3,27 @@ package command
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec" // Added for spec.StepMeta
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 
 // CommandStep executes a shell command on a target host.
 type CommandStep struct {
-	meta                spec.StepMeta // Contains Name and Description
-	Cmd                 string
-	Sudo                bool
-	IgnoreError         bool
-	Timeout             time.Duration
-	Env                 []string
-	ExpectedExitCode    int
-	CheckCmd            string
-	CheckSudo           bool
+	meta                  spec.StepMeta // Contains Name and Description
+	Cmd                   string
+	Sudo                  bool
+	IgnoreError           bool
+	Timeout               time.Duration
+	Env                   []string
+	ExpectedExitCode      int
+	CheckCmd              string
+	CheckSudo             bool
 	CheckExpectedExitCode int
-	RollbackCmd         string // Optional: command to run for rollback
-	RollbackSudo        bool   // Optional: sudo for rollback command
+	RollbackCmd           string // Optional: command to run for rollback
+	RollbackSudo          bool   // Optional: sudo for rollback command
 }
 
 // NewCommandStep creates a new CommandStep.
@@ -58,17 +56,17 @@ func NewCommandStep(
 			Name:        metaName,
 			Description: fmt.Sprintf("Executes command: '%s'", cmd),
 		},
-		Cmd:                 cmd,
-		Sudo:                sudo,
-		IgnoreError:         ignoreError,
-		Timeout:             timeout,
-		Env:                 env,
-		ExpectedExitCode:    expectedExitCode,
-		CheckCmd:            checkCmd,
-		CheckSudo:           checkSudo,
+		Cmd:                   cmd,
+		Sudo:                  sudo,
+		IgnoreError:           ignoreError,
+		Timeout:               timeout,
+		Env:                   env,
+		ExpectedExitCode:      expectedExitCode,
+		CheckCmd:              checkCmd,
+		CheckSudo:             checkSudo,
 		CheckExpectedExitCode: checkExpectedExitCode,
-		RollbackCmd:         rollbackCmd,
-		RollbackSudo:        rollbackSudo,
+		RollbackCmd:           rollbackCmd,
+		RollbackSudo:          rollbackSudo,
 	}
 }
 
@@ -77,7 +75,7 @@ func (s *CommandStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *CommandStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *CommandStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", host.GetName(), "phase", "Precheck")
 
 	if s.CheckCmd == "" {
@@ -130,7 +128,7 @@ func (s *CommandStep) Precheck(ctx runtime.StepContext, host connector.Host) (bo
 	return false, nil
 }
 
-func (s *CommandStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *CommandStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", host.GetName(), "phase", "Run")
 
 	conn, err := ctx.GetConnectorForHost(host)
@@ -153,7 +151,6 @@ func (s *CommandStep) Run(ctx runtime.StepContext, host connector.Host) error {
 	// Example:
 	// ctx.StepCache().Set(s.Name()+"#stdout", string(stdoutBytes))
 	// ctx.StepCache().Set(s.Name()+"#stderr", string(stderrBytes))
-
 
 	if runErr != nil {
 		var cmdErr *connector.CommandError // Assuming connector.CommandError
@@ -189,15 +186,15 @@ func (s *CommandStep) Run(ctx runtime.StepContext, host connector.Host) error {
 	logger.Error(errMsg)
 	// Create a CommandError to carry the actual exit code (0) and output
 	return &connector.CommandError{
-		Cmd:      s.Cmd, // Populate Cmd field in CommandError
+		Cmd:        s.Cmd,              // Populate Cmd field in CommandError
 		Underlying: errors.New(errMsg), // Populate Underlying field
-		ExitCode: 0, // Actual exit code
-		Stdout:   string(stdoutBytes),
-		Stderr:   string(stderrBytes),
+		ExitCode:   0,                  // Actual exit code
+		Stdout:     string(stdoutBytes),
+		Stderr:     string(stderrBytes),
 	}
 }
 
-func (s *CommandStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *CommandStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", host.GetName(), "phase", "Rollback")
 
 	if s.RollbackCmd == "" {

@@ -20,10 +20,10 @@ import (
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/runner"
 	"github.com/mensylisir/kubexm/pkg/util"
+	corev1 "k8s.io/api/core/v1"
 	"path/filepath"
 	// For EventRecorder initialization
 	"k8s.io/client-go/kubernetes/scheme"
-	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/record"
 	// "k8s.io/client-go/kubernetes" // Would be needed for a real clientset
 )
@@ -32,18 +32,31 @@ var osReadFileFS = os.ReadFile // Allow mocking for tests related to private key
 
 // RuntimeBuilder constructs and initializes a runtime.Context.
 type RuntimeBuilder struct {
-	configFilepath string
-	clusterConfig  *v1alpha1.Cluster // Allow building from an already parsed config
+	configFilepath   string
+	clusterConfig    *v1alpha1.Cluster
+	runnerSvc        runner.Runner
+	connectionPool   *connector.ConnectionPool // Allow building from an already parsed config
+	connectorFactory connector.Factory
 }
 
 // NewRuntimeBuilder creates a new builder for a given configuration file path.
-func NewRuntimeBuilder(configFilepath string) *RuntimeBuilder {
-	return &RuntimeBuilder{configFilepath: configFilepath}
+func NewRuntimeBuilder(configFilepath string, runnerSvc runner.Runner, pool *connector.ConnectionPool, factory connector.Factory) *RuntimeBuilder {
+	return &RuntimeBuilder{
+		configFilepath:   configFilepath,
+		runnerSvc:        runnerSvc,
+		connectionPool:   pool,
+		connectorFactory: factory,
+	}
 }
 
 // NewRuntimeBuilderFromConfig creates a new builder from an already parsed Cluster configuration.
-func NewRuntimeBuilderFromConfig(cfg *v1alpha1.Cluster) *RuntimeBuilder {
-	return &RuntimeBuilder{clusterConfig: cfg}
+func NewRuntimeBuilderFromConfig(cfg *v1alpha1.Cluster, runnerSvc runner.Runner, pool *connector.ConnectionPool, factory connector.Factory) *RuntimeBuilder {
+	return &RuntimeBuilder{
+		clusterConfig:    cfg,
+		runnerSvc:        runnerSvc,
+		connectionPool:   pool,
+		connectorFactory: factory,
+	}
 }
 
 // Build constructs the full runtime Context.
@@ -81,11 +94,11 @@ func (b *RuntimeBuilder) Build(ctx context.Context, engineInst engine.Engine) (*
 	}
 
 	// Initialize core services
-	runnerSvc := runner.New() // Stateless runner service
-	connectionPool := connector.NewConnectionPool(connector.DefaultPoolConfig())
+	//runnerSvc := runner.New() // Stateless runner service
+	//connectionPool := connector.NewConnectionPool(connector.DefaultPoolConfig())
 	cleanupFunc := func() {
 		log.Info("Shutting down connection pool...")
-		connectionPool.Shutdown()
+		b.connectionPool.Shutdown()
 		// Add any other global cleanup tasks here
 	}
 
@@ -94,7 +107,7 @@ func (b *RuntimeBuilder) Build(ctx context.Context, engineInst engine.Engine) (*
 		GoCtx:  ctx,
 		Logger: log,
 		Engine: engineInst,
-		Runner: runnerSvc,
+		Runner: b.runnerSvc,
 		// Recorder will be initialized below
 		ClusterConfig: currentClusterConfig,
 		hostInfoMap:   make(map[string]*HostRuntimeInfo),
@@ -107,7 +120,7 @@ func (b *RuntimeBuilder) Build(ctx context.Context, engineInst engine.Engine) (*
 		ModuleCache:    cache.NewModuleCache(),
 		TaskCache:      cache.NewTaskCache(),
 		StepCache:      cache.NewStepCache(),
-		ConnectionPool: connectionPool, // Assign created pool to context
+		ConnectionPool: b.connectionPool, // Assign created pool to context
 	}
 	if runtimeCtx.GlobalConnectionTimeout <= 0 { // Ensure a sensible default
 		runtimeCtx.GlobalConnectionTimeout = 30 * time.Second
@@ -134,7 +147,7 @@ func (b *RuntimeBuilder) Build(ctx context.Context, engineInst engine.Engine) (*
 	}
 
 	// Initialize host runtimes (connect, gather facts) concurrently
-	if err := b.initializeAllHosts(runtimeCtx, connectionPool, runnerSvc); err != nil {
+	if err := b.initializeAllHosts(runtimeCtx, b.connectionPool, b.runnerSvc); err != nil {
 		cleanupFunc()
 		return nil, nil, err
 	}
@@ -162,7 +175,7 @@ func (b *RuntimeBuilder) setupGlobalWorkDirs(rc *Context) error {
 		log.Info("Global.WorkDir in config not set, using current working directory as base.", "path", baseWorkDir)
 	}
 
-	kubexmOperationalRoot := filepath.Join(baseWorkDir, common.KubeXMRootDir) // $(pwd)/.kubexm
+	kubexmOperationalRoot := filepath.Join(baseWorkDir, common.KUBEXM) // $(pwd)/.kubexm
 	if err := util.CreateDir(kubexmOperationalRoot); err != nil {
 		log.Error(err, "Failed to create Kubexm operational root directory", "path", kubexmOperationalRoot)
 		return fmt.Errorf("failed to create Kubexm operational root dir '%s': %w", kubexmOperationalRoot, err)
@@ -265,10 +278,10 @@ func (b *RuntimeBuilder) initializeSingleHost(ctx context.Context, hostCfg v1alp
 	}
 
 	if isLocal {
-		conn = &connector.LocalConnector{}
+		conn = b.connectorFactory.NewLocalConnector()
 		log.Info("Using LocalConnector.")
 	} else {
-		conn = connector.NewSSHConnector(pool) // SSH connector uses the pool
+		conn = b.connectorFactory.NewSSHConnector(pool) // SSH connector uses the pool
 		log.Info("Using SSHConnector.")
 	}
 
@@ -316,7 +329,7 @@ func (b *RuntimeBuilder) initializeSingleHost(ctx context.Context, hostCfg v1alp
 	log.Info("Gathering facts...")
 	facts, err := runnerSvc.GatherFacts(ctx, conn)
 	if err != nil {
-		conn.Close() // Attempt to close connection on error
+		//conn.Close() // Attempt to close connection on error
 		log.Error(err, "Fact gathering failed")
 		return nil, fmt.Errorf("host %s: fact gathering failed: %w", hostCfg.Name, err)
 	}

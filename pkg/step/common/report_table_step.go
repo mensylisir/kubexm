@@ -2,13 +2,10 @@ package common
 
 import (
 	"fmt"
-	"os"
-	"strings"
-
 	"github.com/olekukonko/tablewriter" // External library for table formatting
+	"os"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 )
@@ -43,7 +40,7 @@ func (s *ReportTableStep) Meta() *spec.StepMeta {
 }
 
 // Precheck for ReportTableStep always returns false, as it's meant to always execute to show current data.
-func (s *ReportTableStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *ReportTableStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	if len(s.Rows) == 0 {
 		// If there are no rows to display, consider the step "done" or skippable.
 		ctx.GetLogger().Info("No rows provided for table report, skipping.", "step", s.meta.Name)
@@ -53,7 +50,7 @@ func (s *ReportTableStep) Precheck(ctx runtime.StepContext, host connector.Host)
 }
 
 // Run prints the table.
-func (s *ReportTableStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *ReportTableStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name)
 
 	if len(s.Rows) == 0 {
@@ -66,8 +63,8 @@ func (s *ReportTableStep) Run(ctx runtime.StepContext, host connector.Host) erro
 	// This library needs to be added to go.mod: go get github.com/olekukonko/tablewriter
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader(s.Headers)
-	table.SetBorder(true)        // Set Border to true
-	table.SetRowLine(true)       // Enable row line
+	table.SetBorder(true)    // Set Border to true
+	table.SetRowLine(true)   // Enable row line
 	table.AppendBulk(s.Rows) // Add Bulk Data
 
 	// For more complex alignment or per-column settings, tablewriter offers more options.
@@ -82,7 +79,7 @@ func (s *ReportTableStep) Run(ctx runtime.StepContext, host connector.Host) erro
 }
 
 // Rollback for ReportTableStep is a no-op as it only prints information.
-func (s *ReportTableStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *ReportTableStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	return nil
 }
 

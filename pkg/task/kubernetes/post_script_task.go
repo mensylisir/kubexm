@@ -1,10 +1,6 @@
 package kubernetes
 
 import (
-	// "fmt"
-	// "github.com/mensylisir/kubexm/pkg/connector"
-	// "github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
 	// commonsteps "github.com/mensylisir/kubexm/pkg/step/common"
 )
@@ -27,12 +23,12 @@ func NewPostScriptTask() task.Task {
 	}
 }
 
-func (t *PostScriptTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
+func (t *PostScriptTask) IsRequired(ctx task.TaskContext) (bool, error) {
 	// Typically always run if the cluster installation reaches this stage.
 	return true, nil // Placeholder
 }
 
-func (t *PostScriptTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
+func (t *PostScriptTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
 	// Plan would involve multiple steps, potentially with dependencies:
 	// 1. Step: CommandStep to remove taints from master nodes (e.g., `kubectl taint nodes --all node-role.kubernetes.io/master-` or specific nodes).
 	// 2. Step: CommandStep to apply labels to nodes as per ClusterConfig.

@@ -3,6 +3,9 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/engine"
+	"github.com/mensylisir/kubexm/pkg/plan"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,61 +17,138 @@ import (
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/runner"
-	"github.com/mensylisir/kubexm/pkg/util"
-	// Mocking parser.ParseFromFile requires a bit more setup or an interface.
-	// For this test, we can use BuildFromConfig and provide a config object directly.
 )
 
-// mockConnectorForBuilderTest is a simple mock.
-type mockConnectorForBuilderTest struct {
-	connector.Connector // Embed interface
-	ConnectFunc func(ctx context.Context, cfg connector.ConnectionCfg) error
-	GetOSFunc   func(ctx context.Context) (*connector.OS, error)
-	CloseFunc   func() error
+// --- Mock Implementations ---
+
+// mockEngine is a simple mock for the engine.Engine interface.
+type mockEngine struct{}
+
+func (m *mockEngine) Execute(ctx engine.EngineExecuteContext, g *plan.ExecutionGraph, dryRun bool) (*plan.GraphExecutionResult, error) {
+	return nil, nil
+}
+func (m *mockEngine) Plan(ctx context.Context, modules ...interface{}) (interface{}, error) {
+	return nil, nil
 }
 
-func (m *mockConnectorForBuilderTest) Connect(ctx context.Context, cfg connector.ConnectionCfg) error {
+// mockConnector is a mock for the connector.Connector interface.
+type mockConnector struct {
+	connector.Connector // Embed interface for forward compatibility
+	ConnectFunc         func(ctx context.Context, cfg connector.ConnectionCfg) error
+}
+
+func (m *mockConnector) Connect(ctx context.Context, cfg connector.ConnectionCfg) error {
 	if m.ConnectFunc != nil {
 		return m.ConnectFunc(ctx, cfg)
 	}
 	return nil
 }
-func (m *mockConnectorForBuilderTest) GetOS(ctx context.Context) (*connector.OS, error) {
-	if m.GetOSFunc != nil {
-		return m.GetOSFunc(ctx)
-	}
-	return &connector.OS{ID: "linux", Arch: "amd64", PrettyName: "Mocked OS"}, nil
-}
-func (m *mockConnectorForBuilderTest) Close() error {
-	if m.CloseFunc != nil {
-		return m.CloseFunc()
-	}
-	return nil
-}
-func (m *mockConnectorForBuilderTest) Exec(ctx context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) { return nil, nil, nil }
-func (m *mockConnectorForBuilderTest) IsConnected() bool { return true }
-func (m *mockConnectorForBuilderTest) CopyContent(ctx context.Context, content []byte, destPath string, options *connector.FileTransferOptions) error { return nil }
-func (m *mockConnectorForBuilderTest) Stat(ctx context.Context, path string) (*connector.FileStat, error) { return nil, nil }
-func (m *mockConnectorForBuilderTest) LookPath(ctx context.Context, file string) (string, error) { return "", nil }
-func (m *mockConnectorForBuilderTest) ReadFile(ctx context.Context, path string) ([]byte, error) {return nil, nil}
-func (m *mockConnectorForBuilderTest) WriteFile(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error {return nil}
 
-
-// mockRunnerForBuilderTest mocks the runner.Runner interface.
-type mockRunnerForBuilderTest struct {
-	runner.Runner // Embed for forward compatibility
+// mockRunner is a mock for the runner.Runner interface.
+type mockRunner struct {
+	runner.Runner
 	GatherFactsFunc func(ctx context.Context, conn connector.Connector) (*runner.Facts, error)
 }
-func (m *mockRunnerForBuilderTest) GatherFacts(ctx context.Context, conn connector.Connector) (*runner.Facts, error) {
+
+func (m *mockRunner) GatherFacts(ctx context.Context, conn connector.Connector) (*runner.Facts, error) {
 	if m.GatherFactsFunc != nil {
 		return m.GatherFactsFunc(ctx, conn)
 	}
-	return &runner.Facts{OS: &connector.OS{ID: "linux", Arch: "amd64", PrettyName: "Mocked OS for Runner"}}, nil
+	return &runner.Facts{Hostname: "default-mock-hostname", OS: &connector.OS{ID: "linux", Arch: "amd64"}}, nil
 }
 
+// mockConnectorFactory is a mock for the connector.Factory interface.
+type mockConnectorFactory struct {
+	connector.Factory
+	NewSSHConnectorFunc   func(pool *connector.ConnectionPool) connector.Connector
+	NewLocalConnectorFunc func() connector.Connector
+}
 
-func TestRuntimeBuilder_BuildFromConfig_Directories(t *testing.T) {
-	// Setup: Create a temporary current working directory for the test
+func (m *mockConnectorFactory) NewSSHConnector(pool *connector.ConnectionPool) connector.Connector {
+	if m.NewSSHConnectorFunc != nil {
+		return m.NewSSHConnectorFunc(pool)
+	}
+	return &mockConnector{}
+}
+func (m *mockConnectorFactory) NewLocalConnector() connector.Connector {
+	if m.NewLocalConnectorFunc != nil {
+		return m.NewLocalConnectorFunc()
+	}
+	return &mockConnector{}
+}
+
+// --- Test Functions ---
+
+func TestRuntimeBuilder_Build_HostInitialization(t *testing.T) {
+	// --- 1. Test Setup ---
+	clusterName := "test-cluster-hosts"
+	node1Spec := v1alpha1.HostSpec{Name: "node1", Address: "10.0.0.1", Type: "ssh", User: "testuser", Port: 22, Roles: []string{"worker"}}
+	cfg := &v1alpha1.Cluster{
+		ObjectMeta: metav1.ObjectMeta{Name: clusterName},
+		Spec: v1alpha1.ClusterSpec{
+			Hosts: []v1alpha1.HostSpec{node1Spec},
+		},
+	}
+	v1alpha1.SetDefaults_Cluster(cfg)
+
+	// --- 2. Create and Configure Mock Dependencies ---
+
+	mockRunnerSvc := &mockRunner{
+		GatherFactsFunc: func(ctx context.Context, conn connector.Connector) (*runner.Facts, error) {
+			return &runner.Facts{Hostname: "facts-hostname", OS: &connector.OS{ID: "mockOS"}}, nil
+		},
+	}
+
+	mockPool := connector.NewConnectionPool(connector.DefaultPoolConfig()) // A real pool is fine
+
+	mockFactory := &mockConnectorFactory{
+		NewSSHConnectorFunc: func(pool *connector.ConnectionPool) connector.Connector {
+			// This will be called for "node1"
+			return &mockConnector{
+				ConnectFunc: func(ctx context.Context, connCfg connector.ConnectionCfg) error {
+					assert.Equal(t, "10.0.0.1", connCfg.Host)
+					return nil
+				},
+			}
+		},
+		NewLocalConnectorFunc: func() connector.Connector {
+			// This will be called for the control-node
+			return &connector.LocalConnector{} // Use a real LocalConnector as it's simple
+		},
+	}
+
+	mockEng := &mockEngine{}
+
+	// --- 3. Create the Builder with Injected Mocks ---
+	builder := NewRuntimeBuilderFromConfig(cfg, mockRunnerSvc, mockPool, mockFactory)
+
+	// --- 4. Execute the method under test ---
+	rtCtx, cleanup, err := builder.Build(context.Background(), mockEng)
+
+	// --- 5. Assertions ---
+	require.NoError(t, err)
+	require.NotNil(t, rtCtx)
+	defer cleanup()
+
+	// Assert control node initialization
+	assert.NotNil(t, rtCtx.controlNode, "ControlNode should be initialized")
+	require.Contains(t, rtCtx.hostInfoMap, common.ControlNodeHostName)
+	controlNodeInfo := rtCtx.hostInfoMap[common.ControlNodeHostName]
+	_, ok := controlNodeInfo.Conn.(*connector.LocalConnector)
+	assert.True(t, ok, "Control node should use LocalConnector created by factory")
+	assert.NotNil(t, controlNodeInfo.Facts)
+
+	// Assert node1 initialization
+	require.Contains(t, rtCtx.hostInfoMap, "node1")
+	node1Info := rtCtx.hostInfoMap["node1"]
+	_, ok = node1Info.Conn.(*mockConnector)
+	assert.True(t, ok, "node1 should use the mocked SSH connector from factory")
+	assert.NotNil(t, node1Info.Facts)
+	assert.Equal(t, "facts-hostname", node1Info.Facts.Hostname)
+}
+
+func TestRuntimeBuilder_Build_Directories(t *testing.T) {
+	// --- 1. Test Setup ---
 	originalWd, err := os.Getwd()
 	require.NoError(t, err)
 	tmpCwd, err := os.MkdirTemp("", "kubexm-builder-test-cwd")
@@ -81,164 +161,53 @@ func TestRuntimeBuilder_BuildFromConfig_Directories(t *testing.T) {
 
 	clusterName := "test-cluster-dirs"
 	cfg := &v1alpha1.Cluster{
-		ObjectMeta: v1alpha1.ObjectMeta{Name: clusterName},
+		ObjectMeta: metav1.ObjectMeta{Name: clusterName},
 		Spec: v1alpha1.ClusterSpec{
-			Hosts: []*v1alpha1.Host{
+			Hosts: []v1alpha1.HostSpec{
 				{Name: "node1", Address: "10.0.0.1", Type: "ssh", Roles: []string{"worker"}},
 			},
-			// Global.WorkDir is intentionally left empty to test default path generation
 		},
 	}
+	v1alpha1.SetDefaults_Cluster(cfg)
 
-	builder := &RuntimeBuilder{} // Not using NewRuntimeBuilder if we call BuildFromConfig directly
+	// --- 2. Create Mocks ---
+	mockRunnerSvc := &mockRunner{}
+	mockPool := connector.NewConnectionPool(connector.DefaultPoolConfig())
+	mockFactory := &mockConnectorFactory{
+		NewSSHConnectorFunc:   func(pool *connector.ConnectionPool) connector.Connector { return &mockConnector{} },
+		NewLocalConnectorFunc: func() connector.Connector { return &connector.LocalConnector{} },
+	}
+	mockEng := &mockEngine{}
 
-	// Override osReadFile for private key if any host needed it (not in this specific test case)
-	// oldOsReadFile := osReadFile
-	// osReadFile = func(name string) ([]byte, error) { return []byte("mock key data"), nil }
-	// defer func() { osReadFile = oldOsReadFile }()
+	// --- 3. Create Builder ---
+	builder := NewRuntimeBuilderFromConfig(cfg, mockRunnerSvc, mockPool, mockFactory)
 
-	// Mock connector behavior within the builder's initializeHost
-	// This is tricky because initializeHost is internal.
-	// A more common way is to mock the services (runner, connector factory) passed to builder,
-	// or make builder accept them.
-	// For now, we rely on LocalConnector for control-node and test directory creation.
+	// --- 4. Execute ---
+	rtCtx, cleanup, err := builder.Build(context.Background(), mockEng)
 
-	rtCtx, cleanup, err := builder.BuildFromConfig(context.Background(), cfg, nil)
+	// --- 5. Assertions ---
 	require.NoError(t, err)
 	require.NotNil(t, rtCtx)
 	defer cleanup()
 
-	expectedGlobalWorkDir := filepath.Join(tmpCwd, common.KUBEXM)
+	expectedGlobalWorkDir := filepath.Join(tmpCwd, common.KUBEXM, clusterName)
 	assert.Equal(t, expectedGlobalWorkDir, rtCtx.GlobalWorkDir)
 
-	// Check GlobalWorkDir creation
-	_, statErr := os.Stat(expectedGlobalWorkDir)
-	assert.NoError(t, statErr, "GlobalWorkDir should be created")
-
-	// Check HostWorkDir for control node
-	controlNodeHostDir := filepath.Join(expectedGlobalWorkDir, common.ControlNodeHostName)
-	_, statErr = os.Stat(controlNodeHostDir)
-	assert.NoError(t, statErr, "ControlNodeHostDir should be created")
-
-	// Check HostWorkDir for node1
-	node1HostDir := filepath.Join(expectedGlobalWorkDir, "node1")
-	_, statErr = os.Stat(node1HostDir)
-	assert.NoError(t, statErr, "node1 HostDir should be created")
-
-
-	// Check ClusterArtifactsDir
-	expectedClusterArtifactsDir := filepath.Join(expectedGlobalWorkDir, clusterName)
-	assert.Equal(t, expectedClusterArtifactsDir, rtCtx.ClusterArtifactsDir)
-	_, statErr = os.Stat(expectedClusterArtifactsDir)
-	assert.NoError(t, statErr, "ClusterArtifactsDir should be created")
-
-	// Check sub-artifact directories
-	dirsToTest := map[string]string{
-		"logs":              filepath.Join(expectedClusterArtifactsDir, common.DefaultLogsDir),
-		"certs_base":        filepath.Join(expectedClusterArtifactsDir, common.DefaultCertsDir),
-		"etcd_certs":        filepath.Join(expectedClusterArtifactsDir, common.DefaultCertsDir, common.DefaultEtcdDir),
-		"etcd_artifacts":    filepath.Join(expectedClusterArtifactsDir, common.DefaultEtcdDir),
-		"crt_artifacts":     filepath.Join(expectedClusterArtifactsDir, common.DefaultContainerRuntimeDir),
-		"k8s_artifacts":     filepath.Join(expectedClusterArtifactsDir, common.DefaultKubernetesDir),
+	// Check directories
+	dirsToTest := []string{
+		rtCtx.GlobalWorkDir,
+		rtCtx.GetHostDir(common.ControlNodeHostName),
+		rtCtx.GetHostDir("node1"),
+		rtCtx.GetCertsDir(),
+		rtCtx.GetEtcdCertsDir(),
+		rtCtx.GetEtcdArtifactsDir(),
+		rtCtx.GetContainerRuntimeArtifactsDir(),
+		rtCtx.GetKubernetesArtifactsDir(),
+		filepath.Join(rtCtx.GlobalWorkDir, common.DefaultLogsDir),
 	}
 
-	for name, dirPath := range dirsToTest {
-		_, statErr = os.Stat(dirPath)
-		assert.NoError(t, statErr, fmt.Sprintf("%s directory should be created at %s", name, dirPath))
+	for _, dirPath := range dirsToTest {
+		_, statErr := os.Stat(dirPath)
+		assert.NoError(t, statErr, fmt.Sprintf("Directory should be created: %s", dirPath))
 	}
-}
-
-func TestRuntimeBuilder_BuildFromConfig_HostInitialization(t *testing.T) {
-	clusterName := "test-cluster-hosts"
-	node1Spec := &v1alpha1.Host{Name: "node1", Address: "10.0.0.1", Type: "ssh", User: "testuser", Port: 22}
-	cfg := &v1alpha1.Cluster{
-		ObjectMeta: v1alpha1.ObjectMeta{Name: clusterName},
-		Spec:       v1alpha1.ClusterSpec{Hosts: []*v1alpha1.Host{node1Spec}},
-	}
-
-	builder := &RuntimeBuilder{}
-
-	// Store original functions to restore them later
-    origNewSSHConnector := connector.NewSSHConnector
-    origNewLocalConnector := func() connector.Connector { return &connector.LocalConnector{} } // Assuming LocalConnector is simple
-    origRunnerNew := runner.New
-
-	// Mock NewSSHConnector to return our mock connector
-    connector.NewSSHConnector = func(pool *connector.ConnectionPool) connector.Connector {
-        mockConn := &mockConnectorForBuilderTest{}
-        mockConn.ConnectFunc = func(ctx context.Context, cfg connector.ConnectionCfg) error {
-            // Assertions about cfg can be made here if needed
-            assert.Equal(t, node1Spec.Address, cfg.Host)
-            return nil
-        }
-        return mockConn
-    }
-    // We also need to control the LocalConnector for the control-node part of BuildFromConfig
-    // This is harder if it's directly instantiated.
-    // For now, let's assume LocalConnector works as is, or its interactions are minimal in this test's scope.
-
-    // Mock runner.New to return our mock runner
-    mockRun := &mockRunnerForBuilderTest{}
-    mockRun.GatherFactsFunc = func(ctx context.Context, conn connector.Connector) (*runner.Facts, error) {
-        // Determine hostname based on the connector type or a passed-in value if possible
-        var hostname string
-        if mc, ok := conn.(*mockConnectorForBuilderTest); ok {
-            // If mockConnectorForBuilderTest had a field for host spec, we could use it.
-            // For now, use a fixed name or the one from the spec this mock is for.
-            hostname = node1Spec.Name // Assuming this mock is specifically for node1
-        } else {
-            hostname = "mocked-host-for-runner"
-        }
-        return &runner.Facts{
-			Hostname: hostname, // Corrected: Assign a string
-			OS:       &connector.OS{ID: "mocklinux", Arch: "amd64", PrettyName: "Mocked OS via Runner"},
-		}, nil // Added comma here
-    }
-    runner.New = func() runner.Runner { return mockRun }
-
-
-	rtCtx, cleanup, err := builder.BuildFromConfig(context.Background(), cfg, nil)
-	require.NoError(t, err)
-	require.NotNil(t, rtCtx)
-	defer cleanup()
-
-	// Restore original functions
-    connector.NewSSHConnector = origNewSSHConnector
-    runner.New = origRunnerNew
-
-
-	assert.NotNil(t, rtCtx.ControlNode, "ControlNode should be initialized")
-	assert.Equal(t, common.ControlNodeHostName, rtCtx.ControlNode.GetName())
-
-	require.Contains(t, rtCtx.HostRuntimes, common.ControlNodeHostName)
-	_, ok := rtCtx.HostRuntimes[common.ControlNodeHostName].Conn.(*connector.LocalConnector)
-	assert.True(t, ok, "Control node should use LocalConnector")
-	assert.NotNil(t, rtCtx.HostRuntimes[common.ControlNodeHostName].Facts)
-
-
-	require.Contains(t, rtCtx.HostRuntimes, "node1")
-	_, ok = rtCtx.HostRuntimes["node1"].Conn.(*mockConnectorForBuilderTest)
-	assert.True(t, ok, "node1 should use the mocked SSH connector")
-	assert.NotNil(t, rtCtx.HostRuntimes["node1"].Facts)
-	// Facts for node1 would come from mockRun.GatherFactsFunc
-	assert.Equal(t, "Mocked OS via Runner", rtCtx.HostRuntimes["node1"].Facts.OS.PrettyName)
-}
-
-// TODO: Test for BuildFromFile (requires mocking parser.ParseFromFile or using a temp config file)
-// TODO: Test private key loading (mocking osReadFile)
-// TODO: Test connection timeout propagation
-// TODO: Test error handling during host initialization
-// TODO: Test global config propagation (Verbose, IgnoreErr, etc.)
-
-func TestUtilCreateDir(t *testing.T) { // Testing the utility function directly as an example
-	tmpDir, err := os.MkdirTemp("", "test-create-dir")
-	require.NoError(t, err)
-	defer os.RemoveAll(tmpDir)
-
-	newPath := filepath.Join(tmpDir, "a", "b", "c")
-	err = util.CreateDir(newPath)
-	require.NoError(t, err)
-
-	_, statErr := os.Stat(newPath)
-	assert.NoError(t, statErr)
 }

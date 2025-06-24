@@ -1,7 +1,6 @@
 package pre
 
 import (
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
 	// commonsteps "github.com/mensylisir/kubexm/pkg/step/common"
 )
@@ -14,7 +13,7 @@ type VerifyArtifactsTask struct {
 }
 
 // NewVerifyArtifactsTask creates a new VerifyArtifactsTask.
-func NewVerifyArtifactsTask( /*expectedArtifacts map[string]string, artifactsDir string*/) task.Task {
+func NewVerifyArtifactsTask( /*expectedArtifacts map[string]string, artifactsDir string*/ ) task.Task {
 	return &VerifyArtifactsTask{
 		BaseTask: task.BaseTask{
 			TaskName: "VerifyOfflineArtifacts",
@@ -27,13 +26,13 @@ func NewVerifyArtifactsTask( /*expectedArtifacts map[string]string, artifactsDir
 	}
 }
 
-func (t *VerifyArtifactsTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
+func (t *VerifyArtifactsTask) IsRequired(ctx task.TaskContext) (bool, error) {
 	// Required if offline installation mode is specified in ClusterConfig.
 	// Example: return ctx.GetClusterConfig().Spec.OfflineInstall, nil
 	return true, nil // Placeholder
 }
 
-func (t *VerifyArtifactsTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
+func (t *VerifyArtifactsTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
 	// fragment := task.NewEmptyFragment()
 	// controlHost, _ := ctx.GetControlNode()
 

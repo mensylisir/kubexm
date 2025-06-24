@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/runner"
 	"testing"
-	"time"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/logger"
@@ -21,9 +21,11 @@ type MockStepConnector struct {
 	// Add other methods like Copy, Stat, etc., if CommandStep starts using them.
 }
 
-func (m *MockStepConnector) Connect(ctx context.Context, cfg connector.ConnectionCfg) error { return nil }
-func (m *MockStepConnector) Close() error                                                 { return nil }
-func (m *MockStepConnector) IsConnected() bool                                            { return true }
+func (m *MockStepConnector) Connect(ctx context.Context, cfg connector.ConnectionCfg) error {
+	return nil
+}
+func (m *MockStepConnector) Close() error      { return nil }
+func (m *MockStepConnector) IsConnected() bool { return true }
 func (m *MockStepConnector) GetOS(ctx context.Context) (*connector.OS, error) {
 	return &connector.OS{ID: "linux", Arch: "amd64"}, nil
 }
@@ -39,12 +41,15 @@ func (m *MockStepConnector) CopyContent(ctx context.Context, content []byte, des
 func (m *MockStepConnector) Stat(ctx context.Context, path string) (*connector.FileStat, error) {
 	return &connector.FileStat{IsExist: false}, nil
 }
-func (m *MockStepConnector) LookPath(ctx context.Context, file string) (string, error) { return file, nil }
-func (m *MockStepConnector) ReadFile(ctx context.Context, path string) ([]byte, error) { return nil, nil }
+func (m *MockStepConnector) LookPath(ctx context.Context, file string) (string, error) {
+	return file, nil
+}
+func (m *MockStepConnector) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	return nil, nil
+}
 func (m *MockStepConnector) WriteFile(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error {
 	return nil
 }
-
 
 // newTestRuntimeContext creates a runtime.Context suitable for testing steps.
 func newTestRuntimeContext(t *testing.T, conn connector.Connector) *runtime.Context {
@@ -74,11 +79,10 @@ func newTestRuntimeContext(t *testing.T, conn connector.Connector) *runtime.Cont
 	return rtCtx.ForHost(mockHost) // Return a StepContext
 }
 
-
 func TestCommandStep_Run_Success(t *testing.T) {
 	mockConn := &MockStepConnector{}
 	rtCtx := newTestRuntimeContext(t, mockConn) // Pass the mock connector
-	host := rtCtx.GetHost() // Get the host from the context
+	host := rtCtx.GetHost()                     // Get the host from the context
 
 	cmdStep := NewCommandStep("TestEcho", "echo hello", false, false, 0, nil, 0, "", false, 0, "", false)
 
@@ -169,7 +173,6 @@ func TestCommandStep_Run_ExpectedExitCode_Mismatch(t *testing.T) {
 	require.True(t, errors.As(err, &cmdError), "error should be or wrap *connector.CommandError")
 	assert.Equal(t, 0, cmdError.ExitCode, "Error should reflect actual exit code")
 }
-
 
 func TestCommandStep_Precheck_NoCheckCmd(t *testing.T) {
 	mockConn := &MockStepConnector{}

@@ -2,7 +2,6 @@ package greeting
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -20,17 +19,17 @@ import (
 
 // mockTaskContextForGreeting provides a mock runtime.TaskContext.
 type mockTaskContextForGreeting struct {
-	runtime.TaskContext // Embed for any future TaskContext methods not directly mocked
-	logger              *logger.Logger
-	goCtx               context.Context
-	controlHost         connector.Host
+	task.TaskContext // Embed for any future TaskContext methods not directly mocked
+	logger           *logger.Logger
+	goCtx            context.Context
+	controlHost      connector.Host
 }
 
 func newMockTaskContextForGreeting() *mockTaskContextForGreeting {
 	l, _ := logger.New(logger.DefaultConfig())
 	// Ensure common.ControlNodeHostName and common.ControlNodeRole are defined
 	// For testing, we can use placeholder strings if not readily available or crucial for this specific test
-	ctrlHostSpec := v1alpha1.Host{
+	ctrlHostSpec := v1alpha1.HostSpec{
 		Name:    common.ControlNodeHostName, // Assume "control-node"
 		Type:    "local",
 		Address: "127.0.0.1",
@@ -46,19 +45,24 @@ func newMockTaskContextForGreeting() *mockTaskContextForGreeting {
 }
 
 // Implement runtime.TaskContext interface methods needed by GreetingTask
-func (m *mockTaskContextForGreeting) GetLogger() *logger.Logger          { return m.logger }
-func (m *mockTaskContextForGreeting) GoContext() context.Context            { return m.goCtx }
-func (m *mockTaskContextForGreeting) GetControlNode() (connector.Host, error) { return m.controlHost, nil }
+func (m *mockTaskContextForGreeting) GetLogger() *logger.Logger  { return m.logger }
+func (m *mockTaskContextForGreeting) GoContext() context.Context { return m.goCtx }
+func (m *mockTaskContextForGreeting) GetControlNode() (connector.Host, error) {
+	return m.controlHost, nil
+}
 func (m *mockTaskContextForGreeting) GetClusterConfig() *v1alpha1.Cluster { return &v1alpha1.Cluster{} }
 func (m *mockTaskContextForGreeting) GetWorkDir() string                  { return "/tmp/kubexm-test-workdir" }
 
 // Mock other TaskContext methods as needed, returning defaults/nils
-func (m *mockTaskContextForGreeting) GetHostsByRole(role string) ([]connector.Host, error) { return nil, nil }
-func (m *mockTaskContextForGreeting) GetHostFacts(host connector.Host) (*runtime.Facts, error) { return nil, nil }
+func (m *mockTaskContextForGreeting) GetHostsByRole(role string) ([]connector.Host, error) {
+	return nil, nil
+}
+func (m *mockTaskContextForGreeting) GetHostFacts(host connector.Host) (*runtime.Facts, error) {
+	return nil, nil
+}
 func (m *mockTaskContextForGreeting) PipelineCache() runtime.PipelineCache { return nil } // Assuming these return specific cache types
-func (m *mockTaskContextForGreeting) ModuleCache() runtime.ModuleCache   { return nil }
-func (m *mockTaskContextForGreeting) TaskCache() runtime.TaskCache     { return nil }
-
+func (m *mockTaskContextForGreeting) ModuleCache() runtime.ModuleCache     { return nil }
+func (m *mockTaskContextForGreeting) TaskCache() runtime.TaskCache         { return nil }
 
 func TestGreetingTask_NewGreetingTask(t *testing.T) {
 	gt := NewGreetingTask()
