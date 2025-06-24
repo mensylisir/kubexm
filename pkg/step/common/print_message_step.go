@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 )
@@ -36,13 +35,13 @@ func (s *PrintMessageStep) Meta() *spec.StepMeta {
 }
 
 // Precheck for PrintMessageStep always returns false, as it's meant to always execute.
-func (s *PrintMessageStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *PrintMessageStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	return false, nil
 }
 
 // Run prints the message. It assumes this step is targeted at the control node
 // and prints to the application's standard output.
-func (s *PrintMessageStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *PrintMessageStep) Run(ctx step.StepContext, host connector.Host) error {
 	// The logger from StepContext could be used, but for direct user messages,
 	// fmt.Println or a dedicated UI service in the runtime context might be more appropriate.
 	// Using fmt.Println for direct console output.
@@ -59,7 +58,7 @@ func (s *PrintMessageStep) Run(ctx runtime.StepContext, host connector.Host) err
 }
 
 // Rollback for PrintMessageStep is a no-op.
-func (s *PrintMessageStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *PrintMessageStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	return nil
 }
 

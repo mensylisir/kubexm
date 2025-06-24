@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 )
@@ -41,7 +40,7 @@ func (s *UserInputStep) Meta() *spec.StepMeta {
 
 // Precheck for UserInputStep returns false if AssumeYes is false, true otherwise.
 // If AssumeYes is true, the step is considered "done" as no input is required.
-func (s *UserInputStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *UserInputStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	if s.AssumeYes {
 		ctx.GetLogger().Info("AssumeYes is true, skipping user prompt.", "step", s.meta.Name)
 		return true, nil // Done, skip Run
@@ -50,7 +49,7 @@ func (s *UserInputStep) Precheck(ctx runtime.StepContext, host connector.Host) (
 }
 
 // Run prompts the user and waits for input.
-func (s *UserInputStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *UserInputStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name)
 	if s.AssumeYes { // Double check, though Precheck should handle this.
 		logger.Info("AssumeYes is true, proceeding automatically.")
@@ -76,7 +75,7 @@ func (s *UserInputStep) Run(ctx runtime.StepContext, host connector.Host) error 
 }
 
 // Rollback for UserInputStep is a no-op.
-func (s *UserInputStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *UserInputStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	return nil
 }
 

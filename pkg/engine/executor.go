@@ -62,7 +62,7 @@ func (e *dagExecutor) Execute(ctx EngineExecuteContext, g *plan.ExecutionGraph, 
 	inDegree := make(map[plan.NodeID]int)
 	dependents := make(map[plan.NodeID][]plan.NodeID)
 	queue := make([]plan.NodeID, 0)
-	nodeResultsLock := new(sync.Mutex) // This lock will be used
+	//nodeResultsLock := new(sync.Mutex) // This lock will be used
 
 	for id, node := range g.Nodes {
 		inDegree[id] = len(node.Dependencies)
@@ -163,7 +163,10 @@ func (e *dagExecutor) Execute(ctx EngineExecuteContext, g *plan.ExecutionGraph, 
 					logHostNames[i] = h.GetName()
 				}
 				logger.Info("Executing node", "nodeID", id, "nodeName", node.Name, "step", node.StepName, "hosts", logHostNames)
+				mu.Lock()
 				nodeRes.Status = plan.StatusRunning
+				nodeRes.StartTime = time.Now()
+				mu.Unlock()
 
 				nodeGoCtx, nodeCancel := context.WithCancel(ctx.GoContext()) // Use GoContext from EngineExecuteContext
 				defer nodeCancel()
@@ -180,9 +183,9 @@ func (e *dagExecutor) Execute(ctx EngineExecuteContext, g *plan.ExecutionGraph, 
 						finalStepCtxForHost := stepCtxForHost.WithGoContext(hostCtxGroup)
 
 						hostRes := e.runStepOnHost(finalStepCtxForHost, node.Step)
-						nodeResultsLock.Lock() // Corrected typo: nodeResLock -> nodeResultsLock
+						mu.Lock() // Corrected typo: nodeResLock -> nodeResultsLock
 						nodeRes.HostResults[currentHost.GetName()] = hostRes
-						nodeResultsLock.Unlock() // Corrected typo: nodeResLock -> nodeResultsLock
+						mu.Unlock() // Corrected typo: nodeResLock -> nodeResultsLock
 						if hostRes.Status == plan.StatusFailed {
 							return fmt.Errorf("step '%s' on host '%s' failed: %s", node.StepName, currentHost.GetName(), hostRes.Message)
 						}
@@ -191,15 +194,21 @@ func (e *dagExecutor) Execute(ctx EngineExecuteContext, g *plan.ExecutionGraph, 
 				}
 
 				nodeFailed := false
+				var determinedStatus plan.Status
+				var determinedMessage string
+
 				if err := hostGroup.Wait(); err != nil {
-					nodeRes.Message = err.Error()
+					determinedMessage = err.Error()
 					nodeFailed = true
 					logger.Error(err, "Node execution failed", "nodeID", id, "nodeName", node.Name)
 				}
 
 				// ... (node status determination logic based on hostResults - remains the same)
 				if nodeFailed {
-					nodeRes.Status = plan.StatusFailed
+					determinedStatus = plan.StatusFailed
+					if determinedMessage == "" {
+						determinedMessage = "Node failed due to one or more host failures."
+					}
 				} else {
 					allHostsSkippedByPrecheck := true
 					anyHostSucceeded := false
@@ -217,19 +226,25 @@ func (e *dagExecutor) Execute(ctx EngineExecuteContext, g *plan.ExecutionGraph, 
 						}
 					}
 					if nodeFailed {
-						nodeRes.Status = plan.StatusFailed
+						determinedStatus = plan.StatusFailed
+						determinedMessage = "Node failed due to one or more host failures."
 					} else if allHostsSkippedByPrecheck && len(nodeRes.HostResults) > 0 {
-						nodeRes.Status = plan.StatusSkipped
-						nodeRes.Message = "All hosts skipped by precheck."
+						determinedStatus = plan.StatusSkipped
+						determinedMessage = "All hosts skipped by precheck."
 					} else if anyHostSucceeded || len(nodeRes.HostResults) == 0 {
-						nodeRes.Status = plan.StatusSuccess
-						nodeRes.Message = "Node executed successfully."
+						determinedStatus = plan.StatusSuccess
+						determinedMessage = "Node executed successfully."
 					} else {
-						nodeRes.Status = plan.StatusSuccess
-						nodeRes.Message = "Node completed; some hosts may have been skipped by precheck."
+						determinedStatus = plan.StatusSuccess
+						determinedMessage = "Node completed; some hosts may have been skipped by precheck."
 					}
 				}
-				nodeRes.EndTime = time.Now()
+				endTime := time.Now()
+				mu.Lock()
+				nodeRes.Status = determinedStatus
+				nodeRes.Message = determinedMessage
+				nodeRes.EndTime = endTime
+				mu.Unlock()
 
 				mu.Lock()
 				processedNodesCount++
@@ -300,7 +315,7 @@ func (e *dagExecutor) runStepOnHost(stepCtx step.StepContext, s step.Step) *plan
 	hr := plan.NewHostResult(currentHost.GetName())
 	engineLogger := stepCtx.GetLogger().With("engine_step_runner", s.Meta().Name, "host", currentHost.GetName())
 
-	engineLogger.Debugf("Running Precheck") // Changed V(1).Info to Debugf
+	engineLogger.Debugf("Running Precheck")         // Changed V(1).Info to Debugf
 	isDone, err := s.Precheck(stepCtx, currentHost) // Pass currentHost, stepCtx is already host-scoped conceptually
 	if err != nil {
 		hr.Status = plan.StatusFailed
@@ -402,6 +417,7 @@ func (e *dagExecutor) markDependentsSkipped(logger *logger.Logger, g *plan.Execu
 	processedNodesCount *int) {
 
 	for _, depID := range dependentsGraph[sourceNodeID] {
+
 		if failedOrSkippedNodes[depID] {
 			continue
 		}

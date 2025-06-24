@@ -10,9 +10,8 @@ import (
 	"strings"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/logger" // For logger.Logger
 	"github.com/mensylisir/kubexm/pkg/spec"
-	"github.com/mensylisir/kubexm/pkg/step"   // For step.Step and step.StepContext
+	"github.com/mensylisir/kubexm/pkg/step" // For step.Step and step.StepContext
 )
 
 // ExtractArchiveStep extracts an archive (e.g., .tar.gz) to a specified directory.
@@ -49,7 +48,7 @@ func (s *ExtractArchiveStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *ExtractArchiveStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *ExtractArchiveStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 
 	// Check if DestinationDir exists
@@ -86,7 +85,7 @@ func (s *ExtractArchiveStep) Precheck(ctx runtime.StepContext, host connector.Ho
 	return false, nil // Let Run proceed to ensure correct state if not using ExpectedFiles for precheck
 }
 
-func (s *ExtractArchiveStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *ExtractArchiveStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 
 	if s.Sudo {
@@ -140,7 +139,6 @@ func (s *ExtractArchiveStep) Run(ctx runtime.StepContext, host connector.Host) e
 			return fmt.Errorf("tar entry %s attempts to escape destination directory %s", header.Name, s.DestinationDir)
 		}
 
-
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(targetPath, os.FileMode(header.Mode)); err != nil {
@@ -166,12 +164,12 @@ func (s *ExtractArchiveStep) Run(ctx runtime.StepContext, host connector.Host) e
 			// Ensure symlink target is also sanitized and within bounds.
 			linkTarget := filepath.Join(filepath.Dir(targetPath), header.Linkname)
 			if !strings.HasPrefix(filepath.Clean(linkTarget), filepath.Clean(s.DestinationDir)+string(os.PathSeparator)) {
-                 // Allow symlinks within the same extraction directory, even if they point "up" locally
-                 // as long as the final resolved path is within DestinationDir. This is complex.
-                 // Safest for now: if header.Linkname itself contains '..', be very careful.
-                 // For now, we will create symlink as specified. Security review needed for general purpose use.
-                 // logger.Warn("Symlink target might be outside destination. Review carefully.", "target", targetPath, "link", header.Linkname)
-            }
+				// Allow symlinks within the same extraction directory, even if they point "up" locally
+				// as long as the final resolved path is within DestinationDir. This is complex.
+				// Safest for now: if header.Linkname itself contains '..', be very careful.
+				// For now, we will create symlink as specified. Security review needed for general purpose use.
+				// logger.Warn("Symlink target might be outside destination. Review carefully.", "target", targetPath, "link", header.Linkname)
+			}
 			if err := os.Symlink(header.Linkname, targetPath); err != nil {
 				return fmt.Errorf("failed to create symlink %s -> %s: %w", targetPath, header.Linkname, err)
 			}
@@ -193,7 +191,7 @@ func (s *ExtractArchiveStep) Run(ctx runtime.StepContext, host connector.Host) e
 	return nil
 }
 
-func (s *ExtractArchiveStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *ExtractArchiveStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	// Rolling back an extraction means removing the DestinationDir.
 	// This could be destructive if other files were in DestinationDir not from this archive.

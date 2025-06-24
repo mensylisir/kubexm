@@ -2,9 +2,9 @@ package greeting
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/connector"
 
 	"github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/step/common" // For PrintMessageStep
 	"github.com/mensylisir/kubexm/pkg/task"
 )
@@ -37,12 +37,12 @@ func NewGreetingTask() task.Task {
 }
 
 // IsRequired for GreetingTask is always true as it's a cosmetic step.
-func (t *GreetingTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
+func (t *GreetingTask) IsRequired(ctx task.TaskContext) (bool, error) {
 	return true, nil
 }
 
 // Plan generates the execution fragment for displaying the greeting.
-func (t *GreetingTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
+func (t *GreetingTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
 	fragment := task.NewExecutionFragment()
 
 	controlHost, err := ctx.GetControlNode()

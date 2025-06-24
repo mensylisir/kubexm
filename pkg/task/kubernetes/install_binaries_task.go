@@ -1,10 +1,6 @@
 package kubernetes
 
 import (
-	// "fmt"
-	// "github.com/mensylisir/kubexm/pkg/connector"
-	// "github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
 	// resource "github.com/mensylisir/kubexm/pkg/resource"
 	// commonsteps "github.com/mensylisir/kubexm/pkg/step/common"
@@ -35,12 +31,12 @@ func NewInstallBinariesTask( /*kubeVersion, etcdVersion, targetDir string*/ ) ta
 	}
 }
 
-func (t *InstallBinariesTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
+func (t *InstallBinariesTask) IsRequired(ctx task.TaskContext) (bool, error) {
 	// Typically always required unless binaries are pre-installed or using a different method.
 	return true, nil // Placeholder
 }
 
-func (t *InstallBinariesTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
+func (t *InstallBinariesTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
 	// Plan would involve:
 	// For each binary (kubelet, kubeadm, kubectl, etcd, etcdctl):
 	//  1. Resource Handle: Create a resource.RemoteBinaryHandle for the binary.

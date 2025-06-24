@@ -1,15 +1,15 @@
 package task
 
 import (
-	"github.com/mensylisir/kubexm/pkg/plan" // Will be used for plan.NodeID, plan.ExecutionNode
+	"github.com/mensylisir/kubexm/pkg/cache" // For cache.TaskCache, cache.ModuleCache, cache.PipelineCache
+	"github.com/mensylisir/kubexm/pkg/plan"  // Will be used for plan.NodeID, plan.ExecutionNode
 	// "github.com/mensylisir/kubexm/pkg/runtime" // No longer needed for runtime.TaskContext
 	"github.com/mensylisir/kubexm/pkg/connector" // For connector.Host
 	"github.com/mensylisir/kubexm/pkg/runner"    // For runner.Facts
-	"github.com/mensylisir/kubexm/pkg/cache"     // For cache.TaskCache, cache.ModuleCache, cache.PipelineCache
 	// "github.com/mensylisir/kubexm/pkg/module" // REMOVED to break cycle
-	"context"                                               // Added
+	"context"                                                // Added
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // Added
-	"github.com/mensylisir/kubexm/pkg/logger"               // Added
+	"github.com/mensylisir/kubexm/pkg/logger"                // Added
 	// "github.com/mensylisir/kubexm/pkg/engine" // Removed, GetEngine removed from TaskContext
 )
 
@@ -19,17 +19,17 @@ type TaskContext interface {
 	GoContext() context.Context
 	GetLogger() *logger.Logger
 	GetClusterConfig() *v1alpha1.Cluster
-	PipelineCache() cache.PipelineCache
+	GetPipelineCache() cache.PipelineCache
 	GetGlobalWorkDir() string
 	// GetEngine() engine.Engine // Removed
 
 	// Methods from former embedded ModuleContext (module-specific)
-	ModuleCache() cache.ModuleCache
+	GetModuleCache() cache.ModuleCache
 
 	// Task-specific methods
 	GetHostsByRole(role string) ([]connector.Host, error)
 	GetHostFacts(host connector.Host) (*runner.Facts, error)
-	TaskCache() cache.TaskCache
+	GetTaskCache() cache.TaskCache
 	GetControlNode() (connector.Host, error)
 }
 

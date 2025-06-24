@@ -3,9 +3,8 @@ package common
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec" // Required for spec.StepMeta
-	"github.com/mensylisir/kubexm/pkg/step"  // Required for step.Step interface
+	"github.com/mensylisir/kubexm/pkg/step" // Required for step.Step interface
 )
 
 // InstallPackagesStep defines a step to install one or more packages.
@@ -38,7 +37,7 @@ func (s *InstallPackagesStep) Meta() *spec.StepMeta {
 
 // Rollback for InstallPackagesStep might attempt to remove the packages.
 // For this example, it's a no-op.
-func (s *InstallPackagesStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *InstallPackagesStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	logger.Info("Attempting rollback (no-op for this version).", "packages", s.Packages)
 	// Example of actual rollback:
@@ -52,7 +51,7 @@ func (s *InstallPackagesStep) Rollback(ctx runtime.StepContext, host connector.H
 }
 
 // Precheck verifies if all specified packages are already installed.
-func (s *InstallPackagesStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *InstallPackagesStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -73,14 +72,14 @@ func (s *InstallPackagesStep) Precheck(ctx runtime.StepContext, host connector.H
 			logger.Info("Package not installed.", "package", pkg)
 			return false, nil // At least one package is not installed
 		}
-		logger.V(1).Info("Package already installed.", "package", pkg)
+		logger.Info("Package already installed.", "package", pkg)
 	}
 	logger.Info("All packages already installed.", "packages", s.Packages)
 	return true, nil // All packages are already installed
 }
 
 // Run executes the package installation.
-func (s *InstallPackagesStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *InstallPackagesStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)

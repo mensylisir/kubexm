@@ -1,10 +1,6 @@
 package kubernetes
 
 import (
-	// "fmt"
-	// "github.com/mensylisir/kubexm/pkg/connector"
-	// "github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
 	// commonsteps "github.com/mensylisir/kubexm/pkg/step/common"
 )
@@ -26,14 +22,14 @@ func NewJoinWorkerNodesTask() task.Task {
 	}
 }
 
-func (t *JoinWorkerNodesTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
+func (t *JoinWorkerNodesTask) IsRequired(ctx task.TaskContext) (bool, error) {
 	// Required if there are worker nodes to join.
 	// workers, _ := ctx.GetHostsByRole("worker") // Or specific worker role
 	// return len(workers) > 0, nil
 	return true, nil // Placeholder
 }
 
-func (t *JoinWorkerNodesTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
+func (t *JoinWorkerNodesTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
 	// Plan would involve:
 	// For each worker node:
 	//  1. Retrieve join command (or token and discovery hash) from TaskCache.

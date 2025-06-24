@@ -1,10 +1,6 @@
 package kubernetes
 
 import (
-	// "fmt"
-	// "github.com/mensylisir/kubexm/pkg/connector"
-	// "github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
 	// commonsteps "github.com/mensylisir/kubexm/pkg/step/common"
 	// kubernetessteps "github.com/mensylisir/kubexm/pkg/step/kubernetes"
@@ -29,14 +25,14 @@ func NewJoinMastersTask() task.Task {
 	}
 }
 
-func (t *JoinMastersTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
+func (t *JoinMastersTask) IsRequired(ctx task.TaskContext) (bool, error) {
 	// Required if there are additional master nodes to join.
 	// masters, _ := ctx.GetHostsByRole("master") // Or specific master role
 	// return len(masters) > 1, nil
 	return true, nil // Placeholder
 }
 
-func (t *JoinMastersTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
+func (t *JoinMastersTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
 	// Plan would involve:
 	// For each additional master node:
 	//  1. Retrieve join command, token, discovery hash, certificate key from TaskCache

@@ -1,19 +1,19 @@
 package common
 
 import (
-	"crypto/sha256"
 	"crypto/md5" // Added for md5 support
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"hash"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/logger" // For logger.Logger
 	"github.com/mensylisir/kubexm/pkg/spec"
-	"github.com/mensylisir/kubexm/pkg/step"   // For step.Step and step.StepContext
+	"github.com/mensylisir/kubexm/pkg/step" // For step.Step and step.StepContext
 )
 
 // FileChecksumStep verifies the checksum of a local file.

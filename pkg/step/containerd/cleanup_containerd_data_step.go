@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 )
@@ -41,7 +40,7 @@ func (s *CleanupContainerdDataStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *CleanupContainerdDataStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *CleanupContainerdDataStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -69,7 +68,7 @@ func (s *CleanupContainerdDataStep) Precheck(ctx runtime.StepContext, host conne
 	return false, nil
 }
 
-func (s *CleanupContainerdDataStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *CleanupContainerdDataStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 
 	if s.DataDir == "" {
@@ -91,7 +90,7 @@ func (s *CleanupContainerdDataStep) Run(ctx runtime.StepContext, host connector.
 	if isActive {
 		logger.Warn("Containerd service is active. It should be stopped before removing data directory. Attempting to stop now...")
 		stopCmd := "systemctl stop containerd"
-		_, _, stopErr := runnerSvc.Run(ctx.GoContext(),conn, stopCmd, s.Sudo)
+		_, stopErr := runnerSvc.Run(ctx.GoContext(), conn, stopCmd, s.Sudo)
 		if stopErr != nil {
 			logger.Error("Failed to stop containerd service before data dir removal. Aborting data removal.", "error", stopErr)
 			return fmt.Errorf("failed to stop containerd before data dir removal: %w", stopErr)
@@ -108,7 +107,7 @@ func (s *CleanupContainerdDataStep) Run(ctx runtime.StepContext, host connector.
 	return nil
 }
 
-func (s *CleanupContainerdDataStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *CleanupContainerdDataStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	logger.Info("Rollback for CleanupContainerdDataStep is not applicable (would mean restoring data, which is not feasible for this step).")
 	return nil

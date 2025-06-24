@@ -9,6 +9,11 @@ import (
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 )
 
+type Factory interface {
+	NewSSHConnector(pool *ConnectionPool) Connector
+	NewLocalConnector() Connector
+}
+
 // OS represents operating system details.
 type OS struct {
 	ID         string // e.g., "ubuntu", "centos", "windows"
@@ -37,15 +42,15 @@ type ProxyCfg struct {
 
 // ConnectionCfg holds all parameters needed to establish a connection.
 type ConnectionCfg struct {
-	Host              string
-	Port              int
-	User              string
-	Password          string
-	PrivateKey        []byte
-	PrivateKeyPath    string
-	Timeout           time.Duration
-	BastionCfg        *BastionCfg // Renamed from Bastion in design doc to match existing code and be clearer
-	ProxyCfg          *ProxyCfg
+	Host           string
+	Port           int
+	User           string
+	Password       string
+	PrivateKey     []byte
+	PrivateKeyPath string
+	Timeout        time.Duration
+	BastionCfg     *BastionCfg // Renamed from Bastion in design doc to match existing code and be clearer
+	ProxyCfg       *ProxyCfg
 }
 
 // ExecOptions is defined in options.go

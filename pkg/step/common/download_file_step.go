@@ -1,20 +1,20 @@
 package common
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"hash"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"crypto/sha256"
-	"encoding/hex"
-	"hash"
 	"strings" // Added for ToLower and EqualFold
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/logger" // For logger.Logger
 	"github.com/mensylisir/kubexm/pkg/spec"
-	"github.com/mensylisir/kubexm/pkg/step"   // For step.Step and step.StepContext
+	"github.com/mensylisir/kubexm/pkg/step" // For step.Step and step.StepContext
 )
 
 // DownloadFileStep downloads a file from a URL to a local path on the target host (usually control node).
@@ -100,7 +100,7 @@ func (s *DownloadFileStep) Precheck(ctx step.StepContext, host connector.Host) (
 	if _, err := os.Stat(s.DestPath); err == nil {
 		// File exists, verify checksum if provided
 		logger.Infof("Destination file already exists. path: %s", s.DestPath)
-		if errVerify := s.verifyChecksum(logger, s.DestPath); errVerify != nil { // Pass logger directly
+		if errVerify := s.verifyChecksum(*logger, s.DestPath); errVerify != nil { // Pass logger directly
 			logger.Warnf("Existing file checksum verification failed for path %s, will re-download. error: %v", s.DestPath, errVerify)
 			// Attempt to remove the corrupted/wrong file before re-downloading
 			if removeErr := os.Remove(s.DestPath); removeErr != nil {
@@ -172,7 +172,7 @@ func (s *DownloadFileStep) Run(ctx step.StepContext, host connector.Host) error 
 		return fmt.Errorf("failed to close destination file %s after writing: %w", s.DestPath, errClose)
 	}
 
-	if err := s.verifyChecksum(logger, s.DestPath); err != nil {
+	if err := s.verifyChecksum(*logger, s.DestPath); err != nil {
 		// Attempt to clean up file if checksum fails
 		_ = os.Remove(s.DestPath)
 		return fmt.Errorf("downloaded file checksum verification failed for %s: %w", s.DestPath, err)

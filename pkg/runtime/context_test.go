@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"path/filepath"
 	"testing"
 
@@ -18,7 +19,7 @@ func TestContext_ArtifactPathHelpers(t *testing.T) {
 	rtCtx := &Context{
 		GlobalWorkDir: globalWD,
 		ClusterConfig: &v1alpha1.Cluster{
-			ObjectMeta: v1alpha1.ObjectMeta{Name: clusterName},
+			ObjectMeta: metav1.ObjectMeta{Name: clusterName},
 		},
 		// ClusterArtifactsDir would be set by builder normally
 	}
@@ -79,7 +80,6 @@ func TestContext_ArtifactPathHelpers(t *testing.T) {
 	fileV4 := "cni-plugins-linux-amd64-v1.1.1.tgz" // Filename might contain version/arch info itself
 	expectedPathV4 := filepath.Join(globalWD, clusterName, compV4, fileV4)
 	assert.Equal(t, expectedPathV4, rtCtx.GetFileDownloadPath(compV4, "", "", fileV4))
-
 
 	// Test GetHostDir
 	hostName1 := "node-control-plane"

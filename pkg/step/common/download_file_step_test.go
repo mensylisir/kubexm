@@ -6,11 +6,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/ioutil"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -39,7 +39,7 @@ func mockStepContextForDownload(t *testing.T, host connector.Host) step.StepCont
 		GoCtx:  context.Background(),
 		Logger: l,
 		ClusterConfig: &v1alpha1.Cluster{
-			ObjectMeta: v1alpha1.ObjectMeta{Name: "test-cluster-download"},
+			ObjectMeta: metav1.ObjectMeta{Name: "test-cluster-download"},
 			Spec: v1alpha1.ClusterSpec{
 				Global: &v1alpha1.GlobalSpec{
 					WorkDir: filepath.Dir(filepath.Dir(tempGlobalWorkDir)), // $(pwd) for GetBinaryInfo

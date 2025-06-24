@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 )
@@ -19,12 +18,12 @@ const (
 
 // DistributeCNIPluginsArchiveStep uploads the CNI plugins archive to target nodes.
 type DistributeCNIPluginsArchiveStep struct {
-	meta                      spec.StepMeta
-	LocalArchivePathCacheKey  string
-	RemoteTempDir             string
-	RemoteArchiveName         string // Name of the archive file on the remote node (e.g., cni-plugins.tgz)
-	OutputRemotePathCacheKey  string
-	Sudo                      bool
+	meta                     spec.StepMeta
+	LocalArchivePathCacheKey string
+	RemoteTempDir            string
+	RemoteArchiveName        string // Name of the archive file on the remote node (e.g., cni-plugins.tgz)
+	OutputRemotePathCacheKey string
+	Sudo                     bool
 }
 
 // NewDistributeCNIPluginsArchiveStep creates a new DistributeCNIPluginsArchiveStep.
@@ -59,7 +58,7 @@ func (s *DistributeCNIPluginsArchiveStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *DistributeCNIPluginsArchiveStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *DistributeCNIPluginsArchiveStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	if s.RemoteArchiveName == "" {
 		return false, fmt.Errorf("RemoteArchiveName is not set for step %s", s.meta.Name)
@@ -77,16 +76,16 @@ func (s *DistributeCNIPluginsArchiveStep) Precheck(ctx runtime.StepContext, host
 	}
 	if exists {
 		logger.Info("CNI plugins archive already exists on remote host.", "path", remoteArchivePath)
-		ctx.TaskCache().Set(s.OutputRemotePathCacheKey, remoteArchivePath)
+		ctx.GetTaskCache().Set(s.OutputRemotePathCacheKey, remoteArchivePath)
 		return true, nil
 	}
 	logger.Info("CNI plugins archive does not exist on remote host.", "path", remoteArchivePath)
 	return false, nil
 }
 
-func (s *DistributeCNIPluginsArchiveStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *DistributeCNIPluginsArchiveStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
-	localPathValue, found := ctx.TaskCache().Get(s.LocalArchivePathCacheKey)
+	localPathValue, found := ctx.GetTaskCache().Get(s.LocalArchivePathCacheKey)
 	if !found {
 		return fmt.Errorf("local CNI plugins archive path not found in task cache with key '%s'", s.LocalArchivePathCacheKey)
 	}
@@ -95,12 +94,12 @@ func (s *DistributeCNIPluginsArchiveStep) Run(ctx runtime.StepContext, host conn
 		return fmt.Errorf("invalid local CNI plugins archive path in task cache: got '%v'", localPathValue)
 	}
 	if s.RemoteArchiveName == "" {
-        s.RemoteArchiveName = filepath.Base(localPath)
-        logger.Info("RemoteArchiveName not set, derived from local path.", "name", s.RemoteArchiveName)
-    }
+		s.RemoteArchiveName = filepath.Base(localPath)
+		logger.Info("RemoteArchiveName not set, derived from local path.", "name", s.RemoteArchiveName)
+	}
 	if s.RemoteArchiveName == "" {
-         return fmt.Errorf("RemoteArchiveName is empty and could not be derived for step %s", s.meta.Name)
-    }
+		return fmt.Errorf("RemoteArchiveName is empty and could not be derived for step %s", s.meta.Name)
+	}
 	logger.Info("Retrieved local CNI plugins archive path from cache.", "path", localPath)
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -113,20 +112,20 @@ func (s *DistributeCNIPluginsArchiveStep) Run(ctx runtime.StepContext, host conn
 	}
 	remoteArchivePath := filepath.Join(s.RemoteTempDir, s.RemoteArchiveName)
 	logger.Info("Uploading CNI plugins archive.", "local", localPath, "remote", remoteArchivePath)
-	fileTransferOptions := &connector.FileTransferOptions{ Permissions: "0640", Sudo: s.Sudo }
+	fileTransferOptions := &connector.FileTransferOptions{Permissions: "0640", Sudo: s.Sudo}
 	err = runnerSvc.UploadFile(ctx.GoContext(), localPath, remoteArchivePath, fileTransferOptions, host)
 	if err != nil {
 		return fmt.Errorf("failed to upload CNI plugins archive from %s to %s:%s: %w", localPath, host.GetName(), remoteArchivePath, err)
 	}
 	logger.Info("CNI plugins archive uploaded successfully.", "remotePath", remoteArchivePath)
-	ctx.TaskCache().Set(s.OutputRemotePathCacheKey, remoteArchivePath)
+	ctx.GetTaskCache().Set(s.OutputRemotePathCacheKey, remoteArchivePath)
 	return nil
 }
 
-func (s *DistributeCNIPluginsArchiveStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *DistributeCNIPluginsArchiveStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	if s.RemoteArchiveName == "" {
-		cachedRemotePathVal, found := ctx.TaskCache().Get(s.OutputRemotePathCacheKey)
+		cachedRemotePathVal, found := ctx.GetTaskCache().Get(s.OutputRemotePathCacheKey)
 		if !found {
 			logger.Warn("Remote archive path not in cache and RemoteArchiveName not set for rollback.")
 			return nil
@@ -138,9 +137,9 @@ func (s *DistributeCNIPluginsArchiveStep) Rollback(ctx runtime.StepContext, host
 		}
 		s.RemoteArchiveName = filepath.Base(cachedRemotePath)
 		if s.RemoteArchiveName == "." || s.RemoteArchiveName == "/" {
-            logger.Warn("Could not reliably derive RemoteArchiveName from cached path for rollback.", "cachedPath", cachedRemotePath)
-            return nil
-        }
+			logger.Warn("Could not reliably derive RemoteArchiveName from cached path for rollback.", "cachedPath", cachedRemotePath)
+			return nil
+		}
 	}
 	remoteArchivePath := filepath.Join(s.RemoteTempDir, s.RemoteArchiveName)
 	logger.Info("Attempting to remove remote CNI plugins archive for rollback.", "path", remoteArchivePath)
@@ -155,7 +154,7 @@ func (s *DistributeCNIPluginsArchiveStep) Rollback(ctx runtime.StepContext, host
 	} else {
 		logger.Info("Successfully removed remote CNI plugins archive (if it existed).", "path", remoteArchivePath)
 	}
-	ctx.TaskCache().Delete(s.OutputRemotePathCacheKey)
+	ctx.GetTaskCache().Delete(s.OutputRemotePathCacheKey)
 	return nil
 }
 

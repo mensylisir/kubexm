@@ -2,19 +2,15 @@ package common
 
 import (
 	"fmt"
-	"path/filepath"
-	"strings"
-
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec" // Added for StepMeta
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 
 // ExtractArchiveStep extracts an archive file on a target host.
-type ExtractArchiveStep struct {
+type ExtractArchive struct {
 	meta                      spec.StepMeta
-	ArchivePathSharedDataKey string // Key to retrieve archive path from Task Cache (Mandatory input)
+	ArchivePathSharedDataKey  string // Key to retrieve archive path from Task Cache (Mandatory input)
 	ExtractionDir             string // Directory to extract contents to (Mandatory)
 	ExtractedDirSharedDataKey string // Task Cache key to store the path of the primary extracted content (Mandatory for output)
 	ArchiveType               string // Optional: e.g., "tar.gz", "zip". If empty, runner.Extract infers.
@@ -24,7 +20,7 @@ type ExtractArchiveStep struct {
 }
 
 // NewExtractArchiveStep creates a new ExtractArchiveStep.
-func NewExtractArchiveStep(
+func NewExtractArchive(
 	instanceName string,
 	archivePathKey, extractionDir, extractedDirKey string,
 	archiveType string, sudo bool, preserveOriginal bool, removeOnRollback bool,
@@ -33,13 +29,13 @@ func NewExtractArchiveStep(
 	if metaName == "" {
 		metaName = "ExtractArchive"
 	}
-	return &ExtractArchiveStep{
+	return &ExtractArchive{
 		meta: spec.StepMeta{
 			Name: metaName,
 			Description: fmt.Sprintf("Extracts archive (from cache key '%s') to '%s' (output key '%s')",
 				archivePathKey, extractionDir, extractedDirKey),
 		},
-		ArchivePathSharedDataKey: archivePathKey,
+		ArchivePathSharedDataKey:  archivePathKey,
 		ExtractionDir:             extractionDir,
 		ExtractedDirSharedDataKey: extractedDirKey,
 		ArchiveType:               archiveType,
@@ -50,11 +46,11 @@ func NewExtractArchiveStep(
 }
 
 // Meta returns the step's metadata.
-func (s *ExtractArchiveStep) Meta() *spec.StepMeta {
+func (s *ExtractArchive) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *ExtractArchiveStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *ExtractArchive) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 
 	if s.ExtractionDir == "" {
@@ -72,7 +68,7 @@ func (s *ExtractArchiveStep) Precheck(ctx runtime.StepContext, host connector.Ho
 	}
 
 	// Check if the target path is already in cache and exists
-	extractedPathVal, pathOk := ctx.TaskCache().Get(s.ExtractedDirSharedDataKey)
+	extractedPathVal, pathOk := ctx.GetTaskCache().Get(s.ExtractedDirSharedDataKey)
 	if pathOk {
 		extractedPath, okStr := extractedPathVal.(string)
 		if okStr && extractedPath != "" {
@@ -108,7 +104,7 @@ func (s *ExtractArchiveStep) Precheck(ctx runtime.StepContext, host connector.Ho
 	return false, nil
 }
 
-func (s *ExtractArchiveStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *ExtractArchive) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 
 	if s.ExtractionDir == "" {
@@ -121,7 +117,7 @@ func (s *ExtractArchiveStep) Run(ctx runtime.StepContext, host connector.Host) e
 		return fmt.Errorf("ExtractedDirSharedDataKey not set for step %s on host %s", s.meta.Name, host.GetName())
 	}
 
-	archivePathVal, archiveOk := ctx.TaskCache().Get(s.ArchivePathSharedDataKey)
+	archivePathVal, archiveOk := ctx.GetTaskCache().Get(s.ArchivePathSharedDataKey)
 	if !archiveOk {
 		return fmt.Errorf("archive path not found in Task Cache using key '%s' for step %s on host %s", s.ArchivePathSharedDataKey, s.meta.Name, host.GetName())
 	}
@@ -176,13 +172,12 @@ func (s *ExtractArchiveStep) Run(ctx runtime.StepContext, host connector.Host) e
 	// 	}
 	// }
 
-
-	ctx.TaskCache().Set(s.ExtractedDirSharedDataKey, determinedExtractedPath)
+	ctx.GetTaskCache().Set(s.ExtractedDirSharedDataKey, determinedExtractedPath)
 	logger.Info("Stored extracted path in Task Cache.", "key", s.ExtractedDirSharedDataKey, "path", determinedExtractedPath)
 	return nil
 }
 
-func (s *ExtractArchiveStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *ExtractArchive) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 
 	if !s.RemoveExtractedOnRollback {
@@ -209,10 +204,10 @@ func (s *ExtractArchiveStep) Rollback(ctx runtime.StepContext, host connector.Ho
 	}
 
 	logger.Info("Successfully removed extraction directory for rollback (or removal was skipped/failed non-critically).", "path", s.ExtractionDir)
-	ctx.TaskCache().Delete(s.ExtractedDirSharedDataKey) // Also remove from cache
+	ctx.GetTaskCache().Delete(s.ExtractedDirSharedDataKey) // Also remove from cache
 	logger.Debug("Removed extracted path key from Task Cache.", "key", s.ExtractedDirSharedDataKey)
 	return nil
 }
 
 // Ensure ExtractArchiveStep implements the step.Step interface.
-var _ step.Step = (*ExtractArchiveStep)(nil)
+var _ step.Step = (*ExtractArchive)(nil)

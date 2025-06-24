@@ -1,10 +1,6 @@
 package addon
 
 import (
-	// "fmt"
-	// "github.com/mensylisir/kubexm/pkg/connector"
-	// "github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
 	// commonsteps "github.com/mensylisir/kubexm/pkg/step/common"
 	// kubernetessteps "github.com/mensylisir/kubexm/pkg/step/kubernetes"
@@ -30,14 +26,14 @@ func NewInstallAddonsTask( /*addonCfgs []v1alpha1.AddonConfig*/ ) task.Task {
 	}
 }
 
-func (t *InstallAddonsTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
+func (t *InstallAddonsTask) IsRequired(ctx task.TaskContext) (bool, error) {
 	// Required if ClusterConfig.Spec.Addons is not empty and contains enabled addons.
 	// clusterCfg := ctx.GetClusterConfig()
 	// return len(clusterCfg.Spec.Addons) > 0, nil // Assuming Addons is []string of names
 	return true, nil // Placeholder
 }
 
-func (t *InstallAddonsTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
+func (t *InstallAddonsTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
 	// Plan would involve:
 	// For each addon specified in ClusterConfig.Spec.Addons:
 	//  1. Determine addon type (Helm chart, YAML manifests).

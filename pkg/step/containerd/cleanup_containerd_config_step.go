@@ -4,18 +4,17 @@ import (
 	"fmt"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 
 // CleanupContainerdConfigStep removes containerd configuration files and the systemd service file.
 type CleanupContainerdConfigStep struct {
-	meta             spec.StepMeta
-	ConfigFilePath   string // e.g., /etc/containerd/config.toml
-	CertsDir         string // e.g., /etc/containerd/certs.d or /etc/docker/certs.d if shared
-	ServiceFilePath  string // e.g., /etc/systemd/system/containerd.service
-	Sudo             bool
+	meta            spec.StepMeta
+	ConfigFilePath  string // e.g., /etc/containerd/config.toml
+	CertsDir        string // e.g., /etc/containerd/certs.d or /etc/docker/certs.d if shared
+	ServiceFilePath string // e.g., /etc/systemd/system/containerd.service
+	Sudo            bool
 }
 
 // NewCleanupContainerdConfigStep creates a new CleanupContainerdConfigStep.
@@ -51,7 +50,7 @@ func (s *CleanupContainerdConfigStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *CleanupContainerdConfigStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *CleanupContainerdConfigStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -66,7 +65,9 @@ func (s *CleanupContainerdConfigStep) Precheck(ctx runtime.StepContext, host con
 
 	allMissing := true
 	for _, p := range pathsToCheck {
-		if p == "" { continue } // Skip if optional path like CertsDir is not provided
+		if p == "" {
+			continue
+		} // Skip if optional path like CertsDir is not provided
 		exists, err := runnerSvc.Exists(ctx.GoContext(), conn, p)
 		if err != nil {
 			logger.Warn("Failed to check existence, assuming it might exist.", "path", p, "error", err)
@@ -85,7 +86,7 @@ func (s *CleanupContainerdConfigStep) Precheck(ctx runtime.StepContext, host con
 	return false, nil
 }
 
-func (s *CleanupContainerdConfigStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *CleanupContainerdConfigStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -100,9 +101,10 @@ func (s *CleanupContainerdConfigStep) Run(ctx runtime.StepContext, host connecto
 		itemsToRemove = append(itemsToRemove, s.CertsDir)
 	}
 
-
 	for _, itemPath := range itemsToRemove {
-		if itemPath == "" { continue}
+		if itemPath == "" {
+			continue
+		}
 		logger.Info("Removing containerd configuration item.", "path", itemPath)
 		if err := runnerSvc.Remove(ctx.GoContext(), conn, itemPath, s.Sudo); err != nil {
 			logger.Error("Failed to remove item (best effort).", "path", itemPath, "error", err)
@@ -118,7 +120,6 @@ func (s *CleanupContainerdConfigStep) Run(ctx runtime.StepContext, host connecto
 		lastErr = fmt.Errorf("failed to remove %s: %w (previous error: %v)", cniConfigDir, err, lastErr)
 	}
 
-
 	if lastErr != nil {
 		return fmt.Errorf("one or more errors occurred during containerd config cleanup: %w", lastErr)
 	}
@@ -126,7 +127,7 @@ func (s *CleanupContainerdConfigStep) Run(ctx runtime.StepContext, host connecto
 	return nil
 }
 
-func (s *CleanupContainerdConfigStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *CleanupContainerdConfigStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	logger.Info("Rollback for CleanupContainerdConfigStep is not applicable.")
 	return nil

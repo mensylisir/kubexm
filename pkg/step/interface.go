@@ -17,19 +17,20 @@ import (
 type StepContext interface {
 	GoContext() context.Context
 	GetLogger() *logger.Logger
-	GetHost() connector.Host // The current host this context is for
+	GetHost() connector.Host  // The current host this context is for
 	GetRunner() runner.Runner // To execute commands, etc.
 	GetClusterConfig() *v1alpha1.Cluster
-	StepCache() cache.StepCache
-	TaskCache() cache.TaskCache
-	ModuleCache() cache.ModuleCache
+	GetStepCache() cache.StepCache
+	GetTaskCache() cache.TaskCache
+	GetModuleCache() cache.ModuleCache
+	GetPipelineCache() cache.PipelineCache
 
 	// Host and cluster information access
 	GetHostsByRole(role string) ([]connector.Host, error)
-	GetHostFacts(host connector.Host) (*runner.Facts, error) // Get facts for any host
-	GetCurrentHostFacts() (*runner.Facts, error)             // Convenience for current host
+	GetHostFacts(host connector.Host) (*runner.Facts, error)              // Get facts for any host
+	GetCurrentHostFacts() (*runner.Facts, error)                          // Convenience for current host
 	GetConnectorForHost(host connector.Host) (connector.Connector, error) // Get connector for any host
-	GetCurrentHostConnector() (connector.Connector, error) // Convenience for current host
+	GetCurrentHostConnector() (connector.Connector, error)                // Convenience for current host
 	GetControlNode() (connector.Host, error)
 
 	// Global configurations

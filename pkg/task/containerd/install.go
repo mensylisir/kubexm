@@ -2,7 +2,6 @@ package containerd
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
@@ -10,7 +9,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/resource"
 	"github.com/mensylisir/kubexm/pkg/runtime"
-	"github.com/mensylisir/kubexm/pkg/step/common" // For common steps like ExtractArchiveStep
 	stepContainerd "github.com/mensylisir/kubexm/pkg/step/containerd"
 	"github.com/mensylisir/kubexm/pkg/step/preflight"
 	"github.com/mensylisir/kubexm/pkg/task"
@@ -44,7 +42,7 @@ func NewInstallContainerdTask(runOnRoles []string) task.Task {
 	}
 }
 
-func (t *InstallContainerdTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
+func (t *InstallContainerdTask) IsRequired(ctx task.TaskContext) (bool, error) {
 	clusterConfig := ctx.GetClusterConfig()
 	// Only run if containerd is the chosen runtime type
 	if clusterConfig.Spec.ContainerRuntime == nil || clusterConfig.Spec.ContainerRuntime.Type != v1alpha1.ContainerdRuntime {
@@ -83,7 +81,6 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 		// t.UseSystemdCgroup = containerdCfg.UseSystemdCgroup (if such field exists)
 	}
 
-
 	// --- Determine target hosts ---
 	targetHosts, err := ctx.GetHostsByRole(t.BaseTask.RunOnRoles...)
 	if err != nil {
@@ -101,9 +98,9 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 	// TODO: Get versions, URLs, checksums from cfg.Spec.ContainerRuntime.Containerd or cfg.Spec.Kubernetes / cfg.Spec.Dependencies
 
 	containerdVersion := cfg.Spec.ContainerRuntime.Version // e.g., "1.7.2"
-	runcVersion := "v1.1.12" // Example, should come from config
-	cniPluginsVersion := "v1.4.0" // Example, should come from config
-	arch := "" // Auto-detect by resource handle
+	runcVersion := "v1.1.12"                               // Example, should come from config
+	cniPluginsVersion := "v1.4.0"                          // Example, should come from config
+	arch := ""                                             // Auto-detect by resource handle
 
 	// Containerd Archive
 	containerdHandle := resource.NewRemoteBinaryHandle("containerd", containerdVersion, arch,
@@ -111,7 +108,9 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 		"", "bin/containerd", "", // BinaryPathInArchive is for the main binary, not the whole archive structure
 	)
 	containerdArchivePlan, err := containerdHandle.EnsurePlan(ctx)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	graph.Merge(containerdArchivePlan)
 	containerdArchiveLocalPathKey := fmt.Sprintf("resource.%s.downloadedPath", containerdHandle.ID())
 
@@ -121,7 +120,9 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 		"", "runc.{{.Arch}}", "", // BinaryPathInArchive is just the filename itself
 	)
 	runcBinaryPlan, err := runcHandle.EnsurePlan(ctx) // This handle's EnsurePlan might be simpler (no extract)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	graph.Merge(runcBinaryPlan)
 	runcBinaryLocalPathKey := fmt.Sprintf("resource.%s.downloadedPath", runcHandle.ID()) // This key points to the runc binary itself
 
@@ -131,19 +132,20 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 		"", "bridge", "", // Dummy BinaryPathInArchive, we care about the archive
 	)
 	cniPluginsArchivePlan, err := cniPluginsHandle.EnsurePlan(ctx)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	graph.Merge(cniPluginsArchivePlan)
 	cniPluginsArchiveLocalPathKey := fmt.Sprintf("resource.%s.downloadedPath", cniPluginsHandle.ID())
-
 
 	// --- 2. Pre-flight checks on all target nodes ---
 	loadModulesStep := preflight.NewLoadKernelModulesStep("", []string{"overlay", "br_netfilter"}, true)
 	loadModulesNodeID := graph.AddNodePerHost("preflight-load-kernel-modules", targetHosts, loadModulesStep)
 
 	sysctlParams := map[string]string{
-		"net.bridge.bridge-nf-call-iptables": "1",
+		"net.bridge.bridge-nf-call-iptables":  "1",
 		"net.bridge.bridge-nf-call-ip6tables": "1", // Good to have for IPv6
-		"net.ipv4.ip_forward":                "1",
+		"net.ipv4.ip_forward":                 "1",
 	}
 	setSysctlStep := preflight.NewSetSystemConfigStep("", sysctlParams, "/etc/sysctl.d/99-kubernetes-cri.conf", true, true)
 	setSysctlNodeID := graph.AddNodePerHost("preflight-set-sysctl-k8s", targetHosts, setSysctlStep)
@@ -153,21 +155,19 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 	graph.AddEntryNodes(loadModulesNodeID)
 	graph.AddEntryNodes(setSysctlNodeID)
 
-
 	// --- 3. Distribution, Extraction, Installation per node (could be parallelized per node if steps don't conflict) ---
 	lastNodeIDs := make(map[string][]plan.NodeID) // Track last step(s) on each node for sequencing
 
 	for _, host := range targetHosts {
-		nodePrefix := fmt.Sprintf("containerd-%s-", strings.ReplaceAll(host.GetName(),".","-"))
+		nodePrefix := fmt.Sprintf("containerd-%s-", strings.ReplaceAll(host.GetName(), ".", "-"))
 		currentDeps := []plan.NodeID{
-            plan.NodeID(fmt.Sprintf("preflight-load-kernel-modules-%s", strings.ReplaceAll(host.GetName(),".","-"))),
-            plan.NodeID(fmt.Sprintf("preflight-set-sysctl-k8s-%s", strings.ReplaceAll(host.GetName(),".","-"))),
-        }
+			plan.NodeID(fmt.Sprintf("preflight-load-kernel-modules-%s", strings.ReplaceAll(host.GetName(), ".", "-"))),
+			plan.NodeID(fmt.Sprintf("preflight-set-sysctl-k8s-%s", strings.ReplaceAll(host.GetName(), ".", "-"))),
+		}
 		// Add dependencies on resource downloads finishing on control node
 		currentDeps = append(currentDeps, containerdArchivePlan.ExitNodes...)
 		currentDeps = append(currentDeps, runcBinaryPlan.ExitNodes...)
 		currentDeps = append(currentDeps, cniPluginsArchivePlan.ExitNodes...)
-
 
 		// Containerd
 		distContainerdStep := stepContainerd.NewDistributeContainerdArchiveStep(nodePrefix+"DistributeContainerd", containerdArchiveLocalPathKey, "", "", "", true)
@@ -182,7 +182,7 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 
 		// Runc
 		distRuncStep := stepContainerd.NewDistributeRuncBinaryStep(nodePrefix+"DistributeRunc", runcBinaryLocalPathKey, "", "runc", "", true) // Assuming remote name is just "runc"
-		distRuncNodeID := graph.AddNode(nodePrefix+"dist-runc", []connector.Host{host}, distRuncStep, currentDeps...) // Depends on containerd install for sequence, or could be parallel
+		distRuncNodeID := graph.AddNode(nodePrefix+"dist-runc", []connector.Host{host}, distRuncStep, currentDeps...)                         // Depends on containerd install for sequence, or could be parallel
 
 		installRuncStep := stepContainerd.NewInstallRuncBinaryStep(nodePrefix+"InstallRunc", stepContainerd.RuncBinaryRemotePathCacheKey, "/usr/local/sbin/runc", true)
 		installRuncNodeID := graph.AddNode(nodePrefix+"install-runc", []connector.Host{host}, installRuncStep, distRuncNodeID)
@@ -199,7 +199,6 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 		// Configuration and Service Management (depends on all binaries being in place)
 		// Ensure dependencies for configure step include installContainerdNodeID, installRuncNodeID, extractCNINodeID
 		allInstallCompleteDeps := []plan.NodeID{installContainerdNodeID, installRuncNodeID, extractCNINodeID}
-
 
 		configureStep := stepContainerd.NewConfigureContainerdStep(nodePrefix+"Configure", t.SandboxImage, t.RegistryMirrors, t.InsecureRegistries, t.ContainerdConfigPath, t.RegistryConfigPath, t.ExtraTomlContent, t.UseSystemdCgroup, true)
 		configureNodeID := graph.AddNode(nodePrefix+"configure", []connector.Host{host}, configureStep, allInstallCompleteDeps...)
@@ -232,7 +231,7 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 	for _, host := range targetHosts {
 		graph.AddExitNodes(lastNodeIDs[host.GetName()]...)
 	}
-    graph.RemoveDuplicateNodeIDs()
+	graph.RemoveDuplicateNodeIDs()
 
 	logger.Info("Containerd installation and configuration plan generated.")
 	return graph, nil
