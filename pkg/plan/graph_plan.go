@@ -53,6 +53,9 @@ type ExecutionNode struct {
 	// This should be populated from Step.Meta().Name.
 	StepName string `json:"stepName"`
 
+	// Hostnames lists the names of the target hosts for marshalling/logging.
+	Hostnames []string `json:"hostnames"`
+
 	// TODO: Add fields for retry strategy, timeout overrides for this specific node, etc.
 }
 
@@ -61,13 +64,14 @@ func NewExecutionGraph(name string) *ExecutionGraph {
 	return &ExecutionGraph{
 		Name:       name,
 		Nodes:      make(map[NodeID]*ExecutionNode),
-		EntryNodes: []NodeID{},
-		ExitNodes:  []NodeID{},
+		EntryNodes: make([]NodeID, 0),
+		ExitNodes:  make([]NodeID, 0),
 	}
 }
 
 // AddNode adds a new execution node to the graph.
 // It returns an error if a node with the same ID already exists.
+// It also populates StepName and Hostnames from the node's Step and Hosts.
 func (g *ExecutionGraph) AddNode(id NodeID, node *ExecutionNode) error {
 	if _, exists := g.Nodes[id]; exists {
 		return fmt.Errorf("node with ID '%s' already exists in the execution graph", id)
@@ -75,9 +79,95 @@ func (g *ExecutionGraph) AddNode(id NodeID, node *ExecutionNode) error {
 	if node == nil {
 		return fmt.Errorf("cannot add a nil node with ID '%s'", id)
 	}
+	if node.Step != nil && node.Step.Meta() != nil { // Ensure Meta is not nil
+		node.StepName = node.Step.Meta().Name
+	}
+	if node.Hostnames == nil && node.Hosts != nil {
+		node.Hostnames = make([]string, len(node.Hosts))
+		for i, h := range node.Hosts {
+			if h != nil { // Ensure host is not nil
+				node.Hostnames[i] = h.GetName()
+			}
+		}
+	}
 	g.Nodes[id] = node
 	return nil
 }
+
+// AddDependency creates a dependency between two nodes (from -> to).
+// It returns an error if either node does not exist or if the dependency would be self-referential.
+func (g *ExecutionGraph) AddDependency(from NodeID, to NodeID) error {
+	if from == to {
+		return fmt.Errorf("cannot add self-dependency for node ID '%s'", from)
+	}
+	if _, exists := g.Nodes[from]; !exists {
+		return fmt.Errorf("source node with ID '%s' not found in graph when adding dependency to '%s'", from, to)
+	}
+	targetNode, exists := g.Nodes[to]
+	if !exists {
+		return fmt.Errorf("target node with ID '%s' not found in graph when adding dependency from '%s'", to, from)
+	}
+
+	// Check for duplicate dependency
+	for _, depID := range targetNode.Dependencies {
+		if depID == from {
+			return nil // Dependency already exists
+		}
+	}
+
+	targetNode.Dependencies = append(targetNode.Dependencies, from)
+	return nil
+}
+
+// CalculateEntryAndExitNodes determines the entry and exit nodes of the graph.
+// This should be called after all nodes and dependencies are added,
+// or if EntryNodes/ExitNodes are not manually maintained.
+func (g *ExecutionGraph) CalculateEntryAndExitNodes() {
+	g.EntryNodes = make([]NodeID, 0)
+	g.ExitNodes = make([]NodeID, 0)
+
+	if len(g.Nodes) == 0 {
+		return
+	}
+
+	allNodeIDs := make(map[NodeID]struct{})
+	hasIncoming := make(map[NodeID]bool)
+	hasOutgoing := make(map[NodeID]bool)
+
+	for id, node := range g.Nodes {
+		allNodeIDs[id] = struct{}{}
+		// Initialize for all nodes
+		hasIncoming[id] = false
+		hasOutgoing[id] = false
+		// Check dependencies specified in the node itself
+		if len(node.Dependencies) > 0 {
+			hasIncoming[id] = true
+		}
+	}
+
+	// Iterate again to mark outgoing dependencies
+	for id, node := range g.Nodes {
+		for _, depID := range node.Dependencies {
+			if _, exists := g.Nodes[depID]; exists { // Ensure dependency exists
+				hasOutgoing[depID] = true
+				hasIncoming[id] = true // Re-affirm target has incoming
+			}
+		}
+	}
+
+	for id := range allNodeIDs {
+		if !hasIncoming[id] {
+			g.EntryNodes = append(g.EntryNodes, id)
+		}
+		if !hasOutgoing[id] {
+			g.ExitNodes = append(g.ExitNodes, id)
+		}
+	}
+	// Ensure uniqueness in case of complex recalculations or manual additions
+	g.EntryNodes = UniqueNodeIDs(g.EntryNodes)
+	g.ExitNodes = UniqueNodeIDs(g.ExitNodes)
+}
+
 
 // UniqueNodeIDs returns a slice with unique NodeIDs from the input.
 // Preserves order of first appearance.
@@ -154,32 +244,43 @@ func (g *ExecutionGraph) Validate() error {
 		return fmt.Errorf("cyclic dependency detected in the execution graph (processed %d nodes, expected %d)", count, len(g.Nodes))
 	}
 
-	// Validate EntryNodes: ensure they exist and have no dependencies if graph is not empty
-	if len(g.Nodes) > 0 {
-		for _, entryID := range g.EntryNodes {
-			node, exists := g.Nodes[entryID]
-			if !exists {
-				return fmt.Errorf("entry node ID '%s' does not exist in the graph's nodes map", entryID)
-			}
-			if len(node.Dependencies) > 0 {
-				// This check might be too strict if EntryNodes are just hints and actual 0-in-degree nodes are calculated by engine.
-				// However, if Pipeline explicitly sets them, they should ideally be true entry points.
-				// For now, let's keep it as a strong validation.
-				// Or, this validation could be part of the engine's pre-flight.
-				// logger.Warn("Entry node '%s' has dependencies defined: %v", entryID, node.Dependencies)
-			}
-		}
+	// Validate EntryNodes: ensure they exist and have no dependencies if graph is not empty.
+	// If EntryNodes were not pre-populated, CalculateEntryAndExitNodes should be called by the graph builder.
+	// The cycle detection already ensures graph coherence if it passes.
+	if len(g.Nodes) > 0 && len(g.EntryNodes) == 0 {
+		// If graph is not empty but has no explicitly set EntryNodes, try to calculate them.
+		// This is a fallback; ideally, the graph constructor (e.g., Pipeline) sets these.
+		// For validation, we primarily care that if EntryNodes *are* set, they are valid.
+		// The Kahn's algorithm for cycle detection inherently finds nodes with in-degree 0.
+		// If count != len(g.Nodes) after Kahn's, it's a cycle or disconnected components that don't start.
+		// If count == len(g.Nodes) but len(g.EntryNodesFromKahn) == 0 (and len(g.Nodes) > 0),
+		// it implies a single node with self-loop if Kahn's was adapted for that, or an issue.
+		// The current Kahn's correctly identifies cycles. If no cycle, there must be entry points.
 	}
 
+	for _, entryID := range UniqueNodeIDs(g.EntryNodes) { // Use unique in case of duplicates
+		node, exists := g.Nodes[entryID]
+		if !exists {
+			return fmt.Errorf("explicitly defined entry node ID '%s' does not exist in the graph's nodes map", entryID)
+		}
+		if len(node.Dependencies) > 0 {
+			// This is a strong check. An explicitly defined "EntryNode" should not have dependencies.
+			// If EntryNodes are just a hint, this validation might be too strict.
+			// Given the DAG model, items in g.EntryNodes should truly be starting points.
+			return fmt.Errorf("explicitly defined entry node ID '%s' has dependencies: %v, which is invalid for an entry node", entryID, node.Dependencies)
+		}
+	}
 
 	// Validate ExitNodes: ensure they exist
-	for _, exitID := range g.ExitNodes {
+	for _, exitID := range UniqueNodeIDs(g.ExitNodes) { // Use unique
 		if _, exists := g.Nodes[exitID]; !exists {
-			return fmt.Errorf("exit node ID '%s' does not exist in the graph's nodes map", exitID)
+			return fmt.Errorf("explicitly defined exit node ID '%s' does not exist in the graph's nodes map", exitID)
 		}
-		// Optionally, one could validate that exit nodes truly have no outgoing dependencies within the graph,
-		// but this is usually guaranteed if the graph construction is correct and cycle validation passes.
+		// Further validation: an exit node should not be a dependency for any other node in g.Nodes.
+		// This is implicitly checked by Kahn's algorithm if it completes successfully and these nodes
+		// are correctly identified as having no outgoing edges to other nodes *within the graph*.
 	}
+
 
 	return nil
 }
