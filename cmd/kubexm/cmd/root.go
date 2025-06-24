@@ -1,12 +1,10 @@
 package cmd
 
 import (
-	"fmt"
-	"os"
-
-	"github.com/mensylisir/kubexm/cmd/kubexm/cmd/cluster" // Import the cluster package
-	"github.com/mensylisir/kubexm/cmd/kubexm/cmd/node"    // Import the node package
 	"github.com/mensylisir/kubexm/cmd/kubexm/cmd/certs"   // Import the certs package
+	"github.com/mensylisir/kubexm/cmd/kubexm/cmd/cluster" // Import the cluster package
+	"github.com/mensylisir/kubexm/cmd/kubexm/cmd/config"  // Import the config package
+	"github.com/mensylisir/kubexm/cmd/kubexm/cmd/node"    // Import the node package
 	"github.com/spf13/cobra"
 	// Homedir will be needed if we add config file handling later
 	// homedir "github.com/mitchellh/go-homedir"
@@ -15,8 +13,8 @@ import (
 )
 
 var (
-	// cfgFile string // For config file, if used
-	// userLicense string // Example global flag
+// cfgFile string // For config file, if used
+// userLicense string // Example global flag
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -56,6 +54,8 @@ func init() {
 	node.AddNodeCommand(rootCmd) // Using the exported function from node package
 	// Add certs command group
 	certs.AddCertsCommand(rootCmd) // Using the exported function from certs package
+	// Add config command group
+	config.AddConfigCommand(rootCmd) // Using the exported function from config package
 	// viper.SetDefault("author", "NAME HERE <EMAIL ADDRESS>")
 	// viper.SetDefault("license", "apache")
 

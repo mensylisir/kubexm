@@ -18,6 +18,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step"
 	"github.com/mensylisir/kubexm/pkg/task"
 	"github.com/mensylisir/kubexm/pkg/util" // For util.BinaryInfo
+	"k8s.io/client-go/tools/record"         // Added for event.Recorder
 )
 
 // Context holds all runtime information, services, and configurations.
@@ -27,6 +28,7 @@ type Context struct {
 	Logger        *logger.Logger
 	Engine        engine.Engine // DAG-aware engine
 	Runner        runner.Runner
+	Recorder      record.EventRecorder // Added event recorder
 	ClusterConfig *v1alpha1.Cluster
 
 	// Global configurations accessible throughout the runtime.
@@ -49,8 +51,9 @@ type Context struct {
 
 	// currentHost and controlNode are for specific contexts (e.g. StepContext)
 	// currentHost will be set by the engine when dispatching a step to a host.
-	currentHost connector.Host
-	controlNode connector.Host // Represents the machine running Kubexm CLI
+	currentHost    connector.Host
+	controlNode    connector.Host            // Represents the machine running Kubexm CLI
+	ConnectionPool *connector.ConnectionPool // Added connection pool
 }
 
 // HostRuntimeInfo holds connection and facts for a specific host.
@@ -95,6 +98,12 @@ func (c *Context) GetRunner() runner.Runner { return c.Runner }
 // GetEngine returns the execution engine.
 func (c *Context) GetEngine() engine.Engine { return c.Engine }
 
+// GetRecorder returns the event recorder.
+func (c *Context) GetRecorder() record.EventRecorder { return c.Recorder }
+
+// GetConnectionPool returns the connection pool.
+func (c *Context) GetConnectionPool() *connector.ConnectionPool { return c.ConnectionPool }
+
 // PipelineCache returns the pipeline-scoped cache.
 func (c *Context) GetPipelineCache() cache.PipelineCache { return c.PipelineCache }
 
@@ -106,7 +115,6 @@ func (c *Context) GetTaskCache() cache.TaskCache { return c.TaskCache }
 
 // StepCache returns the step-scoped cache.
 func (c *Context) GetStepCache() cache.StepCache { return c.StepCache }
-
 
 // --- Host Information Accessors (used by various context levels) ---
 
@@ -182,7 +190,6 @@ func (c *Context) GetHost() connector.Host {
 	return c.currentHost
 }
 
-
 // GetCurrentHostFacts is a convenience method for step.StepContext.
 func (c *Context) GetCurrentHostFacts() (*runner.Facts, error) {
 	if c.currentHost == nil {
@@ -207,7 +214,6 @@ func (c *Context) GetControlNode() (connector.Host, error) {
 	return c.controlNode, nil
 }
 
-
 // --- Global Configuration Accessors ---
 func (c *Context) GetGlobalWorkDir() string { return c.GlobalWorkDir }
 func (c *Context) IsVerbose() bool          { return c.GlobalVerbose }
@@ -215,7 +221,6 @@ func (c *Context) ShouldIgnoreErr() bool    { return c.GlobalIgnoreErr }
 func (c *Context) GetGlobalConnectionTimeout() time.Duration {
 	return c.GlobalConnectionTimeout
 }
-
 
 // --- Artifact Path Helpers (for step.StepContext) ---
 
@@ -293,7 +298,7 @@ func (c *Context) GetFileDownloadPath(componentName, version, arch, fileName str
 	// This function is more about getting the *directory* for a component-version-arch,
 	// or the full path if fileName is also given.
 	if fileName != "" && binInfo.FileName != fileName {
-		 c.Logger.Warnf("Provided fileName '%s' does not match expected fileName '%s' from GetBinaryInfo for component '%s'. Using expected.", fileName, binInfo.FileName, componentName)
+		c.Logger.Warnf("Provided fileName '%s' does not match expected fileName '%s' from GetBinaryInfo for component '%s'. Using expected.", fileName, binInfo.FileName, componentName)
 	}
 	return binInfo.FilePath
 }
@@ -307,7 +312,6 @@ func (c *Context) GetHostDir(hostname string) string {
 	return filepath.Join(c.GetClusterArtifactsDir(), hostname)
 }
 
-
 // --- Context Interface Implementations ---
 // These ensure *Context can be directly used where a more specific context interface is required.
 
@@ -315,6 +319,7 @@ var _ pipeline.PipelineContext = (*Context)(nil)
 var _ module.ModuleContext = (*Context)(nil)
 var _ task.TaskContext = (*Context)(nil)
 var _ step.StepContext = (*Context)(nil)
+
 // Note: engine.EngineExecuteContext might be the same as *Context or a subset.
 // If it's just *Context, no explicit check needed beyond what Engine.Execute expects.
 

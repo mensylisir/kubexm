@@ -21,6 +21,11 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runner"
 	"github.com/mensylisir/kubexm/pkg/util"
 	"path/filepath"
+	// For EventRecorder initialization
+	"k8s.io/client-go/kubernetes/scheme"
+	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/tools/record"
+	// "k8s.io/client-go/kubernetes" // Would be needed for a real clientset
 )
 
 var osReadFileFS = os.ReadFile // Allow mocking for tests related to private key reading
@@ -86,10 +91,11 @@ func (b *RuntimeBuilder) Build(ctx context.Context, engineInst engine.Engine) (*
 
 	// Prepare the main Context structure
 	runtimeCtx := &Context{
-		GoCtx:         ctx,
-		Logger:        log,
-		Engine:        engineInst,
-		Runner:        runnerSvc,
+		GoCtx:  ctx,
+		Logger: log,
+		Engine: engineInst,
+		Runner: runnerSvc,
+		// Recorder will be initialized below
 		ClusterConfig: currentClusterConfig,
 		hostInfoMap:   make(map[string]*HostRuntimeInfo),
 		// Global settings from clusterConfig.Spec.Global
@@ -97,14 +103,29 @@ func (b *RuntimeBuilder) Build(ctx context.Context, engineInst engine.Engine) (*
 		GlobalIgnoreErr:         currentClusterConfig.Spec.Global.IgnoreErr,
 		GlobalConnectionTimeout: currentClusterConfig.Spec.Global.ConnectionTimeout,
 		// Initialize caches
-		PipelineCache: cache.NewPipelineCache(),
-		ModuleCache:   cache.NewModuleCache(),
-		TaskCache:     cache.NewTaskCache(),
-		StepCache:     cache.NewStepCache(),
+		PipelineCache:  cache.NewPipelineCache(),
+		ModuleCache:    cache.NewModuleCache(),
+		TaskCache:      cache.NewTaskCache(),
+		StepCache:      cache.NewStepCache(),
+		ConnectionPool: connectionPool, // Assign created pool to context
 	}
 	if runtimeCtx.GlobalConnectionTimeout <= 0 { // Ensure a sensible default
 		runtimeCtx.GlobalConnectionTimeout = 30 * time.Second
 	}
+
+	// Initialize EventRecorder
+	// For a real implementation, a Kubernetes clientset would be needed.
+	// For now, creating a simple broadcaster and recorder.
+	// This might need to be adjusted if a real clientset becomes available in the builder.
+	eventBroadcaster := record.NewBroadcaster()
+	// TODO: If running inside a K8s cluster, use a proper event sink.
+	// For CLI tool, logging events might be sufficient initially.
+	// eventBroadcaster.StartLogging(log.ZapLogger().Sugar().Infof) // Example: log events
+	// If you have a corev1.EventsGetter (from a clientset), you'd use:
+	// eventBroadcaster.StartRecordingToSink(&corev1.EventSinkImpl{Interface: corev1Client.Events("")})
+	// As a placeholder, we'll create a recorder that doesn't sink to API server.
+	// This recorder will effectively be a no-op for API server events but allows the field to be set.
+	runtimeCtx.Recorder = eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: "kubexm-cli"})
 
 	// Setup working directories on the control machine
 	if err := b.setupGlobalWorkDirs(runtimeCtx); err != nil {
@@ -157,11 +178,11 @@ func (b *RuntimeBuilder) setupGlobalWorkDirs(rc *Context) error {
 
 	// Create standard subdirectories within the cluster's GlobalWorkDir
 	dirsToCreate := map[string]string{
-		"logs":             filepath.Join(rc.GlobalWorkDir, common.DefaultLogsDir),
-		"certs":            rc.GetCertsDir(), // Uses accessor which builds path from GlobalWorkDir
-		"etcd_certs":       rc.GetEtcdCertsDir(),
-		"etcd_artifacts":   rc.GetEtcdArtifactsDir(),
-		"k8s_artifacts":    rc.GetKubernetesArtifactsDir(),
+		"logs":              filepath.Join(rc.GlobalWorkDir, common.DefaultLogsDir),
+		"certs":             rc.GetCertsDir(), // Uses accessor which builds path from GlobalWorkDir
+		"etcd_certs":        rc.GetEtcdCertsDir(),
+		"etcd_artifacts":    rc.GetEtcdArtifactsDir(),
+		"k8s_artifacts":     rc.GetKubernetesArtifactsDir(),
 		"runtime_artifacts": rc.GetContainerRuntimeArtifactsDir(),
 	}
 
@@ -243,7 +264,6 @@ func (b *RuntimeBuilder) initializeSingleHost(ctx context.Context, hostCfg v1alp
 		// Proceeding as local if type/address indicates so.
 	}
 
-
 	if isLocal {
 		conn = &connector.LocalConnector{}
 		log.Info("Using LocalConnector.")
@@ -286,7 +306,6 @@ func (b *RuntimeBuilder) initializeSingleHost(ctx context.Context, hostCfg v1alp
 		connCfg.PrivateKey = keyBytes
 		log.Debug("Loaded private key from path.", "path", hostCfg.PrivateKeyPath)
 	}
-
 
 	if err := conn.Connect(ctx, connCfg); err != nil {
 		log.Error(err, "Connection failed")
