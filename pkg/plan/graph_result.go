@@ -26,26 +26,7 @@ type GraphExecutionResult struct {
 	ErrorMessage string `json:"errorMessage,omitempty"`
 }
 
-// NewNodeResult creates a new NodeResult with default values.
-func NewNodeResult(nodeName, stepName string) *NodeResult {
-	return &NodeResult{
-		NodeName:    nodeName,
-		StepName:    stepName,
-		Status:      StatusPending, // Default to Pending
-		StartTime:   time.Now(),    // Set StartTime on creation for active nodes
-		HostResults: make(map[string]*HostResult),
-	}
-}
-
-// NewHostResult creates a new HostResult with default values.
-func NewHostResult(hostName string) *HostResult {
-	return &HostResult{
-		HostName:  hostName,
-		Status:    StatusPending, // Default to Pending
-		StartTime: time.Now(),    // Set StartTime on creation
-		Skipped:   false,
-	}
-}
+// NewGraphExecutionResult creates a new result object for a graph execution.
 func NewGraphExecutionResult(graphName string) *GraphExecutionResult {
 	return &GraphExecutionResult{
 		GraphName:   graphName,
@@ -53,6 +34,13 @@ func NewGraphExecutionResult(graphName string) *GraphExecutionResult {
 		Status:      StatusPending,   // Default to Pending
 		NodeResults: make(map[NodeID]*NodeResult),
 	}
+}
+
+// Finalize sets the end time and overall status of the graph execution.
+func (ger *GraphExecutionResult) Finalize(status Status, message string) {
+	ger.EndTime = time.Now()
+	ger.Status = status
+	ger.ErrorMessage = message // Aligning with existing field name
 }
 
 // NodeResult captures the outcome of a single ExecutionNode's execution.
@@ -67,6 +55,17 @@ type NodeResult struct {
 	HostResults map[string]*HostResult `json:"hostResults"`     // Keyed by HostName. This structure remains the same.
 }
 
+// NewNodeResult creates a new NodeResult with default values.
+func NewNodeResult(nodeName, stepName string) *NodeResult {
+	return &NodeResult{
+		NodeName:    nodeName,
+		StepName:    stepName,
+		Status:      StatusPending, // Default to Pending
+		StartTime:   time.Now(),    // Set StartTime on creation for active nodes
+		HostResults: make(map[string]*HostResult),
+	}
+}
+
 // HostResult captures the outcome of a single step on a single host.
 // This structure is fundamental and does not need to change.
 type HostResult struct {
@@ -78,4 +77,14 @@ type HostResult struct {
 	StartTime time.Time `json:"startTime"`
 	EndTime   time.Time `json:"endTime"`
 	Skipped   bool      `json:"skipped"` // Skipped due to precheck, not dependency failure.
+}
+
+// NewHostResult creates a new HostResult with default values.
+func NewHostResult(hostName string) *HostResult {
+	return &HostResult{
+		HostName:  hostName,
+		Status:    StatusPending, // Default to Pending
+		StartTime: time.Now(),    // Set StartTime on creation
+		Skipped:   false,
+	}
 }
