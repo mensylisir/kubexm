@@ -34,7 +34,7 @@ func (m *WebServerModule) Tasks() []task.Task {
 // Plan generates the execution plan for all relevant tasks within this module.
 func (m *WebServerModule) Plan(ctx ModuleContext) (*task.ExecutionFragment, error) { // Changed return type to *task.ExecutionFragment
 	// modulePlan := &plan.ExecutionPlan{Phases: []plan.Phase{}} // Old plan structure
-	moduleFragment := task.NewEmptyFragment() // Initialize with an empty fragment
+	moduleFragment := task.NewEmptyFragment(m.Name() + "-base") // Initialize with an empty fragment, give it a name
 
 	// The issue description implies ModuleContext can be asserted to TaskContext.
 	// This might need refinement if the context hierarchy is different.

@@ -5,44 +5,95 @@ import (
 	"context"
 	"io"
 	"os"
-	"strings"
+	"path/filepath"
+	// "strings" // Removed unused import
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
+	"github.com/mensylisir/kubexm/pkg/cache"
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/logger"
-	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/runner"
+	"github.com/mensylisir/kubexm/pkg/step"
 )
 
 // mockUISContext provides a minimal context for testing UserInputStep.
 type mockUISContext struct {
-	runtime.StepContext
-	logger *logger.Logger
-	goCtx  context.Context
+	logger        *logger.Logger
+	goCtx         context.Context
+	clusterConfig *v1alpha1.Cluster
+	globalWorkDir string
+	controlNode   connector.Host
 }
 
 func newMockUISContext(t *testing.T) *mockUISContext {
-	l, _ := logger.New(logger.DefaultConfig())
+	l, _ := logger.NewLogger(logger.DefaultOptions())
+	tempGlobalWorkDir, err := os.MkdirTemp("", "test-gwd-uis-") // Changed ioutil.TempDir to os.MkdirTemp
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(tempGlobalWorkDir) })
+
+	controlHostSpec := v1alpha1.HostSpec{Name: "control-node", Type: "local", Address: "127.0.0.1", Roles: []string{"control-node"}, Arch: "amd64"}
+	controlNode := connector.NewHostFromSpec(controlHostSpec)
+
+	clusterName := "testcluster"
+	baseWorkDirForConfig := filepath.Dir(filepath.Dir(tempGlobalWorkDir))
+
+
 	return &mockUISContext{
 		logger: l,
 		goCtx:  context.Background(),
+		globalWorkDir: tempGlobalWorkDir,
+		controlNode: controlNode,
+		clusterConfig: &v1alpha1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{Name: clusterName}, // Corrected
+			Spec: v1alpha1.ClusterSpec{
+				Global: &v1alpha1.GlobalSpec{WorkDir: baseWorkDirForConfig},
+			},
+		},
 	}
 }
-func (m *mockUISContext) GetLogger() *logger.Logger { return m.logger }
-func (m *mockUISContext) GoContext() context.Context  { return m.goCtx }
-func (m *mockUISContext) GetHost() connector.Host   { return nil } // Assuming local/control node operation
-// Implement other StepContext methods if any are called by the step, returning default/nil.
-func (m *mockUISContext) GetRunner() runner.Runner                                   { return nil }
+
+// Implement step.StepContext
+func (m *mockUISContext) GoContext() context.Context    { return m.goCtx }
+func (m *mockUISContext) GetLogger() *logger.Logger     { return m.logger }
+func (m *mockUISContext) GetHost() connector.Host       { return nil }
+func (m *mockUISContext) GetRunner() runner.Runner      { return nil }
+func (m *mockUISContext) GetControlNode() (connector.Host, error)    { return m.controlNode, nil }
 func (m *mockUISContext) GetConnectorForHost(h connector.Host) (connector.Connector, error) { return nil, nil }
-func (m *mockUISContext) GetHostFacts(h connector.Host) (*runner.Facts, error)           { return nil, nil }
-func (m *mockUISContext) GetCurrentHostFacts() (*runner.Facts, error)                  { return nil, nil }
 func (m *mockUISContext) GetCurrentHostConnector() (connector.Connector, error)        { return nil, nil }
-func (m *mockUISContext) StepCache() runtime.StepCache                               { return nil }
-func (m *mockUISContext) TaskCache() runtime.TaskCache                               { return nil }
-func (m *mockUISContext) ModuleCache() runtime.ModuleCache                             { return nil }
-func (m *mockUISContext) GetGlobalWorkDir() string                                   { return "/tmp" }
+func (m *mockUISContext) GetHostFacts(h connector.Host) (*runner.Facts, error)           { return &runner.Facts{}, nil }
+func (m *mockUISContext) GetCurrentHostFacts() (*runner.Facts, error)                  { return &runner.Facts{}, nil }
+func (m *mockUISContext) GetStepCache() cache.StepCache          { return cache.NewStepCache() }
+func (m *mockUISContext) GetTaskCache() cache.TaskCache          { return cache.NewTaskCache() }
+func (m *mockUISContext) GetModuleCache() cache.ModuleCache      { return cache.NewModuleCache() }
+func (m *mockUISContext) GetPipelineCache() cache.PipelineCache  { return cache.NewPipelineCache() }
+func (m *mockUISContext) GetClusterConfig() *v1alpha1.Cluster { return m.clusterConfig }
+func (m *mockUISContext) GetHostsByRole(role string) ([]connector.Host, error) { return nil, nil }
+func (m *mockUISContext) GetGlobalWorkDir() string         { return m.globalWorkDir }
+func (m *mockUISContext) IsVerbose() bool                  { return false }
+func (m *mockUISContext) ShouldIgnoreErr() bool            { return false }
+func (m *mockUISContext) GetGlobalConnectionTimeout() time.Duration { return 30 * time.Second }
+func (m *mockUISContext) GetClusterArtifactsDir() string       { return m.globalWorkDir }
+func (m *mockUISContext) GetCertsDir() string                  { return filepath.Join(m.GetClusterArtifactsDir(), "certs") }
+func (m *mockUISContext) GetEtcdCertsDir() string              { return filepath.Join(m.GetCertsDir(), "etcd") }
+func (m *mockUISContext) GetComponentArtifactsDir(componentName string) string {
+	return filepath.Join(m.GetClusterArtifactsDir(), componentName)
+}
+func (m *mockUISContext) GetEtcdArtifactsDir() string          { return m.GetComponentArtifactsDir("etcd") }
+func (m *mockUISContext) GetContainerRuntimeArtifactsDir() string { return m.GetComponentArtifactsDir("container_runtime") }
+func (m *mockUISContext) GetKubernetesArtifactsDir() string    { return m.GetComponentArtifactsDir("kubernetes") }
+func (m *mockUISContext) GetFileDownloadPath(cn, v, a, fn string) string { return "" }
+func (m *mockUISContext) GetHostDir(hostname string) string    { return filepath.Join(m.GetClusterArtifactsDir(), hostname) }
+func (m *mockUISContext) WithGoContext(goCtx context.Context) step.StepContext {
+	m.goCtx = goCtx
+	return m
+}
+var _ step.StepContext = (*mockUISContext)(nil)
 
 
 func TestUserInputStep_NewUserInputStep(t *testing.T) {
@@ -81,16 +132,16 @@ func TestUserInputStep_Run_AssumeYes(t *testing.T) {
 	mockCtx := newMockUISContext(t)
 	uis := NewUserInputStep("", "Prompt", true).(*UserInputStep)
 
-	// Capture stdout to ensure nothing is printed
 	oldStdout := os.Stdout
-	r, w, _ := os.Pipe()
+	r, w, pipeErr := os.Pipe()
+	require.NoError(t, pipeErr)
 	os.Stdout = w
 
 	err := uis.Run(mockCtx, nil)
 	require.NoError(t, err)
 
 	w.Close()
-	os.Stdout = oldStdout // Restore stdout
+	os.Stdout = oldStdout
 	var buf bytes.Buffer
 	_, copyErr := io.Copy(&buf, r)
 	require.NoError(t, copyErr)
@@ -99,27 +150,41 @@ func TestUserInputStep_Run_AssumeYes(t *testing.T) {
 	assert.Empty(t, buf.String(), "Run should not print anything if AssumeYes is true")
 }
 
+func simulateUserInput(t *testing.T, input string) (originalStdin *os.File, cleanup func()) {
+	t.Helper()
+	originalStdin = os.Stdin
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+
+	os.Stdin = r
+	_, err = w.WriteString(input)
+	require.NoError(t, err)
+	w.Close() // Close writer so reader gets EOF
+
+	return originalStdin, func() {
+		os.Stdin = originalStdin
+		r.Close()
+	}
+}
+
 func TestUserInputStep_Run_UserInput_Yes(t *testing.T) {
 	mockCtx := newMockUISContext(t)
 	prompt := "Confirm action?"
 	uis := NewUserInputStep("", prompt, false).(*UserInputStep)
 
-	// Simulate user input "yes"
-	inputBuffer := bytes.NewBufferString("yes\n")
-	oldStdin := os.Stdin
-	os.Stdin = inputBuffer // Replace os.Stdin with our buffer
-	defer func() { os.Stdin = oldStdin }() // Restore os.Stdin
+	_, cleanup := simulateUserInput(t, "yes\n")
+	defer cleanup()
 
-	// Capture stdout to check prompt
 	oldStdout := os.Stdout
-	rStdout, wStdout, _ := os.Pipe()
+	rStdout, wStdout, pipeErr := os.Pipe()
+	require.NoError(t, pipeErr)
 	os.Stdout = wStdout
 
 	err := uis.Run(mockCtx, nil)
 	require.NoError(t, err)
 
 	wStdout.Close()
-	os.Stdout = oldStdout // Restore stdout
+	os.Stdout = oldStdout
 	var outBuf bytes.Buffer
 	_, copyErr := io.Copy(&outBuf, rStdout)
 	require.NoError(t, copyErr)
@@ -133,10 +198,8 @@ func TestUserInputStep_Run_UserInput_No(t *testing.T) {
 	prompt := "Confirm action?"
 	uis := NewUserInputStep("", prompt, false).(*UserInputStep)
 
-	inputBuffer := bytes.NewBufferString("no\n")
-	oldStdin := os.Stdin
-	os.Stdin = inputBuffer
-	defer func() { os.Stdin = oldStdin }()
+	_, cleanup := simulateUserInput(t, "no\n")
+	defer cleanup()
 
 	err := uis.Run(mockCtx, nil)
 	require.Error(t, err)
@@ -148,20 +211,17 @@ func TestUserInputStep_Run_UserInput_InvalidThenYes(t *testing.T) {
 	prompt := "Confirm action?"
 	uis := NewUserInputStep("", prompt, false).(*UserInputStep)
 
-	// Test with an initial invalid input, then "y"
-	inputBuffer := bytes.NewBufferString("maybe\nyes\n") // User types "maybe", then "yes"
-	oldStdin := os.Stdin
-	os.Stdin = inputBuffer
-	defer func() { os.Stdin = oldStdin }()
+	// Current UserInputStep reads only one line.
+	// To test retry logic, UserInputStep.Run would need a loop.
+	// This test will show current behavior with "maybe" as input.
+	_, cleanup := simulateUserInput(t, "maybe\nyes\n")
+	defer cleanup()
 
-	// Capture stdout
 	oldStdout := os.Stdout
-	rStdout, wStdout, _ := os.Pipe()
+	rStdout, wStdout, pipeErr := os.Pipe()
+	require.NoError(t, pipeErr)
 	os.Stdout = wStdout
 
-	// Note: The current implementation of UserInputStep only reads one line.
-	// To test multi-line or retry logic, the step itself would need to change.
-	// This test will effectively test with "maybe" as input, which will be treated as "no".
 	err := uis.Run(mockCtx, nil)
 
 	wStdout.Close()
@@ -173,7 +233,7 @@ func TestUserInputStep_Run_UserInput_InvalidThenYes(t *testing.T) {
 
 	assert.Equal(t, prompt+" [yes/no]: ", outBuf.String())
 	require.Error(t, err)
-	assert.EqualError(t, err, "user declined confirmation") // Because "maybe" is not "yes" or "y"
+	assert.EqualError(t, err, "user declined confirmation") // "maybe" is not "y" or "yes"
 }
 
 

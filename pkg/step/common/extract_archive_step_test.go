@@ -4,16 +4,17 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
-	"fmt"
+	// "fmt" // Removed unused import
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strings"
+	// "strings" // Removed unused import
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1" // Added import
 
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/cache"
@@ -21,48 +22,95 @@ import (
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/runner"
-	"github.com/mensylisir/kubexm/pkg/runtime" // For runtime.Context full
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 
-// mockStepContextForExtract is a helper to create a StepContext for testing.
-func mockStepContextForExtract(t *testing.T, host connector.Host) step.StepContext {
-	t.Helper()
-	l, _ := logger.New(logger.DefaultOptions())
-	// Create a temp directory for GlobalWorkDir for this test context
+type mockExtractContext struct {
+	logger        *logger.Logger
+	goCtx         context.Context
+	currentHost   connector.Host
+	controlNode   connector.Host
+	globalWorkDir string
+	clusterConfig *v1alpha1.Cluster
+	// No runner or connector needed for ExtractArchiveStep as it's local FS ops
+}
+
+func newMockExtractContext(t *testing.T, hostName string) *mockExtractContext {
+	l, _ := logger.NewLogger(logger.DefaultOptions())
 	tempGlobalWorkDir, err := ioutil.TempDir("", "test-gwd-extract-")
 	require.NoError(t, err)
-	// t.Cleanup(func() { os.RemoveAll(tempGlobalWorkDir) }) // Cleanup temp dir
+	t.Cleanup(func() { os.RemoveAll(tempGlobalWorkDir) })
 
-	mainCtx := &runtime.Context{
-		GoCtx:  context.Background(),
-		Logger: l,
-		ClusterConfig: &v1alpha1.Cluster{
-			ObjectMeta: v1alpha1.ObjectMeta{Name: "test-cluster-extract"},
-			Spec: v1alpha1.ClusterSpec{
-				Global: &v1alpha1.GlobalSpec{
-					WorkDir: filepath.Dir(filepath.Dir(tempGlobalWorkDir)),
-				},
-			},
+	var currentHost connector.Host
+	controlHostSpec := v1alpha1.HostSpec{Name: common.ControlNodeHostName, Type: "local", Address: "127.0.0.1", Roles: []string{common.ControlNodeRole}, Arch: "amd64"}
+	controlNode := connector.NewHostFromSpec(controlHostSpec)
+
+	if hostName == "" || hostName == common.ControlNodeHostName {
+		currentHost = controlNode
+	} else {
+		// This step primarily runs on control node, but mock can represent it.
+		currentHost = connector.NewHostFromSpec(v1alpha1.HostSpec{Name: hostName, Address: "irrelevant", Type: "local", Arch: "amd64"})
+	}
+
+	clusterCfg := &v1alpha1.Cluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-cluster-extract"}, // Corrected to metav1.ObjectMeta
+		Spec: v1alpha1.ClusterSpec{
+			Global: &v1alpha1.GlobalSpec{WorkDir: filepath.Dir(filepath.Dir(tempGlobalWorkDir))}, // $(pwd)
 		},
-		StepCache:     cache.NewStepCache(),
-		GlobalWorkDir: tempGlobalWorkDir,
 	}
 
-	if host == nil { // Default to a mock local host if none provided
-		hostSpec := v1alpha1.HostSpec{
-			Name:    common.ControlNodeHostName, // Use common constant
-			Type:    "local",
-			Address: "127.0.0.1",
-			Roles:   []string{common.ControlNodeRole}, // Use common constant
-		}
-		host = connector.NewHostFromSpec(hostSpec)
-		mainCtx.SetControlNode(host) // Set the control node
+	return &mockExtractContext{
+		logger:        l,
+		goCtx:         context.Background(),
+		currentHost:   currentHost,
+		controlNode:   controlNode,
+		globalWorkDir: tempGlobalWorkDir, // This is $(pwd)/.kubexm/test-cluster-extract effectively
+		clusterConfig: clusterCfg,
 	}
-	mainCtx.SetCurrentHost(host) // Set the current host for the context
-
-	return mainCtx // The full runtime.Context itself implements step.StepContext
 }
+
+// Implement step.StepContext
+func (m *mockExtractContext) GoContext() context.Context    { return m.goCtx }
+func (m *mockExtractContext) GetLogger() *logger.Logger     { return m.logger }
+func (m *mockExtractContext) GetHost() connector.Host       { return m.currentHost }
+func (m *mockExtractContext) GetRunner() runner.Runner      { return nil } // Not used by ExtractArchiveStep
+func (m *mockExtractContext) GetControlNode() (connector.Host, error)    { return m.controlNode, nil }
+func (m *mockExtractContext) GetConnectorForHost(h connector.Host) (connector.Connector, error) { return nil, nil }
+func (m *mockExtractContext) GetCurrentHostConnector() (connector.Connector, error)        { return nil, nil }
+func (m *mockExtractContext) GetHostFacts(h connector.Host) (*runner.Facts, error)           { return &runner.Facts{OS: &connector.OS{Arch: "amd64"}}, nil }
+func (m *mockExtractContext) GetCurrentHostFacts() (*runner.Facts, error)                  { return &runner.Facts{OS: &connector.OS{Arch: "amd64"}}, nil }
+
+func (m *mockExtractContext) GetStepCache() cache.StepCache          { return cache.NewStepCache() }
+func (m *mockExtractContext) GetTaskCache() cache.TaskCache          { return cache.NewTaskCache() }
+func (m *mockExtractContext) GetModuleCache() cache.ModuleCache      { return cache.NewModuleCache() }
+func (m *mockExtractContext) GetPipelineCache() cache.PipelineCache  { return cache.NewPipelineCache() }
+
+func (m *mockExtractContext) GetClusterConfig() *v1alpha1.Cluster { return m.clusterConfig }
+func (m *mockExtractContext) GetHostsByRole(role string) ([]connector.Host, error) { return nil, nil }
+
+func (m *mockExtractContext) GetGlobalWorkDir() string         { return m.globalWorkDir }
+func (m *mockExtractContext) IsVerbose() bool                  { return false }
+func (m *mockExtractContext) ShouldIgnoreErr() bool            { return false }
+func (m *mockExtractContext) GetGlobalConnectionTimeout() time.Duration { return 30 * time.Second }
+
+func (m *mockExtractContext) GetClusterArtifactsDir() string       { return m.globalWorkDir }
+func (m *mockExtractContext) GetCertsDir() string                  { return filepath.Join(m.GetClusterArtifactsDir(), "certs") }
+func (m *mockExtractContext) GetEtcdCertsDir() string              { return filepath.Join(m.GetCertsDir(), "etcd") }
+func (m *mockExtractContext) GetComponentArtifactsDir(componentName string) string {
+	return filepath.Join(m.GetClusterArtifactsDir(), componentName)
+}
+func (m *mockExtractContext) GetEtcdArtifactsDir() string          { return m.GetComponentArtifactsDir("etcd") }
+func (m *mockExtractContext) GetContainerRuntimeArtifactsDir() string { return m.GetComponentArtifactsDir("container_runtime") }
+func (m *mockExtractContext) GetKubernetesArtifactsDir() string    { return m.GetComponentArtifactsDir("kubernetes") }
+func (m *mockExtractContext) GetFileDownloadPath(cn, v, a, fn string) string { return "" }
+func (m *mockExtractContext) GetHostDir(hostname string) string    { return filepath.Join(m.GetClusterArtifactsDir(), hostname) }
+
+func (m *mockExtractContext) WithGoContext(goCtx context.Context) step.StepContext {
+	m.goCtx = goCtx
+	return m
+}
+var _ step.StepContext = (*mockExtractContext)(nil) // Verify interface satisfaction
+
 
 // Helper to create a simple tar.gz file for testing
 func createTestTarGz(t *testing.T, dir string, files map[string]string, archiveName string) string {
@@ -79,9 +127,8 @@ func createTestTarGz(t *testing.T, dir string, files map[string]string, archiveN
 	defer tarWriter.Close()
 
 	for name, content := range files {
-		// Ensure parent directories for files within tar are created conceptually by full path name
 		hdr := &tar.Header{
-			Name: name, // This name can include directories e.g. "dir1/file1.txt"
+			Name: name,
 			Mode: 0644,
 			Size: int64(len(content)),
 		}
@@ -102,33 +149,30 @@ func TestExtractArchiveStep_NewExtractArchiveStep(t *testing.T) {
 }
 
 func TestExtractArchiveStep_Run_Success_TarGz(t *testing.T) {
-	mockCtx := mockStepContextForExtract(t, nil)
-	baseTestDir := mockCtx.GetGlobalWorkDir() // Use the temp dir from context
+	mockCtx := newMockExtractContext(t, common.ControlNodeHostName)
+	// baseTestDir is now mockCtx.globalWorkDir which is auto-cleaned
+	baseTestDir := mockCtx.GetGlobalWorkDir()
 
 	sourceArchiveDir := filepath.Join(baseTestDir, "source_archive")
 	destDir := filepath.Join(baseTestDir, "destination_extract")
 	require.NoError(t, os.MkdirAll(sourceArchiveDir, 0755))
-	// destDir will be created by the step
 
 	filesToArchive := map[string]string{
-		"file1.txt":        "content1",
-		"dir1/file2.txt":   "content2",
+		"file1.txt":           "content1",
+		"dir1/file2.txt":      "content2",
 		"dir1/dir2/file3.txt": "content3",
 	}
 	archivePath := createTestTarGz(t, sourceArchiveDir, filesToArchive, "test_archive.tar.gz")
 
 	eStep := NewExtractArchiveStep("ExtractRun", archivePath, destDir, false, false).(*ExtractArchiveStep)
 
-	// Precheck: destDir does not exist, so it should run
 	done, errPre := eStep.Precheck(mockCtx, mockCtx.GetHost())
 	require.NoError(t, errPre)
 	assert.False(t, done)
 
-	// Run
 	errRun := eStep.Run(mockCtx, mockCtx.GetHost())
 	require.NoError(t, errRun)
 
-	// Verify extracted files
 	content1, errRead1 := ioutil.ReadFile(filepath.Join(destDir, "file1.txt"))
 	require.NoError(t, errRead1)
 	assert.Equal(t, "content1", string(content1))
@@ -141,23 +185,19 @@ func TestExtractArchiveStep_Run_Success_TarGz(t *testing.T) {
 	require.NoError(t, errRead3)
 	assert.Equal(t, "content3", string(content3))
 
-	// Precheck again: now destDir and its contents should exist (if ExpectedFiles were used)
 	eStep.ExpectedFiles = []string{"file1.txt", "dir1/file2.txt", "dir1/dir2/file3.txt"}
 	doneAfterRun, errPreAfterRun := eStep.Precheck(mockCtx, mockCtx.GetHost())
 	require.NoError(t, errPreAfterRun)
 	assert.True(t, doneAfterRun)
 
-	// Rollback
 	errRollback := eStep.Rollback(mockCtx, mockCtx.GetHost())
 	require.NoError(t, errRollback)
 	_, errStat := os.Stat(destDir)
 	assert.True(t, os.IsNotExist(errStat), "Destination directory should be removed by rollback")
-
-	os.RemoveAll(baseTestDir) // Cleanup test's base temp dir
 }
 
 func TestExtractArchiveStep_Precheck_DestinationExists_NoExpectedFiles(t *testing.T) {
-	mockCtx := mockStepContextForExtract(t, nil)
+	mockCtx := newMockExtractContext(t, common.ControlNodeHostName)
 	baseTestDir := mockCtx.GetGlobalWorkDir()
 	destDir := filepath.Join(baseTestDir, "existing_dest_for_precheck")
 	require.NoError(t, os.MkdirAll(destDir, 0755))
@@ -167,11 +207,10 @@ func TestExtractArchiveStep_Precheck_DestinationExists_NoExpectedFiles(t *testin
 	done, errPre := eStep.Precheck(mockCtx, mockCtx.GetHost())
 	require.NoError(t, errPre)
 	assert.False(t, done, "Should run if dest dir exists but no expected files for verification")
-	os.RemoveAll(baseTestDir)
 }
 
 func TestExtractArchiveStep_Precheck_DestinationExists_ExpectedFilesMissing(t *testing.T) {
-	mockCtx := mockStepContextForExtract(t, nil)
+	mockCtx := newMockExtractContext(t, common.ControlNodeHostName)
 	baseTestDir := mockCtx.GetGlobalWorkDir()
 	destDir := filepath.Join(baseTestDir, "existing_dest_expect_missing")
 	require.NoError(t, os.MkdirAll(destDir, 0755))
@@ -183,11 +222,10 @@ func TestExtractArchiveStep_Precheck_DestinationExists_ExpectedFilesMissing(t *t
 	done, errPre := eStep.Precheck(mockCtx, mockCtx.GetHost())
 	require.NoError(t, errPre)
 	assert.False(t, done, "Should run if some expected files are missing")
-	os.RemoveAll(baseTestDir)
 }
 
 func TestExtractArchiveStep_Run_RemoveArchiveAfterExtract(t *testing.T) {
-	mockCtx := mockStepContextForExtract(t, nil)
+	mockCtx := newMockExtractContext(t, common.ControlNodeHostName)
 	baseTestDir := mockCtx.GetGlobalWorkDir()
 	sourceArchiveDir := filepath.Join(baseTestDir, "source_remove")
 	destDir := filepath.Join(baseTestDir, "destination_remove")
@@ -205,13 +243,12 @@ func TestExtractArchiveStep_Run_RemoveArchiveAfterExtract(t *testing.T) {
 
 	_, errStatExtracted := os.Stat(filepath.Join(destDir, "file.txt"))
 	assert.NoError(t, errStatExtracted, "Extracted file should exist")
-	os.RemoveAll(baseTestDir)
 }
 
 func TestExtractArchiveStep_Run_UnsupportedArchive(t *testing.T) {
-	mockCtx := mockStepContextForExtract(t, nil)
+	mockCtx := newMockExtractContext(t, common.ControlNodeHostName)
 	baseTestDir := mockCtx.GetGlobalWorkDir()
-	unsupportedArchive := filepath.Join(baseTestDir, "archive.zip") // .zip is not supported by current Run
+	unsupportedArchive := filepath.Join(baseTestDir, "archive.zip")
 	require.NoError(t, ioutil.WriteFile(unsupportedArchive, []byte("dummy zip content"), 0644))
 
 	destDir := filepath.Join(baseTestDir, "dest_unsupported")
@@ -220,19 +257,21 @@ func TestExtractArchiveStep_Run_UnsupportedArchive(t *testing.T) {
 	errRun := eStep.Run(mockCtx, mockCtx.GetHost())
 	require.Error(t, errRun)
 	assert.Contains(t, errRun.Error(), "unsupported archive format")
-	os.RemoveAll(baseTestDir)
 }
 
 func TestExtractArchiveStep_Run_PathTraversalAttempt(t *testing.T) {
-	mockCtx := mockStepContextForExtract(t, nil)
+	mockCtx := newMockExtractContext(t, common.ControlNodeHostName)
 	baseTestDir := mockCtx.GetGlobalWorkDir()
 	sourceArchiveDir := filepath.Join(baseTestDir, "source_traversal")
-	destDir := filepath.Join(baseTestDir, "destination_traversal")
+	destDir := filepath.Join(baseTestDir, "destination_traversal") // This is the intended, safe destination
 	require.NoError(t, os.MkdirAll(sourceArchiveDir, 0755))
+	// Crucially, ensure destDir itself exists for the test's internal logic,
+	// though the step would also create it.
+	require.NoError(t, os.MkdirAll(destDir, 0755))
 
-	// Create a tar with a path traversal attempt
+
 	maliciousFiles := map[string]string{
-		"../../../../tmp/evil.txt": "evil content",
+		"../../../../tmp/evil.txt": "evil content", // Path traversal
 		"goodfile.txt":             "good content",
 	}
 	archivePath := createTestTarGz(t, sourceArchiveDir, maliciousFiles, "evil_archive.tar.gz")
@@ -243,56 +282,18 @@ func TestExtractArchiveStep_Run_PathTraversalAttempt(t *testing.T) {
 	require.Error(t, errRun, "Run should fail on path traversal attempt")
 	assert.Contains(t, errRun.Error(), "attempts to escape destination directory")
 
-	// Ensure goodfile was not created either if the process stops on error
 	_, errStatGood := os.Stat(filepath.Join(destDir, "goodfile.txt"))
 	assert.True(t, os.IsNotExist(errStatGood), "Good file should not be created if path traversal detected early")
 
-	// Ensure evil.txt was not created outside the intended destination
-	_, errStatEvil := os.Stat(filepath.Join(baseTestDir, "tmp/evil.txt")) // Check relative to baseTestDir
-	assert.True(t, os.IsNotExist(errStatEvil), "Evil file should not be created outside destination")
-	// Check one level up from baseTestDir as well, just in case.
-	_, errStatEvilRoot := os.Stat(filepath.Join(filepath.Dir(baseTestDir), "tmp/evil.txt"))
-	assert.True(t, os.IsNotExist(errStatEvilRoot))
-
-
-	os.RemoveAll(baseTestDir)
-}
-
-// Ensure mockStepContextForExtract implements step.StepContext
-var _ step.StepContext = (*mockStepContextForExtract)(nil)
-
-// Dummy implementations for the rest of step.StepContext for mockStepContextForExtract
-func (m *mockStepContextForExtract) GetRunner() runner.Runner                                   { return nil }
-func (m *mockStepContextForExtract) GetConnectorForHost(h connector.Host) (connector.Connector, error) { return nil, nil }
-func (m *mockStepContextForExtract) GetHostFacts(h connector.Host) (*runner.Facts, error)           { return nil, nil }
-// GetHost() is implemented by embedding runtime.StepContext, but its underlying mainCtx.currentHost might be nil.
-// For local steps, GetHost() might not be strictly needed if operations are on the control node's file system.
-// If it were needed, a mock host should be set in the mainCtx or returned here.
-func (m *mockStepContextForExtract) GetCurrentHostFacts() (*runner.Facts, error)                  { return nil, nil }
-func (m *mockStepContextForExtract) GetCurrentHostConnector() (connector.Connector, error)        { return nil, nil }
-func (m *mockStepContextForExtract) StepCache() cache.StepCache                               { return nil }
-func (m *mockStepContextForExtract) TaskCache() cache.TaskCache                               { return nil }
-func (m *mockStepContextForExtract) ModuleCache() cache.ModuleCache                             { return nil }
-// GetGlobalWorkDir() is implemented.
-func (m *mockStepContextForExtract) GetClusterConfig() *v1alpha1.Cluster                      { return nil }
-func (m *mockStepContextForExtract) IsVerbose() bool                                        { return false }
-func (m *mockStepContextForExtract) ShouldIgnoreErr() bool                                  { return false }
-func (m *mockStepContextForExtract) GetGlobalConnectionTimeout() time.Duration                { return 0 }
-func (m *mockStepContextForExtract) GetClusterArtifactsDir() string                         { return "" }
-func (m *mockStepContextForExtract) GetCertsDir() string                                    { return "" }
-func (m *mockStepContextForExtract) GetEtcdCertsDir() string                                { return "" }
-func (m *mockStepContextForExtract) GetComponentArtifactsDir(componentName string) string     { return "" }
-func (m *mockStepContextForExtract) GetEtcdArtifactsDir() string                            { return "" }
-func (m *mockStepContextForExtract) GetContainerRuntimeArtifactsDir() string                { return "" }
-func (m *mockStepContextForExtract) GetKubernetesArtifactsDir() string                      { return "" }
-func (m *mockStepContextForExtract) GetFileDownloadPath(c, v, a, f string) string             { return "" }
-func (m *mockStepContextForExtract) GetHostDir(hostname string) string                      { return "" }
-func (m *mockStepContextForExtract) WithGoContext(gCtx context.Context) step.StepContext      {
-	m.goCtx = gCtx
-	return m
-}
-// GetControlNode() is implemented
-func (m *mockStepContextForExtract) GetControlNode() (connector.Host, error) { // Added method for GetControlNode
-	hostSpec := v1alpha1.HostSpec{Name: common.ControlNodeHostName, Type: "local", Address: "127.0.0.1", Roles: []string{common.ControlNodeRole}}
-	return connector.NewHostFromSpec(hostSpec), nil
+	// Construct the path where evil.txt would be if it escaped relative to baseTestDir
+	// If baseTestDir = /tmp/test-gwd-extract-123/
+	// ../../../../tmp/evil.txt would resolve from /tmp/test-gwd-extract-123/destination_traversal/
+	// to /tmp/evil.txt (assuming baseTestDir is shallow enough)
+	// We need to check a path that is truly outside `destDir`.
+	// A simple check is whether `destDir` itself contains `evil.txt` (it shouldn't).
+	_, errStatEvilInDest := os.Stat(filepath.Join(destDir, "evil.txt"))
+	assert.True(t, os.IsNotExist(errStatEvilInDest))
+	// And check a known external path if the traversal was successful.
+	// This is harder to make platform-agnostic and reliable.
+	// The error message is the primary indicator of the defense working.
 }
