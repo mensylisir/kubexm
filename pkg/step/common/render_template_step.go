@@ -44,15 +44,20 @@ func (s *RenderTemplateStep) Meta() *spec.StepMeta {
 }
 
 // Precheck for RenderTemplateStep:
-// A robust precheck would render the template and compare its content with the remote file.
-// For simplicity, this precheck will only check if the remote file exists.
-// If it exists, we assume it's correct. This means changes to template data
-// or content won't trigger a re-render unless the file is manually deleted.
+// Renders the template in memory and compares its content with the remote file.
 // Returns:
-//   - bool: true if the remote file exists (step considered done/skipped).
+//   - bool: true if the remote file exists and content matches (step considered done/skipped).
 //   - error: Any error encountered during the check.
 func (s *RenderTemplateStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
+
+	// 1. Render the template in memory to get the expected content.
+	expectedContent, errRender := util.RenderTemplate(s.TemplateContent, s.Data)
+	if errRender != nil {
+		logger.Error(errRender, "Failed to render template locally for precheck comparison.")
+		// This is an error in the step's own configuration or data, so fail the precheck.
+		return false, fmt.Errorf("failed to render template for precheck comparison on step %s: %w", s.meta.Name, errRender)
+	}
 
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -60,25 +65,40 @@ func (s *RenderTemplateStep) Precheck(ctx step.StepContext, host connector.Host)
 		return false, fmt.Errorf("Precheck: failed to get connector for host %s: %w", host.GetName(), err)
 	}
 
+	// 2. Check if remote file exists.
 	exists, err := runnerSvc.Exists(ctx.GoContext(), conn, s.RemoteDestPath)
 	if err != nil {
-		// If error checking existence (e.g. permission denied to parent dir), better to try Run.
 		logger.Warn("Failed to check existence of remote file, assuming it needs to be rendered.", "path", s.RemoteDestPath, "error", err)
+		return false, nil // Let Run proceed.
+	}
+
+	if !exists {
+		logger.Info("Remote destination file does not exist. Template needs to be rendered.", "path", s.RemoteDestPath)
 		return false, nil
 	}
 
-	if exists {
-		// TODO: Implement content comparison for a more robust precheck.
-		// This would involve:
-		// 1. Render template locally (in memory).
-		// 2. Read remote file content using runnerSvc.ReadFile().
-		// 3. Compare.
-		// For now, existence is sufficient to skip.
-		logger.Info("Remote destination file already exists. Step considered done (no content check).", "path", s.RemoteDestPath)
+	// 3. Remote file exists, read its content.
+	logger.Info("Remote destination file exists, reading content for comparison.", "path", s.RemoteDestPath)
+	remoteContentBytes, errRead := runnerSvc.ReadFile(ctx.GoContext(), conn, s.RemoteDestPath)
+	if errRead != nil {
+		logger.Warn("Failed to read remote file for content comparison, assuming it needs to be re-rendered.", "path", s.RemoteDestPath, "error", errRead)
+		return false, nil // Let Run proceed.
+	}
+	remoteContent := string(remoteContentBytes)
+
+	// 4. Compare content. Normalize line endings for a more robust comparison.
+	normalizedExpectedContent := strings.ReplaceAll(strings.TrimSpace(expectedContent), "\r\n", "\n")
+	normalizedRemoteContent := strings.ReplaceAll(strings.TrimSpace(remoteContent), "\r\n", "\n")
+
+	if normalizedExpectedContent == normalizedRemoteContent {
+		logger.Info("Remote file content matches rendered template. Step considered done.", "path", s.RemoteDestPath)
 		return true, nil
 	}
 
-	logger.Info("Remote destination file does not exist. Template needs to be rendered.", "path", s.RemoteDestPath)
+	logger.Info("Remote file content does not match rendered template. Step needs to run.", "path", s.RemoteDestPath)
+	// For debugging, one might log the diff or parts of the content.
+	// logger.Debug("Expected content snippet", "content", firstNLines(normalizedExpectedContent, 5))
+	// logger.Debug("Remote content snippet", "content", firstNLines(normalizedRemoteContent, 5))
 	return false, nil
 }
 

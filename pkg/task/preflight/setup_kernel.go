@@ -74,20 +74,18 @@ func (t *SetupKernelTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment
 	// Create Step instances
 	// IMPORTANT: These New...Step functions must return objects implementing step.Step
 	// And they should take necessary parameters directly, not "StepSpec" structs.
-	// func NewLoadKernelModulesStep(instanceName string, modules []string, sudo bool) step.Step
 	loadModulesStepName := fmt.Sprintf("%s-LoadModules", t.Name())
-	loadModulesStep := steppreflight.NewLoadKernelModulesStep(loadModulesStepName, kernelModules, true) // Assuming sudo true
+	// Using os.NewLoadKernelModulesStep(instanceName string, modules []string, sudo bool, confFile string)
+	// The confFile for modules is often /etc/modules-load.d/<name>.conf
+	// Let LoadKernelModulesStep use its default config file path.
+	loadModulesStep := os.NewLoadKernelModulesStep(loadModulesStepName, kernelModules, true, "") // sudo true, default conf file
 
-	// func NewSetSystemConfigStep(instanceName string, params map[string]string, configFilePath string, reload bool, sudo bool) step.Step
 	setSysctlStepName := fmt.Sprintf("%s-SetSysctl", t.Name())
-	// The 'reload' parameter in SetSystemConfigStep is a bool, not *bool.
-	// The task's 'reloadSysctl' is already a bool.
-	setSysctlStep := steppreflight.NewSetSystemConfigStep(setSysctlStepName, sysctlParams, sysctlConfigPath, reloadSysctl, true) // Assuming sudo true
+	// Using os.NewSetSystemConfigStep(instanceName string, params map[string]string, configFilePath string, reload bool, sudo bool)
+	setSysctlStep := os.NewSetSystemConfigStep(setSysctlStepName, sysctlParams, sysctlConfigPath, reloadSysctl, true) // sudo true
 
 	// Define ExecutionNodes
-	nodes := make(map[plan.NodeID]*plan.ExecutionNode)
-	var entryNodes []plan.NodeID
-	var exitNodes []plan.NodeID
+	fragment := task.NewExecutionFragment(t.Name() + "-Fragment")
 
 	allHosts, err := ctx.GetHostsByRole(t.BaseTask.RunOnRoles...) // Use roles from BaseTask
 	if err != nil {
@@ -98,39 +96,35 @@ func (t *SetupKernelTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment
 		logger.Info("No hosts targeted for this task based on roles, returning empty fragment.")
 		return task.NewEmptyFragment(), nil
 	}
-	logger.Debug("Targeting hosts", "count", len(allHosts))
+	logger.Debug("Targeting hosts for kernel setup", "count", len(allHosts))
 
+	// Node for loading kernel modules (runs on all target hosts)
+	nodeIDLoadModules, _ := fragment.AddNode(&plan.ExecutionNode{
+		Name:     loadModulesStepName, // Use step's instance name
+		Step:     loadModulesStep,
+		Hosts:    allHosts,
+		StepName: loadModulesStep.Meta().Name,
+	})
 
-	// Node for loading kernel modules
-	nodeIDLoadModules := plan.NodeID(fmt.Sprintf("%s-%s", t.Name(), "load-modules"))
-	nodes[nodeIDLoadModules] = &plan.ExecutionNode{
-		Name:         "Load Kernel Modules",
-		Step:         loadModulesStep,
-		Hosts:        allHosts,
-		StepName:     loadModulesStep.Meta().Name,
-		Dependencies: []plan.NodeID{}, // No internal dependencies for this node
-	}
-	entryNodes = append(entryNodes, nodeIDLoadModules)
+	// Node for setting sysctl parameters (runs on all target hosts)
+	// This node depends on the kernel modules being loaded first on each respective host.
+	// This implies a per-host dependency rather than a global one, if AddNode created per-host nodes.
+	// However, if AddNode creates one node for allHosts, then the dependency is global.
+	// Current AddNodePerHost (if used by module) or AddNode (if used directly) strategy matters.
+	// For this task, let's assume these steps apply to all hosts in one go.
+	nodeIDSetSysctl, _ := fragment.AddNode(&plan.ExecutionNode{
+		Name:     setSysctlStepName, // Use step's instance name
+		Step:     setSysctlStep,
+		Hosts:    allHosts,
+		StepName: setSysctlStep.Meta().Name,
+		Dependencies: []plan.NodeID{nodeIDLoadModules},
+	})
 
-	// Node for setting sysctl parameters
-	// This node depends on the kernel modules being loaded first.
-	nodeIDSetSysctl := plan.NodeID(fmt.Sprintf("%s-%s", t.Name(), "set-sysctl"))
-	nodes[nodeIDSetSysctl] = &plan.ExecutionNode{
-		Name:         "Set System Kernel Parameters",
-		Step:         setSysctlStep,
-		Hosts:        allHosts,
-		StepName:     setSysctlStep.Meta().Name,
-		Dependencies: []plan.NodeID{nodeIDLoadModules}, // Depends on modules being loaded
-	}
-	// Since setSysctl depends on loadModules, loadModules is an entry, and setSysctl is an exit.
-	exitNodes = append(exitNodes, nodeIDSetSysctl)
+	fragment.EntryNodes = []plan.NodeID{nodeIDLoadModules}
+	fragment.ExitNodes = []plan.NodeID{nodeIDSetSysctl}
 
-
-	return &task.ExecutionFragment{
-		Nodes:      nodes,
-		EntryNodes: entryNodes, // Only loadModules is an entry point
-		ExitNodes:  exitNodes,  // Only setSysctl is an exit point
-	}, nil
+	logger.Info("Kernel setup task planned.")
+	return fragment, nil
 }
 
 // Ensure SetupKernelTask implements the task.Task interface.
