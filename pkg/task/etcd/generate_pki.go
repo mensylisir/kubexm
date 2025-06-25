@@ -73,89 +73,148 @@ func (t *GenerateEtcdPkiTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFrag
 	controlHost := []connector.Host{controlNodeHosts[0]} // PKI steps run on one control node.
 
 	// Node Names (also used as part of NodeID for uniqueness within task)
-	determinePathNodeName := "DetermineEtcdPKIPath"
-	altNamesNodeName := "GenerateEtcdCertAltNames"
-	genCANodeName := "GenerateEtcdCA"
-	genNodeCertsNodeName := "GenerateEtcdNodeCertificates"
+	// These steps are assumed to exist in pkg/step/pki and are responsible for
+	// generating certificates on the control node.
+	// Their parameters (like output paths, cache keys) need to align with how
+	// runtime.Context provides paths (e.g., ctx.GetEtcdCertsDir()).
 
-	// Step 1: Determine/Ensure Etcd PKI Path
-	// Assuming PKI step constructors are updated: NewXYZStep(instanceName, ...params, sudoBool)
-	// For local PKI ops, sudo might not be needed if paths are user-writable (e.g. in global work dir).
-	// Let's assume sudo:false for these local PKI steps.
-	step1_determinePath := pki.NewDetermineEtcdPKIPathStep(
-		determinePathNodeName, // instanceName for step's Meta
-		"",                    // PKIPathToEnsureSharedDataKey
-		"",                    // OutputPKIPathSharedDataKey
-		false,                 // sudo
+	fragment := task.NewExecutionFragment(t.Name() + "-Fragment")
+
+	// Step 1: Setup PKI Data Context (e.g., base paths for PKI)
+	// This step would populate ModuleCache with necessary base paths or configurations.
+	// The actual KubexmsKubeConf and HostSpecForPKI would be derived from ctx.GetClusterConfig()
+	// and passed to NewSetupEtcdPkiDataContextStep by the Module or Pipeline that creates this Task.
+	// For this task, we assume these are available or derived if needed by sub-steps.
+	// Let's assume this step takes a config and populates derived values into cache.
+	// For now, we'll simplify and assume paths are directly derived from runtime context by cert generation steps.
+
+	// Step 1: Generate Etcd CA
+	// Constructor: NewGenerateCACertStep(instanceName, commonName string, organizations []string, validityDays int, outputDir, baseFilename string)
+	caOutputDir := ctx.GetEtcdCertsDir() // All certs go into the standard etcd certs directory on control node
+	genCaStepName := fmt.Sprintf("%s-GenerateEtcdCA", t.Name())
+	genCaStep := pki.NewGenerateCACertStep(
+		genCaStepName,
+		"etcd-ca", // Common Name for ETCD CA
+		[]string{"kubexm-etcd"}, // Organization
+		3650, // Validity 10 years
+		caOutputDir,
+		"ca-etcd", // Base filename -> ca-etcd.crt, ca-etcd.key
 	)
-	node1_ID := plan.NodeID(fmt.Sprintf("%s-%s", t.Name(), determinePathNodeName))
-	nodes[node1_ID] = &plan.ExecutionNode{
-		Name:         determinePathNodeName,
-		Step:         step1_determinePath,
-		Hosts:        controlHost,
-		Dependencies: []plan.NodeID{},
+	genCaNodeID, _ := fragment.AddNode(&plan.ExecutionNode{
+		Name: genCaStepName, Step: genCaStep, Hosts: controlHost, Dependencies: []plan.NodeID{},
+	})
+
+	// Step 2: Generate Server/Peer certs for each etcd node, and client cert for apiserver
+	// This is a simplification. A real GenerateEtcdNodeCertsStep would loop through etcd nodes
+	// and master nodes (for apiserver-etcd-client) and create individual certs.
+	// It would need SANs (from AltNameHosts, CP Endpoint) and CA paths.
+	// For now, let's represent this as one conceptual step that depends on the CA.
+	// A more detailed implementation would break this into multiple pki.NewGenerateSignedCertStep calls.
+
+	// Example for one etcd node (this would be looped in a real scenario or by a smarter step)
+	// This part demonstrates how individual cert generation would be planned.
+	// A full implementation of GenerateEtcdNodeCertsStep would encapsulate this looping.
+	// For now, let's assume GenerateEtcdPkiTask focuses on CA and one example server cert.
+	// A more complete PKI task/module would handle all certs.
+
+	var lastCertGenNodeID = genCaNodeID
+	etcdNodes, _ := ctx.GetHostsByRole(common.RoleEtcd) // common.RoleEtcd from pkg/common
+
+	for _, etcdHost := range etcdNodes {
+		hostName := etcdHost.GetName()
+		// TODO: SANs should be properly gathered for each host, including its IP and hostname.
+		// This requires HostSpecForAltNames to be correctly populated and passed or derived.
+		// For simplicity, using hostname as CN and only a few SANs.
+		serverCertStepName := fmt.Sprintf("%s-GenerateEtcdServerCert-%s", t.Name(), hostName)
+		serverCertStep := pki.NewGenerateSignedCertStep(
+			serverCertStepName,
+			hostName, // CN
+			[]string{"kubexm-etcd-server"},
+			[]string{hostName, etcdHost.GetAddress()}, // SANs
+			365, // Validity
+			filepath.Join(caOutputDir, "ca-etcd.crt"),
+			filepath.Join(caOutputDir, "ca-etcd.key"),
+			caOutputDir, // Output dir
+			fmt.Sprintf("%s", hostName), // Base filename for server cert (e.g. node1.crt, node1.key)
+			false, true, // Not client, Is server
+		)
+		serverCertNodeID, _ := fragment.AddNode(&plan.ExecutionNode{
+			Name: serverCertStepName, Step: serverCertStep, Hosts: controlHost, Dependencies: []plan.NodeID{genCaNodeID},
+		})
+
+		peerCertStepName := fmt.Sprintf("%s-GenerateEtcdPeerCert-%s", t.Name(), hostName)
+		peerCertStep := pki.NewGenerateSignedCertStep(
+			peerCertStepName,
+			hostName, // CN
+			[]string{"kubexm-etcd-peer"},
+			[]string{hostName, etcdHost.GetAddress()}, // SANs
+			365, // Validity
+			filepath.Join(caOutputDir, "ca-etcd.crt"),
+			filepath.Join(caOutputDir, "ca-etcd.key"),
+			caOutputDir,
+			fmt.Sprintf("peer-%s", hostName), // Base filename for peer cert
+			true, true, // Is client (to other peers), Is server (listens to peers)
+		)
+		peerCertNodeID, _ := fragment.AddNode(&plan.ExecutionNode{
+			Name: peerCertStepName, Step: peerCertStep, Hosts: controlHost, Dependencies: []plan.NodeID{genCaNodeID},
+		})
+		// Server and Peer certs for a node can be generated in parallel after CA.
+		// For a sequence, lastCertGenNodeID would be updated. Here, they parallel genCaNodeID.
+		// The final exit node should be a conceptual "all-certs-for-this-host-done".
+		// For simplicity, let's make the last one in the loop (if any) the one to track.
+		lastCertGenNodeID = peerCertNodeID // Or a merge node if these were parallel.
 	}
 
-	// Step 2: Generate Etcd AltNames
-	step2_altNames := pki.NewGenerateEtcdAltNamesStep(
-		altNamesNodeName, // instanceName
-		t.AltNameHosts,
-		t.ControlPlaneEndpoint,
-		t.DefaultLBDomain,
-		"",    // Output key for AltNames
-		false, // sudo
+	// Generate apiserver-etcd-client certificate
+	// TODO: SANs for apiserver client cert? Usually just CN based.
+	apiserverClientCertStepName := fmt.Sprintf("%s-GenerateApiServerEtcdClientCert", t.Name())
+	apiserverClientCertStep := pki.NewGenerateSignedCertStep(
+		apiserverClientCertStepName,
+		"kube-apiserver-etcd-client", // CN
+		[]string{"kubexm-etcd-client"}, // Organization
+		nil, // SANs for a client cert are less common unless specific mutual TLS scenarios
+		365, // Validity
+		filepath.Join(caOutputDir, "ca-etcd.crt"),
+		filepath.Join(caOutputDir, "ca-etcd.key"),
+		caOutputDir,
+		"apiserver-etcd-client", // Base filename
+		true, false, // Is client, Not server
 	)
-	node2_ID := plan.NodeID(fmt.Sprintf("%s-%s", t.Name(), altNamesNodeName))
-	nodes[node2_ID] = &plan.ExecutionNode{
-		Name:         altNamesNodeName,
-		Step:         step2_altNames,
-		Hosts:        controlHost,
-		Dependencies: []plan.NodeID{node1_ID},
-	}
+	apiserverClientCertNodeID, _ := fragment.AddNode(&plan.ExecutionNode{
+		Name: apiserverClientCertStepName, Step: apiserverClientCertStep, Hosts: controlHost, Dependencies: []plan.NodeID{genCaNodeID},
+	})
 
-	// Step 3: Generate Etcd CA Certificate
-	step3_genCA := pki.NewGenerateEtcdCAStep(
-		genCANodeName, // instanceName
-		"",            // Input PKIPath key
-		"",            // Input KubeConf key (if needed by step, else remove)
-		"",            // Output CA Cert Object key
-		"",            // Output CA Cert Path key
-		"",            // Output CA Key Path key
-		false,         // sudo
-	)
-	node3_ID := plan.NodeID(fmt.Sprintf("%s-%s", t.Name(), genCANodeName))
-	nodes[node3_ID] = &plan.ExecutionNode{
-		Name:         genCANodeName,
-		Step:         step3_genCA,
-		Hosts:        controlHost,
-		Dependencies: []plan.NodeID{node1_ID, node2_ID},
-	}
 
-	// Step 4: Generate Etcd Node Certificates (members, clients)
-	step4_genNodeCerts := pki.NewGenerateEtcdNodeCertsStep(
-		genNodeCertsNodeName, // instanceName
-		"",                   // Input PKIPath key
-		"",                   // Input AltNames key
-		"",                   // Input CA Cert Object key
-		"",                   // Input KubeConf key (if needed)
-		"",                   // Input Hosts key (for which nodes to gen certs, if applicable beyond altnames)
-		"",                   // Output Generated Files List key
-		false,                // sudo
-	)
-	node4_ID := plan.NodeID(fmt.Sprintf("%s-%s", t.Name(), genNodeCertsNodeName))
-	nodes[node4_ID] = &plan.ExecutionNode{
-		Name:         genNodeCertsNodeName,
-		Step:         step4_genNodeCerts,
-		Hosts:        controlHost,
-		Dependencies: []plan.NodeID{node1_ID, node2_ID, node3_ID},
+	fragment.EntryNodes = []plan.NodeID{genCaNodeID}
+	// Exit nodes are all leaf certificate generation nodes
+	fragment.ExitNodes = []plan.NodeID{}
+	if lastCertGenNodeID != genCaNodeID { // If any node certs were added
+		 for _, node := range fragment.Nodes { // Find all nodes that depend only on CA
+			 isLeaf := true
+			 for _, otherNode := range fragment.Nodes {
+				 if otherNode.Step == node.Step { continue }
+				 for _, dep := range otherNode.Dependencies {
+					 if dep == plan.NodeID(node.Name) { // if current node is a dependency for another
+						isLeaf = false
+						break
+					 }
+				 }
+				 if !isLeaf { break }
+			 }
+			 if isLeaf && plan.NodeID(node.Name) != genCaNodeID { // Exclude CA itself if it's a leaf for some reason
+				fragment.ExitNodes = append(fragment.ExitNodes, plan.NodeID(node.Name))
+			 }
+		 }
 	}
+	if len(fragment.ExitNodes) == 0 && genCaNodeID != "" { // If only CA was generated
+	    fragment.ExitNodes = []plan.NodeID{genCaNodeID}
+	}
+	fragment.ExitNodes = append(fragment.ExitNodes, apiserverClientCertNodeID)
+	fragment.ExitNodes = task.UniqueNodeIDs(fragment.ExitNodes)
+
 
 	logger.Info("Planned steps for Etcd PKI generation on control-node.")
-	return &task.ExecutionFragment{
-		Nodes:      nodes,
-		EntryNodes: []plan.NodeID{node1_ID},
-		ExitNodes:  []plan.NodeID{node4_ID},
-	}, nil
+	return fragment, nil
 }
 
 // Ensure GenerateEtcdPkiTask implements the new task.Task interface.

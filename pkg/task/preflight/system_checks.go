@@ -95,47 +95,41 @@ func (t *SystemChecksTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragmen
 	}
 	entryNodes = append(entryNodes, nodeIDMemoryCheck)
 
-	if runDisableSwapStep {
-		disableSwapStepName := fmt.Sprintf("%s-DisableSwap", t.Name())
-		disableSwapStep := steppreflight.NewDisableSwapStep(disableSwapStepName, sudoForSwap)
-		nodeIDDisableSwap := plan.NodeID(disableSwapStepName)
-		nodes[nodeIDDisableSwap] = &plan.ExecutionNode{
-			Name:     "DisableSwapMemory",
-			Step:     disableSwapStep,
-			Hosts:    targetHosts,
-			StepName: disableSwapStep.Meta().Name,
-		}
-		entryNodes = append(entryNodes, nodeIDDisableSwap)
+	// Node 3: CheckOSVersionStep (New Step to be implemented in pkg/step/preflight or pkg/step/os)
+	// For now, this is a placeholder. Assume NewCheckOSVersionStep exists.
+	/*
+	osCheckStepName := fmt.Sprintf("%s-OSCheck", t.Name())
+	// TODO: Get compatible OS list from config or constants
+	compatibleOS := []string{"ubuntu_20.04_amd64", "centos_7_amd64"}
+	osCheckStep := steppreflight.NewCheckOSVersionStep(osCheckStepName, compatibleOS)
+	nodeIDOSCheck := plan.NodeID(osCheckStepName)
+	nodes[nodeIDOSCheck] = &plan.ExecutionNode{
+		Name:     "SystemOSVersionCheck",
+		Step:     osCheckStep,
+		Hosts:    targetHosts,
+		StepName: osCheckStep.Meta().Name,
 	}
+	entryNodes = append(entryNodes, nodeIDOSCheck)
+	*/
 
+	// All checks can run in parallel, so they are all entry and exit nodes of this fragment.
 	exitNodes = append(exitNodes, entryNodes...)
-	// Deduplicate entry and exit nodes in case some were conditionally added
+
 	finalEntryNodes := task.UniqueNodeIDs(entryNodes)
 	finalExitNodes := task.UniqueNodeIDs(exitNodes)
 
+	if len(nodes) == 0 {
+		logger.Info("No system checks were planned for targeted hosts.")
+		return task.NewEmptyFragment(), nil
+	}
 
 	logger.Info("Planned system preflight checks.", "hostCount", len(targetHosts), "nodesCount", len(nodes))
 	return &task.ExecutionFragment{
+		Name:       t.Name() + "-Fragment",
 		Nodes:      nodes,
 		EntryNodes: finalEntryNodes,
 		ExitNodes:  finalExitNodes,
 	}, nil
 }
-
-// Helper for unique node IDs, can be moved to task package
-// func uniqueNodeIDs(ids []plan.NodeID) []plan.NodeID {
-// 	if len(ids) == 0 {
-// 		return []plan.NodeID{}
-// 	}
-// 	seen := make(map[plan.NodeID]bool)
-// 	result := []plan.NodeID{}
-// 	for _, id := range ids {
-// 		if !seen[id] {
-// 			seen[id] = true
-// 			result = append(result, id)
-// 		}
-// 	}
-// 	return result
-// }
 
 var _ task.Task = (*SystemChecksTask)(nil)

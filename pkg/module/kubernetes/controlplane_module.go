@@ -2,106 +2,111 @@ package kubernetes
 
 import (
 	"fmt"
+
 	"github.com/mensylisir/kubexm/pkg/module"
 	"github.com/mensylisir/kubexm/pkg/plan"
+	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
-	// taskK8s "github.com/mensylisir/kubexm/pkg/task/kubernetes" // For actual tasks later
+	taskKube "github.com/mensylisir/kubexm/pkg/task/kubernetes"
 )
 
-// ControlPlaneModule defines the module for setting up Kubernetes control plane components.
+// ControlPlaneModule is responsible for setting up the Kubernetes control plane.
 type ControlPlaneModule struct {
 	module.BaseModule
 }
 
 // NewControlPlaneModule creates a new ControlPlaneModule.
 func NewControlPlaneModule() module.Module {
-	// TODO: Define actual tasks:
-	// - NewGenerateControlPlanePKITask()
-	// - NewInstallAPIServerTask()
-	// - NewInstallSchedulerTask()
-	// - NewInstallControllerManagerTask()
-	// - NewConfigureKubeconfigsTask() // For components and admin
-	moduleTasks := []task.Task{
-		// Example: taskK8s.NewInstallAPIServerTask(),
+	// Define tasks. Actual instances created in Plan if needed.
+	// These tasks will be planned sequentially.
+	tasks := []task.Task{
+		taskKube.NewInstallKubeBinariesTask(nil), // Roles for binaries: all nodes typically
+		taskKube.NewPullImagesTask(nil),          // Roles for images: control-plane and workers
+		taskKube.NewInitControlPlaneTask(),       // Runs on first master
+		taskKube.NewJoinControlPlaneTask(),       // Runs on other masters (conditional)
 	}
-
-	base := module.NewBaseModule("KubernetesControlPlane", moduleTasks)
-	m := &ControlPlaneModule{BaseModule: base}
-	return m
+	base := module.NewBaseModule("KubernetesControlPlaneSetup", tasks)
+	return &ControlPlaneModule{BaseModule: base}
 }
 
-// Plan generates the execution fragment for the ControlPlane module.
 func (m *ControlPlaneModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("module", m.Name())
-	// clusterConfig := ctx.GetClusterConfig() // Available for checks if needed
+	moduleFragment := task.NewExecutionFragment(m.Name() + "-Fragment")
 
-	// TODO: Add enablement checks if necessary (e.g., if there are no master nodes defined)
-
-	logger.Info("Planning Kubernetes Control Plane module (stub implementation)...")
-
-	moduleFragment := task.NewExecutionFragment()
-	var previousTaskExitNodes []plan.NodeID
-	isFirstEffectiveTask := true
-
-	for _, currentTask := range m.Tasks() {
-		taskCtx, ok := ctx.(task.TaskContext)
-		if !ok {
-			return nil, fmt.Errorf("module context cannot be asserted to task context for module %s, task %s", m.Name(), currentTask.Name())
-		}
-
-		taskIsRequired, err := currentTask.IsRequired(taskCtx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check if task %s is required in module %s: %w", currentTask.Name(), m.Name(), err)
-		}
-		if !taskIsRequired {
-			logger.Info("Skipping task as it's not required", "task_name", currentTask.Name())
-			continue
-		}
-
-		logger.Info("Planning task", "task_name", currentTask.Name())
-		taskFrag, err := currentTask.Plan(taskCtx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to plan task %s in module %s: %w", currentTask.Name(), m.Name(), err)
-		}
-
-		if taskFrag == nil || len(taskFrag.Nodes) == 0 {
-			logger.Info("Task returned an empty fragment, skipping merge", "task_name", currentTask.Name())
-			continue
-		}
-
-		for id, node := range taskFrag.Nodes {
-			if _, exists := moduleFragment.Nodes[id]; exists {
-				return nil, fmt.Errorf("duplicate NodeID '%s' from task '%s' in module '%s'", id, currentTask.Name(), m.Name())
-			}
-			moduleFragment.Nodes[id] = node
-		}
-
-		if !isFirstEffectiveTask && len(previousTaskExitNodes) > 0 {
-			for _, entryNodeID := range taskFrag.EntryNodes {
-				if entryNode, ok := moduleFragment.Nodes[entryNodeID]; ok {
-					entryNode.Dependencies = plan.UniqueNodeIDs(append(entryNode.Dependencies, previousTaskExitNodes...))
-				} else {
-					return nil, fmt.Errorf("entry node ID '%s' from task '%s' not found in module fragment", entryNodeID, currentTask.Name())
-				}
-			}
-		} else if isFirstEffectiveTask {
-			moduleFragment.EntryNodes = append(moduleFragment.EntryNodes, taskFrag.EntryNodes...)
-		}
-
-		if len(taskFrag.ExitNodes) > 0 {
-			previousTaskExitNodes = taskFrag.ExitNodes
-			isFirstEffectiveTask = false
-		}
+	taskCtx, ok := ctx.(task.TaskContext)
+	if !ok {
+		return nil, fmt.Errorf("module context cannot be asserted to task.TaskContext for %s", m.Name())
 	}
-	moduleFragment.ExitNodes = append(moduleFragment.ExitNodes, previousTaskExitNodes...)
-	moduleFragment.RemoveDuplicateNodeIDs()
+
+	var previousTaskExitNodes []plan.NodeID
+	isFirstTaskInModule := true
+
+	// Explicitly define task instances to manage their fragments and linking
+	installBinariesTask := taskKube.NewInstallKubeBinariesTask(nil) // Roles can be refined if needed
+	pullImagesTask := taskKube.NewPullImagesTask(nil)
+	initCPTask := taskKube.NewInitControlPlaneTask()
+	joinCPTask := taskKube.NewJoinControlPlaneTask()
+
+	// 1. Install Kube Binaries (kubeadm, kubelet, kubectl) - runs on all nodes
+	logger.Info("Planning task", "task_name", installBinariesTask.Name())
+	binariesFrag, err := installBinariesTask.Plan(taskCtx)
+	if err != nil { return nil, fmt.Errorf("failed to plan %s: %w", installBinariesTask.Name(), err) }
+	if err := moduleFragment.MergeFragment(binariesFrag); err != nil { return nil, err }
+	// This is an entry point for the module
+	moduleFragment.EntryNodes = append(moduleFragment.EntryNodes, binariesFrag.EntryNodes...)
+
+	// 2. Pull Core K8s Images - runs on all nodes, can be parallel to binaries install
+	logger.Info("Planning task", "task_name", pullImagesTask.Name())
+	imagesFrag, err := pullImagesTask.Plan(taskCtx)
+	if err != nil { return nil, fmt.Errorf("failed to plan %s: %w", pullImagesTask.Name(), err) }
+	if err := moduleFragment.MergeFragment(imagesFrag); err != nil { return nil, err }
+	// Also an entry point for the module
+	moduleFragment.EntryNodes = append(moduleFragment.EntryNodes, imagesFrag.EntryNodes...)
+
+	// `previousTaskExitNodes` will be the combined exits of binaries and images tasks,
+	// as InitControlPlaneTask depends on both being done on the first master.
+	previousTaskExitNodes = append(previousTaskExitNodes, binariesFrag.ExitNodes...)
+	previousTaskExitNodes = append(previousTaskExitNodes, imagesFrag.ExitNodes...)
+	previousTaskExitNodes = plan.UniqueNodeIDs(previousTaskExitNodes)
+
+
+	// 3. Init Control Plane (on first master)
+	initCPRequired, err := initCPTask.IsRequired(taskCtx)
+	if err != nil { return nil, fmt.Errorf("failed to check IsRequired for %s: %w", initCPTask.Name(), err) }
+	if initCPRequired {
+		logger.Info("Planning task", "task_name", initCPTask.Name())
+		initCPFrag, err := initCPTask.Plan(taskCtx)
+		if err != nil { return nil, fmt.Errorf("failed to plan %s: %w", initCPTask.Name(), err) }
+		if err := moduleFragment.MergeFragment(initCPFrag); err != nil { return nil, err }
+		plan.LinkFragments(moduleFragment, previousTaskExitNodes, initCPFrag.EntryNodes)
+		previousTaskExitNodes = initCPFrag.ExitNodes
+	} else {
+		logger.Info("Skipping task as it's not required", "task_name", initCPTask.Name())
+	}
+
+	// 4. Join Other Control Plane Nodes (conditional, on other masters)
+	joinCPRequired, err := joinCPTask.IsRequired(taskCtx)
+	if err != nil { return nil, fmt.Errorf("failed to check IsRequired for %s: %w", joinCPTask.Name(), err) }
+	if joinCPRequired {
+		logger.Info("Planning task", "task_name", joinCPTask.Name())
+		joinCPFrag, err := joinCPTask.Plan(taskCtx)
+		if err != nil { return nil, fmt.Errorf("failed to plan %s: %w", joinCPTask.Name(), err) }
+		if err := moduleFragment.MergeFragment(joinCPFrag); err != nil { return nil, err }
+		plan.LinkFragments(moduleFragment, previousTaskExitNodes, joinCPFrag.EntryNodes)
+		previousTaskExitNodes = joinCPFrag.ExitNodes
+	} else {
+		logger.Info("Skipping task as it's not required", "task_name", joinCPTask.Name())
+	}
+
+	moduleFragment.EntryNodes = task.UniqueNodeIDs(moduleFragment.EntryNodes)
+	moduleFragment.ExitNodes = task.UniqueNodeIDs(previousTaskExitNodes)
 
 	if len(moduleFragment.Nodes) == 0 {
-		logger.Info("Kubernetes Control Plane module planned no executable nodes (stub).")
-	} else {
-		logger.Info("Kubernetes Control Plane module planning complete.", "total_nodes", len(moduleFragment.Nodes))
+		logger.Info("ControlPlaneModule planned no executable nodes.")
+		return task.NewEmptyFragment(), nil
 	}
 
+	logger.Info("ControlPlane module planning complete.", "total_nodes", len(moduleFragment.Nodes))
 	return moduleFragment, nil
 }
 
