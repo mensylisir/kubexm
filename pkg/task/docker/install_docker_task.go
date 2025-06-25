@@ -104,130 +104,214 @@ func (t *InstallDockerTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragme
 
 	graph := task.NewExecutionFragment()
 
-	// --- 1. Resource Acquisition (cri-dockerd, CNI plugins) ---
-	criDockerdVersion := "v0.3.10" // Example, from config
-    cniPluginsVersion := "v1.4.0" // Example, from config
+	// --- 1. Resource Acquisition on Control Node (cri-dockerd archive, CNI plugins archive) ---
+	// Docker engine itself is installed via package manager, so no direct binary resource handle for it.
+	criDockerdVersion := "0.3.10" // Example, should come from cfg.Spec.ContainerRuntime.Docker.CriDockerdVersion or similar
+	cniPluginsVersion := "v1.4.0" // Example, consistent with containerd task, should come from config
 	arch := "" // Auto-detect
 
-	criDockerdHandle := resource.NewRemoteBinaryHandle("cri-dockerd", strings.TrimPrefix(criDockerdVersion, "v"), arch,
-		"https://github.com/Mirantis/cri-dockerd/releases/download/{{.Version}}/cri-dockerd-{{.Version}}.{{.Arch}}.tgz",
-		"", "cri-dockerd/cri-dockerd", "", // BinaryPath is cri-dockerd/cri-dockerd after extraction
-	)
-	criDockerdArchivePlan, err := criDockerdHandle.EnsurePlan(ctx)
-	if err != nil { return nil, err }
-	graph.Merge(criDockerdArchivePlan)
-	criDockerdArchiveLocalPathKey := fmt.Sprintf("resource.%s.downloadedPath", criDockerdHandle.ID())
+	allLocalResourcePrepFragments := []*task.ExecutionFragment{}
 
-	cniPluginsHandle := resource.NewRemoteBinaryHandle("cni-plugins", strings.TrimPrefix(cniPluginsVersion, "v"), arch,
-		"https://github.com/containernetworking/plugins/releases/download/{{.Version}}/cni-plugins-linux-{{.Arch}}-{{.Version}}.tgz",
-		"", "bridge", "",
+	// Cri-dockerd Archive Handle
+	criDockerdHandle, err := resource.NewRemoteBinaryHandle(ctx,
+		"cri-dockerd", strings.TrimPrefix(criDockerdVersion, "v"), arch, "linux",
+		"cri-dockerd", // BinaryNameInArchive: assumes the binary is named 'cri-dockerd' inside a dir like 'cri-dockerd/' in the archive
+		cfg.Spec.ContainerRuntime.GetCriDockerdChecksum(arch),
+		"sha256",
 	)
-	cniPluginsArchivePlan, err := cniPluginsHandle.EnsurePlan(ctx)
-	if err != nil { return nil, err }
-	graph.Merge(cniPluginsArchivePlan)
-	cniPluginsArchiveLocalPathKey := fmt.Sprintf("resource.%s.downloadedPath", cniPluginsHandle.ID())
+	if err != nil { return nil, fmt.Errorf("failed to create cri-dockerd archive handle: %w", err) }
+	criDockerdPrepFragment, err := criDockerdHandle.EnsurePlan(ctx)
+	if err != nil { return nil, fmt.Errorf("failed to plan cri-dockerd archive acquisition: %w", err) }
+	allLocalResourcePrepFragments = append(allLocalResourcePrepFragments, criDockerdPrepFragment)
+	localCriDockerdArchivePath := criDockerdHandle.(*resource.RemoteBinaryHandle).BinaryInfo().FilePath
 
-	// --- 2. Pre-flight checks ---
+
+	// CNI Plugins Archive Handle (same as in containerd task)
+	cniPluginsHandle, err := resource.NewRemoteBinaryHandle(ctx,
+		"kubecni", strings.TrimPrefix(cniPluginsVersion, "v"), arch, "linux",
+		"", // We need the archive for CNI plugins, not a specific binary from it.
+		cfg.Spec.ContainerRuntime.GetCNIChecksum(arch),
+		"sha256",
+	)
+	if err != nil { return nil, fmt.Errorf("failed to create CNI plugins archive handle: %w", err) }
+	cniPluginsPrepFragment, err := cniPluginsHandle.EnsurePlan(ctx)
+	if err != nil { return nil, fmt.Errorf("failed to plan CNI plugins archive acquisition: %w", err) }
+	allLocalResourcePrepFragments = append(allLocalResourcePrepFragments, cniPluginsPrepFragment)
+	localCNIPluginsArchivePath := cniPluginsHandle.(*resource.RemoteBinaryHandle).BinaryInfo().FilePath
+
+	// Merge all local resource preparation fragments.
+	mergedLocalResourceFragment := task.NewExecutionFragment(t.Name() + "-LocalResourcePrep")
+	for _, frag := range allLocalResourcePrepFragments {
+		if err := mergedLocalResourceFragment.MergeFragment(frag); err != nil {
+			return nil, fmt.Errorf("failed to merge local resource prep fragment for docker task: %w", err)
+		}
+	}
+	mergedLocalResourceFragment.CalculateEntryAndExitNodes()
+
+	taskPlanFragment := task.NewExecutionFragment(t.Name())
+	if err := taskPlanFragment.MergeFragment(mergedLocalResourceFragment); err != nil {
+		return nil, fmt.Errorf("failed to merge local resource fragment into docker task plan: %w", err)
+	}
+	controlNodeOpsDoneDependencies := mergedLocalResourceFragment.ExitNodes
+	if len(controlNodeOpsDoneDependencies) == 0 && len(mergedLocalResourceFragment.Nodes) > 0 {
+		for id := range mergedLocalResourceFragment.Nodes { controlNodeOpsDoneDependencies = append(controlNodeOpsDoneDependencies, id)}
+	}
+
+	// --- 2. Pre-flight OS configuration on all target nodes ---
+	preflightFragment := task.NewExecutionFragment(t.Name() + "-OSPreflightDocker")
 	loadModulesStep := preflight.NewLoadKernelModulesStep("", []string{"overlay", "br_netfilter"}, true)
-	loadModulesNodeID := graph.AddNodePerHost("preflight-load-kernel-modules-docker", targetHosts, loadModulesStep)
+	for _, host := range targetHosts {
+		nodeID := plan.NodeID(fmt.Sprintf("preflight-load-modules-docker-%s", host.GetName()))
+		_, _ = preflightFragment.AddNode(&plan.ExecutionNode{
+			Name: loadModulesStep.Meta().Name + "-on-" + host.GetName(), Step: loadModulesStep, Hosts: []connector.Host{host},
+		})
+	}
 	sysctlParams := map[string]string{
-		"net.bridge.bridge-nf-call-iptables": "1",
+		"net.bridge.bridge-nf-call-iptables":  "1",
 		"net.bridge.bridge-nf-call-ip6tables": "1",
-		"net.ipv4.ip_forward":                "1",
+		"net.ipv4.ip_forward":                 "1",
 	}
 	setSysctlStep := preflight.NewSetSystemConfigStep("", sysctlParams, "/etc/sysctl.d/99-kubernetes-cri.conf", true, true)
-	setSysctlNodeID := graph.AddNodePerHost("preflight-set-sysctl-k8s-docker", targetHosts, setSysctlStep)
-	graph.AddEntryNodes(loadModulesNodeID)
-	graph.AddEntryNodes(setSysctlNodeID)
-
+	for _, host := range targetHosts {
+		nodeID := plan.NodeID(fmt.Sprintf("preflight-set-sysctl-docker-%s", host.GetName()))
+		_, _ = preflightFragment.AddNode(&plan.ExecutionNode{
+			Name: setSysctlStep.Meta().Name + "-on-" + host.GetName(), Step: setSysctlStep, Hosts: []connector.Host{host},
+		})
+	}
+	preflightFragment.CalculateEntryAndExitNodes()
+	if err := taskPlanFragment.MergeFragment(preflightFragment); err != nil {
+		return nil, fmt.Errorf("failed to merge OS preflight fragment for docker task: %w", err)
+	}
 
 	// --- 3. Installation and Configuration per node ---
-	lastNodeIDs := make(map[string][]plan.NodeID)
+	var allHostFinalNodes []plan.NodeID
 
 	for _, host := range targetHosts {
-		nodePrefix := fmt.Sprintf("docker-%s-", strings.ReplaceAll(host.GetName(),".","-"))
-		currentDeps := []plan.NodeID{
-            plan.NodeID(fmt.Sprintf("preflight-load-kernel-modules-docker-%s", strings.ReplaceAll(host.GetName(),".","-"))),
-            plan.NodeID(fmt.Sprintf("preflight-set-sysctl-k8s-docker-%s", strings.ReplaceAll(host.GetName(),".","-"))),
-        }
-		// Add dependencies on resource downloads
-		currentDeps = append(currentDeps, criDockerdArchivePlan.ExitNodes...)
-		currentDeps = append(currentDeps, cniPluginsArchivePlan.ExitNodes...)
+		nodePrefix := fmt.Sprintf("docker-%s-", strings.ReplaceAll(host.GetName(), ".", "-"))
+		// Base dependencies for this host's operations: local resources ready AND OS preflight for this host done.
+		perHostBaseDependencies := append([]plan.NodeID{}, controlNodeOpsDoneDependencies...)
+		perHostBaseDependencies = append(perHostBaseDependencies, plan.NodeID(fmt.Sprintf("preflight-load-modules-docker-%s", host.GetName())))
+		perHostBaseDependencies = append(perHostBaseDependencies, plan.NodeID(fmt.Sprintf("preflight-set-sysctl-docker-%s", host.GetName())))
+		currentHostLastOpNodeID := plan.NodeID("")
+
 
 		// Install Docker Engine (package based)
-		// TODO: ExtraRepoSetupCmds might be OS-dependent and should come from config or facts.
-		installDockerStep := docker.NewInstallDockerEngineStep(nodePrefix+"InstallDocker", nil, nil, true)
-		installDockerNodeID := graph.AddNode(nodePrefix+"install-docker", []connector.Host{host}, installDockerStep, currentDeps...)
+		dockerPackages := cfg.Spec.ContainerRuntime.Docker.Packages // Assuming this field exists in v1alpha1.DockerConfig
+		if len(dockerPackages) == 0 { // Provide defaults if not specified
+			dockerPackages = []string{"docker-ce", "docker-ce-cli", "containerd.io"} // Note: containerd.io is often a dep for docker-ce
+		}
+		// TODO: ExtraRepoSetupCmds might be OS-dependent, determined from facts or a more detailed config.
+		var extraRepoCmds []string
+		// Example: if facts.OS.ID == "ubuntu" { extraRepoCmds = ... }
+		installDockerStep := docker.NewInstallDockerEngineStep(nodePrefix+"InstallDockerEngine", dockerPackages, extraRepoCmds, true)
+		installDockerNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: installDockerStep.Meta().Name, Step: installDockerStep, Hosts: []connector.Host{host}, Dependencies: task.UniqueNodeIDs(perHostBaseDependencies),
+		})
+		currentHostLastOpNodeID = installDockerNodeID
 
 		// Configure Docker daemon.json
-		genDaemonJSONStep := docker.NewGenerateDockerDaemonJSONStep(nodePrefix+"GenDockerDaemonJSON", t.DockerDaemonConfig, "", true)
-		genDaemonJSONNodeID := graph.AddNode(nodePrefix+"gen-daemon-json", []connector.Host{host}, genDaemonJSONStep, installDockerNodeID)
+		genDaemonJSONStep := docker.NewGenerateDockerDaemonJSONStep(nodePrefix+"GenerateDockerDaemonJSON", t.DockerDaemonConfig, "", true)
+		genDaemonJSONNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: genDaemonJSONStep.Meta().Name, Step: genDaemonJSONStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{currentHostLastOpNodeID},
+		})
+		currentHostLastOpNodeID = genDaemonJSONNodeID
 
-		// Manage Docker Service (Restart to apply daemon.json)
-		manageDockerRestartStep := docker.NewManageDockerServiceStep(nodePrefix+"RestartDocker", containerdSteps.ActionRestart, true)
-		manageDockerRestartNodeID := graph.AddNode(nodePrefix+"restart-docker", []connector.Host{host}, manageDockerRestartStep, genDaemonJSONNodeID)
+		// Manage Docker Service (Restart to apply daemon.json, then enable)
+		manageDockerRestartStep := docker.NewManageDockerServiceStep(nodePrefix+"RestartDockerService", containerdSteps.ActionRestart, true)
+		manageDockerRestartNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: manageDockerRestartStep.Meta().Name, Step: manageDockerRestartStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{currentHostLastOpNodeID},
+		})
+		currentHostLastOpNodeID = manageDockerRestartNodeID
 
-		enableDockerStep := docker.NewManageDockerServiceStep(nodePrefix+"EnableDocker", containerdSteps.ActionEnable, true)
-		enableDockerNodeID := graph.AddNode(nodePrefix+"enable-docker", []connector.Host{host}, enableDockerStep, manageDockerRestartNodeID) // Enable after ensuring it runs with new config
+		enableDockerStep := docker.NewManageDockerServiceStep(nodePrefix+"EnableDockerService", containerdSteps.ActionEnable, true)
+		enableDockerNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: enableDockerStep.Meta().Name, Step: enableDockerStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{currentHostLastOpNodeID},
+		})
+		currentHostLastOpNodeID = enableDockerNodeID // Docker engine is now set up.
 
-		// CNI Plugins (same as containerd task)
-		distCNIStep := containerdSteps.NewDistributeCNIPluginsArchiveStep(nodePrefix+"DistributeCNI", cniPluginsArchiveLocalPathKey, "", "", "", true)
-		distCNINodeID := graph.AddNode(nodePrefix+"dist-cni", []connector.Host{host}, distCNIStep, currentDeps...) // Can be parallel to Docker install up to a point
+		// Upload and Install CNI Plugins (can be parallel to Docker setup to some extent, but needs Docker running for some CNI use cases implicitly)
+		// For simplicity, let's make CNI setup depend on Docker being enabled.
+		remoteCNIArchiveTempPath := filepath.Join("/tmp", filepath.Base(localCNIPluginsArchivePath))
+		uploadCNIStep := common.NewUploadFileStep(nodePrefix+"UploadCNIArchive", localCNIPluginsArchivePath, remoteCNIArchiveTempPath, "0644", true, false)
+		uploadCNINodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: uploadCNIStep.Meta().Name, Step: uploadCNIStep, Hosts: []connector.Host{host}, Dependencies: task.UniqueNodeIDs(perHostBaseDependencies),
+		})
+		// Task cache for remote CNI archive path
+		ctx.TaskCache().Set(fmt.Sprintf("%s.%s", stepContainerd.CNIPluginsArchiveRemotePathCacheKey, host.GetName()), remoteCNIArchiveTempPath)
 
-		extractCNIStep := containerdSteps.NewExtractCNIPluginsArchiveStep(nodePrefix+"ExtractCNI", containerdSteps.CNIPluginsArchiveRemotePathCacheKey, "/opt/cni/bin", "", true, true)
-		extractCNINodeID := graph.AddNode(nodePrefix+"extract-cni", []connector.Host{host}, extractCNIStep, distCNINodeID)
+		extractCNIStep := stepContainerd.NewExtractCNIPluginsArchiveStep(nodePrefix+"ExtractCNIPlugins", fmt.Sprintf("%s.%s", stepContainerd.CNIPluginsArchiveRemotePathCacheKey, host.GetName()), "/opt/cni/bin", "", true, true)
+		extractCNINodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: extractCNIStep.Meta().Name, Step: extractCNIStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{uploadCNINodeID},
+		})
+		// CNI plugins are now ready on the host.
 
-		// cri-dockerd
-		distCriDockerdStep := docker.NewDistributeCriDockerdArchiveStep(nodePrefix+"DistributeCriDockerd", criDockerdArchiveLocalPathKey, "", "", "", true)
-		distCriDockerdNodeID := graph.AddNode(nodePrefix+"dist-cri-dockerd", []connector.Host{host}, distCriDockerdStep, currentDeps...) // Parallel
+		// Upload, Extract, Install cri-dockerd
+		remoteCriDockerdArchiveTempPath := filepath.Join("/tmp", filepath.Base(localCriDockerdArchivePath))
+		uploadCriDockerdStep := common.NewUploadFileStep(nodePrefix+"UploadCriDockerdArchive", localCriDockerdArchivePath, remoteCriDockerdArchiveTempPath, "0644", true, false)
+		uploadCriDockerdNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: uploadCriDockerdStep.Meta().Name, Step: uploadCriDockerdStep, Hosts: []connector.Host{host}, Dependencies: task.UniqueNodeIDs(perHostBaseDependencies),
+		})
+		ctx.TaskCache().Set(fmt.Sprintf("%s.%s", docker.CriDockerdArchiveRemotePathCacheKey, host.GetName()), remoteCriDockerdArchiveTempPath)
 
-		extractCriDockerdStep := docker.NewExtractCriDockerdArchiveStep(nodePrefix+"ExtractCriDockerd", docker.CriDockerdArchiveRemotePathCacheKey, "", "", "", true, true)
-		extractCriDockerdNodeID := graph.AddNode(nodePrefix+"extract-cri-dockerd", []connector.Host{host}, extractCriDockerdStep, distCriDockerdNodeID)
+		extractCriDockerdStep := docker.NewExtractCriDockerdArchiveStep(nodePrefix+"ExtractCriDockerdArchive", fmt.Sprintf("%s.%s", docker.CriDockerdArchiveRemotePathCacheKey, host.GetName()), "", "", "", true, true) // Default extraction path
+		extractCriDockerdNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: extractCriDockerdStep.Meta().Name, Step: extractCriDockerdStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{uploadCriDockerdNodeID},
+		})
+		// Extracted path for cri-dockerd is set in cache by ExtractCriDockerdArchiveStep if it follows the pattern.
+		// Assume docker.CriDockerdExtractedDirCacheKey is the key used.
+		ctx.TaskCache().Set(fmt.Sprintf("%s.%s", docker.CriDockerdExtractedDirCacheKey, host.GetName()), extractCriDockerdStep.(*docker.ExtractCriDockerdArchiveStep).DefaultExtractionDir)
 
-		installCriDockerdStep := docker.NewInstallCriDockerdBinaryStep(nodePrefix+"InstallCriDockerd", docker.CriDockerdExtractedDirCacheKey, "", "", true)
-		installCriDockerdNodeID := graph.AddNode(nodePrefix+"install-cri-dockerd", []connector.Host{host}, installCriDockerdStep, extractCriDockerdNodeID)
 
-		// Configure cri-dockerd service (if needed beyond default unit file args)
-		// For now, assume default unit file is fine, or args are passed via task spec to modify later.
-		// If t.CriDockerdExecStartArgs is populated, use ConfigureCriDockerdServiceStep.
-		var lastCriDockerdSetupStep plan.NodeID = installCriDockerdNodeID
+		installCriDockerdStep := docker.NewInstallCriDockerdBinaryStep(nodePrefix+"InstallCriDockerdBinaries", fmt.Sprintf("%s.%s", docker.CriDockerdExtractedDirCacheKey, host.GetName()), "", "", true)
+		installCriDockerdNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: installCriDockerdStep.Meta().Name, Step: installCriDockerdStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{extractCriDockerdNodeID},
+		})
+		currentHostLastOpNodeID = installCriDockerdNodeID
+
+
+		// Configure cri-dockerd service if needed
 		if len(t.CriDockerdExecStartArgs) > 0 {
-			configureCriDockerdSvcStep := docker.NewConfigureCriDockerdServiceStep(nodePrefix+"ConfigureCriDockerdSvc", "", t.CriDockerdExecStartArgs, true)
-			configureCriDockerdSvcNodeID := graph.AddNode(nodePrefix+"config-cri-dockerd-svc", []connector.Host{host}, configureCriDockerdSvcStep, installCriDockerdNodeID)
-			lastCriDockerdSetupStep = configureCriDockerdSvcNodeID
+			configureCriDockerdSvcStep := docker.NewConfigureCriDockerdServiceStep(nodePrefix+"ConfigureCriDockerdService", "", t.CriDockerdExecStartArgs, true)
+			configureCriDockerdSvcNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+				Name: configureCriDockerdSvcStep.Meta().Name, Step: configureCriDockerdSvcStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{currentHostLastOpNodeID},
+			})
+			currentHostLastOpNodeID = configureCriDockerdSvcNodeID
 		}
 
-		// Manage cri-dockerd service
-		daemonReloadCriDockerdStep := docker.NewManageCriDockerdServiceStep(nodePrefix+"DaemonReloadCriDockerd", containerdSteps.ActionDaemonReload, true)
-		daemonReloadCriDockerdNodeID := graph.AddNode(nodePrefix+"daemon-reload-cri-dockerd", []connector.Host{host}, daemonReloadCriDockerdStep, lastCriDockerdSetupStep)
+		// Manage cri-dockerd service (daemon-reload, enable, start)
+		// These depend on Docker service being ready AND CNI plugins being available (for --network-plugin=cni).
+		criDockerdServiceDeps := []plan.NodeID{currentHostLastOpNodeID, enableDockerNodeID, extractCNINodeID}
 
-		enableCriDockerdStep := docker.NewManageCriDockerdServiceStep(nodePrefix+"EnableCriDockerd", containerdSteps.ActionEnable, true)
-		enableCriDockerdNodeID := graph.AddNode(nodePrefix+"enable-cri-dockerd", []connector.Host{host}, enableCriDockerdStep, daemonReloadCriDockerdNodeID)
+		daemonReloadCriDStep := docker.NewManageCriDockerdServiceStep(nodePrefix+"DaemonReloadCriDockerdSvc", containerdSteps.ActionDaemonReload, true)
+		daemonReloadCriDNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: daemonReloadCriDStep.Meta().Name, Step: daemonReloadCriDStep, Hosts: []connector.Host{host}, Dependencies: task.UniqueNodeIDs(criDockerdServiceDeps),
+		})
+		currentHostLastOpNodeID = daemonReloadCriDNodeID
 
-		startCriDockerdStep := docker.NewManageCriDockerdServiceStep(nodePrefix+"StartCriDockerd", containerdSteps.ActionStart, true)
-		startCriDockerdNodeID := graph.AddNode(nodePrefix+"start-cri-dockerd", []connector.Host{host}, startCriDockerdStep, enableCriDockerdNodeID)
+		enableCriDStep := docker.NewManageCriDockerdServiceStep(nodePrefix+"EnableCriDockerdService", containerdSteps.ActionEnable, true)
+		enableCriDNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: enableCriDStep.Meta().Name, Step: enableCriDStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{currentHostLastOpNodeID},
+		})
+		currentHostLastOpNodeID = enableCriDNodeID
 
-		// Final verification
-		// All components (Docker, CNI, cri-dockerd) should be ready before this.
-		allServicesReadyDeps := []plan.NodeID{enableDockerNodeID, extractCNINodeID, startCriDockerdNodeID}
+		startCriDStep := docker.NewManageCriDockerdServiceStep(nodePrefix+"StartCriDockerdService", containerdSteps.ActionStart, true)
+		startCriDNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: startCriDStep.Meta().Name, Step: startCriDStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{currentHostLastOpNodeID},
+		})
+		currentHostLastOpNodeID = startCriDNodeID
 
-		verifyStep := docker.NewVerifyDockerCrictlStep(nodePrefix+"VerifyCrictl", "", "", false)
-		verifyNodeID := graph.AddNode(nodePrefix+"verify-crictl", []connector.Host{host}, verifyStep, allServicesReadyDeps...)
-
-		lastNodeIDs[host.GetName()] = []plan.NodeID{verifyNodeID}
+		// Final verification step for this host
+		verifyStep := docker.NewVerifyDockerCrictlStep(nodePrefix+"VerifyDockerCrictlSetup", "", "", false)
+		verifyNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: verifyStep.Meta().Name, Step: verifyStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{currentHostLastOpNodeID},
+		})
+		allHostFinalNodes = append(allHostFinalNodes, verifyNodeID)
 	}
 
-	graph.AddEntryNodes(criDockerdArchivePlan.EntryNodes...)
-	graph.AddEntryNodes(cniPluginsArchivePlan.EntryNodes...)
-	// Pre-flight entry nodes already added.
-
-	for _, host := range targetHosts {
-		graph.AddExitNodes(lastNodeIDs[host.GetName()]...)
-	}
-    graph.RemoveDuplicateNodeIDs()
+	taskPlanFragment.CalculateEntryAndExitNodes()
 
 	logger.Info("Docker & cri-dockerd installation plan generated.")
-	return graph, nil
+	return taskPlanFragment, nil
 }
 
 func contains(slice []string, item string) bool {

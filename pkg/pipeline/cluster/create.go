@@ -21,28 +21,24 @@ type CreateClusterPipeline struct {
 // It initializes the modules that this pipeline will orchestrate.
 func NewCreateClusterPipeline(assumeYes bool) pipeline.Pipeline {
 	// Instantiate modules in their logical execution order.
-	// Assuming constructors like NewCoreComponentsModule, NewClusterBootstrapModule, NewClusterReadyModule
-	// exist in the root of pkg/module/ or in specific subpackages (e.g., pkg/module/kubernetes).
-	// These would need to be implemented and correctly imported. Example:
-	// coreComponentsModule := kubernetes.NewCoreComponentsModule() // if in pkg/module/kubernetes
-
 	preflightModule := preflight.NewPreflightModule(assumeYes)
-	// The 'etcdModule' variable was unused. Etcd installation is typically part of CoreComponents or a dedicated early module.
-
-	// TODO: Replace placeholder constructors below with actual module constructors once they are implemented.
-	// These modules will encapsulate tasks for their respective phases.
-	coreComponentsModule := module.NewCoreComponentsModule()       // Placeholder: e.g., for container runtime, etcd, k8s binaries
-	clusterBootstrapModule := module.NewClusterBootstrapModule() // Placeholder: e.g., for kubeadm init, joining nodes
-	clusterReadyModule := module.NewClusterReadyModule()         // Placeholder: e.g., for CNI, addons, final configurations
-
+	infrastructureModule := infrastructure.NewInfrastructureModule()
+	controlPlaneModule := kubernetes.NewControlPlaneModule()
+	networkModule := network.NewNetworkModule()
+	workerModule := kubernetes.NewWorkerModule()
+	addonsModule := addon.NewAddonsModule()
+	// TODO: Add HighAvailabilityModule if separate and needed early.
+	// For now, HA setup (like VIP for kubeadm init) might be part of Preflight or Infrastructure.
 
 	return &CreateClusterPipeline{
 		PipelineName: "CreateNewCluster",
 		PipelineModules: []module.Module{
-			preflightModule,
-			coreComponentsModule,
-			clusterBootstrapModule,
-			clusterReadyModule,
+			preflightModule,      // System checks, initial OS setup, kernel setup, offline repo/artifacts
+			infrastructureModule, // ETCD (PKI + install), Container Runtime (Docker or Containerd)
+			controlPlaneModule,   // Kube binaries, image pulls, kubeadm init, join masters
+			networkModule,        // CNI plugin
+			workerModule,         // Join worker nodes
+			addonsModule,         // Cluster addons
 		},
 	}
 }

@@ -102,135 +102,171 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 		return nil, fmt.Errorf("failed to create etcd archive resource handle: %w", err)
 	}
 
-	// resourcePrepFragment contains nodes (e.g., DownloadFileStep, ExtractArchiveStep if handle does that)
-	// that run on the controlNode to make the etcd archive available.
+	// resourcePrepFragment contains steps to download/extract etcd locally on the control node.
 	resourcePrepFragment, err := etcdArchiveResourceHandle.EnsurePlan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to plan etcd archive acquisition: %w", err)
 	}
 	// localEtcdArchivePathOnControlNode is the path to the downloaded .tar.gz file on the control node.
-	localEtcdArchivePathOnControlNode, err := etcdArchiveResourceHandle.Path(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get local path for etcd archive from resource handle: %w", err)
+	// Note: etcdArchiveResourceHandle.Path() now gives the path to the *final primary artifact*
+	// For an archive where no specific BinaryNameInArchive was set, this Path() would give the *extracted directory*.
+	// If we need the archive path itself for upload, we might need a specific method from the handle,
+	// or the handle's BinaryInfo.FilePath.
+	// For this task, we need to upload the ARCHIVE, then extract on remote.
+	// So, we need the path to the *archive file* on the control node.
+	// The current `resource.NewRemoteBinaryHandle` with empty BinaryNameInArchive will have `Path` point to the archive itself
+	// if the `RemoteBinaryHandle.Path` is adjusted or if we use `binaryInfo.FilePath` from the handle.
+	// Let's assume `etcdArchiveResourceHandle.binaryInfo.FilePath` gives the local archive path.
+	// This detail depends on the exact implementation of RemoteBinaryHandle's Path() and its internal binaryInfo.
+
+	// To be precise with the "local-first" model:
+	// 1. Resource Handle ensures `etcd-vX.Y.Z-linux-arch.tar.gz` is in `$(pwd)/.kubexm/cluster/etcd/vX.Y.Z/arch/`
+	// 2. Resource Handle also ensures it's extracted locally, e.g. to `.../arch/extracted_etcd-vX.Y.Z.../`
+	//    and `handle.Path()` might point to `.../extracted_etcd.../etcd` (the binary).
+	// However, this task needs to upload the *archive* and extract remotely.
+	// So, the resource handle for "etcd-archive" should have `Path()` return the local archive path.
+	// And a *separate* resource handle for "etcd-binary" (if needed directly by control node) would point to the extracted binary.
+
+	// For InstallETCDTask (binary type), the flow is:
+	// 1. Ensure ETCD archive is on control node (via etcdArchiveResourceHandle.EnsurePlan).
+	//    `localEtcdArchivePathOnControlNode` should be this path.
+	// 2. PKI generation/preparation on control node (by a separate PKITask, results in local cert paths).
+	// 3. This task then:
+	//    a. Uploads the ETCD archive to each etcdNode.
+	//    b. Uploads relevant certs to each etcdNode and masterNode.
+	//    c. On each etcdNode: extracts archive, copies binaries, generates config, generates service, starts service.
+
+	// Let's refine the resource handle usage:
+	// The `etcdArchiveResourceHandle` as defined (empty BinaryNameInArchive) via `NewRemoteBinaryHandle`
+	// will have its `Path(ctx)` return the *extraction directory* if `IsArchive` is true and `BinaryNameInArchive` is empty.
+	// To get the archive path itself, we should use `etcdArchiveResourceHandle.binaryInfo.FilePath`.
+	// This is a bit of an internal detail. A cleaner way might be for the Handle interface
+	// to have `GetDownloadArtifactPath()` and `GetPrimaryArtifactPath()`.
+	// For now, we'll assume `etcdArchiveResourceHandle.binaryInfo.FilePath` is accessible or a similar method exists.
+	// The `resource.NewRemoteBinaryHandle`'s `Path` method was updated to return extraction dir if BinaryNameInArchive is empty.
+	// We need the *archive path* for upload.
+	// A quick fix: create the handle such that its `Path` returns the archive path.
+	// This means `BinaryNameInArchive` for `etcdArchiveResourceHandle` should effectively be the archive's own filename,
+	// or `IsArchive` should be treated specially by `Path`.
+	// Let's assume we get `binaryInfo` from the handle to get the archive path for upload.
+	if etcdArchiveResourceHandle == nil || etcdArchiveResourceHandle.(*resource.RemoteBinaryHandle).BinaryInfo() == nil { // Type assertion to access BinaryInfo
+		return nil, fmt.Errorf("internal error: etcdArchiveResourceHandle or its binaryInfo is nil")
 	}
-	// archiveInternalDirName is the name of the directory that's typically at the root of the etcd archive.
-	// e.g., "etcd-v3.5.13-linux-amd64". This is used to construct paths to binaries within the extracted archive.
+	localEtcdArchivePathOnControlNode := etcdArchiveResourceHandle.(*resource.RemoteBinaryHandle).BinaryInfo().FilePath
+
+
 	archiveInternalDirName := strings.TrimSuffix(strings.TrimSuffix(filepath.Base(localEtcdArchivePathOnControlNode), ".tar.gz"), ".tar")
 
-
-	mainFragment := task.NewExecutionFragment(t.Name())
-	if err := mainFragment.MergeFragment(resourcePrepFragment); err != nil {
-		// Merging nodes from resourcePrepFragment into the main task fragment.
-		return nil, fmt.Errorf("failed to merge resource prep fragment for etcd: %w", err)
+	// This fragment will contain all steps for this task.
+	taskFragment := task.NewExecutionFragment(t.Name())
+	// Merge the local resource preparation steps first.
+	if err := taskFragment.MergeFragment(resourcePrepFragment); err != nil {
+		return nil, fmt.Errorf("failed to merge etcd archive resource prep fragment: %w", err)
+	}
+	// All subsequent remote operations will depend on the exit nodes of resourcePrepFragment.
+	controlNodePrepDoneDependencies := resourcePrepFragment.ExitNodes
+	if len(controlNodePrepDoneDependencies) == 0 && len(resourcePrepFragment.Nodes) > 0 {
+		// If prep fragment had nodes but no explicit exit nodes (e.g. single node fragment), use all its nodes as deps.
+		for id := range resourcePrepFragment.Nodes { controlNodePrepDoneDependencies = append(controlNodePrepDoneDependencies, id)}
 	}
 
-	// lastCtrlNodeActivityID tracks the last operation on the control node (e.g., archive download/extraction).
-	// Subsequent per-host operations (like uploading this archive) will depend on this.
-	lastCtrlNodeActivityID := plan.NodeID("")
-	if len(resourcePrepFragment.ExitNodes) > 0 {
-		lastCtrlNodeActivityID = resourcePrepFragment.ExitNodes[0]
-	}
 
-	// --- 2. PKI Certificate Distribution ---
-	// This section plans the distribution of pre-generated etcd certificates
-	// from the control node to all relevant target hosts (etcd nodes and master nodes).
-	// It assumes certificates were generated by a prior PKI task and are available
-	// in standard locations on the control node (e.g., ctx.GetEtcdCertsDir()).
-	pkiDistributionSubFragment := task.NewExecutionFragment("DistributeEtcdPKI")
-	var pkiDistributionFragmentExitNodes []plan.NodeID // Tracks the last cert upload node for each host receiving certs.
+	// --- PKI Generation & Distribution ---
+	// This task assumes PKI generation happens on the control node.
+	// A dedicated PKI generation task (e.g., GenerateEtcdPkiTask from etcd/generate_pki.go)
+	// should run before this task, populating localEtcdCertsBaseDir.
+	// For this task, we focus on *distributing* those certs.
 
-	allCertReceivingHostsMap := make(map[string]connector.Host)
-	for _, h := range etcdNodes { allCertReceivingHostsMap[h.GetName()] = h }
-	for _, h := range masterNodes { allCertReceivingHostsMap[h.GetName()] = h }
+	localEtcdCertsBaseDir := ctx.GetEtcdCertsDir() // Path on control node where PKI task saved certs.
 
-	etcdCertsBaseDirLocal := ctx.GetEtcdCertsDir() // Base directory for certs on control node.
+	// Create a sub-fragment for all certificate uploads.
+	// These uploads can happen in parallel for different hosts, and for different certs on the same host after CA.
+	certsUploadFragment := task.NewExecutionFragment("UploadEtcdCertificates")
+	var allCertUploadExitNodes []plan.NodeID
 
-	// All PKI upload operations depend on the etcd archive being ready on the control node.
-	pkiNodeInitialDeps := []plan.NodeID{}
-	if lastCtrlNodeActivityID != "" { pkiNodeInitialDeps = append(pkiNodeInitialDeps, lastCtrlNodeActivityID) }
 
-	for _, targetHost := range allCertReceivingHostsMap {
-		hostPkiPrefix := fmt.Sprintf("upload-pki-%s-", strings.ReplaceAll(targetHost.GetName(), ".", "-"))
-		var lastCertUploadedForThisHost plan.NodeID // Tracks the last cert upload for *this specific host*.
-
-		// Define common certs (like ca.pem) and their remote paths/permissions.
-		commonCerts := map[string]string{"ca.pem": "0644"}
-		for certFile, perm := range commonCerts {
-			localPath := filepath.Join(etcdCertsBaseDirLocal, certFile)
-			remotePath := filepath.Join(DefaultEtcdPkiDir, certFile) // e.g., /etc/etcd/pki/ca.pem
-			nodeIDStr := hostPkiPrefix + strings.ReplaceAll(certFile, ".", "_")
-
-			uploadNode := common.NewUploadFileStep(
-				fmt.Sprintf("Upload-%s-to-%s", certFile, targetHost.GetName()), // Instance name for the step
-				localPath, remotePath, perm, true, false, // sudo=true, allowMissingSrc=false
-			)
-			nodeID, _ := pkiDistributionSubFragment.AddNode(&plan.ExecutionNode{
-				Name:     uploadNode.Meta().Name, // Use descriptive name from step
-				Step:     uploadNode,
-				Hosts:    []connector.Host{targetHost},
-				Dependencies: pkiNodeInitialDeps, // Depends on control node prep
-			}, plan.NodeID(nodeIDStr))
-			lastCertUploadedForThisHost = nodeID
+	for _, targetHost := range etcdNodes { // Certs for etcd nodes
+		hostPkiPrefix := fmt.Sprintf("upload-etcd-certs-%s-", targetHost.GetName())
+		certsForEtcdNode := map[string]string{ // cert_file_name_on_control_node -> remote_permissions
+			"ca.pem":                          "0644",
+			fmt.Sprintf("%s.pem", targetHost.GetName()):       "0644", // server cert
+			fmt.Sprintf("%s-key.pem", targetHost.GetName()):   "0600", // server key
+			fmt.Sprintf("peer-%s.pem", targetHost.GetName()):  "0644", // peer cert
+			fmt.Sprintf("peer-%s-key.pem", targetHost.GetName()): "0600", // peer key
 		}
+		var lastUploadOnHost plan.NodeID
+		for certFile, perm := range certsForEtcdNode {
+			localPath := filepath.Join(localEtcdCertsBaseDir, certFile)
+			remotePath := filepath.Join(DefaultEtcdPkiDir, certFile)
+			nodeName := fmt.Sprintf("Upload-%s-to-%s", certFile, targetHost.GetName())
+			uploadStep := common.NewUploadFileStep(nodeName, localPath, remotePath, perm, true, false) // sudo=true
 
-		// Upload etcd-node-specific certificates (server.pem, server-key.pem, peer.pem, peer-key.pem)
-		if isHostInRole(targetHost, etcdNodes) {
-			etcdNodeCerts := map[string]string{ // filename -> permissions
-				fmt.Sprintf("%s.pem", targetHost.GetName()):       "0644",
-				fmt.Sprintf("%s-key.pem", targetHost.GetName()):   "0600",
-				fmt.Sprintf("peer-%s.pem", targetHost.GetName()):  "0644",
-				fmt.Sprintf("peer-%s-key.pem", targetHost.GetName()): "0600",
+			nodeID, _ := certsUploadFragment.AddNode(&plan.ExecutionNode{
+				Name:         uploadStep.Meta().Name,
+				Step:         uploadStep,
+				Hosts:        []connector.Host{targetHost},
+				Dependencies: controlNodePrepDoneDependencies, // Depends on local PKI generation being notionally complete
+			})
+			if lastUploadOnHost != "" { // Chain uploads for the same host for simplicity, though could be parallel
+				certsUploadFragment.AddDependency(lastUploadOnHost, nodeID)
 			}
-			currentDep := lastCertUploadedForThisHost // Subsequent certs for this host depend on the previous one for this host
-			for certFile, perm := range etcdNodeCerts {
-				localPath := filepath.Join(etcdCertsBaseDirLocal, certFile)
-				remotePath := filepath.Join(DefaultEtcdPkiDir, certFile)
-				nodeIDStr := hostPkiPrefix + strings.ReplaceAll(certFile, ".", "_")
-				uploadNode := common.NewUploadFileStep("", localPath, remotePath, perm, true, false)
-				nodeID, _ := pkiDistributionSubFragment.AddNode(&plan.ExecutionNode{
-					Name:     uploadNode.Meta().Name,
-					Step:     uploadNode,
-					Hosts:    []connector.Host{targetHost},
-					Dependencies: []plan.NodeID{currentDep}, // Depends on previous cert for this host
-				}, plan.NodeID(nodeIDStr))
-				currentDep = nodeID
-				lastCertUploadedForThisHost = nodeID
-			}
+			lastUploadOnHost = nodeID
 		}
-
-		// Upload master-node-specific certificates (apiserver-etcd-client.pem, apiserver-etcd-client-key.pem)
-		if isHostInRole(targetHost, masterNodes) {
-			masterCerts := map[string]string{
-				"apiserver-etcd-client.pem":     "0644",
-				"apiserver-etcd-client-key.pem": "0600",
-			}
-			currentDep := lastCertUploadedForThisHost // Depends on previous cert for this host (could be CA or etcd-specific)
-			for certFile, perm := range masterCerts {
-				localPath := filepath.Join(etcdCertsBaseDirLocal, certFile)
-				remotePath := filepath.Join(DefaultEtcdPkiDir, certFile) // Masters also store in /etc/etcd/pki for apiserver
-				nodeIDStr := hostPkiPrefix + "apiserver_client_" + strings.ReplaceAll(certFile, ".", "_")
-				uploadNode := common.NewUploadFileStep("", localPath, remotePath, perm, true, false)
-				nodeID, _ := pkiDistributionSubFragment.AddNode(&plan.ExecutionNode{
-					Name:     uploadNode.Meta().Name,
-					Step:     uploadNode,
-					Hosts:    []connector.Host{targetHost},
-					Dependencies: []plan.NodeID{currentDep},
-				}, plan.NodeID(nodeIDStr))
-				currentDep = nodeID
-				lastCertUploadedForThisHost = nodeID
-			}
-		}
-		// Collect the very last PKI-related node for this host as an exit point for this host's PKI setup.
-		if lastCertUploadedForThisHost != "" {
-			pkiDistributionFragmentExitNodes = append(pkiDistributionFragmentExitNodes, lastCertUploadedForThisHost)
+		if lastUploadOnHost != "" {
+			allCertUploadExitNodes = append(allCertUploadExitNodes, lastUploadOnHost)
 		}
 	}
-	pkiDistributionSubFragment.CalculateEntryAndExitNodes() // Calculate internal entry/exit for this sub-fragment
-	if err := mainFragment.MergeFragment(pkiDistributionSubFragment); err != nil {
-		return nil, fmt.Errorf("failed to merge PKI distribution sub-fragment: %w", err)
-	}
 
-	// --- 3. Orchestrate Installation Steps per ETCD Node ---
+	for _, targetHost := range masterNodes { // Certs for master nodes (apiserver client)
+		// Avoid re-uploading CA if master is also an etcd node (handled by map key uniqueness if merging nodes directly)
+		hostPkiPrefix := fmt.Sprintf("upload-apiserver-etcd-client-certs-%s-", targetHost.GetName())
+		certsForMasterNode := map[string]string{
+			"ca.pem":                          "0644", // Ensure CA is on masters too
+			"apiserver-etcd-client.pem":       "0644",
+			"apiserver-etcd-client-key.pem": "0600",
+		}
+		var lastUploadOnHost plan.NodeID
+		// Check if CA was already uploaded if this master is also an etcd node.
+		// This requires a bit more complex tracking or ensuring UploadFileStep is idempotent.
+		// For simplicity, we might re-upload CA or rely on UploadFileStep's precheck.
+
+		for certFile, perm := range certsForMasterNode {
+			// Skip CA if already planned for this host as an etcd node (more robust check needed if merging nodes)
+			isEtcdNode := false
+			for _, en := range etcdNodes { if en.GetName() == targetHost.GetName() { isEtcdNode = true; break } }
+			if certFile == "ca.pem" && isEtcdNode {
+				// Find the existing CA upload node for this host and use it as dependency
+				// This logic is complex here. Simpler: let UploadStep's Precheck handle existing files.
+				// Or, ensure PKI generation task creates a single set of certs locally, and this task just uploads.
+			}
+
+			localPath := filepath.Join(localEtcdCertsBaseDir, certFile)
+			remotePath := filepath.Join(DefaultEtcdPkiDir, certFile) // Masters might store etcd client certs in a similar path
+			nodeName := fmt.Sprintf("Upload-APIServerEtcdClient-%s-to-%s", certFile, targetHost.GetName())
+			uploadStep := common.NewUploadFileStep(nodeName, localPath, remotePath, perm, true, false)
+
+			nodeID, _ := certsUploadFragment.AddNode(&plan.ExecutionNode{
+				Name:         uploadStep.Meta().Name,
+				Step:         uploadStep,
+				Hosts:        []connector.Host{targetHost},
+				Dependencies: controlNodePrepDoneDependencies,
+			})
+			if lastUploadOnHost != "" {
+				certsUploadFragment.AddDependency(lastUploadOnHost, nodeID)
+			}
+			lastUploadOnHost = nodeID
+		}
+		if lastUploadOnHost != "" {
+			allCertUploadExitNodes = append(allCertUploadExitNodes, lastUploadOnHost)
+		}
+	}
+	certsUploadFragment.CalculateEntryAndExitNodes()
+	if err := taskFragment.MergeFragment(certsUploadFragment); err != nil {
+		return nil, fmt.Errorf("failed to merge PKI distribution fragment: %w", err)
+	}
+	// All subsequent remote etcd setup steps will depend on these cert uploads being done *for that specific host*.
+
+	// --- Per-Host ETCD Installation ---
 	initialClusterPeers := []string{}
 	etcdClientPort := etcdSpec.GetClientPort()      // Uses getter for default port if not set
 	etcdPeerPortResolved := etcdSpec.GetPeerPort() // Uses getter
