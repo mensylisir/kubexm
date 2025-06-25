@@ -21,15 +21,23 @@ type PreflightModule struct {
 // NewPreflightModule creates a new PreflightModule.
 // It initializes the tasks that this module will orchestrate.
 func NewPreflightModule(assumeYes bool) module.Module { // Returns module.Module interface
-	// Define the sequence of tasks for this module
+	// Define the sequence of tasks for this module, using refactored task names/constructors
 	moduleTasks := []task.Task{
-		greeting.NewGreetingTask(),
-		pre.NewPreTask(),      // Corresponds to "执行前置检查" (items 2.1-2.10 from 20-kubernetes流程设计.md)
+		greeting.NewGreetingTask(), // Runs first, no dependencies
+		// Confirmation can happen early
 		pre.NewConfirmTask("InitialConfirmation", "Proceed with KubeXM operations?", assumeYes),
-		pre.NewVerifyArtifactsTask(), // Corresponds to "(离线) 校验离线包"
-		pre.NewCreateRepositoryTask(),// Corresponds to "(离线) 在所有节点创建临时本地仓库"
-		taskpreflight.NewNodePreflightChecksTask(), // Corresponds to "执行 kubeadm 风格的系统预检和配置" (items 1-10)
+		// SystemChecks can run broadly
+		NewSystemChecksTask(nil), // Assuming NewSystemChecksTask takes roles, nil for all relevant
+		// Initial OS Setup (Firewall, SELinux, Swap)
+		NewInitialNodeSetupTask(), // Uses refactored task
+		// Kernel Setup (Modules, Sysctl)
+		NewSetupKernelTask(), // Uses refactored task
+		// Offline/Artifact related tasks (conditionally run)
+		pre.NewVerifyArtifactsTask(),
+		pre.NewCreateRepositoryTask(),
 	}
+	// Note: The old `pre.NewPreTask()` and `taskpreflight.NewNodePreflightChecksTask()`
+	// have been replaced by the more granular `NewSystemChecksTask`, `NewInitialNodeSetupTask`, `NewSetupKernelTask`.
 
 	base := module.NewBaseModule("PreflightChecksAndSetup", moduleTasks)
 	pm := &PreflightModule{
@@ -40,149 +48,98 @@ func NewPreflightModule(assumeYes bool) module.Module { // Returns module.Module
 }
 
 // Plan generates the execution fragment for the preflight module.
-// It orchestrates the fragments from SystemChecksTask and SetupKernelTask,
-// making SetupKernelTask depend on SystemChecksTask.
-func (m *PreflightModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, error) { // Changed to module.ModuleContext
+func (m *PreflightModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("module", m.Name())
-	moduleFragment := &task.ExecutionFragment{
-		Nodes:      make(map[plan.NodeID]*plan.ExecutionNode),
-		EntryNodes: []plan.NodeID{},
-		ExitNodes:  []plan.NodeID{},
+	moduleFragment := task.NewExecutionFragment(m.Name() + "-Fragment")
+
+	taskCtx, ok := ctx.(task.TaskContext)
+	if !ok {
+		return nil, fmt.Errorf("module context cannot be asserted to task.TaskContext for PreflightModule")
 	}
 
 	var previousTaskExitNodes []plan.NodeID
-	isFirstEffectiveTask := true
 
-	for _, currentTask := range m.Tasks() { // Use m.Tasks() from BaseModule
-		// Create TaskContext from ModuleContext
-		// This assumes ModuleContext has a method to derive a TaskContext,
-		// or TaskContext can be created from the components of ModuleContext.
-		// For now, let's assume ModuleContext can provide what TaskContext needs.
-		// If ModuleContext is a superset of TaskContext, we might just pass it,
-		// but facades are for stricter separation.
-		// A common pattern is: taskCtx := ctx.NewTaskContext(additionalArgsIfNeeded)
-		// For now, assuming TaskContext can be derived or ModuleContext is sufficient.
-		// Let's use a hypothetical NewTaskContext method on the ModuleContext for clarity.
-		// This will be refined when runtime.ModuleContext is fully defined.
-		// For the purpose of this example, we will assume ctx (ModuleContext) can fulfill TaskContext's needs.
-		// However, the design doc implies specific facade types.
-		// So, `ctx.(runtime.TaskContext)` would be wrong. `ctx.GetTaskContext()` or similar.
-		// Let's assume ModuleContext has a method `DeriveTaskContext()` or similar.
-		// For now, we'll pass module context directly if the interfaces are compatible or use a placeholder.
-		// The design doc shows distinct interfaces: PipelineContext, ModuleContext, TaskContext, StepContext.
-		// This means we need a way to get a TaskContext from ModuleContext.
-		// This method should ideally be part of the ModuleContext interface.
-		// Example: taskCtx := ctx.TaskCtx()
+	// Define explicit task instances for clarity in linking
+	greetingTask := greeting.NewGreetingTask()
+	confirmTask := pre.NewConfirmTask("InitialConfirmation", "Proceed with KubeXM operations?", m.AssumeYes)
+	systemChecksTask := NewSystemChecksTask(nil) // Use the constructor from this package if it's defined here, or import preflight.NewSystemChecksTask
+	initialNodeSetupTask := NewInitialNodeSetupTask()
+	kernelSetupTask := NewSetupKernelTask()
+	verifyArtifactsTask := pre.NewVerifyArtifactsTask()
+	createRepoTask := pre.NewCreateRepositoryTask()
 
-		// Let's assume for now that the ModuleContext itself can satisfy the broader parts of TaskContext
-		// like GetLogger, GetClusterConfig, GoContext, and GetHostsByRole, GetHostFacts might need to be
-		// part of ModuleContext or TaskContext needs to be constructible.
-		// The "13-runtime设计.md" shows TaskContext embedding ModuleContext.
-		// So, if our `ctx` is a concrete type that implements both, it's fine.
-		// But if it's strictly ModuleContext, we need a conversion.
-		// Let's assume runtime.Context (the main one) implements all, and facades are views.
-		// The `Plan` methods will receive the specific facade type.
-		// So, ModuleContext needs a way to provide a TaskContext to its tasks.
-		// This is a detail of runtime context implementation.
-		// For now, let's assume `ctx` (ModuleContext) is sufficient for `IsRequired` and `Plan`.
-		// This will be addressed when runtime facades are fully implemented.
-		// A simple way: runtime.NewTaskContext(moduleCtx runtime.ModuleContext) runtime.TaskContext
-		// For this step, let's proceed assuming TaskContext can be obtained.
-		// A placeholder: taskRuntimeCtx := ctx (this needs to be fixed if ModuleContext lacks TaskContext methods)
-		// Based on "13-runtime设计.md", TaskContext embeds ModuleContext.
-		// So, a concrete type that implements TaskContext would also implement ModuleContext.
-		// The issue is if the `ctx` parameter here *is* only a ModuleContext interface.
-		// Let's assume the underlying concrete context object that Module.Plan receives
-		// also implements TaskContext. This is a common approach with embedded interfaces.
-		// If not, ModuleContext needs a method like `ToTaskContext()`.
+	// Order and link tasks
+	// 1. Greeting
+	greetingFrag, err := greetingTask.Plan(taskCtx)
+	if err != nil { return nil, fmt.Errorf("failed to plan GreetingTask: %w", err) }
+	if err := moduleFragment.MergeFragment(greetingFrag); err != nil { return nil, err }
+	moduleFragment.EntryNodes = append(moduleFragment.EntryNodes, greetingFrag.EntryNodes...)
+	previousTaskExitNodes = greetingFrag.ExitNodes
 
-		// Simplification for now: assume ModuleContext can be used where TaskContext is needed if methods overlap.
-		// This is not ideal for strict facade separation. The correct way is for ModuleContext to provide a TaskContext.
-		// Let's assume ModuleContext has a method `TaskCtx()` that returns a TaskContext.
-		// This needs to be added to runtime.ModuleContext interface definition.
-		// For now, to make progress, I will assume `ctx` can be used for methods common to both.
-		// If specific TaskContext methods are needed, this will fail compilation later.
-		// Assuming ctx (ModuleContext) is fulfilled by an object that also fulfills TaskContext.
-
-		// Assert module.ModuleContext to task.TaskContext
-		// This is valid because task.TaskContext embeds module.ModuleContext,
-		// and the concrete *runtime.Context implements task.TaskContext.
-		taskCtx, ok := ctx.(task.TaskContext)
-		if !ok {
-			return nil, fmt.Errorf("failed to assert ModuleContext to TaskContext for task %s in module %s", currentTask.Name(), m.Name())
-		}
-
-		taskIsRequired, err := currentTask.IsRequired(taskCtx)
-		if err != nil {
-			logger.Error(err, "Error checking if task is required", "task", currentTask.Name())
-			return nil, fmt.Errorf("failed to check if task %s is required: %w", currentTask.Name(), err)
-		}
-		if !taskIsRequired {
-			logger.Info("Skipping task as it's not required", "task", currentTask.Name())
-			continue
-		}
-
-		logger.Info("Planning task", "task", currentTask.Name())
-		// Same assumption for ctx being passable as TaskContext.
-		taskFragment, err := currentTask.Plan(taskCtx)
-		if err != nil {
-			logger.Error(err, "Failed to plan task", "task", currentTask.Name())
-			return nil, fmt.Errorf("failed to plan task %s: %w", currentTask.Name(), err)
-		}
-
-		if taskFragment == nil || len(taskFragment.Nodes) == 0 {
-			logger.Info("Task returned an empty fragment, skipping", "task", currentTask.Name())
-			continue
-		}
-
-		// Merge nodes from taskFragment into moduleFragment
-		for id, node := range taskFragment.Nodes {
-			if _, exists := moduleFragment.Nodes[id]; exists {
-				err := fmt.Errorf("duplicate NodeID %s detected when merging fragments from task %s", id, currentTask.Name())
-				logger.Error(err, "NodeID collision")
-				return nil, err
-			}
-			moduleFragment.Nodes[id] = node
-		}
-
-		// Link current task's entry nodes to previous task's exit nodes
-		if len(previousTaskExitNodes) > 0 {
-			for _, entryNodeID := range taskFragment.EntryNodes {
-				entryNode, ok := moduleFragment.Nodes[entryNodeID]
-				if !ok {
-					return nil, fmt.Errorf("internal error: entry node %s not found in module fragment", entryNodeID)
-				}
-				existingDeps := make(map[plan.NodeID]bool)
-				for _, depID := range entryNode.Dependencies {
-					existingDeps[depID] = true
-				}
-				for _, prevExitNodeID := range previousTaskExitNodes {
-					if !existingDeps[prevExitNodeID] {
-						entryNode.Dependencies = append(entryNode.Dependencies, prevExitNodeID)
-						existingDeps[prevExitNodeID] = true
-					}
-				}
-			}
-		} else if isFirstEffectiveTask {
-			// This task fragment's entry nodes are also entry nodes for the module
-			moduleFragment.EntryNodes = append(moduleFragment.EntryNodes, taskFragment.EntryNodes...)
-		}
-
-		// The current task's exit nodes become the new "previous" for the next iteration.
-		// If the current task fragment is empty, `previousTaskExitNodes` remains from the task before that.
-		if len(taskFragment.ExitNodes) > 0 {
-		    previousTaskExitNodes = taskFragment.ExitNodes
-			isFirstEffectiveTask = false // An effective task has been planned
+	// 2. Confirm (depends on Greeting finishing, just for sequence)
+	if !m.AssumeYes { // Only plan confirm task if not assuming yes
+		confirmTaskRequired, _ := confirmTask.IsRequired(taskCtx) // Should be true if !m.AssumeYes
+		if confirmTaskRequired {
+			confirmFrag, err := confirmTask.Plan(taskCtx)
+			if err != nil { return nil, fmt.Errorf("failed to plan ConfirmTask: %w", err) }
+			if err := moduleFragment.MergeFragment(confirmFrag); err != nil { return nil, err }
+			plan.LinkFragments(moduleFragment, previousTaskExitNodes, confirmFrag.EntryNodes)
+			previousTaskExitNodes = confirmFrag.ExitNodes
 		}
 	}
 
-	// Module's exit nodes are the exit nodes of the last effectively planned task.
-	moduleFragment.ExitNodes = append(moduleFragment.ExitNodes, previousTaskExitNodes...)
+	// 3. System Checks (can run after confirmation, or parallel to greeting if confirmation is very first)
+	// For simplicity, let's make it depend on confirmation (or greeting if no confirmation)
+	systemChecksFrag, err := systemChecksTask.Plan(taskCtx)
+	if err != nil { return nil, fmt.Errorf("failed to plan SystemChecksTask: %w", err) }
+	if err := moduleFragment.MergeFragment(systemChecksFrag); err != nil { return nil, err }
+	plan.LinkFragments(moduleFragment, previousTaskExitNodes, systemChecksFrag.EntryNodes)
+	// System checks are broad, their exits will be dependencies for many subsequent things.
+	systemChecksExits := systemChecksFrag.ExitNodes
 
-	// Deduplicate EntryNodes and ExitNodes for the module fragment
-	moduleFragment.EntryNodes = plan.UniqueNodeIDs(moduleFragment.EntryNodes) // Changed to plan.UniqueNodeIDs
-	moduleFragment.ExitNodes = plan.UniqueNodeIDs(moduleFragment.ExitNodes)   // Changed to plan.UniqueNodeIDs
 
+	// 4. Initial Node Setup (depends on System Checks being done and confirmation)
+	initialSetupFrag, err := initialNodeSetupTask.Plan(taskCtx)
+	if err != nil { return nil, fmt.Errorf("failed to plan InitialNodeSetupTask: %w", err) }
+	if err := moduleFragment.MergeFragment(initialSetupFrag); err != nil { return nil, err }
+	plan.LinkFragments(moduleFragment, systemChecksExits, initialSetupFrag.EntryNodes) // Depends on system checks
+
+	// 5. Kernel Setup (depends on Initial Node Setup)
+	kernelSetupFrag, err := kernelSetupTask.Plan(taskCtx)
+	if err != nil { return nil, fmt.Errorf("failed to plan KernelSetupTask: %w", err) }
+	if err := moduleFragment.MergeFragment(kernelSetupFrag); err != nil { return nil, err }
+	plan.LinkFragments(moduleFragment, initialSetupFrag.ExitNodes, kernelSetupFrag.EntryNodes)
+	previousTaskExitNodes = kernelSetupFrag.ExitNodes // This is now the main line pre-OS-config exit
+
+	// --- Conditional Offline Tasks ---
+	// These should be checked with IsRequired and depend on previous setup stages.
+	// Example: if clusterConfig.Spec.OfflineMode == true
+	offlineMode := false // TODO: Determine from ctx.GetClusterConfig().Spec.SomeOfflineFlag
+
+	if offlineMode {
+		verifyArtifactsRequired, _ := verifyArtifactsTask.IsRequired(taskCtx)
+		if verifyArtifactsRequired {
+			verifyArtifactsFrag, err := verifyArtifactsTask.Plan(taskCtx)
+			if err != nil { return nil, fmt.Errorf("failed to plan VerifyArtifactsTask: %w", err) }
+			if err := moduleFragment.MergeFragment(verifyArtifactsFrag); err != nil { return nil, err }
+			plan.LinkFragments(moduleFragment, previousTaskExitNodes, verifyArtifactsFrag.EntryNodes)
+			previousTaskExitNodes = verifyArtifactsFrag.ExitNodes
+		}
+
+		createRepoRequired, _ := createRepoTask.IsRequired(taskCtx)
+		if createRepoRequired {
+			createRepoFrag, err := createRepoTask.Plan(taskCtx)
+			if err != nil { return nil, fmt.Errorf("failed to plan CreateRepositoryTask: %w", err) }
+			if err := moduleFragment.MergeFragment(createRepoFrag); err != nil { return nil, err }
+			plan.LinkFragments(moduleFragment, previousTaskExitNodes, createRepoFrag.EntryNodes)
+			previousTaskExitNodes = createRepoFrag.ExitNodes
+		}
+	}
+	// --- End Conditional Offline Tasks ---
+
+
+	// Recalculate final entry/exit nodes for the entire module fragment
+	moduleFragment.CalculateEntryAndExitNodes()
 
 	if len(moduleFragment.Nodes) == 0 {
 		logger.Info("Preflight module planned no executable nodes.")

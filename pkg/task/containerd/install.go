@@ -95,146 +95,226 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 	graph := task.NewExecutionFragment()
 
 	// --- 1. Resource Acquisition on Control Node ---
-	// TODO: Get versions, URLs, checksums from cfg.Spec.ContainerRuntime.Containerd or cfg.Spec.Kubernetes / cfg.Spec.Dependencies
-
-	containerdVersion := cfg.Spec.ContainerRuntime.Version // e.g., "1.7.2"
-	runcVersion := "v1.1.12"                               // Example, should come from config
-	cniPluginsVersion := "v1.4.0"                          // Example, should come from config
-	arch := ""                                             // Auto-detect by resource handle
-
-	// Containerd Archive
-	containerdHandle := resource.NewRemoteBinaryHandle("containerd", containerdVersion, arch,
-		"https://github.com/containerd/containerd/releases/download/v{{.Version}}/containerd-{{.Version}}-linux-{{.Arch}}.tar.gz",
-		"", "bin/containerd", "", // BinaryPathInArchive is for the main binary, not the whole archive structure
-	)
-	containerdArchivePlan, err := containerdHandle.EnsurePlan(ctx)
-	if err != nil {
-		return nil, err
+	// Get versions from config
+	// TODO: These versions should ideally come from a resolved dependency spec, not hardcoded or simple config fields.
+	// For now, assume they are available in cfg.Spec.ContainerRuntime or a similar place.
+	containerdVersion := "1.7.13" // Example, replace with config lookup
+	runcVersion := "v1.1.12"    // Example
+	cniPluginsVersion := "v1.4.0" // Example
+	if cfg.Spec.ContainerRuntime != nil && cfg.Spec.ContainerRuntime.Version != "" {
+		containerdVersion = cfg.Spec.ContainerRuntime.Version
 	}
-	graph.Merge(containerdArchivePlan)
-	containerdArchiveLocalPathKey := fmt.Sprintf("resource.%s.downloadedPath", containerdHandle.ID())
+	// TODO: Add similar lookups for runcVersion and cniPluginsVersion if they are in cfg.Spec.ContainerRuntime.Dependencies or similar.
 
-	// Runc Binary
-	runcHandle := resource.NewRemoteBinaryHandle("runc", strings.TrimPrefix(runcVersion, "v"), arch,
-		"https://github.com/opencontainers/runc/releases/download/{{.Version}}/runc.{{.Arch}}",
-		"", "runc.{{.Arch}}", "", // BinaryPathInArchive is just the filename itself
+	arch := "" // Auto-detect by resource handle
+
+	allLocalResourcePrepFragments := []*task.ExecutionFragment{}
+
+	// Containerd Archive Handle
+	containerdArchiveHandle, err := resource.NewRemoteBinaryHandle(ctx,
+		"containerd", containerdVersion, arch, "linux",
+		"", // BinaryNameInArchive - we want the archive path for upload
+		cfg.Spec.ContainerRuntime.GetContainerdChecksum(arch), // Get checksum from config
+		"sha256",
 	)
-	runcBinaryPlan, err := runcHandle.EnsurePlan(ctx) // This handle's EnsurePlan might be simpler (no extract)
-	if err != nil {
-		return nil, err
-	}
-	graph.Merge(runcBinaryPlan)
-	runcBinaryLocalPathKey := fmt.Sprintf("resource.%s.downloadedPath", runcHandle.ID()) // This key points to the runc binary itself
+	if err != nil { return nil, fmt.Errorf("failed to create containerd archive handle: %w", err) }
+	containerdArchivePrepFragment, err := containerdArchiveHandle.EnsurePlan(ctx)
+	if err != nil { return nil, fmt.Errorf("failed to plan containerd archive acquisition: %w", err) }
+	allLocalResourcePrepFragments = append(allLocalResourcePrepFragments, containerdArchivePrepFragment)
+	localContainerdArchivePath := containerdArchiveHandle.(*resource.RemoteBinaryHandle).BinaryInfo().FilePath
 
-	// CNI Plugins Archive
-	cniPluginsHandle := resource.NewRemoteBinaryHandle("cni-plugins", strings.TrimPrefix(cniPluginsVersion, "v"), arch,
-		"https://github.com/containernetworking/plugins/releases/download/{{.Version}}/cni-plugins-linux-{{.Arch}}-{{.Version}}.tgz",
-		"", "bridge", "", // Dummy BinaryPathInArchive, we care about the archive
+
+	// Runc Binary Handle
+	runcHandle, err := resource.NewRemoteBinaryHandle(ctx,
+		"runc", strings.TrimPrefix(runcVersion, "v"), arch, "linux",
+		"", // BinaryNameInArchive - runc is a direct binary
+		cfg.Spec.ContainerRuntime.GetRuncChecksum(arch),
+		"sha256",
 	)
-	cniPluginsArchivePlan, err := cniPluginsHandle.EnsurePlan(ctx)
-	if err != nil {
-		return nil, err
-	}
-	graph.Merge(cniPluginsArchivePlan)
-	cniPluginsArchiveLocalPathKey := fmt.Sprintf("resource.%s.downloadedPath", cniPluginsHandle.ID())
+	if err != nil { return nil, fmt.Errorf("failed to create runc binary handle: %w", err) }
+	runcPrepFragment, err := runcHandle.EnsurePlan(ctx)
+	if err != nil { return nil, fmt.Errorf("failed to plan runc binary acquisition: %w", err) }
+	allLocalResourcePrepFragments = append(allLocalResourcePrepFragments, runcPrepFragment)
+	localRuncPath := runcHandle.(*resource.RemoteBinaryHandle).BinaryInfo().FilePath
 
-	// --- 2. Pre-flight checks on all target nodes ---
+
+	// CNI Plugins Archive Handle
+	cniPluginsHandle, err := resource.NewRemoteBinaryHandle(ctx,
+		"kubecni", strings.TrimPrefix(cniPluginsVersion, "v"), arch, "linux", // "kubecni" is the component name in util.BinaryInfo for CNI plugins
+		"", // BinaryNameInArchive - we want the archive path for upload
+		cfg.Spec.ContainerRuntime.GetCNIChecksum(arch),
+		"sha256",
+	)
+	if err != nil { return nil, fmt.Errorf("failed to create CNI plugins archive handle: %w", err) }
+	cniPluginsPrepFragment, err := cniPluginsHandle.EnsurePlan(ctx)
+	if err != nil { return nil, fmt.Errorf("failed to plan CNI plugins archive acquisition: %w", err) }
+	allLocalResourcePrepFragments = append(allLocalResourcePrepFragments, cniPluginsPrepFragment)
+	localCNIPluginsArchivePath := cniPluginsHandle.(*resource.RemoteBinaryHandle).BinaryInfo().FilePath
+
+	// Merge all local resource preparation fragments. These can run in parallel on the control node.
+	mergedLocalResourceFragment := task.NewExecutionFragment(t.Name() + "-LocalResourcePrep")
+	for _, frag := range allLocalResourcePrepFragments {
+		if err := mergedLocalResourceFragment.MergeFragment(frag); err != nil {
+			return nil, fmt.Errorf("failed to merge local resource prep fragment: %w", err)
+		}
+	}
+	mergedLocalResourceFragment.CalculateEntryAndExitNodes() // Should mostly be parallel entries and exits
+
+	// This is the main fragment for the task, starting with local resource prep.
+	taskPlanFragment := task.NewExecutionFragment(t.Name())
+	if err := taskPlanFragment.MergeFragment(mergedLocalResourceFragment); err != nil {
+		return nil, fmt.Errorf("failed to merge local resource fragment into task plan: %w", err)
+	}
+	controlNodeOpsDoneDependencies := mergedLocalResourceFragment.ExitNodes
+	if len(controlNodeOpsDoneDependencies) == 0 && len(mergedLocalResourceFragment.Nodes) > 0 { // If merged fragment had nodes but no explicit exits
+		for id := range mergedLocalResourceFragment.Nodes { controlNodeOpsDoneDependencies = append(controlNodeOpsDoneDependencies, id)}
+	}
+
+
+	// --- 2. Pre-flight OS configuration on all target nodes (can run in parallel across hosts) ---
+	// These depend on nothing from the local resource prep.
+	preflightFragment := task.NewExecutionFragment(t.Name() + "-OSPreflight")
+
 	loadModulesStep := preflight.NewLoadKernelModulesStep("", []string{"overlay", "br_netfilter"}, true)
-	loadModulesNodeID := graph.AddNodePerHost("preflight-load-kernel-modules", targetHosts, loadModulesStep)
+	for _, host := range targetHosts {
+		nodeID := plan.NodeID(fmt.Sprintf("preflight-load-modules-%s", host.GetName()))
+		_, _ = preflightFragment.AddNode(&plan.ExecutionNode{
+			Name: loadModulesStep.Meta().Name + "-on-" + host.GetName(), Step: loadModulesStep, Hosts: []connector.Host{host},
+		})
+	}
 
 	sysctlParams := map[string]string{
 		"net.bridge.bridge-nf-call-iptables":  "1",
-		"net.bridge.bridge-nf-call-ip6tables": "1", // Good to have for IPv6
+		"net.bridge.bridge-nf-call-ip6tables": "1",
 		"net.ipv4.ip_forward":                 "1",
 	}
 	setSysctlStep := preflight.NewSetSystemConfigStep("", sysctlParams, "/etc/sysctl.d/99-kubernetes-cri.conf", true, true)
-	setSysctlNodeID := graph.AddNodePerHost("preflight-set-sysctl-k8s", targetHosts, setSysctlStep)
-	// No explicit dependency between modules and sysctl for now, can run in parallel.
-	// If ensure resource plans have exit nodes, these could depend on them to ensure downloads finish first.
-	// For now, these can start immediately.
-	graph.AddEntryNodes(loadModulesNodeID)
-	graph.AddEntryNodes(setSysctlNodeID)
+	for _, host := range targetHosts {
+		nodeID := plan.NodeID(fmt.Sprintf("preflight-set-sysctl-%s", host.GetName()))
+		_, _ = preflightFragment.AddNode(&plan.ExecutionNode{
+			Name: setSysctlStep.Meta().Name + "-on-" + host.GetName(), Step: setSysctlStep, Hosts: []connector.Host{host},
+		})
+	}
+	preflightFragment.CalculateEntryAndExitNodes() // All these are parallel entries and exits
+	if err := taskPlanFragment.MergeFragment(preflightFragment); err != nil {
+		return nil, fmt.Errorf("failed to merge OS preflight fragment: %w", err)
+	}
+	// No explicit dependency between local resource prep and OS preflight, they can start together.
 
-	// --- 3. Distribution, Extraction, Installation per node (could be parallelized per node if steps don't conflict) ---
-	lastNodeIDs := make(map[string][]plan.NodeID) // Track last step(s) on each node for sequencing
+
+	// --- 3. Distribution, Extraction, Installation per node ---
+	var allHostFinalNodes []plan.NodeID
 
 	for _, host := range targetHosts {
 		nodePrefix := fmt.Sprintf("containerd-%s-", strings.ReplaceAll(host.GetName(), ".", "-"))
-		currentDeps := []plan.NodeID{
-			plan.NodeID(fmt.Sprintf("preflight-load-kernel-modules-%s", strings.ReplaceAll(host.GetName(), ".", "-"))),
-			plan.NodeID(fmt.Sprintf("preflight-set-sysctl-k8s-%s", strings.ReplaceAll(host.GetName(), ".", "-"))),
-		}
-		// Add dependencies on resource downloads finishing on control node
-		currentDeps = append(currentDeps, containerdArchivePlan.ExitNodes...)
-		currentDeps = append(currentDeps, runcBinaryPlan.ExitNodes...)
-		currentDeps = append(currentDeps, cniPluginsArchivePlan.ExitNodes...)
 
-		// Containerd
-		distContainerdStep := stepContainerd.NewDistributeContainerdArchiveStep(nodePrefix+"DistributeContainerd", containerdArchiveLocalPathKey, "", "", "", true)
-		distContainerdNodeID := graph.AddNode(nodePrefix+"dist-containerd", []connector.Host{host}, distContainerdStep, currentDeps...)
+		// Dependencies for this host: local resource prep AND local OS preflight for this host.
+		perHostBaseDependencies := append([]plan.NodeID{}, controlNodeOpsDoneDependencies...)
+		perHostBaseDependencies = append(perHostBaseDependencies, plan.NodeID(fmt.Sprintf("preflight-load-modules-%s", host.GetName())))
+		perHostBaseDependencies = append(perHostBaseDependencies, plan.NodeID(fmt.Sprintf("preflight-set-sysctl-%s", host.GetName())))
+		currentHostLastOpNodeID := plan.NodeID("") // Will track the last operation for sequential steps on this host
 
-		extractContainerdStep := stepContainerd.NewExtractContainerdArchiveStep(nodePrefix+"ExtractContainerd", stepContainerd.ContainerdArchiveRemotePathCacheKey, "", "", "", true, true)
-		extractContainerdNodeID := graph.AddNode(nodePrefix+"extract-containerd", []connector.Host{host}, extractContainerdStep, distContainerdNodeID)
 
-		installContainerdStep := stepContainerd.NewInstallContainerdStep(nodePrefix+"InstallContainerdBinaries", stepContainerd.ContainerdExtractedDirCacheKey, nil, "", "", true)
-		installContainerdNodeID := graph.AddNode(nodePrefix+"install-containerd-core", []connector.Host{host}, installContainerdStep, extractContainerdNodeID)
-		currentDeps = []plan.NodeID{installContainerdNodeID} // Subsequent steps for this host depend on this
+		// Upload and Install Containerd
+		remoteContainerdArchiveTempPath := filepath.Join("/tmp", filepath.Base(localContainerdArchivePath)) // Example remote temp path
+		uploadContainerdArchiveStep := common.NewUploadFileStep(nodePrefix+"UploadContainerdArchive", localContainerdArchivePath, remoteContainerdArchiveTempPath, "0644", true, false)
+		uploadContainerdArchiveNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: uploadContainerdArchiveStep.Meta().Name, Step: uploadContainerdArchiveStep, Hosts: []connector.Host{host}, Dependencies: task.UniqueNodeIDs(perHostBaseDependencies),
+		})
+		currentHostLastOpNodeID = uploadContainerdArchiveNodeID
 
-		// Runc
-		distRuncStep := stepContainerd.NewDistributeRuncBinaryStep(nodePrefix+"DistributeRunc", runcBinaryLocalPathKey, "", "runc", "", true) // Assuming remote name is just "runc"
-		distRuncNodeID := graph.AddNode(nodePrefix+"dist-runc", []connector.Host{host}, distRuncStep, currentDeps...)                         // Depends on containerd install for sequence, or could be parallel
+		remoteExtractedContainerdPath := "/opt/kubexm/containerd" // Standard extraction path on remote
+		extractContainerdStep := common.NewExtractArchiveStep(nodePrefix+"ExtractContainerdArchive", remoteContainerdArchiveTempPath, remoteExtractedContainerdPath, true, true) // remove archive, sudo
+		extractContainerdNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: extractContainerdStep.Meta().Name, Step: extractContainerdStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{currentHostLastOpNodeID},
+		})
+		currentHostLastOpNodeID = extractContainerdNodeID
+		// Task cache key for where InstallContainerdStep can find the extracted files on this host.
+		ctx.TaskCache().Set(fmt.Sprintf("%s.%s", stepContainerd.ContainerdExtractedDirCacheKey, host.GetName()), remoteExtractedContainerdPath)
 
-		installRuncStep := stepContainerd.NewInstallRuncBinaryStep(nodePrefix+"InstallRunc", stepContainerd.RuncBinaryRemotePathCacheKey, "/usr/local/sbin/runc", true)
-		installRuncNodeID := graph.AddNode(nodePrefix+"install-runc", []connector.Host{host}, installRuncStep, distRuncNodeID)
-		currentDeps = append(currentDeps, installRuncNodeID) // Add runc install to current dependencies for this host
 
-		// CNI Plugins
-		distCNIStep := stepContainerd.NewDistributeCNIPluginsArchiveStep(nodePrefix+"DistributeCNI", cniPluginsArchiveLocalPathKey, "", "", "", true)
-		distCNINodeID := graph.AddNode(nodePrefix+"dist-cni", []connector.Host{host}, distCNIStep, currentDeps...)
+		installContainerdBinariesStep := stepContainerd.NewInstallContainerdStep(nodePrefix+"InstallContainerdBinaries", fmt.Sprintf("%s.%s", stepContainerd.ContainerdExtractedDirCacheKey, host.GetName()), nil, "", "", true)
+		installContainerdBinariesNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: installContainerdBinariesStep.Meta().Name, Step: installContainerdBinariesStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{currentHostLastOpNodeID},
+		})
+		currentHostLastOpNodeID = installContainerdBinariesNodeID
 
-		extractCNIStep := stepContainerd.NewExtractCNIPluginsArchiveStep(nodePrefix+"ExtractCNI", stepContainerd.CNIPluginsArchiveRemotePathCacheKey, "/opt/cni/bin", "", true, true)
-		extractCNINodeID := graph.AddNode(nodePrefix+"extract-cni", []connector.Host{host}, extractCNIStep, distCNINodeID)
-		currentDeps = []plan.NodeID{extractCNINodeID} // Main dependency for next config steps
+		// Upload and Install Runc
+		remoteRuncTempPath := filepath.Join("/tmp", filepath.Base(localRuncPath))
+		uploadRuncStep := common.NewUploadFileStep(nodePrefix+"UploadRunc", localRuncPath, remoteRuncTempPath, "0755", true, false)
+		uploadRuncNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: uploadRuncStep.Meta().Name, Step: uploadRuncStep, Hosts: []connector.Host{host}, Dependencies: task.UniqueNodeIDs(perHostBaseDependencies), // Can be parallel to containerd archive upload
+		})
+		// Task cache key for where InstallRuncBinaryStep can find the uploaded runc binary on this host.
+		ctx.TaskCache().Set(fmt.Sprintf("%s.%s", stepContainerd.RuncBinaryRemotePathCacheKey, host.GetName()), remoteRuncTempPath)
 
-		// Configuration and Service Management (depends on all binaries being in place)
-		// Ensure dependencies for configure step include installContainerdNodeID, installRuncNodeID, extractCNINodeID
-		allInstallCompleteDeps := []plan.NodeID{installContainerdNodeID, installRuncNodeID, extractCNINodeID}
+		installRuncStep := stepContainerd.NewInstallRuncBinaryStep(nodePrefix+"InstallRuncBinary", fmt.Sprintf("%s.%s", stepContainerd.RuncBinaryRemotePathCacheKey, host.GetName()), "/usr/local/sbin/runc", true)
+		installRuncNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: installRuncStep.Meta().Name, Step: installRuncStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{uploadRuncNodeID},
+		})
+		// currentHostLastOpNodeID should now depend on both containerd binaries AND runc binary being installed.
+		currentHostLastOpNodeID = installRuncNodeID // For simplicity, let's chain. A merge node would be more accurate for parallelism.
 
-		configureStep := stepContainerd.NewConfigureContainerdStep(nodePrefix+"Configure", t.SandboxImage, t.RegistryMirrors, t.InsecureRegistries, t.ContainerdConfigPath, t.RegistryConfigPath, t.ExtraTomlContent, t.UseSystemdCgroup, true)
-		configureNodeID := graph.AddNode(nodePrefix+"configure", []connector.Host{host}, configureStep, allInstallCompleteDeps...)
+		// Upload and Install CNI Plugins
+		remoteCNIArchiveTempPath := filepath.Join("/tmp", filepath.Base(localCNIPluginsArchivePath))
+		uploadCNIStep := common.NewUploadFileStep(nodePrefix+"UploadCNIArchive", localCNIPluginsArchivePath, remoteCNIArchiveTempPath, "0644", true, false)
+		uploadCNINodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: uploadCNIStep.Meta().Name, Step: uploadCNIStep, Hosts: []connector.Host{host}, Dependencies: task.UniqueNodeIDs(perHostBaseDependencies), // Parallel
+		})
+		// Task cache key for CNI archive path on remote host.
+		ctx.TaskCache().Set(fmt.Sprintf("%s.%s", stepContainerd.CNIPluginsArchiveRemotePathCacheKey, host.GetName()), remoteCNIArchiveTempPath)
 
-		genServiceStep := stepContainerd.NewGenerateContainerdServiceStep(nodePrefix+"GenerateService", stepContainerd.ContainerdServiceData{}, "", true)
-		genServiceNodeID := graph.AddNode(nodePrefix+"gen-service", []connector.Host{host}, genServiceStep, configureNodeID) // Depends on config.toml potentially if service file refers to it
+		extractCNIStep := stepContainerd.NewExtractCNIPluginsArchiveStep(nodePrefix+"ExtractCNIPlugins", fmt.Sprintf("%s.%s", stepContainerd.CNIPluginsArchiveRemotePathCacheKey, host.GetName()), "/opt/cni/bin", "", true, true) // remove archive, sudo
+		extractCNINodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: extractCNIStep.Meta().Name, Step: extractCNIStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{uploadCNINodeID},
+		})
+		// currentHostLastOpNodeID now depends on containerd, runc, AND CNI plugins being ready.
+		// This requires careful dependency management. For now, we'll make subsequent config steps depend on all three install/extract final nodes.
+		allBinariesReadyDependencies := []plan.NodeID{installContainerdBinariesNodeID, installRuncNodeID, extractCNINodeID}
 
-		daemonReloadStep := stepContainerd.NewManageContainerdServiceStep(nodePrefix+"DaemonReload", stepContainerd.ActionDaemonReload, true)
-		daemonReloadNodeID := graph.AddNode(nodePrefix+"daemon-reload", []connector.Host{host}, daemonReloadStep, genServiceNodeID)
 
-		enableServiceStep := stepContainerd.NewManageContainerdServiceStep(nodePrefix+"EnableService", stepContainerd.ActionEnable, true)
-		enableServiceNodeID := graph.AddNode(nodePrefix+"enable-service", []connector.Host{host}, enableServiceStep, daemonReloadNodeID)
+		// Configuration and Service Management
+		configureStep := stepContainerd.NewConfigureContainerdStep(nodePrefix+"ConfigureContainerd", t.SandboxImage, t.RegistryMirrors, t.InsecureRegistries, t.ContainerdConfigPath, t.RegistryConfigPath, t.ExtraTomlContent, t.UseSystemdCgroup, true)
+		configureNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: configureStep.Meta().Name, Step: configureStep, Hosts: []connector.Host{host}, Dependencies: task.UniqueNodeIDs(allBinariesReadyDependencies),
+		})
+		currentHostLastOpNodeID = configureNodeID
 
-		startServiceStep := stepContainerd.NewManageContainerdServiceStep(nodePrefix+"StartService", stepContainerd.ActionStart, true)
-		startServiceNodeID := graph.AddNode(nodePrefix+"start-service", []connector.Host{host}, startServiceStep, enableServiceNodeID)
+		genServiceStep := stepContainerd.NewGenerateContainerdServiceStep(nodePrefix+"GenerateContainerdService", stepContainerd.ContainerdServiceData{}, "", true)
+		genServiceNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: genServiceStep.Meta().Name, Step: genServiceStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{currentHostLastOpNodeID},
+		})
+		currentHostLastOpNodeID = genServiceNodeID
 
-		verifyStep := stepContainerd.NewVerifyContainerdCrictlStep(nodePrefix+"VerifyCrictl", "", "", false)
-		verifyNodeID := graph.AddNode(nodePrefix+"verify-crictl", []connector.Host{host}, verifyStep, startServiceNodeID)
+		daemonReloadStep := stepContainerd.NewManageContainerdServiceStep(nodePrefix+"DaemonReloadContainerd", stepContainerd.ActionDaemonReload, true)
+		daemonReloadNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: daemonReloadStep.Meta().Name, Step: daemonReloadStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{currentHostLastOpNodeID},
+		})
+		currentHostLastOpNodeID = daemonReloadNodeID
 
-		lastNodeIDs[host.GetName()] = []plan.NodeID{verifyNodeID}
+		enableServiceStep := stepContainerd.NewManageContainerdServiceStep(nodePrefix+"EnableContainerd", stepContainerd.ActionEnable, true)
+		enableServiceNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: enableServiceStep.Meta().Name, Step: enableServiceStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{currentHostLastOpNodeID},
+		})
+		currentHostLastOpNodeID = enableServiceNodeID
+
+		startServiceStep := stepContainerd.NewManageContainerdServiceStep(nodePrefix+"StartContainerd", stepContainerd.ActionStart, true)
+		startServiceNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: startServiceStep.Meta().Name, Step: startServiceStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{currentHostLastOpNodeID},
+		})
+		currentHostLastOpNodeID = startServiceNodeID
+
+		verifyStep := stepContainerd.NewVerifyContainerdCrictlStep(nodePrefix+"VerifyContainerdCrictl", "", "", false)
+		verifyNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
+			Name: verifyStep.Meta().Name, Step: verifyStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{currentHostLastOpNodeID},
+		})
+		allHostFinalNodes = append(allHostFinalNodes, verifyNodeID)
 	}
 
-	// Set fragment entry and exit nodes
-	// Entry nodes are the initial preflight checks and resource acquisition plans.
-	graph.AddEntryNodes(containerdArchivePlan.EntryNodes...)
-	graph.AddEntryNodes(runcBinaryPlan.EntryNodes...)
-	graph.AddEntryNodes(cniPluginsArchivePlan.EntryNodes...)
-	// Preflight checks are already added via AddNodePerHost to graph's entries if they had no deps.
-
-	for _, host := range targetHosts {
-		graph.AddExitNodes(lastNodeIDs[host.GetName()]...)
-	}
-	graph.RemoveDuplicateNodeIDs()
+	taskPlanFragment.CalculateEntryAndExitNodes() // This will set EntryNodes based on mergedLocalResourceFragment and preflightFragment, and ExitNodes from allHostFinalNodes.
 
 	logger.Info("Containerd installation and configuration plan generated.")
-	return graph, nil
+	return taskPlanFragment, nil
 }
 
 var _ task.Task = (*InstallContainerdTask)(nil)
