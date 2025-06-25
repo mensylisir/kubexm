@@ -16,7 +16,7 @@ type ControlPlaneEndpointSpec struct {
 	// Address is the IP address for the control plane endpoint.
 	// This could be a VIP managed by Keepalived, an external load balancer IP, etc.
 	// Corresponds to `lb_address` in some YAML configurations if `domain` is not used.
-	Address string `json:"address,omitempty" yaml:"address,omitempty"`
+	Address string `json:"address,omitempty" yaml:"lb_address,omitempty"`
 
 	// Port is the port number for the control plane endpoint.
 	// Defaults to 6443.
