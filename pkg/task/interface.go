@@ -2,7 +2,7 @@ package task
 
 import (
 	"github.com/mensylisir/kubexm/pkg/cache" // For cache.TaskCache, cache.ModuleCache, cache.PipelineCache
-	"github.com/mensylisir/kubexm/pkg/plan"  // Will be used for plan.NodeID, plan.ExecutionNode
+	// "github.com/mensylisir/kubexm/pkg/plan"  // Will be used for plan.NodeID, plan.ExecutionNode - Removed as ExecutionFragment is now local to task pkg
 	// "github.com/mensylisir/kubexm/pkg/runtime" // No longer needed for runtime.TaskContext
 	"github.com/mensylisir/kubexm/pkg/connector" // For connector.Host
 	"github.com/mensylisir/kubexm/pkg/runner"    // For runner.Facts

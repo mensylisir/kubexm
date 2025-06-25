@@ -63,13 +63,24 @@ func (ef *ExecutionFragment) AddNode(node *plan.ExecutionNode, id ...plan.NodeID
 	return nodeID, nil
 }
 
+// NewEmptyFragment creates an empty execution fragment.
+// Useful for tasks that determine no work needs to be done.
+func NewEmptyFragment(name string) *ExecutionFragment {
+	return &ExecutionFragment{
+		Name:       name,
+		Nodes:      make(map[plan.NodeID]*plan.ExecutionNode),
+		EntryNodes: []plan.NodeID{},
+		ExitNodes:  []plan.NodeID{},
+	}
+}
+
 // AddDependency adds a dependency between two nodes within the fragment.
-func (ef *ExecutionFragment) AddDependency(fromNoAddeID plan.NodeID, toNodeID plan.NodeID) error {
+func (ef *ExecutionFragment) AddDependency(fromNodeID plan.NodeID, toNodeID plan.NodeID) error {
 	if fromNodeID == toNodeID {
 		return fmt.Errorf("cannot add self-dependency for node ID '%s' in fragment %s", fromNodeID, ef.Name)
 	}
 
-	sourceNode, ok := ef.Nodes[fromNodeID]
+	_, ok := ef.Nodes[fromNodeID] // sourceNode was declared but not used
 	if !ok {
 		return fmt.Errorf("source node '%s' not found in fragment '%s' when adding dependency", fromNodeID, ef.Name)
 	}
@@ -178,7 +189,7 @@ func (ef *ExecutionFragment) MergeFragment(other *ExecutionFragment) error {
 	}
 	for id, node := range other.Nodes {
 		if _, exists := ef.Nodes[id]; exists {
-			// بسيط: If node names are not globally unique, this could be an issue.
+			// NOTE: If node names are not globally unique, this could be an issue.
 			// A more robust merge might involve prefixing IDs from the 'other' fragment.
 			// For now, direct merge/overwrite.
 			// Consider logging a warning or returning an error based on policy.
@@ -190,4 +201,9 @@ func (ef *ExecutionFragment) MergeFragment(other *ExecutionFragment) error {
 	// is responsible for linking fragments and then recalculating the new aggregate Entry/Exit nodes.
 	// We don't simply append them here as that would be incorrect without proper linking.
 	return nil
+}
+
+// IsEmpty checks if the fragment contains any nodes.
+func (ef *ExecutionFragment) IsEmpty() bool {
+	return len(ef.Nodes) == 0
 }
