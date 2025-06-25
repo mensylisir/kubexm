@@ -21,32 +21,28 @@ type CreateClusterPipeline struct {
 // It initializes the modules that this pipeline will orchestrate.
 func NewCreateClusterPipeline(assumeYes bool) pipeline.Pipeline {
 	// Instantiate modules in their logical execution order.
-	preflightModule := preflight.NewPreflightModule(assumeYes)
-	etcdModule := etcd.NewEtcdModule()
-	// Assuming NewContainerdModule() is suitable as per prior check.
-	// If Docker support is also primary, a selector logic or separate pipeline might be needed.
-	// For now, defaulting to containerd.
-	// containerdModule := containerd.NewContainerdModule() // Replaced by CoreComponentsModule
-	// etcdModule := etcd.NewEtcdModule() // Replaced by CoreComponentsModule
-	// controlPlaneModule := k8sModule.NewControlPlaneModule() // Replaced by CoreComponentsModule or ClusterBootstrapModule
-	// kubeletModule := k8sModule.NewKubeletModule() // Replaced by CoreComponentsModule or ClusterBootstrapModule
-	// cniModule := cni.NewCalicoModule() // Replaced by ClusterReadyModule which includes network
+	// Assuming constructors like NewCoreComponentsModule, NewClusterBootstrapModule, NewClusterReadyModule
+	// exist in the root of pkg/module/ or in specific subpackages (e.g., pkg/module/kubernetes).
+	// These would need to be implemented and correctly imported. Example:
+	// coreComponentsModule := kubernetes.NewCoreComponentsModule() // if in pkg/module/kubernetes
 
-	// Instantiate new conceptual modules
-	// Note: AssumeYes is primarily for PreflightModule's ConfirmTask. Other modules
-	// will get configuration from the runtime context during their Plan phase.
-	coreComponentsModule := module.NewCoreComponentsModule()
-	clusterBootstrapModule := module.NewClusterBootstrapModule()
-	clusterReadyModule := module.NewClusterReadyModule()
-	// PreflightModule is already instantiated above.
+	preflightModule := preflight.NewPreflightModule(assumeYes)
+	// The 'etcdModule' variable was unused. Etcd installation is typically part of CoreComponents or a dedicated early module.
+
+	// TODO: Replace placeholder constructors below with actual module constructors once they are implemented.
+	// These modules will encapsulate tasks for their respective phases.
+	coreComponentsModule := module.NewCoreComponentsModule()       // Placeholder: e.g., for container runtime, etcd, k8s binaries
+	clusterBootstrapModule := module.NewClusterBootstrapModule() // Placeholder: e.g., for kubeadm init, joining nodes
+	clusterReadyModule := module.NewClusterReadyModule()         // Placeholder: e.g., for CNI, addons, final configurations
+
 
 	return &CreateClusterPipeline{
 		PipelineName: "CreateNewCluster",
 		PipelineModules: []module.Module{
-			preflightModule,        // Phase 1: Greetings, Pre-checks, Confirmation, Offline Prep
-			coreComponentsModule,   // Phase 2: Runtime, Etcd, K8s Binaries, Images
-			clusterBootstrapModule, // Phase 3: Kubeadm Init, Join Masters, Join Workers
-			clusterReadyModule,     // Phase 4: CNI, Post-Scripts, Addons
+			preflightModule,
+			coreComponentsModule,
+			clusterBootstrapModule,
+			clusterReadyModule,
 		},
 	}
 }
@@ -128,6 +124,10 @@ func (p *CreateClusterPipeline) Plan(ctx pipeline.PipelineContext) (*plan.Execut
 	// Note: The final graph's overall entry/exit points are implicitly defined by the first module's entries
 	// and the last module's exits that are not internal to the graph. The Engine will determine this via nodes with no incoming/outgoing dependencies.
 	// Explicitly setting EntryNodes/ExitNodes on the ExecutionGraph itself is not part of plan.ExecutionGraph struct.
+	// This is incorrect, ExecutionGraph *does* have EntryNodes and ExitNodes.
+	// The pipeline should calculate these for the final graph.
+	finalGraph.CalculateEntryAndExitNodes()
+
 
 	logger.Info("Pipeline planning complete.", "total_nodes", len(finalGraph.Nodes))
 	if err := finalGraph.Validate(); err != nil {
@@ -144,10 +144,8 @@ func (p *CreateClusterPipeline) Run(ctx *runtime.Context, dryRun bool) (*plan.Gr
 
 	// Plan the pipeline using the PipelineContext view of the full runtime.Context
 	// The concrete *runtime.Context should implement runtime.PipelineContext.
-	pipelineCtx, ok := ctx.AsPipelineContext()
-	if !ok {
-		return nil, fmt.Errorf("full runtime context cannot be asserted to PipelineContext for pipeline %s run", p.Name())
-	}
+	// As *runtime.Context implements pipeline.PipelineContext, direct use is fine.
+	pipelineCtx := ctx
 
 	executionGraph, err := p.Plan(pipelineCtx)
 	if err != nil {
