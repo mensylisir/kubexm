@@ -48,88 +48,102 @@ var createCmd = &cobra.Command{
 	Short: "Create a new Kubernetes cluster",
 	Long:  `Create a new Kubernetes cluster based on a provided configuration file.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Initialize logger
-		log := logger.NewLogger(createOptions.Verbose, "") // Empty log file path for now
+		// Initialize global logger
+		logOpts := logger.DefaultOptions()
+		logOpts.ColorConsole = true // Assuming color by default for CLI
+		if createOptions.Verbose {
+			logOpts.ConsoleLevel = logger.DebugLevel
+		}
+		logger.Init(logOpts) // Initialize global logger
+		log := logger.Get()   // Get the global logger instance
+		defer logger.SyncGlobal()
+
 		log.Info("Starting cluster creation process...")
 
 		if createOptions.ClusterConfigFile == "" {
+			// This check is good, but Cobra's MarkFlagRequired should also handle it.
 			return fmt.Errorf("cluster configuration file must be provided via -f or --config flag")
 		}
 
 		absPath, err := filepath.Abs(createOptions.ClusterConfigFile)
 		if err != nil {
-			log.Error(err, "Failed to get absolute path for config file")
+			log.Errorf("Failed to get absolute path for config file %s: %v", createOptions.ClusterConfigFile, err)
 			return fmt.Errorf("failed to get absolute path for config file %s: %w", createOptions.ClusterConfigFile, err)
 		}
-		log.Infof("Loading cluster configuration from: %s", absPath)
+		log.Infof("Using cluster configuration from: %s", absPath)
 
-		clusterConfig, err := config.LoadClusterConfigFromFile(absPath)
+		// Initialize services for RuntimeBuilder
+		// Assuming NewDefaultFactory exists and is the intended constructor
+		connectorFactory := connector.NewDefaultFactory()
+		if connectorFactory == nil {
+			// This would be a programming error if NewDefaultFactory is expected to always succeed.
+			log.Fatalf("Failed to create connector factory.") // Use Fatalf from global logger
+			return fmt.Errorf("failed to create connector factory")
+		}
+
+		connectionPool := connector.NewConnectionPool(connector.DefaultPoolConfig()) // Uses default config
+		runnerSvc := runner.New()
+		engineSvc := engine.NewExecutor() // Uses new DAG executor
+
+		// Create and build runtime context
+		// TODO: Pass a global timeout for the entire operation if desired via goCtx.
+		// For now, using a background context, individual operations might have their own timeouts.
+		goCtx := context.Background()
+		// Pass CLI options like SkipPreflight to the builder or context if they affect runtime behavior.
+		// For now, RuntimeBuilder primarily uses the config file.
+		// Global flags like Verbose are handled by logger init. YesAssume is passed to pipeline.
+
+		rtBuilder := runtime.NewRuntimeBuilder(absPath, runnerSvc, connectionPool, connectorFactory, engineSvc)
+		// The RuntimeBuilder constructor needs engineSvc if it's to be part of the context it builds.
+		// Let's adjust the builder or how engine is set.
+		// The runtime.Context has an Engine field. Builder should set it.
+		// For now, assuming engineSvc is passed to Build, or set on RuntimeBuilder.
+		// The design has engineSvc passed to Build.
+
+		log.Info("Building runtime environment...")
+		runtimeCtx, cleanupFunc, err := rtBuilder.Build(goCtx) // engineSvc removed from Build, assuming it's part of builder's init
 		if err != nil {
-			log.Error(err, "Failed to load cluster configuration")
-			return fmt.Errorf("failed to load cluster configuration from %s: %w", absPath, err)
+			log.Errorf("Failed to build runtime environment: %v", err)
+			return fmt.Errorf("failed to build runtime environment: %w", err)
+		}
+		defer cleanupFunc() // Ensure connection pool and other resources are cleaned up
+
+		// Override context's engine if builder doesn't set it (though it should)
+		if runtimeCtx.Engine == nil {
+			runtimeCtx.Engine = engineSvc
 		}
 
-		// Validate the loaded configuration (basic validation for now)
-		if err := config.ValidateClusterConfig(clusterConfig); err != nil {
-			log.Error(err, "Cluster configuration validation failed")
-			return fmt.Errorf("cluster configuration validation failed: %w", err)
-		}
-		log.Info("Cluster configuration loaded and validated successfully.")
-
-		// Initialize runtime.Context
-		// Most of these would come from global flags or a config file for kubexm itself
-		// For now, using some defaults or options from createCmd
-		// The runtime builder would normally handle this.
-		// We are creating a simplified context for now.
-		goCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute) // Example timeout
-		defer cancel()
-
-		// TODO: Replace this with a proper RuntimeBuilder
-		eng := engine.NewEngine(log) // Create a new engine instance
-
-		// Simplified context creation
-		// In a real scenario, a RuntimeBuilder would populate HostRuntimes, ConnectionPool etc.
-		// based on clusterConfig and connect to hosts.
-		// For this stub, many fields will be nil or default.
-		runtimeCtx := &runtime.Context{
-			GoCtx:         goCtx,
-			Logger:        log,
-			Engine:        eng, // Pass the engine
-			ClusterConfig: clusterConfig,
-			// HostRuntimes:  make(map[string]*runtime.HostRuntime), // Needs population by a builder
-			// ConnectionPool: connector.NewConnectionPool(log, connectionTimeout), // Needs population
-			GlobalWorkDir: ".", // Default to current directory or get from a global config
-			GlobalVerbose: createOptions.Verbose,
-			GlobalIgnoreErr: false, // Default
-			GlobalConnectionTimeout: 1 * time.Minute, // Default
-			// Caches would be initialized here too
-		}
-		log.Info("Runtime context initialized.")
+		log.Info("Runtime environment built successfully.")
 
 		// Instantiate the CreateClusterPipeline
-		// The 'assumeYes' parameter for NewCreateClusterPipeline should come from createOptions.YesAssume
 		createPipeline := kubexmcluster.NewCreateClusterPipeline(createOptions.YesAssume)
 		log.Infof("Instantiated pipeline: %s", createPipeline.Name())
 
 		// Run the pipeline
 		log.Info("Executing pipeline run...")
+		// The pipeline's Run method expects the full *runtime.Context
 		result, err := createPipeline.Run(runtimeCtx, createOptions.DryRun)
 		if err != nil {
-			log.Error(err, "Cluster creation pipeline failed")
-			// result might still contain partial information
+			log.Errorf("Cluster creation pipeline failed: %v", err)
 			if result != nil {
-				log.Infof("Pipeline result status: %s", result.Status)
+				log.Infof("Pipeline final status: %s", result.Status)
+				if result.ErrorMessage != "" {
+					log.Errorf("Pipeline error message: %s", result.ErrorMessage)
+				}
 			}
+			// Consider exiting with non-zero status for scriptability
+			// os.Exit(1) // Or let Cobra handle error return
 			return fmt.Errorf("cluster creation pipeline execution failed: %w", err)
 		}
 
-		if result.Status == plan.StatusFailed { // Corrected to use plan.StatusFailed
-			log.Error(nil, "Cluster creation pipeline reported failure.", "status", result.Status)
-			return fmt.Errorf("cluster creation pipeline failed with status: %s", result.Status)
+		if result.Status == plan.StatusFailed {
+			log.Errorf("Cluster creation pipeline reported failure. Status: %s. Message: %s", result.Status, result.ErrorMessage)
+			// os.Exit(1)
+			return fmt.Errorf("cluster creation pipeline failed with status: %s. Message: %s", result.Status, result.ErrorMessage)
 		}
 
-		log.Info("Cluster creation pipeline completed successfully!", "status", result.Status)
-		// TODO: Print summary or kubeconfig location if applicable
+		log.Infof("Cluster creation pipeline completed successfully! Status: %s", result.Status)
+		// TODO: Print summary or kubeconfig location if applicable if result.Status is Success
 
 		return nil
 	},

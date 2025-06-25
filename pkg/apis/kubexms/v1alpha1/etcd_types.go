@@ -15,11 +15,13 @@ const (
 type EtcdConfig struct {
 	Type                string              `json:"type,omitempty" yaml:"type,omitempty"`    // "stacked" or "external"
 	Version             string              `json:"version,omitempty" yaml:"version,omitempty"` // Etcd version for managed setup
+	Arch                string              `json:"arch,omitempty" yaml:"arch,omitempty"`       // Architecture for etcd binaries
 	External            *ExternalEtcdConfig `json:"external,omitempty" yaml:"external,omitempty"`// Config for external etcd
 
 	ClientPort          *int                `json:"clientPort,omitempty" yaml:"clientPort,omitempty"` // Default: 2379
 	PeerPort            *int                `json:"peerPort,omitempty" yaml:"peerPort,omitempty"`   // Default: 2380
-	DataDir             *string             `json:"dataDir,omitempty" yaml:"dataDir,omitempty"`    // Default: "/var/lib/etcd"
+	DataDir             *string             `json:"dataDir,omitempty" yaml:"dataDir,omitempty"`    // Default: "/var/lib/etcd". This is the main data directory.
+	ClusterToken        string              `json:"clusterToken,omitempty" yaml:"clusterToken,omitempty"` // Token for etcd cluster initialization
 
 	// ExtraArgs for etcd process, as a list of strings (e.g., "--initial-cluster-token=mytoken").
 	ExtraArgs           []string            `json:"extraArgs,omitempty" yaml:"extraArgs,omitempty"`
@@ -73,8 +75,12 @@ func SetDefaults_EtcdConfig(cfg *EtcdConfig) {
 		cfg.PeerPort = &defaultPort
 	}
 	if cfg.DataDir == nil {
-		defaultDataDir := "/var/lib/etcd"
+		defaultDataDir := "/var/lib/etcd" // This is the base directory for etcd data.
 		cfg.DataDir = &defaultDataDir
+	}
+	// Arch defaults handled by HostSpec or runtime fact gathering.
+	if cfg.ClusterToken == "" {
+		cfg.ClusterToken = "kubexm-etcd-default-token" // Default token
 	}
 	if cfg.Type == EtcdTypeExternal && cfg.External == nil {
 		cfg.External = &ExternalEtcdConfig{}
@@ -148,6 +154,11 @@ func Validate_EtcdConfig(cfg *EtcdConfig, verrs *ValidationErrors, pathPrefix st
 	if cfg.DataDir != nil && strings.TrimSpace(*cfg.DataDir) == "" {
 		verrs.Add("%s.dataDir: cannot be empty if specified", pathPrefix)
 	}
+	if strings.TrimSpace(cfg.ClusterToken) == "" {
+		verrs.Add("%s.clusterToken: cannot be empty", pathPrefix)
+	}
+	// Arch validation (e.g., amd64, arm64) could be added if strict values are known.
+	// For now, assume any non-empty string is fine, or it's validated by resource handle.
 
 	if cfg.BackupPeriodHours != nil && *cfg.BackupPeriodHours < 0 {
 		verrs.Add("%s.backupPeriodHours: cannot be negative, got %d", pathPrefix, *cfg.BackupPeriodHours)
