@@ -321,23 +321,39 @@ var _ pipeline.PipelineContext = (*Context)(nil)
 var _ module.ModuleContext = (*Context)(nil)
 var _ task.TaskContext = (*Context)(nil)
 var _ step.StepContext = (*Context)(nil)
-
-// Note: engine.EngineExecuteContext might be the same as *Context or a subset.
-// If it's just *Context, no explicit check needed beyond what Engine.Execute expects.
+var _ engine.EngineExecuteContext = (*Context)(nil)
 
 // WithGoContext for step.StepContext to allow engine to set per-step go context.
+// This creates a new context instance suitable for a step's execution,
+// inheriting most from the parent but with a potentially new Go context.
+// The currentHost should be set by ForHost or SetCurrentHost.
 func (c *Context) WithGoContext(goCtx context.Context) step.StepContext {
-	newCtx := *c // Create a copy
-	newCtx.GoCtx = goCtx
-	// currentHost for this new step context should be set by the dispatcher
-	// It should not be inherited from the parent *Context directly here.
-	// The engine, when creating a context for a step on a specific host, will set currentHost.
-	return &newCtx
+	newRuntimeCtx := *c // Create a shallow copy
+	newRuntimeCtx.GoCtx = goCtx
+	// The currentHost of this new context is not set here.
+	// It's expected to be set by ForHost or directly by the engine using SetCurrentHost.
+	return &newRuntimeCtx
+}
+
+// ForHost creates a step.StepContext tailored for operations on a specific host.
+// It typically creates a new Go context (derived from the original) and sets the currentHost.
+func (c *Context) ForHost(host connector.Host) step.StepContext {
+	// Create a new Go context for this specific host operation, possibly with a timeout or other values.
+	// For now, just derive from the current GoCtx.
+	// The engine might replace this GoCtx again using WithGoContext if it has a more specific one (e.g., from errgroup).
+	hostGoCtx := c.GoCtx // Could be context.WithCancel(c.GoCtx) or similar if needed
+
+	newRuntimeCtx := *c // Create a shallow copy
+	newRuntimeCtx.GoCtx = hostGoCtx
+	newRuntimeCtx.currentHost = host
+	return &newRuntimeCtx
 }
 
 // SetCurrentHost is an internal method for the engine/dispatcher to set the
-// context for a specific host when a step is being executed.
+// currentHost field on a Context instance. This is typically used when the engine
+// prepares a context for a step that will run on a specific host.
+// Returns the modified context to allow chaining or use in assignments.
 func (c *Context) SetCurrentHost(host connector.Host) *Context {
 	c.currentHost = host
-	return c // Return self for chaining if needed, though not typical for setters
+	return c
 }
