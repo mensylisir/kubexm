@@ -141,48 +141,48 @@ func (p *DeployAppPipeline) Plan(ctx PipelineContext) (*plan.ExecutionGraph, err
 }
 
 // Run executes the pipeline.
-func (p *DeployAppPipeline) Run(ctx PipelineContext, dryRun bool) (*plan.GraphExecutionResult, error) { // Changed signature
+// It now accepts an ExecutionGraph as input, aligning with the updated Pipeline interface.
+func (p *DeployAppPipeline) Run(ctx PipelineContext, graph *plan.ExecutionGraph, dryRun bool) (*plan.GraphExecutionResult, error) {
 	logger := ctx.GetLogger().With("pipeline", p.Name())
-	logger.Info("Starting pipeline run...", "dryRun", dryRun)
+	logger.Info("Starting pipeline run...", "dryRun", dryRun, "graphName", graph.Name)
 
-	// ctx is PipelineContext. The concrete type *runtime.Context implements this.
-	executionGraph, err := p.Plan(ctx) // Plan expects PipelineContext
-	if err != nil {
-		logger.Error(err, "Failed to generate execution plan for pipeline")
-		res := plan.NewGraphExecutionResult(p.Name())
-		res.Status = plan.StatusFailed
-		res.EndTime = time.Now()
-		return res, fmt.Errorf("pipeline plan generation failed for %s: %w", p.Name(), err)
-	}
-
-	eng := ctx.GetEngine() // GetEngine is now part of PipelineContext
-	if eng == nil {
-		err := fmt.Errorf("engine not found in pipeline context for pipeline %s", p.Name()) // Updated message
+	if graph == nil {
+		err := fmt.Errorf("execution graph cannot be nil for pipeline %s", p.Name())
 		logger.Error(err, "Cannot execute pipeline")
 		res := plan.NewGraphExecutionResult(p.Name())
-		res.Status = plan.StatusFailed
-		res.EndTime = time.Now()
+		res.Finalize(plan.StatusFailed, err.Error())
 		return res, err
 	}
 
-	logger.Info("Submitting execution graph to engine.", "nodeCount", len(executionGraph.Nodes))
+	eng := ctx.GetEngine() // GetEngine is part of PipelineContext
+	if eng == nil {
+		err := fmt.Errorf("engine not found in pipeline context for pipeline %s", p.Name())
+		logger.Error(err, "Cannot execute pipeline")
+		res := plan.NewGraphExecutionResult(p.Name())
+		res.Finalize(plan.StatusFailed, err.Error())
+		return res, err
+	}
+
+	logger.Info("Submitting execution graph to engine.", "nodeCount", len(graph.Nodes))
 	// eng.Execute expects engine.EngineExecuteContext.
 	// The ctx (PipelineContext) is implemented by *runtime.Context, which also implements EngineExecuteContext.
 	engineExecuteCtx, ok := ctx.(engine.EngineExecuteContext)
 	if !ok {
 		err := fmt.Errorf("pipelineContext cannot be asserted to engine.EngineExecuteContext for pipeline %s", p.Name())
 		logger.Error(err, "Cannot execute pipeline")
-		res := plan.NewGraphExecutionResult(p.Name())
-		res.Status = plan.StatusFailed
-		res.EndTime = time.Now()
+		res := plan.NewGraphExecutionResult(graph.Name) // Use graph name for result
+		res.Finalize(plan.StatusFailed, err.Error())
 		return res, err
 	}
-	graphResult, execErr := eng.Execute(engineExecuteCtx, executionGraph, dryRun)
+	graphResult, execErr := eng.Execute(engineExecuteCtx, graph, dryRun) // Use the passed-in graph
 
 	if execErr != nil {
 		logger.Error(execErr, "Engine execution encountered an error for pipeline "+p.Name())
-		if graphResult == nil {
-			graphResult = plan.NewGraphExecutionResult(p.Name())
+		if graphResult == nil { // Should not happen if engine.Execute guarantees a result object
+			graphResult = plan.NewGraphExecutionResult(graph.Name)
+		}
+		// Ensure status and end time are set if engine didn't do it on error
+		if graphResult.Status != plan.StatusFailed && graphResult.Status != plan.StatusSkipped { // Assuming engine might set Skipped if all nodes skipped
 			graphResult.Status = plan.StatusFailed
 		}
 		if graphResult.EndTime.IsZero() {
@@ -196,13 +196,7 @@ func (p *DeployAppPipeline) Run(ctx PipelineContext, dryRun bool) (*plan.GraphEx
 }
 
 // Ensure DeployAppPipeline implements the pipeline.Pipeline interface.
-var _ Pipeline = (*DeployAppPipeline)(nil) // Using unexported Pipeline type from this package.
-                                          // Should be pipeline.Pipeline if interface is in pipeline package.
-                                          // Corrected to pipeline.Pipeline for interface check
-// var _ pipeline.Pipeline = (*DeployAppPipeline)(nil)
-// The above line needs `pipeline` to be the imported package name.
-// Let's assume the local `Pipeline` is the one from `pkg/pipeline/interface.go`
-// due to the package declaration.
+var _ Pipeline = (*DeployAppPipeline)(nil)
 
 // Placeholder for NewWebServerModule to make the example somewhat runnable if webserver.go isn't fully refactored.
 // This should be removed once the actual WebServerModule is correctly defined and imported.
