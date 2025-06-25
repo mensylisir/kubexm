@@ -115,6 +115,12 @@ func newMockDialer(keySpecificResponses map[string][]mockDialerSetup) dialSSHFun
 		if currentSetup.dialErr != nil {
 			return nil, nil, currentSetup.dialErr
 		}
+		if currentSetup.targetClient == nil {
+			// If the setup intends to simulate a successful dial but provides no client,
+			// it's a test setup error. If it intends to simulate a dial error,
+			// dialErr should have been set.
+			return nil, nil, fmt.Errorf("mockDialer: misconfiguration for key %s - targetClient is nil but no dialErr specified", poolKey)
+		}
 
 		// Unsafe cast: This is risky and assumes the pool only calls methods we've mocked (Close, NewSession).
 		// It's a common but fragile way to test concrete types from external packages.

@@ -24,12 +24,11 @@ func NewPreflightModule(assumeYes bool) module.Module { // Returns module.Module
 	// Define the sequence of tasks for this module
 	moduleTasks := []task.Task{
 		greeting.NewGreetingTask(),
+		pre.NewPreTask(),      // Corresponds to "执行前置检查" (items 2.1-2.10 from 20-kubernetes流程设计.md)
 		pre.NewConfirmTask("InitialConfirmation", "Proceed with KubeXM operations?", assumeYes),
-		pre.NewPreTask(), // General pre-flight checks defined in PreTask
-		// TODO: Add taskPreflight.NewSystemChecksTask() if it's distinct from pre.NewPreTask()
-		// TODO: Add taskPreflight.NewSetupKernelTask()
-		// TODO: Add VerifyArtifactsTask (from pkg/task/pre) when created
-		// TODO: Add CreateRepositoryTask (from pkg/task/pre) when created
+		pre.NewVerifyArtifactsTask(), // Corresponds to "(离线) 校验离线包"
+		pre.NewCreateRepositoryTask(),// Corresponds to "(离线) 在所有节点创建临时本地仓库"
+		taskpreflight.NewNodePreflightChecksTask(), // Corresponds to "执行 kubeadm 风格的系统预检和配置" (items 1-10)
 	}
 
 	base := module.NewBaseModule("PreflightChecksAndSetup", moduleTasks)

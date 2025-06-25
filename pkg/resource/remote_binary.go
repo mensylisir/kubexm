@@ -55,7 +55,15 @@ func NewRemoteBinaryHandle(
 	logger := ctx.GetLogger().With("component", componentName, "version", version)
 
 	// Get workDir and clusterName from context for GetBinaryInfo
-	workDir := ctx.GetGlobalWorkDir()
+	// util.GetBinaryInfo expects workDir to be the directory *containing* '.kubexm'
+	// ctx.GetGlobalWorkDir() is '$(pwd)/.kubexm/${cluster_name}'
+	// So, we need to get the parent of the parent of GlobalWorkDir.
+	globalWorkDir := ctx.GetGlobalWorkDir()
+	if globalWorkDir == "" {
+		return nil, fmt.Errorf("GlobalWorkDir is empty in TaskContext, cannot create RemoteBinaryHandle for %s", componentName)
+	}
+	baseWorkDirForBinaryInfo := filepath.Dir(filepath.Dir(globalWorkDir)) // This should be $(pwd)
+
 	clusterCfg := ctx.GetClusterConfig()
 	if clusterCfg == nil {
 		return nil, fmt.Errorf("cluster config is nil in TaskContext, cannot create RemoteBinaryHandle for %s", componentName)
@@ -88,7 +96,7 @@ func NewRemoteBinaryHandle(
 	finalOS := osName
 	// util.GetBinaryInfo will use its own default for OS if osName is empty
 
-	binInfo, err := util.GetBinaryInfo(componentName, version, finalArch, util.GetZone(), workDir, clusterName)
+	binInfo, err := util.GetBinaryInfo(componentName, version, finalArch, util.GetZone(), baseWorkDirForBinaryInfo, clusterName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get binary info for %s@%s (%s): %w", componentName, version, finalArch, err)
 	}

@@ -153,6 +153,7 @@ type SystemSpec struct {
 	SysctlParams       map[string]string `json:"sysctlParams,omitempty" yaml:"sysctlParams,omitempty"`
 }
 
+
 // GlobalSpec contains settings applicable to the entire cluster or as defaults for hosts.
 type GlobalSpec struct {
 	User              string        `json:"user,omitempty" yaml:"user,omitempty"`

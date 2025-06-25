@@ -182,7 +182,8 @@ func (b *RuntimeBuilder) setupGlobalWorkDirs(rc *Context) error {
 	}
 
 	// This becomes the main work directory for the context, specific to this cluster.
-	rc.GlobalWorkDir = filepath.Join(kubexmOperationalRoot, clusterName) // $(pwd)/.kubexm/${cluster_name}
+	// rc.GlobalWorkDir will be e.g. /current/working/directory/.kubexm/myclustername
+	rc.GlobalWorkDir = filepath.Join(kubexmOperationalRoot, clusterName)
 	log.Info("Ensuring cluster-specific global work directory exists.", "path", rc.GlobalWorkDir)
 	if err := util.CreateDir(rc.GlobalWorkDir); err != nil {
 		log.Error(err, "Failed to create cluster-specific global work directory", "path", rc.GlobalWorkDir)
@@ -240,6 +241,8 @@ func (b *RuntimeBuilder) initializeAllHosts(rc *Context, pool *connector.Connect
 			}
 			// Create host-specific directory within the cluster's global work dir
 			// e.g., $(pwd)/.kubexm/${cluster_name}/${hostname}
+			// This directory can be used by tasks/steps to store files related to a specific host
+			// locally on the control machine before uploading, or for logs/state specific to that host's processing.
 			hostClusterDir := rc.GetHostDir(hri.Host.GetName())
 			if err := util.CreateDir(hostClusterDir); err != nil {
 				mu.Unlock()
