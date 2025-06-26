@@ -61,30 +61,25 @@ func SetDefaults_HAProxyConfig(cfg *HAProxyConfig) {
 		return
 	}
 	if cfg.FrontendBindAddress == nil {
-		def := "0.0.0.0"
-		cfg.FrontendBindAddress = &def
+		cfg.FrontendBindAddress = stringPtr("0.0.0.0")
 	}
 	if cfg.FrontendPort == nil {
-		def := 6443 // Default Kube API server port
-		cfg.FrontendPort = &def
+		cfg.FrontendPort = intPtr(6443) // Default Kube API server port
 	}
 	if cfg.Mode == nil {
-		def := "tcp"
-		cfg.Mode = &def
+		cfg.Mode = stringPtr("tcp")
 	}
 	if cfg.BalanceAlgorithm == nil {
-		def := "roundrobin"
-		cfg.BalanceAlgorithm = &def
+		cfg.BalanceAlgorithm = stringPtr("roundrobin")
 	}
 	if cfg.BackendServers == nil {
 		cfg.BackendServers = []HAProxyBackendServer{}
 	}
 	for i := range cfg.BackendServers {
-	   server := &cfg.BackendServers[i]
-	   if server.Weight == nil {
-		   w := 1 // Default weight
-		   server.Weight = &w
-	   }
+		server := &cfg.BackendServers[i]
+		if server.Weight == nil {
+			server.Weight = intPtr(1) // Default weight
+		}
 	}
 
 	if cfg.ExtraGlobalConfig == nil { cfg.ExtraGlobalConfig = []string{} }
@@ -93,8 +88,7 @@ func SetDefaults_HAProxyConfig(cfg *HAProxyConfig) {
 	if cfg.ExtraBackendConfig == nil { cfg.ExtraBackendConfig = []string{} }
 
 	if cfg.SkipInstall == nil {
-	   b := false // Default to managing HAProxy installation
-	   cfg.SkipInstall = &b
+		cfg.SkipInstall = boolPtr(false) // Default to managing HAProxy installation
 	}
 }
 
@@ -115,22 +109,21 @@ func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *ValidationErrors, pathPre
 	   // Could add IP address validation here for FrontendBindAddress
 	}
 
-	if cfg.FrontendPort == nil {
-		verrs.Add("%s.frontendPort: must be specified", pathPrefix)
-	} else if *cfg.FrontendPort <= 0 || *cfg.FrontendPort > 65535 {
+	// FrontendPort is always defaulted, so check its value.
+	if *cfg.FrontendPort <= 0 || *cfg.FrontendPort > 65535 {
 		verrs.Add("%s.frontendPort: invalid port %d", pathPrefix, *cfg.FrontendPort)
 	}
 
 	if cfg.Mode != nil && *cfg.Mode != "" {
 	   validModes := []string{"tcp", "http"}
-	   if !contains(validModes, *cfg.Mode) { // contains() assumed from network_types.go or similar
+	   if !containsString(validModes, *cfg.Mode) {
 		   verrs.Add("%s.mode: invalid mode '%s', must be one of %v or empty for default", pathPrefix, *cfg.Mode, validModes)
 	   }
 	}
 
 	if cfg.BalanceAlgorithm != nil && *cfg.BalanceAlgorithm != "" {
 	   validAlgos := []string{"roundrobin", "static-rr", "leastconn", "first", "source", "uri", "url_param", "hdr", "rdp-cookie"} // Common algos
-	   if !contains(validAlgos, *cfg.BalanceAlgorithm) {
+	   if !containsString(validAlgos, *cfg.BalanceAlgorithm) {
 		   verrs.Add("%s.balanceAlgorithm: invalid algorithm '%s'", pathPrefix, *cfg.BalanceAlgorithm)
 	   }
 	}

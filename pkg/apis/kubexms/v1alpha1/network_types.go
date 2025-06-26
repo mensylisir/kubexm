@@ -127,8 +127,7 @@ func SetDefaults_NetworkConfig(cfg *NetworkConfig) {
 		cfg.IPPool = &IPPoolConfig{}
 	}
 	if cfg.IPPool.BlockSize == nil {
-		defaultBlockSize := 26 // Default from YAML example
-		cfg.IPPool.BlockSize = &defaultBlockSize
+		cfg.IPPool.BlockSize = intPtr(26) // Default from YAML example
 	}
 
 	if cfg.Plugin == "calico" {
@@ -159,8 +158,7 @@ func SetDefaults_NetworkConfig(cfg *NetworkConfig) {
 		cfg.Multus = &MultusCNIConfig{}
 	}
 	if cfg.Multus.Enabled == nil {
-		b := false
-		cfg.Multus.Enabled = &b
+		cfg.Multus.Enabled = boolPtr(false)
 	}
 
 	if cfg.KubeOvn == nil {
@@ -185,31 +183,25 @@ func SetDefaults_CalicoConfig(cfg *CalicoConfig, defaultPoolCIDR string, globalD
 		cfg.VXLANMode = "Never"
 	}
 	if cfg.IPv4NatOutgoing == nil {
-		b := true
-		cfg.IPv4NatOutgoing = &b
+		cfg.IPv4NatOutgoing = boolPtr(true)
 	}
 	if cfg.DefaultIPPOOL == nil {
-		b := true
-		cfg.DefaultIPPOOL = &b
+		cfg.DefaultIPPOOL = boolPtr(true)
 	}
 	if cfg.EnableTypha == nil {
-		b := false
-		cfg.EnableTypha = &b
+		cfg.EnableTypha = boolPtr(false)
 	}
 	if cfg.EnableTypha != nil && *cfg.EnableTypha && cfg.TyphaReplicas == nil {
-		var defaultReplicas int = 2
-		cfg.TyphaReplicas = &defaultReplicas
+		cfg.TyphaReplicas = intPtr(2)
 	}
 	if cfg.TyphaNodeSelector == nil {
 		cfg.TyphaNodeSelector = make(map[string]string)
 	}
 	if cfg.VethMTU == nil {
-		var defaultMTU int = 0
-		cfg.VethMTU = &defaultMTU
+		cfg.VethMTU = intPtr(0)
 	}
 	if cfg.LogSeverityScreen == nil {
-		s := "Info"
-		cfg.LogSeverityScreen = &s
+		cfg.LogSeverityScreen = stringPtr("Info")
 	}
 
 	if len(cfg.IPPools) == 0 && cfg.DefaultIPPOOL != nil && *cfg.DefaultIPPOOL && defaultPoolCIDR != "" {
@@ -221,10 +213,21 @@ func SetDefaults_CalicoConfig(cfg *CalicoConfig, defaultPoolCIDR string, globalD
 			defaultInternalBlockSize := 26
 			bs = &defaultInternalBlockSize
 		}
+
+		var defaultPoolEncap string
+		if cfg.IPIPMode == "Always" || cfg.IPIPMode == "CrossSubnet" {
+			defaultPoolEncap = "IPIP"
+		} else if cfg.VXLANMode == "Always" || cfg.VXLANMode == "CrossSubnet" {
+			// This case is unlikely to be hit if IPIPMode defaults to "Always"
+			defaultPoolEncap = "VXLAN"
+		} else {
+			defaultPoolEncap = "None"
+		}
+
 		cfg.IPPools = append(cfg.IPPools, CalicoIPPool{
 			Name:          "default-ipv4-ippool",
 			CIDR:          defaultPoolCIDR,
-			Encapsulation: cfg.IPIPMode, // Default encapsulation based on Calico settings
+			Encapsulation: defaultPoolEncap, // Use the derived valid pool encapsulation
 			NatOutgoing:   cfg.IPv4NatOutgoing,
 			BlockSize:     bs,
 		})
@@ -241,11 +244,10 @@ func SetDefaults_CalicoConfig(cfg *CalicoConfig, defaultPoolCIDR string, globalD
 			}
 		}
 		if pool.NatOutgoing == nil {
-			pool.NatOutgoing = cfg.IPv4NatOutgoing
+			pool.NatOutgoing = cfg.IPv4NatOutgoing // This correctly copies the pointer if already set, or the bool value
 		}
 		if pool.BlockSize == nil {
-			bs := 26
-			pool.BlockSize = &bs
+			pool.BlockSize = intPtr(26)
 		}
 	}
 } // Corrected: Added missing closing brace for SetDefaults_CalicoConfig
@@ -258,8 +260,7 @@ func SetDefaults_FlannelConfig(cfg *FlannelConfig) {
 		cfg.BackendMode = "vxlan"
 	}
 	if cfg.DirectRouting == nil {
-		b := false
-		cfg.DirectRouting = &b
+		cfg.DirectRouting = boolPtr(false)
 	}
 }
 
@@ -268,21 +269,17 @@ func SetDefaults_KubeOvnConfig(cfg *KubeOvnConfig) {
 		return
 	}
 	if cfg.Enabled == nil {
-		b := false
-		cfg.Enabled = &b
+		cfg.Enabled = boolPtr(false)
 	}
 	if cfg.Enabled != nil && *cfg.Enabled {
 		if cfg.Label == nil {
-			def := "kube-ovn/role"
-			cfg.Label = &def
+			cfg.Label = stringPtr("kube-ovn/role")
 		}
 		if cfg.TunnelType == nil {
-			def := "geneve"
-			cfg.TunnelType = &def
+			cfg.TunnelType = stringPtr("geneve")
 		}
 		if cfg.EnableSSL == nil {
-			b := false
-			cfg.EnableSSL = &b
+			cfg.EnableSSL = boolPtr(false)
 		}
 	}
 }
@@ -292,21 +289,17 @@ func SetDefaults_HybridnetConfig(cfg *HybridnetConfig) {
 		return
 	}
 	if cfg.Enabled == nil {
-		b := false
-		cfg.Enabled = &b
+		cfg.Enabled = boolPtr(false)
 	}
 	if cfg.Enabled != nil && *cfg.Enabled {
 		if cfg.DefaultNetworkType == nil {
-			def := "Overlay"
-			cfg.DefaultNetworkType = &def
+			cfg.DefaultNetworkType = stringPtr("Overlay")
 		}
 		if cfg.EnableNetworkPolicy == nil {
-			b := true
-			cfg.EnableNetworkPolicy = &b
+			cfg.EnableNetworkPolicy = boolPtr(true)
 		}
 		if cfg.InitDefaultNetwork == nil {
-			b := true
-			cfg.InitDefaultNetwork = &b
+			cfg.InitDefaultNetwork = boolPtr(true)
 		}
 	}
 }
@@ -389,10 +382,10 @@ func Validate_CalicoConfig(cfg *CalicoConfig, verrs *ValidationErrors, pathPrefi
 		return
 	}
 	validEncModes := []string{"Always", "CrossSubnet", "Never", ""}
-	if !contains(validEncModes, cfg.IPIPMode) {
+	if !containsString(validEncModes, cfg.IPIPMode) {
 		verrs.Add("%s.ipipMode: invalid: '%s'", pathPrefix, cfg.IPIPMode)
 	}
-	if !contains(validEncModes, cfg.VXLANMode) {
+	if !containsString(validEncModes, cfg.VXLANMode) {
 		verrs.Add("%s.vxlanMode: invalid: '%s'", pathPrefix, cfg.VXLANMode)
 	}
 	if cfg.VethMTU != nil && *cfg.VethMTU < 0 {
@@ -402,7 +395,7 @@ func Validate_CalicoConfig(cfg *CalicoConfig, verrs *ValidationErrors, pathPrefi
 		verrs.Add("%s.typhaReplicas: must be positive if Typha is enabled", pathPrefix)
 	}
 	validLogSeverities := []string{"Info", "Debug", "Warning", "Error", "Critical", "None", ""}
-	if cfg.LogSeverityScreen != nil && !contains(validLogSeverities, *cfg.LogSeverityScreen) {
+	if cfg.LogSeverityScreen != nil && !containsString(validLogSeverities, *cfg.LogSeverityScreen) {
 		verrs.Add("%s.logSeverityScreen: invalid: '%s'", pathPrefix, *cfg.LogSeverityScreen)
 	}
 	for i, pool := range cfg.IPPools {
@@ -417,7 +410,7 @@ func Validate_CalicoConfig(cfg *CalicoConfig, verrs *ValidationErrors, pathPrefi
 			verrs.Add("%s.blockSize: must be between 20 and 32, got %d", poolPath, *pool.BlockSize)
 		}
 		validPoolEncap := []string{"IPIP", "VXLAN", "None", ""}
-		if !contains(validPoolEncap, pool.Encapsulation) {
+		if !containsString(validPoolEncap, pool.Encapsulation) {
 			verrs.Add("%s.encapsulation: invalid: '%s'", poolPath, pool.Encapsulation)
 		}
 	}
@@ -428,7 +421,7 @@ func Validate_FlannelConfig(cfg *FlannelConfig, verrs *ValidationErrors, pathPre
 		return
 	}
 	validBackendModes := []string{"vxlan", "host-gw", "udp", ""}
-	if !contains(validBackendModes, cfg.BackendMode) {
+	if !containsString(validBackendModes, cfg.BackendMode) {
 		verrs.Add("%s.backendMode: invalid: '%s'", pathPrefix, cfg.BackendMode)
 	}
 }
@@ -442,7 +435,7 @@ func Validate_KubeOvnConfig(cfg *KubeOvnConfig, verrs *ValidationErrors, pathPre
 	}
 	if cfg.TunnelType != nil && *cfg.TunnelType != "" {
 		validTypes := []string{"geneve", "vxlan", "stt"}
-		if !contains(validTypes, *cfg.TunnelType) {
+		if !containsString(validTypes, *cfg.TunnelType) {
 			verrs.Add("%s.tunnelType: invalid type '%s', must be one of %v", pathPrefix, *cfg.TunnelType, validTypes)
 		}
 	}
@@ -457,7 +450,7 @@ func Validate_HybridnetConfig(cfg *HybridnetConfig, verrs *ValidationErrors, pat
 	}
 	if cfg.DefaultNetworkType != nil && *cfg.DefaultNetworkType != "" {
 		validTypes := []string{"Underlay", "Overlay"}
-		if !contains(validTypes, *cfg.DefaultNetworkType) {
+		if !containsString(validTypes, *cfg.DefaultNetworkType) {
 			verrs.Add("%s.defaultNetworkType: invalid type '%s', must be one of %v", pathPrefix, *cfg.DefaultNetworkType, validTypes)
 		}
 	}
@@ -490,15 +483,6 @@ func (c *CalicoConfig) GetVethMTU() int {
 		return *c.VethMTU
 	}
 	return 0
-}
-
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
 }
 
 // isValidCIDR is expected to be available from kubernetes_types.go or a shared util.

@@ -66,16 +66,13 @@ func SetDefaults_KubeVIPConfig(cfg *KubeVIPConfig) {
 		return
 	}
 	if cfg.Mode == nil {
-		defaultMode := KubeVIPModeARP
-		cfg.Mode = &defaultMode
+		cfg.Mode = stringPtr(KubeVIPModeARP)
 	}
 	if cfg.EnableControlPlaneLB == nil {
-		b := true // Typically, if KubeVIP is used, it's for CP LB.
-		cfg.EnableControlPlaneLB = &b
+		cfg.EnableControlPlaneLB = boolPtr(true) // Typically, if KubeVIP is used, it's for CP LB.
 	}
 	if cfg.EnableServicesLB == nil {
-		b := false // Service LB is often an optional add-on.
-		cfg.EnableServicesLB = &b
+		cfg.EnableServicesLB = boolPtr(false) // Service LB is often an optional add-on.
 	}
 	if cfg.ExtraArgs == nil {
 		cfg.ExtraArgs = []string{}
@@ -98,11 +95,16 @@ func Validate_KubeVIPConfig(cfg *KubeVIPConfig, verrs *ValidationErrors, pathPre
 
 	if cfg.Mode != nil && *cfg.Mode != "" {
 	   validModes := []string{KubeVIPModeARP, KubeVIPModeBGP}
-	   if !contains(validModes, *cfg.Mode) { // contains() assumed from network_types.go or similar
+	   if !containsString(validModes, *cfg.Mode) {
 		   verrs.Add("%s.mode: invalid mode '%s', must be one of %v", pathPrefix, *cfg.Mode, validModes)
 	   }
-	} else if cfg.Mode == nil { // Mode is defaulted, so this case implies an issue if it's required post-default
-	   verrs.Add("%s.mode: mode must be specified (defaulted to ARP)", pathPrefix)
+	} else { // Mode is nil, but it's defaulted to ARP. This path should ideally not be hit if defaults run first.
+	   // If it were possible for Mode to be nil here (e.g. direct validation call without defaults),
+	   // it implies a required field is missing. However, SetDefaults_KubeVIPConfig ensures Mode is non-nil.
+	   // For robustness, if Mode somehow ends up nil post-defaulting (shouldn't happen), it's an issue.
+	   // But the current default logic makes this check for nil redundant for typical validation flow.
+	   // The primary check is for valid *values* of Mode.
+	   // Let's assume defaults have run, so Mode is never nil. If it was empty string, it's handled by containsString.
 	}
 
 

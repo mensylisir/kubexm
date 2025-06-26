@@ -72,8 +72,7 @@ func SetDefaults_HighAvailabilityConfig(cfg *HighAvailabilityConfig) {
 		return
 	}
 	if cfg.Enabled == nil {
-		b := false // HA features off by default unless specified
-		cfg.Enabled = &b
+		cfg.Enabled = boolPtr(false) // HA features off by default unless specified
 	}
 
 	// ControlPlaneEndpoint is no longer part of this struct.
@@ -102,11 +101,11 @@ func SetDefaults_HighAvailabilityConfig(cfg *HighAvailabilityConfig) {
 func SetDefaults_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig) {
 	if cfg == nil { return }
 	if cfg.Enabled == nil {
-		b := false
+		enabledVal := false
 		if cfg.Type != "" && (strings.Contains(cfg.Type, "Managed") || cfg.Type == "UserProvided") {
-			b = true
+			enabledVal = true
 		}
-		cfg.Enabled = &b
+		cfg.Enabled = boolPtr(enabledVal)
 	}
 
 	if cfg.Enabled != nil && *cfg.Enabled {
@@ -127,7 +126,7 @@ func SetDefaults_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig) {
 
 func SetDefaults_InternalLoadBalancerConfig(cfg *InternalLoadBalancerConfig) {
 	if cfg == nil { return }
-	if cfg.Enabled == nil { b := false; cfg.Enabled = &b } // Internal LB not enabled by default
+	if cfg.Enabled == nil { cfg.Enabled = boolPtr(false) } // Internal LB not enabled by default
 
 	if cfg.Enabled != nil && *cfg.Enabled {
 		if cfg.Type == "KubeVIP" { // Example type
