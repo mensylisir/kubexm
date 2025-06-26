@@ -51,6 +51,7 @@ type ConnectionCfg struct {
 	Timeout        time.Duration
 	BastionCfg     *BastionCfg // Renamed from Bastion in design doc to match existing code and be clearer
 	ProxyCfg       *ProxyCfg
+	HostKeyCallback ssh.HostKeyCallback `json:"-" yaml:"-"` // Callback for verifying server keys
 }
 
 // ExecOptions is defined in options.go
