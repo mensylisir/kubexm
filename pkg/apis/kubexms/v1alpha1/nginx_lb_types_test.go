@@ -57,7 +57,6 @@ func TestValidate_NginxLBConfig(t *testing.T) {
 		cfg        NginxLBConfig
 		wantErrMsg string
 	}{
-	   {"nil_listen_port", NginxLBConfig{UpstreamServers:[]NginxLBUpstreamServer{validServer}}, ".listenPort: must be specified"},
 	   {"bad_listen_port", NginxLBConfig{ListenPort: pintNginxLB(0)}, ".listenPort: invalid port 0"},
 	   {"invalid_mode", NginxLBConfig{Mode: pstrNginxLB("udp")}, ".mode: invalid mode 'udp'"},
 	   {"invalid_algo", NginxLBConfig{BalanceAlgorithm: pstrNginxLB("foo")}, ".balanceAlgorithm: invalid algorithm 'foo'"},

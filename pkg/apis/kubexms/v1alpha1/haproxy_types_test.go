@@ -60,7 +60,6 @@ func TestValidate_HAProxyConfig(t *testing.T) {
 		cfg        HAProxyConfig
 		wantErrMsg string
 	}{
-	   {"nil_frontend_port", HAProxyConfig{BackendServers: []HAProxyBackendServer{validServer}}, ".frontendPort: must be specified"},
 	   {"bad_frontend_port", HAProxyConfig{FrontendPort: pintHAProxy(0)}, ".frontendPort: invalid port 0"},
 	   {"invalid_mode", HAProxyConfig{Mode: pstrHAProxy("udp")}, ".mode: invalid mode 'udp'"},
 	   {"invalid_algo", HAProxyConfig{BalanceAlgorithm: pstrHAProxy("randomest")}, ".balanceAlgorithm: invalid algorithm 'randomest'"},

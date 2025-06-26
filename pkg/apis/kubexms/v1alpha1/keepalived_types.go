@@ -41,15 +41,13 @@ func SetDefaults_KeepalivedConfig(cfg *KeepalivedConfig) {
 		return
 	}
 	if cfg.AuthType == nil {
-		defaultAuth := "PASS"
-		cfg.AuthType = &defaultAuth
+		cfg.AuthType = stringPtr("PASS")
 	}
 	if cfg.SkipInstall == nil {
-	   b := false // Default to managing keepalived installation
-	   cfg.SkipInstall = &b
+		cfg.SkipInstall = boolPtr(false) // Default to managing keepalived installation
 	}
 	if cfg.ExtraConfig == nil {
-	   cfg.ExtraConfig = []string{}
+		cfg.ExtraConfig = []string{}
 	}
 	// VRID, Priority, Interface, AuthPass are highly environment-specific,
 	// so no strong universal defaults here. They should be set by user or
@@ -88,13 +86,13 @@ func Validate_KeepalivedConfig(cfg *KeepalivedConfig, verrs *ValidationErrors, p
 
 	validAuthTypes := []string{"PASS", "AH"}
 	isAuthTypeValid := false
-	if cfg.AuthType != nil {
-	   for _, vt := range validAuthTypes { if *cfg.AuthType == vt { isAuthTypeValid = true; break } }
+	if cfg.AuthType != nil { // AuthType is defaulted to "PASS", so it won't be nil here.
+		isAuthTypeValid = containsString(validAuthTypes, *cfg.AuthType)
 	}
-	if !isAuthTypeValid { // Covers nil or invalid
-		// If AuthType was nil, it's defaulted to PASS, so this path for nil should not be hit
-		// unless default changes or is removed.
-		verrs.Add("%s.authType: invalid or missing, must be one of %v (defaulted to PASS if nil)", pathPrefix, validAuthTypes)
+	// The default ensures AuthType is "PASS", which is valid.
+	// This check is mainly for user-provided invalid values.
+	if !isAuthTypeValid && cfg.AuthType != nil { // only error if user provided something invalid
+		verrs.Add("%s.authType: invalid value '%s', must be one of %v", pathPrefix, *cfg.AuthType, validAuthTypes)
 	}
 
 

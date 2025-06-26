@@ -64,7 +64,7 @@ func TestValidate_KeepalivedConfig(t *testing.T) {
 		{"bad_priority_high", KeepalivedConfig{Priority: pintKeepalived(255)}, ".priority: must be between 1 and 254"},
 		{"nil_interface", KeepalivedConfig{VRID: pintKeepalived(50), Priority: pintKeepalived(100)}, ".interface: network interface must be specified"},
 		{"empty_interface", KeepalivedConfig{Interface: pstrKeepalived(" ")}, ".interface: network interface must be specified"},
-		{"invalid_auth_type", KeepalivedConfig{AuthType: pstrKeepalived("NONE")}, ".authType: invalid or missing"},
+		{"invalid_auth_type", KeepalivedConfig{AuthType: pstrKeepalived("NONE")}, "invalid value 'NONE'"},
 		{"pass_auth_no_pass", KeepalivedConfig{AuthType: pstrKeepalived("PASS"), AuthPass: pstrKeepalived(" ")}, ".authPass: must be specified if authType is 'PASS'"},
 		{"pass_auth_long_pass", KeepalivedConfig{AuthType: pstrKeepalived("PASS"), AuthPass: pstrKeepalived("longpassword")}, ".authPass: password too long"},
 		{"ah_auth_with_pass", KeepalivedConfig{AuthType: pstrKeepalived("AH"), AuthPass: pstrKeepalived("secret")}, ".authPass: should not be specified if authType is 'AH'"},

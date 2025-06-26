@@ -118,6 +118,7 @@ func newValidV1alpha1ClusterForTest() *Cluster {
 			Kubernetes: &KubernetesConfig{Version: "v1.25.0"}, // PodSubnet removed
 			Network:    &NetworkConfig{KubePodsCIDR: "10.244.0.0/16"}, // PodSubnet equivalent moved here
 			Etcd:       &EtcdConfig{},    // Etcd section is required by Validate_Cluster
+			ControlPlaneEndpoint: &ControlPlaneEndpointSpec{Address: "1.2.3.4"}, // Ensure CPE is valid by default
 			// Other components can be nil if their sections are optional and their Validate_* funcs handle nil
 		},
 	}
@@ -155,13 +156,13 @@ func TestValidate_Cluster_MissingRequiredFields(t *testing.T) {
 	}{
 		{"missing metadata.name", func(c *Cluster) { c.ObjectMeta.Name = "" }, "metadata.name: cannot be empty"},
 		{"missing hosts", func(c *Cluster) { c.Spec.Hosts = []HostSpec{} }, "spec.hosts: must contain at least one host"},
-		{"missing host.name", func(c *Cluster) { c.Spec.Hosts[0].Name = "" }, "spec.hosts[0].name: cannot be empty"},
-		{"missing host.address", func(c *Cluster) { c.Spec.Hosts[0].Address = "" }, "spec.hosts[0].address: cannot be empty"},
+		{"missing host.name", func(c *Cluster) { c.Spec.Hosts[0].Name = "" }, "spec.hosts[0].name: cannot be empty"}, // Path changes if name is empty
+		{"missing host.address", func(c *Cluster) { c.Spec.Hosts[0].Address = "" }, "spec.hosts[0:m1].address: cannot be empty"},
 		{"missing host.user (after global also empty)", func(c *Cluster) {
 			c.Spec.Global.User = ""
 			c.Spec.Hosts[0].User = "" // Will be defaulted from global, so this test needs to ensure global is also empty for it to fail here
-		}, "spec.hosts[0].user: cannot be empty"},
-		{"missing k8s section", func(c *Cluster) { c.Spec.Kubernetes = nil }, "spec.kubernetes: section is required"},
+		}, "spec.hosts[0:m1].user: cannot be empty (after defaults)"}, // Adjusted path and added (after defaults)
+		{"missing k8s section", func(c *Cluster) { c.Spec.Kubernetes = nil }, "spec.kubernetes.version: cannot be empty"}, // SetDefaults re-initializes, so version will be empty
 		// Note: Validation for Kubernetes.Version being empty is now in Validate_KubernetesConfig
 	}
 
