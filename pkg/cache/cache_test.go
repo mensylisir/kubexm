@@ -14,7 +14,7 @@ type testStepSpec struct {
 }
 
 func TestGenericCache_GetSetDelete(t *testing.T) {
-	cache := NewGenericCache() // This is *genericCache
+	cache := NewGenericCache(nil) // Fixed: pass nil for parent
 
 	// Test Set and Get
 	cache.Set("key1", "value1")
@@ -87,7 +87,7 @@ func TestGenericCache_StepSpec(t *testing.T) {
 }
 
 func TestGenericCache_Concurrency(t *testing.T) {
-	cache := NewGenericCache()
+	cache := NewGenericCache(nil) // Fixed: pass nil for parent
 	var wg sync.WaitGroup
 	numGoroutines := 50
 
@@ -269,13 +269,12 @@ func TestGenericCache_LocalizedSetDelete(t *testing.T) {
 
 	// Delete from module cache
 	moduleC.Delete("sharedKey")
-	_, ok = moduleC.Get("sharedKey") // Should now fall back to pipeline's value
-	if !ok || moduleC.store.Load("sharedKey") == true { // Ensure it's gone from moduleC.store
-		t.Error("ModuleCache: 'sharedKey' should be deleted from module's own store.")
+	if _, stillInModuleStore := moduleC.store.Load("sharedKey"); stillInModuleStore {
+		t.Error("ModuleCache: 'sharedKey' should have been deleted from module's own store, but was found.")
 	}
-	val, ok = moduleC.Get("sharedKey") // Now this Get should find it in pipelineC
+	val, ok = moduleC.Get("sharedKey") // Fixed: use = instead of :=
 	if !ok || val != "pipeValue" {
-		t.Errorf("ModuleCache: Expected 'pipeValue' for 'sharedKey' (from pipeline) after module delete, got '%v'", val)
+		t.Errorf("ModuleCache: Expected 'pipeValue' for 'sharedKey' (from pipeline) after module delete, got '%v', ok=%v", val, ok)
 	}
 
 
