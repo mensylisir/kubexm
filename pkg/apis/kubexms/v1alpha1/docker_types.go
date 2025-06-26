@@ -67,24 +67,23 @@ func SetDefaults_DockerConfig(cfg *DockerConfig) {
 	if cfg.DefaultAddressPools == nil { cfg.DefaultAddressPools = []DockerAddressPool{} }
 	if cfg.StorageOpts == nil { cfg.StorageOpts = []string{} }
 	if cfg.Runtimes == nil { cfg.Runtimes = make(map[string]DockerRuntime) }
-	if cfg.MaxConcurrentDownloads == nil { mcd := 3; cfg.MaxConcurrentDownloads = &mcd } // Docker default
-	if cfg.MaxConcurrentUploads == nil { mcu := 5; cfg.MaxConcurrentUploads = &mcu }   // Docker default
-	if cfg.Bridge == nil { bridgeName := "docker0"; cfg.Bridge = &bridgeName }
+	if cfg.MaxConcurrentDownloads == nil { cfg.MaxConcurrentDownloads = intPtr(3) } // Docker default
+	if cfg.MaxConcurrentUploads == nil { cfg.MaxConcurrentUploads = intPtr(5) }   // Docker default
+	if cfg.Bridge == nil { cfg.Bridge = stringPtr("docker0") }
 	// DefaultRuntime: Docker's default is typically "runc". Let Docker handle if not specified.
 
 	if cfg.InstallCRIDockerd == nil {
-		b := true // Default to installing cri-dockerd with Docker for Kubernetes
-		cfg.InstallCRIDockerd = &b
+		cfg.InstallCRIDockerd = boolPtr(true) // Default to installing cri-dockerd with Docker for Kubernetes
 	}
 	// No default for CRIDockerdVersion, let install logic handle it or require user input if specific version needed.
 
-	if cfg.LogDriver == nil { defaultLogDriver := "json-file"; cfg.LogDriver = &defaultLogDriver }
+	if cfg.LogDriver == nil { cfg.LogDriver = stringPtr("json-file") }
 	// Default DataRoot depends on OS, often /var/lib/docker. Let Docker daemon handle its own default if not set.
-	// if cfg.DataRoot == nil { defaultDataRoot := "/var/lib/docker"; cfg.DataRoot = &defaultDataRoot }
+	// if cfg.DataRoot == nil { cfg.DataRoot = stringPtr("/var/lib/docker") } // Example if we wanted to enforce it
 
-	if cfg.IPTables == nil { b := true; cfg.IPTables = &b } // Docker default is true
-	if cfg.IPMasq == nil { b := true; cfg.IPMasq = &b }     // Docker default is true
-	if cfg.Experimental == nil { b := false; cfg.Experimental = &b }
+	if cfg.IPTables == nil { cfg.IPTables = boolPtr(true) } // Docker default is true
+	if cfg.IPMasq == nil { cfg.IPMasq = boolPtr(true) }     // Docker default is true
+	if cfg.Experimental == nil { cfg.Experimental = boolPtr(false) }
 }
 
 // Validate_DockerConfig validates DockerConfig.

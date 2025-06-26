@@ -63,16 +63,13 @@ func SetDefaults_NginxLBConfig(cfg *NginxLBConfig) {
 		return
 	}
 	if cfg.ListenAddress == nil {
-		def := "0.0.0.0"
-		cfg.ListenAddress = &def
+		cfg.ListenAddress = stringPtr("0.0.0.0")
 	}
 	if cfg.ListenPort == nil {
-		def := 6443 // Default for Kube API, or 443 if mode is HTTP for general LB
-		cfg.ListenPort = &def
+		cfg.ListenPort = intPtr(6443) // Default for Kube API, or 443 if mode is HTTP for general LB
 	}
 	if cfg.Mode == nil {
-	   def := "tcp" // Default to TCP load balancing for API server like use-cases
-	   cfg.Mode = &def
+		cfg.Mode = stringPtr("tcp") // Default to TCP load balancing for API server like use-cases
 	}
 	// No default for BalanceAlgorithm, Nginx uses round-robin by default.
 
@@ -80,11 +77,10 @@ func SetDefaults_NginxLBConfig(cfg *NginxLBConfig) {
 		cfg.UpstreamServers = []NginxLBUpstreamServer{}
 	}
 	for i := range cfg.UpstreamServers {
-	   server := &cfg.UpstreamServers[i]
-	   if server.Weight == nil {
-		   w := 1 // Default weight
-		   server.Weight = &w
-	   }
+		server := &cfg.UpstreamServers[i]
+		if server.Weight == nil {
+			server.Weight = intPtr(1) // Default weight
+		}
 	}
 
 	if cfg.ExtraHTTPConfig == nil { cfg.ExtraHTTPConfig = []string{} }
@@ -92,13 +88,11 @@ func SetDefaults_NginxLBConfig(cfg *NginxLBConfig) {
 	if cfg.ExtraServerConfig == nil { cfg.ExtraServerConfig = []string{} }
 
 	if cfg.ConfigFilePath == nil {
-	   defPath := "/etc/nginx/nginx.conf" // Common default path
-	   cfg.ConfigFilePath = &defPath
+		cfg.ConfigFilePath = stringPtr("/etc/nginx/nginx.conf") // Common default path
 	}
 
 	if cfg.SkipInstall == nil {
-	   b := false // Default to managing Nginx installation
-	   cfg.SkipInstall = &b
+		cfg.SkipInstall = boolPtr(false) // Default to managing Nginx installation
 	}
 }
 
@@ -119,15 +113,14 @@ func Validate_NginxLBConfig(cfg *NginxLBConfig, verrs *ValidationErrors, pathPre
 	   // Could add IP address validation here
 	}
 
-	if cfg.ListenPort == nil {
-		verrs.Add("%s.listenPort: must be specified", pathPrefix)
-	} else if *cfg.ListenPort <= 0 || *cfg.ListenPort > 65535 {
+	// ListenPort is always defaulted, so check its value.
+	if *cfg.ListenPort <= 0 || *cfg.ListenPort > 65535 {
 		verrs.Add("%s.listenPort: invalid port %d", pathPrefix, *cfg.ListenPort)
 	}
 
 	if cfg.Mode != nil && *cfg.Mode != "" {
 	   validModes := []string{"tcp", "http"}
-	   if !contains(validModes, *cfg.Mode) { // contains() assumed from network_types.go or similar
+	   if !containsString(validModes, *cfg.Mode) {
 		   verrs.Add("%s.mode: invalid mode '%s', must be 'tcp' or 'http'", pathPrefix, *cfg.Mode)
 	   }
 	}
@@ -136,7 +129,7 @@ func Validate_NginxLBConfig(cfg *NginxLBConfig, verrs *ValidationErrors, pathPre
 	   // Nginx built-in for stream: round_robin (default), least_conn, hash, random
 	   // Nginx built-in for http: round_robin (default), least_conn, ip_hash, generic_hash, random, least_time
 	   validAlgos := []string{"round_robin", "least_conn", "ip_hash", "hash", "random", "least_time"}
-	   if !contains(validAlgos, *cfg.BalanceAlgorithm) {
+	   if !containsString(validAlgos, *cfg.BalanceAlgorithm) {
 		   verrs.Add("%s.balanceAlgorithm: invalid algorithm '%s'", pathPrefix, *cfg.BalanceAlgorithm)
 	   }
 	}
