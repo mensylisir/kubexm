@@ -22,19 +22,17 @@ type CreateOptions struct {
 	ClusterConfigFile string
 	SkipPreflight     bool
 	DryRun            bool
-	Verbose           bool
-	YesAssume         bool // Corresponds to --yes or -y for auto-approval
+	// Verbose and YesAssume will use global flags from root.go
 }
 
-var createOptions = &CreateOptions{}
+var createOptions = &CreateOptions{} // Verbose and YesAssume removed
 
 func init() {
 	ClusterCmd.AddCommand(createCmd)
 	createCmd.Flags().StringVarP(&createOptions.ClusterConfigFile, "config", "f", "", "Path to the cluster configuration YAML file (required)")
 	createCmd.Flags().BoolVar(&createOptions.SkipPreflight, "skip-preflight", false, "Skip preflight checks")
 	createCmd.Flags().BoolVar(&createOptions.DryRun, "dry-run", false, "Simulate the cluster creation without making any changes")
-	createCmd.Flags().BoolVarP(&createOptions.Verbose, "verbose", "v", false, "Enable verbose output")
-	createCmd.Flags().BoolVarP(&createOptions.YesAssume, "yes", "y", false, "Assume yes to all prompts and run non-interactively")
+	// Local verbose and yes flags are removed, will use global ones from rootCmd
 
 	// Mark flags as required if necessary
 	if err := createCmd.MarkFlagRequired("config"); err != nil {
@@ -48,15 +46,13 @@ var createCmd = &cobra.Command{
 	Short: "Create a new Kubernetes cluster",
 	Long:  `Create a new Kubernetes cluster based on a provided configuration file.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Initialize global logger
-		logOpts := logger.DefaultOptions()
-		logOpts.ColorConsole = true // Assuming color by default for CLI
-		if createOptions.Verbose {
-			logOpts.ConsoleLevel = logger.DebugLevel
-		}
-		logger.Init(logOpts) // Initialize global logger
-		log := logger.Get()   // Get the global logger instance
+		// Logger is now initialized in rootCmd's PersistentPreRunE based on global -v flag
+		log := logger.Get() // Get the globally initialized logger
 		defer logger.SyncGlobal()
+
+		// Access global flags (verbose is handled by logger init, use assumeYesFlag directly)
+		// verboseFlag := cmd.Flag("verbose").Value.String() == "true" // Example if needed, but logger handles it
+		assumeYesGlobal, _ := cmd.Flags().GetBool("yes") // Get the global 'yes' flag value
 
 		log.Info("Starting cluster creation process...")
 
@@ -93,35 +89,28 @@ var createCmd = &cobra.Command{
 		// For now, RuntimeBuilder primarily uses the config file.
 		// Global flags like Verbose are handled by logger init. YesAssume is passed to pipeline.
 
-		rtBuilder := runtime.NewRuntimeBuilder(absPath, runnerSvc, connectionPool, connectorFactory, engineSvc)
-		// The RuntimeBuilder constructor needs engineSvc if it's to be part of the context it builds.
-		// Let's adjust the builder or how engine is set.
-		// The runtime.Context has an Engine field. Builder should set it.
-		// For now, assuming engineSvc is passed to Build, or set on RuntimeBuilder.
-		// The design has engineSvc passed to Build.
+		// Pass absPath, runnerSvc, connectionPool, connectorFactory to NewRuntimeBuilder
+		// engineSvc will be passed to Build method.
+		rtBuilder := runtime.NewRuntimeBuilder(absPath, runnerSvc, connectionPool, connectorFactory)
 
 		log.Info("Building runtime environment...")
-		runtimeCtx, cleanupFunc, err := rtBuilder.Build(goCtx) // engineSvc removed from Build, assuming it's part of builder's init
+		runtimeCtx, cleanupFunc, err := rtBuilder.Build(goCtx, engineSvc) // Pass engineSvc to Build
 		if err != nil {
 			log.Errorf("Failed to build runtime environment: %v", err)
 			return fmt.Errorf("failed to build runtime environment: %w", err)
 		}
 		defer cleanupFunc() // Ensure connection pool and other resources are cleaned up
 
-		// Override context's engine if builder doesn't set it (though it should)
-		if runtimeCtx.Engine == nil {
-			runtimeCtx.Engine = engineSvc
-		}
-
 		log.Info("Runtime environment built successfully.")
 
-		// Instantiate the CreateClusterPipeline
-		createPipeline := kubexmcluster.NewCreateClusterPipeline(createOptions.YesAssume)
+		// Instantiate the CreateClusterPipeline, passing the global assumeYesFlag
+		createPipeline := kubexmcluster.NewCreateClusterPipeline(assumeYesGlobal)
 		log.Infof("Instantiated pipeline: %s", createPipeline.Name())
 
 		// Run the pipeline
 		log.Info("Executing pipeline run...")
 		// The pipeline's Run method expects the full *runtime.Context
+		// The runtimeCtx from Build() should now have the engine properly set.
 		result, err := createPipeline.Run(runtimeCtx, createOptions.DryRun)
 		if err != nil {
 			log.Errorf("Cluster creation pipeline failed: %v", err)

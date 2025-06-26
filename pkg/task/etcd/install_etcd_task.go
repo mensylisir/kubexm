@@ -16,13 +16,7 @@ import (
 	// "github.com/mensylisir/kubexm/pkg/runtime" // No longer used in signatures
 )
 
-const (
-	// DefaultEtcdPkiDir is the default remote directory for etcd PKI files.
-	DefaultEtcdPkiDir = "/etc/etcd/pki"
-	// DefaultEtcdServicePath is the default path for the etcd systemd service file.
-	DefaultEtcdServicePath = "/etc/systemd/system/etcd.service"
-	// DefaultEtcdUsrLocalBin is the default path for etcd binaries.
-	DefaultEtcdUsrLocalBin = "/usr/local/bin"
+	"github.com/mensylisir/kubexm/pkg/common" // Import common
 )
 
 // InstallETCDTask defines the task for installing ETCD cluster (binary deployment).
@@ -197,9 +191,9 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 		var lastUploadOnHost plan.NodeID
 		for certFile, perm := range certsForEtcdNode {
 			localPath := filepath.Join(localEtcdCertsBaseDir, certFile)
-			remotePath := filepath.Join(DefaultEtcdPkiDir, certFile)
+			remotePath := filepath.Join(common.EtcdDefaultPKIDir, certFile) // Use common constant
 			nodeName := fmt.Sprintf("Upload-%s-to-%s", certFile, targetHost.GetName())
-			uploadStep := common.NewUploadFileStep(nodeName, localPath, remotePath, perm, true, false) // sudo=true
+			uploadStep := commonstep.NewUploadFileStep(nodeName, localPath, remotePath, perm, true, false) // sudo=true, commonstep alias
 
 			nodeID, _ := certsUploadFragment.AddNode(&plan.ExecutionNode{
 				Name:         uploadStep.Meta().Name,
@@ -308,11 +302,11 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 		remoteTempArchiveDir := "/tmp/kubexm-etcd-archives" // TODO: Make this configurable or use a host-specific temp path
 		remoteEtcdArchivePathOnHost := filepath.Join(remoteTempArchiveDir, filepath.Base(localEtcdArchivePathOnControlNode))
 
-		uploadArchiveStep := common.NewUploadFileStep(
+		uploadArchiveStep := commonstep.NewUploadFileStep( // commonstep alias
 			fmt.Sprintf("UploadEtcdArchiveTo-%s", etcdHost.GetName()),
 			localEtcdArchivePathOnControlNode, remoteEtcdArchivePathOnHost, "0644", true, false,
 		)
-		uploadArchiveNodeID, _ := mainFragment.AddNode(&plan.ExecutionNode{
+		uploadArchiveNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{ // Use taskFragment
 			Name:     uploadArchiveStep.Meta().Name, Step: uploadArchiveStep,
 			Hosts:    []connector.Host{etcdHost}, Dependencies: currentHostProcessingDeps,
 		}, plan.NodeID(nodeSpecificPrefix+"upload-archive"))
@@ -320,13 +314,13 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 
 		// Extract Etcd Archive on this etcdHost
 		etcdExtractDirOnHost := "/opt/kubexm/etcd-extracted" // TODO: Make this configurable
-		extractArchiveStep := common.NewExtractArchiveStep(
+		extractArchiveStep := commonstep.NewExtractArchiveStep( // commonstep alias
 			fmt.Sprintf("ExtractEtcdArchiveOn-%s", etcdHost.GetName()),
 			remoteEtcdArchivePathOnHost, etcdExtractDirOnHost,
 			true, // removeArchiveAfterExtract
 			true, // sudo for extraction
 		)
-		extractArchiveNodeID, _ := mainFragment.AddNode(&plan.ExecutionNode{
+		extractArchiveNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{ // Use taskFragment
 			Name:     extractArchiveStep.Meta().Name, Step: extractArchiveStep,
 			Hosts:    []connector.Host{etcdHost}, Dependencies: []plan.NodeID{currentHostLastStepID},
 		}, plan.NodeID(nodeSpecificPrefix+"extract-archive"))
@@ -337,18 +331,18 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 
 		// Copy Binaries to System Path (e.g., /usr/local/bin)
 		// Using CommandSteps for explicit control over copy and chmod.
-		cmdCopyEtcd := fmt.Sprintf("cp -fp %s %s/etcd && chmod +x %s/etcd", filepath.Join(pathContainingBinariesOnNode, "etcd"), DefaultEtcdUsrLocalBin, DefaultEtcdUsrLocalBin)
-		cmdCopyEtcdctl := fmt.Sprintf("cp -fp %s %s/etcdctl && chmod +x %s/etcdctl", filepath.Join(pathContainingBinariesOnNode, "etcdctl"), DefaultEtcdUsrLocalBin, DefaultEtcdUsrLocalBin)
+		cmdCopyEtcd := fmt.Sprintf("cp -fp %s %s/etcd && chmod +x %s/etcd", filepath.Join(pathContainingBinariesOnNode, "etcd"), common.EtcdDefaultBinDir, common.EtcdDefaultBinDir)
+		cmdCopyEtcdctl := fmt.Sprintf("cp -fp %s %s/etcdctl && chmod +x %s/etcdctl", filepath.Join(pathContainingBinariesOnNode, "etcdctl"), common.EtcdDefaultBinDir, common.EtcdDefaultBinDir)
 
-		copyEtcdNodeID, _ := mainFragment.AddNode(&plan.ExecutionNode{
+		copyEtcdNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{ // Use taskFragment
 			Name: fmt.Sprintf("CopyEtcdBinaryOn-%s", etcdHost.GetName()),
-			Step: common.NewCommandStep("", cmdCopyEtcd, true, false, 0, nil, 0, "", false, 0, "", false),
+			Step: commonstep.NewCommandStep("", cmdCopyEtcd, true, false, 0, nil, 0, "", false, 0, "", false), // commonstep alias
 			Hosts: []connector.Host{etcdHost}, Dependencies: []plan.NodeID{currentHostLastStepID},
 		}, plan.NodeID(nodeSpecificPrefix+"copy-etcd"))
 
-		copyEtcdctlNodeID, _ := mainFragment.AddNode(&plan.ExecutionNode{
+		copyEtcdctlNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{ // Use taskFragment
 			Name: fmt.Sprintf("CopyEtcdctlBinaryOn-%s", etcdHost.GetName()),
-			Step: common.NewCommandStep("", cmdCopyEtcdctl, true, false, 0, nil, 0, "", false, 0, "", false),
+			Step: commonstep.NewCommandStep("", cmdCopyEtcdctl, true, false, 0, nil, 0, "", false, 0, "", false), // commonstep alias
 			Hosts: []connector.Host{etcdHost}, Dependencies: []plan.NodeID{currentHostLastStepID}, // Can run parallel to etcd copy
 		}, plan.NodeID(nodeSpecificPrefix+"copy-etcdctl"))
 
@@ -369,12 +363,12 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 			InitialAdvertisePeerURLs: fmt.Sprintf("https://%s:%d", nodeIP, etcdPeerPortResolved),
 			AdvertiseClientURLs:      fmt.Sprintf("https://%s:%d", nodeIP, etcdClientPort),
 			InitialCluster:           initialClusterString, InitialClusterToken: etcdSpec.ClusterToken,
-			TrustedCAFile:            filepath.Join(DefaultEtcdPkiDir, "ca.pem"),
-			CertFile:                 filepath.Join(DefaultEtcdPkiDir, fmt.Sprintf("%s.pem", etcdHost.GetName())),
-			KeyFile:                  filepath.Join(DefaultEtcdPkiDir, fmt.Sprintf("%s-key.pem", etcdHost.GetName())),
-			PeerTrustedCAFile:        filepath.Join(DefaultEtcdPkiDir, "ca.pem"),
-			PeerCertFile:             filepath.Join(DefaultEtcdPkiDir, fmt.Sprintf("peer-%s.pem", etcdHost.GetName())),
-			PeerKeyFile:              filepath.Join(DefaultEtcdPkiDir, fmt.Sprintf("peer-%s-key.pem", etcdHost.GetName())),
+			TrustedCAFile:            filepath.Join(common.EtcdDefaultPKIDir, common.CACertFileName), // Use common constants
+			CertFile:                 filepath.Join(common.EtcdDefaultPKIDir, fmt.Sprintf("%s.pem", etcdHost.GetName())),
+			KeyFile:                  filepath.Join(common.EtcdDefaultPKIDir, fmt.Sprintf("%s-key.pem", etcdHost.GetName())),
+			PeerTrustedCAFile:        filepath.Join(common.EtcdDefaultPKIDir, common.CACertFileName), // Use common constants
+			PeerCertFile:             filepath.Join(common.EtcdDefaultPKIDir, fmt.Sprintf("peer-%s.pem", etcdHost.GetName())),
+			PeerKeyFile:              filepath.Join(common.EtcdDefaultPKIDir, fmt.Sprintf("peer-%s-key.pem", etcdHost.GetName())),
 			SnapshotCount:            fmt.Sprintf("%d", etcdSpec.GetSnapshotCount()), // Use getters for defaults
 			AutoCompactionRetention:  fmt.Sprintf("%d", etcdSpec.GetAutoCompactionRetentionHours()),
 			MaxRequestBytes:          fmt.Sprintf("%d", etcdSpec.GetMaxRequestBytes()),
@@ -382,24 +376,24 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 		}
 		if i == 0 { etcdConfigData.InitialClusterState = "new" } else { etcdConfigData.InitialClusterState = "existing" }
 
-		generateConfigStep := etcd.NewGenerateEtcdConfigStep(
+		generateConfigStep := etcdstep.NewGenerateEtcdConfigStep( // etcdstep alias
 			fmt.Sprintf("GenerateEtcdConfig-%s", etcdHost.GetName()),
-			etcdConfigData, etcd.EtcdConfigRemotePath, true, // sudo=true
+			etcdConfigData, common.EtcdDefaultConfFile, true, // Use common constant for remote path
 		)
-		generateConfigNodeID, _ := mainFragment.AddNode(&plan.ExecutionNode{
+		generateConfigNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{ // Use taskFragment
 			Name: generateConfigStep.Meta().Name, Step: generateConfigStep,
 			Hosts: []connector.Host{etcdHost}, Dependencies: configAndServiceSetupDeps,
 		}, plan.NodeID(nodeSpecificPrefix+"generate-config"))
 		currentHostLastStepID = generateConfigNodeID
 
 		// Generate etcd.service systemd file
-		generateServiceStep := etcd.NewGenerateEtcdServiceStep(
+		generateServiceStep := etcdstep.NewGenerateEtcdServiceStep( // etcdstep alias
 			fmt.Sprintf("GenerateEtcdServiceFile-%s", etcdHost.GetName()),
 			// TODO: EtcdServiceData may need more fields if template is complex (e.g. User, Group)
-			etcd.EtcdServiceData{ExecStartArgs: "--config-file=" + etcd.EtcdConfigRemotePath},
-			DefaultEtcdServicePath, true, // sudo=true
+			etcdstep.EtcdServiceData{ExecStartArgs: "--config-file=" + common.EtcdDefaultConfFile}, // Use common constant
+			common.EtcdDefaultSystemdFile, true, // sudo=true, Use common constant
 		)
-		generateServiceNodeID, _ := mainFragment.AddNode(&plan.ExecutionNode{
+		generateServiceNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{ // Use taskFragment
 			Name: generateServiceStep.Meta().Name, Step: generateServiceStep,
 			Hosts: []connector.Host{etcdHost}, Dependencies: []plan.NodeID{currentHostLastStepID},
 		}, plan.NodeID(nodeSpecificPrefix+"generate-service"))

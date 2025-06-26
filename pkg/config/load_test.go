@@ -728,3 +728,119 @@ func TestLoadFromBytes_ValidDockerRuntime(t *testing.T) {
 		t.Errorf("Docker.CRIDockerdVersion = %v, want 'v0.3.1'", dockerCfg.CRIDockerdVersion)
 	}
 }
+
+const yamlInvalidAfterDefaults = `
+apiVersion: kubexms.io/v1alpha1
+kind: Cluster
+metadata:
+  name: invalid-after-defaults
+spec:
+  type: kubexm
+  hosts:
+  # Missing name, address, user which are normally defaulted or inherited.
+  # If global is also missing, user will be empty after defaults and fail validation.
+  - port: 22
+    roles: ["master"]
+  # Missing etcd, kubernetes, network sections which are required by Validate_Cluster
+`
+
+const yamlValidDueToDefaults = `
+apiVersion: kubexms.io/v1alpha1
+kind: Cluster
+metadata:
+  name: valid-due-to-defaults
+spec:
+  # type will be defaulted to kubexm
+  global:
+    user: "testuser" # This will be inherited by host
+    # port: 22, connectionTimeout: 30s will be defaulted
+  hosts:
+  - name: node-1
+    address: 10.0.0.1
+    roles: ["worker"]
+    # port, user will be inherited or defaulted
+  etcd: {} # Will be defaulted
+  kubernetes:
+    version: v1.23.0 # Other k8s fields will be defaulted
+  network:
+    kubePodsCIDR: 10.244.0.0/16 # Other network fields will be defaulted
+`
+
+func TestParseFromFile_ValidationFail(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "config-validation-fail-")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	configPath := filepath.Join(tmpDir, "invalid_cluster.yaml")
+	if err := os.WriteFile(configPath, []byte(yamlInvalidAfterDefaults), 0644); err != nil {
+		t.Fatalf("Failed to write temp config file: %v", err)
+	}
+
+	_, err = ParseFromFile(configPath)
+	if err == nil {
+		t.Fatalf("ParseFromFile with YAML that should fail validation after defaults, expected error, got nil")
+	}
+	// Check for a specific validation error message if possible, e.g. missing host name or required section
+	// Example: This YAML will likely fail because etcd, kubernetes, network are missing.
+	// Or because host name/address/user are missing and global is not there to provide them.
+	expectedErrorSubstrings := []string{
+		// Based on current Validate_Cluster, these are likely:
+		"spec.hosts[0].name: cannot be empty",
+		"spec.hosts[0].address: cannot be empty",
+		"spec.hosts[0].user: cannot be empty",
+		"spec.etcd: section is required", // Or similar depending on how defaults for Etcd behave
+		"spec.kubernetes: section is required",
+		"spec.network: section is required",
+	}
+
+	foundOne := false
+	for _, sub := range expectedErrorSubstrings {
+		if strings.Contains(err.Error(), sub) {
+			foundOne = true
+			break
+		}
+	}
+	if !foundOne {
+		t.Errorf("Expected one of validation errors %v, but got: %v", expectedErrorSubstrings, err)
+	}
+}
+
+func TestParseFromFile_ValidDueToDefaults(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "config-valid-defaults-")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	configPath := filepath.Join(tmpDir, "valid_due_to_defaults.yaml")
+	if err := os.WriteFile(configPath, []byte(yamlValidDueToDefaults), 0644); err != nil {
+		t.Fatalf("Failed to write temp config file: %v", err)
+	}
+
+	cfg, err := ParseFromFile(configPath)
+	if err != nil {
+		t.Fatalf("ParseFromFile with YAML that should be valid due to defaults, failed: %v", err)
+	}
+
+	// Check some defaulted values
+	if cfg.Spec.Type != v1alpha1.ClusterTypeKubeXM {
+		t.Errorf("cfg.Spec.Type = %s, want %s (defaulted)", cfg.Spec.Type, v1alpha1.ClusterTypeKubeXM)
+	}
+	if cfg.Spec.Global.Port != 22 {
+		t.Errorf("cfg.Spec.Global.Port = %d, want 22 (defaulted)", cfg.Spec.Global.Port)
+	}
+	if cfg.Spec.Hosts[0].User != "testuser" {
+		t.Errorf("cfg.Spec.Hosts[0].User = %s, want 'testuser' (inherited)", cfg.Spec.Hosts[0].User)
+	}
+	if cfg.Spec.Etcd.Type != v1alpha1.EtcdTypeKubeXMSInternal { // Default for EtcdConfig
+		t.Errorf("cfg.Spec.Etcd.Type = %s, want %s (defaulted)", cfg.Spec.Etcd.Type, v1alpha1.EtcdTypeKubeXMSInternal)
+	}
+	if cfg.Spec.Kubernetes.DNSDomain != "cluster.local" {
+		t.Errorf("cfg.Spec.Kubernetes.DNSDomain = %s, want cluster.local (defaulted)", cfg.Spec.Kubernetes.DNSDomain)
+	}
+	if cfg.Spec.Network.Plugin != "calico" { // Default for NetworkConfig
+		t.Errorf("cfg.Spec.Network.Plugin = %s, want calico (defaulted)", cfg.Spec.Network.Plugin)
+	}
+}

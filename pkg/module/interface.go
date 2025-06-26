@@ -19,10 +19,11 @@ type ModuleContext interface {
 	GetClusterConfig() *v1alpha1.Cluster
 	GetPipelineCache() cache.PipelineCache
 	GetGlobalWorkDir() string
-	GetEngine() engine.Engine // Consider if modules really need direct engine access
+	// GetEngine() engine.Engine // Modules should not directly access the engine; execution is handled by Pipeline.
 
 	// Module-specific methods:
 	GetModuleCache() cache.ModuleCache
+	// Add other methods specific to module context if needed, e.g., GetModuleConfig() if modules have their own config sections.
 }
 
 // Module defines the methods that all concrete module types must implement.
@@ -32,15 +33,14 @@ type Module interface {
 	// Name returns the designated name of the module.
 	Name() string
 
-	// Tasks returns a list of tasks that belong to this module.
-	// This might still be useful for introspection or if the module's Plan method
-	// dynamically decides which tasks to include based on some logic.
-	// Alternatively, tasks could be hardcoded within the module's Plan method.
-	// Keeping it for now as per original design.
-	Tasks() []task.Task
+	// GetTasks returns a list of tasks that belong to this module, potentially dynamically
+	// determined based on the provided context (e.g., cluster configuration).
+	// Returns an error if tasks cannot be determined.
+	GetTasks(ctx ModuleContext) ([]task.Task, error)
 
-	// Plan now aggregates ExecutionFragments from its tasks into a larger ExecutionFragment.
+	// Plan aggregates ExecutionFragments from its tasks into a larger ExecutionFragment.
 	// It is responsible for linking the exit nodes of one task's fragment
-	// to the entry nodes of the next task's fragment, creating dependencies.
-	Plan(ctx ModuleContext) (*task.ExecutionFragment, error) // Changed to local ModuleContext
+	// to the entry nodes of the next task's fragment, creating dependencies according
+	// to the module's logic (e.g., sequential, parallel).
+	Plan(ctx ModuleContext) (*task.ExecutionFragment, error)
 }

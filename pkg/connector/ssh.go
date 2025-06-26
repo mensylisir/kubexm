@@ -351,26 +351,93 @@ func (s *SSHConnector) WriteFile(ctx context.Context, content []byte, destPath, 
 	if err := s.ensureSftp(); err != nil {
 		return fmt.Errorf("sftp client not available for WriteFile on host %s: %w", s.connCfg.Host, err)
 	}
-	if sudo {
-		// This warning is appropriate as direct SFTP write with sudo is not really a thing.
-		// True sudo write would involve temp file and `sudo mv` via Exec.
-		fmt.Fprintf(os.Stderr, "Warning: WriteFile with sudo=true for SSH connector attempts direct SFTP write to %s on host %s; this may fail for restricted paths.\n", destPath, s.connCfg.Host)
+	if err := s.ensureSftp(); err != nil { // Ensure SFTP client is available for non-sudo or initial upload part of sudo
+		return fmt.Errorf("sftp client not available for WriteFile on host %s: %w", s.connCfg.Host, err)
 	}
 
-	// Attempt to create parent directory if it doesn't exist. Best effort.
+	if sudo {
+		// Sudo strategy: upload to temp, then sudo mv, sudo chmod, sudo chown
+		tmpPath := filepath.Join("/tmp", fmt.Sprintf("kubexm-write-%d-%s", time.Now().UnixNano(), filepath.Base(destPath)))
+
+		// 1. Upload to temporary path without sudo
+		err := s.writeFileViaSFTP(ctx, content, tmpPath, "0644") // Write with temp permissions
+		if err != nil {
+			return fmt.Errorf("failed to upload to temporary path %s on host %s for sudo write: %w", tmpPath, s.connCfg.Host, err)
+		}
+		// Defer removal of temporary file
+		defer func() {
+			// Best effort removal, log if it fails but don't fail the WriteFile operation itself for this.
+			// Sudo might be needed if the user running kubexm can't delete from /tmp (unlikely but possible)
+			// For simplicity, using non-sudo rm.
+			rmCmd := fmt.Sprintf("rm -f %s", tmpPath)
+			_, _, rmErr := s.Exec(ctx, rmCmd, &ExecOptions{Sudo: false}) // Try non-sudo first
+			if rmErr != nil {
+				// Attempt with sudo if non-sudo failed, as a fallback cleanup
+				_, _, rmSudoErr := s.Exec(ctx, rmCmd, &ExecOptions{Sudo: true})
+				if rmSudoErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to remove temporary file %s on host %s (tried non-sudo and sudo): %v / %v\n", tmpPath, s.connCfg.Host, rmErr, rmSudoErr)
+				}
+			}
+		}()
+
+		// 2. Ensure destination directory exists using sudo
+		destDir := filepath.Dir(destPath)
+		if destDir != "." && destDir != "/" {
+			mkdirCmd := fmt.Sprintf("mkdir -p %s", destDir)
+			_, _, mkdirErr := s.Exec(ctx, mkdirCmd, &ExecOptions{Sudo: true})
+			if mkdirErr != nil {
+				return fmt.Errorf("failed to sudo mkdir -p %s on host %s: %w", destDir, s.connCfg.Host, mkdirErr)
+			}
+		}
+
+		// 3. Move file to destination using sudo
+		mvCmd := fmt.Sprintf("mv %s %s", tmpPath, destPath)
+		_, _, mvErr := s.Exec(ctx, mvCmd, &ExecOptions{Sudo: true})
+		if mvErr != nil {
+			return fmt.Errorf("failed to sudo mv %s to %s on host %s: %w", tmpPath, destPath, s.connCfg.Host, mvErr)
+		}
+
+		// 4. Apply permissions using sudo
+		if permissions != "" {
+			// Validate permissions format briefly before sending to chmod
+			if _, err := strconv.ParseUint(permissions, 8, 32); err != nil {
+				return fmt.Errorf("invalid permissions format '%s' for sudo chmod on host %s: %w", permissions, s.connCfg.Host, err)
+
+			}
+			chmodCmd := fmt.Sprintf("chmod %s %s", permissions, destPath)
+			_, _, chmodErr := s.Exec(ctx, chmodCmd, &ExecOptions{Sudo: true})
+			if chmodErr != nil {
+				return fmt.Errorf("failed to sudo chmod %s to %s on host %s: %w", destPath, permissions, s.connCfg.Host, chmodErr)
+			}
+		}
+		// Note: Chown is not part of WriteFile's signature, but could be added to FileTransferOptions
+		// and handled here if options were passed to WriteFile.
+		// For now, permissions are handled.
+	} else {
+		// Non-sudo: direct SFTP write
+		return s.writeFileViaSFTP(ctx, content, destPath, permissions)
+	}
+	return nil
+}
+
+
+// writeFileViaSFTP is a helper for direct SFTP writes.
+func (s *SSHConnector) writeFileViaSFTP(ctx context.Context, content []byte, destPath, permissions string) error {
+	// Ensure parent directory exists (best effort with SFTP, might need `mkdir -p` via Exec for complex cases)
 	parentDir := filepath.Dir(destPath)
 	if parentDir != "." && parentDir != "/" {
-		// Stat parent first to avoid unnecessary mkdir attempts or errors if it exists.
 		_, statErr := s.sftpClient.Stat(parentDir)
 		if statErr != nil {
 			if os.IsNotExist(statErr) {
-				// MkdirAll equivalent is not directly in sftp, so we do it simply.
-				// For complex cases, an Exec("mkdir -p") might be more robust.
+				// sftpClient.Mkdir is not recursive.
+				// For simplicity, we are not implementing recursive mkdir with SFTP here.
+				// A robust solution might require Exec("mkdir -p").
+				// This matches the previous behavior.
 				if err := s.sftpClient.Mkdir(parentDir); err != nil {
-					// Log or print warning, but proceed to create file, maybe it's a deeper path issue.
 					fmt.Fprintf(os.Stderr, "Warning: failed to SFTP mkdir parent %s on host %s, continuing write attempt: %v\n", parentDir, s.connCfg.Host, err)
 				}
 			}
+			// Other stat errors are ignored for parent dir, proceed to create.
 		}
 	}
 
@@ -501,9 +568,15 @@ var actualDialSSH dialSSHFunc = func(ctx context.Context, cfg ConnectionCfg, eff
 	}
 	if len(authMethods) == 0 { return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("no authentication method provided (password or private key)")} }
 
+	hostKeyCallback := cfg.HostKeyCallback
+	if hostKeyCallback == nil {
+		fmt.Fprintf(os.Stderr, "Warning: HostKeyCallback is not set for host %s. Using InsecureIgnoreHostKey(). This is not recommended for production.\n", cfg.Host)
+		hostKeyCallback = ssh.InsecureIgnoreHostKey()
+	}
+
 	sshConfig := &ssh.ClientConfig{
 		User: cfg.User, Auth: authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), Timeout: effectiveConnectTimeout,
+		HostKeyCallback: hostKeyCallback, Timeout: effectiveConnectTimeout,
 	}
 	var client *ssh.Client
 	var bastionSshClient *ssh.Client

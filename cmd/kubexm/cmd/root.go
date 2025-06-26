@@ -13,8 +13,10 @@ import (
 )
 
 var (
-// cfgFile string // For config file, if used
-// userLicense string // Example global flag
+	// Global flags
+	verboseFlag   bool
+	assumeYesFlag bool
+	// cfgFile string // Future use for global config file
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -23,9 +25,17 @@ var rootCmd = &cobra.Command{
 	Short: "kubexm is a tool for managing Kubernetes clusters.",
 	Long: `kubexm is a command-line interface tool that helps you
 create, manage, and scale Kubernetes clusters efficiently.`,
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	// Run: func(cmd *cobra.Command, args []string) { },
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Initialize global logger based on verboseFlag
+		logOpts := logger.DefaultOptions()
+		logOpts.ColorConsole = true // Default for CLI
+		if verboseFlag {
+			logOpts.ConsoleLevel = logger.DebugLevel
+		}
+		logger.Init(logOpts) // Initialize global logger
+		// No need to defer SyncGlobal here, individual commands should do it or main.
+		return nil
+	},
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -37,16 +47,10 @@ func Execute() error {
 func init() {
 	// cobra.OnInitialize(initConfig) // For viper config
 
-	// Here you will define your flags and configuration settings.
-	// Cobra supports persistent flags, which, if defined here,
-	// will be global for your application.
-
-	// rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.kubexm.yaml)")
-	// rootCmd.PersistentFlags().StringP("author", "a", "YOUR NAME", "author name for copyright attribution")
-	// rootCmd.PersistentFlags().StringVarP(&userLicense, "license", "l", "", "name of license for the project")
-	// rootCmd.PersistentFlags().Bool("viper", true, "use Viper for configuration")
-	// viper.BindPFlag("author", rootCmd.PersistentFlags().Lookup("author"))
-	// viper.BindPFlag("useViper", rootCmd.PersistentFlags().Lookup("viper"))
+	// Define global persistent flags
+	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Enable verbose output")
+	rootCmd.PersistentFlags().BoolVarP(&assumeYesFlag, "yes", "y", false, "Assume yes to all prompts and run non-interactively")
+	// rootCmd.PersistentFlags().StringVar(&cfgFile, "config-global", "", "Global config file (default is $HOME/.kubexm/config.yaml)")
 
 	// Add cluster command group
 	rootCmd.AddCommand(cluster.ClusterCmd)
@@ -56,11 +60,6 @@ func init() {
 	certs.AddCertsCommand(rootCmd) // Using the exported function from certs package
 	// Add config command group
 	config.AddConfigCommand(rootCmd) // Using the exported function from config package
-	// viper.SetDefault("author", "NAME HERE <EMAIL ADDRESS>")
-	// viper.SetDefault("license", "apache")
-
-	// Example of adding a global flag:
-	// rootCmd.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose output")
 }
 
 /* // initConfig reads in config file and ENV variables if set.
