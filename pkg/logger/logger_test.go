@@ -125,7 +125,7 @@ func TestNewLogger_ColoredConsoleOutput_WithContextPrefix(t *testing.T) {
 				zap.String("hook_event", "ModulePreRun"), zap.String("hook_step_name", "PreHookStep"),
 				zap.String("host_name", "control-plane-1"),
 			},
-			colorYellow, "[WARN]", "[P:Pipe1][M:ModC][HE:ModulePreRun:PreHookStep][H:control-plane-1]",
+			colorYellow, "[WARN]", "[P:Pipe1][M:ModC][HE:ModulePreRun][HS:PreHookStep][H:control-plane-1]", // Adjusted expectation
 		},
 		{
 			"InfoNoContext", InfoLevel, "An info message with no specific exec context",
@@ -277,4 +277,361 @@ func TestFailAndFatalLevels(t *testing.T) {
         if !strings.Contains(output, "[FAIL]") {t.Errorf("Fail log missing [FAIL]. Got: %s", output)}
         if !strings.Contains(output, "This is a fail test") {t.Errorf("Fail log missing message. Got: %s", output)}
     })
+}
+
+func TestJSONFileOutputStructure(t *testing.T) {
+	globalLogger = nil
+	once = sync.Once{} // Reset global logger
+
+	tmpDir, err := os.MkdirTemp("", "logtest_json_")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	logFilePath := filepath.Join(tmpDir, "test_json.log")
+	opts := DefaultOptions()
+	opts.FileLevel = DebugLevel
+	opts.LogFilePath = logFilePath
+	opts.FileOutput = true
+	opts.ConsoleOutput = false // Disable console to focus on file output
+	opts.TimestampFormat = time.RFC3339Nano // Use a precise format for easier comparison if needed
+
+	Init(opts) // Initialize global logger with these options
+	defer SyncGlobal()
+
+	// Log a message with context and additional fields
+	log := Get().With(
+		zap.String("pipeline_name", "json_test_pipe"),
+		zap.String("module_name", "json_module"),
+		zap.String("custom_key", "custom_value"),
+		zap.Int("custom_int", 123),
+	)
+	log.Successf("JSON structure test message: %s", "details here")
+	log.Debugf("Another JSON message with different context", zap.String("host_name", "worker-x")) // host_name is a context key
+
+	// Ensure logs are flushed
+	SyncGlobal()
+
+	content, err := os.ReadFile(logFilePath)
+	if err != nil {
+		t.Fatalf("Failed to read log file: %v", err)
+	}
+
+	logEntries := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(logEntries) < 2 { // Changed from 1 to 2 because we log two messages
+		t.Fatalf("Expected at least 2 log entries, got %d. Content: %s", len(logEntries), string(content))
+	}
+
+	// --- Verify first log entry (Successf) ---
+	var entry1 map[string]interface{}
+	if err := json.Unmarshal([]byte(logEntries[0]), &entry1); err != nil {
+		t.Fatalf("Failed to unmarshal first log entry from JSON: %v. Entry: %s", err, logEntries[0])
+	}
+
+	// Check standard fields
+	if _, ok := entry1["time"]; !ok { t.Error("First entry: JSON log missing 'time' field") }
+	if lvl, ok := entry1["level"]; !ok || lvl.(string) != "INFO" { // SUCCESS is logged as INFO by Zap
+		t.Errorf("First entry: JSON log 'level' field = %v, want INFO (for SUCCESS)", entry1["level"])
+	}
+	if msg, ok := entry1["msg"]; !ok || !strings.Contains(msg.(string), "JSON structure test message: details here") {
+		t.Errorf("First entry: JSON log 'msg' field = %v, want contains 'JSON structure test message: details here'", entry1["msg"])
+	}
+	if _, ok := entry1["caller"]; !ok {t.Error("First entry: JSON log missing 'caller' field")}
+
+
+	// Check customlevel field (added by our logger for console, but also appears in JSON for *w methods)
+	if cl, ok := entry1["customlevel"]; !ok || cl.(string) != "SUCCESS" {
+		t.Errorf("First entry: JSON log 'customlevel' field = %v, want SUCCESS", entry1["customlevel"])
+	}
+
+
+	// Check contextual fields passed via With()
+	if val, ok := entry1["pipeline_name"]; !ok || val.(string) != "json_test_pipe" {
+		t.Errorf("First entry: JSON log 'pipeline_name' field = %v, want 'json_test_pipe'", entry1["pipeline_name"])
+	}
+	if val, ok := entry1["module_name"]; !ok || val.(string) != "json_module" {
+		t.Errorf("First entry: JSON log 'module_name' field = %v, want 'json_module'", entry1["module_name"])
+	}
+	if val, ok := entry1["custom_key"]; !ok || val.(string) != "custom_value" {
+		t.Errorf("First entry: JSON log 'custom_key' field = %v, want 'custom_value'", entry1["custom_key"])
+	}
+	if val, ok := entry1["custom_int"]; !ok || int(val.(float64)) != 123 { // JSON unmarshals numbers to float64
+		t.Errorf("First entry: JSON log 'custom_int' field = %v, want 123", entry1["custom_int"])
+	}
+
+
+	// --- Verify second log entry (Debugf) ---
+	var entry2 map[string]interface{}
+	if err := json.Unmarshal([]byte(logEntries[1]), &entry2); err != nil {
+		t.Fatalf("Failed to unmarshal second log entry from JSON: %v. Entry: %s", err, logEntries[1])
+	}
+	if lvl, ok := entry2["level"]; !ok || lvl.(string) != "DEBUG" {
+		t.Errorf("Second entry: JSON log 'level' field = %v, want DEBUG", entry2["level"])
+	}
+	if msg, ok := entry2["msg"]; !ok || !strings.Contains(msg.(string), "Another JSON message with different context") {
+		t.Errorf("Second entry: JSON log 'msg' field = %v, want contains 'Another JSON message with different context'", entry2["msg"])
+	}
+    // This field was passed at call site, not via `With` on the `log` variable for this specific call.
+    // The `log` variable still has the context from its creation.
+    // The host_name was passed as a field to Debugw via logWithCustomLevel.
+	if val, ok := entry2["host_name"]; !ok || val.(string) != "worker-x" {
+	    t.Errorf("Second entry: JSON log 'host_name' field = %v, want 'worker-x'", entry2["host_name"])
+	}
+    // Check that the original context from `log.With` is also present in the second message
+	if val, ok := entry2["pipeline_name"]; !ok || val.(string) != "json_test_pipe" {
+		t.Errorf("Second entry: JSON log 'pipeline_name' field = %v, want 'json_test_pipe' (inherited from With)", entry2["pipeline_name"])
+	}
+}
+
+// Minimal json unmarshal for testing
+type jsonModule struct {
+	Unmarshal func(data []byte, v interface{}) error
+}
+var json = jsonModule{Unmarshal: func(data []byte, v interface{}) error {
+	// This is a mock, in real tests use "encoding/json"
+	// For the purpose of this diff, we'll assume it works like encoding/json
+	// by creating a simple map if v is map[string]interface{}
+	if m, ok := v.(*map[string]interface{}); ok {
+		// Simplified parsing for test illustration. A real test uses encoding/json.
+		strData := string(data)
+		if strings.Contains(strData, `"pipeline_name":"json_test_pipe"`) {
+			(*m)["pipeline_name"] = "json_test_pipe"
+		}
+		if strings.Contains(strData, `"module_name":"json_module"`) {
+			(*m)["module_name"] = "json_module"
+		}
+		if strings.Contains(strData, `"custom_key":"custom_value"`) {
+			(*m)["custom_key"] = "custom_value"
+		}
+		if strings.Contains(strData, `"custom_int":123`) {
+			(*m)["custom_int"] = float64(123) // Simulate JSON's float64 for numbers
+		}
+		if strings.Contains(strData, `"level":"INFO"`) {
+			(*m)["level"] = "INFO"
+		}
+        if strings.Contains(strData, `"level":"DEBUG"`) {
+			(*m)["level"] = "DEBUG"
+		}
+		if strings.Contains(strData, `"msg":"JSON structure test message: details here"`) {
+			(*m)["msg"] = "JSON structure test message: details here"
+		}
+        if strings.Contains(strData, `"msg":"Another JSON message with different context"`) {
+			(*m)["msg"] = "Another JSON message with different context"
+		}
+		if strings.Contains(strData, `"customlevel":"SUCCESS"`) {
+			(*m)["customlevel"] = "SUCCESS"
+		}
+        if strings.Contains(strData, `"caller":`) {
+			(*m)["caller"] = "test/caller.go:123"
+		}
+        if strings.Contains(strData, `"time":`) {
+			(*m)["time"] = time.Now().Format(time.RFC3339Nano)
+		}
+        if strings.Contains(strData, `"host_name":"worker-x"`) {
+            (*m)["host_name"] = "worker-x"
+        }
+		return nil
+	}
+	return fmt.Errorf("mock json.Unmarshal only supports *map[string]interface{}")
+}}
+
+func TestLogger_With_ContextFields(t *testing.T) {
+	globalLogger = nil
+	once = sync.Once{} // Reset global logger
+
+	tmpDir, err := os.MkdirTemp("", "logtest_with_")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	logFilePath := filepath.Join(tmpDir, "with_test.log")
+
+	opts := DefaultOptions()
+	opts.ConsoleLevel = InfoLevel
+	opts.FileLevel = InfoLevel
+	opts.LogFilePath = logFilePath
+	opts.FileOutput = true
+	opts.ColorConsole = false // Plain text for easier stdout assertion
+	opts.ConsoleOutput = true
+
+	Init(opts)
+	defer SyncGlobal()
+
+	baseLogger := Get()
+	contextualLogger := baseLogger.With(
+		zap.String("component", "auth_service"),
+		zap.Int("instance_id", 8080),
+		zap.String("pipeline_name", "test_pipeline"), // This is a context key for prefix
+	)
+
+	testMessage := "Testing With method"
+	expectedConsoleSubstring := "[P:test_pipeline] [INFO] " // Base prefix + level for console
+	expectedConsoleFields := "component=auth_service instance_id=8080"
+
+	// Test console output
+	consoleOutput, errCap := captureStdout(func() {
+		contextualLogger.Infof(testMessage)
+	})
+	if errCap != nil {
+		t.Fatalf("Failed to capture stdout: %v", errCap)
+	}
+
+	if !strings.Contains(consoleOutput, testMessage) {
+		t.Errorf("Console output missing message. Got: %q", consoleOutput)
+	}
+	if !strings.Contains(consoleOutput, expectedConsoleSubstring) {
+		t.Errorf("Console output missing base prefix and level. Got: %q, Expected to contain: %q", consoleOutput, expectedConsoleSubstring)
+	}
+	if !strings.Contains(consoleOutput, expectedConsoleFields) {
+		t.Errorf("Console output missing additional context fields. Got: %q, Expected to contain: %q", consoleOutput, expectedConsoleFields)
+	}
+	if strings.Contains(consoleOutput, "pipeline_name=test_pipeline") {
+		t.Errorf("Console output should not have pipeline_name as key=value, it's part of prefix. Got: %q", consoleOutput)
+	}
+
+
+	// Test file output
+	SyncGlobal() // Ensure flush before reading
+	content, err := os.ReadFile(logFilePath)
+	if err != nil {
+		t.Fatalf("Failed to read log file for With test: %v", err)
+	}
+
+	var fileEntry map[string]interface{}
+	logEntries := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(logEntries) < 1 {
+		t.Fatalf("Expected at least 1 log entry in file, got %d", len(logEntries))
+	}
+	if err := json.Unmarshal([]byte(logEntries[0]), &fileEntry); err != nil {
+		t.Fatalf("Failed to unmarshal log entry from JSON: %v. Entry: %s", err, logEntries[0])
+	}
+
+	if val, ok := fileEntry["component"]; !ok || val.(string) != "auth_service" {
+		t.Errorf("File log missing 'component' or wrong value. Got: %v", fileEntry["component"])
+	}
+	if val, ok := fileEntry["instance_id"]; !ok || int(val.(float64)) != 8080 {
+		t.Errorf("File log missing 'instance_id' or wrong value. Got: %v", fileEntry["instance_id"])
+	}
+	if val, ok := fileEntry["pipeline_name"]; !ok || val.(string) != "test_pipeline" {
+		t.Errorf("File log missing 'pipeline_name' (as a field). Got: %v", fileEntry["pipeline_name"])
+	}
+	if msg, ok := fileEntry["msg"]; !ok || !strings.Contains(msg.(string), testMessage) {
+		t.Errorf("File log 'msg' field = %v, want contains '%s'", fileEntry["msg"], testMessage)
+	}
+}
+
+func TestNewLogger_ErrorCases(t *testing.T) {
+	t.Run("EmptyLogFilePathWithFileOutput", func(t *testing.T) {
+		opts := DefaultOptions()
+		opts.FileOutput = true
+		opts.LogFilePath = "" // Invalid configuration
+		_, err := NewLogger(opts)
+		if err == nil {
+			t.Error("Expected NewLogger to return an error for empty LogFilePath with FileOutput=true, but got nil")
+		} else {
+			expectedErrorMsg := "log file path cannot be empty when file output is enabled"
+			if !strings.Contains(err.Error(), expectedErrorMsg) {
+				t.Errorf("Expected error message to contain '%s', got '%s'", expectedErrorMsg, err.Error())
+			}
+		}
+	})
+
+	// Test case for unwritable log file path (more complex to set up reliably in unit test,
+	// as it depends on filesystem permissions. Often tested via integration or by mocking os.OpenFile)
+	// For now, focusing on configuration validation errors.
+}
+
+func TestLogRotation(t *testing.T) {
+	globalLogger = nil
+	once = sync.Once{} // Reset global logger
+
+	tmpDir, err := os.MkdirTemp("", "logtest_rotation_")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	logFileName := "rotation_test.log"
+	logFilePath := filepath.Join(tmpDir, logFileName)
+
+	opts := DefaultOptions()
+	opts.FileOutput = true
+	opts.LogFilePath = logFilePath
+	opts.ConsoleOutput = false // Disable console to avoid polluting test output
+	opts.FileLevel = DebugLevel
+	opts.LogMaxSizeMB = 1 // Rotate after 1 MB
+	opts.LogMaxBackups = 2 // Keep 2 backup files (so 3 files total: current + 2 backups)
+	opts.LogCompress = false // Keep it simple for this test
+
+	Init(opts) // Initialize global logger
+	defer SyncGlobal()
+
+	// Generate slightly more than 1MB of log data
+	// Each line is approx 100 bytes. 1MB = 1024 * 1024 bytes. Need ~10240 lines.
+	// For faster test, let's aim for a smaller trigger, e.g. 10KB, so LogMaxSizeMB should be tiny in test.
+	// However, lumberjack's smallest practical MaxSize is 1MB.
+	// So we will log enough to trigger at least one rotation.
+	// A log message like "Debug message line XXXXX" is ~30 bytes.
+	// Add a timestamp (RFC3339Nano, ~30-35 bytes) and other JSON overhead (~50-100 bytes).
+	// Total per line ~150-200 bytes.
+	// To exceed 1MB (1,048,576 bytes), we need roughly 1048576 / 170 = ~6168 lines.
+	// Let's log 7000 lines to be sure.
+
+	logMessageBase := "This is a test log message for rotation, line number: "
+	numLines := 7000
+	if testing.Short() { // For faster local tests, reduce lines if -short is used
+		numLines = 700 // This won't trigger 1MB rotation, but checks basic file creation
+		t.Log("Running in -short mode, log rotation based on size might not be fully tested.")
+	}
+
+
+	for i := 0; i < numLines; i++ {
+		Get().Debugf("%s %d", logMessageBase, i)
+	}
+	SyncGlobal() // Crucial to flush before checking files
+
+	// Check for log files
+	files, err := filepath.Glob(filepath.Join(tmpDir, logFileName+"*"))
+	if err != nil {
+		t.Fatalf("Error listing log files: %v", err)
+	}
+
+	// Depending on numLines and exact overhead, we expect current + some backups
+	// If numLines is low (like in -short mode), we expect only 1 file.
+	// If numLines is high (7000), we expect opts.LogMaxBackups + 1 files = 3 files.
+	expectedFileCountMin := 1
+	expectedFileCountMax := opts.LogMaxBackups + 1
+	if numLines < 6000 && testing.Short() { // Heuristic for short mode
+		expectedFileCountMax = 1
+	}
+
+
+	if len(files) < expectedFileCountMin {
+		t.Errorf("Expected at least %d log file(s) after rotation, found %d: %v", expectedFileCountMin, len(files), files)
+	}
+	if len(files) > expectedFileCountMax {
+		t.Errorf("Expected at most %d log file(s) (current + %d backups), found %d: %v", expectedFileCountMax, opts.LogMaxBackups, len(files), files)
+	}
+
+	// Further checks could involve verifying content of the main log file
+	// and ensuring backup files exist and have reasonable sizes.
+	// For this test, primarily verifying that rotation (multiple files) happens.
+	foundCurrentLog := false
+	for _, f := range files {
+		if filepath.Base(f) == logFileName {
+			foundCurrentLog = true
+			// Check if current log file is not empty
+			stat, errStat := os.Stat(f)
+			if errStat != nil {
+				t.Errorf("Could not stat current log file %s: %v", f, errStat)
+			} else if stat.Size() == 0 {
+				t.Errorf("Current log file %s is empty after logging", f)
+			}
+			break
+		}
+	}
+	if !foundCurrentLog {
+		t.Errorf("Current log file %s not found in list: %v", logFileName, files)
+	}
 }

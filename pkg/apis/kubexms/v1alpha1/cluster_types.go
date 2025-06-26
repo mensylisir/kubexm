@@ -698,3 +698,63 @@ func (in *ClusterList) DeepCopy() *ClusterList {
 // All placeholder types and functions below were causing redeclaration errors
 // and have been removed. The actual definitions reside in their respective
 // xxx_types.go files within the same package.
+
+// Validate_RoleGroupsSpec validates the RoleGroupsSpec.
+// It performs structural checks on the defined roles and their host lists.
+// Cross-validation against ClusterSpec.Hosts (e.g., ensuring hostnames exist)
+// is typically done in Validate_Cluster.
+func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *ValidationErrors, pathPrefix string) {
+	if cfg == nil {
+		// RoleGroupsSpec is optional, so nil is acceptable.
+		return
+	}
+
+	validateRoleSpecHosts := func(hosts []string, roleName string, pPrefix string) {
+		for i, hostName := range hosts {
+			if strings.TrimSpace(hostName) == "" {
+				verrs.Add("%s.%s.hosts[%d]: hostname cannot be empty", pPrefix, roleName, i)
+			}
+		}
+	}
+
+	// Validate predefined roles
+	if cfg.Master.Hosts != nil {
+		validateRoleSpecHosts(cfg.Master.Hosts, "master", pathPrefix)
+	}
+	if cfg.Worker.Hosts != nil {
+		validateRoleSpecHosts(cfg.Worker.Hosts, "worker", pathPrefix)
+	}
+	if cfg.Etcd.Hosts != nil {
+		validateRoleSpecHosts(cfg.Etcd.Hosts, "etcd", pathPrefix)
+	}
+	if cfg.LoadBalancer.Hosts != nil {
+		validateRoleSpecHosts(cfg.LoadBalancer.Hosts, "loadbalancer", pathPrefix)
+	}
+	if cfg.Storage.Hosts != nil {
+		validateRoleSpecHosts(cfg.Storage.Hosts, "storage", pathPrefix)
+	}
+	if cfg.Registry.Hosts != nil {
+		validateRoleSpecHosts(cfg.Registry.Hosts, "registry", pathPrefix)
+	}
+
+	// Validate CustomRoles
+	if cfg.CustomRoles != nil {
+		customRoleNames := make(map[string]bool)
+		for i, customRole := range cfg.CustomRoles {
+			customRolePathPrefix := pathPrefix + ".customRoles[" + string(i) + "]" // Corrected to use string(i) for index
+			if strings.TrimSpace(customRole.Name) == "" {
+				verrs.Add("%s.name: custom role name cannot be empty", customRolePathPrefix)
+			} else {
+				if _, exists := customRoleNames[customRole.Name]; exists {
+					verrs.Add("%s.name: custom role name '%s' is duplicated", customRolePathPrefix, customRole.Name)
+				}
+				customRoleNames[customRole.Name] = true
+			}
+			if customRole.Hosts != nil {
+				// It seems there was a copy-paste error in the original diff for zz_placeholder_validations.go
+				// The call to validateRoleSpecHosts for customRole.Hosts was missing. Adding it here.
+				validateRoleSpecHosts(customRole.Hosts, customRole.Name, customRolePathPrefix)
+			}
+		}
+	}
+}

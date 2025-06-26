@@ -48,6 +48,7 @@ import (
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // Level defines the log level.
@@ -171,6 +172,12 @@ type Options struct {
 	ColorConsole bool
 	// TimestampFormat defines the format for timestamps in logs (e.g., time.RFC3339 or "2006-01-02T15:04:05Z07:00").
 	TimestampFormat string
+
+	// Log rotation options (applicable if FileOutput is true)
+	LogMaxSizeMB  int  // Maximum size in megabytes of the log file before it gets rotated.
+	LogMaxBackups int  // Maximum number of old log files to retain.
+	LogMaxAgeDays int  // Maximum number of days to retain old log files based on TImestamp.
+	LogCompress   bool // Whether to compress rotated log files.
 }
 
 // Logger is a wrapper around zap.SugaredLogger, providing custom level handling
@@ -232,6 +239,12 @@ func DefaultOptions() Options {
 		FileOutput:      false,
 		ColorConsole:    true,
 		TimestampFormat: time.RFC3339,
+
+		// Default log rotation settings
+		LogMaxSizeMB:  100, // 100 MB
+		LogMaxBackups: 3,   // Keep 3 old files
+		LogMaxAgeDays: 28,  // Keep logs for 28 days
+		LogCompress:   false, // Do not compress by default
 	}
 }
 
@@ -295,11 +308,15 @@ func NewLogger(opts Options) (*Logger, error) {
 		// JSON format is generally preferred for file logs for easier parsing.
 		fileEncoder := zapcore.NewJSONEncoder(fileEncoderCfg)
 
-		file, err := os.OpenFile(opts.LogFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open log file %s: %w", opts.LogFilePath, err)
+		// Configure lumberjack for log rotation
+		ljLogger := &lumberjack.Logger{
+			Filename:   opts.LogFilePath,
+			MaxSize:    opts.LogMaxSizeMB, // megabytes
+			MaxBackups: opts.LogMaxBackups,
+			MaxAge:     opts.LogMaxAgeDays, //days
+			Compress:   opts.LogCompress,
 		}
-		fileWriter := zapcore.AddSync(file)
+		fileWriter := zapcore.AddSync(ljLogger)
 
 		fileLevelEnabler := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
 			// Similar logic as console for custom levels, ensuring they are included if their

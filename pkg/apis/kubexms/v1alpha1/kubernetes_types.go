@@ -310,8 +310,25 @@ func Validate_APIServerConfig(cfg *APIServerConfig, verrs *ValidationErrors, pat
 	   } // Further checks for numbers and min < max could be added
 	}
 }
-func Validate_ControllerManagerConfig(cfg *ControllerManagerConfig, verrs *ValidationErrors, pathPrefix string) { if cfg == nil {return} /* TODO */ }
-func Validate_SchedulerConfig(cfg *SchedulerConfig, verrs *ValidationErrors, pathPrefix string) { if cfg == nil {return} /* TODO */ }
+func Validate_ControllerManagerConfig(cfg *ControllerManagerConfig, verrs *ValidationErrors, pathPrefix string) {
+	if cfg == nil {
+		return
+	}
+	if cfg.ServiceAccountPrivateKeyFile != "" && strings.TrimSpace(cfg.ServiceAccountPrivateKeyFile) == "" {
+		verrs.Add("%s.serviceAccountPrivateKeyFile: cannot be empty if specified", pathPrefix)
+	}
+	// Further validation could check if the path is absolute, but that might be too restrictive.
+	// Actual file existence is a runtime concern.
+}
+func Validate_SchedulerConfig(cfg *SchedulerConfig, verrs *ValidationErrors, pathPrefix string) {
+	if cfg == nil {
+		return
+	}
+	if cfg.PolicyConfigFile != "" && strings.TrimSpace(cfg.PolicyConfigFile) == "" {
+		verrs.Add("%s.policyConfigFile: cannot be empty if specified", pathPrefix)
+	}
+	// Further validation could check if the path is absolute.
+}
 
 func Validate_KubeletConfig(cfg *KubeletConfig, verrs *ValidationErrors, pathPrefix string) {
 	if cfg == nil { return }

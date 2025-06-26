@@ -56,6 +56,15 @@ func (r *defaultRunner) AddUser(ctx context.Context, conn connector.Connector, u
 		return fmt.Errorf("username cannot be empty for AddUser")
 	}
 
+	// Check for existence to ensure idempotency
+	exists, err := r.UserExists(ctx, conn, username)
+	if err != nil {
+		return fmt.Errorf("failed to check if user %s exists before adding: %w", username, err)
+	}
+	if exists {
+		return nil // User already exists
+	}
+
 	cmdParts := []string{"useradd"}
 	if systemUser {
 		cmdParts = append(cmdParts, "-r")
@@ -98,6 +107,15 @@ func (r *defaultRunner) AddGroup(ctx context.Context, conn connector.Connector, 
 	}
 	if strings.TrimSpace(groupname) == "" {
 		return fmt.Errorf("groupname cannot be empty for AddGroup")
+	}
+
+	// Check for existence to ensure idempotency
+	exists, err := r.GroupExists(ctx, conn, groupname)
+	if err != nil {
+		return fmt.Errorf("failed to check if group %s exists before adding: %w", groupname, err)
+	}
+	if exists {
+		return nil // Group already exists
 	}
 
 	cmdParts := []string{"groupadd"}

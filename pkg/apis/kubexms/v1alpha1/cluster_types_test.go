@@ -196,6 +196,14 @@ func TestValidate_Cluster_MissingRequiredFields(t *testing.T) {
 	}
 }
 
+// Minimal KubernetesConfig for compiling TestValidate_NetworkConfig_Calls_Validate_CiliumConfig
+// This can be removed if a shared test utility or simplified KubernetesConfig is available for tests.
+/*
+type KubernetesConfig struct {
+	// Dummy fields if needed by other validation calls within NetworkConfig validation chain
+}
+*/
+
 func TestValidate_Cluster_InvalidHostValues(t *testing.T) {
 	cfg := newValidV1alpha1ClusterForTest()
 	cfg.Spec.Hosts[0].Port = 70000 // Invalid port
@@ -244,5 +252,77 @@ func TestValidationErrors_Methods_V1alpha1(t *testing.T) {
 	expected := "error 1: detail; error 2"
 	if ve.Error() != expected {
 		t.Errorf("Multiple errors string incorrect. Got:\n'%s'\nWant:\n'%s'", ve.Error(), expected)
+	}
+}
+
+func TestValidate_RoleGroupsSpec(t *testing.T) {
+	tests := []struct {
+		name       string
+		cfg        *RoleGroupsSpec
+		wantErrMsg string
+	}{
+		{"nil_config", nil, ""}, // nil is acceptable
+		{"empty_config", &RoleGroupsSpec{}, ""},
+		{
+			"master_host_empty",
+			&RoleGroupsSpec{Master: MasterRoleSpec{Hosts: []string{"host1", ""}}},
+			"master.hosts[1]: hostname cannot be empty",
+		},
+		{
+			"worker_host_empty",
+			&RoleGroupsSpec{Worker: WorkerRoleSpec{Hosts: []string{""}}},
+			"worker.hosts[0]: hostname cannot be empty",
+		},
+		{
+			"custom_role_empty_name",
+			&RoleGroupsSpec{CustomRoles: []CustomRoleSpec{{Name: "  ", Hosts: []string{"host1"}}}},
+			"customRoles[0].name: custom role name cannot be empty",
+		},
+		{
+			"custom_role_duplicate_name",
+			&RoleGroupsSpec{CustomRoles: []CustomRoleSpec{
+				{Name: "metrics", Hosts: []string{"host1"}},
+				{Name: "metrics", Hosts: []string{"host2"}},
+			}},
+			"customRoles[1].name: custom role name 'metrics' is duplicated",
+		},
+		{
+			"custom_role_host_empty",
+			&RoleGroupsSpec{CustomRoles: []CustomRoleSpec{{Name: "db", Hosts: []string{"host1", " "}}}},
+			"customRoles[0].db.hosts[1]: hostname cannot be empty",
+		},
+		{
+			"valid_custom_role",
+			&RoleGroupsSpec{CustomRoles: []CustomRoleSpec{{Name: "monitoring", Hosts: []string{"mon1", "mon2"}}}},
+			"",
+		},
+		{
+			"valid_multiple_roles",
+			&RoleGroupsSpec{
+				Master:      MasterRoleSpec{Hosts: []string{"master1"}},
+				Worker:      WorkerRoleSpec{Hosts: []string{"worker1", "worker2"}},
+				CustomRoles: []CustomRoleSpec{{Name: "gpu-nodes", Hosts: []string{"gpu1"}}},
+			},
+			"",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			verrs := &ValidationErrors{}
+			Validate_RoleGroupsSpec(tt.cfg, verrs, "spec.roleGroups")
+			if tt.wantErrMsg == "" {
+				if !verrs.IsEmpty() {
+					t.Errorf("Validate_RoleGroupsSpec expected no error for %s, got %v", tt.name, verrs)
+				}
+			} else {
+				if verrs.IsEmpty() {
+					t.Fatalf("Validate_RoleGroupsSpec expected error for %s, got none", tt.name)
+				}
+				if !strings.Contains(verrs.Error(), tt.wantErrMsg) {
+					t.Errorf("Validate_RoleGroupsSpec error for %s = %v, want to contain %q", tt.name, verrs, tt.wantErrMsg)
+				}
+			}
+		})
 	}
 }

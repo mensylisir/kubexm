@@ -357,3 +357,145 @@ func (c *Context) SetCurrentHost(host connector.Host) *Context {
 	c.currentHost = host
 	return c
 }
+
+// --- Context Derivation for Scopes & Cache Handling ---
+
+// ForPipeline is not strictly needed as the RuntimeBuilder creates the initial context
+// which acts as the pipeline context. This initial context will have its PipelineCache
+// set without a parent.
+
+// ForModule derives a new context suitable for a module's execution.
+// It creates a new ModuleCache parented to the pipeline's cache.
+func (c *Context) ForModule() module.ModuleContext {
+	newCtx := *c // Shallow copy
+
+	moduleCacheInstance := cache.NewModuleCache()
+	if pc, ok := c.PipelineCache.(*cache.genericCache); ok { // Assuming PipelineCache is *genericCache
+		if mc, okCast := moduleCacheInstance.(*cache.genericCache); okCast {
+			mc.SetParent(pc)
+		} else {
+			// This would be a programming error if factory functions return unexpected types.
+			newCtx.Logger.Error(nil, "Failed to type-assert moduleCacheInstance to *cache.genericCache for setting parent")
+		}
+	} else {
+		newCtx.Logger.Error(nil, "PipelineCache is not of type *cache.genericCache, cannot set parent for ModuleCache")
+	}
+	newCtx.ModuleCache = moduleCacheInstance
+
+	// Reset task and step caches as they are for narrower scopes
+	newCtx.TaskCache = nil
+	newCtx.StepCache = nil
+
+	return &newCtx
+}
+
+// ForTask derives a new context suitable for a task's execution.
+// It creates a new TaskCache parented to the module's cache.
+func (c *Context) ForTask() task.TaskContext {
+	newCtx := *c // Shallow copy
+
+	taskCacheInstance := cache.NewTaskCache()
+	currentModuleCache := c.GetModuleCache() // This ensures ModuleCache is initialized if called on a context from ForModule
+
+	if currentModuleCache != nil {
+		if mc, ok := currentModuleCache.(*cache.genericCache); ok {
+			if tc, okCast := taskCacheInstance.(*cache.genericCache); okCast {
+				tc.SetParent(mc)
+			} else {
+				newCtx.Logger.Error(nil, "Failed to type-assert taskCacheInstance to *cache.genericCache for setting parent")
+			}
+		} else {
+			newCtx.Logger.Error(nil, "ModuleCache is not of type *cache.genericCache, cannot set parent for TaskCache")
+		}
+	} else {
+		// This case implies ForTask was called on a context that wasn't properly derived via ForModule,
+		// or ModuleCache was reset. TaskCache will have no parent.
+		newCtx.Logger.Warn("Current ModuleCache is nil when creating TaskCache; TaskCache will have no parent.")
+	}
+	newCtx.TaskCache = taskCacheInstance
+
+	// Reset step cache
+	newCtx.StepCache = nil
+
+	return &newCtx
+}
+
+// ForStep (as previously defined, but let's ensure it handles StepCache correctly)
+// It derives a context for a step, setting the current host and creating a StepCache.
+func (c *Context) ForStep(host connector.Host) step.StepContext {
+	newCtx := *c // Shallow copy
+	newCtx.GoCtx = c.GoCtx // Inherit GoContext, can be overridden by WithGoContext later
+	newCtx.currentHost = host
+
+	stepCacheInstance := cache.NewStepCache()
+	currentTaskCache := c.GetTaskCache() // Ensures TaskCache is initialized if called on a context from ForTask
+
+	if currentTaskCache != nil {
+		if tc, ok := currentTaskCache.(*cache.genericCache); ok {
+			if sc, okCast := stepCacheInstance.(*cache.genericCache); okCast {
+				sc.SetParent(tc)
+			} else {
+				newCtx.Logger.Error(nil, "Failed to type-assert stepCacheInstance to *cache.genericCache for setting parent")
+			}
+		} else {
+			newCtx.Logger.Error(nil, "TaskCache is not of type *cache.genericCache, cannot set parent for StepCache")
+		}
+	} else {
+		newCtx.Logger.Warn("Current TaskCache is nil when creating StepCache; StepCache will have no parent.")
+	}
+	newCtx.StepCache = stepCacheInstance
+
+	return &newCtx
+}
+
+// GetModuleCache ensures ModuleCache is initialized for the current context.
+// If called on a raw pipeline context, it initializes a new ModuleCache parented to PipelineCache.
+func (c *Context) GetModuleCache() cache.ModuleCache {
+	if c.ModuleCache == nil {
+		// This lazy initialization is for safety but ideally ForModule should be used.
+		// If this is a pipeline-level context, create a new ModuleCache parented to PipelineCache.
+		// If this is already a module/task/step context where ModuleCache should exist,
+		// this indicates a potential issue in context propagation or reset.
+		c.Logger.Debug("ModuleCache accessed but was nil; lazily initializing. This might indicate context not derived via ForModule.")
+		moduleCacheInstance := cache.NewModuleCache()
+		if pc, ok := c.PipelineCache.(*cache.genericCache); ok {
+			if mc, okCast := moduleCacheInstance.(*cache.genericCache); okCast {
+				mc.SetParent(pc)
+			}
+		}
+		c.ModuleCache = moduleCacheInstance
+	}
+	return c.ModuleCache
+}
+
+// GetTaskCache ensures TaskCache is initialized.
+func (c *Context) GetTaskCache() cache.TaskCache {
+	if c.TaskCache == nil {
+		c.Logger.Debug("TaskCache accessed but was nil; lazily initializing. This might indicate context not derived via ForTask.")
+		taskCacheInstance := cache.NewTaskCache()
+		parentCache := c.GetModuleCache() // Ensures module cache is available
+		if mc, ok := parentCache.(*cache.genericCache); ok {
+			if tc, okCast := taskCacheInstance.(*cache.genericCache); okCast {
+				tc.SetParent(mc)
+			}
+		}
+		c.TaskCache = taskCacheInstance
+	}
+	return c.TaskCache
+}
+
+// GetStepCache ensures StepCache is initialized.
+func (c *Context) GetStepCache() cache.StepCache {
+	if c.StepCache == nil {
+		c.Logger.Debug("StepCache accessed but was nil; lazily initializing. This might indicate context not derived via ForStep.")
+		stepCacheInstance := cache.NewStepCache()
+		parentCache := c.GetTaskCache() // Ensures task cache is available
+		if tc, ok := parentCache.(*cache.genericCache); ok {
+			if sc, okCast := stepCacheInstance.(*cache.genericCache); okCast {
+				sc.SetParent(tc)
+			}
+		}
+		c.StepCache = stepCacheInstance
+	}
+	return c.StepCache
+}
