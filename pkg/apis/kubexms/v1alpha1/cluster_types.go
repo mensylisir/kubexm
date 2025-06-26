@@ -741,7 +741,7 @@ func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *ValidationErrors, pathP
 	if cfg.CustomRoles != nil {
 		customRoleNames := make(map[string]bool)
 		for i, customRole := range cfg.CustomRoles {
-			customRolePathPrefix := pathPrefix + ".customRoles[" + string(i) + "]" // Corrected to use string(i) for index
+			customRolePathPrefix := fmt.Sprintf("%s.customRoles[%d]", pathPrefix, i) // Corrected to use string(i) for index
 			if strings.TrimSpace(customRole.Name) == "" {
 				verrs.Add("%s.name: custom role name cannot be empty", customRolePathPrefix)
 			} else {

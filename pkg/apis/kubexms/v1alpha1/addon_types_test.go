@@ -5,10 +5,6 @@ import (
 	"testing"
 )
 
-// Helper for Addon tests
-func pboolAddon(b bool) *bool { return &b }
-func pint32Addon(i int32) *int32 { return &i }
-
 func TestSetDefaults_AddonConfig(t *testing.T) {
 	cfg := &AddonConfig{Name: "my-addon"} // Name is required for some defaults potentially
 	SetDefaults_AddonConfig(cfg)
@@ -44,7 +40,7 @@ func TestSetDefaults_AddonConfig(t *testing.T) {
 func TestValidate_AddonConfig_Valid(t *testing.T) {
 	cfg := &AddonConfig{
 		Name: "metrics-server",
-		Enabled: pboolAddon(true),
+		Enabled: boolPtr(true),
 		Sources: AddonSources{Chart: &ChartSource{Name: "metrics-server", Repo: "https://charts.bitnami.com/bitnami"}},
 	}
 	SetDefaults_AddonConfig(cfg)
@@ -66,8 +62,8 @@ func TestValidate_AddonConfig_Invalid(t *testing.T) {
 	   {"chart_repo_no_name", &AddonConfig{Name:"a", Sources: AddonSources{Chart: &ChartSource{Repo: "r", Name:" "}}}, "chart name must be specified if chart.repo is set"},
 	   {"yaml_no_path", &AddonConfig{Name:"a", Sources: AddonSources{Yaml: &YamlSource{Path: []string{}}}}, ".yaml.path: must contain at least one YAML path"},
 	   {"yaml_empty_path_item", &AddonConfig{Name:"a", Sources: AddonSources{Yaml: &YamlSource{Path: []string{" "}}}}, ".yaml.path[0]: path/URL cannot be empty"},
-	   {"negative_retries", &AddonConfig{Name:"a", Retries: pint32Addon(-1)}, ".retries: cannot be negative"},
-	   {"negative_delay", &AddonConfig{Name:"a", Delay: pint32Addon(-1)}, ".delay: cannot be negative"},
+	   {"negative_retries", &AddonConfig{Name:"a", Retries: int32Ptr(-1)}, ".retries: cannot be negative"},
+	   {"negative_delay", &AddonConfig{Name:"a", Delay: int32Ptr(-1)}, ".delay: cannot be negative"},
    }
    for _, tt := range tests {
 	   t.Run(tt.name, func(t *testing.T){

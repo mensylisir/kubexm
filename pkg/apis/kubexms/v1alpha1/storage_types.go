@@ -91,8 +91,7 @@ func SetDefaults_OpenEBSConfig(cfg *OpenEBSConfig) {
 	// If the openebs block is present in YAML, cfg won't be nil.
 	// In this case, we default Enabled to true if it's not specified by the user.
 	if cfg.Enabled == nil {
-		b := true // Default OpenEBS to enabled if the 'openebs:' block exists
-		cfg.Enabled = &b
+		cfg.Enabled = boolPtr(true) // Default OpenEBS to enabled if the 'openebs:' block exists
 	}
 
 	if cfg.Enabled != nil && *cfg.Enabled { // If OpenEBS is effectively enabled
@@ -107,18 +106,17 @@ func SetDefaults_OpenEBSConfig(cfg *OpenEBSConfig) {
 			cfg.Engines.LocalHostPath = &OpenEBSEngineLocalHostPathConfig{}
 		}
 		if cfg.Engines.LocalHostPath.Enabled == nil {
-			defEngine := true // Default LocalHostPath engine to true if OpenEBS is enabled
-			cfg.Engines.LocalHostPath.Enabled = &defEngine
+			cfg.Engines.LocalHostPath.Enabled = boolPtr(true) // Default LocalHostPath engine to true if OpenEBS is enabled
 		}
 		// Mayastor, Jiva, cStor default to disabled unless specified by user
 		if cfg.Engines.Mayastor == nil {
-			cfg.Engines.Mayastor = &OpenEBSEngineMayastorConfig{Enabled: pboolStorage(false)}
+			cfg.Engines.Mayastor = &OpenEBSEngineMayastorConfig{Enabled: boolPtr(false)}
 		}
 		if cfg.Engines.Jiva == nil {
-			cfg.Engines.Jiva = &OpenEBSEngineJivaConfig{Enabled: pboolStorage(false)}
+			cfg.Engines.Jiva = &OpenEBSEngineJivaConfig{Enabled: boolPtr(false)}
 		}
 		if cfg.Engines.CStor == nil {
-			cfg.Engines.CStor = &OpenEBSEnginecStorConfig{Enabled: pboolStorage(false)}
+			cfg.Engines.CStor = &OpenEBSEnginecStorConfig{Enabled: boolPtr(false)}
 		}
 	} else { // OpenEBS is explicitly disabled (cfg.Enabled is not nil and is false)
 		// If OpenEBS is disabled, ensure sub-engines are also marked as disabled if they exist.
@@ -126,16 +124,16 @@ func SetDefaults_OpenEBSConfig(cfg *OpenEBSConfig) {
 		// but still has engine blocks defined.
 		if cfg.Engines != nil {
 			if cfg.Engines.LocalHostPath != nil {
-				cfg.Engines.LocalHostPath.Enabled = pboolStorage(false)
+				cfg.Engines.LocalHostPath.Enabled = boolPtr(false)
 			}
 			if cfg.Engines.Mayastor != nil {
-				cfg.Engines.Mayastor.Enabled = pboolStorage(false)
+				cfg.Engines.Mayastor.Enabled = boolPtr(false)
 			}
 			if cfg.Engines.Jiva != nil {
-				cfg.Engines.Jiva.Enabled = pboolStorage(false)
+				cfg.Engines.Jiva.Enabled = boolPtr(false)
 			}
 			if cfg.Engines.CStor != nil {
-				cfg.Engines.CStor.Enabled = pboolStorage(false)
+				cfg.Engines.CStor.Enabled = boolPtr(false)
 			}
 		}
 	}
@@ -171,5 +169,3 @@ func Validate_OpenEBSConfig(cfg *OpenEBSConfig, verrs *ValidationErrors, pathPre
 		// No specific validation for Engines sub-fields yet, beyond them being optional.
 	}
 }
-
-func pboolStorage(b bool) *bool { return &b }

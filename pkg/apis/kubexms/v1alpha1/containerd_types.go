@@ -55,12 +55,10 @@ func SetDefaults_ContainerdConfig(cfg *ContainerdConfig) {
 		cfg.InsecureRegistries = []string{}
 	}
 	if cfg.UseSystemdCgroup == nil {
-		defaultUseSystemdCgroup := true
-		cfg.UseSystemdCgroup = &defaultUseSystemdCgroup
+		cfg.UseSystemdCgroup = boolPtr(true)
 	}
 	if cfg.ConfigPath == nil {
-		defaultPath := "/etc/containerd/config.toml"
-		cfg.ConfigPath = &defaultPath
+		cfg.ConfigPath = stringPtr("/etc/containerd/config.toml")
 	}
 	if cfg.DisabledPlugins == nil {
 		cfg.DisabledPlugins = []string{}

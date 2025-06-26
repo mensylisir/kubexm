@@ -81,8 +81,7 @@ func SetDefaults_RegistryConfig(cfg *RegistryConfig) {
 	}
 	if cfg.Type != nil && *cfg.Type != "" { // If a local registry type is specified
 		if cfg.DataRoot == nil || *cfg.DataRoot == "" {
-			defaultDataRoot := "/mnt/registry" // Default from 21-其他说明.md
-			cfg.DataRoot = &defaultDataRoot
+			cfg.DataRoot = stringPtr("/mnt/registry") // Default from 21-其他说明.md
 		}
 	}
 	// No default for Type itself.
@@ -101,12 +100,10 @@ func SetDefaults_RegistryAuth(cfg *RegistryAuth) {
 		return
 	}
 	if cfg.SkipTLSVerify == nil {
-		b := false // Default to verifying TLS
-		cfg.SkipTLSVerify = &b
+		cfg.SkipTLSVerify = boolPtr(false) // Default to verifying TLS
 	}
 	if cfg.PlainHTTP == nil {
-		b := false // Default to not using plain HTTP
-		cfg.PlainHTTP = &b
+		cfg.PlainHTTP = boolPtr(false) // Default to not using plain HTTP
 	}
 }
 

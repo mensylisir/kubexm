@@ -47,29 +47,28 @@ func SetDefaults_AddonConfig(cfg *AddonConfig) {
 		return
 	}
 	if cfg.Enabled == nil {
-		b := true // Default most addons to enabled unless specified
-		cfg.Enabled = &b
+		cfg.Enabled = boolPtr(true) // Default most addons to enabled unless specified
 	}
 	// Default namespace could be addon name, or a global addons namespace.
 	// For now, leave empty; specific addons might default this if cfg.Namespace == ""
 
 	if cfg.Retries == nil {
-	   var r int32 = 0; cfg.Retries = &r // Default to 0 retries (1 attempt)
+		cfg.Retries = int32Ptr(0) // Default to 0 retries (1 attempt)
 	}
 	if cfg.Delay == nil {
-	   var d int32 = 5; cfg.Delay = &d // Default delay 5s
+		cfg.Delay = int32Ptr(5) // Default delay 5s
 	}
 
 	if cfg.Sources.Chart != nil {
-	   if cfg.Sources.Chart.Wait == nil {
-		   b := true; cfg.Sources.Chart.Wait = &b // Default wait to true for charts
-	   }
-	   if cfg.Sources.Chart.Values == nil {
-		   cfg.Sources.Chart.Values = []string{}
-	   }
+		if cfg.Sources.Chart.Wait == nil {
+			cfg.Sources.Chart.Wait = boolPtr(true) // Default wait to true for charts
+		}
+		if cfg.Sources.Chart.Values == nil {
+			cfg.Sources.Chart.Values = []string{}
+		}
 	}
 	if cfg.Sources.Yaml != nil && cfg.Sources.Yaml.Path == nil {
-	   cfg.Sources.Yaml.Path = []string{}
+		cfg.Sources.Yaml.Path = []string{}
 	}
 
 	if cfg.PreInstall == nil { cfg.PreInstall = []string{} }

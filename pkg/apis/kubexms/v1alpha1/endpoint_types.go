@@ -88,16 +88,6 @@ func Validate_ControlPlaneEndpointSpec(cfg *ControlPlaneEndpointSpec, verrs *Val
 	}
 }
 
-// containsString is a helper function.
-func containsString(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
 // isValidIP helper function
 func isValidIP(ip string) bool {
 	return net.ParseIP(ip) != nil

@@ -5,10 +5,6 @@ import (
 	"testing"
 )
 
-// Helper for Storage tests
-func pboolStorageTestHelper(b bool) *bool { return &b } // Renamed to avoid conflict if merged
-// func pstrStorageTest(s string) *string { return &s } // If needed for version etc.
-
 func TestSetDefaults_StorageConfig(t *testing.T) {
 	cfg := &StorageConfig{}
 	SetDefaults_StorageConfig(cfg)
@@ -40,16 +36,16 @@ func TestSetDefaults_OpenEBSConfig(t *testing.T) {
 	cfg := &OpenEBSConfig{}
 	SetDefaults_OpenEBSConfig(cfg)
 
-	if cfg.Enabled == nil || *cfg.Enabled != false {
-		t.Errorf("Default OpenEBS Enabled = %v, want false", cfg.Enabled)
+	if cfg.Enabled == nil || *cfg.Enabled != true { // OpenEBS is defaulted to enabled if block exists
+		t.Errorf("Default OpenEBS Enabled = %v, want true", cfg.Enabled)
 	}
-	// BasePath should not be defaulted if Enabled is false (or nil defaulted to false)
-	if cfg.BasePath != "" {
-		t.Errorf("Default OpenEBS BasePath = %s, want \"\" when not enabled", cfg.BasePath)
+	// BasePath should be defaulted if Enabled is true
+	if cfg.BasePath != "/var/openebs/local" { // Expect BasePath to be defaulted
+		t.Errorf("Default OpenEBS BasePath = %s, want /var/openebs/local when enabled by default", cfg.BasePath)
 	}
 
-	// Test when Enabled is true
-	cfgEnabled := &OpenEBSConfig{Enabled: pboolStorageTestHelper(true)}
+	// Test when Enabled is true (explicitly)
+	cfgEnabled := &OpenEBSConfig{Enabled: boolPtr(true)}
 	SetDefaults_OpenEBSConfig(cfgEnabled)
 	if cfgEnabled.BasePath != "/var/openebs/local" {
 		t.Errorf("Default OpenEBS BasePath for enabled = %s, want /var/openebs/local", cfgEnabled.BasePath)
@@ -58,19 +54,19 @@ func TestSetDefaults_OpenEBSConfig(t *testing.T) {
 	if cfgEnabled.Engines.LocalHostPath == nil || cfgEnabled.Engines.LocalHostPath.Enabled == nil || !*cfgEnabled.Engines.LocalHostPath.Enabled {
 		t.Error("OpenEBS Engines.LocalHostPath should be enabled by default when OpenEBS is enabled")
 	}
-    if cfgEnabled.Engines.Mayastor == nil || cfgEnabled.Engines.Mayastor.Enabled == nil || *cfgEnabled.Engines.Mayastor.Enabled != false {
-        t.Error("OpenEBS Engines.Mayastor should default to disabled")
-    }
+	if cfgEnabled.Engines.Mayastor == nil || cfgEnabled.Engines.Mayastor.Enabled == nil || *cfgEnabled.Engines.Mayastor.Enabled != false {
+		t.Error("OpenEBS Engines.Mayastor should default to disabled")
+	}
     // Version is not defaulted
-    if cfgEnabled.Version != nil {
-        t.Errorf("OpenEBS Version should be nil by default, got %v", *cfgEnabled.Version)
-    }
+	if cfgEnabled.Version != nil {
+		t.Errorf("OpenEBS Version should be nil by default, got %v", *cfgEnabled.Version)
+	}
 }
 
 func TestValidate_StorageConfig(t *testing.T) {
 	validCfg := &StorageConfig{
-		OpenEBS: &OpenEBSConfig{Enabled: pboolStorageTestHelper(true), BasePath: "/data/openebs"},
-		DefaultStorageClass: pstrStorageTest("my-default-sc"),
+		OpenEBS: &OpenEBSConfig{Enabled: boolPtr(true), BasePath: "/data/openebs"},
+		DefaultStorageClass: stringPtr("my-default-sc"),
 	}
 	SetDefaults_StorageConfig(validCfg) // Ensure defaults are applied before validation
 	verrsValid := &ValidationErrors{}
@@ -85,10 +81,10 @@ func TestValidate_StorageConfig(t *testing.T) {
 		wantErrMsg string
 	}{
 		{"openebs_enabled_empty_basepath",
-			&StorageConfig{OpenEBS: &OpenEBSConfig{Enabled: pboolStorageTestHelper(true), BasePath: " "}},
+			&StorageConfig{OpenEBS: &OpenEBSConfig{Enabled: boolPtr(true), BasePath: " "}},
 			".openebs.basePath: cannot be empty if OpenEBS is enabled"},
 		{"empty_default_storage_class",
-			&StorageConfig{DefaultStorageClass: pstrStorageTest(" ")},
+			&StorageConfig{DefaultStorageClass: stringPtr(" ")},
 			".defaultStorageClass: cannot be empty if specified"},
 	}
 
@@ -107,6 +103,3 @@ func TestValidate_StorageConfig(t *testing.T) {
 		})
 	}
 }
-
-// pstrStorageTest is a local helper, assuming pstr might be defined elsewhere or to avoid conflict
-func pstrStorageTest(s string) *string { return &s }

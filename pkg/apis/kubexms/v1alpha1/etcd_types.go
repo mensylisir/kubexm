@@ -66,17 +66,17 @@ func SetDefaults_EtcdConfig(cfg *EtcdConfig) {
 	if cfg.Type == "" {
 		cfg.Type = EtcdTypeKubeXMSInternal // Default to KubeXM deploying etcd as binaries
 	}
+	if cfg.Type == "" {
+		cfg.Type = EtcdTypeKubeXMSInternal // Default to KubeXM deploying etcd as binaries
+	}
 	if cfg.ClientPort == nil {
-		defaultPort := 2379
-		cfg.ClientPort = &defaultPort
+		cfg.ClientPort = intPtr(2379)
 	}
 	if cfg.PeerPort == nil {
-		defaultPort := 2380
-		cfg.PeerPort = &defaultPort
+		cfg.PeerPort = intPtr(2380)
 	}
 	if cfg.DataDir == nil {
-		defaultDataDir := "/var/lib/etcd" // This is the base directory for etcd data.
-		cfg.DataDir = &defaultDataDir
+		cfg.DataDir = stringPtr("/var/lib/etcd") // This is the base directory for etcd data.
 	}
 	// Arch defaults handled by HostSpec or runtime fact gathering.
 	if cfg.ClusterToken == "" {
@@ -86,30 +86,30 @@ func SetDefaults_EtcdConfig(cfg *EtcdConfig) {
 		cfg.External = &ExternalEtcdConfig{}
 	}
 	if cfg.External != nil && cfg.External.Endpoints == nil {
-	   cfg.External.Endpoints = []string{}
+		cfg.External.Endpoints = []string{}
 	}
 	if cfg.ExtraArgs == nil { cfg.ExtraArgs = []string{} }
 
 	// Default backup settings (can be adjusted)
-	if cfg.BackupDir == nil { defaultBackupDir := "/var/backups/etcd"; cfg.BackupDir = &defaultBackupDir }
-	if cfg.BackupPeriodHours == nil { defaultBackupPeriod := 24; cfg.BackupPeriodHours = &defaultBackupPeriod } // e.g., daily
-	if cfg.KeepBackupNumber == nil { defaultKeepBackups := 7; cfg.KeepBackupNumber = &defaultKeepBackups }
+	if cfg.BackupDir == nil { cfg.BackupDir = stringPtr("/var/backups/etcd") }
+	if cfg.BackupPeriodHours == nil { cfg.BackupPeriodHours = intPtr(24) } // e.g., daily
+	if cfg.KeepBackupNumber == nil { cfg.KeepBackupNumber = intPtr(7) }
 
 	// Default performance/tuning (values from etcd defaults or common practice)
-	if cfg.HeartbeatIntervalMillis == nil { hb := 250; cfg.HeartbeatIntervalMillis = &hb } // YAML: heartbeatInterval: 250
-	if cfg.ElectionTimeoutMillis == nil { et := 5000; cfg.ElectionTimeoutMillis = &et } // YAML: electionTimeout: 5000
-	if cfg.SnapshotCount == nil { var sc uint64 = 10000; cfg.SnapshotCount = &sc } // YAML: snapshotCount: 10000
-	if cfg.AutoCompactionRetentionHours == nil { acr := 8; cfg.AutoCompactionRetentionHours = &acr } // YAML: autoCompactionRetention: 8
+	if cfg.HeartbeatIntervalMillis == nil { cfg.HeartbeatIntervalMillis = intPtr(250) } // YAML: heartbeatInterval: 250
+	if cfg.ElectionTimeoutMillis == nil { cfg.ElectionTimeoutMillis = intPtr(5000) } // YAML: electionTimeout: 5000
+	if cfg.SnapshotCount == nil { cfg.SnapshotCount = uint64Ptr(10000) } // YAML: snapshotCount: 10000
+	if cfg.AutoCompactionRetentionHours == nil { cfg.AutoCompactionRetentionHours = intPtr(8) } // YAML: autoCompactionRetention: 8
 
 	// Resource management defaults
-	if cfg.QuotaBackendBytes == nil { var qbb int64 = 2147483648; cfg.QuotaBackendBytes = &qbb } // YAML: quotaBackendBytes: 2147483648 (2GB)
-	if cfg.MaxRequestBytes == nil { var mrb uint = 1572864; cfg.MaxRequestBytes = &mrb } // YAML: maxRequestBytes: 1572864 (1.5MB)
+	if cfg.QuotaBackendBytes == nil { cfg.QuotaBackendBytes = int64Ptr(2147483648) } // YAML: quotaBackendBytes: 2147483648 (2GB)
+	if cfg.MaxRequestBytes == nil { cfg.MaxRequestBytes = uintPtr(1572864) } // YAML: maxRequestBytes: 1572864 (1.5MB)
 
 	// Operational defaults
-	if cfg.Metrics == nil { m := "basic"; cfg.Metrics = &m } // YAML: metrics: basic
-	if cfg.LogLevel == nil { l := "info"; cfg.LogLevel = &l }
-	if cfg.MaxSnapshotsToKeep == nil { var ms uint = 5; cfg.MaxSnapshotsToKeep = &ms } // etcd default
-	if cfg.MaxWALsToKeep == nil { var mw uint = 5; cfg.MaxWALsToKeep = &mw }          // etcd default
+	if cfg.Metrics == nil { cfg.Metrics = stringPtr("basic") } // YAML: metrics: basic
+	if cfg.LogLevel == nil { cfg.LogLevel = stringPtr("info") }
+	if cfg.MaxSnapshotsToKeep == nil { cfg.MaxSnapshotsToKeep = uintPtr(5) } // etcd default
+	if cfg.MaxWALsToKeep == nil { cfg.MaxWALsToKeep = uintPtr(5) }          // etcd default
 }
 
 // Validate_EtcdConfig validates EtcdConfig.
@@ -185,13 +185,13 @@ func Validate_EtcdConfig(cfg *EtcdConfig, verrs *ValidationErrors, pathPrefix st
 
 	if cfg.Metrics != nil && *cfg.Metrics != "" { // Allow empty for etcd default
 		validMetrics := []string{"basic", "extensive"}
-		if !contains(validMetrics, *cfg.Metrics) { // Assumes contains() helper exists or is added
+		if !containsString(validMetrics, *cfg.Metrics) {
 			verrs.Add("%s.metrics: invalid value '%s', must be 'basic' or 'extensive'", pathPrefix, *cfg.Metrics)
 		}
 	}
 	if cfg.LogLevel != nil && *cfg.LogLevel != "" { // Allow empty for etcd default
 		validLogLevels := []string{"debug", "info", "warn", "error", "panic", "fatal"}
-		if !contains(validLogLevels, *cfg.LogLevel) {
+		if !containsString(validLogLevels, *cfg.LogLevel) {
 			verrs.Add("%s.logLevel: invalid value '%s'", pathPrefix, *cfg.LogLevel)
 		}
 	}

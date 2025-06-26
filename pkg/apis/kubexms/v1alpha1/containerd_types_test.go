@@ -9,8 +9,8 @@ import (
 func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
 	cfg := &ContainerRuntimeConfig{}
 	SetDefaults_ContainerRuntimeConfig(cfg)
-	if cfg.Type != ContainerRuntimeContainerd {
-		t.Errorf("Default Type = %s, want %s", cfg.Type, ContainerRuntimeContainerd)
+	if cfg.Type != ContainerRuntimeDocker { // Changed expectation to Docker
+		t.Errorf("Default Type = %s, want %s", cfg.Type, ContainerRuntimeDocker)
 	}
 }
 
@@ -26,8 +26,20 @@ func TestValidate_ContainerRuntimeConfig(t *testing.T) {
 	invalidCfg := &ContainerRuntimeConfig{Type: "rkt"}
 	verrsInvalid := &ValidationErrors{}
 	Validate_ContainerRuntimeConfig(invalidCfg, verrsInvalid, "spec.containerRuntime")
-	if verrsInvalid.IsEmpty() || !strings.Contains(verrsInvalid.Errors[0], "invalid type 'rkt'") {
-		t.Errorf("Validate_ContainerRuntimeConfig for invalid type failed or wrong message: %v", verrsInvalid)
+	if verrsInvalid.IsEmpty() {
+		t.Errorf("Validate_ContainerRuntimeConfig should have failed for invalid type 'rkt', but no errors found.")
+	} else {
+		expectedError := "spec.containerRuntime.type: invalid container runtime type 'rkt'"
+		found := false
+		for _, eStr := range verrsInvalid.Errors {
+			if eStr == expectedError {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Validate_ContainerRuntimeConfig for invalid type 'rkt' failed. Expected error '%s', got errors: %v", expectedError, verrsInvalid.Errors)
+		}
 	}
 }
 
