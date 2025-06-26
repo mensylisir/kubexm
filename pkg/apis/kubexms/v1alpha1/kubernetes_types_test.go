@@ -225,3 +225,67 @@ func TestKubernetesConfig_Helpers(t *testing.T) {
 }
 
 func pstrKubernetesTest(s string) *string { return &s }
+
+func TestValidate_ControllerManagerConfig(t *testing.T) {
+	tests := []struct {
+		name       string
+		cfg        *ControllerManagerConfig
+		wantErrMsg string
+	}{
+		{"nil_config", nil, ""}, // nil config should not error, just return
+		{"valid_empty", &ControllerManagerConfig{}, ""},
+		{"valid_with_path", &ControllerManagerConfig{ServiceAccountPrivateKeyFile: "/path/to/sa.key"}, ""},
+		{"invalid_empty_path", &ControllerManagerConfig{ServiceAccountPrivateKeyFile: "   "}, "serviceAccountPrivateKeyFile: cannot be empty if specified"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			verrs := &ValidationErrors{}
+			Validate_ControllerManagerConfig(tt.cfg, verrs, "spec.kubernetes.controllerManager")
+			if tt.wantErrMsg == "" {
+				if !verrs.IsEmpty() {
+					t.Errorf("Validate_ControllerManagerConfig expected no error for %s, got %v", tt.name, verrs)
+				}
+			} else {
+				if verrs.IsEmpty() {
+					t.Fatalf("Validate_ControllerManagerConfig expected error for %s, got none", tt.name)
+				}
+				if !strings.Contains(verrs.Error(), tt.wantErrMsg) {
+					t.Errorf("Validate_ControllerManagerConfig error for %s = %v, want to contain %q", tt.name, verrs, tt.wantErrMsg)
+				}
+			}
+		})
+	}
+}
+
+func TestValidate_SchedulerConfig(t *testing.T) {
+	tests := []struct {
+		name       string
+		cfg        *SchedulerConfig
+		wantErrMsg string
+	}{
+		{"nil_config", nil, ""}, // nil config should not error, just return
+		{"valid_empty", &SchedulerConfig{}, ""},
+		{"valid_with_path", &SchedulerConfig{PolicyConfigFile: "/path/to/policy.yaml"}, ""},
+		{"invalid_empty_path", &SchedulerConfig{PolicyConfigFile: "   "}, "policyConfigFile: cannot be empty if specified"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			verrs := &ValidationErrors{}
+			Validate_SchedulerConfig(tt.cfg, verrs, "spec.kubernetes.scheduler")
+			if tt.wantErrMsg == "" {
+				if !verrs.IsEmpty() {
+					t.Errorf("Validate_SchedulerConfig expected no error for %s, got %v", tt.name, verrs)
+				}
+			} else {
+				if verrs.IsEmpty() {
+					t.Fatalf("Validate_SchedulerConfig expected error for %s, got none", tt.name)
+				}
+				if !strings.Contains(verrs.Error(), tt.wantErrMsg) {
+					t.Errorf("Validate_SchedulerConfig error for %s = %v, want to contain %q", tt.name, verrs, tt.wantErrMsg)
+				}
+			}
+		})
+	}
+}

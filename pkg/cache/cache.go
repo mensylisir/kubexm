@@ -32,24 +32,41 @@ type StepCache interface {
 	GetCurrentStepSpec() (interface{}, bool) // returns spec.StepSpec, but use interface{}
 }
 
-// genericCache provides a thread-safe key-value store.
+// genericCache provides a thread-safe key-value store with optional parent for fallback reads.
 type genericCache struct {
-	store sync.Map
+	store  sync.Map
+	parent *genericCache // Pointer to parent cache for inherited reads
 }
 
 // NewGenericCache creates a new genericCache.
-func NewGenericCache() *genericCache {
-	return &genericCache{}
+// Parent can be nil for top-level caches (e.g., PipelineCache).
+func NewGenericCache(parent *genericCache) *genericCache {
+	return &genericCache{
+		parent: parent,
+	}
 }
 
 // Get retrieves a value from the cache.
+// It first checks the current cache, then falls back to the parent cache if the key is not found locally.
 func (c *genericCache) Get(key string) (interface{}, bool) {
-	return c.store.Load(key)
+	if val, ok := c.store.Load(key); ok {
+		return val, true
+	}
+	if c.parent != nil {
+		return c.parent.Get(key) // Recursive call to parent's Get
+	}
+	return nil, false
 }
 
-// Set stores a value in the cache.
+// Set stores a value in the cache. Writes are always local to the current cache instance.
 func (c *genericCache) Set(key string, value interface{}) {
 	c.store.Store(key, value)
+}
+
+// SetParent sets the parent cache for the current cache.
+// This is intended to be used by the runtime to establish the cache hierarchy.
+func (c *genericCache) SetParent(parent *genericCache) {
+	c.parent = parent
 }
 
 // Delete removes a value from the cache.

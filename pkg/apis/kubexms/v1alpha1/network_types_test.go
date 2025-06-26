@@ -170,3 +170,272 @@ func TestCalicoConfig_TyphaHelpers(t *testing.T) {
    cfg.TyphaReplicas = pintNetworkTest(5) // Changed pint32NetworkTest to pintNetworkTest
    if cfg.GetTyphaReplicas() != 5 {t.Errorf("GetTyphaReplicas custom failed, got %d", cfg.GetTyphaReplicas())}
 }
+
+// --- Tests for CiliumConfig Defaulting and Validation ---
+
+func TestSetDefaults_CiliumConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    *CiliumConfig
+		expected *CiliumConfig
+	}{
+		{
+			name:  "nil input",
+			input: nil,
+			expected: nil,
+		},
+		{
+			name:  "empty input",
+			input: &CiliumConfig{},
+			expected: &CiliumConfig{
+				TunnelingMode:          "vxlan",
+				KubeProxyReplacement:   "strict",
+				EnableHubble:           false,
+				HubbleUI:               false,
+				EnableBPFMasquerade:    false,
+				IdentityAllocationMode: "crd",
+			},
+		},
+		{
+			name: "HubbleUI true, EnableHubble false",
+			input: &CiliumConfig{
+				HubbleUI:     true,
+				EnableHubble: false, // This should trigger EnableHubble to true
+			},
+			expected: &CiliumConfig{
+				TunnelingMode:          "vxlan",
+				KubeProxyReplacement:   "strict",
+				EnableHubble:           true, // Expected to be true
+				HubbleUI:               true,
+				EnableBPFMasquerade:    false,
+				IdentityAllocationMode: "crd",
+			},
+		},
+		{
+			name: "HubbleUI true, EnableHubble true",
+			input: &CiliumConfig{
+				HubbleUI:     true,
+				EnableHubble: true,
+			},
+			expected: &CiliumConfig{
+				TunnelingMode:          "vxlan",
+				KubeProxyReplacement:   "strict",
+				EnableHubble:           true,
+				HubbleUI:               true,
+				EnableBPFMasquerade:    false,
+				IdentityAllocationMode: "crd",
+			},
+		},
+		{
+			name: "partial input, e.g. only TunnelingMode set",
+			input: &CiliumConfig{
+				TunnelingMode: "geneve",
+			},
+			expected: &CiliumConfig{
+				TunnelingMode:          "geneve",
+				KubeProxyReplacement:   "strict",
+				EnableHubble:           false,
+				HubbleUI:               false,
+				EnableBPFMasquerade:    false,
+				IdentityAllocationMode: "crd",
+			},
+		},
+		{
+			name: "all fields explicitly set by user",
+			input: &CiliumConfig{
+				TunnelingMode:          "disabled",
+				KubeProxyReplacement:   "probe",
+				EnableHubble:           true,
+				HubbleUI:               true,
+				EnableBPFMasquerade:    true,
+				IdentityAllocationMode: "kvstore",
+			},
+			expected: &CiliumConfig{
+				TunnelingMode:          "disabled",
+				KubeProxyReplacement:   "probe",
+				EnableHubble:           true,
+				HubbleUI:               true,
+				EnableBPFMasquerade:    true,
+				IdentityAllocationMode: "kvstore",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			SetDefaults_CiliumConfig(tt.input)
+			if tt.expected == nil {
+				if tt.input != nil {
+					t.Errorf("Expected nil, got %v", tt.input)
+				}
+			} else {
+				if tt.input == nil {
+					t.Errorf("Expected %v, got nil", tt.expected)
+				} else {
+					if tt.input.TunnelingMode != tt.expected.TunnelingMode {
+						t.Errorf("TunnelingMode: got %s, want %s", tt.input.TunnelingMode, tt.expected.TunnelingMode)
+					}
+					if tt.input.KubeProxyReplacement != tt.expected.KubeProxyReplacement {
+						t.Errorf("KubeProxyReplacement: got %s, want %s", tt.input.KubeProxyReplacement, tt.expected.KubeProxyReplacement)
+					}
+					if tt.input.EnableHubble != tt.expected.EnableHubble {
+						t.Errorf("EnableHubble: got %v, want %v", tt.input.EnableHubble, tt.expected.EnableHubble)
+					}
+					if tt.input.HubbleUI != tt.expected.HubbleUI {
+						t.Errorf("HubbleUI: got %v, want %v", tt.input.HubbleUI, tt.expected.HubbleUI)
+					}
+					if tt.input.EnableBPFMasquerade != tt.expected.EnableBPFMasquerade {
+						t.Errorf("EnableBPFMasquerade: got %v, want %v", tt.input.EnableBPFMasquerade, tt.expected.EnableBPFMasquerade)
+					}
+					if tt.input.IdentityAllocationMode != tt.expected.IdentityAllocationMode {
+						t.Errorf("IdentityAllocationMode: got %s, want %s", tt.input.IdentityAllocationMode, tt.expected.IdentityAllocationMode)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestValidate_CiliumConfig(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       *CiliumConfig
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "nil input",
+			input:       nil,
+			expectError: false,
+		},
+		{
+			name: "valid empty (after defaults)",
+			input: &CiliumConfig{
+				TunnelingMode:          "vxlan",
+				KubeProxyReplacement:   "strict",
+				IdentityAllocationMode: "crd",
+			},
+			expectError: false,
+		},
+		{
+			name: "invalid TunnelingMode",
+			input: &CiliumConfig{TunnelingMode: "invalid"},
+			expectError: true,
+			errorMsg:    "cilium.tunnelingMode: invalid mode 'invalid'",
+		},
+		{
+			name: "invalid KubeProxyReplacement",
+			input: &CiliumConfig{KubeProxyReplacement: "invalid"},
+			expectError: true,
+			errorMsg:    "cilium.kubeProxyReplacement: invalid mode 'invalid'",
+		},
+		{
+			name: "HubbleUI true, EnableHubble false",
+			input: &CiliumConfig{HubbleUI: true, EnableHubble: false},
+			expectError: true,
+			errorMsg:    "cilium.hubbleUI: cannot be true if enableHubble is false",
+		},
+		{
+			name: "valid HubbleUI true, EnableHubble true",
+			input: &CiliumConfig{EnableHubble: true, HubbleUI: true},
+			expectError: false,
+		},
+		{
+			name: "invalid IdentityAllocationMode",
+			input: &CiliumConfig{IdentityAllocationMode: "invalid"},
+			expectError: true,
+			errorMsg:    "cilium.identityAllocationMode: invalid mode 'invalid'",
+		},
+		{
+			name: "all fields valid",
+			input: &CiliumConfig{
+				TunnelingMode:          "geneve",
+				KubeProxyReplacement:   "probe",
+				EnableHubble:           true,
+				HubbleUI:               true,
+				EnableBPFMasquerade:    true,
+				IdentityAllocationMode: "kvstore",
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			verrs := &ValidationErrors{}
+			Validate_CiliumConfig(tt.input, verrs, "cilium")
+			if tt.expectError {
+				if verrs.IsEmpty() {
+					t.Errorf("Expected validation errors but got none")
+				}
+				if tt.errorMsg != "" {
+					found := false
+					for _, errStr := range verrs.Errors {
+						if strings.Contains(errStr, tt.errorMsg) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Errorf("Expected error message substring '%s' not found in errors: %v", tt.errorMsg, verrs.Errors)
+					}
+				}
+			} else {
+				if !verrs.IsEmpty() {
+					t.Errorf("Expected no validation errors, but got: %v", verrs.Errors)
+				}
+			}
+		})
+	}
+}
+
+func TestValidate_NetworkConfig_Calls_Validate_CiliumConfig(t *testing.T) {
+	cfg := &NetworkConfig{
+		Plugin: "cilium",
+		Cilium: &CiliumConfig{
+			TunnelingMode: "invalid-mode", // Invalid value
+		},
+		KubePodsCIDR:    "10.244.0.0/16", // Valid KubePodsCIDR
+		KubeServiceCIDR: "10.96.0.0/12",  // Valid KubeServiceCIDR
+	}
+	// No need to call SetDefaults_NetworkConfig here if we are testing validation logic path
+	// and CiliumConfig is explicitly provided.
+
+	verrs := &ValidationErrors{}
+	Validate_NetworkConfig(cfg, verrs, "spec.network", nil) // k8sSpec can be nil
+
+	if verrs.IsEmpty() {
+		t.Fatal("Expected validation errors from CiliumConfig via NetworkConfig, but got none.")
+	}
+
+	expectedErrorSubstring := "spec.network.cilium.tunnelingMode: invalid mode 'invalid-mode'"
+	found := false
+	for _, errStr := range verrs.Errors {
+		if strings.Contains(errStr, expectedErrorSubstring) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected error substring '%s' not found in errors: %v", expectedErrorSubstring, verrs.Errors)
+	}
+}
+
+func TestSetDefaults_NetworkConfig_Calls_SetDefaults_CiliumConfig(t *testing.T) {
+	cfg := &NetworkConfig{
+		Plugin: "cilium",
+		Cilium: &CiliumConfig{}, // Empty CiliumConfig
+		IPPool: &IPPoolConfig{}, // Ensure IPPool is not nil, as SetDefaults_NetworkConfig accesses it
+	}
+	SetDefaults_NetworkConfig(cfg)
+
+	if cfg.Cilium == nil {
+		t.Fatal("CiliumConfig should have been initialized by SetDefaults_NetworkConfig.")
+	}
+	if cfg.Cilium.TunnelingMode != "vxlan" {
+		t.Errorf("CiliumConfig TunnelingMode default was not applied: got %s, want vxlan", cfg.Cilium.TunnelingMode)
+	}
+	if cfg.Cilium.KubeProxyReplacement != "strict" {
+		t.Errorf("CiliumConfig KubeProxyReplacement default was not applied: got %s, want strict", cfg.Cilium.KubeProxyReplacement)
+	}
+}

@@ -148,6 +148,12 @@ func SetDefaults_NetworkConfig(cfg *NetworkConfig) {
 		}
 		SetDefaults_FlannelConfig(cfg.Flannel)
 	}
+	if cfg.Plugin == "cilium" {
+		if cfg.Cilium == nil {
+			cfg.Cilium = &CiliumConfig{}
+		}
+		SetDefaults_CiliumConfig(cfg.Cilium)
+	}
 
 	if cfg.Multus == nil {
 		cfg.Multus = &MultusCNIConfig{}
@@ -342,6 +348,13 @@ func Validate_NetworkConfig(cfg *NetworkConfig, verrs *ValidationErrors, pathPre
 			verrs.Add("%s.flannel: config cannot be nil if plugin is 'flannel'", pathPrefix)
 		} else {
 			Validate_FlannelConfig(cfg.Flannel, verrs, pathPrefix+".flannel")
+		}
+	}
+	if cfg.Plugin == "cilium" {
+		if cfg.Cilium == nil {
+			verrs.Add("%s.cilium: config cannot be nil if plugin is 'cilium'", pathPrefix)
+		} else {
+			Validate_CiliumConfig(cfg.Cilium, verrs, pathPrefix+".cilium")
 		}
 	}
 
