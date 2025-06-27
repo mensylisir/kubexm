@@ -6,31 +6,31 @@ import "strings"
 type KeepalivedConfig struct {
 	// VRID is the Virtual Router ID, must be unique in the network segment.
 	// Range: 0-255.
-	VRID *int `json:"vrid,omitempty"`
+	VRID *int `json:"vrid,omitempty" yaml:"vrid,omitempty"`
 
 	// Priority determines master/backup election. Higher value means higher priority.
 	// Range: 1-254. Masters usually have higher values (e.g., 101) than backups (e.g., 100).
-	Priority *int `json:"priority,omitempty"`
+	Priority *int `json:"priority,omitempty" yaml:"priority,omitempty"`
 
 	// Interface is the network interface Keepalived should bind to for VRRP.
 	// Example: "eth0", "ens192".
-	Interface *string `json:"interface,omitempty"`
+	Interface *string `json:"interface,omitempty" yaml:"interface,omitempty"`
 
 	// AuthType specifies the authentication method for VRRP.
 	// Supported: "PASS", "AH". Defaults to "PASS".
-	AuthType *string `json:"authType,omitempty"`
+	AuthType *string `json:"authType,omitempty" yaml:"authType,omitempty"`
 
 	// AuthPass is the password for "PASS" authentication type.
 	// Required if AuthType is "PASS". Max 8 characters for older keepalived versions.
-	AuthPass *string `json:"authPass,omitempty"`
+	AuthPass *string `json:"authPass,omitempty" yaml:"authPass,omitempty"`
 
 	// ExtraConfig allows adding raw lines to the keepalived.conf.
 	// Each string is a line to be appended.
-	ExtraConfig []string `json:"extraConfig,omitempty"`
+	ExtraConfig []string `json:"extraConfig,omitempty" yaml:"extraConfig,omitempty"`
 
 	// SkipInstall, if true, assumes Keepalived is already installed and configured externally.
 	// KubeXMS will then only use the VIP information if provided in HAConfig.
-	SkipInstall *bool `json:"skipInstall,omitempty"`
+	SkipInstall *bool `json:"skipInstall,omitempty" yaml:"skipInstall,omitempty"`
 }
 
 // --- Defaulting Functions ---
