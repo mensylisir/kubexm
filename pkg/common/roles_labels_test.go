@@ -1,47 +1,27 @@
 package common
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestRolesLabelsConstants(t *testing.T) {
 	t.Run("HostRoles", func(t *testing.T) {
-		if RoleMaster != "master" {
-			t.Errorf("RoleMaster constant is incorrect: got %s", RoleMaster)
-		}
-		if RoleWorker != "worker" {
-			t.Errorf("RoleWorker constant is incorrect: got %s", RoleWorker)
-		}
-		if RoleEtcd != "etcd" {
-			t.Errorf("RoleEtcd constant is incorrect: got %s", RoleEtcd)
-		}
-		if RoleLoadBalancer != "loadbalancer" {
-			t.Errorf("RoleLoadBalancer constant is incorrect: got %s", RoleLoadBalancer)
-		}
-		if RoleStorage != "storage" {
-			t.Errorf("RoleStorage constant is incorrect: got %s", RoleStorage)
-		}
-		if RoleRegistry != "registry" {
-			t.Errorf("RoleRegistry constant is incorrect: got %s", RoleRegistry)
-		}
+		assert.Equal(t, "master", RoleMaster, "RoleMaster constant is incorrect")
+		assert.Equal(t, "worker", RoleWorker, "RoleWorker constant is incorrect")
+		assert.Equal(t, "etcd", RoleEtcd, "RoleEtcd constant is incorrect")
+		assert.Equal(t, "loadbalancer", RoleLoadBalancer, "RoleLoadBalancer constant is incorrect")
+		assert.Equal(t, "storage", RoleStorage, "RoleStorage constant is incorrect")
+		assert.Equal(t, "registry", RoleRegistry, "RoleRegistry constant is incorrect")
 	})
 
 	t.Run("KubernetesNodeLabelsAndTaints", func(t *testing.T) {
-		if LabelNodeRoleMaster != "node-role.kubernetes.io/master" {
-			t.Errorf("LabelNodeRoleMaster constant is incorrect: got %s", LabelNodeRoleMaster)
-		}
-		if TaintKeyNodeRoleMaster != "node-role.kubernetes.io/master" {
-			t.Errorf("TaintKeyNodeRoleMaster constant is incorrect: got %s", TaintKeyNodeRoleMaster)
-		}
-		if LabelNodeRoleControlPlane != "node-role.kubernetes.io/control-plane" {
-			t.Errorf("LabelNodeRoleControlPlane constant is incorrect: got %s", LabelNodeRoleControlPlane)
-		}
-		if TaintKeyNodeRoleControlPlane != "node-role.kubernetes.io/control-plane" {
-			t.Errorf("TaintKeyNodeRoleControlPlane constant is incorrect: got %s", TaintKeyNodeRoleControlPlane)
-		}
-		if LabelManagedBy != "app.kubernetes.io/managed-by" {
-			t.Errorf("LabelManagedBy constant is incorrect: got %s", LabelManagedBy)
-		}
-		if LabelValueKubexm != "kubexm" {
-			t.Errorf("LabelValueKubexm constant is incorrect: got %s", LabelValueKubexm)
-		}
+		assert.Equal(t, "node-role.kubernetes.io/master", LabelNodeRoleMaster, "LabelNodeRoleMaster constant is incorrect")
+		assert.Equal(t, "node-role.kubernetes.io/master", TaintKeyNodeRoleMaster, "TaintKeyNodeRoleMaster constant is incorrect")
+		assert.Equal(t, "node-role.kubernetes.io/control-plane", LabelNodeRoleControlPlane, "LabelNodeRoleControlPlane constant is incorrect")
+		assert.Equal(t, "node-role.kubernetes.io/control-plane", TaintKeyNodeRoleControlPlane, "TaintKeyNodeRoleControlPlane constant is incorrect")
+		assert.Equal(t, "app.kubernetes.io/managed-by", LabelManagedBy, "LabelManagedBy constant is incorrect")
+		assert.Equal(t, "kubexm", LabelValueKubexm, "LabelValueKubexm constant is incorrect")
 	})
 }

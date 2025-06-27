@@ -1,59 +1,39 @@
 package common
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestKubernetesInternalConstants(t *testing.T) {
 	t.Run("CoreDNSConstants", func(t *testing.T) {
-		if CoreDNSConfigMapName != "coredns" {
-			t.Errorf("CoreDNSConfigMapName constant is incorrect: got %s, want coredns", CoreDNSConfigMapName)
-		}
-		if CoreDNSDeploymentName != "coredns" {
-			t.Errorf("CoreDNSDeploymentName constant is incorrect: got %s, want coredns", CoreDNSDeploymentName)
-		}
-		if CoreDNSServiceName != "kube-dns" {
-			t.Errorf("CoreDNSServiceName constant is incorrect: got %s, want kube-dns", CoreDNSServiceName)
-		}
+		assert.Equal(t, "coredns", CoreDNSConfigMapName, "CoreDNSConfigMapName constant is incorrect")
+		assert.Equal(t, "coredns", CoreDNSDeploymentName, "CoreDNSDeploymentName constant is incorrect")
+		assert.Equal(t, "kube-dns", CoreDNSServiceName, "CoreDNSServiceName constant is incorrect")
 	})
 
 	t.Run("KubeProxyConstants", func(t *testing.T) {
-		if KubeProxyConfigMapName != "kube-proxy" {
-			t.Errorf("KubeProxyConfigMapName constant is incorrect: got %s, want kube-proxy", KubeProxyConfigMapName)
-		}
-		if KubeProxyDaemonSetName != "kube-proxy" {
-			t.Errorf("KubeProxyDaemonSetName constant is incorrect: got %s, want kube-proxy", KubeProxyDaemonSetName)
-		}
+		assert.Equal(t, "kube-proxy", KubeProxyConfigMapName, "KubeProxyConfigMapName constant is incorrect")
+		assert.Equal(t, "kube-proxy", KubeProxyDaemonSetName, "KubeProxyDaemonSetName constant is incorrect")
 	})
 
 	t.Run("ClusterInfoConstants", func(t *testing.T) {
-		if ClusterInfoConfigMapName != "cluster-info" {
-			t.Errorf("ClusterInfoConfigMapName constant is incorrect: got %s, want cluster-info", ClusterInfoConfigMapName)
-		}
-		if KubeadmConfigConfigMapName != "kubeadm-config" {
-			t.Errorf("KubeadmConfigConfigMapName constant is incorrect: got %s, want kubeadm-config", KubeadmConfigConfigMapName)
-		}
+		assert.Equal(t, "cluster-info", ClusterInfoConfigMapName, "ClusterInfoConfigMapName constant is incorrect")
+		assert.Equal(t, "kubeadm-config", KubeadmConfigConfigMapName, "KubeadmConfigConfigMapName constant is incorrect")
 	})
 
 	t.Run("SecretsConstants", func(t *testing.T) {
-		if BootstrapTokenSecretPrefix != "bootstrap-token-" {
-			t.Errorf("BootstrapTokenSecretPrefix constant is incorrect: got %s, want bootstrap-token-", BootstrapTokenSecretPrefix)
-		}
+		assert.Equal(t, "bootstrap-token-", BootstrapTokenSecretPrefix, "BootstrapTokenSecretPrefix constant is incorrect")
 	})
 
 	t.Run("RBACConstants", func(t *testing.T) {
-		if NodeBootstrapperClusterRoleName != "system:node-bootstrapper" {
-			t.Errorf("NodeBootstrapperClusterRoleName constant is incorrect: got %s, want system:node-bootstrapper", NodeBootstrapperClusterRoleName)
-		}
-		if KubeadmNodeAdminClusterRoleBindingName != "kubeadm:node-admins" {
-			t.Errorf("KubeadmNodeAdminClusterRoleBindingName constant is incorrect: got %s, want kubeadm:node-admins", KubeadmNodeAdminClusterRoleBindingName)
-		}
+		assert.Equal(t, "system:node-bootstrapper", NodeBootstrapperClusterRoleName, "NodeBootstrapperClusterRoleName constant is incorrect")
+		assert.Equal(t, "kubeadm:node-admins", KubeadmNodeAdminClusterRoleBindingName, "KubeadmNodeAdminClusterRoleBindingName constant is incorrect")
 	})
 
 	t.Run("KubeletSettingsConstants", func(t *testing.T) {
-		if KubeletCSICertsVolumeName != "kubelet-csi-certs" {
-			t.Errorf("KubeletCSICertsVolumeName constant is incorrect: got %s, want kubelet-csi-certs", KubeletCSICertsVolumeName)
-		}
-		if KubeletCSICertsMountPath != "/var/lib/kubelet/plugins_registry" {
-			t.Errorf("KubeletCSICertsMountPath constant is incorrect: got %s, want /var/lib/kubelet/plugins_registry", KubeletCSICertsMountPath)
-		}
+		assert.Equal(t, "kubelet-csi-certs", KubeletCSICertsVolumeName, "KubeletCSICertsVolumeName constant is incorrect")
+		assert.Equal(t, "/var/lib/kubelet/plugins_registry", KubeletCSICertsMountPath, "KubeletCSICertsMountPath constant is incorrect")
 	})
 }
