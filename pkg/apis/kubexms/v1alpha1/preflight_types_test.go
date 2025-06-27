@@ -1,49 +1,67 @@
 package v1alpha1
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSetDefaults_PreflightConfig(t *testing.T) {
 	cfg := &PreflightConfig{}
 	SetDefaults_PreflightConfig(cfg)
-	if cfg.DisableSwap == nil || !*cfg.DisableSwap {
-		t.Errorf("Default DisableSwap = %v, want true", cfg.DisableSwap)
-	}
-	// Add tests for MinCPUCores/MinMemoryMB defaults if they are implemented
+	assert.NotNil(t, cfg.DisableSwap)
+	assert.True(t, *cfg.DisableSwap, "Default DisableSwap should be true")
+
+	// Test case where DisableSwap is already set
+	falseVal := false
+	cfgCustom := &PreflightConfig{DisableSwap: &falseVal}
+	SetDefaults_PreflightConfig(cfgCustom)
+	assert.NotNil(t, cfgCustom.DisableSwap)
+	assert.False(t, *cfgCustom.DisableSwap, "DisableSwap should not be overridden if already set")
+
+	// MinCPUCores and MinMemoryMB are not defaulted by SetDefaults_PreflightConfig currently
+	cfgNilCPU := &PreflightConfig{}
+	SetDefaults_PreflightConfig(cfgNilCPU)
+	assert.Nil(t, cfgNilCPU.MinCPUCores)
+	assert.Nil(t, cfgNilCPU.MinMemoryMB)
 }
 
 func TestValidate_PreflightConfig(t *testing.T) {
 	validCfg := &PreflightConfig{MinCPUCores: int32Ptr(2), MinMemoryMB: uint64Ptr(2048), DisableSwap: boolPtr(true)}
+	SetDefaults_PreflightConfig(validCfg) // Ensure defaults are applied if any could affect validation (like DisableSwap)
 	verrsValid := &ValidationErrors{}
 	Validate_PreflightConfig(validCfg, verrsValid, "spec.preflight")
-	if !verrsValid.IsEmpty() {
-		t.Errorf("Validate_PreflightConfig for valid config failed: %v", verrsValid)
-	}
+	assert.True(t, verrsValid.IsEmpty(), "Validate_PreflightConfig for valid config failed: %v", verrsValid.Error())
 
-	tests := []struct{
-		name string
-		cfg *PreflightConfig
-		wantErrMsg string
+	tests := []struct {
+		name        string
+		cfg         *PreflightConfig
+		wantErrMsg  string
+		expectErr   bool
 	}{
-		{"negative_cpu", &PreflightConfig{MinCPUCores: int32Ptr(-1)}, ".minCPUCores: must be positive"},
-		{"zero_cpu", &PreflightConfig{MinCPUCores: int32Ptr(0)}, ".minCPUCores: must be positive"},
-		// Assuming MinMemoryMB must also be positive, though 0 could mean "don't check".
-		// Current Validate_PreflightConfig checks for "<= 0", so 0 is an error.
-		{"zero_mem", &PreflightConfig{MinMemoryMB: uint64Ptr(0)}, ".minMemoryMB: must be positive"},
+		{"valid_nil_values", &PreflightConfig{DisableSwap: boolPtr(true)}, "", false}, // MinCPU/Mem not set, should be valid
+		{"negative_cpu", &PreflightConfig{MinCPUCores: int32Ptr(-1)}, ".minCPUCores: must be positive", true},
+		{"zero_cpu", &PreflightConfig{MinCPUCores: int32Ptr(0)}, ".minCPUCores: must be positive", true},
+		{"zero_mem", &PreflightConfig{MinMemoryMB: uint64Ptr(0)}, ".minMemoryMB: must be positive", true},
+		// {"negative_mem", &PreflightConfig{MinMemoryMB: uint64Ptr(^uint64(0))}, ".minMemoryMB: must be positive", true}, // This test was flawed: MaxUint64 is not <= 0.
+		{"valid_min_values_only", &PreflightConfig{MinCPUCores: int32Ptr(1), MinMemoryMB: uint64Ptr(1)}, "", false},
 	}
 	for _, tt := range tests {
-	   t.Run(tt.name, func(t *testing.T){
-		   SetDefaults_PreflightConfig(tt.cfg)
-		   verrs := &ValidationErrors{}
-		   Validate_PreflightConfig(tt.cfg, verrs, "spec.preflight")
-		   if verrs.IsEmpty() {
-			   t.Fatalf("Expected error for %s, got none", tt.name)
-		   }
-		   if !strings.Contains(verrs.Error(), tt.wantErrMsg) {
-			   t.Errorf("Error for %s = %v, want to contain %q", tt.name, verrs, tt.wantErrMsg)
-		   }
-	   })
+		t.Run(tt.name, func(t *testing.T) {
+			// Apply defaults. For these tests, DisableSwap is the only thing defaulted if not set.
+			if tt.cfg.DisableSwap == nil { // Explicitly ensure DisableSwap has a value for consistent testing if needed.
+				SetDefaults_PreflightConfig(tt.cfg)
+			}
+
+			verrs := &ValidationErrors{}
+			Validate_PreflightConfig(tt.cfg, verrs, "spec.preflight")
+
+			if tt.expectErr {
+				assert.False(t, verrs.IsEmpty(), "Expected error for %s, got none", tt.name)
+				assert.Contains(t, verrs.Error(), tt.wantErrMsg, "Error for %s = %v, want to contain %q", tt.name, verrs.Error(), tt.wantErrMsg)
+			} else {
+				assert.True(t, verrs.IsEmpty(), "Expected no error for %s, got: %v", tt.name, verrs.Error())
+			}
+		})
 	}
 }

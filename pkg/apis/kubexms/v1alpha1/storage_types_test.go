@@ -1,79 +1,75 @@
 package v1alpha1
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSetDefaults_StorageConfig(t *testing.T) {
 	cfg := &StorageConfig{}
 	SetDefaults_StorageConfig(cfg)
 
-	// DefaultStorageClass is not defaulted, so it should be nil
-	if cfg.DefaultStorageClass != nil {
-		t.Errorf("DefaultStorageClass should be nil by default, got %v", *cfg.DefaultStorageClass)
-	}
-	// OpenEBS is not initialized by default in SetDefaults_StorageConfig itself,
-	// but SetDefaults_Cluster initializes Spec.Storage to &StorageConfig{}, then calls SetDefaults_StorageConfig.
-	// SetDefaults_StorageConfig then calls SetDefaults_OpenEBSConfig if OpenEBS is not nil.
-	// So, if OpenEBS is intended to be defaulted when storage: {} is present,
-	// then SetDefaults_StorageConfig should initialize cfg.OpenEBS = &OpenEBSConfig{}
-	// For this test, we assume it's not initialized if openebs: {} is missing.
-	if cfg.OpenEBS != nil { // Test what happens if it was nil
-		t.Errorf("OpenEBS should be nil if not specified in YAML, got %v", cfg.OpenEBS)
-	}
+	assert.Nil(t, cfg.DefaultStorageClass, "DefaultStorageClass should be nil by default")
+	assert.Nil(t, cfg.OpenEBS, "OpenEBS should be nil if not specified in YAML")
 
 	// Test with OpenEBS explicitly present but empty
 	cfgWithEmptyOpenEBS := &StorageConfig{OpenEBS: &OpenEBSConfig{}}
 	SetDefaults_StorageConfig(cfgWithEmptyOpenEBS)
-	if cfgWithEmptyOpenEBS.OpenEBS == nil {
-		t.Fatal("OpenEBS should remain initialized if passed as empty struct")
-	}
-	// Defaults for OpenEBS sub-fields are tested in TestSetDefaults_OpenEBSConfig
+	assert.NotNil(t, cfgWithEmptyOpenEBS.OpenEBS, "OpenEBS should remain initialized if passed as empty struct")
+	// Further OpenEBS defaults are tested in TestSetDefaults_OpenEBSConfig
 }
 
 func TestSetDefaults_OpenEBSConfig(t *testing.T) {
 	cfg := &OpenEBSConfig{}
 	SetDefaults_OpenEBSConfig(cfg)
 
-	if cfg.Enabled == nil || *cfg.Enabled != true { // OpenEBS is defaulted to enabled if block exists
-		t.Errorf("Default OpenEBS Enabled = %v, want true", cfg.Enabled)
-	}
-	// BasePath should be defaulted if Enabled is true
-	if cfg.BasePath != "/var/openebs/local" { // Expect BasePath to be defaulted
-		t.Errorf("Default OpenEBS BasePath = %s, want /var/openebs/local when enabled by default", cfg.BasePath)
-	}
+	assert.NotNil(t, cfg.Enabled, "OpenEBS Enabled should be defaulted")
+	assert.True(t, *cfg.Enabled, "Default OpenEBS Enabled should be true")
+	assert.Equal(t, "/var/openebs/local", cfg.BasePath, "Default OpenEBS BasePath mismatch when enabled by default")
 
 	// Test when Enabled is true (explicitly)
 	cfgEnabled := &OpenEBSConfig{Enabled: boolPtr(true)}
 	SetDefaults_OpenEBSConfig(cfgEnabled)
-	if cfgEnabled.BasePath != "/var/openebs/local" {
-		t.Errorf("Default OpenEBS BasePath for enabled = %s, want /var/openebs/local", cfgEnabled.BasePath)
+	assert.Equal(t, "/var/openebs/local", cfgEnabled.BasePath, "Default OpenEBS BasePath for explicitly enabled")
+
+	assert.NotNil(t, cfgEnabled.Engines, "OpenEBS Engines should be initialized when enabled")
+	if cfgEnabled.Engines != nil {
+		assert.NotNil(t, cfgEnabled.Engines.LocalHostPath, "LocalHostPath engine should be initialized")
+		assert.NotNil(t, cfgEnabled.Engines.LocalHostPath.Enabled, "LocalHostPath.Enabled should be defaulted")
+		assert.True(t, *cfgEnabled.Engines.LocalHostPath.Enabled, "LocalHostPath engine should be enabled by default")
+
+		assert.NotNil(t, cfgEnabled.Engines.Mayastor, "Mayastor engine should be initialized")
+		assert.NotNil(t, cfgEnabled.Engines.Mayastor.Enabled, "Mayastor.Enabled should be defaulted")
+		assert.False(t, *cfgEnabled.Engines.Mayastor.Enabled, "Mayastor engine should be disabled by default")
+		// Similar checks for Jiva and CStor
+		assert.NotNil(t, cfgEnabled.Engines.Jiva, "Jiva engine should be initialized")
+		assert.NotNil(t, cfgEnabled.Engines.Jiva.Enabled, "Jiva.Enabled should be defaulted")
+		assert.False(t, *cfgEnabled.Engines.Jiva.Enabled, "Jiva engine should be disabled by default")
+		assert.NotNil(t, cfgEnabled.Engines.CStor, "CStor engine should be initialized")
+		assert.NotNil(t, cfgEnabled.Engines.CStor.Enabled, "CStor.Enabled should be defaulted")
+		assert.False(t, *cfgEnabled.Engines.CStor.Enabled, "CStor engine should be disabled by default")
 	}
-	if cfgEnabled.Engines == nil { t.Fatal("OpenEBS Engines should be initialized when enabled") }
-	if cfgEnabled.Engines.LocalHostPath == nil || cfgEnabled.Engines.LocalHostPath.Enabled == nil || !*cfgEnabled.Engines.LocalHostPath.Enabled {
-		t.Error("OpenEBS Engines.LocalHostPath should be enabled by default when OpenEBS is enabled")
-	}
-	if cfgEnabled.Engines.Mayastor == nil || cfgEnabled.Engines.Mayastor.Enabled == nil || *cfgEnabled.Engines.Mayastor.Enabled != false {
-		t.Error("OpenEBS Engines.Mayastor should default to disabled")
-	}
-    // Version is not defaulted
-	if cfgEnabled.Version != nil {
-		t.Errorf("OpenEBS Version should be nil by default, got %v", *cfgEnabled.Version)
-	}
+	assert.Nil(t, cfgEnabled.Version, "OpenEBS Version should be nil by default")
+
+	// Test when Enabled is explicitly false
+	cfgDisabled := &OpenEBSConfig{Enabled: boolPtr(false), BasePath: "custom/path", Engines: &OpenEBSEngineConfig{LocalHostPath: &OpenEBSEngineLocalHostPathConfig{Enabled: boolPtr(true)}}}
+	SetDefaults_OpenEBSConfig(cfgDisabled)
+	assert.Equal(t, "custom/path", cfgDisabled.BasePath, "BasePath should not be overridden when OpenEBS is disabled")
+	assert.NotNil(t, cfgDisabled.Engines.LocalHostPath.Enabled, "LocalHostPath.Enabled should still be present")
+	assert.False(t, *cfgDisabled.Engines.LocalHostPath.Enabled, "LocalHostPath engine should be forced to disabled")
+
 }
 
 func TestValidate_StorageConfig(t *testing.T) {
 	validCfg := &StorageConfig{
-		OpenEBS: &OpenEBSConfig{Enabled: boolPtr(true), BasePath: "/data/openebs"},
+		OpenEBS:             &OpenEBSConfig{Enabled: boolPtr(true), BasePath: "/data/openebs"},
 		DefaultStorageClass: stringPtr("my-default-sc"),
 	}
-	SetDefaults_StorageConfig(validCfg) // Ensure defaults are applied before validation
+	SetDefaults_StorageConfig(validCfg)
 	verrsValid := &ValidationErrors{}
 	Validate_StorageConfig(validCfg, verrsValid, "spec.storage")
-	if !verrsValid.IsEmpty() {
-		t.Errorf("Validate_StorageConfig for valid config failed: %v", verrsValid)
-	}
+	assert.True(t, verrsValid.IsEmpty(), "Validate_StorageConfig for valid config failed: %v", verrsValid.Error())
 
 	tests := []struct {
 		name       string
@@ -90,16 +86,13 @@ func TestValidate_StorageConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Defaults are not re-applied here as the test is about validating specific states
+			// For these specific validation tests, defaults on the parent StorageConfig
+			// don't interfere with the specific invalid field being tested.
 			// SetDefaults_StorageConfig(tt.cfg)
 			verrs := &ValidationErrors{}
 			Validate_StorageConfig(tt.cfg, verrs, "spec.storage")
-			if verrs.IsEmpty() {
-				t.Fatalf("Validate_StorageConfig expected error for %s, got none", tt.name)
-			}
-			if !strings.Contains(verrs.Error(), tt.wantErrMsg) {
-				t.Errorf("Validate_StorageConfig error for %s = %v, want to contain %q", tt.name, verrs, tt.wantErrMsg)
-			}
+			assert.False(t, verrs.IsEmpty(), "Expected error for %s, got none", tt.name)
+			assert.Contains(t, verrs.Error(), tt.wantErrMsg, "Error for %s = %v, want to contain %q", tt.name, verrs.Error(), tt.wantErrMsg)
 		})
 	}
 }
