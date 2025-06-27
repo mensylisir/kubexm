@@ -12,34 +12,49 @@ import (
 )
 
 // Helper to quickly get a runner with a mock connector for network tests
-func newTestRunnerForNetwork(t *testing.T) (*Runner, *MockConnector) {
+func newTestRunnerForNetwork(t *testing.T) (Runner, *Facts, *MockConnector) { // Updated signature
 	mockConn := NewMockConnector()
+	// Setup mockConn.GetOSFunc and mockConn.ExecFunc for basic fact gathering
 	mockConn.GetOSFunc = func(ctx context.Context) (*connector.OS, error) {
-		return &connector.OS{ID: "linux-test", Arch: "amd64", Kernel: "test-kernel"}, nil
+		return &connector.OS{ID: "linux-network-test", Arch: "amd64", Kernel: "net-kernel"}, nil
 	}
-	// Default Exec for NewRunner fact gathering & other commands if not overridden
 	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
 		mockConn.LastExecCmd = cmd
 		mockConn.LastExecOptions = options
-		if isFactGatheringCommand(cmd) { return []byte("dummy"), nil, nil }
-		// Fallback for network commands if not specifically mocked in a test
+		if mockConn.ExecHistory == nil { mockConn.ExecHistory = []string{} }
+		mockConn.ExecHistory = append(mockConn.ExecHistory, cmd)
+
+		if strings.Contains(cmd, "hostname") { return []byte("network-test-host"), nil, nil }
+		if strings.Contains(cmd, "nproc") { return []byte("2"), nil, nil }
+		if strings.Contains(cmd, "grep MemTotal") { return []byte("2048000"), nil, nil } // 2GB
+		if strings.Contains(cmd, "ip -4 route get 8.8.8.8") { return []byte("8.8.8.8 dev eth1 src 10.0.0.10"), nil, nil }
+		if strings.Contains(cmd, "ip -6 route get") { return nil, nil, fmt.Errorf("no ipv6 for network test") }
+		if strings.Contains(cmd, "command -v") { return []byte("/usr/bin/" + strings.Fields(cmd)[2]), nil, nil } // Basic mock for command -v
+		if strings.HasPrefix(cmd, "test -e /etc/init.d") { return nil, nil, errors.New("no /etc/init.d for this mock")}
+
+		// Fallback for commands not specific to fact gathering for network tests
+		// Individual tests will override this for commands like 'ss', 'netstat', 'hostnamectl'
+		// fmt.Printf("newTestRunnerForNetwork: Default ExecFunc called for: %s\n", cmd)
 		return []byte(""), nil, nil
 	}
-	// Default LookPath for commands that might be checked
 	mockConn.LookPathFunc = func(ctx context.Context, file string) (string, error) {
-		switch file {
-		case "ss", "netstat", "hostnamectl", "hostname": // Add other common commands if needed
-			return "/usr/bin/" + file, nil
-		default:
-			if isFactGatheringCommandLookup(file) { return "/usr/bin/" + file, nil}
-			return "", fmt.Errorf("LookPath mock: command %s not found for network test setup", file)
+		 switch file {
+			case "ss", "netstat", "hostnamectl", "hostname", "grep", "awk", "ip", "cat", "uname", "nproc", "systemctl", "service", "apt-get", "yum", "dnf":
+				return "/usr/bin/" + file, nil
+			default:
+				return "", fmt.Errorf("LookPath mock (network): command %s not found", file)
 		}
 	}
-	r, err := NewRunner(context.Background(), mockConn)
+
+	r := NewRunner()
+	facts, err := r.GatherFacts(context.Background(), mockConn)
 	if err != nil {
-		t.Fatalf("Failed to create runner for network tests: %v", err)
+		t.Fatalf("newTestRunnerForNetwork: Failed to gather facts: %v", err)
 	}
-	return r, mockConn
+	if facts == nil {
+        t.Fatalf("newTestRunnerForNetwork: GatherFacts returned nil facts")
+    }
+	return r, facts, mockConn
 }
 
 // isFactGatheringCommandLookup is a helper for LookPath during NewRunner
@@ -49,7 +64,7 @@ func isFactGatheringCommandLookup(cmd string) bool {
 
 
 func TestRunner_IsPortOpen_True_ss(t *testing.T) {
-	r, mockConn := newTestRunnerForNetwork(t)
+	r, facts, mockConn := newTestRunnerForNetwork(t)
 	port := 8080
 
 	mockConn.LookPathFunc = func(ctx context.Context, file string) (string, error) {
@@ -67,7 +82,7 @@ func TestRunner_IsPortOpen_True_ss(t *testing.T) {
 		return nil, nil, fmt.Errorf("IsPortOpen ss: unexpected cmd %s", cmd)
 	}
 
-	isOpen, err := r.IsPortOpen(context.Background(), port)
+	isOpen, err := r.IsPortOpen(context.Background(), mockConn, facts, port)
 	if err != nil {
 		t.Fatalf("IsPortOpen() error = %v", err)
 	}
@@ -77,7 +92,7 @@ func TestRunner_IsPortOpen_True_ss(t *testing.T) {
 }
 
 func TestRunner_IsPortOpen_False_netstat(t *testing.T) {
-	r, mockConn := newTestRunnerForNetwork(t)
+	r, facts, mockConn := newTestRunnerForNetwork(t)
 	port := 80
 
 	mockConn.LookPathFunc = func(ctx context.Context, file string) (string, error) {
@@ -96,7 +111,7 @@ func TestRunner_IsPortOpen_False_netstat(t *testing.T) {
 		return nil, nil, fmt.Errorf("IsPortOpen netstat: unexpected cmd %s", cmd)
 	}
 
-	isOpen, err := r.IsPortOpen(context.Background(), port)
+	isOpen, err := r.IsPortOpen(context.Background(), mockConn, facts, port)
 	if err != nil {
 		t.Fatalf("IsPortOpen() error = %v (expected nil from IsPortOpen itself)", err)
 	}
@@ -106,7 +121,7 @@ func TestRunner_IsPortOpen_False_netstat(t *testing.T) {
 }
 
 func TestRunner_WaitForPort_Success(t *testing.T) {
-	r, mockConn := newTestRunnerForNetwork(t)
+	r, facts, mockConn := newTestRunnerForNetwork(t)
 	port := 1234
 	callCount := 0
 
@@ -131,7 +146,7 @@ func TestRunner_WaitForPort_Success(t *testing.T) {
 		return nil, nil, fmt.Errorf("WaitForPort Success: unexpected cmd %s", cmd)
 	}
 
-	err := r.WaitForPort(context.Background(), port, 5*time.Second)
+	err := r.WaitForPort(context.Background(), mockConn, facts, port, 5*time.Second)
 	if err != nil {
 		t.Fatalf("WaitForPort() error = %v", err)
 	}
@@ -141,7 +156,7 @@ func TestRunner_WaitForPort_Success(t *testing.T) {
 }
 
 func TestRunner_WaitForPort_Timeout(t *testing.T) {
-	r, mockConn := newTestRunnerForNetwork(t)
+	r, facts, mockConn := newTestRunnerForNetwork(t)
 	port := 4321
 
 	mockConn.LookPathFunc = func(ctx context.Context, file string) (string, error) {
@@ -159,7 +174,7 @@ func TestRunner_WaitForPort_Timeout(t *testing.T) {
 		return nil, nil, fmt.Errorf("WaitForPort Timeout: unexpected cmd %s", cmd)
 	}
 
-	err := r.WaitForPort(context.Background(), port, 100*time.Millisecond)
+	err := r.WaitForPort(context.Background(), mockConn, facts, port, 100*time.Millisecond)
 	if err == nil {
 		t.Fatal("WaitForPort() expected timeout error, got nil")
 	}
@@ -169,7 +184,7 @@ func TestRunner_WaitForPort_Timeout(t *testing.T) {
 }
 
 func TestRunner_SetHostname_Success(t *testing.T) {
-	r, mockConn := newTestRunnerForNetwork(t)
+	r, facts, mockConn := newTestRunnerForNetwork(t)
 	hostname := "new-test-host"
 
 	var hostnamectlCmd, applyHostnameCmd string
@@ -195,7 +210,7 @@ func TestRunner_SetHostname_Success(t *testing.T) {
 		return nil, nil, fmt.Errorf("SetHostname: unexpected cmd %s", cmd)
 	}
 
-	err := r.SetHostname(context.Background(), hostname)
+	err := r.SetHostname(context.Background(), mockConn, facts, hostname)
 	if err != nil {
 		t.Fatalf("SetHostname() error = %v", err)
 	}
@@ -208,7 +223,7 @@ func TestRunner_SetHostname_Success(t *testing.T) {
 }
 
 func TestRunner_AddHostEntry_NewEntry(t *testing.T) {
-	r, mockConn := newTestRunnerForNetwork(t)
+	r, _, mockConn := newTestRunnerForNetwork(t) // Ignored facts
 	ip := "10.0.0.5"
 	fqdn := "server.example.com"
 	hostname := "server"
@@ -230,7 +245,7 @@ func TestRunner_AddHostEntry_NewEntry(t *testing.T) {
 		return nil, nil, fmt.Errorf("AddHostEntry new: unexpected cmd %s", cmd)
 	}
 
-	err := r.AddHostEntry(context.Background(), ip, fqdn, hostname)
+	err := r.AddHostEntry(context.Background(), mockConn, ip, fqdn, hostname) // Added mockConn, facts implicitly not used by AddHostEntry
 	if err != nil {
 		t.Fatalf("AddHostEntry() error = %v", err)
 	}
@@ -239,7 +254,7 @@ func TestRunner_AddHostEntry_NewEntry(t *testing.T) {
 }
 
 func TestRunner_AddHostEntry_EntryExists(t *testing.T) {
-	r, mockConn := newTestRunnerForNetwork(t)
+	r, _, mockConn := newTestRunnerForNetwork(t) // Ignored facts
 	ip := "10.0.0.6"
 	fqdn := "db.example.com"
 	expectedEntry := fmt.Sprintf("%s %s", ip, fqdn)
@@ -259,7 +274,7 @@ func TestRunner_AddHostEntry_EntryExists(t *testing.T) {
 		return nil, nil, fmt.Errorf("AddHostEntry exists: unexpected cmd %s", cmd)
 	}
 
-	err := r.AddHostEntry(context.Background(), ip, fqdn)
+	err := r.AddHostEntry(context.Background(), mockConn, ip, fqdn) // Added mockConn, facts implicitly not used
 	if err != nil {
 		t.Fatalf("AddHostEntry() when entry exists error = %v", err)
 	}

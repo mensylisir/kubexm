@@ -59,12 +59,8 @@ func (r *defaultRunner) Check(ctx context.Context, conn connector.Connector, cmd
 		// This is not an operational error of the Check method itself.
 		return false, nil
 	}
-	// If err is not nil and not a CommandError, it's an operational error (e.g., connection issue).
-	if err != nil {
-		return false, err
-	}
-	// If err is nil, command exited 0.
-	return true, nil
+	// If err is not nil and not a CommandError, it's an operational error (e.g., connection issue, context cancelled).
+	return false, err
 }
 
 // RunWithOptions provides full control over connector.ExecOptions.

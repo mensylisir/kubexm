@@ -12,34 +12,47 @@ import (
 )
 
 // Helper to quickly get a runner with a mock connector for command tests
-func newTestRunnerWithMock(t *testing.T) (*Runner, *MockConnector) {
+func newTestRunnerForCommand(t *testing.T) (Runner, *MockConnector) { // Renamed and returns Runner
 	mockConn := NewMockConnector()
-	// Provide a minimal successful NewRunner setup
+	// MockConnector's NewMockConnector() already sets up default GetOSFunc and ExecFunc.
+	// We can override them here if specific default behavior for command tests is needed,
+	// but often individual tests will set their own ExecFunc.
+
+	// Example minimal setup if NewMockConnector defaults are not sufficient for some edge cases
+	// or if we want to ensure specific behavior for commands NOT explicitly tested.
 	mockConn.GetOSFunc = func(ctx context.Context) (*connector.OS, error) {
-		return &connector.OS{ID: "linux-test", Arch: "amd64", Kernel: "test-kernel"}, nil
+		return &connector.OS{ID: "linux-mock-command", Arch: "amd64"}, nil
 	}
+    // Default ExecFunc in this helper is for any background commands runner might issue
+    // that are not the primary command being tested by a subtest.
+	// Most tests will override mockConn.ExecFunc for the command they are testing.
+	originalExecFunc := mockConn.ExecFunc // Keep original default from NewMockConnector if needed
 	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
-		// Default exec for fact gathering in NewRunner
-		if strings.Contains(cmd, "hostname") { return []byte("test-host"), nil, nil }
-		if strings.Contains(cmd, "uname -r") { return []byte("test-kernel"), nil, nil }
-		if strings.Contains(cmd, "nproc") { return []byte("1"), nil, nil }
-		if strings.Contains(cmd, "grep MemTotal") { return []byte("1024"), nil, nil } // 1MB
-		if strings.Contains(cmd, "ip -4 route") { return []byte("1.1.1.1"), nil, nil }
-		if strings.Contains(cmd, "ip -6 route") { return nil, nil, fmt.Errorf("no ipv6") }
-		// Fallback for actual test commands if not overridden by specific tests
-		return []byte(""), nil, nil
+		if strings.Contains(cmd, "hostname") { return []byte("test-host-cmd"), nil, nil }
+		// If other fact-gathering commands were strictly needed by tested methods *before* the main exec:
+		// if strings.Contains(cmd, "some_other_fact_cmd") { ... }
+
+		// If an individual test overrides ExecFunc, that will be used.
+		// If not, and it's not a known fact-gathering cmd, use original default or specific error.
+		if originalExecFunc != nil {
+			// This part might be complex if tests override and we still want a general default.
+			// For command.go tests, they primarily test one Exec call.
+			// So, individual tests setting ExecFunc is the main pattern.
+		}
+		// A simple default for commands not caught by specific test overrides:
+		// fmt.Printf("Warning: newTestRunnerForCommand default ExecFunc called for: %s\n", cmd)
+		return []byte("default exec from newTestRunnerForCommand"), nil, nil
 	}
 
-	r, err := NewRunner(context.Background(), mockConn)
-	if err != nil {
-		t.Fatalf("Failed to create runner for command tests: %v", err)
-	}
+
+	r := NewRunner() // Corrected call
+	// No error returned by NewRunner()
 	return r, mockConn
 }
 
 
 func TestRunner_Run_Success(t *testing.T) {
-	r, mockConn := newTestRunnerWithMock(t)
+	r, mockConn := newTestRunnerForCommand(t) // Updated call
 
 	expectedStdout := "hello world"
 	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
@@ -52,7 +65,7 @@ func TestRunner_Run_Success(t *testing.T) {
 		return nil, nil, errors.New("unexpected command in Run test")
 	}
 
-	out, err := r.Run(context.Background(), "echo hello", false)
+	out, err := r.Run(context.Background(), mockConn, "echo hello", false)
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -62,7 +75,7 @@ func TestRunner_Run_Success(t *testing.T) {
 }
 
 func TestRunner_Run_WithSudo(t *testing.T) {
-	r, mockConn := newTestRunnerWithMock(t)
+	r, mockConn := newTestRunnerForCommand(t) // Updated call
 
 	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
 		mockConn.LastExecCmd = cmd
@@ -74,7 +87,7 @@ func TestRunner_Run_WithSudo(t *testing.T) {
 		return nil, nil, errors.New("unexpected command or sudo option")
 	}
 
-	_, err := r.Run(context.Background(), "whoami", true)
+	_, err := r.Run(context.Background(), mockConn, "whoami", true)
 	if err != nil {
 		t.Fatalf("Run() with sudo error = %v", err)
 	}
@@ -82,7 +95,7 @@ func TestRunner_Run_WithSudo(t *testing.T) {
 
 
 func TestRunner_Run_Error(t *testing.T) {
-	r, mockConn := newTestRunnerWithMock(t)
+	r, mockConn := newTestRunnerForCommand(t) // Updated call
 
 	expectedErr := &connector.CommandError{Cmd: "failing_cmd", ExitCode: 1, Stderr: "it failed"}
 	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
@@ -91,7 +104,7 @@ func TestRunner_Run_Error(t *testing.T) {
 		return nil, []byte("it failed"), expectedErr
 	}
 
-	_, err := r.Run(context.Background(), "failing_cmd", false)
+	_, err := r.Run(context.Background(), mockConn, "failing_cmd", false)
 	if err == nil {
 		t.Fatal("Run() with failing command expected error, got nil")
 	}
@@ -108,7 +121,7 @@ func TestRunner_Run_Error(t *testing.T) {
 }
 
 func TestRunner_MustRun_Success(t *testing.T) {
-	r, mockConn := newTestRunnerWithMock(t)
+	r, mockConn := newTestRunnerForCommand(t) // Updated call
 	expectedStdout := "must_succeed"
 	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
 		mockConn.LastExecCmd = cmd
@@ -121,14 +134,14 @@ func TestRunner_MustRun_Success(t *testing.T) {
 			t.Errorf("MustRun() panicked unexpectedly: %v", rec)
 		}
 	}()
-	out := r.MustRun(context.Background(), "anything", false)
+	out := r.MustRun(context.Background(), mockConn, "anything", false)
 	if out != expectedStdout {
 		t.Errorf("MustRun() output = %q, want %q", out, expectedStdout)
 	}
 }
 
 func TestRunner_MustRun_Panics(t *testing.T) {
-	r, mockConn := newTestRunnerWithMock(t)
+	r, mockConn := newTestRunnerForCommand(t) // Updated call
 	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
 		mockConn.LastExecCmd = cmd
 		mockConn.LastExecOptions = options
@@ -145,18 +158,18 @@ func TestRunner_MustRun_Panics(t *testing.T) {
 			}
 		}
 	}()
-	r.MustRun(context.Background(), "failing_cmd_mustrun", false)
+	r.MustRun(context.Background(), mockConn, "failing_cmd_mustrun", false)
 }
 
 func TestRunner_Check_True(t *testing.T) {
-	r, mockConn := newTestRunnerWithMock(t)
+	r, mockConn := newTestRunnerForCommand(t) // Updated call
 	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
 		mockConn.LastExecCmd = cmd
 		mockConn.LastExecOptions = options
 		return nil, nil, nil // No error means exit code 0
 	}
 
-	ok, err := r.Check(context.Background(), "true_command", false)
+	ok, err := r.Check(context.Background(), mockConn, "true_command", false)
 	if err != nil {
 		t.Fatalf("Check() error = %v", err)
 	}
@@ -166,14 +179,14 @@ func TestRunner_Check_True(t *testing.T) {
 }
 
 func TestRunner_Check_False_NonZeroExit(t *testing.T) {
-	r, mockConn := newTestRunnerWithMock(t)
+	r, mockConn := newTestRunnerForCommand(t) // Updated call
 	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
 		mockConn.LastExecCmd = cmd
 		mockConn.LastExecOptions = options
 		return nil, nil, &connector.CommandError{Cmd: cmd, ExitCode: 1} // Non-zero exit
 	}
 
-	ok, err := r.Check(context.Background(), "false_command", false)
+	ok, err := r.Check(context.Background(), mockConn, "false_command", false)
 	if err != nil {
 		t.Fatalf("Check() error = %v for non-zero exit (expected nil error from Check itself)", err)
 	}
@@ -183,7 +196,7 @@ func TestRunner_Check_False_NonZeroExit(t *testing.T) {
 }
 
 func TestRunner_Check_Error_ExecFailed(t *testing.T) {
-	r, mockConn := newTestRunnerWithMock(t)
+	r, mockConn := newTestRunnerForCommand(t) // Updated call
 	expectedErr := errors.New("connection failed")
 	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
 		mockConn.LastExecCmd = cmd
@@ -191,7 +204,7 @@ func TestRunner_Check_Error_ExecFailed(t *testing.T) {
 		return nil, nil, expectedErr // Actual execution error, not CommandError
 	}
 
-	_, err := r.Check(context.Background(), "any_command", false)
+	_, err := r.Check(context.Background(), mockConn, "any_command", false)
 	if err == nil {
 		t.Fatal("Check() with actual exec error expected error, got nil")
 	}
@@ -202,7 +215,7 @@ func TestRunner_Check_Error_ExecFailed(t *testing.T) {
 
 
 func TestRunner_RunWithOptions_Success(t *testing.T) {
-	r, mockConn := newTestRunnerWithMock(t)
+	r, mockConn := newTestRunnerForCommand(t) // Updated call
 
 	expectedStdout := "output with options"
 	expectedOpts := &connector.ExecOptions{Sudo: true, Timeout: 5 * time.Second}
@@ -219,7 +232,7 @@ func TestRunner_RunWithOptions_Success(t *testing.T) {
 		return []byte(expectedStdout), nil, nil
 	}
 
-	stdout, _, err := r.RunWithOptions(context.Background(), "test_cmd_opts", expectedOpts)
+	stdout, _, err := r.RunWithOptions(context.Background(), mockConn, "test_cmd_opts", expectedOpts)
 	if err != nil {
 		t.Fatalf("RunWithOptions() error = %v", err)
 	}

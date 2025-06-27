@@ -19,13 +19,21 @@ import (
 // defaultRunner is a stateless struct that implements the Runner interface.
 type defaultRunner struct{}
 
-// New creates a new stateless Runner service.
-func New() Runner {
+// NewRunner creates a new stateless Runner service.
+// Renamed from New() to match test expectations.
+func NewRunner() Runner {
 	return &defaultRunner{}
 }
 
 // GatherFacts gathers information about the host.
 func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connector) (*Facts, error) {
+	if conn == nil {
+		return nil, fmt.Errorf("connector cannot be nil for GatherFacts")
+	}
+	if !conn.IsConnected() {
+		return nil, fmt.Errorf("connector is not connected for GatherFacts")
+	}
+
 	facts := &Facts{}
 	var err error
 
