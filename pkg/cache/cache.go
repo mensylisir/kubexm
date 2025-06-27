@@ -92,20 +92,32 @@ func NewPipelineCache() PipelineCache {
 	return NewGenericCache(nil)
 }
 
-// NewModuleCache creates a new ModuleCache.
-// It's expected that the runtime will set its parent if part of a hierarchy.
-func NewModuleCache() ModuleCache {
-	return NewGenericCache(nil)
+// NewModuleCache creates a new ModuleCache with the given PipelineCache as its parent.
+func NewModuleCache(parent PipelineCache) ModuleCache {
+	var parentGenericCache *genericCache
+	if parent != nil {
+		// Assume parent is always a *genericCache, which is true in this pkg's design
+		parentGenericCache, _ = parent.(*genericCache)
+	}
+	return NewGenericCache(parentGenericCache)
 }
 
-// NewTaskCache creates a new TaskCache.
-// It's expected that the runtime will set its parent if part of a hierarchy.
-func NewTaskCache() TaskCache {
-	return NewGenericCache(nil)
+// NewTaskCache creates a new TaskCache with the given ModuleCache as its parent.
+func NewTaskCache(parent ModuleCache) TaskCache {
+	var parentGenericCache *genericCache
+	if parent != nil {
+		// Assume parent is always a *genericCache
+		parentGenericCache, _ = parent.(*genericCache)
+	}
+	return NewGenericCache(parentGenericCache)
 }
 
-// NewStepCache creates a new StepCache.
-// It's expected that the runtime will set its parent if part of a hierarchy.
-func NewStepCache() StepCache {
-	return NewGenericCache(nil)
+// NewStepCache creates a new StepCache with the given TaskCache as its parent.
+func NewStepCache(parent TaskCache) StepCache {
+	var parentGenericCache *genericCache
+	if parent != nil {
+		// Assume parent is always a *genericCache
+		parentGenericCache, _ = parent.(*genericCache)
+	}
+	return NewGenericCache(parentGenericCache)
 }
