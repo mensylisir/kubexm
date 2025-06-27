@@ -48,7 +48,11 @@ func TestGenericCache_GetSetDelete(t *testing.T) {
 }
 
 func TestGenericCache_StepSpec(t *testing.T) {
-	stepCache := NewStepCache() // Returns StepCache interface, implemented by *genericCache
+	// NewStepCache now requires a TaskCache parent.
+	// For this test, we are focused on StepCache's own methods,
+	// so a nil parent is acceptable.
+	var nilTaskCache TaskCache
+	stepCache := NewStepCache(nilTaskCache)
 
 	// Test GetCurrentStepSpec when none is set
 	spec, ok := stepCache.GetCurrentStepSpec()
@@ -122,7 +126,11 @@ func TestGenericCache_Concurrency(t *testing.T) {
 }
 
 func TestStepCache_Concurrency_StepSpec(t *testing.T) {
-	stepCache := NewStepCache()
+	// NewStepCache now requires a TaskCache parent.
+	// For this test, we are focused on StepCache's own methods,
+	// so a nil parent (or a dummy one) is acceptable.
+	var nilTaskCache TaskCache // explicit nil of type TaskCache
+	stepCache := NewStepCache(nilTaskCache)
 	var wg sync.WaitGroup
 	numGoroutines := 50
 
@@ -288,19 +296,168 @@ func TestGenericCache_LocalizedSetDelete(t *testing.T) {
 
 func TestFactoryFunctions(t *testing.T) {
 	pc := NewPipelineCache()
-	mc := NewModuleCache()
-	tc := NewTaskCache()
-	sc := NewStepCache()
-
-	if pc == nil || mc == nil || tc == nil || sc == nil {
-		t.Fatal("Factory functions returned nil caches")
+	if pc == nil {
+		t.Fatal("NewPipelineCache returned nil")
 	}
-	// Further tests could involve type assertions if needed, but basic creation is enough here.
-	// The parent linking will be tested via SetParent or in runtime tests.
-	// For now, ensure they create non-nil caches.
-	pc.Set("test", "val")
-	_, ok := pc.Get("test")
+	pc.Set("testPipe", "valPipe")
+	_, ok := pc.Get("testPipe")
 	if !ok {
 		t.Error("PipelineCache Get/Set failed")
+	}
+
+	mc := NewModuleCache(pc)
+	if mc == nil {
+		t.Fatal("NewModuleCache returned nil")
+	}
+	mc.Set("testMod", "valMod")
+	_, ok = mc.Get("testMod")
+	if !ok {
+		t.Error("ModuleCache Get/Set failed")
+	}
+	// Test inheritance from parent
+	val, ok := mc.Get("testPipe")
+	if !ok || val != "valPipe" {
+		t.Errorf("ModuleCache failed to get 'testPipe' from parent, got %v, ok %v", val, ok)
+	}
+
+	tc := NewTaskCache(mc)
+	if tc == nil {
+		t.Fatal("NewTaskCache returned nil")
+	}
+	tc.Set("testTask", "valTask")
+	_, ok = tc.Get("testTask")
+	if !ok {
+		t.Error("TaskCache Get/Set failed")
+	}
+	val, ok = tc.Get("testMod")
+	if !ok || val != "valMod" {
+		t.Errorf("TaskCache failed to get 'testMod' from parent, got %v, ok %v", val, ok)
+	}
+
+
+	sc := NewStepCache(tc)
+	if sc == nil {
+		t.Fatal("NewStepCache returned nil")
+	}
+	sc.Set("testStep", "valStep")
+	_, ok = sc.Get("testStep")
+	if !ok {
+		t.Error("StepCache Get/Set failed")
+	}
+	val, ok = sc.Get("testTask")
+	if !ok || val != "valTask" {
+		t.Errorf("StepCache failed to get 'testTask' from parent, got %v, ok %v", val, ok)
+	}
+}
+
+func TestFactoryFunctions_WithNilParents(t *testing.T) {
+	mc := NewModuleCache(nil) // Pass nil as PipelineCache
+	if mc == nil {
+		t.Fatal("NewModuleCache(nil) returned nil")
+	}
+	mc.Set("key", "val")
+	if _, ok := mc.Get("key"); !ok {
+		t.Error("ModuleCache(nil) failed Get/Set")
+	}
+
+	tc := NewTaskCache(nil) // Pass nil as ModuleCache
+	if tc == nil {
+		t.Fatal("NewTaskCache(nil) returned nil")
+	}
+	tc.Set("key", "val")
+	if _, ok := tc.Get("key"); !ok {
+		t.Error("TaskCache(nil) failed Get/Set")
+	}
+
+	sc := NewStepCache(nil) // Pass nil as TaskCache
+	if sc == nil {
+		t.Fatal("NewStepCache(nil) returned nil")
+	}
+	sc.Set("key", "val")
+	if _, ok := sc.Get("key"); !ok {
+		t.Error("StepCache(nil) failed Get/Set")
+	}
+	spec := &testStepSpec{Name: "NilParentSpec"}
+	sc.SetCurrentStepSpec(spec)
+	if retSpec, ok := sc.GetCurrentStepSpec(); !ok || retSpec != spec {
+		t.Error("StepCache(nil) failed Set/GetCurrentStepSpec")
+	}
+}
+
+func TestFactoryFunction_HierarchyAndInheritance(t *testing.T) {
+	// 1. Create hierarchy using factory functions
+	pipelineCache := NewPipelineCache()
+	pipelineCache.Set("pipeKey", "pipeValue")
+	pipelineCache.Set("overrideKey", "pipeOverride")
+
+	moduleCache := NewModuleCache(pipelineCache)
+	moduleCache.Set("moduleKey", "moduleValue")
+	moduleCache.Set("overrideKey", "moduleOverride") // Overrides pipeline
+
+	taskCache := NewTaskCache(moduleCache)
+	taskCache.Set("taskKey", "taskValue")
+
+	stepCache := NewStepCache(taskCache)
+	stepCache.Set("stepKey", "stepValue")
+
+	// 2. Test reads from stepCache (should be able to see all inherited values)
+	// Local to step
+	val, ok := stepCache.Get("stepKey")
+	if !ok || val != "stepValue" {
+		t.Errorf("StepCache: Expected 'stepValue' for 'stepKey', got '%v', ok=%v", val, ok)
+	}
+	// From task
+	val, ok = stepCache.Get("taskKey")
+	if !ok || val != "taskValue" {
+		t.Errorf("StepCache: Expected 'taskValue' for 'taskKey' (from task), got '%v', ok=%v", val, ok)
+	}
+	// From module (overridden)
+	val, ok = stepCache.Get("overrideKey")
+	if !ok || val != "moduleOverride" {
+		t.Errorf("StepCache: Expected 'moduleOverride' for 'overrideKey' (from module), got '%v', ok=%v", val, ok)
+	}
+	// From pipeline
+	val, ok = stepCache.Get("pipeKey")
+	if !ok || val != "pipeValue" {
+		t.Errorf("StepCache: Expected 'pipeValue' for 'pipeKey' (from pipeline), got '%v', ok=%v", val, ok)
+	}
+
+	// 3. Test reads from intermediate caches
+	// From moduleCache, should not see taskKey
+	val, ok = moduleCache.Get("taskKey")
+	if ok {
+		t.Errorf("ModuleCache: Expected not to find 'taskKey', but got '%v'", val)
+	}
+	// From moduleCache, should see its own overrideKey
+	val, ok = moduleCache.Get("overrideKey")
+	if !ok || val != "moduleOverride" {
+		t.Errorf("ModuleCache: Expected 'moduleOverride' for 'overrideKey', got '%v', ok=%v", val, ok)
+	}
+	// From moduleCache, should see pipeKey
+	val, ok = moduleCache.Get("pipeKey")
+	if !ok || val != "pipeValue" {
+		t.Errorf("ModuleCache: Expected 'pipeValue' for 'pipeKey' (from pipeline), got '%v', ok=%v", val, ok)
+	}
+
+
+	// 4. Test non-existent key
+	_, ok = stepCache.Get("nonExistentAnywhere")
+	if ok {
+		t.Error("StepCache: Expected not to find 'nonExistentAnywhere'")
+	}
+
+	// 5. Test that writes are local (idempotent to TestGenericCache_LocalizedSetDelete, but using factory-created caches)
+	pipelineCache.Set("sharedKey", "pipeInitial")
+	moduleCache.Set("sharedKey", "moduleInitial")
+
+	// Check module cache sees its own value
+	val, ok = moduleCache.Get("sharedKey")
+	if !ok || val != "moduleInitial" {
+		t.Errorf("ModuleCache (factory): Expected 'moduleInitial' for 'sharedKey', got '%v'", val)
+	}
+	// Check pipeline cache still has its original value
+	val, ok = pipelineCache.Get("sharedKey")
+	if !ok || val != "pipeInitial" {
+		t.Errorf("PipelineCache (factory): Expected 'pipeInitial' for 'sharedKey' after module set, got '%v'", val)
 	}
 }
