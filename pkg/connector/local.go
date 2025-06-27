@@ -3,12 +3,11 @@ package connector
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
-	"crypto/sha256" // Added
-	"encoding/hex"  // Added
-	// "fmt" // Removed duplicate
-	// "io" // Removed duplicate
+	"io/fs" // For Mkdir permissions
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"io/fs" // For Mkdir permissions
 	"time"
 )
 
@@ -163,7 +161,7 @@ func (l *LocalConnector) Copy(ctx context.Context, srcPath, dstPath string, opti
 	}
 	defer srcFile.Close()
 
-	if err := os.MkdirAll(filepath.Dir(dstPath), os.ModePerm); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil { // Changed os.ModePerm to 0755
 		return fmt.Errorf("failed to create destination directory for %s: %w", dstPath, err)
 	}
 
@@ -206,12 +204,27 @@ func (l *LocalConnector) CopyContent(ctx context.Context, content []byte, dstPat
 		defer cancel()
 	}
 
-	// TODO: Sudo handling as in Copy.
-	if err := os.MkdirAll(filepath.Dir(dstPath), os.ModePerm); err != nil {
+	// TODO: Sudo handling as in Copy. For now, align with WriteFile and disallow sudo.
+	if options != nil && options.Sudo {
+		return fmt.Errorf("sudo not implemented for LocalConnector.CopyContent, target path %s may require privileges", dstPath)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil { // Standardized to 0755
 		return fmt.Errorf("failed to create destination directory for %s: %w", dstPath, err)
 	}
 
-	err := os.WriteFile(dstPath, content, 0666) // Default permissions, then chmod
+	// Determine file mode for WriteFile
+	permMode := fs.FileMode(0644) // Default to rw-r--r--
+	if options != nil && options.Permissions != "" {
+		permVal, parseErr := strconv.ParseUint(options.Permissions, 8, 32)
+		if parseErr == nil {
+			permMode = fs.FileMode(permVal)
+		} else {
+			fmt.Fprintf(os.Stderr, "Warning: Invalid permissions format '%s' for local CopyContent to %s, using default 0644: %v\n", options.Permissions, dstPath, parseErr)
+		}
+	}
+
+	err := os.WriteFile(dstPath, content, permMode)
 	if err != nil {
 		return fmt.Errorf("failed to write content to %s: %w", dstPath, err)
 	}

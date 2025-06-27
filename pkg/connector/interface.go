@@ -6,6 +6,8 @@ import (
 	"io/fs" // For fs.FileMode
 	"time"
 
+	"golang.org/x/crypto/ssh" // Added to resolve undefined: ssh
+
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 )
 

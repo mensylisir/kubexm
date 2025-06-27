@@ -32,6 +32,13 @@ type MockConnector struct {
 	IsConnectedFunc func() bool
 	// CloseFunc can be set to mock the Close method.
 	CloseFunc func() error
+	// New methods from connector.Connector
+	ReadFileFunc        func(ctx context.Context, path string) ([]byte, error)
+	WriteFileFunc       func(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error
+	MkdirFunc           func(ctx context.Context, path string, perm string) error
+	RemoveFunc          func(ctx context.Context, path string, opts connector.RemoveOptions) error
+	GetFileChecksumFunc func(ctx context.Context, path string, checksumType string) (string, error)
+
 
 	// LastExecCmd stores the last command passed to ExecFunc, useful for assertions.
 	LastExecCmd     string
@@ -97,6 +104,40 @@ func NewMockConnector() *MockConnector {
 	mc.FetchFunc = func(ctx context.Context, remotePath, localPath string) error {
 		return nil
 	}
+
+	// Default implementations for new methods
+	mc.ReadFileFunc = func(ctx context.Context, path string) ([]byte, error) {
+		if content, ok := mc.mockFileContent[path]; ok {
+			return content, nil
+		}
+		return nil, os.ErrNotExist // Default to not found
+	}
+	mc.WriteFileFunc = func(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error {
+		// For mock, just store content, don't worry about perms/sudo for now unless test needs it
+		if mc.mockFileContent == nil { mc.mockFileContent = make(map[string][]byte) }
+		mc.mockFileContent[destPath] = content
+		if mc.mockFs == nil { mc.mockFs = make(map[string]*connector.FileStat) }
+		mc.mockFs[destPath] = &connector.FileStat{Name: destPath, IsExist: true, IsDir: false, Size: int64(len(content))}
+		return nil
+	}
+	mc.MkdirFunc = func(ctx context.Context, path string, perm string) error {
+		if mc.mockFs == nil { mc.mockFs = make(map[string]*connector.FileStat) }
+		mc.mockFs[path] = &connector.FileStat{Name: path, IsExist: true, IsDir: true}
+		return nil
+	}
+	mc.RemoveFunc = func(ctx context.Context, path string, opts connector.RemoveOptions) error {
+		if mc.mockFs != nil {
+			delete(mc.mockFs, path)
+		}
+		if mc.mockFileContent != nil {
+			delete(mc.mockFileContent, path)
+		}
+		return nil
+	}
+	mc.GetFileChecksumFunc = func(ctx context.Context, path string, checksumType string) (string, error) {
+		return "mockchecksum", nil // Default mock checksum
+	}
+
 	return mc
 }
 
@@ -187,6 +228,47 @@ func (m *MockConnector) AddMockFile(path string, stat *connector.FileStat, conte
 		m.mockFileContent[path] = content
 	}
 }
+
+// ReadFile implements the Connector interface.
+func (m *MockConnector) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	if m.ReadFileFunc != nil {
+		return m.ReadFileFunc(ctx, path)
+	}
+	return nil, fmt.Errorf("ReadFileFunc not implemented in mock")
+}
+
+// WriteFile implements the Connector interface.
+func (m *MockConnector) WriteFile(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error {
+	if m.WriteFileFunc != nil {
+		return m.WriteFileFunc(ctx, content, destPath, permissions, sudo)
+	}
+	return fmt.Errorf("WriteFileFunc not implemented in mock")
+}
+
+// Mkdir implements the Connector interface.
+func (m *MockConnector) Mkdir(ctx context.Context, path string, perm string) error {
+	if m.MkdirFunc != nil {
+		return m.MkdirFunc(ctx, path, perm)
+	}
+	return fmt.Errorf("MkdirFunc not implemented in mock")
+}
+
+// Remove implements the Connector interface.
+func (m *MockConnector) Remove(ctx context.Context, path string, opts connector.RemoveOptions) error {
+	if m.RemoveFunc != nil {
+		return m.RemoveFunc(ctx, path, opts)
+	}
+	return fmt.Errorf("RemoveFunc not implemented in mock")
+}
+
+// GetFileChecksum implements the Connector interface.
+func (m *MockConnector) GetFileChecksum(ctx context.Context, path string, checksumType string) (string, error) {
+	if m.GetFileChecksumFunc != nil {
+		return m.GetFileChecksumFunc(ctx, path, checksumType)
+	}
+	return "", fmt.Errorf("GetFileChecksumFunc not implemented in mock")
+}
+
 
 // Ensure MockConnector implements Connector interface
 var _ connector.Connector = &MockConnector{}

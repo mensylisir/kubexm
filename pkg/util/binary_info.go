@@ -274,6 +274,9 @@ type templateData struct {
 // zone is "cn" for China region, otherwise uses default URLs.
 // workDir and clusterName are used to construct local storage paths.
 func GetBinaryInfo(componentName, version, arch, zone, workDir, clusterName string) (*BinaryInfo, error) {
+	if strings.TrimSpace(version) == "" {
+		return nil, fmt.Errorf("version cannot be empty for component %s", componentName)
+	}
 	details, ok := knownBinaryDetails[strings.ToLower(componentName)]
 	if !ok {
 		return nil, fmt.Errorf("unknown binary component: %s", componentName)

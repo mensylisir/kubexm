@@ -59,8 +59,12 @@ func (r *defaultRunner) WaitForPort(ctx context.Context, conn connector.Connecto
 		case <-ticker.C:
 			isOpen, err := r.IsPortOpen(opCtx, conn, facts, port) // Pass facts
 			if err != nil {
-				// Log transient errors? For now, continue polling until timeout.
-				// Consider if certain errors from IsPortOpen should be fatal immediately.
+				// If the error indicates a fundamental problem like tools not found, fail fast.
+				if strings.Contains(err.Error(), "neither ss nor netstat found") {
+					return fmt.Errorf("cannot wait for port %d, required tools (ss/netstat) not found: %w", port, err)
+				}
+				// For other transient errors, continue polling.
+				// A log line here could be useful: fmt.Fprintf(os.Stderr, "Debug: IsPortOpen check for port %d returned error during wait: %v\n", port, err)
 			}
 			if isOpen {
 				return nil // Port is open
