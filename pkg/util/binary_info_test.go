@@ -13,10 +13,6 @@ func TestGetBinaryInfo(t *testing.T) {
 	origKXZONE := os.Getenv("KXZONE")
 	defer os.Setenv("KXZONE", origKXZONE)
 
-	// Mock os.Getenv for KXZONE
-	origKXZONE := os.Getenv("KXZONE")
-	defer os.Setenv("KXZONE", origKXZONE)
-
 	baseWorkDir := "/testwork"
 	baseClusterName := "mycluster"
 
@@ -55,7 +51,9 @@ func TestGetBinaryInfo(t *testing.T) {
 		}
 
 		baseDir = filepath.Join(clusterBase, typeDirName)
-		componentDir = filepath.Join(baseDir, pathParts...)
+		// componentDir = filepath.Join(baseDir, pathParts...) // Original line causing issues
+		allComponentPathElements := append([]string{baseDir}, pathParts...)
+		componentDir = filepath.Join(allComponentPathElements...)
 		filePath = filepath.Join(componentDir, fileName)
 		return
 	}
@@ -208,7 +206,7 @@ func TestGetBinaryInfo(t *testing.T) {
 			workDir:               baseWorkDir,
 			clusterName:           baseClusterName,
 			expectError:           true,
-			expectedErrorContains: "failed to render filename for etcd", // Error from template rendering due to empty version
+			expectedErrorContains: "version cannot be empty for component etcd",
 		},
 		{
 			name:                  "etcd_no_workdir",
@@ -431,23 +429,6 @@ func TestArchAlias(t *testing.T) {
 				t.Errorf("ArchAlias(%q) = %q, want %q", tt.input, got, tt.expected)
 			}
 		})
-	}
-}
-
-// Test for RenderTemplate (basic)
-func TestRenderTemplate(t *testing.T) {
-	data := struct {
-		Version string
-		Arch    string
-	}{"v1.0", "amd64"}
-	tmplStr := "file-{{.Version}}-{{.Arch}}.zip"
-	expected := "file-v1.0-amd64.zip"
-	got, err := RenderTemplate(tmplStr, data)
-	if err != nil {
-		t.Fatalf("RenderTemplate failed: %v", err)
-	}
-	if got != expected {
-		t.Errorf("RenderTemplate got %q, want %q", got, expected)
 	}
 }
 

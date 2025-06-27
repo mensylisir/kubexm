@@ -14,11 +14,12 @@ import (
 // This function is likely to be superseded by runner.Download or resource handles.
 func DownloadFileWithConnector(
 	ctx context.Context,
-	log logger.Logger, // Assuming logger.Logger is the type
+	log *logger.Logger, // Changed to *logger.Logger
 	conn connector.Connector,
 	url, targetDir, targetName, checksum string,
 ) (string, error) {
-	log.Info("Placeholder: DownloadFileWithConnector called", "url", url, "target", filepath.Join(targetDir, targetName))
+	// Use Infof for structured-like logging if that's the logger's pattern
+	log.Infof("Placeholder: DownloadFileWithConnector called. URL: %s, TargetDir: %s, TargetName: %s", url, targetDir, targetName)
 	// Simulate a successful download for now if tests depend on this path
 	// In a real scenario, this would involve complex logic.
 	// Checksum verification would also happen here.
