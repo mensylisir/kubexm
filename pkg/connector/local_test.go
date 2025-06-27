@@ -2,6 +2,9 @@ package connector
 
 import (
 	"context"
+	"crypto/rand" // For random content in checksum test
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -247,5 +250,189 @@ func TestLocalConnector_GetOS(t *testing.T) {
 	}
 	if osInfo != osInfo2 { // Should be the same cached pointer
 		t.Error("GetOS() caching failed; returned different struct pointers")
+	}
+}
+
+func TestLocalConnector_CopyContent_SudoError(t *testing.T) {
+	lc := &LocalConnector{}
+	ctx := context.Background()
+	tmpDir, err := os.MkdirTemp("", "local-copycontent-sudo-")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	dstPath := filepath.Join(tmpDir, "test_sudo.txt")
+
+	err = lc.CopyContent(ctx, []byte("test"), dstPath, &FileTransferOptions{Sudo: true})
+	if err == nil {
+		t.Error("CopyContent with Sudo=true expected an error for LocalConnector, got nil")
+	} else {
+		if !strings.Contains(err.Error(), "sudo not implemented") {
+			t.Errorf("CopyContent with Sudo=true error message = %q, want to contain 'sudo not implemented'", err.Error())
+		}
+	}
+}
+
+
+func TestLocalConnector_Mkdir(t *testing.T) {
+	lc := &LocalConnector{}
+	ctx := context.Background()
+	tmpDir, err := os.MkdirTemp("", "local-mkdir-")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Test creating a nested directory
+	nestedDir := filepath.Join(tmpDir, "a", "b", "c")
+	perms := "0750"
+	err = lc.Mkdir(ctx, nestedDir, perms)
+	if err != nil {
+		t.Fatalf("Mkdir(%s, %s) error = %v", nestedDir, perms, err)
+	}
+
+	stat, err := os.Stat(nestedDir)
+	if err != nil {
+		t.Fatalf("os.Stat(%s) after Mkdir error = %v", nestedDir, err)
+	}
+	if !stat.IsDir() {
+		t.Errorf("%s is not a directory after Mkdir", nestedDir)
+	}
+	if runtime.GOOS != "windows" && stat.Mode().Perm() != 0750 {
+        t.Errorf("Mkdir permissions mismatch: got %s, want %s", stat.Mode().Perm().String(), perms)
+    }
+
+
+	// Test creating an existing directory (should be idempotent)
+	err = lc.Mkdir(ctx, nestedDir, perms)
+	if err != nil {
+		t.Errorf("Mkdir on existing directory error = %v, want nil", err)
+	}
+}
+
+func TestLocalConnector_Remove(t *testing.T) {
+	lc := &LocalConnector{}
+	ctx := context.Background()
+	tmpDir, err := os.MkdirTemp("", "local-remove-")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir) // Ensure base tmpDir is cleaned
+
+	// File for removal
+	fileToRemove := filepath.Join(tmpDir, "file_to_remove.txt")
+	if err := os.WriteFile(fileToRemove, []byte("delete me"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	// Test Remove file
+	err = lc.Remove(ctx, fileToRemove, RemoveOptions{})
+	if err != nil {
+		t.Errorf("Remove file %s error = %v", fileToRemove, err)
+	}
+	if _, err := os.Stat(fileToRemove); !os.IsNotExist(err) {
+		t.Errorf("File %s should not exist after Remove, stat error: %v", fileToRemove, err)
+	}
+
+	// Directory for recursive removal
+	dirToRemove := filepath.Join(tmpDir, "dir_to_remove")
+	nestedFile := filepath.Join(dirToRemove, "nested_file.txt")
+	if err := os.Mkdir(dirToRemove, 0755); err != nil {
+		t.Fatalf("Failed to create test dir: %v", err)
+	}
+	if err := os.WriteFile(nestedFile, []byte("delete me too"), 0644); err != nil {
+		t.Fatalf("Failed to create nested test file: %v", err)
+	}
+
+	// Test Remove non-empty directory non-recursively (should error)
+	err = lc.Remove(ctx, dirToRemove, RemoveOptions{})
+	if err == nil {
+		t.Errorf("Remove non-empty directory %s non-recursively should have failed", dirToRemove)
+	}
+
+	// Test Remove directory recursively
+	err = lc.Remove(ctx, dirToRemove, RemoveOptions{Recursive: true})
+	if err != nil {
+		t.Errorf("Remove directory recursively %s error = %v", dirToRemove, err)
+	}
+	if _, err := os.Stat(dirToRemove); !os.IsNotExist(err) {
+		t.Errorf("Directory %s should not exist after recursive Remove, stat error: %v", dirToRemove, err)
+	}
+
+	// Test IgnoreNotExist
+	nonExistentPath := filepath.Join(tmpDir, "non_existent.txt")
+	err = lc.Remove(ctx, nonExistentPath, RemoveOptions{IgnoreNotExist: true})
+	if err != nil {
+		t.Errorf("Remove with IgnoreNotExist for %s expected no error, got %v", nonExistentPath, err)
+	}
+
+	// Test Remove non-existent without IgnoreNotExist (should error)
+	err = lc.Remove(ctx, nonExistentPath, RemoveOptions{IgnoreNotExist: false})
+	if err == nil {
+		t.Errorf("Remove non-existent file %s without IgnoreNotExist should have failed", nonExistentPath)
+	} else if !strings.Contains(err.Error(), "does not exist") { // Error message check
+		t.Errorf("Remove non-existent file error message = %q, want to contain 'does not exist'", err.Error())
+	}
+}
+
+func TestLocalConnector_GetFileChecksum(t *testing.T) {
+	lc := &LocalConnector{}
+	ctx := context.Background()
+	tmpDir, err := os.MkdirTemp("", "local-checksum-")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	filePath := filepath.Join(tmpDir, "checksum_test.txt")
+
+	// Generate random content
+	randomContent := make([]byte, 128) // 128 random bytes
+	_, rErr := rand.Read(randomContent)
+	if rErr != nil {
+		t.Fatalf("Failed to generate random content: %v", rErr)
+	}
+
+	if err := os.WriteFile(filePath, randomContent, 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	// Calculate expected SHA256sum from the original randomContent
+	hasher := sha256.New()
+	hasher.Write(randomContent)
+	expectedSHA256 := hex.EncodeToString(hasher.Sum(nil))
+
+	// Get checksum using the connector method
+	sha256sum, err := lc.GetFileChecksum(ctx, filePath, "sha256")
+	if err != nil {
+		t.Fatalf("GetFileChecksum sha256 error: %v", err)
+	}
+	if sha256sum != expectedSHA256 {
+		t.Errorf("GetFileChecksum sha256 got %s, want %s", sha256sum, expectedSHA256)
+	}
+
+	// Test MD5 (currently not implemented in LocalConnector, should error)
+	_, err = lc.GetFileChecksum(ctx, filePath, "md5")
+	if err == nil {
+		t.Error("GetFileChecksum md5 expected an error (not implemented), got nil")
+	} else {
+		if !strings.Contains(err.Error(), "md5 checksum not implemented") {
+			t.Errorf("GetFileChecksum md5 error = %q, want to contain 'md5 checksum not implemented'", err.Error())
+		}
+	}
+
+	_, err = lc.GetFileChecksum(ctx, filePath, "invalidtype")
+	if err == nil {
+		t.Error("GetFileChecksum expected error for invalid type, got nil")
+	} else {
+		if !strings.Contains(err.Error(), "unsupported checksum type") {
+			t.Errorf("GetFileChecksum invalid type error = %q, want to contain 'unsupported checksum type'", err.Error())
+		}
+	}
+
+	nonExistentFile := filepath.Join(tmpDir, "non_existent_for_checksum.txt")
+	_, err = lc.GetFileChecksum(ctx, nonExistentFile, "sha256")
+	if err == nil {
+		t.Errorf("GetFileChecksum for non-existent file %s should have failed", nonExistentFile)
 	}
 }

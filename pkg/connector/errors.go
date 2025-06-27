@@ -23,6 +23,11 @@ func (e *CommandError) Error() string {
 	return errMsg
 }
 
+// Unwrap returns the underlying error for errors.Is and errors.As support.
+func (e *CommandError) Unwrap() error {
+	return e.Underlying
+}
+
 // ConnectionError represents a failure to establish a connection.
 type ConnectionError struct {
 	Host string
@@ -32,4 +37,9 @@ type ConnectionError struct {
 // Error returns a string representation of the ConnectionError.
 func (e *ConnectionError) Error() string {
 	return fmt.Sprintf("failed to connect to host %s: %v", e.Host, e.Err)
+}
+
+// Unwrap returns the underlying error for errors.Is and errors.As support.
+func (e *ConnectionError) Unwrap() error {
+	return e.Err
 }

@@ -220,27 +220,77 @@ func (s *SSHConnector) ensureSftp() error {
 
 func (s *SSHConnector) CopyContent(ctx context.Context, content []byte, dstPath string, options *FileTransferOptions) error {
 	if err := s.ensureSftp(); err != nil { return err }
-	if options != nil && options.Sudo {
-		fmt.Fprintf(os.Stderr, "Warning: CopyContent with sudo=true for SSH connector attempts direct SFTP write to %s; this may fail for restricted paths.\n", dstPath)
+
+	effectiveSudo := false
+	var effectivePerms string
+	if options != nil {
+		effectiveSudo = options.Sudo
+		effectivePerms = options.Permissions
 	}
-	dstFile, err := s.sftpClient.Create(dstPath)
-	if err != nil {
-		return fmt.Errorf("failed to create remote file %s for content: %w", dstPath, err)
-	}
-	defer dstFile.Close()
-	_, err = dstFile.Write(content)
-	if err != nil { return fmt.Errorf("failed to write content to remote file %s: %w", dstPath, err) }
-	if options != nil && options.Permissions != "" {
-		perm, parseErr := strconv.ParseUint(options.Permissions, 8, 32)
-		if parseErr == nil {
-			if errChmod := s.sftpClient.Chmod(dstPath, os.FileMode(perm)); errChmod != nil {
-				fmt.Fprintf(os.Stderr, "Warning: Failed to chmod remote file %s to %s via SFTP: %v\n", dstPath, options.Permissions, errChmod)
-			}
-		} else {
-			fmt.Fprintf(os.Stderr, "Warning: Invalid permissions format '%s' for SFTP CopyContent to %s, skipping chmod: %v\n", options.Permissions, dstPath, parseErr)
+
+	if effectiveSudo {
+		tmpPath := filepath.Join("/tmp", fmt.Sprintf("kubexm-copycontent-%d-%s", time.Now().UnixNano(), filepath.Base(dstPath)))
+
+		// 1. Upload to temporary path (non-sudo)
+		// Use default restrictive perms for temp file, final perms applied by sudo chmod.
+		err := s.writeFileViaSFTP(context.Background(), content, tmpPath, "0600") // Use background context for temp operations
+		if err != nil {
+			return fmt.Errorf("failed to upload to temporary path %s for sudo CopyContent: %w", tmpPath, err)
 		}
+		defer func() {
+			rmCmd := fmt.Sprintf("rm -f %s", tmpPath)
+			// Use a new context for cleanup, don't let original ctx timeout affect cleanup.
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			_, _, rmErr := s.Exec(cleanupCtx, rmCmd, &ExecOptions{Sudo: false}) // Try non-sudo first
+			if rmErr != nil {
+				_, _, rmSudoErr := s.Exec(cleanupCtx, rmCmd, &ExecOptions{Sudo: true})
+				if rmSudoErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to remove temporary file %s on host %s (tried non-sudo and sudo): %v / %v\n", tmpPath, s.connCfg.Host, rmErr, rmSudoErr)
+				}
+			}
+		}()
+
+		// 2. Ensure destination directory exists using sudo
+		destDir := filepath.Dir(dstPath)
+		if destDir != "." && destDir != "/" {
+			mkdirCmd := fmt.Sprintf("mkdir -p %s", destDir)
+			execCtx, cancel := context.WithTimeout(ctx, 15*time.Second) // Use main ctx for timeout
+			_, _, mkdirErr := s.Exec(execCtx, mkdirCmd, &ExecOptions{Sudo: true})
+			cancel()
+			if mkdirErr != nil {
+				return fmt.Errorf("failed to sudo mkdir -p %s on host %s: %w", destDir, s.connCfg.Host, mkdirErr)
+			}
+		}
+
+		// 3. Move file to destination using sudo
+		mvCmd := fmt.Sprintf("mv %s %s", tmpPath, dstPath)
+		execCtxMv, cancelMv := context.WithTimeout(ctx, 30*time.Second) // Potentially longer for mv
+		_, _, mvErr := s.Exec(execCtxMv, mvCmd, &ExecOptions{Sudo: true})
+		cancelMv()
+		if mvErr != nil {
+			return fmt.Errorf("failed to sudo mv %s to %s on host %s: %w", tmpPath, dstPath, s.connCfg.Host, mvErr)
+		}
+
+		// 4. Apply permissions using sudo
+		if effectivePerms != "" {
+			if _, err := strconv.ParseUint(effectivePerms, 8, 32); err != nil { // Validate format
+				return fmt.Errorf("invalid permissions format '%s' for sudo chmod on host %s: %w", effectivePerms, s.connCfg.Host, err)
+			}
+			chmodCmd := fmt.Sprintf("chmod %s %s", effectivePerms, dstPath)
+			execCtxChmod, cancelChmod := context.WithTimeout(ctx, 15*time.Second)
+			_, _, chmodErr := s.Exec(execCtxChmod, chmodCmd, &ExecOptions{Sudo: true})
+			cancelChmod()
+			if chmodErr != nil {
+				return fmt.Errorf("failed to sudo chmod %s to %s on host %s: %w", dstPath, effectivePerms, s.connCfg.Host, chmodErr)
+			}
+		}
+		// TODO: Handle Owner/Group from FileTransferOptions if they are set, via sudo chown.
+		return nil
+	} else {
+		// Non-sudo: direct SFTP write
+		return s.writeFileViaSFTP(ctx, content, dstPath, effectivePerms)
 	}
-	return nil
 }
 
 func (s *SSHConnector) Stat(ctx context.Context, path string) (*FileStat, error) {
@@ -423,22 +473,25 @@ func (s *SSHConnector) WriteFile(ctx context.Context, content []byte, destPath, 
 
 // writeFileViaSFTP is a helper for direct SFTP writes.
 func (s *SSHConnector) writeFileViaSFTP(ctx context.Context, content []byte, destPath, permissions string) error {
-	// Ensure parent directory exists (best effort with SFTP, might need `mkdir -p` via Exec for complex cases)
 	parentDir := filepath.Dir(destPath)
 	if parentDir != "." && parentDir != "/" {
 		_, statErr := s.sftpClient.Stat(parentDir)
 		if statErr != nil {
 			if os.IsNotExist(statErr) {
-				// sftpClient.Mkdir is not recursive.
-				// For simplicity, we are not implementing recursive mkdir with SFTP here.
-				// A robust solution might require Exec("mkdir -p").
-				// This matches the previous behavior.
-				if err := s.sftpClient.Mkdir(parentDir); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to SFTP mkdir parent %s on host %s, continuing write attempt: %v\n", parentDir, s.connCfg.Host, err)
+				// Use Exec for robust recursive directory creation (non-sudo context for this helper)
+				mkdirCmd := fmt.Sprintf("mkdir -p %s", parentDir)
+				execCtx, execCancel := context.WithTimeout(ctx, 15*time.Second) // Use parent ctx for timeout
+				_, _, mkdirErr := s.Exec(execCtx, mkdirCmd, &ExecOptions{Sudo: false})
+				execCancel()
+				if mkdirErr != nil {
+					return fmt.Errorf("failed to create parent directory %s via exec on host %s: %w", parentDir, s.connCfg.Host, mkdirErr)
 				}
+			} else {
+				// Other stat errors (e.g., permission denied to stat parent) are problematic.
+				return fmt.Errorf("failed to stat parent directory %s on host %s: %w", parentDir, s.connCfg.Host, statErr)
 			}
-			// Other stat errors are ignored for parent dir, proceed to create.
 		}
+		// If statErr is nil, directory exists.
 	}
 
 	file, err := s.sftpClient.Create(destPath) // Create will truncate if file exists
@@ -502,19 +555,29 @@ func (s *SSHConnector) Remove(ctx context.Context, path string, opts RemoveOptio
 	cmd = fmt.Sprintf("rm %s %s", flags, path)
 
 	// Assuming no sudo for basic remove by connector. Runner would apply sudo if needed.
-	_, stderrBytes, err := s.Exec(ctx, cmd, &ExecOptions{Sudo: false})
-	if err != nil {
-		// If IgnoreNotExist is true, and error indicates "No such file or directory"
-		// This check can be fragile based on OS and rm version stderr messages.
-		// A more robust way might be to Stat first if IgnoreNotExist is true.
-		if opts.IgnoreNotExist {
-			// A common pattern for "No such file or directory"
-			// This is a heuristic and might need adjustment based on target OS.
-			if cmdErr, ok := err.(*CommandError); ok && (strings.Contains(cmdErr.Stderr, "No such file or directory") || (cmdErr.ExitCode == 1 && cmdErr.Stderr == "")) {
-				return nil // Suppress error as requested
-			}
+	// (Sudo should be part of ExecOptions if needed by caller)
+	execOpts := &ExecOptions{Sudo: false} // Default, caller can override via opts in a more generic Exec
+
+	if opts.IgnoreNotExist {
+		statCtx, statCancel := context.WithTimeout(ctx, 10*time.Second)
+		fileStat, statErr := s.Stat(statCtx, path)
+		statCancel()
+
+		if statErr == nil && fileStat != nil && !fileStat.IsExist {
+			return nil // File does not exist, success as per IgnoreNotExist
 		}
+		// If Stat itself had an error other than "not found", we might still want to proceed with rm,
+		// as rm -f is quite forgiving. Or, we could return statErr here if it's not an os.IsNotExist type.
+		// For now, if Stat says it exists, or Stat had an unrelated error, we proceed to rm.
+	}
+
+	_, stderrBytes, err := s.Exec(ctx, cmd, execOpts)
+	if err != nil {
+		// If IgnoreNotExist was true AND Stat indicated it existed (or Stat errored non-fatally),
+		// then an error from `rm` is a real error.
 		if cmdErr, ok := err.(*CommandError); ok {
+			// If IgnoreNotExist was true, but rm still failed (e.g. permission denied on existing file)
+			// that's a valid error to report. The Stat check above only handles "already not there".
 			return fmt.Errorf("failed to remove %s on %s (exit code %d): %w (stderr: %s)", path, s.connCfg.Host, cmdErr.ExitCode, err, cmdErr.Stderr)
 		}
 		return fmt.Errorf("failed to remove %s on %s: %w (stderr: %s)", path, s.connCfg.Host, err, string(stderrBytes))
