@@ -14,6 +14,7 @@ import (
 	"time" // Added import
 	"encoding/json" // Added for real JSON unmarshalling
 
+	"github.com/stretchr/testify/assert" // Added for testify assertions
 	"go.uber.org/zap" // For adding fields in test
 	// "go.uber.org/zap/zapcore" // Commented out as it became unused
 )
@@ -77,25 +78,37 @@ func TestNewLogger_ConsoleOutput(t *testing.T) {
 		logger.Info(testMsg)
 	})
 
-	if errCap != nil { t.Fatalf("Failed to capture stdout: %v", errCap) }
+	assert.NoError(t, errCap, "Failed to capture stdout")
 	// Allow for timestamp and caller by checking for Contains, not exact match at start
-	if !strings.Contains(output, expectedLevelPrefix) { t.Errorf("Console output missing level prefix. Got: %q, Expected to contain: %q", output, expectedLevelPrefix) }
-	if !strings.Contains(output, testMsg) { t.Errorf("Console output missing message. Got: %q, Expected to contain: %q", output, testMsg) }
+	assert.Contains(t, output, expectedLevelPrefix, "Console output missing level prefix.")
+	assert.Contains(t, output, testMsg, "Console output missing message.")
 }
 
 // TestNewLogger_FileOutput (as previously defined, ensure it still passes or adapt)
 func TestNewLogger_FileOutput(t *testing.T) {
 	// Reset global logger for this test
 	globalLogger = nil; once = sync.Once{}
-	tmpDir, _ := os.MkdirTemp("", "logtest"); defer os.RemoveAll(tmpDir)
+	tmpDir, errTmp := os.MkdirTemp("", "logtest");
+	assert.NoError(t, errTmp, "Failed to create temp dir")
+	defer os.RemoveAll(tmpDir)
+
 	logFilePath := filepath.Join(tmpDir, "test.log")
 	opts := DefaultOptions(); opts.FileLevel = InfoLevel; opts.LogFilePath = logFilePath; opts.FileOutput = true; opts.ConsoleOutput = false
-	// File output doesn't rely on stdout capture, so logger can be initialized outside.
-	logger, err := NewLogger(opts); if err != nil { t.Fatalf("NewLogger() error = %v", err) };
-	testMsg := "Test file message"; logger.Info(testMsg); logger.Debug("No debug in file"); logger.Sync() // Changed Infof to Info, Debugf to Debug
-	content, _ := os.ReadFile(logFilePath); logContent := string(content)
-	if !strings.Contains(logContent, testMsg) { t.Errorf("Log file missing message. Got: %q", logContent) }
-	if strings.Contains(logContent, "No debug in file") {t.Errorf("Log file contains debug. Content: %q", logContent)}
+
+	logger, errNew := NewLogger(opts);
+	assert.NoError(t, errNew, "NewLogger() error")
+	if errNew != nil { t.FailNow() } // Fail fast if logger creation failed
+
+	testMsg := "Test file message"; logger.Info(testMsg); logger.Debug("No debug in file");
+	errSync := logger.Sync()
+	assert.NoError(t, errSync, "Logger sync error")
+
+	content, errRead := os.ReadFile(logFilePath);
+	assert.NoError(t, errRead, "Failed to read log file")
+	logContent := string(content)
+
+	assert.Contains(t, logContent, testMsg, "Log file missing message.")
+	assert.NotContains(t, logContent, "No debug in file", "Log file contains debug.")
 }
 
 
@@ -199,49 +212,25 @@ func TestNewLogger_ColoredConsoleOutput_WithContextPrefix(t *testing.T) {
 			})
 
 			// Assertions remain outside the captureStdout func, using currentTC
-			if errCap != nil {
-				t.Fatalf("Failed to capture stdout for %s: %v", currentTC.name, errCap)
-			}
+			assert.NoError(t, errCap, "Failed to capture stdout for %s", currentTC.name)
 
 			// Skip further checks for levels that cause termination
 			if currentTC.level == FatalLevel || currentTC.level == PanicLevel || currentTC.level == FailLevel {
 				return
 			}
 
-			if !strings.Contains(output, currentTC.message) {
-				t.Errorf("Console output for %s missing message. Got: %q, Expected to contain: %q", currentTC.name, output, currentTC.message)
-			}
+			assert.Contains(t, output, currentTC.message, "Console output for %s missing message.", currentTC.name)
 
-			var expectedPrefixElements []string
 			if currentTC.expectedCtxPrefix != "" {
-				expectedPrefixElements = append(expectedPrefixElements, currentTC.expectedCtxPrefix)
-			}
-			expectedPrefixElements = append(expectedPrefixElements, currentTC.levelString)
-			// We will check for context prefix and level string separately in the raw output.
-			// fullExpectedPrefix := strings.Join(expectedPrefixElements, " ") // Not used directly anymore
-
-			// normalizedOutput := strings.Join(strings.Fields(output), " ") // Avoid normalization for prefix checks
-			// normalizedExpectedPrefix := strings.Join(strings.Fields(fullExpectedPrefix), " ")
-
-			if currentTC.expectedCtxPrefix != "" && !strings.Contains(output, currentTC.expectedCtxPrefix) {
-				t.Errorf("Console output for %s missing context prefix. Got: %q, Expected to contain: %q",
-					currentTC.name, output, currentTC.expectedCtxPrefix)
+				assert.Contains(t, output, currentTC.expectedCtxPrefix, "Console output for %s missing context prefix.", currentTC.name)
 			}
 
-			// Check for uncolored level string. Color check is separate.
-			// The tc.levelString is already like "[INFO]", "[SUCCESS]"
-			if !strings.Contains(output, currentTC.levelString) {
-				t.Errorf("Console output for %s missing level string. Got: %q, Expected to contain: %q",
-					currentTC.name, output, currentTC.levelString)
-			}
-
-			// The message check `!strings.Contains(output, currentTC.message)` is already present and correct.
+			// Check for uncolored level string.
+			assert.Contains(t, output, currentTC.levelString, "Console output for %s missing level string.", currentTC.name)
 
 			if currentTC.expectedColor != "" {
 				expectedColoredLevelString := currentTC.expectedColor + currentTC.levelString + colorReset
-				if !strings.Contains(output, expectedColoredLevelString) {
-					t.Errorf("Console output for %s missing expected color sequence %q around level. Got: %q", currentTC.name, expectedColoredLevelString, output)
-				}
+				assert.Contains(t, output, expectedColoredLevelString, "Console output for %s missing expected color sequence around level.", currentTC.name)
 			}
 		})
 	}
@@ -252,7 +241,7 @@ func TestNewLogger_ColoredConsoleOutput_WithContextPrefix(t *testing.T) {
 func TestLogLevelFiltering(t *testing.T) {
 	opts := DefaultOptions(); opts.ConsoleLevel = WarnLevel; opts.FileOutput = false; opts.ColorConsole = false
 	var output string
-	output, _ = captureStdout(func() {
+	output, errCap := captureStdout(func() {
 		// Logger instance created inside
 		logger, err := NewLogger(opts)
 		if err != nil {
@@ -262,8 +251,12 @@ func TestLogLevelFiltering(t *testing.T) {
 		logger.Debugf("%s", "debug_test"); logger.Infof("%s", "info_test"); logger.Successf("%s", "success_test");
 		logger.Warnf("%s", "warn_test"); logger.Errorf("%s", "error_test")
 	})
-	if strings.Contains(output, "debug_test") {t.Error("Contains DEBUG")}; if strings.Contains(output, "success_test") {t.Error("Contains SUCCESS")}; if strings.Contains(output, "info_test") {t.Error("Contains INFO")}
-	if !strings.Contains(output, "warn_test") {t.Errorf("Missing WARN. Got: %s", output)}; if !strings.Contains(output, "error_test") {t.Errorf("Missing ERROR. Got: %s", output)}
+	assert.NoError(t, errCap, "captureStdout error in TestLogLevelFiltering")
+	assert.NotContains(t, output, "debug_test", "Output contains DEBUG log")
+	assert.NotContains(t, output, "success_test", "Output contains SUCCESS log") // Success is Info level
+	assert.NotContains(t, output, "info_test", "Output contains INFO log")
+	assert.Contains(t, output, "warn_test", "Output missing WARN log")
+	assert.Contains(t, output, "error_test", "Output missing ERROR log")
 }
 
 // TestGlobalLogger (as previously defined, should still pass)
@@ -272,70 +265,57 @@ func TestGlobalLogger(t *testing.T) {
 	defer func() { globalLogger = originalGlobalLogger; once = originalOnce }()
 
 	opts1 := DefaultOptions(); opts1.ConsoleLevel = InfoLevel; opts1.FileOutput = false; opts1.ColorConsole = false
-	output1, _ := captureStdout(func() {
+	output1, errCap1 := captureStdout(func() {
 		globalLogger = nil; once = sync.Once{} // Reset global state
 		Init(opts1) // Init inside
 		defer SyncGlobal()
 		Info("%s", "Global logger test"); Success("%s", "Global success test")
 	})
+	assert.NoError(t, errCap1, "captureStdout error in TestGlobalLogger (output1)")
+	assert.Contains(t, output1, "[INFO]", "Global Info() log incorrect (level).")
+	assert.Contains(t, output1, "Global logger test", "Global Info() log incorrect (message).")
+	assert.Contains(t, output1, "[SUCCESS]", "Global Success() log incorrect (level).")
+	assert.Contains(t, output1, "Global success test", "Global Success() log incorrect (message).")
 
-	// Check for Info log components in output1
-	if !(strings.Contains(output1, "[INFO]") && strings.Contains(output1, "Global logger test")) {
-		t.Errorf("Global Info() log incorrect. Got: %s. Expected to contain '[INFO]' and 'Global logger test'", output1)
-	}
-	// Check for Success log components in output1
-	if !(strings.Contains(output1, "[SUCCESS]") && strings.Contains(output1, "Global success test")) {
-		t.Errorf("Global Success() log incorrect. Got: %s. Expected to contain '[SUCCESS]' and 'Global success test'", output1)
-	}
-
-	// Test that re-Init with different options is a no-op for the already initialized global logger's level
-	// if not reset. But here we are resetting.
+	// Test that re-Init with different options works after reset.
 	opts2 := DefaultOptions(); opts2.ConsoleLevel = DebugLevel; opts2.FileOutput = false; opts2.ColorConsole = false
-	output2, _ := captureStdout(func() {
+	output2, errCap2 := captureStdout(func() {
 		globalLogger = nil; once = sync.Once{} // Reset global state again
 		Init(opts2) // Init inside with different options
 		defer SyncGlobal()
-		// This Debug call should now respect opts2.ConsoleLevel (DebugLevel)
 		Debug("%s", "Global debug, should appear now")
 	})
-
-	// If Init(opts2) worked correctly after reset, Debug should appear.
-	if !strings.Contains(output2, "Global debug, should appear now") {
-		t.Error("Global Debug() did not appear after re-initializing with DebugLevel.")
-	}
+	assert.NoError(t, errCap2, "captureStdout error in TestGlobalLogger (output2)")
+	assert.Contains(t, output2, "Global debug, should appear now", "Global Debug() did not appear after re-initializing with DebugLevel.")
 
 	// Test stickiness: if we init with Info, then call Init with Debug *without* reset, Debug should still be filtered.
-	output3, _ := captureStdout(func() {
+	output3, errCap3 := captureStdout(func() {
 		globalLogger = nil; once = sync.Once{} // Reset
 		Init(opts1) // Init with InfoLevel
-		Init(opts2) // Attempt to Init with DebugLevel (should be no-op on globalLogger instance)
+		Init(opts2) // Attempt to Init with DebugLevel (should be no-op on globalLogger instance's level)
 		defer SyncGlobal()
 		Debug("%s", "Global debug, should NOT appear due to sticky InfoLevel")
 	})
-	if strings.Contains(output3, "Global debug, should NOT appear due to sticky InfoLevel") {
-		// This part of the test asserts that Debug log is NOT present.
-		t.Error("Global Debug() appeared after sticky Init. Expected InfoLevel to persist and filter Debug.")
-	} else {
-		// If the debug log is correctly filtered, this is a pass for this part.
-	}
+	assert.NoError(t, errCap3, "captureStdout error in TestGlobalLogger (output3)")
+	assert.NotContains(t, output3, "Global debug, should NOT appear due to sticky InfoLevel", "Global Debug() appeared after sticky Init. Expected InfoLevel to persist and filter Debug.")
 }
 
 // TestTimestampFormat (as previously defined, should still pass)
 func TestTimestampFormat(t *testing.T) {
 	customFormat := "2006/01/02_15:04:05"
 	opts := DefaultOptions(); opts.ConsoleLevel=InfoLevel; opts.FileOutput=false; opts.ColorConsole=false; opts.TimestampFormat=customFormat
-	output, _ := captureStdout(func(){
-		// For testing an instance logger, not the global one.
-		// globalLogger = nil; once = sync.Once{}; // Not strictly needed if we only use instance logger
+	output, errCap := captureStdout(func(){
 		logger, err := NewLogger(opts)
-		if err != nil {
-			panic(fmt.Sprintf("NewLogger err: %v",err)) // panic to fail test
+		assert.NoError(t, err, "NewLogger err in TestTimestampFormat")
+		if err != nil { // Ensure logger is not nil before using
+			return
 		}
-		defer logger.Sync()
+		// defer func() { assert.NoError(t, logger.Sync()) }() // Temporarily comment out Sync for diagnosis
 		logger.Infof("%s", "Timestamp test")
 	})
-	re := regexp.MustCompile(`\d{4}/\d{2}/\d{2}_\d{2}:\d{2}:\d{2}`);
-	if !re.MatchString(output) {t.Errorf("Timestamp wrong format %s. Got: %q", customFormat, output)}
+	assert.NoError(t, errCap, "captureStdout error in TestTimestampFormat")
+	re := regexp.MustCompile(`\d{4}/\d{2}/\d{2}_\d{2}:\d{2}:\d{2}`); // Regex for YYYY/MM/DD_HH:MM:SS
+	assert.Regexp(t, re, output, "Timestamp wrong format")
 }
 
 /*
@@ -405,68 +385,46 @@ func TestJSONFileOutputStructure(t *testing.T) {
 	// --- Verify first log entry (Successf) ---
 	var entry1 map[string]interface{}
 	// Use encoding/json directly
-	if err := json.Unmarshal([]byte(logEntries[0]), &entry1); err != nil {
-		t.Fatalf("Failed to unmarshal first log entry from JSON: %v. Entry: %s", err, logEntries[0])
-	}
+	err = json.Unmarshal([]byte(logEntries[0]), &entry1);
+	assert.NoError(t, err, "Failed to unmarshal first log entry from JSON. Entry: %s", logEntries[0])
+
 
 	// Check standard fields
-	if _, ok := entry1["time"]; !ok { t.Error("First entry: JSON log missing 'time' field") }
-	if lvl, ok := entry1["level"]; !ok || lvl.(string) != "INFO" { // SUCCESS is logged as INFO by Zap
-		t.Errorf("First entry: JSON log 'level' field = %v, want INFO (for SUCCESS)", entry1["level"])
-	}
-	if msg, ok := entry1["msg"]; !ok || !strings.Contains(msg.(string), "JSON structure test message: details here") {
-		t.Errorf("First entry: JSON log 'msg' field = %v, want contains 'JSON structure test message: details here'", entry1["msg"])
-	}
-	if _, ok := entry1["caller"]; !ok {t.Error("First entry: JSON log missing 'caller' field")}
+	assert.Contains(t, entry1, "time", "First entry: JSON log missing 'time' field")
+	assert.Equal(t, "INFO", entry1["level"], "First entry: JSON log 'level' field mismatch (for SUCCESS)")
+	assert.Contains(t, entry1["msg"], "JSON structure test message: details here", "First entry: JSON log 'msg' field mismatch")
+	assert.Contains(t, entry1, "caller", "First entry: JSON log missing 'caller' field")
 
-
-	// Check customlevel field (added by our logger for console, but also appears in JSON for *w methods)
-	if cl, ok := entry1["customlevel"]; !ok || cl.(string) != "SUCCESS" {
-		t.Errorf("First entry: JSON log 'customlevel' field = %v, want SUCCESS", entry1["customlevel"])
-	}
-
+	// Check customlevel field
+	assert.Equal(t, "SUCCESS", entry1["customlevel"], "First entry: JSON log 'customlevel' field mismatch")
 
 	// Check contextual fields passed via With()
-	if val, ok := entry1["pipeline_name"]; !ok || val.(string) != "json_test_pipe" {
-		t.Errorf("First entry: JSON log 'pipeline_name' field = %v, want 'json_test_pipe'", entry1["pipeline_name"])
-	}
-	if val, ok := entry1["module_name"]; !ok || val.(string) != "json_module" {
-		t.Errorf("First entry: JSON log 'module_name' field = %v, want 'json_module'", entry1["module_name"])
-	}
-	if val, ok := entry1["custom_key"]; !ok || val.(string) != "custom_value" {
-		t.Errorf("First entry: JSON log 'custom_key' field = %v, want 'custom_value'", entry1["custom_key"])
-	}
-	if val, ok := entry1["custom_int"]; !ok || int(val.(float64)) != 123 { // JSON unmarshals numbers to float64
-		t.Errorf("First entry: JSON log 'custom_int' field = %v, want 123", entry1["custom_int"])
-	}
-
+	assert.Equal(t, "json_test_pipe", entry1["pipeline_name"], "First entry: JSON log 'pipeline_name' field mismatch")
+	assert.Equal(t, "json_module", entry1["module_name"], "First entry: JSON log 'module_name' field mismatch")
+	assert.Equal(t, "custom_value", entry1["custom_key"], "First entry: JSON log 'custom_key' field mismatch")
+	assert.EqualValues(t, 123, entry1["custom_int"], "First entry: JSON log 'custom_int' field mismatch") // Use EqualValues for float64 vs int
 
 	// --- Verify second log entry (Debugf) ---
 	var entry2 map[string]interface{}
-	// Use encoding/json directly
-	if err := json.Unmarshal([]byte(logEntries[1]), &entry2); err != nil {
-		t.Fatalf("Failed to unmarshal second log entry from JSON: %v. Entry: %s", err, logEntries[1])
-	}
-	if lvl, ok := entry2["level"]; !ok || lvl.(string) != "DEBUG" {
-		t.Errorf("Second entry: JSON log 'level' field = %v, want DEBUG", entry2["level"])
-	}
+	err = json.Unmarshal([]byte(logEntries[1]), &entry2);
+	assert.NoError(t, err, "Failed to unmarshal second log entry from JSON. Entry: %s", logEntries[1])
+
+	assert.Equal(t, "DEBUG", entry2["level"], "Second entry: JSON log 'level' field mismatch")
 
 	expectedMsgPart := "Another JSON message with different context"
 	// This is what `fmt.Sprintf("%v", zap.String("host_name", "worker-x"))` produces
-	expectedMangledHostName := "{host_name 15 0 worker-x <nil>}"
+	expectedMangledHostName := "{host_name 15 0 worker-x <nil>}" // Note: KubeXMS logger likely uses a different field name than "host_name" for its contextual prefix logic. This test might need adjustment if "host_name" is a special context key.
+	                                                          // For JSON output of Debugf, the zap.String field becomes part of the formatted message string.
 	actualMsg, msgOk := entry2["msg"].(string)
-
-	if !msgOk || !strings.Contains(actualMsg, expectedMsgPart) || !strings.Contains(actualMsg, expectedMangledHostName) {
-		t.Errorf("Second entry: JSON log 'msg' field = %q, want contains %q and %q", actualMsg, expectedMsgPart, expectedMangledHostName)
-	}
+	assert.True(t, msgOk, "Second entry: 'msg' field is not a string")
+	assert.Contains(t, actualMsg, expectedMsgPart, "Second entry: JSON log 'msg' does not contain expected part.")
+	assert.Contains(t, actualMsg, expectedMangledHostName, "Second entry: JSON log 'msg' does not contain mangled host_name field.")
 
     // host_name will NOT be a separate field due to fmt.Sprintf in Debugf.
     // The assertion for its presence as a top-level field is removed.
 
     // Check that the original context from `log.With` is also present in the second message
-	if val, ok := entry2["pipeline_name"]; !ok || val.(string) != "json_test_pipe" {
-		t.Errorf("Second entry: JSON log 'pipeline_name' field = %v, want 'json_test_pipe' (inherited from With)", entry2["pipeline_name"])
-	}
+	assert.Equal(t, "json_test_pipe", entry2["pipeline_name"], "Second entry: JSON log 'pipeline_name' field mismatch (inherited from With)")
 }
 
 /* // Removing the mock json variable and its type as it's no longer used.
@@ -613,22 +571,12 @@ func TestLogger_With_ContextFields(t *testing.T) {
 		contextualLogger.Infof("%s", testMessage)
 	})
 
-	if errCap != nil {
-		t.Fatalf("Failed to capture stdout: %v", errCap)
-	}
+	assert.NoError(t, errCap, "Failed to capture stdout")
 
-	if !strings.Contains(consoleOutput, testMessage) {
-		t.Errorf("Console output missing message. Got: %q, Expected: %q", consoleOutput, testMessage)
-	}
-	if !strings.Contains(consoleOutput, expectedConsoleSubstring) {
-		t.Errorf("Console output missing base prefix and level. Got: %q, Expected to contain: %q", consoleOutput, expectedConsoleSubstring)
-	}
-	if !strings.Contains(consoleOutput, expectedConsoleFields) {
-		t.Errorf("Console output missing additional context fields. Got: %q, Expected to contain: %q", consoleOutput, expectedConsoleFields)
-	}
-	if strings.Contains(consoleOutput, "pipeline_name=test_pipeline") {
-		t.Errorf("Console output should not have pipeline_name as key=value, it's part of prefix. Got: %q", consoleOutput)
-	}
+	assert.Contains(t, consoleOutput, testMessage, "Console output missing message.")
+	assert.Contains(t, consoleOutput, expectedConsoleSubstring, "Console output missing base prefix and level.")
+	assert.Contains(t, consoleOutput, expectedConsoleFields, "Console output missing additional context fields.")
+	assert.NotContains(t, consoleOutput, "pipeline_name=test_pipeline", "Console output should not have pipeline_name as key=value, it's part of prefix.")
 
 	// Test file output
 	// Re-initialize global logger for file test if the above customInit was too disruptive,
@@ -656,22 +604,13 @@ func TestLogger_With_ContextFields(t *testing.T) {
 		t.Fatalf("Expected at least 1 log entry in file, got %d", len(logEntries))
 	}
 	// Use encoding/json directly
-	if err := json.Unmarshal([]byte(logEntries[0]), &fileEntry); err != nil {
-		t.Fatalf("Failed to unmarshal log entry from JSON: %v. Entry: %s", err, logEntries[0])
-	}
+	err = json.Unmarshal([]byte(logEntries[0]), &fileEntry)
+	assert.NoError(t, err, "Failed to unmarshal log entry from JSON. Entry: %s", logEntries[0])
 
-	if val, ok := fileEntry["component"]; !ok || val.(string) != "auth_service" {
-		t.Errorf("File log missing 'component' or wrong value. Got: %v", fileEntry["component"])
-	}
-	if val, ok := fileEntry["instance_id"]; !ok || int(val.(float64)) != 8080 {
-		t.Errorf("File log missing 'instance_id' or wrong value. Got: %v", fileEntry["instance_id"])
-	}
-	if val, ok := fileEntry["pipeline_name"]; !ok || val.(string) != "test_pipeline" {
-		t.Errorf("File log missing 'pipeline_name' (as a field). Got: %v", fileEntry["pipeline_name"])
-	}
-	if msg, ok := fileEntry["msg"]; !ok || !strings.Contains(msg.(string), testMessage) {
-		t.Errorf("File log 'msg' field = %v, want contains '%s'", fileEntry["msg"], testMessage)
-	}
+	assert.Equal(t, "auth_service", fileEntry["component"], "File log 'component' field mismatch.")
+	assert.EqualValues(t, 8080, fileEntry["instance_id"], "File log 'instance_id' field mismatch.") // Use EqualValues for float64 vs int
+	assert.Equal(t, "test_pipeline", fileEntry["pipeline_name"], "File log 'pipeline_name' field mismatch.")
+	assert.Contains(t, fileEntry["msg"], testMessage, "File log 'msg' field mismatch.")
 }
 
 func TestNewLogger_ErrorCases(t *testing.T) {
@@ -680,13 +619,10 @@ func TestNewLogger_ErrorCases(t *testing.T) {
 		opts.FileOutput = true
 		opts.LogFilePath = "" // Invalid configuration
 		_, err := NewLogger(opts)
-		if err == nil {
-			t.Error("Expected NewLogger to return an error for empty LogFilePath with FileOutput=true, but got nil")
-		} else {
+		assert.Error(t, err, "Expected NewLogger to return an error for empty LogFilePath with FileOutput=true")
+		if err != nil { // Check only if error is not nil
 			expectedErrorMsg := "log file path cannot be empty when file output is enabled"
-			if !strings.Contains(err.Error(), expectedErrorMsg) {
-				t.Errorf("Expected error message to contain '%s', got '%s'", expectedErrorMsg, err.Error())
-			}
+			assert.Contains(t, err.Error(), expectedErrorMsg, "Error message mismatch.")
 		}
 	})
 
@@ -771,20 +707,17 @@ func TestLogRotation(t *testing.T) {
 	// and ensuring backup files exist and have reasonable sizes.
 	// For this test, primarily verifying that rotation (multiple files) happens.
 	foundCurrentLog := false
-	for _, f := range files {
-		if filepath.Base(f) == logFileName {
+	for _, fPath := range files {
+		if filepath.Base(fPath) == logFileName {
 			foundCurrentLog = true
 			// Check if current log file is not empty
-			stat, errStat := os.Stat(f)
-			if errStat != nil {
-				t.Errorf("Could not stat current log file %s: %v", f, errStat)
-			} else if stat.Size() == 0 {
-				t.Errorf("Current log file %s is empty after logging", f)
+			stat, errStat := os.Stat(fPath)
+			assert.NoError(t, errStat, "Could not stat current log file %s", fPath)
+			if errStat == nil { // Proceed only if stat was successful
+				assert.Greater(t, stat.Size(), int64(0), "Current log file %s is empty after logging", fPath)
 			}
 			break
 		}
 	}
-	if !foundCurrentLog {
-		t.Errorf("Current log file %s not found in list: %v", logFileName, files)
-	}
+	assert.True(t, foundCurrentLog, "Current log file %s not found in list: %v", logFileName, files)
 }
