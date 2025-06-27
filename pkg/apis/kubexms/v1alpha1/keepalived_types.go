@@ -84,19 +84,13 @@ func Validate_KeepalivedConfig(cfg *KeepalivedConfig, verrs *ValidationErrors, p
 		verrs.Add("%s.interface: network interface must be specified", pathPrefix)
 	}
 
+	// AuthType is defaulted to "PASS", so cfg.AuthType will not be nil if defaults were applied.
 	validAuthTypes := []string{"PASS", "AH"}
-	isAuthTypeValid := false
-	if cfg.AuthType != nil { // AuthType is defaulted to "PASS", so it won't be nil here.
-		isAuthTypeValid = containsString(validAuthTypes, *cfg.AuthType)
-	}
-	// The default ensures AuthType is "PASS", which is valid.
-	// This check is mainly for user-provided invalid values.
-	if !isAuthTypeValid && cfg.AuthType != nil { // only error if user provided something invalid
+	if !containsString(validAuthTypes, *cfg.AuthType) {
 		verrs.Add("%s.authType: invalid value '%s', must be one of %v", pathPrefix, *cfg.AuthType, validAuthTypes)
 	}
 
-
-	if cfg.AuthType != nil && *cfg.AuthType == "PASS" {
+	if *cfg.AuthType == "PASS" {
 		if cfg.AuthPass == nil || strings.TrimSpace(*cfg.AuthPass) == "" {
 			verrs.Add("%s.authPass: must be specified if authType is 'PASS'", pathPrefix)
 		} else if len(*cfg.AuthPass) > 8 {

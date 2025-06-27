@@ -3,52 +3,47 @@ package v1alpha1
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-// Helper for Keepalived tests
-func pintKeepalived(i int) *int { v := i; return &v }
-func pstrKeepalived(s string) *string { v := s; return &v }
-func pboolKeepalived(b bool) *bool { v := b; return &v }
+// Local helpers removed, using global ones from zz_helpers.go (e.g. intPtr, stringPtr, boolPtr)
 
 func TestSetDefaults_KeepalivedConfig(t *testing.T) {
 	cfg := &KeepalivedConfig{}
 	SetDefaults_KeepalivedConfig(cfg)
-	if cfg.AuthType == nil || *cfg.AuthType != "PASS" {
-		t.Errorf("Default AuthType failed, got %v", cfg.AuthType)
-	}
-	if cfg.SkipInstall == nil || *cfg.SkipInstall != false {
-		t.Errorf("Default SkipInstall failed, got %v", cfg.SkipInstall)
-	}
-	if cfg.ExtraConfig == nil || cap(cfg.ExtraConfig) != 0 {
-		t.Errorf("Default ExtraConfig failed, got %v", cfg.ExtraConfig)
-	}
+
+	assert.NotNil(t, cfg.AuthType, "AuthType should be defaulted")
+	assert.Equal(t, "PASS", *cfg.AuthType, "Default AuthType failed")
+
+	assert.NotNil(t, cfg.SkipInstall, "SkipInstall should be defaulted")
+	assert.False(t, *cfg.SkipInstall, "Default SkipInstall failed")
+
+	assert.NotNil(t, cfg.ExtraConfig, "ExtraConfig should be initialized")
+	assert.Len(t, cfg.ExtraConfig, 0, "ExtraConfig should be empty by default")
 }
 
 func TestValidate_KeepalivedConfig(t *testing.T) {
 	validCfg := KeepalivedConfig{
-		VRID:      pintKeepalived(51),
-		Priority:  pintKeepalived(101),
-		Interface: pstrKeepalived("eth0"),
-		AuthType:  pstrKeepalived("PASS"),
-		AuthPass:  pstrKeepalived("secret"),
+		VRID:      intPtr(51),
+		Priority:  intPtr(101),
+		Interface: stringPtr("eth0"),
+		AuthType:  stringPtr("PASS"), // Will be defaulted if nil, but explicit for clarity
+		AuthPass:  stringPtr("secret"),
 	}
 	// Apply defaults to fill in SkipInstall, etc.
 	SetDefaults_KeepalivedConfig(&validCfg)
 
 	verrs := &ValidationErrors{}
 	Validate_KeepalivedConfig(&validCfg, verrs, "keepalived")
-	if !verrs.IsEmpty() {
-		t.Errorf("Validation failed for valid config: %v", verrs)
-	}
+	assert.True(t, verrs.IsEmpty(), "Validation failed for valid config: %v", verrs.Error())
 
 	// Test SkipInstall
-	skipInstallCfg := KeepalivedConfig{SkipInstall: pboolKeepalived(true)}
-	SetDefaults_KeepalivedConfig(&skipInstallCfg)
+	skipInstallCfg := KeepalivedConfig{SkipInstall: boolPtr(true)}
+	SetDefaults_KeepalivedConfig(&skipInstallCfg) // Ensure other defaults like AuthType are set
 	verrsSkip := &ValidationErrors{}
 	Validate_KeepalivedConfig(&skipInstallCfg, verrsSkip, "keepalived")
-	if !verrsSkip.IsEmpty() {
-		t.Errorf("Validation should pass (mostly skipped) if SkipInstall is true: %v", verrsSkip)
-	}
+	assert.True(t, verrsSkip.IsEmpty(), "Validation should pass (mostly skipped) if SkipInstall is true: %v", verrsSkip.Error())
 
 
 	tests := []struct {
@@ -56,27 +51,35 @@ func TestValidate_KeepalivedConfig(t *testing.T) {
 		cfg        KeepalivedConfig
 		wantErrMsg string
 	}{
-		{"nil_vrid", KeepalivedConfig{Priority: pintKeepalived(100), Interface: pstrKeepalived("eth0")}, ".vrid: virtual router ID must be specified"},
-		{"bad_vrid_low", KeepalivedConfig{VRID: pintKeepalived(-1)}, ".vrid: must be between 0 and 255"},
-		{"bad_vrid_high", KeepalivedConfig{VRID: pintKeepalived(256)}, ".vrid: must be between 0 and 255"},
-		{"nil_priority", KeepalivedConfig{VRID: pintKeepalived(50), Interface: pstrKeepalived("eth0")}, ".priority: must be specified"},
-		{"bad_priority_low", KeepalivedConfig{Priority: pintKeepalived(0)}, ".priority: must be between 1 and 254"},
-		{"bad_priority_high", KeepalivedConfig{Priority: pintKeepalived(255)}, ".priority: must be between 1 and 254"},
-		{"nil_interface", KeepalivedConfig{VRID: pintKeepalived(50), Priority: pintKeepalived(100)}, ".interface: network interface must be specified"},
-		{"empty_interface", KeepalivedConfig{Interface: pstrKeepalived(" ")}, ".interface: network interface must be specified"},
-		{"invalid_auth_type", KeepalivedConfig{AuthType: pstrKeepalived("NONE")}, "invalid value 'NONE'"},
-		{"pass_auth_no_pass", KeepalivedConfig{AuthType: pstrKeepalived("PASS"), AuthPass: pstrKeepalived(" ")}, ".authPass: must be specified if authType is 'PASS'"},
-		{"pass_auth_long_pass", KeepalivedConfig{AuthType: pstrKeepalived("PASS"), AuthPass: pstrKeepalived("longpassword")}, ".authPass: password too long"},
-		{"ah_auth_with_pass", KeepalivedConfig{AuthType: pstrKeepalived("AH"), AuthPass: pstrKeepalived("secret")}, ".authPass: should not be specified if authType is 'AH'"},
+		{"nil_vrid", KeepalivedConfig{Priority: intPtr(100), Interface: stringPtr("eth0")}, ".vrid: virtual router ID must be specified"},
+		{"bad_vrid_low", KeepalivedConfig{VRID: intPtr(-1)}, ".vrid: must be between 0 and 255"},
+		{"bad_vrid_high", KeepalivedConfig{VRID: intPtr(256)}, ".vrid: must be between 0 and 255"},
+		{"nil_priority", KeepalivedConfig{VRID: intPtr(50), Interface: stringPtr("eth0")}, ".priority: must be specified"},
+		{"bad_priority_low", KeepalivedConfig{Priority: intPtr(0)}, ".priority: must be between 1 and 254"},
+		{"bad_priority_high", KeepalivedConfig{Priority: intPtr(255)}, ".priority: must be between 1 and 254"},
+		{"nil_interface", KeepalivedConfig{VRID: intPtr(50), Priority: intPtr(100)}, ".interface: network interface must be specified"},
+		{"empty_interface", KeepalivedConfig{Interface: stringPtr(" ")}, ".interface: network interface must be specified"},
+		{"invalid_auth_type", KeepalivedConfig{AuthType: stringPtr("NONE")}, "invalid value 'NONE'"}, // AuthType will be defaulted to PASS if nil, so this must be explicitly wrong
+		{"pass_auth_no_pass", KeepalivedConfig{AuthType: stringPtr("PASS"), AuthPass: stringPtr(" ")}, ".authPass: must be specified if authType is 'PASS'"},
+		{"pass_auth_long_pass", KeepalivedConfig{AuthType: stringPtr("PASS"), AuthPass: stringPtr("longpassword")}, ".authPass: password too long"},
+		{"ah_auth_with_pass", KeepalivedConfig{AuthType: stringPtr("AH"), AuthPass: stringPtr("secret")}, ".authPass: should not be specified if authType is 'AH'"},
 		{"empty_extra_config_line", KeepalivedConfig{ExtraConfig: []string{" "}}, ".extraConfig[0]: extra config line cannot be empty"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Ensure mandatory fields for other checks are set to valid values to isolate the test
-			if tt.cfg.VRID == nil && !strings.Contains(tt.name, "vrid") { tt.cfg.VRID = pintKeepalived(1) }
-			if tt.cfg.Priority == nil && !strings.Contains(tt.name, "priority") { tt.cfg.Priority = pintKeepalived(100) }
-			if tt.cfg.Interface == nil && !strings.Contains(tt.name, "interface") { tt.cfg.Interface = pstrKeepalived("net1") }
+			if tt.cfg.VRID == nil && !strings.Contains(tt.name, "vrid") { tt.cfg.VRID = intPtr(1) }
+			if tt.cfg.Priority == nil && !strings.Contains(tt.name, "priority") { tt.cfg.Priority = intPtr(100) }
+			if tt.cfg.Interface == nil && !strings.Contains(tt.name, "interface") { tt.cfg.Interface = stringPtr("net1") }
+			// AuthType is defaulted so it will always be present. If testing AuthType, it should be explicitly set in `cfg`.
+			// If AuthType is "PASS" (default or explicit), AuthPass is needed.
+			if tt.cfg.AuthType == nil || *tt.cfg.AuthType == "PASS" { // Handle default case for AuthPass
+				if tt.cfg.AuthPass == nil && !strings.Contains(tt.name, "auth_no_pass") && !strings.Contains(tt.name, "auth_long_pass") {
+					tt.cfg.AuthPass = stringPtr("default")
+				}
+			}
+
 
 			// Apply defaults AFTER potentially setting fields for a specific test case
 			// This ensures that default AuthType doesn't mask an AuthType test, for example.

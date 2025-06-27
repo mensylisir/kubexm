@@ -36,17 +36,17 @@ func SetDefaults_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig) {
 	// Version might be defaulted based on chosen type or a global default.
 	// For now, assume version is explicitly set or handled by higher-level logic.
 
-	if cfg.Type == ContainerRuntimeDocker && cfg.Docker == nil {
-		cfg.Docker = &DockerConfig{}
-	}
-	if cfg.Docker != nil {
+	if cfg.Type == ContainerRuntimeDocker {
+		if cfg.Docker == nil {
+			cfg.Docker = &DockerConfig{}
+		}
 		SetDefaults_DockerConfig(cfg.Docker)
 	}
 
-	if cfg.Type == ContainerRuntimeContainerd && cfg.Containerd == nil {
-		cfg.Containerd = &ContainerdConfig{}
-	}
-	if cfg.Containerd != nil {
+	if cfg.Type == ContainerRuntimeContainerd {
+		if cfg.Containerd == nil {
+			cfg.Containerd = &ContainerdConfig{}
+		}
 		SetDefaults_ContainerdConfig(cfg.Containerd)
 	}
 }

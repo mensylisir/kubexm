@@ -2,7 +2,11 @@ package v1alpha1
 
 import "strings"
 
-// AddonConfig defines the configuration for a single addon.
+// AddonConfig defines the detailed configuration for a single addon.
+// This struct is typically used when a more fine-grained configuration for addons is needed,
+// potentially managed separately or through a dedicated 'addons' section in the cluster YAML
+// that allows for more than just enabling/disabling by name (as seen in ClusterSpec.Addons which is []string).
+// It allows specifying sources like Helm charts or YAML manifests, along with other parameters.
 type AddonConfig struct {
 	Name    string `json:"name"`
 	Enabled *bool  `json:"enabled,omitempty"` // Pointer for optionality, defaults to true or based on addon
