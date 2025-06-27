@@ -3352,6 +3352,86 @@ func Validate_PreflightConfig(cfg *PreflightConfig, verrs *ValidationErrors, pat
 
    这为高级用户提供了必要的灵活性，避免了预检系统过于死板。
 
+
+### dns_types.go
+```
+package v1alpha1
+
+type DNS struct {
+	DNSEtcHosts  string       `yaml:"dnsEtcHosts" json:"dnsEtcHosts"`
+	NodeEtcHosts string       `yaml:"nodeEtcHosts" json:"nodeEtcHosts,omitempty"`
+	CoreDNS      CoreDNS      `yaml:"coredns" json:"coredns"`
+	NodeLocalDNS NodeLocalDNS `yaml:"nodelocaldns" json:"nodelocaldns"`
+}
+
+type CoreDNS struct {
+	AdditionalConfigs  string         `yaml:"additionalConfigs" json:"additionalConfigs"`
+	ExternalZones      []ExternalZone `yaml:"externalZones" json:"externalZones"`
+	RewriteBlock       string         `yaml:"rewriteBlock" json:"rewriteBlock"`
+	UpstreamDNSServers []string       `yaml:"upstreamDNSServers" json:"upstreamDNSServers"`
+}
+
+type NodeLocalDNS struct {
+	ExternalZones []ExternalZone `yaml:"externalZones" json:"externalZones"`
+}
+
+type ExternalZone struct {
+	Zones       []string `yaml:"zones" json:"zones"`
+	Nameservers []string `yaml:"nameservers" json:"nameservers"`
+	Cache       int      `yaml:"cache" json:"cache"`
+	Rewrite     []string `yaml:"rewrite" json:"rewrite"`
+}```
+
+
+这是一个非常专业和典型的 API 设计，下面我对它的分析和评估：
+
+### 结构解析 (Structure Analysis)
+
+1. **DNS (顶层结构):**
+   - 这是总的配置入口，非常清晰。它将所有DNS相关的配置聚合在一个地方。
+   - DNSEtcHosts / NodeEtcHosts: 提供了两种主机文件（hosts file）的配置方式，可能是为了区分应用到Pod内部的hosts和应用到节点本身的hosts，这种区分很实用。omitempty标签的使用也很标准，表示NodeEtcHosts是可选的。
+   - CoreDNS: 这是一个嵌套结构，专门用于配置 CoreDNS。这是一种很好的设计模式，将一个复杂组件的配置内聚到自己的模块里。
+   - NodeLocalDNS: 同上，专门用于配置 node-local-dns，这是 Kubernetes 中常用的一个提升DNS性能的插件。
+2. **CoreDNS (CoreDNS 配置):**
+   - AdditionalConfigs 和 RewriteBlock: 这两个 string 类型的字段是设计的亮点。它们提供了**“逃生舱口” (escape hatch)**，允许用户注入原生的、自由格式的 CoreDNS Corefile 配置片段。这极大地增强了灵活性，因为你不可能用结构化字段覆盖所有CoreDNS的插件和高级用法。
+   - ExternalZones: 定义了一组外部DNS区域的特殊处理规则，这是实现**分离DNS (Split DNS)** 的关键。
+   - UpstreamDNSServers: 用于定义上游DNS服务器，这是最基本也最重要的配置之一。
+3. **NodeLocalDNS (NodeLocalDNS 配置):**
+   - 它复用了 ExternalZone 结构，这是一个非常好的实践（DRY - Don't Repeat Yourself）。这表明 node-local-dns 也可以有针对特定外部域的转发策略。
+4. **ExternalZone (外部区域配置):**
+   - 这是最精细的配置单元，功能非常强大。
+   - Zones: 匹配的域名列表。
+   - Nameservers: **条件转发**，指定当查询匹配 Zones 里的域名时，应该去问哪些特定的DNS服务器。
+   - Cache: 为这个特定的区域设置缓存时间，提供了细粒度的缓存控制。
+   - Rewrite: 允许对特定区域的查询进行重写，功能非常高级。
+
+### 设计评估 (Design Evaluation)
+
+#### 优点 (Strengths):
+
+1. **结构清晰，高内聚**: 配置按功能（CoreDNS, NodeLocalDNS, External Zones）组织，可读性高，易于理解和维护。
+2. **表达力强**: 覆盖了从基础（上游服务器）到高级（条件转发、重写、自定义配置块）的绝大多数DNS配置场景。
+3. **兼具结构化与灵活性**: 大部分配置是结构化的（如 UpstreamDNSServers），这易于校验和程序处理。同时，通过 AdditionalConfigs 等自由文本字段，保留了应对复杂、未知场景的灵活性。
+4. **符合API设计最佳实践**:
+   - 使用 v1alpha1 表明了API的生命周期阶段，告知用户这是早期版本，可能会有不兼容的变更。
+   - 使用了 yaml 和 json 标签，明确了序列化/反序列化的格式，这是Go应用配置的标准做法。
+   - 通过复用 ExternalZone 结构，避免了代码重复。
+
+#### 潜在的改进点或思考 (Potential Improvements / Considerations):
+
+1. **文档**: 当前代码没有注释。为每个字段添加Go Doc注释（// ...）来说明其用途、示例值和注意事项，对于API的使用者来说至关重要。
+2. **校验 (Validation)**: 这个结构定义本身不包含校验逻辑。在实际应用中，你需要配套的校验代码（或使用像 kubebuilder 的 // +kubebuilder:validation 标记）来确保：
+   - Nameservers 里的字符串是合法的IP地址。
+   - Cache 的值是一个合理的正整数。
+   - Zones 里的域名格式正确。
+3. **ExternalZone.Rewrite 的类型**: []string 有一点模糊。如果重写规则有固定的格式（例如 from_pattern to_pattern），可以考虑定义一个更具体的结构，如 type RewriteRule struct { From stringyaml:"from"; To stringyaml:"to"}，这样结构更清晰，也更容易校验。
+
+### 总结
+
+**这是一个非常优秀、专业且实用的DNS配置API设计。**
+
+它平衡了易用性、功能强大性和未来可扩展性。任何熟悉云原生DNS体系的人都能很快理解它的意图。除了补充文档和校验逻辑之外，这个设计本身几乎没有什么可以挑剔的地方，完全可以作为生产级项目的API蓝本。
+
 ### 总结 (Conclusion)
 
 **这是一个简洁、实用且具有前瞻性的API设计。**
@@ -3403,13 +3483,13 @@ type Cluster struct {
 
 // ClusterSpec defines the desired state of the Kubernetes cluster.
 type ClusterSpec struct {
-	Type                 string                    `json:"type,omitempty" yaml:"type,omitempty"` // "kubexm" or "kubeadm"
 	Hosts                []HostSpec                `json:"hosts" yaml:"hosts"`
 	RoleGroups           *RoleGroupsSpec           `json:"roleGroups,omitempty" yaml:"roleGroups,omitempty"`
 	Global               *GlobalSpec               `json:"global,omitempty" yaml:"global,omitempty"`
 	System               *SystemSpec               `json:"system,omitempty" yaml:"system,omitempty"`
 	Kubernetes           *KubernetesConfig         `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"`
 	Etcd                 *EtcdConfig               `json:"etcd,omitempty" yaml:"etcd,omitempty"`
+	DNS                  DNS                        `yaml:"dns" json:"dns,omitempty"`
 	ContainerRuntime     *ContainerRuntimeConfig   `json:"containerRuntime,omitempty" yaml:"containerRuntime,omitempty"`
 	Network              *NetworkConfig            `json:"network,omitempty" yaml:"network,omitempty"`
 	ControlPlaneEndpoint *ControlPlaneEndpointSpec `json:"controlPlaneEndpoint,omitempty" yaml:"controlPlaneEndpoint,omitempty"`
