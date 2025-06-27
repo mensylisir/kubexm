@@ -130,9 +130,13 @@ func Validate_KubeVIPConfig(cfg *KubeVIPConfig, verrs *ValidationErrors, pathPre
 	   } else {
 		   // Basic BGP config validation
 		   bp := pathPrefix + ".bgpConfig"
-		   if strings.TrimSpace(cfg.BGPConfig.RouterID) == "" && !isValidIP(cfg.BGPConfig.RouterID) { // RouterID can be IP or string
-			   // Kube-VIP might allow non-IP router ID. Relaxing this for now.
-			   // verrs.Add("%s.routerID: must be a valid IP address if not a unique string", bp)
+		   if strings.TrimSpace(cfg.BGPConfig.RouterID) == "" {
+			   verrs.Add("%s.routerID: router ID must be specified for BGP mode", bp)
+			   // Kube-VIP might allow non-IP router ID, so primary check is for non-emptiness.
+			   // Further validation if it must be an IP could be added if strictness is required:
+			   // else if !isValidIP(cfg.BGPConfig.RouterID) {
+			   //    verrs.Add("%s.routerID: if specified, must be a valid IP address (or KubeVIP specific format)", bp)
+			   // }
 		   }
 		   if cfg.BGPConfig.ASN == 0 { verrs.Add("%s.asn: local ASN must be specified for BGP mode", bp)}
 		   if cfg.BGPConfig.PeerASN == 0 { verrs.Add("%s.peerASN: peer ASN must be specified for BGP mode", bp)}

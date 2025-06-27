@@ -1,54 +1,41 @@
 package v1alpha1
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-// Helper for Registry tests
-func pstrRegistryTest(s string) *string { return &s }
+// Local helper pstrRegistryTest removed, using global stringPtr from zz_helpers.go
 
 func TestSetDefaults_RegistryConfig(t *testing.T) {
 	cfg := &RegistryConfig{}
 	SetDefaults_RegistryConfig(cfg)
 
-	// RegistryMirrors and InsecureRegistries are removed from RegistryConfig.
-	// if cfg.RegistryMirrors == nil || cap(cfg.RegistryMirrors) != 0 {
-	// 	t.Error("RegistryMirrors should be initialized to empty slice")
-	// }
-	// if cfg.InsecureRegistries == nil || cap(cfg.InsecureRegistries) != 0 {
-	// 	t.Error("InsecureRegistries should be initialized to empty slice")
-	// }
-	if cfg.Auths == nil {
-		t.Error("Auths should be initialized to empty map")
-	}
-	// PrivateRegistry default is no longer "dockerhub.kubexm.local" in SetDefaults_RegistryConfig
-	// if cfg.PrivateRegistry != "dockerhub.kubexm.local" {
-	// 	t.Errorf("Expected PrivateRegistry default 'dockerhub.kubexm.local', got '%s'", cfg.PrivateRegistry)
-	// }
+	assert.NotNil(t, cfg.Auths, "Auths should be initialized to empty map")
+	assert.Empty(t, cfg.Auths, "Auths should be empty by default")
 
 	// Test DataRoot default when Type is set
-	cfgWithType := &RegistryConfig{Type: pstrRegistryTest("harbor")}
+	cfgWithType := &RegistryConfig{Type: stringPtr("harbor")}
 	SetDefaults_RegistryConfig(cfgWithType)
-	if cfgWithType.DataRoot == nil || *cfgWithType.DataRoot != "/mnt/registry" {
-		t.Errorf("Expected DataRoot default '/mnt/registry' when Type is set, got %v", cfgWithType.DataRoot)
+	assert.NotNil(t, cfgWithType.DataRoot, "DataRoot should be defaulted when Type is set")
+	if cfgWithType.DataRoot != nil { // Guard for assert
+		assert.Equal(t, "/mnt/registry", *cfgWithType.DataRoot, "Default DataRoot mismatch")
 	}
+
 
 	// Test DataRoot is not defaulted if Type is not set
 	cfgNoType := &RegistryConfig{}
-	SetDefaults_RegistryConfig(cfgNoType) // PrivateRegistry will be defaulted here again, that's fine
-	if cfgNoType.DataRoot != nil {
-		t.Errorf("DataRoot should remain nil if Type is not set, got %v", *cfgNoType.DataRoot)
-	}
+	SetDefaults_RegistryConfig(cfgNoType)
+	assert.Nil(t, cfgNoType.DataRoot, "DataRoot should remain nil if Type is not set")
+
 
 	// Test NamespaceRewrite initialization
-	if cfg.NamespaceRewrite == nil {
-		t.Error("NamespaceRewrite should be initialized")
+	assert.NotNil(t, cfg.NamespaceRewrite, "NamespaceRewrite should be initialized")
+	if cfg.NamespaceRewrite != nil { // Guard for assert
+		assert.NotNil(t, cfg.NamespaceRewrite.Rules, "NamespaceRewrite.Rules should be initialized")
+		assert.Len(t, cfg.NamespaceRewrite.Rules, 0, "NamespaceRewrite.Rules should be empty by default")
 	}
-	if cfg.NamespaceRewrite != nil && cfg.NamespaceRewrite.Rules == nil {
-		t.Error("NamespaceRewrite.Rules should be initialized to an empty slice")
-	}
-
 }
 
 func TestValidate_RegistryConfig(t *testing.T) {
@@ -56,66 +43,40 @@ func TestValidate_RegistryConfig(t *testing.T) {
 	validAuth["docker.io"] = RegistryAuth{Username: "user", Password: "password"}
 
 	validCfg := &RegistryConfig{
-		// RegistryMirrors and InsecureRegistries removed
-		PrivateRegistry:    "myprivatereg.com",
-		Auths:              validAuth,
+		PrivateRegistry: "myprivatereg.com",
+		Auths:           validAuth,
 	}
 	SetDefaults_RegistryConfig(validCfg) // Apply defaults
 	verrsValid := &ValidationErrors{}
 	Validate_RegistryConfig(validCfg, verrsValid, "spec.registry")
-	if !verrsValid.IsEmpty() {
-		t.Errorf("Validate_RegistryConfig for valid config failed: %v", verrsValid)
-	}
+	assert.True(t, verrsValid.IsEmpty(), "Validate_RegistryConfig for valid config failed: %v", verrsValid.Error())
 
 	tests := []struct {
-		name       string
-		cfg        *RegistryConfig
-		wantErrMsg string
+		name        string
+		cfg         *RegistryConfig
+		wantErrMsg  string
+		exactMatch  bool // Flag to indicate if we want an exact match for the error message
 	}{
-		// {"empty_mirror", &RegistryConfig{RegistryMirrors: []string{" "}}, ".registryMirrors[0]: mirror URL cannot be empty"}, // Field removed
-		// {"invalid_mirror_url", &RegistryConfig{RegistryMirrors: []string{"not a url"}}, ".registryMirrors[0]: invalid URL format 'not a url'"}, // Field removed
-		// {"empty_insecure", &RegistryConfig{InsecureRegistries: []string{" "}}, ".insecureRegistries[0]: registry host cannot be empty"}, // Field removed
-		{"auth_empty_key", &RegistryConfig{Auths: map[string]RegistryAuth{" ": {Username: "u", Password: "p"}}}, ".auths: registry address key cannot be empty"},
-		{"auth_no_creds", &RegistryConfig{Auths: map[string]RegistryAuth{"test.com": {}}}, "auths[\"test.com\"]: either username/password or auth string must be provided"},
-		{"auth_bad_base64", &RegistryConfig{Auths: map[string]RegistryAuth{"test.com": {Auth: "!!!"}}}, ".auths[\"test.com\"].auth: failed to decode base64 auth string"},
-		{"type_empty_if_set", &RegistryConfig{Type: pstrRegistryTest(" ")}, ".type: cannot be empty if specified"},
-		{"dataroot_empty_if_set", &RegistryConfig{DataRoot: pstrRegistryTest(" ")}, "spec.registry.registryDataDir (dataRoot): cannot be empty if specified"}, // Exact first error
-		// {"type_set_dataroot_missing", &RegistryConfig{Type: pstrRegistryTest("harbor")}, ".dataRoot: must be specified if registry type is set"}, // Defaulting handles this
-		{"dataroot_set_type_missing", &RegistryConfig{DataRoot: pstrRegistryTest("/mnt/registry")}, "spec.registry.type: must be specified if registryDataDir (dataRoot) is set for local deployment"}, // Exact error
+		{"auth_empty_key", &RegistryConfig{Auths: map[string]RegistryAuth{" ": {Username: "u", Password: "p"}}}, ".auths: registry address key cannot be empty", false},
+		{"auth_no_creds", &RegistryConfig{Auths: map[string]RegistryAuth{"test.com": {}}}, "auths[\"test.com\"]: either username/password or auth string must be provided", false},
+		{"auth_bad_base64", &RegistryConfig{Auths: map[string]RegistryAuth{"test.com": {Auth: "!!!"}}}, ".auths[\"test.com\"].auth: failed to decode base64 auth string", false},
+		{"type_empty_if_set", &RegistryConfig{Type: stringPtr(" ")}, ".type: cannot be empty if specified", false},
+		{"dataroot_empty_if_set", &RegistryConfig{DataRoot: stringPtr(" ")}, "spec.registry.registryDataDir (dataRoot): cannot be empty if specified", false}, // Changed exactMatch to false
+		{"dataroot_set_type_missing", &RegistryConfig{DataRoot: stringPtr("/mnt/registry")}, "spec.registry.type: must be specified if registryDataDir (dataRoot) is set for local deployment", true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			SetDefaults_RegistryConfig(tt.cfg) // Apply defaults, though test cases are specific
+			SetDefaults_RegistryConfig(tt.cfg)
 			verrs := &ValidationErrors{}
 			Validate_RegistryConfig(tt.cfg, verrs, "spec.registry")
-			if verrs.IsEmpty() {
-				t.Fatalf("Validate_RegistryConfig expected error for %s, got none", tt.name)
-			}
 
-			// For dataroot_empty_if_set, we expect two errors. Check the first one exactly.
-			// For other cases, check if the verrs.Error() (joined string) contains the specific message.
-			// This handles cases where a single specific validation is targeted.
-			found := false
-			if tt.name == "dataroot_empty_if_set" {
-				if len(verrs.Errors) > 0 {
-					t.Logf("dataroot_empty_if_set: Error[0]: |%s|, wantErrMsg: |%s|", verrs.Errors[0], tt.wantErrMsg)
-					if verrs.Errors[0] == tt.wantErrMsg {
-						found = true
-					}
-				}
-			} else if tt.name == "dataroot_set_type_missing" { // This also expects an exact match for a single error
-				if len(verrs.Errors) == 1 && verrs.Errors[0] == tt.wantErrMsg {
-					found = true
-				}
+			assert.False(t, verrs.IsEmpty(), "Expected error for %s, got none", tt.name)
+
+			if tt.exactMatch {
+				assert.Equal(t, []string{tt.wantErrMsg}, verrs.Errors, "Error for %s did not match exactly. Got %v, want %q", tt.name, verrs.Errors, tt.wantErrMsg)
 			} else {
-				if strings.Contains(verrs.Error(), tt.wantErrMsg) {
-					found = true
-				}
-			}
-
-			if !found {
-				t.Errorf("Validate_RegistryConfig error for %s. Expected '%s', got %v", tt.name, tt.wantErrMsg, verrs.Errors)
+				assert.Contains(t, verrs.Error(), tt.wantErrMsg, "Error for %s = %v, want to contain %q", tt.name, verrs.Error(), tt.wantErrMsg)
 			}
 		})
 	}

@@ -56,6 +56,6 @@ func Validate_CiliumConfig(cfg *CiliumConfig, verrs *ValidationErrors, pathPrefi
 		// if defaulting logic changes or isn't applied prior to validation in some scenarios.
 		// However, SetDefaults_CiliumConfig now handles this.
 		// For strictness, we can keep it:
-		verrs.Add("%s.hubbleUI: cannot be true if enableHubble is false (defaulting should handle this, but validation caught it)", pathPrefix)
+		verrs.Add("%s.hubbleUI: inconsistent state: hubbleUI is true but enableHubble is false. Defaulting should ensure enableHubble is true when hubbleUI is true.", pathPrefix)
 	}
 }

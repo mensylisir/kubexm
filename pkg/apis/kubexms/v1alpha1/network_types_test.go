@@ -5,11 +5,8 @@ import (
 	"testing"
 )
 
-// Helper function to get pointers for basic types in tests
-func pboolNetworkTest(b bool) *bool { return &b }
-func pint32NetworkTest(i int32) *int32 { return &i }
-func pstrNetworkTest(s string) *string { return &s } // Added
-func pintNetworkTest(i int) *int { v := i; return &v } // Added for Calico IPPool BlockSize
+// Helper functions (pboolNetworkTest, etc.) removed in favor of global helpers
+// from zz_helpers.go (e.g., boolPtr, int32Ptr, stringPtr, intPtr)
 
 // --- Test SetDefaults_NetworkConfig & Sub-configs ---
 func TestSetDefaults_NetworkConfig_Overall(t *testing.T) {
@@ -33,7 +30,7 @@ func TestSetDefaults_NetworkConfig_Overall(t *testing.T) {
 	}
 
 	// Test Calico defaults when plugin is Calico
-	cfgCalico := &NetworkConfig{Plugin: "calico"}
+	cfgCalico := &NetworkConfig{Plugin: "calico", IPPool: &IPPoolConfig{}} // Ensure IPPool is not nil for Calico defaults
 	SetDefaults_NetworkConfig(cfgCalico)
 	if cfgCalico.Calico == nil { t.Fatal("Calico config should be initialized when plugin is calico") }
 	if cfgCalico.Calico.IPIPMode != "Always" { t.Errorf("Calico IPIPMode default failed") }
@@ -52,7 +49,7 @@ func TestSetDefaults_NetworkConfig_Overall(t *testing.T) {
 	if cfgFlannel.Flannel.BackendMode != "vxlan" { t.Errorf("Flannel BackendMode default failed") }
 
 	// Test KubeOvn defaults when enabled
-	cfgKubeOvn := &NetworkConfig{Plugin: "kubeovn", KubeOvn: &KubeOvnConfig{Enabled: pboolNetworkTest(true)}}
+	cfgKubeOvn := &NetworkConfig{Plugin: "kubeovn", KubeOvn: &KubeOvnConfig{Enabled: boolPtr(true)}, IPPool: &IPPoolConfig{}}
 	SetDefaults_NetworkConfig(cfgKubeOvn) // Should call SetDefaults_KubeOvnConfig
 	if cfgKubeOvn.KubeOvn == nil { t.Fatal("KubeOvn config should be initialized for plugin kubeovn") }
 	if cfgKubeOvn.KubeOvn.Label == nil || *cfgKubeOvn.KubeOvn.Label != "kube-ovn/role" { t.Errorf("KubeOvn Label default failed: %v", cfgKubeOvn.KubeOvn.Label) }
@@ -60,7 +57,7 @@ func TestSetDefaults_NetworkConfig_Overall(t *testing.T) {
 	if cfgKubeOvn.KubeOvn.EnableSSL == nil || *cfgKubeOvn.KubeOvn.EnableSSL != false { t.Errorf("KubeOvn EnableSSL default failed: %v", cfgKubeOvn.KubeOvn.EnableSSL) }
 
 	// Test Hybridnet defaults when enabled
-	cfgHybridnet := &NetworkConfig{Plugin: "hybridnet", Hybridnet: &HybridnetConfig{Enabled: pboolNetworkTest(true)}}
+	cfgHybridnet := &NetworkConfig{Plugin: "hybridnet", Hybridnet: &HybridnetConfig{Enabled: boolPtr(true)}, IPPool: &IPPoolConfig{}}
 	SetDefaults_NetworkConfig(cfgHybridnet) // Should call SetDefaults_HybridnetConfig
 	if cfgHybridnet.Hybridnet == nil { t.Fatal("Hybridnet config should be initialized for plugin hybridnet") }
 	if cfgHybridnet.Hybridnet.DefaultNetworkType == nil || *cfgHybridnet.Hybridnet.DefaultNetworkType != "Overlay" { t.Errorf("Hybridnet DefaultNetworkType default failed: %v", cfgHybridnet.Hybridnet.DefaultNetworkType) }
@@ -68,7 +65,7 @@ func TestSetDefaults_NetworkConfig_Overall(t *testing.T) {
 	if cfgHybridnet.Hybridnet.InitDefaultNetwork == nil || !*cfgHybridnet.Hybridnet.InitDefaultNetwork { t.Errorf("Hybridnet InitDefaultNetwork default failed: %v", cfgHybridnet.Hybridnet.InitDefaultNetwork) }
 
 	// Test Calico Default IPPool creation and LogSeverityScreen
-	cfgCalicoWithPool := &NetworkConfig{Plugin: "calico", KubePodsCIDR: "192.168.0.0/16", Calico: &CalicoConfig{DefaultIPPOOL: pboolNetworkTest(true), IPPools: []CalicoIPPool{}}}
+	cfgCalicoWithPool := &NetworkConfig{Plugin: "calico", KubePodsCIDR: "192.168.0.0/16", Calico: &CalicoConfig{DefaultIPPOOL: boolPtr(true), IPPools: []CalicoIPPool{}}, IPPool: &IPPoolConfig{}}
 	SetDefaults_NetworkConfig(cfgCalicoWithPool)
 	if cfgCalicoWithPool.Calico == nil {t.Fatal("Calico config should be initialized")}
 	if cfgCalicoWithPool.Calico.LogSeverityScreen == nil || *cfgCalicoWithPool.Calico.LogSeverityScreen != "Info" {t.Errorf("Calico LogSeverityScreen default failed: %v", cfgCalicoWithPool.Calico.LogSeverityScreen)}
@@ -115,14 +112,14 @@ func TestValidate_NetworkConfig_Invalid(t *testing.T) {
 		{"calico_invalid_ipip", &NetworkConfig{Plugin: "calico", KubePodsCIDR: "10.244.0.0/16", Calico: &CalicoConfig{IPIPMode: "bad"}}, defaultK8sCfg, ".calico.ipipMode: invalid: 'bad'"},
 		// {"flannel_nil_if_plugin_flannel", &NetworkConfig{Plugin: "flannel", KubePodsCIDR: "10.244.0.0/16", Flannel: nil}, defaultK8sCfg, ".flannel: config cannot be nil if plugin is 'flannel'"}, // Defaulting ensures Flannel is non-nil
 		{"flannel_invalid_backend", &NetworkConfig{Plugin: "flannel", KubePodsCIDR: "10.244.0.0/16", Flannel: &FlannelConfig{BackendMode: "bad"}}, defaultK8sCfg, "spec.network.flannel.backendMode: invalid: 'bad'"}, // Exact full message
-		{"kubeovn_invalid_tunneltype", &NetworkConfig{Plugin: "kubeovn", KubePodsCIDR: "10.244.0.0/16", KubeOvn: &KubeOvnConfig{Enabled: pboolNetworkTest(true), TunnelType: pstrNetworkTest("bad")}}, defaultK8sCfg, ".kubeovn.tunnelType: invalid type 'bad'"},
-		{"kubeovn_invalid_joincidr", &NetworkConfig{Plugin: "kubeovn", KubePodsCIDR: "10.244.0.0/16", KubeOvn: &KubeOvnConfig{Enabled: pboolNetworkTest(true), JoinCIDR: pstrNetworkTest("invalid")}}, defaultK8sCfg, ".kubeovn.joinCIDR: invalid CIDR format"},
-		{"hybridnet_invalid_networktype", &NetworkConfig{Plugin: "hybridnet", KubePodsCIDR: "10.244.0.0/16", Hybridnet: &HybridnetConfig{Enabled: pboolNetworkTest(true), DefaultNetworkType: pstrNetworkTest("bad")}}, defaultK8sCfg, ".hybridnet.defaultNetworkType: invalid type 'bad'"},
-		{"calico_invalid_logseverity", &NetworkConfig{Plugin: "calico", KubePodsCIDR: "10.244.0.0/16", Calico: &CalicoConfig{LogSeverityScreen: pstrNetworkTest("trace")}}, defaultK8sCfg, ".calico.logSeverityScreen: invalid: 'trace'"},
+		{"kubeovn_invalid_tunneltype", &NetworkConfig{Plugin: "kubeovn", KubePodsCIDR: "10.244.0.0/16", KubeOvn: &KubeOvnConfig{Enabled: boolPtr(true), TunnelType: stringPtr("bad")}}, defaultK8sCfg, ".kubeovn.tunnelType: invalid type 'bad'"},
+		{"kubeovn_invalid_joincidr", &NetworkConfig{Plugin: "kubeovn", KubePodsCIDR: "10.244.0.0/16", KubeOvn: &KubeOvnConfig{Enabled: boolPtr(true), JoinCIDR: stringPtr("invalid")}}, defaultK8sCfg, ".kubeovn.joinCIDR: invalid CIDR format"},
+		{"hybridnet_invalid_networktype", &NetworkConfig{Plugin: "hybridnet", KubePodsCIDR: "10.244.0.0/16", Hybridnet: &HybridnetConfig{Enabled: boolPtr(true), DefaultNetworkType: stringPtr("bad")}}, defaultK8sCfg, ".hybridnet.defaultNetworkType: invalid type 'bad'"},
+		{"calico_invalid_logseverity", &NetworkConfig{Plugin: "calico", KubePodsCIDR: "10.244.0.0/16", Calico: &CalicoConfig{LogSeverityScreen: stringPtr("trace")}}, defaultK8sCfg, ".calico.logSeverityScreen: invalid: 'trace'"},
 		{"calico_ippool_empty_cidr", &NetworkConfig{Plugin: "calico", KubePodsCIDR: "10.244.0.0/16", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name: "p1", CIDR: ""}}}}, defaultK8sCfg, ".calico.ipPools[0:p1].cidr: cannot be empty"},
 		{"calico_ippool_invalid_cidr", &NetworkConfig{Plugin: "calico", KubePodsCIDR: "10.244.0.0/16", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name: "p1", CIDR: "invalid"}}}}, defaultK8sCfg, ".calico.ipPools[0:p1].cidr: invalid CIDR 'invalid'"},
-		{"calico_ippool_bad_blocksize_low", &NetworkConfig{Plugin: "calico", KubePodsCIDR: "10.244.0.0/16", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name:"p1",CIDR:"1.1.1.0/24",BlockSize: pintNetworkTest(19)}}}}, defaultK8sCfg, ".calico.ipPools[0:p1].blockSize: must be between 20 and 32"},
-		{"calico_ippool_bad_blocksize_high", &NetworkConfig{Plugin: "calico", KubePodsCIDR: "10.244.0.0/16", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name:"p1",CIDR:"1.1.1.0/24",BlockSize: pintNetworkTest(33)}}}}, defaultK8sCfg, ".calico.ipPools[0:p1].blockSize: must be between 20 and 32"},
+		{"calico_ippool_bad_blocksize_low", &NetworkConfig{Plugin: "calico", KubePodsCIDR: "10.244.0.0/16", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name:"p1",CIDR:"1.1.1.0/24",BlockSize: intPtr(19)}}}}, defaultK8sCfg, ".calico.ipPools[0:p1].blockSize: must be between 20 and 32"},
+		{"calico_ippool_bad_blocksize_high", &NetworkConfig{Plugin: "calico", KubePodsCIDR: "10.244.0.0/16", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name:"p1",CIDR:"1.1.1.0/24",BlockSize: intPtr(33)}}}}, defaultK8sCfg, ".calico.ipPools[0:p1].blockSize: must be between 20 and 32"},
 		{"calico_ippool_bad_encap", &NetworkConfig{Plugin: "calico", KubePodsCIDR: "10.244.0.0/16", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name:"p1",CIDR:"1.1.1.0/24",Encapsulation: "bad"}}}}, defaultK8sCfg, ".calico.ipPools[0:p1].encapsulation: invalid: 'bad'"},
 	}
 
@@ -160,11 +157,11 @@ func TestValidate_NetworkConfig_Invalid(t *testing.T) {
 
 // --- Test NetworkConfig Helper Methods ---
 func TestNetworkConfig_EnableMultusCNI(t *testing.T) {
-   cfg := &NetworkConfig{}
+   cfg := &NetworkConfig{IPPool: &IPPoolConfig{}} // Ensure IPPool is not nil for SetDefaults_NetworkConfig
    SetDefaults_NetworkConfig(cfg) // Defaults Multus.Enabled to false
    if cfg.EnableMultusCNI() != false {t.Error("EnableMultusCNI default failed")}
 
-   cfg.Multus.Enabled = pboolNetworkTest(true)
+   cfg.Multus.Enabled = boolPtr(true)
    if cfg.EnableMultusCNI() != true {t.Error("EnableMultusCNI true failed")}
 }
 
@@ -174,12 +171,12 @@ func TestCalicoConfig_TyphaHelpers(t *testing.T) {
    if cfg.IsTyphaEnabled() != false {t.Error("IsTyphaEnabled default failed")}
    if cfg.GetTyphaReplicas() != 0 {t.Error("GetTyphaReplicas default for disabled Typha failed")}
 
-   cfg.EnableTypha = pboolNetworkTest(true)
+   cfg.EnableTypha = boolPtr(true)
    SetDefaults_CalicoConfig(cfg, "", nil) // Pass nil for globalDefaultBlockSize
    if cfg.IsTyphaEnabled() != true {t.Error("IsTyphaEnabled true failed")}
    if cfg.GetTyphaReplicas() != 2 {t.Errorf("GetTyphaReplicas default for enabled Typha failed, got %d", cfg.GetTyphaReplicas())}
 
-   cfg.TyphaReplicas = pintNetworkTest(5) // Changed pint32NetworkTest to pintNetworkTest
+   cfg.TyphaReplicas = intPtr(5)
    if cfg.GetTyphaReplicas() != 5 {t.Errorf("GetTyphaReplicas custom failed, got %d", cfg.GetTyphaReplicas())}
 }
 
@@ -345,7 +342,7 @@ func TestValidate_CiliumConfig(t *testing.T) {
 			name: "HubbleUI true, EnableHubble false",
 			input: &CiliumConfig{HubbleUI: true, EnableHubble: false},
 			expectError: true,
-			errorMsg:    "cilium.hubbleUI: cannot be true if enableHubble is false",
+			errorMsg:    "cilium.hubbleUI: inconsistent state: hubbleUI is true but enableHubble is false. Defaulting should ensure enableHubble is true when hubbleUI is true.",
 		},
 		{
 			name: "valid HubbleUI true, EnableHubble true",

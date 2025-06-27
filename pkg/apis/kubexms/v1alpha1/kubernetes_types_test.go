@@ -5,14 +5,12 @@ import (
 	"testing"
 	"k8s.io/apimachinery/pkg/runtime"
 	// "k8s.io/apimachinery/pkg/util/version" // Already imported by kubernetes_types.go
+	"github.com/stretchr/testify/assert"
 )
 
 // Helper function to get pointers for basic types in tests, if not in a shared util yet
-// For bool
-func pboolKubernetesTest(b bool) *bool { return &b }
-// For int32
-func pint32KubernetesTest(i int32) *int32 { return &i }
-
+// For bool - using global boolPtr from zz_helpers.go
+// For int32 - using global int32Ptr from zz_helpers.go
 
 // --- Test SetDefaults_KubernetesConfig ---
 func TestSetDefaults_KubernetesConfig(t *testing.T) {
@@ -107,10 +105,11 @@ func TestSetDefaults_KubernetesConfig(t *testing.T) {
 
 	cfgProxyIpvs := &KubernetesConfig{ProxyMode: "ipvs"}
 	SetDefaults_KubernetesConfig(cfgProxyIpvs, "ipvs-test")
-	if cfgProxyIpvs.KubeProxy.IPVS == nil { t.Error("KubeProxy.IPVS should be initialized for ipvs mode") }
-	if cfgProxyIpvs.KubeProxy.IPVS.Scheduler != "rr" {t.Error("KubeProxy.IPVS.Scheduler default failed")}
-	if cfgProxyIpvs.KubeProxy.IPVS.ExcludeCIDRs == nil { // Changed cap check to nil check
-		t.Error("KubeProxy.IPVS.ExcludeCIDRs should be initialized (non-nil empty slice)")
+	assert.NotNil(t, cfgProxyIpvs.KubeProxy.IPVS, "KubeProxy.IPVS should be initialized for ipvs mode")
+	if cfgProxyIpvs.KubeProxy.IPVS != nil { // Guard against nil pointer dereference if assert fails
+		assert.Equal(t, "rr", cfgProxyIpvs.KubeProxy.IPVS.Scheduler, "KubeProxy.IPVS.Scheduler default failed")
+		assert.NotNil(t, cfgProxyIpvs.KubeProxy.IPVS.ExcludeCIDRs, "KubeProxy.IPVS.ExcludeCIDRs should be initialized")
+		assert.Len(t, cfgProxyIpvs.KubeProxy.IPVS.ExcludeCIDRs, 0, "KubeProxy.IPVS.ExcludeCIDRs should be empty by default")
 	}
 }
 
@@ -148,10 +147,10 @@ func TestValidate_KubernetesConfig_Invalid(t *testing.T) {
 		// APIServerConfig validation
 		{"apiserver_invalid_port_range", &KubernetesConfig{Version: "v1.20.0", APIServer: &APIServerConfig{ServiceNodePortRange: "invalid"}}, ".apiServer.serviceNodePortRange: invalid format"},
 		// KubeletConfig validation
-		{"kubelet_invalid_cgroupdriver", &KubernetesConfig{Version: "v1.20.0", Kubelet: &KubeletConfig{CgroupDriver: pstrKubernetesTest("docker")}}, ".kubelet.cgroupDriver: must be 'cgroupfs' or 'systemd'"},
-		{"kubelet_invalid_hairpin", &KubernetesConfig{Version: "v1.20.0", Kubelet: &KubeletConfig{HairpinMode: pstrKubernetesTest("bad")}}, ".kubelet.hairpinMode: invalid mode 'bad'"},
+		{"kubelet_invalid_cgroupdriver", &KubernetesConfig{Version: "v1.20.0", Kubelet: &KubeletConfig{CgroupDriver: stringPtr("docker")}}, ".kubelet.cgroupDriver: must be 'cgroupfs' or 'systemd'"},
+		{"kubelet_invalid_hairpin", &KubernetesConfig{Version: "v1.20.0", Kubelet: &KubeletConfig{HairpinMode: stringPtr("bad")}}, ".kubelet.hairpinMode: invalid mode 'bad'"},
 		// KubeProxyConfig validation
-		{"kubeproxy_iptables_bad_masq_bit", &KubernetesConfig{Version: "v1.20.0", ProxyMode: "iptables", KubeProxy: &KubeProxyConfig{IPTables: &KubeProxyIPTablesConfig{MasqueradeBit: pint32KubernetesTest(32)}}}, ".kubeProxy.ipTables.masqueradeBit: must be between 0 and 31"},
+		{"kubeproxy_iptables_bad_masq_bit", &KubernetesConfig{Version: "v1.20.0", ProxyMode: "iptables", KubeProxy: &KubeProxyConfig{IPTables: &KubeProxyIPTablesConfig{MasqueradeBit: int32Ptr(32)}}}, ".kubeProxy.ipTables.masqueradeBit: must be between 0 and 31"},
 	}
 
 	for _, tt := range tests {
@@ -180,39 +179,39 @@ func TestKubernetesConfig_Helpers(t *testing.T) {
 
 	// IsKubeProxyDisabled
 	if cfg.IsKubeProxyDisabled() != false { t.Error("IsKubeProxyDisabled default failed") }
-	cfg.DisableKubeProxy = pboolKubernetesTest(true)
+	cfg.DisableKubeProxy = boolPtr(true)
 	if cfg.IsKubeProxyDisabled() != true { t.Error("IsKubeProxyDisabled true failed") }
 
 	// IsNodelocaldnsEnabled
 	if cfg.IsNodelocaldnsEnabled() != true { t.Error("IsNodelocaldnsEnabled default failed") } // Default is true
-	cfg.Nodelocaldns.Enabled = pboolKubernetesTest(false)
+	cfg.Nodelocaldns.Enabled = boolPtr(false)
 	if cfg.IsNodelocaldnsEnabled() != false { t.Error("IsNodelocaldnsEnabled false failed") }
 
 	// IsAuditEnabled
 	if cfg.IsAuditEnabled() != false {t.Error("IsAuditEnabled default failed")}
-	cfg.Audit.Enabled = pboolKubernetesTest(true)
+	cfg.Audit.Enabled = boolPtr(true)
 	if !cfg.IsAuditEnabled() {t.Error("IsAuditEnabled true failed")}
 
 	// IsKataEnabled
 	if cfg.IsKataEnabled() != false {t.Error("IsKataEnabled default failed")}
-	cfg.Kata.Enabled = pboolKubernetesTest(true)
+	cfg.Kata.Enabled = boolPtr(true)
 	if !cfg.IsKataEnabled() {t.Error("IsKataEnabled true failed")}
 
 	// IsNodeFeatureDiscoveryEnabled
 	if cfg.IsNodeFeatureDiscoveryEnabled() != false {t.Error("IsNodeFeatureDiscoveryEnabled default failed")}
-	cfg.NodeFeatureDiscovery.Enabled = pboolKubernetesTest(true)
+	cfg.NodeFeatureDiscovery.Enabled = boolPtr(true)
 	if !cfg.IsNodeFeatureDiscoveryEnabled() {t.Error("IsNodeFeatureDiscoveryEnabled true failed")}
 
 
 	// IsAutoRenewCertsEnabled
 	if cfg.IsAutoRenewCertsEnabled() != true {t.Error("IsAutoRenewCertsEnabled default failed, expected true")} // Default is true
-	cfg.AutoRenewCerts = pboolKubernetesTest(false) // Set to false to test change
+	cfg.AutoRenewCerts = boolPtr(false) // Set to false to test change
 	if cfg.IsAutoRenewCertsEnabled() != false {t.Error("IsAutoRenewCertsEnabled set to false failed")}
 
 
 	// GetMaxPods
 	if cfg.GetMaxPods() != 110 { t.Errorf("GetMaxPods default failed, got %d", cfg.GetMaxPods()) }
-	cfg.MaxPods = pint32KubernetesTest(200)
+	cfg.MaxPods = int32Ptr(200)
 	if cfg.GetMaxPods() != 200 { t.Errorf("GetMaxPods custom failed, got %d", cfg.GetMaxPods()) }
 
 	// IsAtLeastVersion
