@@ -1,81 +1,270 @@
 package v1alpha1
 
 import (
-	"strings"
+	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
+// boolPtr and int32Ptr are defined in zz_helpers.go and available in the package.
+
 func TestSetDefaults_AddonConfig(t *testing.T) {
-	cfg := &AddonConfig{Name: "my-addon"} // Name is required for some defaults potentially
-	SetDefaults_AddonConfig(cfg)
-
-	if cfg.Enabled == nil || !*cfg.Enabled {
-		t.Errorf("Default Enabled = %v, want true", cfg.Enabled)
+	tests := []struct {
+		name     string
+		input    *AddonConfig
+		expected *AddonConfig
+	}{
+		{
+			name:  "nil config",
+			input: nil,
+			expected: nil,
+		},
+		{
+			name: "empty config",
+			input: &AddonConfig{}, // Minimal valid input for defaulting
+			expected: &AddonConfig{
+				Enabled:     boolPtr(true),
+				Retries:     int32Ptr(0),
+				Delay:       int32Ptr(5),
+				Sources:     AddonSources{Chart: nil, Yaml: nil}, // Chart & Yaml are nil, so their sub-fields not defaulted here
+				PreInstall:  []string{},
+				PostInstall: []string{},
+			},
+		},
+		{
+			name: "empty config with empty sources to default chart/yaml internals",
+			input: &AddonConfig{
+				Sources: AddonSources{
+					Chart: &ChartSource{}, // Chart is non-nil
+					Yaml:  &YamlSource{},  // Yaml is non-nil
+				},
+			},
+			expected: &AddonConfig{
+				Enabled: boolPtr(true),
+				Retries: int32Ptr(0),
+				Delay:   int32Ptr(5),
+				Sources: AddonSources{
+					Chart: &ChartSource{
+						Wait:   boolPtr(true),
+						Values: []string{},
+					},
+					Yaml: &YamlSource{
+						Path: []string{},
+					},
+				},
+				PreInstall:  []string{},
+				PostInstall: []string{},
+			},
+		},
+		{
+			name: "enabled explicitly false",
+			input: &AddonConfig{Enabled: boolPtr(false)},
+			expected: &AddonConfig{
+				Enabled:     boolPtr(false),
+				Retries:     int32Ptr(0),
+				Delay:       int32Ptr(5),
+				Sources:     AddonSources{Chart: nil, Yaml: nil},
+				PreInstall:  []string{},
+				PostInstall: []string{},
+			},
+		},
+		{
+			name: "chart source with wait explicitly false",
+			input: &AddonConfig{
+				Sources: AddonSources{
+					Chart: &ChartSource{Wait: boolPtr(false)},
+				},
+			},
+			expected: &AddonConfig{
+				Enabled: boolPtr(true),
+				Retries: int32Ptr(0),
+				Delay:   int32Ptr(5),
+				Sources: AddonSources{
+					Chart: &ChartSource{
+						Wait:   boolPtr(false),
+						Values: []string{}, // Defaulted
+					},
+					Yaml: nil,
+				},
+				PreInstall:  []string{},
+				PostInstall: []string{},
+			},
+		},
+		{
+			name: "all fields specified, no overrides by defaults",
+			input: &AddonConfig{
+				Name:      "my-addon",
+				Enabled:   boolPtr(false),
+				Namespace: "my-ns",
+				Retries:   int32Ptr(3),
+				Delay:     int32Ptr(10),
+				Sources: AddonSources{
+					Chart: &ChartSource{
+						Name:       "nginx",
+						Repo:       "https://charts.bitnami.com/bitnami",
+						Path:       "charts/nginx",
+						Version:    "9.3.2",
+						ValuesFile: "values.yaml",
+						Values:     []string{"service.type=LoadBalancer"},
+						Wait:       boolPtr(false),
+					},
+					Yaml: &YamlSource{
+						Path: []string{"path/to/manifest.yaml"},
+					},
+				},
+				PreInstall:  []string{"echo pre"},
+				PostInstall: []string{"echo post"},
+			},
+			expected: &AddonConfig{
+				Name:      "my-addon",
+				Enabled:   boolPtr(false),
+				Namespace: "my-ns",
+				Retries:   int32Ptr(3),
+				Delay:     int32Ptr(10),
+				Sources: AddonSources{
+					Chart: &ChartSource{
+						Name:       "nginx",
+						Repo:       "https://charts.bitnami.com/bitnami",
+						Path:       "charts/nginx",
+						Version:    "9.3.2",
+						ValuesFile: "values.yaml",
+						Values:     []string{"service.type=LoadBalancer"},
+						Wait:       boolPtr(false),
+					},
+					Yaml: &YamlSource{
+						Path: []string{"path/to/manifest.yaml"},
+					},
+				},
+				PreInstall:  []string{"echo pre"},
+				PostInstall: []string{"echo post"},
+			},
+		},
+		{
+			name: "retries and delay specified",
+			input: &AddonConfig{Retries: int32Ptr(2), Delay: int32Ptr(15)},
+			expected: &AddonConfig{
+				Enabled:     boolPtr(true),
+				Retries:     int32Ptr(2),
+				Delay:       int32Ptr(15),
+				Sources:     AddonSources{Chart: nil, Yaml: nil},
+				PreInstall:  []string{},
+				PostInstall: []string{},
+			},
+		},
 	}
-	if cfg.Retries == nil || *cfg.Retries != 0 {
-		t.Errorf("Default Retries = %v, want 0", cfg.Retries)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			SetDefaults_AddonConfig(tt.input)
+			if !reflect.DeepEqual(tt.input, tt.expected) {
+				assert.Equal(t, tt.expected, tt.input, "SetDefaults_AddonConfig() mismatch")
+			}
+		})
 	}
-	if cfg.Delay == nil || *cfg.Delay != 5 {
-		t.Errorf("Default Delay = %v, want 5", cfg.Delay)
-	}
-	if cfg.PreInstall == nil { t.Error("PreInstall should be initialized") }
-	if cfg.PostInstall == nil { t.Error("PostInstall should be initialized") }
-
-	// Test chart defaults
-	cfgWithChart := &AddonConfig{Name: "chart-addon", Sources: AddonSources{Chart: &ChartSource{}}}
-	SetDefaults_AddonConfig(cfgWithChart)
-	if cfgWithChart.Sources.Chart.Wait == nil || !*cfgWithChart.Sources.Chart.Wait {
-		t.Errorf("Chart.Wait default = %v, want true", cfgWithChart.Sources.Chart.Wait)
-	}
-	if cfgWithChart.Sources.Chart.Values == nil {t.Error("Chart.Values should be initialized")}
-
-
-	// Test yaml defaults
-	cfgWithYaml := &AddonConfig{Name: "yaml-addon", Sources: AddonSources{Yaml: &YamlSource{}}}
-	SetDefaults_AddonConfig(cfgWithYaml)
-	if cfgWithYaml.Sources.Yaml.Path == nil {t.Error("Yaml.Path should be initialized")}
-
 }
 
-func TestValidate_AddonConfig_Valid(t *testing.T) {
-	cfg := &AddonConfig{
-		Name: "metrics-server",
-		Enabled: boolPtr(true),
-		Sources: AddonSources{Chart: &ChartSource{Name: "metrics-server", Repo: "https://charts.bitnami.com/bitnami"}},
-	}
-	SetDefaults_AddonConfig(cfg)
-	verrs := &ValidationErrors{}
-	Validate_AddonConfig(cfg, verrs, "spec.addons[0]")
-	if !verrs.IsEmpty() {
-		t.Errorf("Validate_AddonConfig for valid config failed: %v", verrs)
-	}
-}
+func TestValidate_AddonConfig(t *testing.T) {
+	validBaseChartSource := AddonSources{Chart: &ChartSource{Name: "metrics-server", Repo: "https://charts.bitnami.com/bitnami"}}
+	validBaseYamlSource := AddonSources{Yaml: &YamlSource{Path: []string{"manifest.yaml"}}}
 
-func TestValidate_AddonConfig_Invalid(t *testing.T) {
-   tests := []struct{
-	   name string
-	   cfg *AddonConfig
-	   wantErrMsg string
-   }{
-	   {"empty_name", &AddonConfig{Name: " "}, ".name: addon name cannot be empty"},
-	   {"chart_no_name_or_path", &AddonConfig{Name:"a", Sources: AddonSources{Chart: &ChartSource{Repo: "r"}}}, "either chart.name (with repo) or chart.path (for local chart) must be specified"},
-	   {"chart_repo_no_name", &AddonConfig{Name:"a", Sources: AddonSources{Chart: &ChartSource{Repo: "r", Name:" "}}}, "chart name must be specified if chart.repo is set"},
-	   {"yaml_no_path", &AddonConfig{Name:"a", Sources: AddonSources{Yaml: &YamlSource{Path: []string{}}}}, ".yaml.path: must contain at least one YAML path"},
-	   {"yaml_empty_path_item", &AddonConfig{Name:"a", Sources: AddonSources{Yaml: &YamlSource{Path: []string{" "}}}}, ".yaml.path[0]: path/URL cannot be empty"},
-	   {"negative_retries", &AddonConfig{Name:"a", Retries: int32Ptr(-1)}, ".retries: cannot be negative"},
-	   {"negative_delay", &AddonConfig{Name:"a", Delay: int32Ptr(-1)}, ".delay: cannot be negative"},
-   }
-   for _, tt := range tests {
-	   t.Run(tt.name, func(t *testing.T){
-		   SetDefaults_AddonConfig(tt.cfg)
-		   verrs := &ValidationErrors{}
-		   Validate_AddonConfig(tt.cfg, verrs, "spec.addons[test]")
-		   if verrs.IsEmpty() {
-			   t.Fatalf("Expected error for %s, got none", tt.name)
-		   }
-		   if !strings.Contains(verrs.Error(), tt.wantErrMsg) {
-			   t.Errorf("Error for %s = %v, want to contain %q", tt.name, verrs, tt.wantErrMsg)
-		   }
-	   })
-   }
+	tests := []struct {
+		name        string
+		input       *AddonConfig
+		expectErr   bool
+		errContains []string
+	}{
+		{
+			name:        "valid chart addon",
+			input:       &AddonConfig{Name: "metrics-server", Enabled: boolPtr(true), Sources: validBaseChartSource},
+			expectErr:   false,
+		},
+		{
+			name:        "valid yaml addon",
+			input:       &AddonConfig{Name: "dashboard", Enabled: boolPtr(true), Sources: validBaseYamlSource},
+			expectErr:   false,
+		},
+		{
+			name:        "valid local chart addon",
+			input:       &AddonConfig{Name: "local-chart", Enabled: boolPtr(true), Sources: AddonSources{Chart: &ChartSource{Path: "./charts/mychart"}}},
+			expectErr:   false,
+		},
+		{
+			name:        "addon disabled, no sources needed",
+			input:       &AddonConfig{Name: "disabled-addon", Enabled: boolPtr(false)},
+			expectErr:   false, // Validation for no sources when enabled is commented out in original code
+		},
+		{
+			name:        "empty name",
+			input:       &AddonConfig{Name: " ", Enabled: boolPtr(true), Sources: validBaseYamlSource},
+			expectErr:   true,
+			errContains: []string{".name: addon name cannot be empty"},
+		},
+		{
+			name:        "chart source with repo but empty name",
+			input:       &AddonConfig{Name: "test", Enabled: boolPtr(true), Sources: AddonSources{Chart: &ChartSource{Repo: "myrepo", Name: " "}}},
+			expectErr:   true,
+			errContains: []string{".sources.chart.name: chart name must be specified if chart.repo is set"},
+		},
+		{
+			name:        "chart source with neither name nor path",
+			input:       &AddonConfig{Name: "test", Enabled: boolPtr(true), Sources: AddonSources{Chart: &ChartSource{}}},
+			expectErr:   true,
+			errContains: []string{".sources.chart: either chart.name (with repo) or chart.path (for local chart) must be specified"},
+		},
+		{
+			name:        "yaml source with empty path list",
+			input:       &AddonConfig{Name: "test", Enabled: boolPtr(true), Sources: AddonSources{Yaml: &YamlSource{Path: []string{}}}},
+			expectErr:   true,
+			errContains: []string{".sources.yaml.path: must contain at least one YAML path or URL"},
+		},
+		{
+			name:        "yaml source with empty string in path list",
+			input:       &AddonConfig{Name: "test", Enabled: boolPtr(true), Sources: AddonSources{Yaml: &YamlSource{Path: []string{"", "valid.yaml"}}}},
+			expectErr:   true,
+			errContains: []string{".sources.yaml.path[0]: path/URL cannot be empty"},
+		},
+		{
+			name:        "negative retries",
+			input:       &AddonConfig{Name: "test", Retries: int32Ptr(-1), Sources: validBaseChartSource},
+			expectErr:   true,
+			errContains: []string{".retries: cannot be negative"},
+		},
+		{
+			name:        "negative delay",
+			input:       &AddonConfig{Name: "test", Delay: int32Ptr(-1), Sources: validBaseChartSource},
+			expectErr:   true,
+			errContains: []string{".delay: cannot be negative"},
+		},
+		// As per original addon_types.go, the check for "enabled but no source" is commented out.
+		// If it were active, this test would be relevant:
+		// {
+		//	name: "enabled but no source defined",
+		//	input: &AddonConfig{Name: "no-source-addon", Enabled: boolPtr(true)},
+		//	expectErr: true,
+		//	errContains: []string{"addon 'no-source-addon' is enabled but has no chart or yaml sources defined"},
+		// },
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Apply defaults before validation, as the validation logic might expect defaulted fields.
+			SetDefaults_AddonConfig(tt.input)
+
+			verrs := &ValidationErrors{Errors: []string{}} // Assuming ValidationErrors is available from the package
+			Validate_AddonConfig(tt.input, verrs, "spec.addons[0]")
+
+			if tt.expectErr {
+				assert.False(t, verrs.IsEmpty(), "Expected validation errors, but got none for test: %s", tt.name)
+				if len(tt.errContains) > 0 {
+					combinedErrors := verrs.Error()
+					for _, errStr := range tt.errContains {
+						assert.Contains(t, combinedErrors, errStr, "Error message for test '%s' does not contain expected substring '%s'. Full error: %s", tt.name, errStr, combinedErrors)
+					}
+				}
+			} else {
+				assert.True(t, verrs.IsEmpty(), "Expected no validation errors for test: %s, but got: %s", tt.name, verrs.Error())
+			}
+		})
+	}
 }

@@ -66,9 +66,6 @@ func SetDefaults_EtcdConfig(cfg *EtcdConfig) {
 	if cfg.Type == "" {
 		cfg.Type = EtcdTypeKubeXMSInternal // Default to KubeXM deploying etcd as binaries
 	}
-	if cfg.Type == "" {
-		cfg.Type = EtcdTypeKubeXMSInternal // Default to KubeXM deploying etcd as binaries
-	}
 	if cfg.ClientPort == nil {
 		cfg.ClientPort = intPtr(2379)
 	}

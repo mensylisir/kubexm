@@ -1,161 +1,259 @@
 package v1alpha1
 
 import (
-	"strings"
+	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-// --- Test SetDefaults_EtcdConfig ---
+// Helper functions (intPtr, stringPtr, etc.) are expected to be in zz_helpers.go
+
 func TestSetDefaults_EtcdConfig(t *testing.T) {
-	cfg := &EtcdConfig{}
-	SetDefaults_EtcdConfig(cfg)
-
-	if cfg.Type != "kubexm" { // Updated expected default
-		t.Errorf("Default Type = %s, want kubexm", cfg.Type)
-	}
-	if cfg.ClientPort == nil || *cfg.ClientPort != 2379 {
-		t.Errorf("Default ClientPort = %v, want 2379", cfg.ClientPort)
-	}
-	if cfg.PeerPort == nil || *cfg.PeerPort != 2380 {
-		t.Errorf("Default PeerPort = %v, want 2380", cfg.PeerPort)
-	}
-	if cfg.DataDir == nil || *cfg.DataDir != "/var/lib/etcd" {
-		t.Errorf("Default DataDir = %v, want /var/lib/etcd", cfg.DataDir)
-	}
-	if cfg.ExtraArgs == nil { // Check that ExtraArgs is initialized to a non-nil (empty) slice
-		t.Error("ExtraArgs should be initialized as an empty slice, not nil")
-	}
-	if cfg.BackupDir == nil || *cfg.BackupDir != "/var/backups/etcd" { t.Errorf("Default BackupDir failed: %v", cfg.BackupDir) }
-	if cfg.BackupPeriodHours == nil || *cfg.BackupPeriodHours != 24 { t.Errorf("Default BackupPeriodHours failed: %v", cfg.BackupPeriodHours) }
-	if cfg.KeepBackupNumber == nil || *cfg.KeepBackupNumber != 7 { t.Errorf("Default KeepBackupNumber failed: %v", cfg.KeepBackupNumber) }
-
-	if cfg.HeartbeatIntervalMillis == nil || *cfg.HeartbeatIntervalMillis != 250 { t.Errorf("Default HeartbeatIntervalMillis failed: %v, want 250", cfg.HeartbeatIntervalMillis) }
-	if cfg.ElectionTimeoutMillis == nil || *cfg.ElectionTimeoutMillis != 5000 { t.Errorf("Default ElectionTimeoutMillis failed: %v, want 5000", cfg.ElectionTimeoutMillis) }
-	if cfg.SnapshotCount == nil || *cfg.SnapshotCount != 10000 { t.Errorf("Default SnapshotCount failed: %v, want 10000", cfg.SnapshotCount) }
-	if cfg.AutoCompactionRetentionHours == nil || *cfg.AutoCompactionRetentionHours != 8 { t.Errorf("Default AutoCompactionRetentionHours failed: %v, want 8", cfg.AutoCompactionRetentionHours) }
-
-	if cfg.QuotaBackendBytes == nil || *cfg.QuotaBackendBytes != 2147483648 { t.Errorf("Default QuotaBackendBytes failed: %v, want 2147483648", cfg.QuotaBackendBytes) }
-	if cfg.MaxRequestBytes == nil || *cfg.MaxRequestBytes != 1572864 { t.Errorf("Default MaxRequestBytes failed: %v, want 1572864", cfg.MaxRequestBytes) }
-
-
-	if cfg.Metrics == nil || *cfg.Metrics != "basic" { t.Errorf("Default Metrics failed: %v", cfg.Metrics) }
-	if cfg.LogLevel == nil || *cfg.LogLevel != "info" { t.Errorf("Default LogLevel failed: %v", cfg.LogLevel) }
-	if cfg.MaxSnapshotsToKeep == nil || *cfg.MaxSnapshotsToKeep != 5 { t.Errorf("Default MaxSnapshotsToKeep failed: %v", cfg.MaxSnapshotsToKeep) }
-	if cfg.MaxWALsToKeep == nil || *cfg.MaxWALsToKeep != 5 { t.Errorf("Default MaxWALsToKeep failed: %v", cfg.MaxWALsToKeep) }
-
-	cfgExternal := &EtcdConfig{Type: EtcdTypeExternal}
-	SetDefaults_EtcdConfig(cfgExternal)
-	if cfgExternal.External == nil {
-		t.Error("External should be initialized if Type is external")
-	}
-	if cfgExternal.External != nil && cfgExternal.External.Endpoints == nil {
-	   t.Error("External.Endpoints should be initialized if External is not nil")
-	}
-}
-
-// --- Test Validate_EtcdConfig ---
-func TestValidate_EtcdConfig_Valid(t *testing.T) {
-	cfgStacked := &EtcdConfig{Type: EtcdTypeKubeXMSInternal, ClientPort: pint(2379), PeerPort: pint(2380), DataDir: pstr("/var/lib/etcd")}
-	SetDefaults_EtcdConfig(cfgStacked) // Apply defaults to fill other fields if necessary
-	verrsStacked := &ValidationErrors{}
-	Validate_EtcdConfig(cfgStacked, verrsStacked, "spec.etcd")
-	if !verrsStacked.IsEmpty() {
-		t.Errorf("Validate_EtcdConfig for valid stacked config failed: %v", verrsStacked)
-	}
-
-	cfgExternal := &EtcdConfig{
-		Type: EtcdTypeExternal,
-		External: &ExternalEtcdConfig{Endpoints: []string{"http://etcd1:2379"}},
-	}
-	SetDefaults_EtcdConfig(cfgExternal)
-	verrsExternal := &ValidationErrors{}
-	Validate_EtcdConfig(cfgExternal, verrsExternal, "spec.etcd")
-	if !verrsExternal.IsEmpty() {
-		t.Errorf("Validate_EtcdConfig for valid external config failed: %v", verrsExternal)
-	}
-}
-
-func TestValidate_EtcdConfig_Invalid(t *testing.T) {
 	tests := []struct {
-		name       string
-		cfg        *EtcdConfig
-		wantErrMsg string
+		name     string
+		input    *EtcdConfig
+		expected *EtcdConfig
 	}{
-		{"invalid type", &EtcdConfig{Type: "invalid"}, "invalid type 'invalid'"},
-		{"external_no_config", &EtcdConfig{Type: EtcdTypeExternal, External: nil}, ".external.endpoints: must contain at least one endpoint"},
-		{"external_no_endpoints", &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{}}}, ".external.endpoints: must contain at least one endpoint"},
-		{"external_empty_endpoint", &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{""}}}, ".external.endpoints[0]: endpoint cannot be empty"},
-		{"external_mismatched_tls_cert", &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{"h"}, CertFile: "cert"}}, "certFile and keyFile must be specified together"},
-		{"external_mismatched_tls_key", &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{"h"}, KeyFile: "key"}}, "certFile and keyFile must be specified together"},
-		{"invalid_client_port_low", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, ClientPort: pint(0)}, ".clientPort: invalid port 0"},
-		{"invalid_client_port_high", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, ClientPort: pint(70000)}, ".clientPort: invalid port 70000"},
-		{"invalid_peer_port", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, PeerPort: pint(0)}, ".peerPort: invalid port 0"},
-		{"empty_datadir", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, DataDir: pstr(" ")}, ".dataDir: cannot be empty if specified"},
-		{"negative_backup_period", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, BackupPeriodHours: pint(-1)}, ".backupPeriodHours: cannot be negative"},
-		{"negative_keep_backup", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, KeepBackupNumber: pint(-1)}, ".keepBackupNumber: cannot be negative"},
-		{"zero_heartbeat", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, HeartbeatIntervalMillis: pint(0)}, ".heartbeatIntervalMillis: must be positive"},
-		{"zero_election_timeout", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, ElectionTimeoutMillis: pint(0)}, ".electionTimeoutMillis: must be positive"},
-		{"negative_autocompaction", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, AutoCompactionRetentionHours: pint(-1)}, ".autoCompactionRetentionHours: cannot be negative"},
-		{"negative_quota", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, QuotaBackendBytes: pint64(-100)}, ".quotaBackendBytes: cannot be negative"},
-		{"zero_max_request_bytes", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, MaxRequestBytes: puint(0)}, ".maxRequestBytes: must be positive if set"}, // MaxRequestBytes uses *uint, 0 is invalid if set
-		{"invalid_metrics", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, Metrics: pstr("detailed")}, ".metrics: invalid value 'detailed'"},
-		{"invalid_loglevel", &EtcdConfig{Type: EtcdTypeKubeXMSInternal, LogLevel: pstr("trace")}, ".logLevel: invalid value 'trace'"},
+		{
+			name:     "nil input",
+			input:    nil,
+			expected: nil,
+		},
+		{
+			name:  "empty config",
+			input: &EtcdConfig{},
+			expected: &EtcdConfig{
+				Type:                         EtcdTypeKubeXMSInternal,
+				ClientPort:                   intPtr(2379),
+				PeerPort:                     intPtr(2380),
+				DataDir:                      stringPtr("/var/lib/etcd"),
+				ClusterToken:                 "kubexm-etcd-default-token",
+				External:                     nil, // Not EtcdTypeExternal
+				ExtraArgs:                    []string{},
+				BackupDir:                    stringPtr("/var/backups/etcd"),
+				BackupPeriodHours:            intPtr(24),
+				KeepBackupNumber:             intPtr(7),
+				HeartbeatIntervalMillis:      intPtr(250),
+				ElectionTimeoutMillis:        intPtr(5000),
+				SnapshotCount:                uint64Ptr(10000),
+				AutoCompactionRetentionHours: intPtr(8),
+				QuotaBackendBytes:            int64Ptr(2147483648),
+				MaxRequestBytes:              uintPtr(1572864),
+				Metrics:                      stringPtr("basic"),
+				LogLevel:                     stringPtr("info"),
+				MaxSnapshotsToKeep:           uintPtr(5),
+				MaxWALsToKeep:                uintPtr(5),
+			},
+		},
+		{
+			name: "type external, external config initialized",
+			input: &EtcdConfig{Type: EtcdTypeExternal},
+			expected: &EtcdConfig{
+				Type:                         EtcdTypeExternal,
+				ClientPort:                   intPtr(2379),
+				PeerPort:                     intPtr(2380),
+				DataDir:                      stringPtr("/var/lib/etcd"),
+				ClusterToken:                 "kubexm-etcd-default-token",
+				External:                     &ExternalEtcdConfig{Endpoints: []string{}}, // Initialized
+				ExtraArgs:                    []string{},
+				BackupDir:                    stringPtr("/var/backups/etcd"),
+				BackupPeriodHours:            intPtr(24),
+				KeepBackupNumber:             intPtr(7),
+				HeartbeatIntervalMillis:      intPtr(250),
+				ElectionTimeoutMillis:        intPtr(5000),
+				SnapshotCount:                uint64Ptr(10000),
+				AutoCompactionRetentionHours: intPtr(8),
+				QuotaBackendBytes:            int64Ptr(2147483648),
+				MaxRequestBytes:              uintPtr(1572864),
+				Metrics:                      stringPtr("basic"),
+				LogLevel:                     stringPtr("info"),
+				MaxSnapshotsToKeep:           uintPtr(5),
+				MaxWALsToKeep:                uintPtr(5),
+			},
+		},
+		{
+			name: "some fields pre-set",
+			input: &EtcdConfig{
+				ClientPort: intPtr(3379),
+				DataDir:    stringPtr("/mnt/myetcd"),
+				LogLevel:   stringPtr("debug"),
+			},
+			expected: &EtcdConfig{
+				Type:                         EtcdTypeKubeXMSInternal,
+				ClientPort:                   intPtr(3379), // Not overridden
+				PeerPort:                     intPtr(2380),
+				DataDir:                      stringPtr("/mnt/myetcd"), // Not overridden
+				ClusterToken:                 "kubexm-etcd-default-token",
+				External:                     nil,
+				ExtraArgs:                    []string{},
+				BackupDir:                    stringPtr("/var/backups/etcd"),
+				BackupPeriodHours:            intPtr(24),
+				KeepBackupNumber:             intPtr(7),
+				HeartbeatIntervalMillis:      intPtr(250),
+				ElectionTimeoutMillis:        intPtr(5000),
+				SnapshotCount:                uint64Ptr(10000),
+				AutoCompactionRetentionHours: intPtr(8),
+				QuotaBackendBytes:            int64Ptr(2147483648),
+				MaxRequestBytes:              uintPtr(1572864),
+				Metrics:                      stringPtr("basic"),
+				LogLevel:                     stringPtr("debug"), // Not overridden
+				MaxSnapshotsToKeep:           uintPtr(5),
+				MaxWALsToKeep:                uintPtr(5),
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			SetDefaults_EtcdConfig(tt.cfg) // Apply defaults before validation
-			verrs := &ValidationErrors{}
-			Validate_EtcdConfig(tt.cfg, verrs, "spec.etcd")
-			if verrs.IsEmpty() {
-				t.Fatalf("Validate_EtcdConfig expected error for %s, got none", tt.name)
-			}
-			found := false
-			for _, eStr := range verrs.Errors {
-				if strings.Contains(eStr, tt.wantErrMsg) {
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.Errorf("Validate_EtcdConfig error for %s = %v, want to contain %q", tt.name, verrs, tt.wantErrMsg)
+			SetDefaults_EtcdConfig(tt.input)
+			if !reflect.DeepEqual(tt.input, tt.expected) {
+				assert.Equal(t, tt.expected, tt.input)
 			}
 		})
 	}
 }
 
-// --- Test EtcdConfig Helper Methods ---
-func TestEtcdConfig_GetPortsAndDataDir(t *testing.T) {
-	// Test with nil config
-	var nilCfg *EtcdConfig
-	if nilCfg.GetClientPort() != 2379 { t.Error("nilCfg.GetClientPort failed") }
-	if nilCfg.GetPeerPort() != 2380 { t.Error("nilCfg.GetPeerPort failed") }
-	if nilCfg.GetDataDir() != "/var/lib/etcd" { t.Error("nilCfg.GetDataDir failed") }
-
-	// Test with empty config (defaults should apply)
-	emptyCfg := &EtcdConfig{}
-	SetDefaults_EtcdConfig(emptyCfg) // Strictly, helpers should work even before SetDefaults if they provide ultimate fallback
-	if emptyCfg.GetClientPort() != 2379 { t.Error("emptyCfg.GetClientPort failed") }
-	if emptyCfg.GetPeerPort() != 2380 { t.Error("emptyCfg.GetPeerPort failed") }
-	if emptyCfg.GetDataDir() != "/var/lib/etcd" { t.Error("emptyCfg.GetDataDir failed") }
-
-
-	// Test with specified values
-	customClientPort := 2377
-	customPeerPort := 2378
-	customDataDir := "/mnt/etcd_data"
-	specifiedCfg := &EtcdConfig{
-		ClientPort: &customClientPort,
-		PeerPort:   &customPeerPort,
-		DataDir:    &customDataDir,
+func TestValidate_EtcdConfig(t *testing.T) {
+	validCases := []struct {
+		name  string
+		input *EtcdConfig
+	}{
+		{
+			name:  "minimal valid internal etcd (after defaults)",
+			input: &EtcdConfig{Type: EtcdTypeKubeXMSInternal},
+		},
+		{
+			name: "valid external etcd",
+			input: &EtcdConfig{
+				Type:         EtcdTypeExternal,
+				External:     &ExternalEtcdConfig{Endpoints: []string{"http://etcd1:2379", "http://etcd2:2379"}},
+				ClusterToken: "some-token", // Required even for external if not defaulted
+			},
+		},
+		{
+			name: "valid internal etcd with all fields",
+			input: &EtcdConfig{
+				Type:                         EtcdTypeKubeXMSInternal,
+				Version:                      "v3.5.0",
+				Arch:                         "arm64",
+				ClientPort:                   intPtr(2379),
+				PeerPort:                     intPtr(2380),
+				DataDir:                      stringPtr("/var/lib/etcd-data"),
+				ClusterToken:                 "securetoken",
+				ExtraArgs:                    []string{"--debug"},
+				BackupDir:                    stringPtr("/backups/etcd"),
+				BackupPeriodHours:            intPtr(12),
+				KeepBackupNumber:             intPtr(10),
+				BackupScriptPath:             stringPtr("/usr/local/bin/backup-etcd.sh"),
+				HeartbeatIntervalMillis:      intPtr(100),
+				ElectionTimeoutMillis:        intPtr(1000),
+				SnapshotCount:                uint64Ptr(5000),
+				AutoCompactionRetentionHours: intPtr(1),
+				QuotaBackendBytes:            int64Ptr(4 * 1024 * 1024 * 1024), // 4GB
+				MaxRequestBytes:              uintPtr(2 * 1024 * 1024),       // 2MB
+				Metrics:                      stringPtr("extensive"),
+				LogLevel:                     stringPtr("debug"),
+				MaxSnapshotsToKeep:           uintPtr(10),
+				MaxWALsToKeep:                uintPtr(10),
+			},
+		},
 	}
-	if specifiedCfg.GetClientPort() != customClientPort { t.Error("specifiedCfg.GetClientPort failed") }
-	if specifiedCfg.GetPeerPort() != customPeerPort { t.Error("specifiedCfg.GetPeerPort failed") }
-	if specifiedCfg.GetDataDir() != customDataDir { t.Error("specifiedCfg.GetDataDir failed") }
+
+	for _, tt := range validCases {
+		t.Run("Valid_"+tt.name, func(t *testing.T) {
+			SetDefaults_EtcdConfig(tt.input) // Apply defaults
+			verrs := &ValidationErrors{}
+			Validate_EtcdConfig(tt.input, verrs, "spec.etcd")
+			assert.True(t, verrs.IsEmpty(), "Expected no validation errors for '%s', but got: %s", tt.name, verrs.Error())
+		})
+	}
+
+	invalidCases := []struct {
+		name        string
+		cfgBuilder  func() *EtcdConfig // Use a builder to avoid modifying shared input
+		errContains []string
+	}{
+		{"invalid type", func() *EtcdConfig { return &EtcdConfig{Type: "invalid-type"} }, []string{"invalid type 'invalid-type'"}},
+		{"external_no_config_struct_becomes_no_endpoints_after_defaulting", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeExternal, External: nil} }, []string{".external.endpoints: must contain at least one endpoint"}},
+		{"external_no_endpoints", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{}}} }, []string{".external.endpoints: must contain at least one endpoint"}},
+		{"external_empty_endpoint", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{""}}} }, []string{".external.endpoints[0]: endpoint cannot be empty"}},
+		{"external_mismatched_tls_cert", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{"h"}, CertFile: "cert"}} }, []string{"certFile and keyFile must be specified together"}},
+		{"external_mismatched_tls_key", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{"h"}, KeyFile: "key"}} }, []string{"certFile and keyFile must be specified together"}},
+		{"invalid_client_port_low", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, ClientPort: intPtr(0)} }, []string{".clientPort: invalid port 0"}},
+		{"invalid_client_port_high", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, ClientPort: intPtr(70000)} }, []string{".clientPort: invalid port 70000"}},
+		{"invalid_peer_port", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, PeerPort: intPtr(0)} }, []string{".peerPort: invalid port 0"}},
+		{"empty_datadir", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, DataDir: stringPtr(" ")} }, []string{".dataDir: cannot be empty if specified"}},
+		{"empty_clustertoken", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, ClusterToken: " "} }, []string{".clusterToken: cannot be empty"}},
+		{"negative_backup_period", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, BackupPeriodHours: intPtr(-1)} }, []string{".backupPeriodHours: cannot be negative"}},
+		{"negative_keep_backup", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, KeepBackupNumber: intPtr(-1)} }, []string{".keepBackupNumber: cannot be negative"}},
+		{"zero_heartbeat", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, HeartbeatIntervalMillis: intPtr(0)} }, []string{".heartbeatIntervalMillis: must be positive"}},
+		{"zero_election_timeout", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, ElectionTimeoutMillis: intPtr(0)} }, []string{".electionTimeoutMillis: must be positive"}},
+		{"negative_autocompaction", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, AutoCompactionRetentionHours: intPtr(-1)} }, []string{".autoCompactionRetentionHours: cannot be negative"}},
+		{"negative_quota", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, QuotaBackendBytes: int64Ptr(-100)} }, []string{".quotaBackendBytes: cannot be negative"}},
+		{"zero_max_request_bytes", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, MaxRequestBytes: uintPtr(0)} }, []string{".maxRequestBytes: must be positive if set"}},
+		{"invalid_metrics", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, Metrics: stringPtr("detailed")} }, []string{".metrics: invalid value 'detailed'"}},
+		{"invalid_loglevel", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, LogLevel: stringPtr("trace")} }, []string{".logLevel: invalid value 'trace'"}},
+	}
+
+	for _, tt := range invalidCases {
+		t.Run("Invalid_"+tt.name, func(t *testing.T) {
+			cfg := tt.cfgBuilder()
+			SetDefaults_EtcdConfig(cfg) // Apply defaults before validation
+			verrs := &ValidationErrors{}
+			Validate_EtcdConfig(cfg, verrs, "spec.etcd")
+			assert.False(t, verrs.IsEmpty(), "Expected validation errors for '%s', but got none", tt.name)
+			if len(tt.errContains) > 0 {
+				fullError := verrs.Error()
+				for _, errStr := range tt.errContains {
+					assert.Contains(t, fullError, errStr, "Error message for '%s' does not contain expected substring '%s'. Full error: %s", tt.name, errStr, fullError)
+				}
+			}
+		})
+	}
 }
 
-// Helper functions to get pointers for basic types in tests
-func pint(i int) *int { v := i; return &v }
-func pstr(s string) *string { return &s }
-func pint64(i int64) *int64 { v := i; return &v }
-func puint(u uint) *uint { v := u; return &v }
+func TestEtcdConfig_GetPortsAndDataDir(t *testing.T) {
+	t.Run("nil config", func(t *testing.T) {
+		var nilCfg *EtcdConfig
+		assert.Equal(t, 2379, nilCfg.GetClientPort())
+		assert.Equal(t, 2380, nilCfg.GetPeerPort())
+		assert.Equal(t, "/var/lib/etcd", nilCfg.GetDataDir())
+	})
+
+	t.Run("empty config after defaults", func(t *testing.T) {
+		emptyCfg := &EtcdConfig{}
+		SetDefaults_EtcdConfig(emptyCfg)
+		assert.Equal(t, 2379, emptyCfg.GetClientPort())
+		assert.Equal(t, 2380, emptyCfg.GetPeerPort())
+		assert.Equal(t, "/var/lib/etcd", emptyCfg.GetDataDir())
+	})
+
+	t.Run("config with specified values", func(t *testing.T) {
+		customClientPort := 2377
+		customPeerPort := 2378
+		customDataDir := "/mnt/etcd_data"
+		specifiedCfg := &EtcdConfig{
+			ClientPort: intPtr(customClientPort),
+			PeerPort:   intPtr(customPeerPort),
+			DataDir:    stringPtr(customDataDir),
+		}
+		// Note: Getters should work correctly even if defaults haven't been run on the whole struct,
+		// as long as the specific fields they check are set or nil.
+		assert.Equal(t, customClientPort, specifiedCfg.GetClientPort())
+		assert.Equal(t, customPeerPort, specifiedCfg.GetPeerPort())
+		assert.Equal(t, customDataDir, specifiedCfg.GetDataDir())
+	})
+
+	t.Run("config with some nil fields (should use getter defaults)", func(t *testing.T) {
+		partialCfg := &EtcdConfig{
+			ClientPort: nil, // Explicitly nil
+			PeerPort: intPtr(12345),
+			DataDir: nil,
+		}
+		assert.Equal(t, 2379, partialCfg.GetClientPort(), "Client port should fallback to getter's default")
+		assert.Equal(t, 12345, partialCfg.GetPeerPort())
+		assert.Equal(t, "/var/lib/etcd", partialCfg.GetDataDir(), "DataDir should fallback to getter's default")
+
+	})
+}
