@@ -302,8 +302,14 @@ func NewLogger(opts Options) (*Logger, error) {
 		}
 		fileEncoderCfg := zap.NewProductionEncoderConfig()
 		fileEncoderCfg.EncodeTime = zapcore.TimeEncoderOfLayout(opts.TimestampFormat)
+		fileEncoderCfg.TimeKey = "time" // Explicitly set TimeKey for file output
 		// For file output, use Zap's standard level encoding (e.g., "INFO", "ERROR").
 		fileEncoderCfg.EncodeLevel = zapcore.CapitalLevelEncoder
+		fileEncoderCfg.CallerKey = "caller"
+		fileEncoderCfg.MessageKey = "msg"
+		fileEncoderCfg.NameKey = "logger"
+		fileEncoderCfg.StacktraceKey = "stacktrace"
+
 
 		// JSON format is generally preferred for file logs for easier parsing.
 		fileEncoder := zapcore.NewJSONEncoder(fileEncoderCfg)
