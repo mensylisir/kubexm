@@ -156,3 +156,141 @@ pkg/runner 完美地坐落在**第二层：基础服务**中，并起到了至�
 如果说 pkg/connector 是架构的“骨骼和神经”，那么 pkg/runner 就是架构的**“肌肉”**。它将底层的“脉冲信号”（Exec）转化为了有力量、有目的的动作（InstallPackages）。
 
 这份接口设计非常成熟和全面，它为上层 Step 的编写提供了极大的便利和抽象，同时保持了自身的无状态和可测试性。它是连接底层协议和上层业务逻辑的完美桥梁，是整个“世界树”项目中最高度可复用的业务逻辑库。这是一个不需要大改，可以直接投入实现的出色设计
+
+
+
+在现有基础上，我们可以从以下几个维度来进一步丰富它，使其在处理更复杂的真实世界场景时更加得心应手：
+
+------
+
+
+
+### 一、 系统与内核级操作 (System & Kernel Level)
+
+这部分功能用于更深层次地配置操作系统。
+
+1. **内核模块管理 (Kernel Module Management)**
+    - LoadModule(ctx context.Context, conn connector.Connector, facts *Facts, moduleName string, params ...string) error
+        - **作用**: 加载一个内核模块（等同于 modprobe <module> [params]）。这对于配置网络（如 br_netfilter）或存储（如 iscsi_tcp）至关重要。
+    - UnloadModule(ctx context.Context, conn connector.Connector, facts *Facts, moduleName string) error
+        - **作用**: 卸载内核模块 (rmmod <module>)。
+    - IsModuleLoaded(ctx context.Context, conn connector.Connector, moduleName string) (bool, error)
+        - **作用**: 检查模块是否已加载 (lsmod | grep <module>)。
+    - ConfigureModuleOnBoot(ctx context.Context, conn connector.Connector, facts *Facts, moduleName string, params ...string) error
+        - **作用**: 配置模块在系统启动时自动加载（通常是向 /etc/modules-load.d/ 目录写入配置文件）。
+2. **Sysctl参数管理 (Sysctl Parameter Management)**
+    - GetSysctl(ctx context.Context, conn connector.Connector, key string) (string, error)
+        - **作用**: 读取当前的内核参数值 (sysctl -n <key>)。
+    - SetSysctl(ctx context.Context, conn connector.Connector, key, value string, temporary bool) error
+        - **作用**: 设置内核参数。temporary=true 时使用 sysctl -w <key>=<value>（重启后失效）；temporary=false 时则会写入到 /etc/sysctl.d/ 下的配置文件并执行 sysctl -p，使其永久生效。
+3. **系统时间与时区 (Time & Timezone)**
+    - SetTimezone(ctx context.Context, conn connector.Connector, facts *Facts, timezone string) error
+        - **作用**: 设置系统的时区 (timedatectl set-timezone <timezone>)。
+    - SyncTime(ctx context.Context, conn connector.Connector, facts *Facts, ntpServers ...string) error
+        - **作用**: 手动与NTP服务器同步时间，或者配置并重启chronyd/ntp服务。
+4. **Swap管理**
+    - DisableSwap(ctx context.Context, conn connector.Connector, facts *Facts) error
+        - **作用**: 临时禁用所有swap (swapoff -a) 并注释掉 /etc/fstab 中的swap条目使其永久生效。Kubernetes部署的经典步骤。
+    - IsSwapEnabled(ctx context.Context, conn connector.Connector) (bool, error)
+        - **作用**: 检查当前系统是否启用了任何swap。
+
+### 二、 文件系统与存储操作 (Filesystem & Storage)
+
+这部分功能用于处理磁盘和存储。
+
+1. **挂载点管理 (Mount Point Management)**
+    - Mount(ctx context.Context, conn connector.Connector, device, mountPoint, fsType string, options []string) error
+        - **作用**: 挂载一个设备 (mount -t <fsType> -o <options> <device> <mountPoint>)。
+    - Unmount(ctx context.Context, conn connector.Connector, mountPoint string, force bool) error
+        - **作用**: 卸载一个挂载点 (umount [-f] <mountPoint>)。
+    - IsMounted(ctx context.Context, conn connector.Connector, path string) (bool, error)
+        - **作用**: 检查一个路径是否是挂载点。
+    - EnsureMount(ctx context.Context, conn connector.Connector, device, mountPoint, fsType string, options []string, persistent bool) error
+        - **作用**: 一个幂等的挂载操作。如果未挂载，则执行挂载。如果 persistent=true，则确保 /etc/fstab 中有对应的条目。
+2. **文件系统创建 (Filesystem Creation)**
+    - MakeFilesystem(ctx context.Context, conn connector.Connector, device, fsType string, force bool) error
+        - **作用**: 在一个块设备上创建文件系统 (mkfs.<fsType> [-f] <device>)。
+3. **符号链接管理 (Symbolic Link Management)**
+    - CreateSymlink(ctx context.Context, conn connector.Connector, target, linkPath string, sudo bool) error
+        - **作用**: 创建一个符号链接 (ln -s <target> <linkPath>)。
+
+### 三、 网络操作 (Networking)
+
+这部分功能用于配置网络接口和服务。
+
+1. **防火墙管理 (Firewall Management)**
+    - ConfigureFirewall(ctx context.Context, conn connector.Connector, facts *Facts, rules ...FirewallRule) error
+        - **作用**: 一个高级接口，用于添加/删除防火墙规则。FirewallRule 可以是一个结构体，如 { Port int, Protocol string, Action string, Zone string }。底层实现会根据 facts 判断是使用 firewalld, iptables还是ufw。
+    - DisableFirewall(ctx context.Context, conn connector.Connector, facts *Facts) error
+        - **作用**: 禁用防火墙服务。
+2. **获取网络信息 (Network Information Gathering)**
+    - GetInterfaceAddresses(ctx context.Context, conn connector.Connector, interfaceName string) (map[string][]string, error)
+        - **作用**: 获取指定网络接口的所有IP地址（IPv4和IPv6）。返回 map["ipv4": ["ip1", "ip2"], "ipv6": ["ip3"]}。
+
+### 四、 用户与权限增强 (User & Permissions Enhancement)
+
+1. **修改用户属性 (Modify User Attributes)**
+    - ModifyUser(ctx context.Context, conn connector.Connector, username string, modifications UserModifications) error
+        - **作用**: 修改用户信息，如 usermod。UserModifications 是一个结构体，包含 NewGroup, AddToGroups, NewShell, NewHomeDir 等可选字段。
+    - SetUserPassword(ctx context.Context, conn connector.Connector, username, hashedPassword string) error
+        - **作用**: 设置用户的密码（通常是已加密的哈希值）。
+2. **Sudoers 配置**
+    - ConfigureSudoer(ctx context.Context, conn connector.Connector, sudoerName, content string) error
+        - **作用**: 在 /etc/sudoers.d/ 目录下创建一个配置文件，为用户或组授予特定的sudo权限，并进行语法检查 (visudo -c)。
+
+### 五、 复合与高级操作 (Compound & High-Level Operations)
+
+这些是组合了多个原子操作的、更贴近实际任务的接口。
+
+1. **幂等的服务配置与启动 (Idempotent Service Configuration)**
+    - DeployAndEnableService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName, configContent, configPath, permissions string, templateData interface{}) error
+        - **作用**: 一个完整的服务部署流程。它会：
+            1. 用 templateData 渲染 configContent (如果提供了模板)。
+            2. 将渲染后的内容写入到 configPath。
+            3. 设置正确的权限。
+            4. 执行 DaemonReload。
+            5. EnableService 并 RestartService。
+            6. 可以加入一个检查，只有当配置文件内容变化时才重启服务，实现幂等性。
+2. **Reboot & Wait**
+    - Reboot(ctx context.Context, conn connector.Connector, timeout time.Duration) error
+        - **作用**: 发送重启命令，然后等待主机重新变为可连接状态，直到超时。这是一个非常实用的功能，因为很多系统配置需要重启才能生效。
+
+### 总结：丰富后的接口
+
+通过增加上述功能，你的 Runner 接口将变得更加强大和完善，几乎能满足绝大多数基础设施自动化场景的需求。
+
+Generated go
+
+```
+type Runner interface {
+    // ... all existing methods ...
+
+    // --- System & Kernel ---
+    LoadModule(ctx context.Context, conn connector.Connector, facts *Facts, moduleName string, params ...string) error
+    IsModuleLoaded(ctx context.Context, conn connector.Connector, moduleName string) (bool, error)
+    ConfigureModuleOnBoot(ctx context.Context, conn connector.Connector, facts *Facts, moduleName string, params ...string) error
+    SetSysctl(ctx context.Context, conn connector.Connector, key, value string, persistent bool) error
+    SetTimezone(ctx context.Context, conn connector.Connector, facts *Facts, timezone string) error
+    DisableSwap(ctx context.Context, conn connector.Connector, facts *Facts) error
+    IsSwapEnabled(ctx context.Context, conn connector.Connector) (bool, error)
+
+    // --- Filesystem & Storage ---
+    EnsureMount(ctx context.Context, conn connector.Connector, device, mountPoint, fsType string, options []string, persistent bool) error
+    IsMounted(ctx context.Context, conn connector.Connector, path string) (bool, error)
+    MakeFilesystem(ctx context.Context, conn connector.Connector, device, fsType string, force bool) error
+    CreateSymlink(ctx context.Context, conn connector.Connector, target, linkPath string, sudo bool) error
+    
+    // --- Networking ---
+    DisableFirewall(ctx context.Context, conn connector.Connector, facts *Facts) error
+    // GetInterfaceAddresses(...)
+
+    // --- User & Permissions ---
+    // ModifyUser(...)
+    ConfigureSudoer(ctx context.Context, conn connector.Connector, sudoerName, content string) error
+
+    // --- High-Level ---
+    DeployAndEnableService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName, configContent, configPath, permissions string, templateData interface{}) error
+    Reboot(ctx context.Context, conn connector.Connector, timeout time.Duration) error
+}
+```
+
