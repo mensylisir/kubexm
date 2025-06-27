@@ -89,20 +89,23 @@ func (c *genericCache) GetCurrentStepSpec() (interface{}, bool) {
 
 // NewPipelineCache creates a new PipelineCache.
 func NewPipelineCache() PipelineCache {
-	return NewGenericCache()
+	return NewGenericCache(nil)
 }
 
 // NewModuleCache creates a new ModuleCache.
+// It's expected that the runtime will set its parent if part of a hierarchy.
 func NewModuleCache() ModuleCache {
-	return NewGenericCache()
+	return NewGenericCache(nil)
 }
 
 // NewTaskCache creates a new TaskCache.
+// It's expected that the runtime will set its parent if part of a hierarchy.
 func NewTaskCache() TaskCache {
-	return NewGenericCache()
+	return NewGenericCache(nil)
 }
 
 // NewStepCache creates a new StepCache.
+// It's expected that the runtime will set its parent if part of a hierarchy.
 func NewStepCache() StepCache {
-	return NewGenericCache()
+	return NewGenericCache(nil)
 }
