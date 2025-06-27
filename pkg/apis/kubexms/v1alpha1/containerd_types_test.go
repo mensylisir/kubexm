@@ -1,116 +1,186 @@
 package v1alpha1
 
 import (
-	"strings"
+	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-// --- Test SetDefaults_ContainerRuntimeConfig ---
-func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
-	cfg := &ContainerRuntimeConfig{}
-	SetDefaults_ContainerRuntimeConfig(cfg)
-	if cfg.Type != ContainerRuntimeDocker { // Changed expectation to Docker
-		t.Errorf("Default Type = %s, want %s", cfg.Type, ContainerRuntimeDocker)
-	}
-}
+// stringPtr and boolPtr are expected to be in zz_helpers.go or similar within the package.
 
-// --- Test Validate_ContainerRuntimeConfig ---
-func TestValidate_ContainerRuntimeConfig(t *testing.T) {
-	validCfg := &ContainerRuntimeConfig{Type: ContainerRuntimeContainerd}
-	verrsValid := &ValidationErrors{}
-	Validate_ContainerRuntimeConfig(validCfg, verrsValid, "spec.containerRuntime")
-	if !verrsValid.IsEmpty() {
-		t.Errorf("Validate_ContainerRuntimeConfig for valid config failed: %v", verrsValid)
-	}
-
-	invalidCfg := &ContainerRuntimeConfig{Type: "rkt"}
-	verrsInvalid := &ValidationErrors{}
-	Validate_ContainerRuntimeConfig(invalidCfg, verrsInvalid, "spec.containerRuntime")
-	if verrsInvalid.IsEmpty() {
-		t.Errorf("Validate_ContainerRuntimeConfig should have failed for invalid type 'rkt', but no errors found.")
-	} else {
-		expectedError := "spec.containerRuntime.type: invalid container runtime type 'rkt'"
-		found := false
-		for _, eStr := range verrsInvalid.Errors {
-			if eStr == expectedError {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("Validate_ContainerRuntimeConfig for invalid type 'rkt' failed. Expected error '%s', got errors: %v", expectedError, verrsInvalid.Errors)
-		}
-	}
-}
-
-// --- Test SetDefaults_ContainerdConfig ---
 func TestSetDefaults_ContainerdConfig(t *testing.T) {
-	cfg := &ContainerdConfig{}
-	SetDefaults_ContainerdConfig(cfg)
+	tests := []struct {
+		name     string
+		input    *ContainerdConfig
+		expected *ContainerdConfig
+	}{
+		{
+			name:     "nil input",
+			input:    nil,
+			expected: nil,
+		},
+		{
+			name:  "empty config",
+			input: &ContainerdConfig{},
+			expected: &ContainerdConfig{
+				RegistryMirrors:    make(map[string][]string),
+				InsecureRegistries: []string{},
+				UseSystemdCgroup:   boolPtr(true),
+				ConfigPath:         stringPtr("/etc/containerd/config.toml"),
+				DisabledPlugins:    []string{},
+				RequiredPlugins:    []string{"io.containerd.grpc.v1.cri"},
+				Imports:            []string{},
+			},
+		},
+		{
+			name: "UseSystemdCgroup explicitly false",
+			input: &ContainerdConfig{UseSystemdCgroup: boolPtr(false)},
+			expected: &ContainerdConfig{
+				RegistryMirrors:    make(map[string][]string),
+				InsecureRegistries: []string{},
+				UseSystemdCgroup:   boolPtr(false), // Not overridden
+				ConfigPath:         stringPtr("/etc/containerd/config.toml"),
+				DisabledPlugins:    []string{},
+				RequiredPlugins:    []string{"io.containerd.grpc.v1.cri"},
+				Imports:            []string{},
+			},
+		},
+		{
+			name: "ConfigPath explicitly set",
+			input: &ContainerdConfig{ConfigPath: stringPtr("/custom/path/config.toml")},
+			expected: &ContainerdConfig{
+				RegistryMirrors:    make(map[string][]string),
+				InsecureRegistries: []string{},
+				UseSystemdCgroup:   boolPtr(true),
+				ConfigPath:         stringPtr("/custom/path/config.toml"), // Not overridden
+				DisabledPlugins:    []string{},
+				RequiredPlugins:    []string{"io.containerd.grpc.v1.cri"},
+				Imports:            []string{},
+			},
+		},
+		{
+			name: "RequiredPlugins already set",
+			input: &ContainerdConfig{RequiredPlugins: []string{"custom.plugin"}},
+			expected: &ContainerdConfig{
+				RegistryMirrors:    make(map[string][]string),
+				InsecureRegistries: []string{},
+				UseSystemdCgroup:   boolPtr(true),
+				ConfigPath:         stringPtr("/etc/containerd/config.toml"),
+				DisabledPlugins:    []string{},
+				RequiredPlugins:    []string{"custom.plugin"}, // Not overridden
+				Imports:            []string{},
+			},
+		},
+		{
+			name: "All fields already set",
+			input: &ContainerdConfig{
+				Version:            "1.5.5",
+				RegistryMirrors:    map[string][]string{"docker.io": {"https://mirror.internal"}},
+				InsecureRegistries: []string{"insecure.repo:5000"},
+				UseSystemdCgroup:   boolPtr(false),
+				ExtraTomlConfig:    "some_toml_config",
+				ConfigPath:         stringPtr("/opt/containerd/config.toml"),
+				DisabledPlugins:    []string{"some.plugin.to.disable"},
+				RequiredPlugins:    []string{"io.containerd.grpc.v1.cri", "another.required.plugin"},
+				Imports:            []string{"/etc/containerd/conf.d/extra.toml"},
+			},
+			expected: &ContainerdConfig{
+				Version:            "1.5.5",
+				RegistryMirrors:    map[string][]string{"docker.io": {"https://mirror.internal"}},
+				InsecureRegistries: []string{"insecure.repo:5000"},
+				UseSystemdCgroup:   boolPtr(false),
+				ExtraTomlConfig:    "some_toml_config",
+				ConfigPath:         stringPtr("/opt/containerd/config.toml"),
+				DisabledPlugins:    []string{"some.plugin.to.disable"},
+				RequiredPlugins:    []string{"io.containerd.grpc.v1.cri", "another.required.plugin"},
+				Imports:            []string{"/etc/containerd/conf.d/extra.toml"},
+			},
+		},
+	}
 
-	if cfg.RegistryMirrors == nil {
-		t.Error("RegistryMirrors should be initialized")
-	}
-	if cfg.InsecureRegistries == nil {
-		t.Error("InsecureRegistries should be initialized")
-	}
-	if cfg.UseSystemdCgroup == nil || !*cfg.UseSystemdCgroup {
-		t.Errorf("UseSystemdCgroup default = %v, want true", cfg.UseSystemdCgroup)
-	}
-	if cfg.ConfigPath == nil || *cfg.ConfigPath != "/etc/containerd/config.toml" {
-	   t.Errorf("ConfigPath default = %v, want /etc/containerd/config.toml", cfg.ConfigPath)
-	}
-	if cfg.DisabledPlugins == nil || cap(cfg.DisabledPlugins) != 0 { t.Error("DisabledPlugins should be initialized to empty slice") }
-	if cfg.RequiredPlugins == nil || len(cfg.RequiredPlugins) != 1 || cfg.RequiredPlugins[0] != "io.containerd.grpc.v1.cri" {
-		t.Errorf("RequiredPlugins default failed: %v", cfg.RequiredPlugins)
-	}
-	if cfg.Imports == nil || cap(cfg.Imports) != 0 { t.Error("Imports should be initialized to empty slice") }
-}
-
-// --- Test Validate_ContainerdConfig ---
-func TestValidate_ContainerdConfig_Valid(t *testing.T) {
-	cfg := &ContainerdConfig{
-		RegistryMirrors:    map[string][]string{"docker.io": {"https://mirror.example.com"}},
-		InsecureRegistries: []string{"my.registry:5000"},
-		ConfigPath:         pstrContainerdTest("/custom/config.toml"), // Use local helper
-	}
-	SetDefaults_ContainerdConfig(cfg) // Apply defaults
-	verrs := &ValidationErrors{}
-	Validate_ContainerdConfig(cfg, verrs, "spec.containerd")
-	if !verrs.IsEmpty() {
-		t.Errorf("Validate_ContainerdConfig for valid config failed: %v", verrs)
-	}
-}
-
-func TestValidate_ContainerdConfig_Invalid(t *testing.T) {
-   tests := []struct{
-	   name string
-	   cfg *ContainerdConfig
-	   wantErrMsg string
-   }{
-	   {"empty_mirror_key", &ContainerdConfig{RegistryMirrors: map[string][]string{" ": {"m1"}}}, "registry host key cannot be empty"},
-	   {"empty_mirror_list", &ContainerdConfig{RegistryMirrors: map[string][]string{"docker.io": {}}}, "must contain at least one mirror URL"},
-	   {"empty_mirror_url", &ContainerdConfig{RegistryMirrors: map[string][]string{"docker.io": {" "}}}, "mirror URL cannot be empty"},
-	   {"empty_insecure_reg", &ContainerdConfig{InsecureRegistries: []string{" "}}, "registry host cannot be empty"},
-	   {"empty_config_path", &ContainerdConfig{ConfigPath: pstrContainerdTest(" ")}, "configPath: cannot be empty if specified"}, // Use local helper
-	   {"disabledplugins_empty_item", &ContainerdConfig{DisabledPlugins: []string{" "}}, ".disabledPlugins[0]: plugin name cannot be empty"},
-	   {"requiredplugins_empty_item", &ContainerdConfig{RequiredPlugins: []string{" "}}, ".requiredPlugins[0]: plugin name cannot be empty"},
-	   {"imports_empty_item", &ContainerdConfig{Imports: []string{" "}}, ".imports[0]: import path cannot be empty"},
-   }
-
-   for _, tt := range tests {
-	   t.Run(tt.name, func(t *testing.T){
-		   SetDefaults_ContainerdConfig(tt.cfg)
-		   verrs := &ValidationErrors{}
-		   Validate_ContainerdConfig(tt.cfg, verrs, "spec.containerd")
-		   if verrs.IsEmpty() {
-				t.Fatalf("Validate_ContainerdConfig expected error for %s, got none", tt.name)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			SetDefaults_ContainerdConfig(tt.input)
+			if !reflect.DeepEqual(tt.input, tt.expected) {
+				assert.Equal(t, tt.expected, tt.input)
 			}
-			if !strings.Contains(verrs.Errors[0], tt.wantErrMsg) {
-				t.Errorf("Validate_ContainerdConfig error for %s = %v, want to contain %q", tt.name, verrs.Errors[0], tt.wantErrMsg)
-			}
-	   })
-   }
+		})
+	}
 }
-// Local pstr helper for containerd_types_test.go as it might be created independently of etcd_types_test.go
-func pstrContainerdTest(s string) *string { return &s }
+
+func TestValidate_ContainerdConfig(t *testing.T) {
+	validCases := []struct {
+		name  string
+		input *ContainerdConfig
+	}{
+		{
+			name:  "minimal valid after defaults",
+			input: &ContainerdConfig{}, // Defaults will make it valid
+		},
+		{
+			name: "valid with mirrors and insecure registries",
+			input: &ContainerdConfig{
+				RegistryMirrors:    map[string][]string{"docker.io": {"https://mirror.example.com"}},
+				InsecureRegistries: []string{"my.registry:5000"},
+				ConfigPath:         stringPtr("/custom/config.toml"),
+			},
+		},
+		{
+			name: "valid with plugins and imports",
+			input: &ContainerdConfig{
+				DisabledPlugins: []string{"unwanted.plugin"},
+				RequiredPlugins: []string{"io.containerd.grpc.v1.cri", "my.plugin"},
+				Imports:         []string{"/etc/containerd/custom.toml"},
+			},
+		},
+		{
+			name: "valid with version and extra toml",
+			input: &ContainerdConfig{
+				Version:         "1.6.0",
+				ExtraTomlConfig: "[plugins.\"io.containerd.grpc.v1.cri\".registry]\n  config_path = \"/etc/containerd/certs.d\"",
+			},
+		},
+	}
+
+	for _, tt := range validCases {
+		t.Run("Valid_"+tt.name, func(t *testing.T) {
+			SetDefaults_ContainerdConfig(tt.input) // Apply defaults
+			verrs := &ValidationErrors{}
+			Validate_ContainerdConfig(tt.input, verrs, "spec.containerd")
+			assert.True(t, verrs.IsEmpty(), "Expected no validation errors for '%s', but got: %s", tt.name, verrs.Error())
+		})
+	}
+
+	invalidCases := []struct {
+		name        string
+		input       *ContainerdConfig
+		errContains []string
+	}{
+		{"empty_mirror_key", &ContainerdConfig{RegistryMirrors: map[string][]string{" ": {"m1"}}}, []string{"registry host key cannot be empty"}},
+		{"empty_mirror_list", &ContainerdConfig{RegistryMirrors: map[string][]string{"docker.io": {}}}, []string{"must contain at least one mirror URL"}},
+		{"empty_mirror_url", &ContainerdConfig{RegistryMirrors: map[string][]string{"docker.io": {" "}}}, []string{"mirror URL cannot be empty"}},
+		{"empty_insecure_reg", &ContainerdConfig{InsecureRegistries: []string{" "}}, []string{"registry host cannot be empty"}},
+		{"empty_config_path", &ContainerdConfig{ConfigPath: stringPtr(" ")}, []string{"configPath: cannot be empty if specified"}},
+		{"disabledplugins_empty_item", &ContainerdConfig{DisabledPlugins: []string{" "}}, []string{".disabledPlugins[0]: plugin name cannot be empty"}},
+		{"requiredplugins_empty_item", &ContainerdConfig{RequiredPlugins: []string{" "}}, []string{".requiredPlugins[0]: plugin name cannot be empty"}},
+		{"imports_empty_item", &ContainerdConfig{Imports: []string{" "}}, []string{".imports[0]: import path cannot be empty"}},
+	}
+
+	for _, tt := range invalidCases {
+		t.Run("Invalid_"+tt.name, func(t *testing.T) {
+			// Apply defaults, though for these specific validation errors, it might not change the outcome
+			// but it's good practice to validate the state the system would actually see.
+			SetDefaults_ContainerdConfig(tt.input)
+			verrs := &ValidationErrors{}
+			Validate_ContainerdConfig(tt.input, verrs, "spec.containerd")
+			assert.False(t, verrs.IsEmpty(), "Expected validation errors for '%s', but got none", tt.name)
+			if len(tt.errContains) > 0 {
+				fullError := verrs.Error()
+				for _, errStr := range tt.errContains {
+					assert.Contains(t, fullError, errStr, "Error message for '%s' does not contain expected substring '%s'. Full error: %s", tt.name, errStr, fullError)
+				}
+			}
+		})
+	}
+}

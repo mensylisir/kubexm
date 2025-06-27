@@ -38,13 +38,13 @@ type Cluster struct {
 
 // ClusterSpec defines the desired state of the Kubernetes cluster.
 type ClusterSpec struct {
-	Type                 string                    `json:"type,omitempty" yaml:"type,omitempty"` // "kubexm" or "kubeadm"
 	Hosts                []HostSpec                `json:"hosts" yaml:"hosts"`
 	RoleGroups           *RoleGroupsSpec           `json:"roleGroups,omitempty" yaml:"roleGroups,omitempty"`
 	Global               *GlobalSpec               `json:"global,omitempty" yaml:"global,omitempty"`
 	System               *SystemSpec               `json:"system,omitempty" yaml:"system,omitempty"`
 	Kubernetes           *KubernetesConfig         `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"`
 	Etcd                 *EtcdConfig               `json:"etcd,omitempty" yaml:"etcd,omitempty"`
+	DNS                  DNS                       `yaml:"dns" json:"dns,omitempty"`
 	ContainerRuntime     *ContainerRuntimeConfig   `json:"containerRuntime,omitempty" yaml:"containerRuntime,omitempty"`
 	Network              *NetworkConfig            `json:"network,omitempty" yaml:"network,omitempty"`
 	ControlPlaneEndpoint *ControlPlaneEndpointSpec `json:"controlPlaneEndpoint,omitempty" yaml:"controlPlaneEndpoint,omitempty"`
@@ -182,9 +182,7 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	}
 	cfg.SetGroupVersionKind(SchemeGroupVersion.WithKind("Cluster"))
 
-	if cfg.Spec.Type == "" {
-		cfg.Spec.Type = ClusterTypeKubeXM // Default to kubexm type
-	}
+	// cfg.Spec.Type was removed
 
 	if cfg.Spec.Global == nil {
 		cfg.Spec.Global = &GlobalSpec{}
@@ -295,6 +293,9 @@ func SetDefaults_Cluster(cfg *Cluster) {
 		cfg.Spec.Registry = &RegistryConfig{}
 	}
 	SetDefaults_RegistryConfig(cfg.Spec.Registry)
+
+	// Set defaults for DNS. cfg.Spec.DNS is not a pointer.
+	SetDefaults_DNS(&cfg.Spec.DNS)
 	// OS field removed from ClusterSpec
 }
 
@@ -411,17 +412,8 @@ func Validate_Cluster(cfg *Cluster) error {
 		verrs.Add("metadata.name: cannot be empty")
 	}
 
-	validClusterTypes := []string{ClusterTypeKubeXM, ClusterTypeKubeadm}
-	isValidClusterType := false
-	for _, vt := range validClusterTypes {
-		if cfg.Spec.Type == vt {
-			isValidClusterType = true
-			break
-		}
-	}
-	if !isValidClusterType {
-		verrs.Add("spec.type: invalid cluster type '%s', must be one of %v", cfg.Spec.Type, validClusterTypes)
-	}
+	// cfg.Spec.Type was removed, so its validation is also removed.
+	// The type of Kubernetes deployment (kubexm or kubeadm) is now solely determined by KubernetesConfig.Type.
 
 	if cfg.Spec.Global != nil {
 		g := cfg.Spec.Global
@@ -529,6 +521,9 @@ func Validate_Cluster(cfg *Cluster) error {
 	if cfg.Spec.Registry != nil {
 		Validate_RegistryConfig(cfg.Spec.Registry, verrs, "spec.registry")
 	}
+
+	// Validate DNS. cfg.Spec.DNS is not a pointer.
+	Validate_DNS(&cfg.Spec.DNS, verrs, "spec.dns")
 	// OS field removed from ClusterSpec
 
 	if !verrs.IsEmpty() {
