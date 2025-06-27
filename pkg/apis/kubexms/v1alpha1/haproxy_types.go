@@ -9,13 +9,13 @@ import (
 // HAProxyBackendServer defines a backend server for HAProxy load balancing.
 type HAProxyBackendServer struct {
 	// Name is an identifier for the backend server.
-	Name string `json:"name"`
+	Name string `json:"name" yaml:"name"`
 	// Address is the IP address or resolvable hostname of the backend server.
-	Address string `json:"address"`
+	Address string `json:"address" yaml:"address"`
 	// Port is the port on which the backend server is listening.
-	Port int `json:"port"`
+	Port int `json:"port" yaml:"port"`
 	// Weight for weighted load balancing algorithms (optional).
-	Weight *int `json:"weight,omitempty"`
+	Weight *int `json:"weight,omitempty" yaml:"weight,omitempty"`
 	// TODO: Add other server options like 'check', 'inter', 'rise', 'fall' if needed.
 }
 
@@ -23,34 +23,34 @@ type HAProxyBackendServer struct {
 type HAProxyConfig struct {
 	// FrontendBindAddress is the address HAProxy should bind its frontend to.
 	// Defaults to "0.0.0.0" (all interfaces).
-	FrontendBindAddress *string `json:"frontendBindAddress,omitempty"`
+	FrontendBindAddress *string `json:"frontendBindAddress,omitempty" yaml:"frontendBindAddress,omitempty"`
 
 	// FrontendPort is the port HAProxy listens on for the load-balanced service (e.g., Kubernetes API).
 	// Defaults to 6443 or a common load balancer port like 8443.
-	FrontendPort *int `json:"frontendPort,omitempty"`
+	FrontendPort *int `json:"frontendPort,omitempty" yaml:"frontendPort,omitempty"`
 
 	// Mode for HAProxy (e.g., "tcp", "http"). Defaults to "tcp" for API server.
-	Mode *string `json:"mode,omitempty"`
+	Mode *string `json:"mode,omitempty" yaml:"mode,omitempty"`
 
 	// BalanceAlgorithm for backend server selection.
 	// e.g., "roundrobin", "leastconn", "source". Defaults to "roundrobin".
-	BalanceAlgorithm *string `json:"balanceAlgorithm,omitempty"`
+	BalanceAlgorithm *string `json:"balanceAlgorithm,omitempty" yaml:"balanceAlgorithm,omitempty"`
 
 	// BackendServers is a list of backend servers to load balance.
 	// Typically, these are the control-plane nodes for kube-apiserver.
-	BackendServers []HAProxyBackendServer `json:"backendServers,omitempty"`
+	BackendServers []HAProxyBackendServer `json:"backendServers,omitempty" yaml:"backendServers,omitempty"`
 
 	// ExtraGlobalConfig allows adding raw lines to the 'global' section of haproxy.cfg.
-	ExtraGlobalConfig []string `json:"extraGlobalConfig,omitempty"`
+	ExtraGlobalConfig []string `json:"extraGlobalConfig,omitempty" yaml:"extraGlobalConfig,omitempty"`
 	// ExtraDefaultsConfig allows adding raw lines to the 'defaults' section of haproxy.cfg.
-	ExtraDefaultsConfig []string `json:"extraDefaultsConfig,omitempty"`
+	ExtraDefaultsConfig []string `json:"extraDefaultsConfig,omitempty" yaml:"extraDefaultsConfig,omitempty"`
 	// ExtraFrontendConfig allows adding raw lines to the specific frontend section of haproxy.cfg.
-	ExtraFrontendConfig []string `json:"extraFrontendConfig,omitempty"`
+	ExtraFrontendConfig []string `json:"extraFrontendConfig,omitempty" yaml:"extraFrontendConfig,omitempty"`
 	// ExtraBackendConfig allows adding raw lines to the specific backend section of haproxy.cfg.
-	ExtraBackendConfig []string `json:"extraBackendConfig,omitempty"`
+	ExtraBackendConfig []string `json:"extraBackendConfig,omitempty" yaml:"extraBackendConfig,omitempty"`
 
 	// SkipInstall, if true, assumes HAProxy is already installed and configured externally.
-	SkipInstall *bool `json:"skipInstall,omitempty"`
+	SkipInstall *bool `json:"skipInstall,omitempty" yaml:"skipInstall,omitempty"`
 }
 
 // --- Defaulting Functions ---
@@ -82,10 +82,18 @@ func SetDefaults_HAProxyConfig(cfg *HAProxyConfig) {
 		}
 	}
 
-	if cfg.ExtraGlobalConfig == nil { cfg.ExtraGlobalConfig = []string{} }
-	if cfg.ExtraDefaultsConfig == nil { cfg.ExtraDefaultsConfig = []string{} }
-	if cfg.ExtraFrontendConfig == nil { cfg.ExtraFrontendConfig = []string{} }
-	if cfg.ExtraBackendConfig == nil { cfg.ExtraBackendConfig = []string{} }
+	if cfg.ExtraGlobalConfig == nil {
+		cfg.ExtraGlobalConfig = []string{}
+	}
+	if cfg.ExtraDefaultsConfig == nil {
+		cfg.ExtraDefaultsConfig = []string{}
+	}
+	if cfg.ExtraFrontendConfig == nil {
+		cfg.ExtraFrontendConfig = []string{}
+	}
+	if cfg.ExtraBackendConfig == nil {
+		cfg.ExtraBackendConfig = []string{}
+	}
 
 	if cfg.SkipInstall == nil {
 		cfg.SkipInstall = boolPtr(false) // Default to managing HAProxy installation
@@ -105,8 +113,8 @@ func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *ValidationErrors, pathPre
 	}
 
 	if cfg.FrontendBindAddress != nil && strings.TrimSpace(*cfg.FrontendBindAddress) == "" {
-	   verrs.Add("%s.frontendBindAddress: cannot be empty if specified", pathPrefix)
-	   // Could add IP address validation here for FrontendBindAddress
+		verrs.Add("%s.frontendBindAddress: cannot be empty if specified", pathPrefix)
+		// Could add IP address validation here for FrontendBindAddress
 	}
 
 	// FrontendPort is always defaulted, so check its value.
@@ -115,19 +123,18 @@ func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *ValidationErrors, pathPre
 	}
 
 	if cfg.Mode != nil && *cfg.Mode != "" {
-	   validModes := []string{"tcp", "http"}
-	   if !containsString(validModes, *cfg.Mode) {
-		   verrs.Add("%s.mode: invalid mode '%s', must be one of %v or empty for default", pathPrefix, *cfg.Mode, validModes)
-	   }
+		validModes := []string{"tcp", "http"}
+		if !containsString(validModes, *cfg.Mode) {
+			verrs.Add("%s.mode: invalid mode '%s', must be one of %v or empty for default", pathPrefix, *cfg.Mode, validModes)
+		}
 	}
 
 	if cfg.BalanceAlgorithm != nil && *cfg.BalanceAlgorithm != "" {
-	   validAlgos := []string{"roundrobin", "static-rr", "leastconn", "first", "source", "uri", "url_param", "hdr", "rdp-cookie"} // Common algos
-	   if !containsString(validAlgos, *cfg.BalanceAlgorithm) {
-		   verrs.Add("%s.balanceAlgorithm: invalid algorithm '%s'", pathPrefix, *cfg.BalanceAlgorithm)
-	   }
+		validAlgos := []string{"roundrobin", "static-rr", "leastconn", "first", "source", "uri", "url_param", "hdr", "rdp-cookie"} // Common algos
+		if !containsString(validAlgos, *cfg.BalanceAlgorithm) {
+			verrs.Add("%s.balanceAlgorithm: invalid algorithm '%s'", pathPrefix, *cfg.BalanceAlgorithm)
+		}
 	}
-
 
 	if len(cfg.BackendServers) == 0 {
 		verrs.Add("%s.backendServers: must specify at least one backend server", pathPrefix)
@@ -145,7 +152,7 @@ func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *ValidationErrors, pathPre
 			verrs.Add("%s.port: invalid backend server port %d", serverPath, server.Port)
 		}
 		if server.Weight != nil && *server.Weight < 0 { // Weight usually 0-256
-		   verrs.Add("%s.weight: cannot be negative, got %d", serverPath, *server.Weight)
+			verrs.Add("%s.weight: cannot be negative, got %d", serverPath, *server.Weight)
 		}
 	}
 	// Validate ExtraConfig sections for non-empty lines if needed
