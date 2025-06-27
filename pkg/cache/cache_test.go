@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // Simple struct to act as a StepSpec for testing
@@ -19,32 +21,28 @@ func TestGenericCache_GetSetDelete(t *testing.T) {
 	// Test Set and Get
 	cache.Set("key1", "value1")
 	val, ok := cache.Get("key1")
-	if !ok || val != "value1" {
-		t.Errorf("Expected to get 'value1' for 'key1', got '%v', ok=%v", val, ok)
-	}
+	assert.True(t, ok, "Expected 'key1' to be found")
+	assert.Equal(t, "value1", val, "Expected to get 'value1' for 'key1'")
 
 	// Test Get non-existent
-	_, ok = cache.Get("nonexistent")
-	if ok {
-		t.Errorf("Expected ok=false for non-existent key, got ok=%v", ok)
-	}
+	val, ok = cache.Get("nonexistent")
+	assert.False(t, ok, "Expected ok=false for non-existent key")
+	assert.Nil(t, val, "Expected val=nil for non-existent key")
 
 	// Test Set overwrite
 	cache.Set("key1", "value1_overwritten")
 	val, ok = cache.Get("key1")
-	if !ok || val != "value1_overwritten" {
-		t.Errorf("Expected 'value1_overwritten' after overwrite, got '%v', ok=%v", val, ok)
-	}
+	assert.True(t, ok, "Expected 'key1' to be found after overwrite")
+	assert.Equal(t, "value1_overwritten", val, "Expected 'value1_overwritten' after overwrite")
 
 	// Test Delete
 	cache.Delete("key1")
 	val, ok = cache.Get("key1")
-	if ok {
-		t.Errorf("Expected ok=false after deleting 'key1', got val='%v', ok=%v", val, ok)
-	}
+	assert.False(t, ok, "Expected ok=false after deleting 'key1'")
+	assert.Nil(t, val, "Expected val=nil after deleting 'key1'")
 
 	// Test Delete non-existent
-	cache.Delete("nonexistent_delete") // Should not panic
+	assert.NotPanics(t, func() { cache.Delete("nonexistent_delete") }, "Delete non-existent key should not panic")
 }
 
 func TestGenericCache_StepSpec(t *testing.T) {
@@ -56,37 +54,33 @@ func TestGenericCache_StepSpec(t *testing.T) {
 
 	// Test GetCurrentStepSpec when none is set
 	spec, ok := stepCache.GetCurrentStepSpec()
-	if ok || spec != nil {
-		t.Errorf("Expected no spec initially, got spec=%v, ok=%v", spec, ok)
-	}
+	assert.False(t, ok, "Expected ok=false for initial GetCurrentStepSpec")
+	assert.Nil(t, spec, "Expected nil spec initially")
 
 	// Test SetCurrentStepSpec and GetCurrentStepSpec
 	mySpec := &testStepSpec{Name: "TestSpec", Val: 123}
 	stepCache.SetCurrentStepSpec(mySpec)
 
 	retrievedSpec, ok := stepCache.GetCurrentStepSpec()
-	if !ok {
-		t.Fatalf("GetCurrentStepSpec returned ok=false after setting a spec")
-	}
-	if retrievedSpec == nil {
-		t.Fatalf("GetCurrentStepSpec returned nil spec after setting one")
-	}
+	assert.True(t, ok, "GetCurrentStepSpec should return ok=true after setting a spec")
+	assert.NotNil(t, retrievedSpec, "GetCurrentStepSpec should return non-nil spec after setting one")
 
 	castedSpec, castOk := retrievedSpec.(*testStepSpec)
-	if !castOk {
-		t.Fatalf("Could not cast retrieved spec to *testStepSpec, type was %T", retrievedSpec)
-	}
-	if castedSpec.Name != "TestSpec" || castedSpec.Val != 123 {
-		t.Errorf("Retrieved spec did not match set spec. Got: %+v", castedSpec)
+	assert.True(t, castOk, "Could not cast retrieved spec to *testStepSpec, type was %T", retrievedSpec)
+	if castOk { // Proceed only if cast was successful
+		assert.Equal(t, "TestSpec", castedSpec.Name, "Retrieved spec name did not match")
+		assert.Equal(t, 123, castedSpec.Val, "Retrieved spec val did not match")
 	}
 
 	// Test overwriting spec
 	anotherSpec := &testStepSpec{Name: "AnotherSpec", Val: 456}
 	stepCache.SetCurrentStepSpec(anotherSpec)
-	retrievedSpec, _ = stepCache.GetCurrentStepSpec()
-	castedSpec, _ = retrievedSpec.(*testStepSpec)
-	if castedSpec.Name != "AnotherSpec" {
-		t.Errorf("Retrieved spec after overwrite did not match. Got: %+v", castedSpec)
+	retrievedSpec, ok = stepCache.GetCurrentStepSpec()
+	assert.True(t, ok, "GetCurrentStepSpec should return ok=true after overwrite")
+	castedSpec, castOk = retrievedSpec.(*testStepSpec)
+	assert.True(t, castOk, "Could not cast retrieved spec to *testStepSpec after overwrite, type was %T", retrievedSpec)
+	if castOk {
+		assert.Equal(t, "AnotherSpec", castedSpec.Name, "Retrieved spec name after overwrite did not match")
 	}
 }
 
@@ -107,9 +101,8 @@ func TestGenericCache_Concurrency(t *testing.T) {
 			time.Sleep(time.Millisecond * time.Duration(idx%10)) // Stagger reads a bit
 
 			retrievedVal, ok := cache.Get(key)
-			if !ok || retrievedVal != value {
-				t.Errorf("Goroutine %d: Expected '%s' for '%s', got '%v', ok=%v", idx, value, key, retrievedVal, ok)
-			}
+			assert.True(t, ok, "Goroutine %d: Expected key '%s' to be found", idx, key)
+			assert.Equal(t, value, retrievedVal, "Goroutine %d: Value mismatch for key '%s'", idx, key)
 		}(i)
 	}
 	wg.Wait()
@@ -119,9 +112,8 @@ func TestGenericCache_Concurrency(t *testing.T) {
 		key := fmt.Sprintf("key-%d", i)
 		value := fmt.Sprintf("value-%d", i)
 		retrievedVal, ok := cache.Get(key)
-		if !ok || retrievedVal != value {
-			t.Errorf("Post-concurrency check: Expected '%s' for '%s', got '%v', ok=%v", value, key, retrievedVal, ok)
-		}
+		assert.True(t, ok, "Post-concurrency check: Expected key '%s' to be found", key)
+		assert.Equal(t, value, retrievedVal, "Post-concurrency check: Value mismatch for key '%s'", key)
 	}
 }
 
@@ -158,15 +150,9 @@ func TestStepCache_Concurrency_StepSpec(t *testing.T) {
 
 	// Check that a spec is still there (likely the one set by one of the last goroutines)
 	finalSpec, ok := stepCache.GetCurrentStepSpec()
-	if !ok {
-		t.Errorf("After concurrent SetCurrentStepSpec, GetCurrentStepSpec returned !ok")
-	}
-	if finalSpec == nil {
-		t.Errorf("After concurrent SetCurrentStepSpec, finalSpec is nil")
-	}
-	if _, castOk := finalSpec.(*testStepSpec); !castOk {
-		t.Errorf("After concurrent SetCurrentStepSpec, finalSpec is not *testStepSpec, but %T", finalSpec)
-	}
+	assert.True(t, ok, "After concurrent SetCurrentStepSpec, GetCurrentStepSpec should return ok=true")
+	assert.NotNil(t, finalSpec, "After concurrent SetCurrentStepSpec, finalSpec should not be nil")
+	assert.IsType(t, &testStepSpec{}, finalSpec, "After concurrent SetCurrentStepSpec, finalSpec type mismatch")
 }
 
 func TestGenericCache_InheritedGet(t *testing.T) {
@@ -190,40 +176,34 @@ func TestGenericCache_InheritedGet(t *testing.T) {
 	// Test reads from stepCache (should be able to see all)
 	// Local to step
 	val, ok := stepC.Get("stepKey")
-	if !ok || val != "stepValue" {
-		t.Errorf("StepCache: Expected 'stepValue' for 'stepKey', got '%v'", val)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "stepValue", val)
 	// From task
 	val, ok = stepC.Get("taskKey")
-	if !ok || val != "taskValue" {
-		t.Errorf("StepCache: Expected 'taskValue' for 'taskKey' (from task), got '%v'", val)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "taskValue", val)
 	// From module (overridden)
 	val, ok = stepC.Get("overrideKey")
-	if !ok || val != "moduleOverride" {
-		t.Errorf("StepCache: Expected 'moduleOverride' for 'overrideKey' (from module), got '%v'", val)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "moduleOverride", val)
 	// From pipeline
 	val, ok = stepC.Get("pipeKey")
-	if !ok || val != "pipeValue" {
-		t.Errorf("StepCache: Expected 'pipeValue' for 'pipeKey' (from pipeline), got '%v'", val)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "pipeValue", val)
 
 	// Test reads from moduleCache
 	val, ok = moduleC.Get("taskKey") // Should not see taskKey
-	if ok {
-		t.Errorf("ModuleCache: Expected not to find 'taskKey', but got '%v'", val)
-	}
+	assert.False(t, ok)
+	assert.Nil(t, val)
+
 	val, ok = moduleC.Get("overrideKey")
-	if !ok || val != "moduleOverride" {
-		t.Errorf("ModuleCache: Expected 'moduleOverride' for 'overrideKey', got '%v'", val)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "moduleOverride", val)
 
 	// Test non-existent key
-	_, ok = stepC.Get("nonExistentAnywhere")
-	if ok {
-		t.Error("StepCache: Expected not to find 'nonExistentAnywhere'")
-	}
+	val, ok = stepC.Get("nonExistentAnywhere")
+	assert.False(t, ok)
+	assert.Nil(t, val)
 }
 
 func TestGenericCache_SetParent_And_InheritedGet(t *testing.T) {
@@ -242,17 +222,16 @@ func TestGenericCache_SetParent_And_InheritedGet(t *testing.T) {
 
 	// Test Get from taskCache
 	val, ok := taskC.Get("pKey")
-	if !ok || val != "pValue" {
-		t.Errorf("TaskCache (with SetParent): Expected 'pValue' for 'pKey', got '%v'", val)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "pValue", val)
+
 	val, ok = taskC.Get("mKey")
-	if !ok || val != "mValue" {
-		t.Errorf("TaskCache (with SetParent): Expected 'mValue' for 'mKey', got '%v'", val)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "mValue", val)
+
 	val, ok = taskC.Get("tKey")
-	if !ok || val != "tValue" {
-		t.Errorf("TaskCache (with SetParent): Expected 'tValue' for 'tKey', got '%v'", val)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "tValue", val)
 }
 
 
@@ -265,123 +244,101 @@ func TestGenericCache_LocalizedSetDelete(t *testing.T) {
 
 	// Check module cache sees its own value
 	val, ok := moduleC.Get("sharedKey")
-	if !ok || val != "moduleValue" {
-		t.Errorf("ModuleCache: Expected 'moduleValue' for 'sharedKey', got '%v'", val)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "moduleValue", val)
 
 	// Check pipeline cache still has its original value
 	val, ok = pipelineC.Get("sharedKey")
-	if !ok || val != "pipeValue" {
-		t.Errorf("PipelineCache: Expected 'pipeValue' for 'sharedKey' after module set, got '%v'", val)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "pipeValue", val)
 
 	// Delete from module cache
 	moduleC.Delete("sharedKey")
-	if _, stillInModuleStore := moduleC.store.Load("sharedKey"); stillInModuleStore {
-		t.Error("ModuleCache: 'sharedKey' should have been deleted from module's own store, but was found.")
-	}
-	val, ok = moduleC.Get("sharedKey") // Fixed: use = instead of :=
-	if !ok || val != "pipeValue" {
-		t.Errorf("ModuleCache: Expected 'pipeValue' for 'sharedKey' (from pipeline) after module delete, got '%v', ok=%v", val, ok)
-	}
+	_, stillInModuleStore := moduleC.store.Load("sharedKey")
+	assert.False(t, stillInModuleStore, "ModuleCache: 'sharedKey' should have been deleted from module's own store")
+
+	val, ok = moduleC.Get("sharedKey")
+	assert.True(t, ok, "ModuleCache: Should find 'sharedKey' from pipeline after local delete")
+	assert.Equal(t, "pipeValue", val, "ModuleCache: Value from pipeline for 'sharedKey' incorrect after local delete")
 
 
 	// Set a key only in module cache
 	moduleC.Set("moduleOnlyKey", "modOnly")
-	_, ok = pipelineC.Get("moduleOnlyKey")
-	if ok {
-		t.Error("PipelineCache: Should not find 'moduleOnlyKey' set in module cache.")
-	}
+	val, ok = pipelineC.Get("moduleOnlyKey")
+	assert.False(t, ok, "PipelineCache: Should not find 'moduleOnlyKey' set in module cache")
+	assert.Nil(t, val)
 }
 
 func TestFactoryFunctions(t *testing.T) {
 	pc := NewPipelineCache()
-	if pc == nil {
-		t.Fatal("NewPipelineCache returned nil")
-	}
+	assert.NotNil(t, pc, "NewPipelineCache returned nil")
 	pc.Set("testPipe", "valPipe")
-	_, ok := pc.Get("testPipe")
-	if !ok {
-		t.Error("PipelineCache Get/Set failed")
-	}
+	val, ok := pc.Get("testPipe")
+	assert.True(t, ok, "PipelineCache Get failed for 'testPipe'")
+	assert.Equal(t, "valPipe", val)
 
 	mc := NewModuleCache(pc)
-	if mc == nil {
-		t.Fatal("NewModuleCache returned nil")
-	}
+	assert.NotNil(t, mc, "NewModuleCache returned nil")
 	mc.Set("testMod", "valMod")
-	_, ok = mc.Get("testMod")
-	if !ok {
-		t.Error("ModuleCache Get/Set failed")
-	}
+	val, ok = mc.Get("testMod")
+	assert.True(t, ok, "ModuleCache Get failed for 'testMod'")
+	assert.Equal(t, "valMod", val)
+
 	// Test inheritance from parent
-	val, ok := mc.Get("testPipe")
-	if !ok || val != "valPipe" {
-		t.Errorf("ModuleCache failed to get 'testPipe' from parent, got %v, ok %v", val, ok)
-	}
+	val, ok = mc.Get("testPipe")
+	assert.True(t, ok, "ModuleCache failed to get 'testPipe' from parent")
+	assert.Equal(t, "valPipe", val)
 
 	tc := NewTaskCache(mc)
-	if tc == nil {
-		t.Fatal("NewTaskCache returned nil")
-	}
+	assert.NotNil(t, tc, "NewTaskCache returned nil")
 	tc.Set("testTask", "valTask")
-	_, ok = tc.Get("testTask")
-	if !ok {
-		t.Error("TaskCache Get/Set failed")
-	}
-	val, ok = tc.Get("testMod")
-	if !ok || val != "valMod" {
-		t.Errorf("TaskCache failed to get 'testMod' from parent, got %v, ok %v", val, ok)
-	}
+	val, ok = tc.Get("testTask")
+	assert.True(t, ok, "TaskCache Get failed for 'testTask'")
+	assert.Equal(t, "valTask", val)
 
+	val, ok = tc.Get("testMod")
+	assert.True(t, ok, "TaskCache failed to get 'testMod' from parent")
+	assert.Equal(t, "valMod", val)
 
 	sc := NewStepCache(tc)
-	if sc == nil {
-		t.Fatal("NewStepCache returned nil")
-	}
+	assert.NotNil(t, sc, "NewStepCache returned nil")
 	sc.Set("testStep", "valStep")
-	_, ok = sc.Get("testStep")
-	if !ok {
-		t.Error("StepCache Get/Set failed")
-	}
+	val, ok = sc.Get("testStep")
+	assert.True(t, ok, "StepCache Get failed for 'testStep'")
+	assert.Equal(t, "valStep", val)
+
 	val, ok = sc.Get("testTask")
-	if !ok || val != "valTask" {
-		t.Errorf("StepCache failed to get 'testTask' from parent, got %v, ok %v", val, ok)
-	}
+	assert.True(t, ok, "StepCache failed to get 'testTask' from parent")
+	assert.Equal(t, "valTask", val)
 }
 
 func TestFactoryFunctions_WithNilParents(t *testing.T) {
 	mc := NewModuleCache(nil) // Pass nil as PipelineCache
-	if mc == nil {
-		t.Fatal("NewModuleCache(nil) returned nil")
-	}
+	assert.NotNil(t, mc, "NewModuleCache(nil) returned nil")
 	mc.Set("key", "val")
-	if _, ok := mc.Get("key"); !ok {
-		t.Error("ModuleCache(nil) failed Get/Set")
-	}
+	val, ok := mc.Get("key")
+	assert.True(t, ok)
+	assert.Equal(t, "val", val)
 
 	tc := NewTaskCache(nil) // Pass nil as ModuleCache
-	if tc == nil {
-		t.Fatal("NewTaskCache(nil) returned nil")
-	}
+	assert.NotNil(t, tc, "NewTaskCache(nil) returned nil")
 	tc.Set("key", "val")
-	if _, ok := tc.Get("key"); !ok {
-		t.Error("TaskCache(nil) failed Get/Set")
-	}
+	val, ok = tc.Get("key")
+	assert.True(t, ok)
+	assert.Equal(t, "val", val)
 
 	sc := NewStepCache(nil) // Pass nil as TaskCache
-	if sc == nil {
-		t.Fatal("NewStepCache(nil) returned nil")
-	}
+	assert.NotNil(t, sc, "NewStepCache(nil) returned nil")
 	sc.Set("key", "val")
-	if _, ok := sc.Get("key"); !ok {
-		t.Error("StepCache(nil) failed Get/Set")
-	}
+	val, ok = sc.Get("key")
+	assert.True(t, ok)
+	assert.Equal(t, "val", val)
+
 	spec := &testStepSpec{Name: "NilParentSpec"}
 	sc.SetCurrentStepSpec(spec)
-	if retSpec, ok := sc.GetCurrentStepSpec(); !ok || retSpec != spec {
-		t.Error("StepCache(nil) failed Set/GetCurrentStepSpec")
-	}
+	retSpec, ok := sc.GetCurrentStepSpec()
+	assert.True(t, ok)
+	assert.Equal(t, spec, retSpec)
 }
 
 func TestFactoryFunction_HierarchyAndInheritance(t *testing.T) {
@@ -403,48 +360,42 @@ func TestFactoryFunction_HierarchyAndInheritance(t *testing.T) {
 	// 2. Test reads from stepCache (should be able to see all inherited values)
 	// Local to step
 	val, ok := stepCache.Get("stepKey")
-	if !ok || val != "stepValue" {
-		t.Errorf("StepCache: Expected 'stepValue' for 'stepKey', got '%v', ok=%v", val, ok)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "stepValue", val)
 	// From task
 	val, ok = stepCache.Get("taskKey")
-	if !ok || val != "taskValue" {
-		t.Errorf("StepCache: Expected 'taskValue' for 'taskKey' (from task), got '%v', ok=%v", val, ok)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "taskValue", val)
 	// From module (overridden)
 	val, ok = stepCache.Get("overrideKey")
-	if !ok || val != "moduleOverride" {
-		t.Errorf("StepCache: Expected 'moduleOverride' for 'overrideKey' (from module), got '%v', ok=%v", val, ok)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "moduleOverride", val)
 	// From pipeline
 	val, ok = stepCache.Get("pipeKey")
-	if !ok || val != "pipeValue" {
-		t.Errorf("StepCache: Expected 'pipeValue' for 'pipeKey' (from pipeline), got '%v', ok=%v", val, ok)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "pipeValue", val)
 
 	// 3. Test reads from intermediate caches
 	// From moduleCache, should not see taskKey
 	val, ok = moduleCache.Get("taskKey")
-	if ok {
-		t.Errorf("ModuleCache: Expected not to find 'taskKey', but got '%v'", val)
-	}
+	assert.False(t, ok, "ModuleCache should not find 'taskKey'")
+	assert.Nil(t, val)
+
 	// From moduleCache, should see its own overrideKey
 	val, ok = moduleCache.Get("overrideKey")
-	if !ok || val != "moduleOverride" {
-		t.Errorf("ModuleCache: Expected 'moduleOverride' for 'overrideKey', got '%v', ok=%v", val, ok)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "moduleOverride", val)
+
 	// From moduleCache, should see pipeKey
 	val, ok = moduleCache.Get("pipeKey")
-	if !ok || val != "pipeValue" {
-		t.Errorf("ModuleCache: Expected 'pipeValue' for 'pipeKey' (from pipeline), got '%v', ok=%v", val, ok)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "pipeValue", val)
 
 
 	// 4. Test non-existent key
-	_, ok = stepCache.Get("nonExistentAnywhere")
-	if ok {
-		t.Error("StepCache: Expected not to find 'nonExistentAnywhere'")
-	}
+	val, ok = stepCache.Get("nonExistentAnywhere")
+	assert.False(t, ok, "StepCache should not find 'nonExistentAnywhere'")
+	assert.Nil(t, val)
 
 	// 5. Test that writes are local (idempotent to TestGenericCache_LocalizedSetDelete, but using factory-created caches)
 	pipelineCache.Set("sharedKey", "pipeInitial")
@@ -452,12 +403,38 @@ func TestFactoryFunction_HierarchyAndInheritance(t *testing.T) {
 
 	// Check module cache sees its own value
 	val, ok = moduleCache.Get("sharedKey")
-	if !ok || val != "moduleInitial" {
-		t.Errorf("ModuleCache (factory): Expected 'moduleInitial' for 'sharedKey', got '%v'", val)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "moduleInitial", val)
 	// Check pipeline cache still has its original value
 	val, ok = pipelineCache.Get("sharedKey")
-	if !ok || val != "pipeInitial" {
-		t.Errorf("PipelineCache (factory): Expected 'pipeInitial' for 'sharedKey' after module set, got '%v'", val)
-	}
+	assert.True(t, ok)
+	assert.Equal(t, "pipeInitial", val)
+}
+
+// TestFactoryFunctions_PanicWithWrongParentType tests that factory functions panic
+// if a parent of an incorrect type is provided.
+func TestFactoryFunctions_PanicWithWrongParentType(t *testing.T) {
+	// Create a dummy cache that satisfies PipelineCache but isn't a *genericCache
+	type dummyPipelineCache struct{ PipelineCache }
+	dp := &dummyPipelineCache{}
+
+	// Create a dummy cache that satisfies ModuleCache but isn't a *genericCache
+	type dummyModuleCache struct{ ModuleCache }
+	dm := &dummyModuleCache{}
+
+	// Create a dummy cache that satisfies TaskCache but isn't a *genericCache
+	type dummyTaskCache struct{ TaskCache }
+	dt := &dummyTaskCache{}
+
+	assert.PanicsWithValue(t, "NewModuleCache: parent is not of type *genericCache, got *cache.dummyPipelineCache", func() {
+		NewModuleCache(dp)
+	}, "NewModuleCache should panic with wrong parent type")
+
+	assert.PanicsWithValue(t, "NewTaskCache: parent is not of type *genericCache, got *cache.dummyModuleCache", func() {
+		NewTaskCache(dm)
+	}, "NewTaskCache should panic with wrong parent type")
+
+	assert.PanicsWithValue(t, "NewStepCache: parent is not of type *genericCache, got *cache.dummyTaskCache", func() {
+		NewStepCache(dt)
+	}, "NewStepCache should panic with wrong parent type")
 }

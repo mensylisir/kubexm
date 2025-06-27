@@ -1,6 +1,9 @@
 package cache
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+)
 
 // PipelineCache stores data scoped to a pipeline's execution.
 type PipelineCache interface {
@@ -96,8 +99,11 @@ func NewPipelineCache() PipelineCache {
 func NewModuleCache(parent PipelineCache) ModuleCache {
 	var parentGenericCache *genericCache
 	if parent != nil {
-		// Assume parent is always a *genericCache, which is true in this pkg's design
-		parentGenericCache, _ = parent.(*genericCache)
+		var ok bool
+		parentGenericCache, ok = parent.(*genericCache)
+		if !ok {
+			panic(fmt.Sprintf("NewModuleCache: parent is not of type *genericCache, got %T", parent))
+		}
 	}
 	return NewGenericCache(parentGenericCache)
 }
@@ -106,8 +112,11 @@ func NewModuleCache(parent PipelineCache) ModuleCache {
 func NewTaskCache(parent ModuleCache) TaskCache {
 	var parentGenericCache *genericCache
 	if parent != nil {
-		// Assume parent is always a *genericCache
-		parentGenericCache, _ = parent.(*genericCache)
+		var ok bool
+		parentGenericCache, ok = parent.(*genericCache)
+		if !ok {
+			panic(fmt.Sprintf("NewTaskCache: parent is not of type *genericCache, got %T", parent))
+		}
 	}
 	return NewGenericCache(parentGenericCache)
 }
@@ -116,8 +125,11 @@ func NewTaskCache(parent ModuleCache) TaskCache {
 func NewStepCache(parent TaskCache) StepCache {
 	var parentGenericCache *genericCache
 	if parent != nil {
-		// Assume parent is always a *genericCache
-		parentGenericCache, _ = parent.(*genericCache)
+		var ok bool
+		parentGenericCache, ok = parent.(*genericCache)
+		if !ok {
+			panic(fmt.Sprintf("NewStepCache: parent is not of type *genericCache, got %T", parent))
+		}
 	}
 	return NewGenericCache(parentGenericCache)
 }
