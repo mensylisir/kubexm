@@ -31,55 +31,61 @@ type LocalConnector struct {
 func (l *LocalConnector) Connect(ctx context.Context, cfg ConnectionCfg) error {
 	l.connCfg = cfg
 	// For local connector, connection is implicitly always available.
-	// We can do a basic check like ensuring the user from cfg exists if needed,
-	// but for now, it's a no-op.
 	return nil
 }
 
 // IsConnected for LocalConnector always returns true as it operates locally.
 func (l *LocalConnector) IsConnected() bool {
-	return true // Local execution doesn't have a "connection" in the remote sense.
+	return true
 }
 
 // Close for LocalConnector is a no-op.
 func (l *LocalConnector) Close() error {
-	// No resources to release for local execution.
 	return nil
 }
 
 // Exec executes a command locally.
 func (l *LocalConnector) Exec(ctx context.Context, cmd string, options *ExecOptions) (stdout, stderr []byte, err error) {
 	var actualCmd *exec.Cmd
-	shell := []string{"/bin/sh", "-c"} // Default shell
+	shell := []string{"/bin/sh", "-c"}
 	if runtime.GOOS == "windows" {
 		shell = []string{"cmd", "/C"}
 	}
 
 	fullCmdString := cmd
-	if options != nil && options.Sudo {
-		// Note: Local sudo might require password input if not configured for NOPASSWD.
-		// This implementation doesn't handle interactive password prompts.
-		// -E is used to preserve environment variables with sudo.
-		fullCmdString = "sudo -E -- " + cmd
+	effectiveOptions := &ExecOptions{} // Create a new instance to avoid modifying the input options
+	if options != nil {
+		*effectiveOptions = *options // Copy options
 	}
 
-	// Use context for timeout if provided
-	if options != nil && options.Timeout > 0 {
+	if effectiveOptions.Sudo {
+		fullCmdString = "sudo -E -- " + cmd
+		if l.connCfg.Password != "" { // Check if password is provided in connection config
+			fullCmdString = "sudo -S -p '' -E -- " + cmd // Use -S to read password from stdin
+		}
+	}
+
+	if effectiveOptions.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, options.Timeout)
+		ctx, cancel = context.WithTimeout(ctx, effectiveOptions.Timeout)
 		defer cancel()
 	}
 
 	actualCmd = exec.CommandContext(ctx, shell[0], append(shell[1:], fullCmdString)...)
 
-	if options != nil && len(options.Env) > 0 {
-		actualCmd.Env = append(os.Environ(), options.Env...)
+	if len(effectiveOptions.Env) > 0 {
+		actualCmd.Env = append(os.Environ(), effectiveOptions.Env...)
 	}
 
+	if effectiveOptions.Sudo && l.connCfg.Password != "" && strings.HasPrefix(fullCmdString, "sudo -S") {
+		actualCmd.Stdin = strings.NewReader(l.connCfg.Password + "\n")
+	}
+
+
 	var stdoutBuf, stderrBuf bytes.Buffer
-	if options != nil && options.Stream != nil {
-		actualCmd.Stdout = io.MultiWriter(&stdoutBuf, options.Stream)
-		actualCmd.Stderr = io.MultiWriter(&stderrBuf, options.Stream)
+	if effectiveOptions.Stream != nil {
+		actualCmd.Stdout = io.MultiWriter(&stdoutBuf, effectiveOptions.Stream)
+		actualCmd.Stderr = io.MultiWriter(&stderrBuf, effectiveOptions.Stream)
 	} else {
 		actualCmd.Stdout = &stdoutBuf
 		actualCmd.Stderr = &stderrBuf
@@ -98,24 +104,32 @@ func (l *LocalConnector) Exec(ctx context.Context, cmd string, options *ExecOpti
 			}
 		}
 
-		// Retry logic
-		if options != nil && options.Retries > 0 {
-			for i := 0; i < options.Retries; i++ {
-				if options.RetryDelay > 0 {
-					time.Sleep(options.RetryDelay)
+		if effectiveOptions.Retries > 0 {
+			for i := 0; i < effectiveOptions.Retries; i++ {
+				if effectiveOptions.RetryDelay > 0 {
+					time.Sleep(effectiveOptions.RetryDelay)
+				}
+				retryCtx := ctx // Use the potentially timed-out context for retries as well
+				if options != nil && options.Timeout > 0 { // Re-arm timeout if needed for each retry attempt
+					var retryCancel context.CancelFunc
+					retryCtx, retryCancel = context.WithTimeout(context.Background(), options.Timeout) // Use fresh background context for timeout
+					defer retryCancel()
 				}
 
-				// Create new command for retry
-				retryCmd := exec.CommandContext(ctx, shell[0], append(shell[1:], fullCmdString)...)
-				if options.Env != nil {
-					retryCmd.Env = append(os.Environ(), options.Env...)
+
+				retryCmd := exec.CommandContext(retryCtx, shell[0], append(shell[1:], fullCmdString)...)
+				if len(effectiveOptions.Env) > 0 {
+					retryCmd.Env = append(os.Environ(), effectiveOptions.Env...)
+				}
+				if effectiveOptions.Sudo && l.connCfg.Password != "" && strings.HasPrefix(fullCmdString, "sudo -S") {
+					retryCmd.Stdin = strings.NewReader(l.connCfg.Password + "\n")
 				}
 
-				stdoutBuf.Reset() // Clear buffers for retry
+				stdoutBuf.Reset()
 				stderrBuf.Reset()
-				if options.Stream != nil {
-					retryCmd.Stdout = io.MultiWriter(&stdoutBuf, options.Stream)
-					retryCmd.Stderr = io.MultiWriter(&stderrBuf, options.Stream)
+				if effectiveOptions.Stream != nil {
+					retryCmd.Stdout = io.MultiWriter(&stdoutBuf, effectiveOptions.Stream)
+					retryCmd.Stderr = io.MultiWriter(&stderrBuf, effectiveOptions.Stream)
 				} else {
 					retryCmd.Stdout = &stdoutBuf
 					retryCmd.Stderr = &stderrBuf
@@ -125,7 +139,7 @@ func (l *LocalConnector) Exec(ctx context.Context, cmd string, options *ExecOpti
 				stdout = stdoutBuf.Bytes()
 				stderr = stderrBuf.Bytes()
 				if err == nil {
-					break // Success on retry
+					break
 				}
 				if exitErr, ok := err.(*exec.ExitError); ok {
 					if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
@@ -135,25 +149,23 @@ func (l *LocalConnector) Exec(ctx context.Context, cmd string, options *ExecOpti
 			}
 		}
 
-		if err != nil { // If error persists after retries
+		if err != nil {
 			return stdout, stderr, &CommandError{Cmd: cmd, ExitCode: exitCode, Stdout: string(stdout), Stderr: string(stderr), Underlying: err}
 		}
 	}
 	return stdout, stderr, nil
 }
 
-// Copy copies a local file or directory to another local path.
 func (l *LocalConnector) Copy(ctx context.Context, srcPath, dstPath string, options *FileTransferOptions) error {
-	// Timeout handling (for the whole operation, though os.Copy is blocking)
 	if options != nil && options.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, options.Timeout)
 		defer cancel()
 	}
 
-	// TODO: Implement sudo logic if options.Sudo is true.
-	// This would involve copying to a temp location then using `sudo mv` and `sudo chmod/chown`.
-	// For now, direct copy.
+	if options != nil && options.Sudo {
+		return fmt.Errorf("sudo not implemented for LocalConnector.Copy, target path %s may require privileges", dstPath)
+	}
 
 	srcFile, err := os.Open(srcPath)
 	if err != nil {
@@ -161,7 +173,7 @@ func (l *LocalConnector) Copy(ctx context.Context, srcPath, dstPath string, opti
 	}
 	defer srcFile.Close()
 
-	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil { // Changed os.ModePerm to 0755
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
 		return fmt.Errorf("failed to create destination directory for %s: %w", dstPath, err)
 	}
 
@@ -176,27 +188,19 @@ func (l *LocalConnector) Copy(ctx context.Context, srcPath, dstPath string, opti
 		return fmt.Errorf("failed to copy content from %s to %s: %w", srcPath, dstPath, err)
 	}
 
-	// Apply permissions and ownership
-	if options != nil {
-		if options.Permissions != "" {
-			perm, err := strconv.ParseUint(options.Permissions, 8, 32)
-			if err == nil {
-				if errChmod := os.Chmod(dstPath, os.FileMode(perm)); errChmod != nil {
-					// Log or return error, potentially wrapped
-				}
+	if options != nil && options.Permissions != "" {
+		perm, parseErr := strconv.ParseUint(options.Permissions, 8, 32)
+		if parseErr == nil {
+			if errChmod := os.Chmod(dstPath, os.FileMode(perm)); errChmod != nil {
+				return fmt.Errorf("failed to chmod %s to %s: %w", dstPath, options.Permissions, errChmod)
 			}
+		} else {
+			return fmt.Errorf("invalid permissions format '%s' for %s: %w", options.Permissions, dstPath, parseErr)
 		}
-		// For local, Chown requires process to have privileges.
-		// if options.Owner != "" || options.Group != "" {
-		// This part is complex due to UID/GID lookup and permissions.
-		// os.Chown might fail if not run as root or with appropriate capabilities.
-		// If options.Sudo is true, this should be done via `sudo chown` command.
-		// }
 	}
 	return nil
 }
 
-// CopyContent writes content to a local file.
 func (l *LocalConnector) CopyContent(ctx context.Context, content []byte, dstPath string, options *FileTransferOptions) error {
 	if options != nil && options.Timeout > 0 {
 		var cancel context.CancelFunc
@@ -204,23 +208,23 @@ func (l *LocalConnector) CopyContent(ctx context.Context, content []byte, dstPat
 		defer cancel()
 	}
 
-	// TODO: Sudo handling as in Copy. For now, align with WriteFile and disallow sudo.
 	if options != nil && options.Sudo {
 		return fmt.Errorf("sudo not implemented for LocalConnector.CopyContent, target path %s may require privileges", dstPath)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil { // Standardized to 0755
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
 		return fmt.Errorf("failed to create destination directory for %s: %w", dstPath, err)
 	}
 
-	// Determine file mode for WriteFile
-	permMode := fs.FileMode(0644) // Default to rw-r--r--
+	permMode := fs.FileMode(0644)
 	if options != nil && options.Permissions != "" {
 		permVal, parseErr := strconv.ParseUint(options.Permissions, 8, 32)
 		if parseErr == nil {
 			permMode = fs.FileMode(permVal)
 		} else {
-			fmt.Fprintf(os.Stderr, "Warning: Invalid permissions format '%s' for local CopyContent to %s, using default 0644: %v\n", options.Permissions, dstPath, parseErr)
+			// Log warning but proceed with default, or return error.
+			// For now, returning error for invalid permission string.
+			return fmt.Errorf("invalid permissions format '%s' for local CopyContent to %s: %w", options.Permissions, dstPath, parseErr)
 		}
 	}
 
@@ -228,28 +232,13 @@ func (l *LocalConnector) CopyContent(ctx context.Context, content []byte, dstPat
 	if err != nil {
 		return fmt.Errorf("failed to write content to %s: %w", dstPath, err)
 	}
-
-	if options != nil {
-		if options.Permissions != "" {
-			perm, err := strconv.ParseUint(options.Permissions, 8, 32)
-			if err == nil {
-				if errChmod := os.Chmod(dstPath, os.FileMode(perm)); errChmod != nil {
-					// Log or return error
-				}
-			}
-		}
-		// Sudo/Chown handling as in Copy.
-	}
 	return nil
 }
 
-// Fetch copies a local file to another local path (effectively same as Copy for local).
 func (l *LocalConnector) Fetch(ctx context.Context, remotePath, localPath string) error {
-	// For local connector, remotePath is just another local path.
-	return l.Copy(ctx, remotePath, localPath, nil) // No options for simplicity, or pass them through.
+	return l.Copy(ctx, remotePath, localPath, nil)
 }
 
-// Stat gets information about a local file or directory.
 func (l *LocalConnector) Stat(ctx context.Context, path string) (*FileStat, error) {
 	fi, err := os.Lstat(path)
 	if err != nil {
@@ -258,56 +247,41 @@ func (l *LocalConnector) Stat(ctx context.Context, path string) (*FileStat, erro
 		}
 		return nil, fmt.Errorf("failed to stat local path %s: %w", path, err)
 	}
-
-	// TODO: Get Owner/Group (requires user/group ID lookup from syscall.Stat_t)
-	// TODO: Get SHA256 sum if needed by reading the file.
 	return &FileStat{
 		Name:    fi.Name(),
 		Size:    fi.Size(),
-		Mode:    fi.Mode(), // Use directly as fs.FileMode
+		Mode:    fi.Mode(),
 		ModTime: fi.ModTime(),
 		IsDir:   fi.IsDir(),
 		IsExist: true,
 	}, nil
 }
 
-// LookPath searches for an executable in the local PATH.
 func (l *LocalConnector) LookPath(ctx context.Context, file string) (string, error) {
 	return exec.LookPath(file)
 }
 
-// GetOS retrieves local operating system information.
 func (l *LocalConnector) GetOS(ctx context.Context) (*OS, error) {
 	if l.cachedOS != nil {
 		return l.cachedOS, nil
 	}
-
 	osInfo := &OS{
-		ID:   strings.ToLower(runtime.GOOS), // e.g., "linux", "darwin", "windows"
-		Arch: runtime.GOARCH,                // e.g., "amd64", "arm64"
+		ID:   strings.ToLower(runtime.GOOS),
+		Arch: runtime.GOARCH,
 	}
-
-	// Getting VersionID, Codename, Kernel for local can be more involved
-	// and platform-specific.
-	osInfo.Arch = runtime.GOARCH // Already correct
-
 	switch runtime.GOOS {
 	case "linux":
-		// Kernel version from `uname -r`
 		kernelCmd := exec.CommandContext(ctx, "uname", "-r")
 		kernelOut, errKernel := kernelCmd.Output()
 		if errKernel == nil {
 			osInfo.Kernel = strings.TrimSpace(string(kernelOut))
 		} else {
-			// Log warning or error, but proceed
 			fmt.Fprintf(os.Stderr, "warning: failed to get kernel version for local connector: %v\n", errKernel)
 		}
-
-		// Read /etc/os-release
 		content, err := os.ReadFile("/etc/os-release")
 		if err == nil {
-			lines := strings.Split(string(content), "\n")
 			vars := make(map[string]string)
+			lines := strings.Split(string(content), "\n")
 			for _, line := range lines {
 				parts := strings.SplitN(line, "=", 2)
 				if len(parts) == 2 {
@@ -316,56 +290,42 @@ func (l *LocalConnector) GetOS(ctx context.Context) (*OS, error) {
 					vars[key] = val
 				}
 			}
-			osInfo.ID = vars["ID"]
-			osInfo.VersionID = vars["VERSION_ID"]
-			osInfo.PrettyName = vars["PRETTY_NAME"]
-			osInfo.Codename = vars["VERSION_CODENAME"]
+			if id, ok := vars["ID"]; ok { osInfo.ID = id }
+			if verID, ok := vars["VERSION_ID"]; ok { osInfo.VersionID = verID }
+			if name, ok := vars["PRETTY_NAME"]; ok { osInfo.PrettyName = name }
+			if cname, ok := vars["VERSION_CODENAME"]; ok { osInfo.Codename = cname }
 		} else {
-			// Fallback if /etc/os-release is not readable
-			osInfo.ID = "linux"
-			if osInfo.PrettyName == "" {
-				osInfo.PrettyName = "Linux"
-			}
+			if osInfo.ID == "" { osInfo.ID = "linux" }
+			if osInfo.PrettyName == "" { osInfo.PrettyName = "Linux" }
 			fmt.Fprintf(os.Stderr, "warning: failed to read /etc/os-release for local connector: %v\n", err)
 		}
-
 	case "darwin":
 		osInfo.ID = "darwin"
-		// Populate PrettyName, VersionID, Kernel using `sw_vers` and `uname -r`
-		swVersCmd := exec.CommandContext(ctx, "sw_vers", "-productName")
-		prodName, errProd := swVersCmd.Output()
-		if errProd == nil {
-			osInfo.PrettyName = strings.TrimSpace(string(prodName))
-		}
-		swVersCmd = exec.CommandContext(ctx, "sw_vers", "-productVersion")
-		prodVer, errVer := swVersCmd.Output()
-		if errVer == nil {
-			osInfo.VersionID = strings.TrimSpace(string(prodVer))
-		}
+		swVersCmdName := exec.CommandContext(ctx, "sw_vers", "-productName")
+		prodName, errProdName := swVersCmdName.Output()
+		if errProdName == nil { osInfo.PrettyName = strings.TrimSpace(string(prodName)) }
+
+		swVersCmdVersion := exec.CommandContext(ctx, "sw_vers", "-productVersion")
+		prodVer, errProdVer := swVersCmdVersion.Output()
+		if errProdVer == nil { osInfo.VersionID = strings.TrimSpace(string(prodVer)) }
+
 		kernelCmd := exec.CommandContext(ctx, "uname", "-r")
 		kernelOut, errKernel := kernelCmd.Output()
-		if errKernel == nil {
-			osInfo.Kernel = strings.TrimSpace(string(kernelOut))
-		}
-		if osInfo.PrettyName == "" {
-			osInfo.PrettyName = "macOS"
-		}
+		if errKernel == nil { osInfo.Kernel = strings.TrimSpace(string(kernelOut)) }
+
+		if osInfo.PrettyName == "" { osInfo.PrettyName = "macOS" }
 	case "windows":
 		osInfo.ID = "windows"
-		osInfo.PrettyName = "Windows" // Basic, can be enhanced with `ver` or registry checks
-		// Kernel and VersionID might require more complex parsing of `ver` or systeminfo
+		osInfo.PrettyName = "Windows"
 	default:
-		osInfo.ID = runtime.GOOS
-		osInfo.PrettyName = runtime.GOOS
+		if osInfo.ID == "" { osInfo.ID = runtime.GOOS }
+		if osInfo.PrettyName == "" { osInfo.PrettyName = runtime.GOOS }
 	}
-
 	l.cachedOS = osInfo
 	return l.cachedOS, nil
 }
 
-// ReadFile reads a file from the local filesystem.
 func (l *LocalConnector) ReadFile(ctx context.Context, path string) ([]byte, error) {
-	// TODO: Consider context cancellation/timeout for large file reads if necessary.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read local file %s: %w", path, err)
@@ -373,78 +333,64 @@ func (l *LocalConnector) ReadFile(ctx context.Context, path string) ([]byte, err
 	return data, nil
 }
 
-// WriteFile writes content to a local file.
-// Permissions are applied after writing. Sudo is complex for local writes
-// and usually means the process itself needs privileges or uses a helper.
-// For simplicity, this WriteFile does not implement sudo move logic like remote might.
 func (l *LocalConnector) WriteFile(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error {
 	if sudo {
-		// Local sudo for WriteFile is tricky. Typically means writing to a restricted path.
-		// This would require writing to temp and then `sudo mv` and `sudo chmod`.
-		// For now, returning an error if sudo is requested for local write,
-		// as it implies a privileged operation not directly handled here.
 		return fmt.Errorf("sudo not implemented for LocalConnector.WriteFile, target path %s may require privileges", destPath)
 	}
-
-	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil { // Default permissive mkdir for parent
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 		return fmt.Errorf("failed to create parent directory for %s: %w", destPath, err)
 	}
-
-	// Default file permission if not specified or invalid
-	permMode := fs.FileMode(0644) // Default to rw-r--r--
+	permMode := fs.FileMode(0644)
 	if permissions != "" {
 		permVal, parseErr := strconv.ParseUint(permissions, 8, 32)
 		if parseErr == nil {
 			permMode = fs.FileMode(permVal)
 		} else {
-			fmt.Fprintf(os.Stderr, "Warning: Invalid permissions format '%s' for local WriteFile to %s, using default 0644: %v\n", permissions, destPath, parseErr)
+			// Return error for invalid permission string, consistent with CopyContent change
+			return fmt.Errorf("invalid permissions format '%s' for local WriteFile to %s: %w", permissions, destPath, parseErr)
 		}
 	}
-
 	err := os.WriteFile(destPath, content, permMode)
 	if err != nil {
 		return fmt.Errorf("failed to write file %s: %w", destPath, err)
 	}
-	// Chmod is effectively done by WriteFile's perm argument if permissions string was valid,
-	// but explicit chmod can be done if WriteFile used a temp perm.
-	// For simplicity, WriteFile directly uses the target perm.
 	return nil
 }
 
-
-// GetFileChecksum calculates the checksum of a local file.
-// Supports "sha256", "md5".
 func (l *LocalConnector) GetFileChecksum(ctx context.Context, path string, checksumType string) (string, error) {
-	// TODO: Context cancellation for large files
 	file, err := os.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to open local file %s for checksum: %w", path, err)
 	}
 	defer file.Close()
 
-	hasher := sha256.New() // Default hasher
+	var hasher io.Writer
 	switch strings.ToLower(checksumType) {
 	case "sha256":
-		// Hasher already sha256.New()
-	case "md5":
-		// hasher = md5.New() // To use md5, import "crypto/md5"
-		return "", fmt.Errorf("md5 checksum not implemented for local connector, requested for %s", path)
+		hasher = sha256.New()
+	// case "md5": // md5 is currently not supported as per previous logic
+	// 	hasher = md5.New()
 	default:
 		return "", fmt.Errorf("unsupported checksum type '%s' for local file %s", checksumType, path)
 	}
 
-	if _, err := io.Copy(hasher, file); err != nil {
+	if _, err := io.Copy(hasher.(io.Writer), file); err != nil { // Assert hasher is an io.Writer
 		return "", fmt.Errorf("failed to read local file %s for checksum calculation: %w", path, err)
 	}
 
-	return hex.EncodeToString(hasher.Sum(nil)), nil
+	// Type assert back to hash.Hash to call Sum
+	// The specific type *sha256.digest is not exported.
+	// sha256.New() returns hash.Hash, which has the Sum method.
+	if ch, ok := hasher.(interface{ Sum(b []byte) []byte }); ok {
+		return hex.EncodeToString(ch.Sum(nil)), nil
+	}
+	// This fallback should ideally not be reached if hasher was correctly initialized
+	// from a known crypto package like sha256 or md5 (if implemented).
+	return "", fmt.Errorf("checksum hasher for %s does not support Sum method", checksumType)
 }
 
-// Mkdir creates a directory on the local filesystem.
-// perm is an octal string like "0755".
 func (l *LocalConnector) Mkdir(ctx context.Context, path string, perm string) error {
-	// TODO: Handle context cancellation if os.MkdirAll can be long-running (unlikely for mkdir)
-	var mode fs.FileMode = 0755 // Default permission
+	var mode fs.FileMode = 0755
 	if perm != "" {
 		parsedMode, err := strconv.ParseUint(perm, 8, 32)
 		if err != nil {
@@ -459,10 +405,7 @@ func (l *LocalConnector) Mkdir(ctx context.Context, path string, perm string) er
 	return nil
 }
 
-// Remove removes a file or directory on the local filesystem.
-// For LocalConnector, RemoveOptions are used to control behavior.
 func (l *LocalConnector) Remove(ctx context.Context, path string, opts RemoveOptions) error {
-	// TODO: Handle context cancellation
 	_, err := os.Lstat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -487,6 +430,4 @@ func (l *LocalConnector) Remove(ctx context.Context, path string, opts RemoveOpt
 	return nil
 }
 
-
-// Ensure LocalConnector implements Connector interface
 var _ Connector = &LocalConnector{}
