@@ -125,8 +125,19 @@ func TestLocalConnector_FileOperations(t *testing.T) {
 		t.Errorf("CopyContent() content mismatch: got %q, want %q", string(readContent), string(fileContent))
 	}
 	statContent, _ := os.Stat(contentFilePath)
-	if runtime.GOOS != "windows" && statContent.Mode().Perm() != 0644 { // Windows permissions are different
-		t.Errorf("CopyContent() permissions mismatch: got %s, want 0644", statContent.Mode().Perm())
+	if runtime.GOOS != "windows" && statContent.Mode().Perm() != 0644 {
+		t.Errorf("CopyContent() permissions mismatch: got %s, want 0644", statContent.Mode().Perm().String())
+	}
+
+	// Test CopyContent with invalid permissions string
+	invalidPermContentPath := filepath.Join(tmpDir, "invalid_perm_content.txt")
+	err = lc.CopyContent(ctx, fileContent, invalidPermContentPath, &FileTransferOptions{Permissions: "invalid"})
+	if err == nil {
+		t.Errorf("CopyContent() with invalid permissions string should have failed")
+	} else {
+		if !strings.Contains(err.Error(), "invalid permissions format") {
+			t.Errorf("CopyContent() with invalid permissions error message mismatch: got %s", err.Error())
+		}
 	}
 
 
@@ -299,14 +310,38 @@ func TestLocalConnector_Mkdir(t *testing.T) {
 		t.Errorf("%s is not a directory after Mkdir", nestedDir)
 	}
 	if runtime.GOOS != "windows" && stat.Mode().Perm() != 0750 {
-        t.Errorf("Mkdir permissions mismatch: got %s, want %s", stat.Mode().Perm().String(), perms)
+        t.Errorf("Mkdir permissions mismatch for 0750: got %s, want %s", stat.Mode().Perm().String(), perms)
     }
-
 
 	// Test creating an existing directory (should be idempotent)
 	err = lc.Mkdir(ctx, nestedDir, perms)
 	if err != nil {
 		t.Errorf("Mkdir on existing directory error = %v, want nil", err)
+	}
+
+	// Test Mkdir with default permissions
+	defaultPermDir := filepath.Join(tmpDir, "default_perm_dir")
+	err = lc.Mkdir(ctx, defaultPermDir, "") // Empty perm string to test default
+	if err != nil {
+		t.Fatalf("Mkdir with default perms error = %v", err)
+	}
+	statDefault, errDefault := os.Stat(defaultPermDir)
+	if errDefault != nil {
+		t.Fatalf("os.Stat after Mkdir with default perms error = %v", errDefault)
+	}
+	if runtime.GOOS != "windows" && statDefault.Mode().Perm() != 0755 { // Default is 0755
+		t.Errorf("Mkdir default permissions mismatch: got %s, want 0755", statDefault.Mode().Perm().String())
+	}
+
+	// Test Mkdir with invalid permission string
+	invalidPermDir := filepath.Join(tmpDir, "invalid_perm_dir")
+	err = lc.Mkdir(ctx, invalidPermDir, "invalid")
+	if err == nil {
+		t.Errorf("Mkdir with invalid perm string should have failed")
+	} else {
+		if !strings.Contains(err.Error(), "invalid permission format") {
+			t.Errorf("Mkdir with invalid perm string error message mismatch: got %s", err.Error())
+		}
 	}
 }
 
@@ -416,8 +451,9 @@ func TestLocalConnector_GetFileChecksum(t *testing.T) {
 	if err == nil {
 		t.Error("GetFileChecksum md5 expected an error (not implemented), got nil")
 	} else {
-		if !strings.Contains(err.Error(), "md5 checksum not implemented") {
-			t.Errorf("GetFileChecksum md5 error = %q, want to contain 'md5 checksum not implemented'", err.Error())
+		// Updated to reflect that md5 is now caught by the "unsupported checksum type" general case
+		if !strings.Contains(err.Error(), "unsupported checksum type 'md5'") {
+			t.Errorf("GetFileChecksum md5 error = %q, want to contain 'unsupported checksum type 'md5''", err.Error())
 		}
 	}
 
