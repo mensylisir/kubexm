@@ -1,5 +1,28 @@
 pkg/connector已存在，已经实现
 
+
+Package connector 定义了与远程或本地主机进行交互的标准化接口。
+它是整个执行引擎的核心抽象层，将上层业务逻辑（如部署步骤）与底层的连接协议
+（如SSH、本地执行）完全解耦。
+
+主要接口和类型：
+
+- Connector: 核心接口，定义了连接、执行命令、传输文件、获取状态等原子操作。
+  所有与主机的交互都应通过此接口进行。
+
+- ConnectionCfg: 封装了建立一个连接所需的所有配置参数，包括认证信息、
+  超时、代理和跳板机配置。
+
+- ExecOptions / FileTransferOptions: 为具体操作（如命令执行、文件传输）
+  提供了丰富的可配置项，如sudo、超时、重试等，赋予上层逻辑精细的控制能力。
+
+- OS / FileStat: 定义了标准化的主机操作系统信息和文件元数据结构，
+  使得上层可以一致地处理来自不同类型主机的信息。
+
+该包的设计目标是提供一个可扩展、健壮且易于使用的基础服务，为所有需要
+与主机交互的上层模块提供统一、可靠的底层能力。
+
+
 ### interface.go
 ```aiignore
 package connector
@@ -83,6 +106,26 @@ type FileStat struct {
 	IsExist bool // Explicitly track if the file exists
 }
 
+
+
+/*
+Package connector (error.go) 定义了模块中使用的标准化错误类型。
+通过结构化的错误对象，上层调用者可以获取比标准 `error` 接口更丰富的
+上下文信息，从而进行更智能的错误处理、日志记录和决策。
+
+主要错误类型：
+
+- CommandError: 当一个命令执行失败时返回。它封装了执行的命令本身、
+  退出码、标准输出和标准错误的内容，以及底层的原始错误。这对于调试
+  失败的脚本或命令至关重要。
+
+- ConnectionError: 当建立连接失败时返回。它包含了目标主机信息和
+  底层的连接错误，便于快速定位网络或认证问题。
+
+使用这些自定义错误类型，可以方便地通过类型断言来检查错误类型，并根据
+具体的错误信息采取不同的恢复或上报策略。
+*/
+
 // ExitError is an error type that includes the exit code of a command.
 // This is a common pattern for command execution errors.
 type ExitError struct {
@@ -148,6 +191,25 @@ type ExtendedConnector interface {
 
 ```
 
+Package connector (options.go) 定义了用于控制 Connector 接口中
+各种操作行为的结构体。这些选项使得上层调用者能够对命令执行、文件传输等
+过程进行精细化配置，以适应不同的应用场景。
+
+主要选项结构体：
+
+- ExecOptions: 用于 Connector.Exec 方法。它允许配置sudo权限、
+  执行超时、环境变量、失败重试策略以及流式输出等。
+
+- FileTransferOptions: 用于 Connector.CopyContent 和 Connector.WriteFile
+  等文件操作方法。它允许指定目标文件的权限、所有者、用户组，并能通过
+  sudo模式处理需要高级权限的文件写入。
+
+- RemoveOptions: 用于 Connector.Remove 方法，提供如递归删除、
+  忽略不存在错误等选项。
+
+这些结构化的选项对象取代了函数签名中冗长的参数列表，使得API更加清晰、
+可扩展和易于使用。
+
 ### options.go
 ```aiignore
 package connector
@@ -201,6 +263,31 @@ type FileTransferOptions struct {
 
 ```
 
+Package connector (ssh.go) 提供了 Connector 接口的 SSH 实现。
+SSHConnector 负责通过SSH协议连接到远程主机，并执行各种操作。
+它是与远程Linux/Unix主机交互的主要方式。
+
+核心功能：
+
+- **连接管理**: 支持通过密码、私钥以及跳板机（Bastion Host）进行连接。
+  同时，它与 `pool.go` 集成，优先使用连接池来复用和管理SSH连接，
+  以提高大规模并发操作的性能。
+
+- **命令执行 (Exec)**: 实现了健壮的命令执行逻辑。支持 `sudo` 提权，
+  当 `sudo` 需要密码时，会自动使用 `ConnectionCfg` 中提供的 `Password`
+  字段，通过 `sudo -S` 从标准输入传递密码。同时支持超时、重试和
+  环境变量设置。
+
+- **文件操作**: 利用 SFTP 协议（`github.com/pkg/sftp`）实现高效的
+  文件读写（ReadFile, WriteFile, CopyContent）和元数据获取（Stat）。
+  对于需要 `sudo` 权限的文件写入，它采用“先上传到临时目录，再用
+  `sudo mv/chown/chmod` 移动和设置权限”的安全策略。
+
+- **主机信息获取**: 实现了 GetOS, LookPath, IsSudoer 等方法，用于
+  探测远程主机的环境和用户权限。
+
+SSHConnector 是整个系统的核心组件之一，为上层模块提供了与远程主机
+进行交互的强大而可靠的能力。
 ### 同时实现了ssh.go支持远程执行
 ### ssh.go
 ```aiignore
@@ -209,6 +296,8 @@ package connector
 import (
 	"bytes"
 	"context"
+	// "crypto/sha256" // Not used directly here, checksumming is via remote command
+	// "encoding/hex"  // Not used directly here
 	"fmt"
 	"io"
 	"net"
@@ -225,13 +314,13 @@ import (
 // SSHConnector implements the Connector interface for SSH connections.
 type SSHConnector struct {
 	client        *ssh.Client
-	bastionClient *ssh.Client // Client for the bastion host, if used
+	bastionClient *ssh.Client
 	sftpClient    *sftp.Client
-	connCfg       ConnectionCfg // Stores the config used for the current connection
+	connCfg       ConnectionCfg
 	cachedOS      *OS
 	isConnected   bool
-	pool          *ConnectionPool // Connection pool instance
-	isFromPool    bool          // True if the current client is from the pool
+	pool          *ConnectionPool
+	isFromPool    bool
 }
 
 // NewSSHConnector creates a new SSHConnector, optionally with a connection pool.
@@ -242,52 +331,39 @@ func NewSSHConnector(pool *ConnectionPool) *SSHConnector {
 }
 
 // Connect establishes an SSH connection to the host specified in cfg.
-// It may use a connection pool if configured and applicable.
 func (s *SSHConnector) Connect(ctx context.Context, cfg ConnectionCfg) error {
-	s.connCfg = cfg // Store for potential use in Close (Put to pool)
-	s.isFromPool = false // Reset for this connection attempt
+	s.connCfg = cfg
+	s.isFromPool = false
 
-	// Try pool first if available and connection is poolable (e.g., no bastion for now)
-	if s.pool != nil && cfg.Bastion == nil {
-		// Attempt to get a connection from the pool
+	if s.pool != nil && cfg.BastionCfg == nil {
 		pooledClient, err := s.pool.Get(ctx, cfg)
 		if err == nil && pooledClient != nil {
 			s.client = pooledClient
 			s.isFromPool = true
 			s.isConnected = true
-
-			// Perform a basic test to ensure the client from the pool is usable
 			session, testErr := s.client.NewSession()
 			if testErr != nil {
-				// Pooled connection is bad, discard it properly
-				s.pool.CloseConnection(s.connCfg, s.client) // CloseConnection handles numActive
+				s.pool.CloseConnection(s.connCfg, s.client)
 				s.client = nil
 				s.isFromPool = false
 				s.isConnected = false
-				// Log this event and fall through to direct dial
-				// Consider using a logger if available from context or connector options
 				fmt.Fprintf(os.Stderr, "SSHConnector: Pooled connection for %s failed health check, falling back to direct dial: %v\n", cfg.Host, testErr)
 			} else {
 				session.Close()
-				// fmt.Fprintf(os.Stdout, "SSHConnector: Reused connection from pool for %s\n", cfg.Host)
-				return nil // Successfully connected using a pooled connection
+				return nil
 			}
 		} else if err != nil {
-			// Log error from pool.Get but still fall through to direct dial
 			fmt.Fprintf(os.Stderr, "SSHConnector: Failed to get connection from pool for %s: %v. Falling back to direct dial.\n", cfg.Host, err)
 		}
 	}
 
-	// Direct Dial Logic (Fallback or Default if pool not used/failed)
 	if !s.isFromPool {
-		// fmt.Fprintf(os.Stdout, "SSHConnector: Attempting direct dial for %s (pool not used or fallback)\n", cfg.Host)
-		client, bastionClient, err := dialSSH(ctx, cfg, cfg.Timeout) // Use cfg.Timeout for direct dials
+		client, bastionClient, err := dialSSH(ctx, cfg, cfg.Timeout)
 		if err != nil {
-			return err // dialSSH already wraps errors in ConnectionError where appropriate
+			return err
 		}
 		s.client = client
-		s.bastionClient = bastionClient // Store bastion client if one was used
-		// Test connection by opening a session (dialSSH does not do this final test)
+		s.bastionClient = bastionClient
 		session, testErr := s.client.NewSession()
 		if testErr != nil {
 			if s.client != nil {
@@ -300,7 +376,6 @@ func (s *SSHConnector) Connect(ctx context.Context, cfg ConnectionCfg) error {
 		}
 		session.Close()
 		s.isConnected = true
-		// s.isFromPool remains false
 	}
 	return nil
 }
@@ -310,12 +385,9 @@ func (s *SSHConnector) IsConnected() bool {
 	if s.client == nil || !s.isConnected {
 		return false
 	}
-	// Sending a keepalive or checking session status might be more robust,
-	// but for now, we rely on the initial connection success and the Close method.
-	// A simple check is to see if a new session can be opened.
 	session, err := s.client.NewSession()
 	if err != nil {
-		s.isConnected = false // Mark as disconnected if new session fails
+		s.isConnected = false
 		return false
 	}
 	session.Close()
@@ -326,42 +398,28 @@ func (s *SSHConnector) IsConnected() bool {
 func (s *SSHConnector) Close() error {
 	s.isConnected = false
 	var sshClientErr error
-
 	if s.sftpClient != nil {
 		if err := s.sftpClient.Close(); err != nil {
-			// Log SFTP close error but don't let it override SSH client error
 			fmt.Fprintf(os.Stderr, "SSHConnector: Failed to close SFTP client for %s: %v\n", s.connCfg.Host, err)
 		}
 		s.sftpClient = nil
 	}
-
 	if s.client != nil {
 		if s.isFromPool && s.pool != nil {
-			// Return to pool, assume healthy for now. Pool's Get will re-verify.
-			// connCfg should be the one used to Get this client.
 			s.pool.Put(s.connCfg, s.client, true)
-			// fmt.Fprintf(os.Stdout, "SSHConnector: Returned connection for %s to pool\n", s.connCfg.Host)
 		} else {
-			// Not from pool, or pool is nil, so directly close it.
-			// fmt.Fprintf(os.Stdout, "SSHConnector: Closing direct-dialed connection for %s\n", s.connCfg.Host)
 			sshClientErr = s.client.Close()
 		}
 		s.client = nil
 	}
-	s.isFromPool = false // Reset pool status
-
-	// TODO: Handle bastion client closure if it was stored and managed by this connector instance
-	// For now, bastion client is closed during Connect if subsequent steps fail, or not stored.
-	// If it was a direct dial with bastion, we need to close it.
+	s.isFromPool = false
 	if !s.isFromPool && s.bastionClient != nil {
-		// Log error from bastion close but prioritize main client close error
 		if berr := s.bastionClient.Close(); berr != nil {
 			fmt.Fprintf(os.Stderr, "SSHConnector: Failed to close direct-dialed bastion client for %s: %v\n", s.connCfg.Host, berr)
 		}
 		s.bastionClient = nil
 	}
-
-	return sshClientErr // Only return error from direct client.Close()
+	return sshClientErr
 }
 
 // Exec executes a command on the remote host.
@@ -369,41 +427,36 @@ func (s *SSHConnector) Exec(ctx context.Context, cmd string, options *ExecOption
 	if !s.IsConnected() {
 		return nil, nil, &ConnectionError{Host: s.connCfg.Host, Err: fmt.Errorf("not connected")}
 	}
-
 	var session *ssh.Session
 	var cancelFunc context.CancelFunc
-
 	if options != nil && options.Timeout > 0 {
 		var newCtx context.Context
 		newCtx, cancelFunc = context.WithTimeout(ctx, options.Timeout)
 		defer cancelFunc()
-		ctx = newCtx // Use the new context with timeout
+		ctx = newCtx
 	}
-
 	session, err = s.client.NewSession()
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create session: %w", err)
 	}
 	defer session.Close()
-
 	if options != nil && len(options.Env) > 0 {
 		for _, envVar := range options.Env {
 			parts := strings.SplitN(envVar, "=", 2)
 			if len(parts) == 2 {
-				if err := session.Setenv(parts[0], parts[1]); err != nil {
-					// Log or handle individual Setenv errors if necessary
+				if err := session.Setenv(parts[0], parts[1]); err != nil { /* Log error */
 				}
 			}
 		}
 	}
-
-	var finalCmd = cmd
-	if options != nil && options.Sudo {
-		finalCmd = "sudo -E -- " + cmd // Ensure environment variables are preserved with -E
+	finalCmd := cmd
+	if options != nil && options.Sudo && s.connCfg.Password != "" {
+		finalCmd = "sudo -S -p '' -E -- " + cmd
+		session.Stdin = strings.NewReader(s.connCfg.Password + "\n")
+	} else if options != nil && options.Sudo {
+		finalCmd = "sudo -E -- " + cmd
 	}
-
 	var stdoutBuf, stderrBuf bytes.Buffer
-
 	if options != nil && options.Stream != nil {
 		session.Stdout = io.MultiWriter(&stdoutBuf, options.Stream)
 		session.Stderr = io.MultiWriter(&stderrBuf, options.Stream)
@@ -411,49 +464,34 @@ func (s *SSHConnector) Exec(ctx context.Context, cmd string, options *ExecOption
 		session.Stdout = &stdoutBuf
 		session.Stderr = &stderrBuf
 	}
-
-
 	errChan := make(chan error, 1)
-	go func() {
-		errChan <- session.Run(finalCmd)
-	}()
-
+	go func() { errChan <- session.Run(finalCmd) }()
 	select {
 	case err = <-errChan:
-		// continue
 	case <-ctx.Done():
-		// This case handles timeouts or cancellations from the parent context.
-		// We need to ensure the session is killed if the context is done.
-		// Sending a signal or closing the session might be necessary.
-		// For now, we rely on the defer session.Close() and the potential error from session.Run().
-		// A more robust way would be to kill the process on the remote side.
 		return stdoutBuf.Bytes(), stderrBuf.Bytes(), fmt.Errorf("command execution context done: %w", ctx.Err())
 	}
-
-
 	stdout = stdoutBuf.Bytes()
 	stderr = stderrBuf.Bytes()
-
 	if err != nil {
 		exitCode := -1
 		if exitErr, ok := err.(*ssh.ExitError); ok {
 			exitCode = exitErr.ExitStatus()
 		}
-
-		// Retry logic
 		if options != nil && options.Retries > 0 {
 			for i := 0; i < options.Retries; i++ {
 				if options.RetryDelay > 0 {
 					time.Sleep(options.RetryDelay)
 				}
-				// Create a new session for retry
 				retrySession, retryErr := s.client.NewSession()
 				if retryErr != nil {
 					return stdout, stderr, &CommandError{Cmd: cmd, ExitCode: exitCode, Stdout: string(stdout), Stderr: string(stderr), Underlying: fmt.Errorf("failed to create retry session: %w", retryErr)}
 				}
-
+				if options.Sudo && s.connCfg.Password != "" {
+					retrySession.Stdin = strings.NewReader(s.connCfg.Password + "\n")
+				}
 				if options.Stream != nil {
-					retrySession.Stdout = io.MultiWriter(&stdoutBuf, options.Stream) // Reset buffer or use new ones
+					retrySession.Stdout = io.MultiWriter(&stdoutBuf, options.Stream)
 					retrySession.Stderr = io.MultiWriter(&stderrBuf, options.Stream)
 				} else {
 					stdoutBuf.Reset()
@@ -461,8 +499,7 @@ func (s *SSHConnector) Exec(ctx context.Context, cmd string, options *ExecOption
 					retrySession.Stdout = &stdoutBuf
 					retrySession.Stderr = &stderrBuf
 				}
-
-				if len(options.Env) > 0 { // Apply Env to retry session
+				if len(options.Env) > 0 {
 					for _, envVar := range options.Env {
 						parts := strings.SplitN(envVar, "=", 2)
 						if len(parts) == 2 {
@@ -470,21 +507,18 @@ func (s *SSHConnector) Exec(ctx context.Context, cmd string, options *ExecOption
 						}
 					}
 				}
-
-				err = retrySession.Run(finalCmd) // Use finalCmd
+				err = retrySession.Run(finalCmd)
 				retrySession.Close()
 				stdout = stdoutBuf.Bytes()
 				stderr = stderrBuf.Bytes()
 				if err == nil {
-					break // Success on retry
+					break
 				}
 				if exitErr, ok := err.(*ssh.ExitError); ok {
 					exitCode = exitErr.ExitStatus()
 				}
 			}
 		}
-
-		// If error still persists after retries
 		if err != nil {
 			return stdout, stderr, &CommandError{Cmd: cmd, ExitCode: exitCode, Stdout: string(stdout), Stderr: string(stderr), Underlying: err}
 		}
@@ -492,7 +526,6 @@ func (s *SSHConnector) Exec(ctx context.Context, cmd string, options *ExecOption
 	return stdout, stderr, nil
 }
 
-// Helper to initialize SFTP client if not already done.
 func (s *SSHConnector) ensureSftp() error {
 	if s.sftpClient == nil {
 		if !s.IsConnected() {
@@ -507,146 +540,87 @@ func (s *SSHConnector) ensureSftp() error {
 	return nil
 }
 
-// Copy copies a local file or directory to the remote host.
-// For simplicity, this initial implementation only supports single file copy.
-// Directory copy would require recursive logic.
-func (s *SSHConnector) Copy(ctx context.Context, srcPath, dstPath string, options *FileTransferOptions) error {
-	if err := s.ensureSftp(); err != nil {
-		return err
-	}
-
-	// Timeout handling
-	if options != nil && options.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, options.Timeout)
-		defer cancel()
-	}
-
-	// Read source file
-	srcFile, err := os.Open(srcPath)
-	if err != nil {
-		return fmt.Errorf("failed to open source file %s: %w", srcPath, err)
-	}
-	defer srcFile.Close()
-
-	// Create destination file
-	// TODO: Handle sudo for dstPath creation if options.Sudo is true.
-	// This might involve copying to a temp location and then using sudo mv.
-	// For now, direct write.
-	dstFile, err := s.sftpClient.Create(dstPath)
-	if err != nil {
-		return fmt.Errorf("failed to create remote file %s: %w", dstPath, err)
-	}
-	defer dstFile.Close()
-
-	// Copy content
-	_, err = io.Copy(dstFile, srcFile)
-	if err != nil {
-		return fmt.Errorf("failed to copy content to remote file %s: %w", dstPath, err)
-	}
-
-	// Apply permissions and ownership if specified
-	if options != nil {
-		if options.Permissions != "" {
-			perm, err := strconv.ParseUint(options.Permissions, 8, 32)
-			if err == nil {
-				if err := s.sftpClient.Chmod(dstPath, os.FileMode(perm)); err != nil {
-					// Log or return error for chmod failure
-				}
-			}
-		}
-		// Ownership (Owner, Group) via SFTP is tricky and often not directly supported
-		// or requires root privileges on the SFTP server side.
-		// For full sudo support, commands via Exec might be needed after upload.
-		// Example: _, _, err := s.Exec(ctx, fmt.Sprintf("chown %s:%s %s", options.Owner, options.Group, dstPath), &ExecOptions{Sudo: true})
-	}
-
-	return nil
-}
-
-// CopyContent writes content to a remote file.
 func (s *SSHConnector) CopyContent(ctx context.Context, content []byte, dstPath string, options *FileTransferOptions) error {
 	if err := s.ensureSftp(); err != nil {
 		return err
 	}
 
-	// Timeout handling
-	if options != nil && options.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, options.Timeout)
-		defer cancel()
-	}
-
-	// TODO: Handle sudo for dstPath creation if options.Sudo is true.
-	// This might involve copying to a temp location and then using sudo mv.
-	// For now, direct write.
-	dstFile, err := s.sftpClient.Create(dstPath)
-	if err != nil {
-		return fmt.Errorf("failed to create remote file %s for content: %w", dstPath, err)
-	}
-	defer dstFile.Close()
-
-	_, err = dstFile.Write(content)
-	if err != nil {
-		return fmt.Errorf("failed to write content to remote file %s: %w", dstPath, err)
-	}
-
-	// Apply permissions and ownership
+	effectiveSudo := false
+	var effectivePerms string
 	if options != nil {
-		if options.Permissions != "" {
-			perm, err := strconv.ParseUint(options.Permissions, 8, 32)
-			if err == nil {
-				if err := s.sftpClient.Chmod(dstPath, os.FileMode(perm)); err != nil {
-					// Log or return error
+		effectiveSudo = options.Sudo
+		effectivePerms = options.Permissions
+	}
+
+	if effectiveSudo {
+		tmpPath := filepath.Join("/tmp", fmt.Sprintf("kubexm-copycontent-%d-%s", time.Now().UnixNano(), filepath.Base(dstPath)))
+
+		// 1. Upload to temporary path (non-sudo)
+		// Use default restrictive perms for temp file, final perms applied by sudo chmod.
+		err := s.writeFileViaSFTP(context.Background(), content, tmpPath, "0600") // Use background context for temp operations
+		if err != nil {
+			return fmt.Errorf("failed to upload to temporary path %s for sudo CopyContent: %w", tmpPath, err)
+		}
+		defer func() {
+			rmCmd := fmt.Sprintf("rm -f %s", tmpPath)
+			// Use a new context for cleanup, don't let original ctx timeout affect cleanup.
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			_, _, rmErr := s.Exec(cleanupCtx, rmCmd, &ExecOptions{Sudo: false}) // Try non-sudo first
+			if rmErr != nil {
+				_, _, rmSudoErr := s.Exec(cleanupCtx, rmCmd, &ExecOptions{Sudo: true})
+				if rmSudoErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to remove temporary file %s on host %s (tried non-sudo and sudo): %v / %v\n", tmpPath, s.connCfg.Host, rmErr, rmSudoErr)
 				}
 			}
+		}()
+
+		// 2. Ensure destination directory exists using sudo
+		destDir := filepath.Dir(dstPath)
+		if destDir != "." && destDir != "/" {
+			mkdirCmd := fmt.Sprintf("mkdir -p %s", destDir)
+			execCtx, cancel := context.WithTimeout(ctx, 15*time.Second) // Use main ctx for timeout
+			_, _, mkdirErr := s.Exec(execCtx, mkdirCmd, &ExecOptions{Sudo: true})
+			cancel()
+			if mkdirErr != nil {
+				return fmt.Errorf("failed to sudo mkdir -p %s on host %s: %w", destDir, s.connCfg.Host, mkdirErr)
+			}
 		}
-		// Ownership similar to Copy method
+
+		// 3. Move file to destination using sudo
+		mvCmd := fmt.Sprintf("mv %s %s", tmpPath, dstPath)
+		execCtxMv, cancelMv := context.WithTimeout(ctx, 30*time.Second) // Potentially longer for mv
+		_, _, mvErr := s.Exec(execCtxMv, mvCmd, &ExecOptions{Sudo: true})
+		cancelMv()
+		if mvErr != nil {
+			return fmt.Errorf("failed to sudo mv %s to %s on host %s: %w", tmpPath, dstPath, s.connCfg.Host, mvErr)
+		}
+
+		// 4. Apply permissions using sudo
+		if effectivePerms != "" {
+			if _, err := strconv.ParseUint(effectivePerms, 8, 32); err != nil { // Validate format
+				return fmt.Errorf("invalid permissions format '%s' for sudo chmod on host %s: %w", effectivePerms, s.connCfg.Host, err)
+			}
+			chmodCmd := fmt.Sprintf("chmod %s %s", effectivePerms, dstPath)
+			execCtxChmod, cancelChmod := context.WithTimeout(ctx, 15*time.Second)
+			_, _, chmodErr := s.Exec(execCtxChmod, chmodCmd, &ExecOptions{Sudo: true})
+			cancelChmod()
+			if chmodErr != nil {
+				return fmt.Errorf("failed to sudo chmod %s to %s on host %s: %w", dstPath, effectivePerms, s.connCfg.Host, chmodErr)
+			}
+		}
+		// TODO: Handle Owner/Group from FileTransferOptions if they are set, via sudo chown.
+		return nil
+	} else {
+		// Non-sudo: direct SFTP write
+		return s.writeFileViaSFTP(ctx, content, dstPath, effectivePerms)
 	}
-	return nil
 }
 
-
-// Fetch retrieves a file from the remote host to local.
-// For simplicity, this initial implementation only supports single file fetch.
-func (s *SSHConnector) Fetch(ctx context.Context, remotePath, localPath string) error {
-	if err := s.ensureSftp(); err != nil {
-		return err
-	}
-
-	// Open remote file
-	remoteFile, err := s.sftpClient.Open(remotePath)
-	if err != nil {
-		return fmt.Errorf("failed to open remote file %s: %w", remotePath, err)
-	}
-	defer remoteFile.Close()
-
-	// Create local file
-	// Ensure local directory exists
-	if err := os.MkdirAll(filepath.Dir(localPath), os.ModePerm); err != nil {
-		return fmt.Errorf("failed to create local directory for %s: %w", localPath, err)
-	}
-	localFile, err := os.Create(localPath)
-	if err != nil {
-		return fmt.Errorf("failed to create local file %s: %w", localPath, err)
-	}
-	defer localFile.Close()
-
-	// Copy content
-	_, err = io.Copy(localFile, remoteFile)
-	if err != nil {
-		return fmt.Errorf("failed to copy content from remote file %s to local %s: %w", remotePath, localPath, err)
-	}
-	return nil
-}
-
-
-// Stat gets information about a remote file or directory.
 func (s *SSHConnector) Stat(ctx context.Context, path string) (*FileStat, error) {
 	if err := s.ensureSftp(); err != nil {
 		return nil, err
 	}
-
 	fi, err := s.sftpClient.Lstat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -654,38 +628,23 @@ func (s *SSHConnector) Stat(ctx context.Context, path string) (*FileStat, error)
 		}
 		return nil, fmt.Errorf("failed to stat remote path %s: %w", path, err)
 	}
-
-	// TODO: Get Owner/Group and SHA256 sum if needed.
-	// Owner/Group might require exec "stat ..." command.
-	// SHA256 sum would require reading the file or exec "sha256sum ..."
 	return &FileStat{
-		Name:    fi.Name(),
-		Size:    fi.Size(),
-		Mode:    fi.Mode(),
-		ModTime: fi.ModTime(),
-		IsDir:   fi.IsDir(),
-		IsExist: true,
+		Name: fi.Name(), Size: fi.Size(), Mode: fi.Mode(),
+		ModTime: fi.ModTime(), IsDir: fi.IsDir(), IsExist: true,
 	}, nil
 }
 
-// LookPath searches for an executable in the remote host's PATH.
 func (s *SSHConnector) LookPath(ctx context.Context, file string) (string, error) {
-	// A common way to implement LookPath over SSH is to use `command -v` or `which`.
-	// `command -v` is POSIX standard and generally preferred.
 	cmd := fmt.Sprintf("command -v %s", file)
-	stdout, stderr, err := s.Exec(ctx, cmd, nil) // No options for this internal command
-
+	stdout, stderr, err := s.Exec(ctx, cmd, nil)
 	if err != nil {
-		// If command execution itself failed (not just non-zero exit)
 		if cmdErr, ok := err.(*CommandError); ok {
-			// command -v returns 1 if not found, which is an expected "not found" scenario
 			if cmdErr.ExitCode == 1 {
 				return "", fmt.Errorf("executable %s not found in PATH (stderr: %s)", file, string(stderr))
 			}
 		}
 		return "", fmt.Errorf("failed to execute 'command -v %s': %w (stdout: %s, stderr: %s)", file, err, string(stdout), string(stderr))
 	}
-
 	path := strings.TrimSpace(string(stdout))
 	if path == "" {
 		return "", fmt.Errorf("executable %s not found in PATH (stderr: %s)", file, string(stderr))
@@ -693,79 +652,305 @@ func (s *SSHConnector) LookPath(ctx context.Context, file string) (string, error
 	return path, nil
 }
 
-// GetOS retrieves operating system information.
 func (s *SSHConnector) GetOS(ctx context.Context) (*OS, error) {
 	if s.cachedOS != nil {
 		return s.cachedOS, nil
 	}
 
-	// Try /etc/os-release first
-	stdout, _, err := s.Exec(ctx, "cat /etc/os-release", nil)
+	osInfo := &OS{}            // Initialize osInfo at the beginning
+	var content, stderr []byte // Declare content and stderr
+	var err error              // Declare err
+
+	content, stderr, err = s.Exec(ctx, "cat /etc/os-release", nil)
+
 	if err != nil {
-		// Fallback or handle error if /etc/os-release is not available
-		// For now, we'll return a partial error if this primary method fails.
-		// A more robust solution might try other commands like lsb_release -a
-		return nil, fmt.Errorf("failed to cat /etc/os-release: %w", err)
+		// Attempt to get at least Arch and Kernel if /etc/os-release fails
+		var archStdout, kernelStdout []byte // Declare variables for this block
+		var archErr, kernelErr error        // Declare error variables for this block
+
+		archStdout, _, archErr = s.Exec(ctx, "uname -m", nil)
+		if archErr == nil {
+			osInfo.Arch = strings.TrimSpace(string(archStdout))
+		}
+		kernelStdout, _, kernelErr = s.Exec(ctx, "uname -r", nil) // Corrected from := to =
+		if kernelErr == nil {
+			osInfo.Kernel = strings.TrimSpace(string(kernelStdout))
+		}
+		return osInfo, fmt.Errorf("failed to cat /etc/os-release on host %s: %w (stderr: %s)", s.connCfg.Host, err, string(stderr))
 	}
 
-	osInfo := &OS{}
-	lines := strings.Split(string(stdout), "\n")
+	lines := strings.Split(string(content), "\n")
+	vars := make(map[string]string)
 	for _, line := range lines {
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) == 2 {
 			key := strings.TrimSpace(parts[0])
 			val := strings.Trim(strings.TrimSpace(parts[1]), "\"")
-			switch key {
-			case "ID":
-				osInfo.ID = val
-			case "VERSION_ID":
-				osInfo.VersionID = val
-			case "PRETTY_NAME": // Often includes codename
-				if osInfo.Codename == "" && strings.Contains(val, "(") && strings.Contains(val, ")") {
-					start := strings.Index(val, "(")
-					end := strings.Index(val, ")")
-					if start != -1 && end != -1 && start < end {
-						osInfo.Codename = strings.ToLower(strings.TrimSpace(val[start+1 : end]))
-					}
-				}
-			case "VERSION_CODENAME":
-				osInfo.Codename = val
-			}
+			vars[key] = val
 		}
 	}
+	osInfo.ID = vars["ID"]
+	osInfo.VersionID = vars["VERSION_ID"]
+	osInfo.PrettyName = vars["PRETTY_NAME"]
+	osInfo.Codename = vars["VERSION_CODENAME"] // Populate Codename
 
-	// Get Arch
-	archStdout, _, err := s.Exec(ctx, "uname -m", nil)
-	if err == nil {
+	archStdout, _, archErr := s.Exec(ctx, "uname -m", nil)
+	if archErr == nil {
 		osInfo.Arch = strings.TrimSpace(string(archStdout))
+	} else {
+		fmt.Fprintf(os.Stderr, "Warning: failed to get arch for host %s: %v\n", s.connCfg.Host, archErr)
 	}
 
-	// Get Kernel
-	kernelStdout, _, err := s.Exec(ctx, "uname -r", nil)
-	if err == nil {
+	kernelStdout, _, kernelErr := s.Exec(ctx, "uname -r", nil)
+	if kernelErr == nil {
 		osInfo.Kernel = strings.TrimSpace(string(kernelStdout))
+	} else {
+		fmt.Fprintf(os.Stderr, "Warning: failed to get kernel for host %s: %v\n", s.connCfg.Host, kernelErr)
 	}
-
-	// TODO: Variant detection if necessary
 
 	s.cachedOS = osInfo
 	return s.cachedOS, nil
 }
 
-// Ensure SSHConnector implements Connector interface
+func (s *SSHConnector) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	if err := s.ensureSftp(); err != nil {
+		return nil, fmt.Errorf("sftp client not available for ReadFile on host %s: %w", s.connCfg.Host, err)
+	}
+	file, err := s.sftpClient.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open remote file %s via sftp on host %s: %w", path, s.connCfg.Host, err)
+	}
+	defer file.Close()
+
+	contentBytes, err := io.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read remote file %s via sftp on host %s: %w", path, s.connCfg.Host, err)
+	}
+	return contentBytes, nil
+}
+
+func (s *SSHConnector) WriteFile(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error {
+	if err := s.ensureSftp(); err != nil {
+		return fmt.Errorf("sftp client not available for WriteFile on host %s: %w", s.connCfg.Host, err)
+	}
+	if err := s.ensureSftp(); err != nil { // Ensure SFTP client is available for non-sudo or initial upload part of sudo
+		return fmt.Errorf("sftp client not available for WriteFile on host %s: %w", s.connCfg.Host, err)
+	}
+
+	if sudo {
+		// Sudo strategy: upload to temp, then sudo mv, sudo chmod, sudo chown
+		tmpPath := filepath.Join("/tmp", fmt.Sprintf("kubexm-write-%d-%s", time.Now().UnixNano(), filepath.Base(destPath)))
+
+		// 1. Upload to temporary path without sudo
+		err := s.writeFileViaSFTP(ctx, content, tmpPath, "0644") // Write with temp permissions
+		if err != nil {
+			return fmt.Errorf("failed to upload to temporary path %s on host %s for sudo write: %w", tmpPath, s.connCfg.Host, err)
+		}
+		// Defer removal of temporary file
+		defer func() {
+			// Best effort removal, log if it fails but don't fail the WriteFile operation itself for this.
+			// Sudo might be needed if the user running kubexm can't delete from /tmp (unlikely but possible)
+			// For simplicity, using non-sudo rm.
+			rmCmd := fmt.Sprintf("rm -f %s", tmpPath)
+			_, _, rmErr := s.Exec(ctx, rmCmd, &ExecOptions{Sudo: false}) // Try non-sudo first
+			if rmErr != nil {
+				// Attempt with sudo if non-sudo failed, as a fallback cleanup
+				_, _, rmSudoErr := s.Exec(ctx, rmCmd, &ExecOptions{Sudo: true})
+				if rmSudoErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to remove temporary file %s on host %s (tried non-sudo and sudo): %v / %v\n", tmpPath, s.connCfg.Host, rmErr, rmSudoErr)
+				}
+			}
+		}()
+
+		// 2. Ensure destination directory exists using sudo
+		destDir := filepath.Dir(destPath)
+		if destDir != "." && destDir != "/" {
+			mkdirCmd := fmt.Sprintf("mkdir -p %s", destDir)
+			_, _, mkdirErr := s.Exec(ctx, mkdirCmd, &ExecOptions{Sudo: true})
+			if mkdirErr != nil {
+				return fmt.Errorf("failed to sudo mkdir -p %s on host %s: %w", destDir, s.connCfg.Host, mkdirErr)
+			}
+		}
+
+		// 3. Move file to destination using sudo
+		mvCmd := fmt.Sprintf("mv %s %s", tmpPath, destPath)
+		_, _, mvErr := s.Exec(ctx, mvCmd, &ExecOptions{Sudo: true})
+		if mvErr != nil {
+			return fmt.Errorf("failed to sudo mv %s to %s on host %s: %w", tmpPath, destPath, s.connCfg.Host, mvErr)
+		}
+
+		// 4. Apply permissions using sudo
+		if permissions != "" {
+			// Validate permissions format briefly before sending to chmod
+			if _, err := strconv.ParseUint(permissions, 8, 32); err != nil {
+				return fmt.Errorf("invalid permissions format '%s' for sudo chmod on host %s: %w", permissions, s.connCfg.Host, err)
+
+			}
+			chmodCmd := fmt.Sprintf("chmod %s %s", permissions, destPath)
+			_, _, chmodErr := s.Exec(ctx, chmodCmd, &ExecOptions{Sudo: true})
+			if chmodErr != nil {
+				return fmt.Errorf("failed to sudo chmod %s to %s on host %s: %w", destPath, permissions, s.connCfg.Host, chmodErr)
+			}
+		}
+		// Note: Chown is not part of WriteFile's signature, but could be added to FileTransferOptions
+		// and handled here if options were passed to WriteFile.
+		// For now, permissions are handled.
+	} else {
+		// Non-sudo: direct SFTP write
+		return s.writeFileViaSFTP(ctx, content, destPath, permissions)
+	}
+	return nil
+}
+
+// writeFileViaSFTP is a helper for direct SFTP writes.
+func (s *SSHConnector) writeFileViaSFTP(ctx context.Context, content []byte, destPath, permissions string) error {
+	parentDir := filepath.Dir(destPath)
+	if parentDir != "." && parentDir != "/" {
+		_, statErr := s.sftpClient.Stat(parentDir)
+		if statErr != nil {
+			if os.IsNotExist(statErr) {
+				// Use Exec for robust recursive directory creation (non-sudo context for this helper)
+				mkdirCmd := fmt.Sprintf("mkdir -p %s", parentDir)
+				execCtx, execCancel := context.WithTimeout(ctx, 15*time.Second) // Use parent ctx for timeout
+				_, _, mkdirErr := s.Exec(execCtx, mkdirCmd, &ExecOptions{Sudo: false})
+				execCancel()
+				if mkdirErr != nil {
+					return fmt.Errorf("failed to create parent directory %s via exec on host %s: %w", parentDir, s.connCfg.Host, mkdirErr)
+				}
+			} else {
+				// Other stat errors (e.g., permission denied to stat parent) are problematic.
+				return fmt.Errorf("failed to stat parent directory %s on host %s: %w", parentDir, s.connCfg.Host, statErr)
+			}
+		}
+		// If statErr is nil, directory exists.
+	}
+
+	file, err := s.sftpClient.Create(destPath) // Create will truncate if file exists
+	if err != nil {
+		return fmt.Errorf("failed to create/truncate remote file %s via sftp on host %s: %w", destPath, s.connCfg.Host, err)
+	}
+	defer file.Close()
+
+	_, err = file.Write(content)
+	if err != nil {
+		return fmt.Errorf("failed to write content to remote file %s via sftp on host %s: %w", destPath, s.connCfg.Host, err)
+	}
+
+	if permissions != "" {
+		permVal, parseErr := strconv.ParseUint(permissions, 8, 32)
+		if parseErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Invalid permissions format '%s' for SFTP WriteFile to %s on host %s, skipping chmod: %v\n", permissions, destPath, s.connCfg.Host, parseErr)
+		} else {
+			if chmodErr := s.sftpClient.Chmod(destPath, os.FileMode(permVal)); chmodErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: Failed to chmod remote file %s to %s via SFTP on host %s: %v\n", destPath, permissions, s.connCfg.Host, chmodErr)
+			}
+		}
+	}
+	return nil
+}
+
+func (s *SSHConnector) Mkdir(ctx context.Context, path string, perm string) error {
+	// Construct the command with sudo if needed, though typically mkdir -p handles permissions well.
+	// For simplicity, assuming Runner handles sudo if path requires it.
+	// Connector's Mkdir itself won't use sudo directly unless ExecOptions are passed.
+	cmd := fmt.Sprintf("mkdir -p %s", path)                            // -p makes it idempotent
+	_, stderrBytes, err := s.Exec(ctx, cmd, &ExecOptions{Sudo: false}) // Assuming no sudo for basic mkdir by connector
+	if err != nil {
+		// Check if it's CommandError to provide more details
+		if cmdErr, ok := err.(*CommandError); ok {
+			return fmt.Errorf("failed to create directory %s on %s (exit code %d): %w (stderr: %s)", path, s.connCfg.Host, cmdErr.ExitCode, err, cmdErr.Stderr)
+		}
+		return fmt.Errorf("failed to create directory %s on %s: %w (stderr: %s)", path, s.connCfg.Host, err, string(stderrBytes))
+	}
+
+	if perm != "" {
+		chmodCmd := fmt.Sprintf("chmod %s %s", perm, path)
+		// Pass Sudo false, as chmod on a directory usually depends on ownership or prior sudo for mkdir.
+		_, chmodStderrBytes, chmodErr := s.Exec(ctx, chmodCmd, &ExecOptions{Sudo: false})
+		if chmodErr != nil {
+			if cmdErr, ok := chmodErr.(*CommandError); ok {
+				return fmt.Errorf("failed to chmod directory %s on %s to %s (exit code %d): %w (stderr: %s)", path, s.connCfg.Host, perm, cmdErr.ExitCode, chmodErr, cmdErr.Stderr)
+			}
+			return fmt.Errorf("failed to chmod directory %s on %s to %s: %w (stderr: %s)", path, s.connCfg.Host, perm, chmodErr, string(chmodStderrBytes))
+		}
+	}
+	return nil
+}
+
+func (s *SSHConnector) Remove(ctx context.Context, path string, opts RemoveOptions) error {
+	var cmd string
+	flags := "-f" // Default to force, helps with idempotency if file doesn't exist with -f
+	if opts.Recursive {
+		flags += "r"
+	}
+	cmd = fmt.Sprintf("rm %s %s", flags, path)
+
+	// Assuming no sudo for basic remove by connector. Runner would apply sudo if needed.
+	// (Sudo should be part of ExecOptions if needed by caller)
+	execOpts := &ExecOptions{Sudo: false} // Default, caller can override via opts in a more generic Exec
+
+	if opts.IgnoreNotExist {
+		statCtx, statCancel := context.WithTimeout(ctx, 10*time.Second)
+		fileStat, statErr := s.Stat(statCtx, path)
+		statCancel()
+
+		if statErr == nil && fileStat != nil && !fileStat.IsExist {
+			return nil // File does not exist, success as per IgnoreNotExist
+		}
+		// If Stat itself had an error other than "not found", we might still want to proceed with rm,
+		// as rm -f is quite forgiving. Or, we could return statErr here if it's not an os.IsNotExist type.
+		// For now, if Stat says it exists, or Stat had an unrelated error, we proceed to rm.
+	}
+
+	_, stderrBytes, err := s.Exec(ctx, cmd, execOpts)
+	if err != nil {
+		// If IgnoreNotExist was true AND Stat indicated it existed (or Stat errored non-fatally),
+		// then an error from `rm` is a real error.
+		if cmdErr, ok := err.(*CommandError); ok {
+			// If IgnoreNotExist was true, but rm still failed (e.g. permission denied on existing file)
+			// that's a valid error to report. The Stat check above only handles "already not there".
+			return fmt.Errorf("failed to remove %s on %s (exit code %d): %w (stderr: %s)", path, s.connCfg.Host, cmdErr.ExitCode, err, cmdErr.Stderr)
+		}
+		return fmt.Errorf("failed to remove %s on %s: %w (stderr: %s)", path, s.connCfg.Host, err, string(stderrBytes))
+	}
+	return nil
+}
+
+func (s *SSHConnector) GetFileChecksum(ctx context.Context, path string, checksumType string) (string, error) {
+	var checksumCmd string
+	switch strings.ToLower(checksumType) {
+	case "sha256":
+		checksumCmd = fmt.Sprintf("sha256sum -b %s", path)
+	case "md5":
+		checksumCmd = fmt.Sprintf("md5sum -b %s", path)
+	default:
+		return "", fmt.Errorf("unsupported checksum type '%s' for remote file %s on host %s", checksumType, path, s.connCfg.Host)
+	}
+
+	stdoutBytes, stderrBytes, err := s.Exec(ctx, checksumCmd, &ExecOptions{Sudo: false}) // Assuming no sudo for checksum
+	if err != nil {
+		if cmdErr, ok := err.(*CommandError); ok {
+			return "", fmt.Errorf("failed to execute checksum command '%s' on %s for %s (exit code %d): %w (stderr: %s)", checksumCmd, s.connCfg.Host, path, cmdErr.ExitCode, err, cmdErr.Stderr)
+		}
+		return "", fmt.Errorf("failed to execute checksum command '%s' on %s for %s: %w (stderr: %s)", checksumCmd, s.connCfg.Host, path, err, string(stderrBytes))
+	}
+
+	parts := strings.Fields(string(stdoutBytes))
+	if len(parts) > 0 {
+		return parts[0], nil
+	}
+	return "", fmt.Errorf("failed to parse checksum from command output for %s on host %s: '%s'", path, s.connCfg.Host, string(stdoutBytes))
+}
+
 var _ Connector = &SSHConnector{}
 
-// dialSSHFunc defines the signature for the SSH dialing function, allowing it to be mocked.
 type dialSSHFunc func(ctx context.Context, cfg ConnectionCfg, effectiveConnectTimeout time.Duration) (*ssh.Client, *ssh.Client, error)
 
-// actualDialSSH holds the real implementation for dialing SSH.
 var actualDialSSH dialSSHFunc = func(ctx context.Context, cfg ConnectionCfg, effectiveConnectTimeout time.Duration) (*ssh.Client, *ssh.Client, error) {
 	var authMethods []ssh.AuthMethod
-
 	if cfg.Password != "" {
 		authMethods = append(authMethods, ssh.Password(cfg.Password))
 	}
-
 	if len(cfg.PrivateKey) > 0 {
 		signer, err := ssh.ParsePrivateKey(cfg.PrivateKey)
 		if err != nil {
@@ -783,73 +968,69 @@ var actualDialSSH dialSSHFunc = func(ctx context.Context, cfg ConnectionCfg, eff
 		}
 		authMethods = append(authMethods, ssh.PublicKeys(signer))
 	}
-
 	if len(authMethods) == 0 {
 		return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("no authentication method provided (password or private key)")}
 	}
 
-	sshConfig := &ssh.ClientConfig{
-		User:            cfg.User,
-		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: Make this configurable
-		Timeout:         effectiveConnectTimeout,     // Use the passed-in timeout
+	hostKeyCallback := cfg.HostKeyCallback
+	if hostKeyCallback == nil {
+		fmt.Fprintf(os.Stderr, "Warning: HostKeyCallback is not set for host %s. Using InsecureIgnoreHostKey(). This is not recommended for production.\n", cfg.Host)
+		hostKeyCallback = ssh.InsecureIgnoreHostKey()
 	}
 
+	sshConfig := &ssh.ClientConfig{
+		User: cfg.User, Auth: authMethods,
+		HostKeyCallback: hostKeyCallback, Timeout: effectiveConnectTimeout,
+	}
 	var client *ssh.Client
-	var bastionSshClient *ssh.Client // Explicitly separate bastion client variable
+	var bastionSshClient *ssh.Client
 	var err error
-
 	dialAddr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 
-	if cfg.Bastion != nil {
-		bastionAuthMethods := []ssh.AuthMethod{}
-		if cfg.Bastion.Password != "" {
-			bastionAuthMethods = append(bastionAuthMethods, ssh.Password(cfg.Bastion.Password))
+	if cfg.BastionCfg != nil {
+		var bastionAuthMethods []ssh.AuthMethod
+		if cfg.BastionCfg.Password != "" {
+			bastionAuthMethods = append(bastionAuthMethods, ssh.Password(cfg.BastionCfg.Password))
 		}
-		if len(cfg.Bastion.PrivateKey) > 0 {
-			signer, err := ssh.ParsePrivateKey(cfg.Bastion.PrivateKey)
+		if len(cfg.BastionCfg.PrivateKey) > 0 {
+			signer, err := ssh.ParsePrivateKey(cfg.BastionCfg.PrivateKey)
 			if err != nil {
-				return nil, nil, &ConnectionError{Host: cfg.Bastion.Host, Err: fmt.Errorf("failed to parse bastion private key: %w", err)}
+				return nil, nil, &ConnectionError{Host: cfg.BastionCfg.Host, Err: fmt.Errorf("failed to parse bastion private key: %w", err)}
 			}
 			bastionAuthMethods = append(bastionAuthMethods, ssh.PublicKeys(signer))
-		} else if cfg.Bastion.PrivateKeyPath != "" {
-			key, err := os.ReadFile(cfg.Bastion.PrivateKeyPath)
+		} else if cfg.BastionCfg.PrivateKeyPath != "" {
+			key, err := os.ReadFile(cfg.BastionCfg.PrivateKeyPath)
 			if err != nil {
-				return nil, nil, &ConnectionError{Host: cfg.Bastion.Host, Err: fmt.Errorf("failed to read bastion private key file %s: %w", cfg.Bastion.PrivateKeyPath, err)}
+				return nil, nil, &ConnectionError{Host: cfg.BastionCfg.Host, Err: fmt.Errorf("failed to read bastion private key file %s: %w", cfg.BastionCfg.PrivateKeyPath, err)}
 			}
 			signer, err := ssh.ParsePrivateKey(key)
 			if err != nil {
-				return nil, nil, &ConnectionError{Host: cfg.Bastion.Host, Err: fmt.Errorf("failed to parse bastion private key from file %s: %w", cfg.Bastion.PrivateKeyPath, err)}
+				return nil, nil, &ConnectionError{Host: cfg.BastionCfg.Host, Err: fmt.Errorf("failed to parse bastion private key from file %s: %w", cfg.BastionCfg.PrivateKeyPath, err)}
 			}
 			bastionAuthMethods = append(bastionAuthMethods, ssh.PublicKeys(signer))
 		}
-
 		if len(bastionAuthMethods) == 0 {
-			return nil, nil, &ConnectionError{Host: cfg.Bastion.Host, Err: fmt.Errorf("no authentication method provided for bastion (password or private key)")}
+			return nil, nil, &ConnectionError{Host: cfg.BastionCfg.Host, Err: fmt.Errorf("no authentication method provided for bastion (password or private key)")}
 		}
 
 		bastionConfig := &ssh.ClientConfig{
-			User:            cfg.Bastion.User,
-			Auth:            bastionAuthMethods,
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: Make this configurable
-			Timeout:         cfg.Bastion.Timeout,         // Bastion has its own timeout in its Cfg
+			User: cfg.BastionCfg.User, Auth: bastionAuthMethods,
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(), Timeout: cfg.BastionCfg.Timeout,
 		}
-
-		bastionDialAddr := net.JoinHostPort(cfg.Bastion.Host, strconv.Itoa(cfg.Bastion.Port))
+		bastionDialAddr := net.JoinHostPort(cfg.BastionCfg.Host, strconv.Itoa(cfg.BastionCfg.Port))
 		bastionSshClient, err = ssh.Dial("tcp", bastionDialAddr, bastionConfig)
 		if err != nil {
-			return nil, nil, &ConnectionError{Host: cfg.Bastion.Host, Err: fmt.Errorf("failed to dial bastion: %w", err)}
+			return nil, nil, &ConnectionError{Host: cfg.BastionCfg.Host, Err: fmt.Errorf("failed to dial bastion: %w", err)}
 		}
 
 		conn, err := bastionSshClient.Dial("tcp", dialAddr)
 		if err != nil {
-			bastionSshClient.Close() // Close bastion if dialing target fails
+			bastionSshClient.Close()
 			return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to dial target host via bastion: %w", err)}
 		}
-
 		ncc, chans, reqs, err := ssh.NewClientConn(conn, dialAddr, sshConfig)
 		if err != nil {
-			bastionSshClient.Close() // Close bastion if NewClientConn to target fails
+			bastionSshClient.Close()
 			return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to create new client connection via bastion: %w", err)}
 		}
 		client = ssh.NewClient(ncc, chans, reqs)
@@ -859,23 +1040,16 @@ var actualDialSSH dialSSHFunc = func(ctx context.Context, cfg ConnectionCfg, eff
 			return nil, nil, &ConnectionError{Host: cfg.Host, Err: err}
 		}
 	}
-	// The final test session is done by the caller (Connect or Pool's Get)
 	return client, bastionSshClient, nil
 }
 
-// G_dialSSHOverride allows overriding the dialSSH behavior for testing.
 var G_dialSSHOverride dialSSHFunc
 
-// SetDialSSHOverrideForTesting replaces the actual SSH dialer with a mock and returns a cleanup function.
 func SetDialSSHOverrideForTesting(fn dialSSHFunc) (cleanupFunc func()) {
 	G_dialSSHOverride = fn
-	return func() {
-		G_dialSSHOverride = nil
-	}
+	return func() { G_dialSSHOverride = nil }
 }
 
-// dialSSH is a wrapper that either calls the override or the actual implementation.
-// This is the function that SSHConnector.Connect and ConnectionPool.Get should call.
 func dialSSH(ctx context.Context, cfg ConnectionCfg, effectiveConnectTimeout time.Duration) (*ssh.Client, *ssh.Client, error) {
 	if G_dialSSHOverride != nil {
 		return G_dialSSHOverride(ctx, cfg, effectiveConnectTimeout)
@@ -883,7 +1057,69 @@ func dialSSH(ctx context.Context, cfg ConnectionCfg, effectiveConnectTimeout tim
 	return actualDialSSH(ctx, cfg, effectiveConnectTimeout)
 }
 
+// 返回值:
+//   - isSudoer: bool, 如果用户是 sudoer，则为 true。
+//   - err: 如果执行检查命令时发生连接或执行错误，则返回非 nil 错误。
+func (s *SSHConnector) IsSudoer(ctx context.Context) (isSudoer bool, err error) {
+	if !s.IsConnected() {
+		return false, &ConnectionError{Host: s.connCfg.Host, Err: fmt.Errorf("not connected")}
+	}
+
+	const checkCmd = "groups"
+
+	stdout, _, err := s.Exec(ctx, checkCmd, nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to execute 'groups' command to check sudo permissions: %w", err)
+	}
+
+	output := strings.TrimSpace(string(stdout))
+
+	parts := strings.Split(output, ":")
+	if len(parts) > 1 {
+		output = strings.TrimSpace(parts[1])
+	}
+
+	groups := strings.Fields(output)
+
+	for _, group := range groups {
+		if group == "sudo" || group == "wheel" {
+			// 找到了！该用户是 sudoer。
+			return true, nil
+		}
+	}
+
+	if s.connCfg.User == "root" {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+
 ```
+
+Package connector (local.go) 提供了 Connector 接口的本地实现。
+LocalConnector 使得执行引擎能够以与操作远程主机完全相同的方式，
+在运行其本身的控制节点上执行命令和文件操作。
+
+核心功能：
+
+- **透明执行**: 实现了与 SSHConnector 一致的接口，使得上层逻辑
+  无需关心命令是在本地还是远程执行。这对于需要在控制节点上准备环境、
+  下载文件或执行本地脚本的场景至关重要。
+
+- **命令执行 (Exec)**: 使用 Go 的 `os/exec` 包来执行本地命令。
+  它同样支持 `sudo` 提权（依赖于本地系统的sudo配置），以及超时和
+  环境变量等选项。
+
+- **文件操作**: 直接使用 Go 的 `os` 和 `io` 标准库来进行文件操作，
+  这是最高效的本地文件处理方式。
+
+- **环境探测**: 调用 `runtime` 包和执行本地命令（如`uname`）来获取
+  准确的本地操作系统信息。
+
+LocalConnector 的存在，极大地简化了需要混合操作（部分在本地，部分在
+远程）的复杂部署流程，是整个 connector 抽象层完整性的体现。
 ### local.go支持本地执行
 ### local.go
 ```aiignore
@@ -942,11 +1178,12 @@ func (l *LocalConnector) Exec(ctx context.Context, cmd string, options *ExecOpti
 	}
 
 	fullCmdString := cmd
-	if options != nil && options.Sudo {
-		// Note: Local sudo might require password input if not configured for NOPASSWD.
-		// This implementation doesn't handle interactive password prompts.
-		// -E is used to preserve environment variables with sudo.
-		fullCmdString = "sudo -E -- " + cmd
+	if effectiveOptions.Sudo {
+		if l.connCfg.Password != "" {
+			fullCmdString = "sudo -S -p '' -E -- " + cmd
+		} else {
+			fullCmdString = "sudo -E -- " + cmd
+		}
 	}
 
 	// Use context for timeout if provided
@@ -996,6 +1233,10 @@ func (l *LocalConnector) Exec(ctx context.Context, cmd string, options *ExecOpti
 				if options.Env != nil {
 					retryCmd.Env = append(os.Environ(), options.Env...)
 				}
+				
+				if effectiveOptions.Sudo && l.connCfg.Password != "" {
+                    actualCmd.Stdin = strings.NewReader(l.connCfg.Password + "\n")
+                }
 
 				stdoutBuf.Reset() // Clear buffers for retry
 				stderrBuf.Reset()
@@ -1205,6 +1446,38 @@ func (l *LocalConnector) GetOS(ctx context.Context) (*OS, error) {
 var _ Connector = &LocalConnector{}
 
 ```
+
+Package connector (pool.go) 实现了一个高性能的SSH连接池。
+在大规模、高并发的分布式操作中，频繁地建立和销毁SSH连接会成为
+严重的性能瓶颈。此连接池通过复用已建立的TCP和SSH会话，显著地
+降低了认证和握手开销，从而大幅提升了整体执行效率。
+
+核心设计与功能：
+
+- **连接管理单元 (ManagedConnection)**: 不再直接池化 *ssh.Client，
+  而是使用 ManagedConnection 结构体进行包装。这个结构体同时持有了
+  目标主机的 client 和可能的跳板机 bastionClient，并记录了连接的
+  元数据（如创建时间、最后使用时间），从根本上解决了跳板机连接
+  生命周期管理的问题。
+
+- **智能获取与归还 (Get/Put)**: Get 方法负责从池中获取一个健康的连接，
+  如果池中没有可用连接，则会尝试新建。Put 方法负责将使用完毕的连接
+  归还到池中。这两个方法的交互基于 ManagedConnection，保证了上下文
+  的完整性。
+
+- **生命周期管理**: 连接池具备完善的连接生命周期管理能力。
+    - **健康检查**: 在取出连接时进行快速健康检查，并可配置后台goroutine
+      进行定期的批量健康检查，自动剔除“僵尸连接”。
+    - **超时与老化**: 支持配置空闲连接超时 (IdleTimeout) 和连接最大
+      生命周期 (MaxConnectionAge)，防止连接因长时间存在而变得不可靠。
+
+- **配置驱动**: 连接池的行为由 PoolConfig 结构体驱动，允许用户精细
+  调整池的大小、超时策略等，以适应不同的负载和网络环境。
+
+- **可观测性 (未来方向)**: 预留了集成指标监控（如Prometheus）的
+  设计空间，以便暴露池的内部状态，如活跃连接数、等待时间等。
+
+这个连接池是 `kubexm` 实现高性能远程操作的关键基础设施。
 ### 同时还实现了pool.go支持ssh连接池
 ### pool.go
 ```aiignore
@@ -1279,6 +1552,7 @@ type ConnectionPool struct {
 	pools  map[string]*hostConnectionPool // Key: string derived from ConnectionCfg
 	config PoolConfig
 	mu     sync.RWMutex // Protects access to the pools map
+	// stopCh chan struct{} // 用于停止后台goroutine
 	// TODO: Could add a global context for shutdown signalling for active connections
 }
 
