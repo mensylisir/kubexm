@@ -25,6 +25,16 @@ var (
 	enablePoolSshTests   = os.Getenv("ENABLE_SSH_CONNECTOR_TESTS") == "true" // Use same env var
 )
 
+// SetTestDialerOverride allows overriding the package-level currentDialer function for testing.
+// Returns a cleanup function to restore the original.
+func SetTestDialerOverride(overrideFn dialSSHFunc) func() {
+	original := currentDialer // connector.currentDialer
+	currentDialer = overrideFn
+	return func() {
+		currentDialer = original
+	}
+}
+
 func resetActualDialCount() {
 	actualDialCountMutex.Lock()
 	defer actualDialCountMutex.Unlock()
@@ -63,17 +73,16 @@ type mockDialerSetup struct {
 	mockTargetClient    *mockSSHClient // Used if not using real SSH, for simple mock checks
 	mockBastionClient   *mockSSHClient
 	dialErr         error
-	numTimesToReturn int
+	numTimesToReturn int // How many times this specific setup should be returned before moving to the next in list or default.
 }
 
 // newMockDialer returns a mock dialSSHFunc.
-// If real SSH tests are enabled for the pool, it can use actualDialSSH.
-// Otherwise, it uses simplified mocks or returns errors.
+// The signature of dialSSHFunc now includes connectTimeout.
 func newMockDialer(keySpecificResponses map[string][]mockDialerSetup, t *testing.T) dialSSHFunc {
 	keyCallCounts := make(map[string]int)
 	var mu sync.Mutex
 
-	return func(ctx context.Context, cfg ConnectionCfg, timeout time.Duration) (*ssh.Client, *ssh.Client, error) {
+	return func(ctx context.Context, cfg ConnectionCfg, connectTimeout time.Duration) (*ssh.Client, *ssh.Client, error) {
 		incrementActualDialCount()
 		mu.Lock()
 		defer mu.Unlock()
@@ -230,13 +239,13 @@ func TestConnectionPool_GetPut_BasicReuse(t *testing.T) {
 		t.Skip("Skipping TestConnectionPool_GetPut_BasicReuse: real SSH config not available or tests disabled.")
 	}
 	// This test now uses real SSH connections.
-	cleanup = SetDialSSHOverrideForTesting(actualDialSSH) // Use actualDialSSH from ssh.go
+	cleanup = SetTestDialerOverride(dialSSH) // Use the real dialSSH from the package
 
 	pool := NewConnectionPool(DefaultPoolConfig())
 	// cfg is already set by getRealSSHConfig
 
 	// 1. Get a connection - should dial
-	client1, err := pool.Get(context.Background(), cfg)
+	client1, _, err := pool.Get(context.Background(), cfg) // Adjusted for 3 return values
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
@@ -250,10 +259,10 @@ func TestConnectionPool_GetPut_BasicReuse(t *testing.T) {
 	// due to unsafe.Pointer. We rely on dial count and mock setup.
 
 	// 2. Put the connection back
-	pool.Put(cfg, client1, true)
+	pool.Put(cfg, client1, nil, true) // Adjusted for 4 arguments
 
 	// 3. Get again - should reuse from pool, no new dial
-	client2, err := pool.Get(context.Background(), cfg)
+	client2, _, err := pool.Get(context.Background(), cfg) // Adjusted for 3 return values
 	if err != nil {
 		t.Fatalf("Second Get failed: %v", err)
 	}
@@ -289,7 +298,7 @@ func TestConnectionPool_MaxPerKeyLimit(t *testing.T) {
 	if !canRunReal {
 		t.Skip("Skipping TestConnectionPool_MaxPerKeyLimit: real SSH config not available or tests disabled.")
 	}
-	cleanup = SetDialSSHOverrideForTesting(actualDialSSH)
+	cleanup = SetTestDialerOverride(dialSSH)
 
 	poolCfg := DefaultPoolConfig()
 	poolCfg.MaxPerKey = 1 // Critical for this test
@@ -297,7 +306,7 @@ func TestConnectionPool_MaxPerKeyLimit(t *testing.T) {
 	// cfg is from getRealSSHConfig
 
 	// Get first connection - should succeed
-	client1, err := pool.Get(context.Background(), cfg)
+	client1, _, err := pool.Get(context.Background(), cfg) // Adjusted
 	if err != nil {
 		t.Fatalf("First Get failed: %v", err)
 	}
@@ -309,7 +318,7 @@ func TestConnectionPool_MaxPerKeyLimit(t *testing.T) {
 	}
 
 	// Attempt to Get another - should fail due to MaxPerKey=1
-	_, err = pool.Get(context.Background(), cfg)
+	_, _, err = pool.Get(context.Background(), cfg) // Adjusted
 	if err == nil {
 		t.Fatal("Second Get should have failed due to MaxPerKey limit, but succeeded")
 	}
@@ -322,10 +331,10 @@ func TestConnectionPool_MaxPerKeyLimit(t *testing.T) {
 
 
 	// Put the first client back
-	pool.Put(cfg, client1, true)
+	pool.Put(cfg, client1, nil, true) // Adjusted
 
 	// Get again - should succeed by reusing the one just Put
-	client3, err := pool.Get(context.Background(), cfg)
+	client3, _, err := pool.Get(context.Background(), cfg) // Adjusted
 	if err != nil {
 		t.Fatalf("Third Get failed after Put: %v", err)
 	}
@@ -353,7 +362,7 @@ func TestConnectionPool_IdleTimeout(t *testing.T) {
 	if !canRunReal {
 		t.Skip("Skipping TestConnectionPool_IdleTimeout: real SSH config not available or tests disabled.")
 	}
-	cleanup = SetDialSSHOverrideForTesting(actualDialSSH)
+	cleanup = SetTestDialerOverride(dialSSH)
 
 	poolCfg := DefaultPoolConfig()
 	poolCfg.IdleTimeout = 50 * time.Millisecond // Short timeout
@@ -362,11 +371,11 @@ func TestConnectionPool_IdleTimeout(t *testing.T) {
 	// cfg is from getRealSSHConfig
 
 	// Get and Put a connection
-	client1, err := pool.Get(context.Background(), cfg)
+	client1, _, err := pool.Get(context.Background(), cfg) // Adjusted
 	if err != nil {
 		t.Fatalf("Get for IdleTimeout test failed: %v", err)
 	}
-	pool.Put(cfg, client1, true)
+	pool.Put(cfg, client1, nil, true) // Adjusted
 	if getActualDialCount() != 1 {
 		t.Fatalf("Expected 1 dial for initial Get, got %d", getActualDialCount())
 	}
@@ -375,7 +384,7 @@ func TestConnectionPool_IdleTimeout(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Get again - should discard stale and dial a new one
-	client2, err := pool.Get(context.Background(), cfg)
+	client2, _, err := pool.Get(context.Background(), cfg) // Adjusted
 	if err != nil {
 		t.Fatalf("Get after IdleTimeout failed: %v", err)
 	}
@@ -398,7 +407,7 @@ func TestConnectionPool_IdleTimeout(t *testing.T) {
 	// Note: client2 is now the active connection from the pool for this key (if MaxPerKey allows)
 	// or a new connection if the pool decided to replace the stale one.
 	// We defer its Put in the test for cleanup.
-	defer pool.Put(cfg, client2, true) // Ensure client2 is eventually returned/closed
+	defer pool.Put(cfg, client2, nil, true) // Ensure client2 is eventually returned/closed // Adjusted
 }
 
 
@@ -420,16 +429,16 @@ func TestConnectionPool_Shutdown(t *testing.T) {
 	// Let's use the same config for simplicity, testing shutdown's effect on one pool.
 	// If testing multiple distinct pools, create cfgB similarly.
 
-	cleanup = SetDialSSHOverrideForTesting(actualDialSSH)
+	cleanup = SetTestDialerOverride(dialSSH)
 
 	pool := NewConnectionPool(DefaultPoolConfig())
 
 	// Get and Put a connection
-	client1, err := pool.Get(context.Background(), cfgA)
+	client1, _, err := pool.Get(context.Background(), cfgA) // Adjusted
 	if err != nil {
 		t.Fatalf("Setup Get for client1 failed: %v", err)
 	}
-	pool.Put(cfgA, client1, true) // client1 is now idle in pool
+	pool.Put(cfgA, client1, nil, true) // client1 is now idle in pool // Adjusted
 
 	initialDialCount := getActualDialCount()
 	if initialDialCount == 0 { // Should have dialed at least once if no error
@@ -455,11 +464,11 @@ func TestConnectionPool_Shutdown(t *testing.T) {
 
 
 	// Try to Get a connection for cfgA again - should result in a new dial
-	client2, err := pool.Get(context.Background(), cfgA)
+	client2, _, err := pool.Get(context.Background(), cfgA) // Adjusted
 	if err != nil {
 		t.Fatalf("Get for cfgA after Shutdown failed: %v", err)
 	}
-	defer pool.Put(cfgA, client2, true) // ensure it's put back for cleanup by outer defer if test fails early
+	defer pool.Put(cfgA, client2, nil, true) // ensure it's put back for cleanup by outer defer if test fails early // Adjusted
 
 	if getActualDialCount() != initialDialCount+1 {
 		t.Errorf("Expected %d total dials (new dial after shutdown), got %d", initialDialCount+1, getActualDialCount())

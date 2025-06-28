@@ -67,28 +67,136 @@ func TestLocalConnector_Exec_Timeout(t *testing.T) {
 		t.Skip("Skipping timeout test on Windows due to differences in process handling")
 	}
 	lc := &LocalConnector{}
-	ctx := context.Background()
-	opts := &ExecOptions{Timeout: 100 * time.Millisecond}
-	// Command that sleeps longer than timeout
-	cmdStr := "sleep 1"
+	// Use a background context that we can cancel to ensure the test doesn't hang indefinitely
+	parentCtx, parentCancel := context.WithTimeout(context.Background(), 5*time.Second) // Overall test timeout
+	defer parentCancel()
 
-	_, _, err := lc.Exec(ctx, cmdStr, opts)
+	opts := &ExecOptions{Timeout: 50 * time.Millisecond} // Short timeout for the command itself
+	cmdStr := "sleep 0.2" // Command sleeps for 200ms, should exceed timeout
+
+	_, _, err := lc.Exec(parentCtx, cmdStr, opts)
 	if err == nil {
 		t.Fatalf("LocalConnector.Exec() with timeout expected error, got nil")
 	}
-	// The error might be context.DeadlineExceeded wrapped in CommandError or directly
-	t.Logf("Timeout error: %v", err) // Log error for inspection
-	if !strings.Contains(err.Error(), "deadline exceeded") && !strings.Contains(err.Error(), "signal: killed") {
-         // Depending on OS and shell, error message might vary slightly.
-         // For CommandError, the Underlying error would be context.DeadlineExceeded.
-         if cmdErr, ok := err.(*CommandError); ok {
-             if cmdErr.Underlying != context.DeadlineExceeded && !strings.Contains(cmdErr.Underlying.Error(), "signal: killed") {
-                 t.Errorf("Expected error to contain 'deadline exceeded' or 'signal: killed', got %v", cmdErr.Underlying)
-             }
-         } else {
-            t.Errorf("Expected error to contain 'deadline exceeded' or 'signal: killed', got %v", err)
-         }
+
+	cmdErr, ok := err.(*CommandError)
+	if !ok {
+		t.Fatalf("Expected CommandError, got %T: %v", err, err)
 	}
+
+	// Check if the underlying error is context.DeadlineExceeded
+	// It might also be an *os.PathError if the command (sleep) isn't found,
+	// or *exec.ExitError if sleep exits due to signal on some OS.
+	// The key is that CommandError.Underlying is not nil and indicates a problem.
+	t.Logf("Exec_Timeout error: %v, Underlying: %v", err, cmdErr.Underlying)
+	if cmdErr.Underlying == nil {
+		t.Errorf("Expected CommandError.Underlying to be non-nil for timeout, got nil")
+	} else {
+		// Check for common timeout-related errors.
+		// context.DeadlineExceeded is the most direct.
+		// "signal: killed" can happen if the process is killed due to timeout.
+		underlyingErrStr := cmdErr.Underlying.Error()
+		if cmdErr.Underlying != context.DeadlineExceeded && !strings.Contains(underlyingErrStr, "signal: killed") && !strings.Contains(underlyingErrStr, "deadline exceeded") {
+			t.Errorf("Expected CommandError.Underlying to be context.DeadlineExceeded or contain 'signal: killed' or 'deadline exceeded', got: %v", cmdErr.Underlying)
+		}
+	}
+}
+
+func TestLocalConnector_Exec_Retries(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping retry test on Windows as it relies on specific shell script behavior")
+	}
+	lc := &LocalConnector{}
+	ctx := context.Background()
+
+	tmpDir, err := os.MkdirTemp("", "localconnector-retry-test-")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	scriptPath := filepath.Join(tmpDir, "retry_script.sh")
+	successMarker := filepath.Join(tmpDir, "success_marker")
+
+	// Script fails twice, then succeeds
+	scriptContent := `
+#!/bin/sh
+FAIL_COUNT_FILE="` + filepath.ToSlash(filepath.Join(tmpDir, "fail_count")) + `"
+if [ ! -f "$FAIL_COUNT_FILE" ]; then
+    echo 0 > "$FAIL_COUNT_FILE"
+fi
+count=$(cat "$FAIL_COUNT_FILE")
+echo $((count + 1)) > "$FAIL_COUNT_FILE"
+if [ "$count" -lt 2 ]; then
+    echo "Attempt $count: failing" >&2
+    exit 1
+else
+    echo "Attempt $count: succeeding"
+    # Create a marker file to indicate success for verification
+    touch "` + filepath.ToSlash(successMarker) + `"
+    exit 0
+fi
+`
+	err = os.WriteFile(scriptPath, []byte(scriptContent), 0755)
+	if err != nil {
+		t.Fatalf("Failed to write retry script: %v", err)
+	}
+
+	opts := &ExecOptions{
+		Retries:    2, // Should succeed on the 3rd attempt (0, 1, 2)
+		RetryDelay: 10 * time.Millisecond,
+	}
+
+	stdout, stderr, err := lc.Exec(ctx, scriptPath, opts)
+	if err != nil {
+		t.Fatalf("LocalConnector.Exec() with retries failed: %v\nStdout: %s\nStderr: %s", err, string(stdout), string(stderr))
+	}
+
+	if _, statErr := os.Stat(successMarker); os.IsNotExist(statErr) {
+		t.Errorf("Success marker file %s was not created, script did not succeed as expected.", successMarker)
+	}
+
+	expectedStdout := "Attempt 2: succeeding"
+	if !strings.Contains(string(stdout), expectedStdout) {
+		t.Errorf("Expected stdout to contain %q, got %q", expectedStdout, string(stdout))
+	}
+	t.Logf("Retry stdout: %s", string(stdout))
+	t.Logf("Retry stderr: %s", string(stderr)) // Should contain failure messages from first 2 attempts
+
+	// Test retry with timeout that causes failure even after retries
+	failScriptPath := filepath.Join(tmpDir, "fail_script.sh")
+	failScriptContent := `#!/bin/sh
+echo "Trying to sleep..."
+sleep 10
+echo "Slept"
+exit 0` // Script tries to sleep long
+	err = os.WriteFile(failScriptPath, []byte(failScriptContent), 0755)
+	if err != nil {
+		t.Fatalf("Failed to write fail script: %v", err)
+	}
+
+	failOpts := &ExecOptions{
+		Retries:    1,
+		RetryDelay: 10 * time.Millisecond,
+		Timeout:    50 * time.Millisecond, // Each attempt times out
+	}
+	_, _, err = lc.Exec(ctx, failScriptPath, failOpts)
+	if err == nil {
+		t.Fatalf("LocalConnector.Exec() with retries and timeout should have failed")
+	}
+	cmdErr, ok := err.(*CommandError)
+	if !ok {
+		t.Fatalf("Expected CommandError, got %T: %v", err, err)
+	}
+	if cmdErr.Underlying == nil {
+		t.Errorf("Expected CommandError.Underlying to be non-nil for timeout, got nil")
+	} else {
+		underlyingErrStr := cmdErr.Underlying.Error()
+		if cmdErr.Underlying != context.DeadlineExceeded && !strings.Contains(underlyingErrStr, "signal: killed") && !strings.Contains(underlyingErrStr, "deadline exceeded") {
+			t.Errorf("Expected CommandError.Underlying for retry timeout to be context.DeadlineExceeded or contain 'signal: killed', got: %v", cmdErr.Underlying)
+		}
+	}
+	t.Logf("Retry with timeout error: %v", err)
 }
 
 
@@ -264,26 +372,96 @@ func TestLocalConnector_GetOS(t *testing.T) {
 	}
 }
 
-func TestLocalConnector_CopyContent_SudoError(t *testing.T) {
+func TestLocalConnector_FileOp_WithSudo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Sudo tests are not applicable on Windows")
+	}
+
 	lc := &LocalConnector{}
+	// Attempting to use sudo without a password set in connCfg.
+	// This should try to execute `sudo -E -- tee ...` or `sudo -E -- cat ... | sudo -E -- tee ...`
+	// which will likely fail in a test environment without passwordless sudo.
+	// The key is that it *tries* and doesn't return a "not implemented" error from our Go code.
+	// It should return an error from the actual command execution (e.g., sudo asking for a password).
+
 	ctx := context.Background()
-	tmpDir, err := os.MkdirTemp("", "local-copycontent-sudo-")
+	tmpDir, err := os.MkdirTemp("", "local-sudo-test-")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
-	dstPath := filepath.Join(tmpDir, "test_sudo.txt")
 
-	err = lc.CopyContent(ctx, []byte("test"), dstPath, &FileTransferOptions{Sudo: true})
+	content := []byte("sudo test content")
+
+	// Test WriteFile with Sudo
+	writeFileDest := filepath.Join(tmpDir, "sudo_writefile.txt")
+	err = lc.WriteFile(ctx, content, writeFileDest, "0644", true)
 	if err == nil {
-		t.Error("CopyContent with Sudo=true expected an error for LocalConnector, got nil")
+		// This might pass if passwordless sudo is configured for `tee` or `mkdir` and `chmod`.
+		// In a typical CI, it should fail. We check the file content if it passes.
+		t.Logf("WriteFile with Sudo unexpectedly succeeded. This might happen with passwordless sudo.")
+		// Attempt to read the file to verify content if it passed. This read is non-sudo.
+		// If it succeeded, the file should exist.
+		if _, statErr := os.Stat(writeFileDest); os.IsNotExist(statErr) {
+			 t.Errorf("WriteFile with Sudo claimed success but file %s does not exist", writeFileDest)
+		}
+		// Clean up if it succeeded to avoid interfering with other tests or permissions issues.
+		os.Remove(writeFileDest)
 	} else {
-		if !strings.Contains(err.Error(), "sudo not implemented") {
-			t.Errorf("CopyContent with Sudo=true error message = %q, want to contain 'sudo not implemented'", err.Error())
+		t.Logf("WriteFile with Sudo expectedly failed (likely no passwordless sudo): %v", err)
+		if strings.Contains(err.Error(), "sudo not implemented") {
+			t.Errorf("WriteFile with Sudo should not return 'sudo not implemented', got: %v", err)
+		}
+		// Example error on Linux if sudo requires password: "sudo: a terminal is required to read the password"
+		// Or "failed to write to ... with sudo tee: sudo: a password is required"
+		if !strings.Contains(err.Error(), "sudo") && !strings.Contains(err.Error(), "Sudo") {
+			t.Errorf("WriteFile with Sudo error message %q did not contain 'sudo' or 'Sudo'", err.Error())
+		}
+	}
+
+	// Test CopyContent with Sudo (relies on WriteFile's sudo logic)
+	copyContentDest := filepath.Join(tmpDir, "sudo_copycontent.txt")
+	err = lc.CopyContent(ctx, content, copyContentDest, &FileTransferOptions{Sudo: true, Permissions: "0644"})
+	if err == nil {
+		t.Logf("CopyContent with Sudo unexpectedly succeeded.")
+		if _, statErr := os.Stat(copyContentDest); os.IsNotExist(statErr) {
+			t.Errorf("CopyContent with Sudo claimed success but file %s does not exist", copyContentDest)
+		}
+		os.Remove(copyContentDest)
+	} else {
+		t.Logf("CopyContent with Sudo expectedly failed: %v", err)
+		if strings.Contains(err.Error(), "sudo not implemented") {
+			t.Errorf("CopyContent with Sudo should not return 'sudo not implemented', got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "sudo") && !strings.Contains(err.Error(), "Sudo") {
+			t.Errorf("CopyContent with Sudo error message %q did not contain 'sudo' or 'Sudo'", err.Error())
+		}
+	}
+
+	// Test Copy with Sudo
+	srcCopyFile := filepath.Join(tmpDir, "src_copy_sudo.txt")
+	err = os.WriteFile(srcCopyFile, content, 0644)
+	if err != nil {
+		t.Fatalf("Failed to create source file for sudo copy test: %v", err)
+	}
+	copyDest := filepath.Join(tmpDir, "sudo_copy.txt")
+	err = lc.Copy(ctx, srcCopyFile, copyDest, &FileTransferOptions{Sudo: true, Permissions: "0644"})
+	if err == nil {
+		t.Logf("Copy with Sudo unexpectedly succeeded.")
+		if _, statErr := os.Stat(copyDest); os.IsNotExist(statErr) {
+			t.Errorf("Copy with Sudo claimed success but file %s does not exist", copyDest)
+		}
+		os.Remove(copyDest)
+	} else {
+		t.Logf("Copy with Sudo expectedly failed: %v", err)
+		if strings.Contains(err.Error(), "sudo not implemented") {
+			t.Errorf("Copy with Sudo should not return 'sudo not implemented', got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "sudo") && !strings.Contains(err.Error(), "Sudo") {
+			t.Errorf("Copy with Sudo error message %q did not contain 'sudo' or 'Sudo'", err.Error())
 		}
 	}
 }
-
 
 func TestLocalConnector_Mkdir(t *testing.T) {
 	lc := &LocalConnector{}
