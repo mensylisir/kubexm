@@ -73,8 +73,12 @@ func (s *SSHConnector) Connect(ctx context.Context, cfg ConnectionCfg) error {
 		s.bastionClient = bastionClient
 		session, testErr := s.client.NewSession()
 		if testErr != nil {
-			if s.client != nil { s.client.Close() }
-			if s.bastionClient != nil { s.bastionClient.Close() }
+			if s.client != nil {
+				s.client.Close()
+			}
+			if s.bastionClient != nil {
+				s.bastionClient.Close()
+			}
 			return &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to create test session after direct dial: %w", testErr)}
 		}
 		session.Close()
@@ -85,7 +89,9 @@ func (s *SSHConnector) Connect(ctx context.Context, cfg ConnectionCfg) error {
 
 // IsConnected checks if the SSH client is connected.
 func (s *SSHConnector) IsConnected() bool {
-	if s.client == nil || !s.isConnected { return false }
+	if s.client == nil || !s.isConnected {
+		return false
+	}
 	session, err := s.client.NewSession()
 	if err != nil {
 		s.isConnected = false
@@ -137,18 +143,26 @@ func (s *SSHConnector) Exec(ctx context.Context, cmd string, options *ExecOption
 		ctx = newCtx
 	}
 	session, err = s.client.NewSession()
-	if err != nil { return nil, nil, fmt.Errorf("failed to create session: %w", err) }
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create session: %w", err)
+	}
 	defer session.Close()
 	if options != nil && len(options.Env) > 0 {
 		for _, envVar := range options.Env {
 			parts := strings.SplitN(envVar, "=", 2)
 			if len(parts) == 2 {
-				if err := session.Setenv(parts[0], parts[1]); err != nil { /* Log error */ }
+				if err := session.Setenv(parts[0], parts[1]); err != nil { /* Log error */
+				}
 			}
 		}
 	}
 	finalCmd := cmd
-	if options != nil && options.Sudo { finalCmd = "sudo -E -- " + cmd }
+	if options != nil && options.Sudo && s.connCfg.Password != "" {
+		finalCmd = "sudo -S -p '' -E -- " + cmd
+		session.Stdin = strings.NewReader(s.connCfg.Password + "\n")
+	} else if options != nil && options.Sudo {
+		finalCmd = "sudo -E -- " + cmd
+	}
 	var stdoutBuf, stderrBuf bytes.Buffer
 	if options != nil && options.Stream != nil {
 		session.Stdout = io.MultiWriter(&stdoutBuf, options.Stream)
@@ -168,33 +182,48 @@ func (s *SSHConnector) Exec(ctx context.Context, cmd string, options *ExecOption
 	stderr = stderrBuf.Bytes()
 	if err != nil {
 		exitCode := -1
-		if exitErr, ok := err.(*ssh.ExitError); ok { exitCode = exitErr.ExitStatus() }
+		if exitErr, ok := err.(*ssh.ExitError); ok {
+			exitCode = exitErr.ExitStatus()
+		}
 		if options != nil && options.Retries > 0 {
 			for i := 0; i < options.Retries; i++ {
-				if options.RetryDelay > 0 { time.Sleep(options.RetryDelay) }
+				if options.RetryDelay > 0 {
+					time.Sleep(options.RetryDelay)
+				}
 				retrySession, retryErr := s.client.NewSession()
 				if retryErr != nil {
 					return stdout, stderr, &CommandError{Cmd: cmd, ExitCode: exitCode, Stdout: string(stdout), Stderr: string(stderr), Underlying: fmt.Errorf("failed to create retry session: %w", retryErr)}
+				}
+				if options.Sudo && s.connCfg.Password != "" {
+					retrySession.Stdin = strings.NewReader(s.connCfg.Password + "\n")
 				}
 				if options.Stream != nil {
 					retrySession.Stdout = io.MultiWriter(&stdoutBuf, options.Stream)
 					retrySession.Stderr = io.MultiWriter(&stderrBuf, options.Stream)
 				} else {
-					stdoutBuf.Reset(); stderrBuf.Reset()
+					stdoutBuf.Reset()
+					stderrBuf.Reset()
 					retrySession.Stdout = &stdoutBuf
 					retrySession.Stderr = &stderrBuf
 				}
 				if len(options.Env) > 0 {
 					for _, envVar := range options.Env {
 						parts := strings.SplitN(envVar, "=", 2)
-						if len(parts) == 2 { retrySession.Setenv(parts[0], parts[1]) }
+						if len(parts) == 2 {
+							retrySession.Setenv(parts[0], parts[1])
+						}
 					}
 				}
 				err = retrySession.Run(finalCmd)
 				retrySession.Close()
-				stdout = stdoutBuf.Bytes(); stderr = stderrBuf.Bytes()
-				if err == nil { break }
-				if exitErr, ok := err.(*ssh.ExitError); ok { exitCode = exitErr.ExitStatus() }
+				stdout = stdoutBuf.Bytes()
+				stderr = stderrBuf.Bytes()
+				if err == nil {
+					break
+				}
+				if exitErr, ok := err.(*ssh.ExitError); ok {
+					exitCode = exitErr.ExitStatus()
+				}
 			}
 		}
 		if err != nil {
@@ -219,7 +248,9 @@ func (s *SSHConnector) ensureSftp() error {
 }
 
 func (s *SSHConnector) CopyContent(ctx context.Context, content []byte, dstPath string, options *FileTransferOptions) error {
-	if err := s.ensureSftp(); err != nil { return err }
+	if err := s.ensureSftp(); err != nil {
+		return err
+	}
 
 	effectiveSudo := false
 	var effectivePerms string
@@ -294,10 +325,14 @@ func (s *SSHConnector) CopyContent(ctx context.Context, content []byte, dstPath 
 }
 
 func (s *SSHConnector) Stat(ctx context.Context, path string) (*FileStat, error) {
-	if err := s.ensureSftp(); err != nil { return nil, err }
+	if err := s.ensureSftp(); err != nil {
+		return nil, err
+	}
 	fi, err := s.sftpClient.Lstat(path)
 	if err != nil {
-		if os.IsNotExist(err) { return &FileStat{Name: filepath.Base(path), IsExist: false}, nil }
+		if os.IsNotExist(err) {
+			return &FileStat{Name: filepath.Base(path), IsExist: false}, nil
+		}
 		return nil, fmt.Errorf("failed to stat remote path %s: %w", path, err)
 	}
 	return &FileStat{
@@ -318,23 +353,27 @@ func (s *SSHConnector) LookPath(ctx context.Context, file string) (string, error
 		return "", fmt.Errorf("failed to execute 'command -v %s': %w (stdout: %s, stderr: %s)", file, err, string(stdout), string(stderr))
 	}
 	path := strings.TrimSpace(string(stdout))
-	if path == "" { return "", fmt.Errorf("executable %s not found in PATH (stderr: %s)", file, string(stderr)) }
+	if path == "" {
+		return "", fmt.Errorf("executable %s not found in PATH (stderr: %s)", file, string(stderr))
+	}
 	return path, nil
 }
 
 func (s *SSHConnector) GetOS(ctx context.Context) (*OS, error) {
-	if s.cachedOS != nil { return s.cachedOS, nil }
+	if s.cachedOS != nil {
+		return s.cachedOS, nil
+	}
 
-	osInfo := &OS{} // Initialize osInfo at the beginning
+	osInfo := &OS{}            // Initialize osInfo at the beginning
 	var content, stderr []byte // Declare content and stderr
-	var err error             // Declare err
+	var err error              // Declare err
 
 	content, stderr, err = s.Exec(ctx, "cat /etc/os-release", nil)
 
 	if err != nil {
 		// Attempt to get at least Arch and Kernel if /etc/os-release fails
 		var archStdout, kernelStdout []byte // Declare variables for this block
-		var archErr, kernelErr error    // Declare error variables for this block
+		var archErr, kernelErr error        // Declare error variables for this block
 
 		archStdout, _, archErr = s.Exec(ctx, "uname -m", nil)
 		if archErr == nil {
@@ -470,7 +509,6 @@ func (s *SSHConnector) WriteFile(ctx context.Context, content []byte, destPath, 
 	return nil
 }
 
-
 // writeFileViaSFTP is a helper for direct SFTP writes.
 func (s *SSHConnector) writeFileViaSFTP(ctx context.Context, content []byte, destPath, permissions string) error {
 	parentDir := filepath.Dir(destPath)
@@ -522,7 +560,7 @@ func (s *SSHConnector) Mkdir(ctx context.Context, path string, perm string) erro
 	// Construct the command with sudo if needed, though typically mkdir -p handles permissions well.
 	// For simplicity, assuming Runner handles sudo if path requires it.
 	// Connector's Mkdir itself won't use sudo directly unless ExecOptions are passed.
-	cmd := fmt.Sprintf("mkdir -p %s", path) // -p makes it idempotent
+	cmd := fmt.Sprintf("mkdir -p %s", path)                            // -p makes it idempotent
 	_, stderrBytes, err := s.Exec(ctx, cmd, &ExecOptions{Sudo: false}) // Assuming no sudo for basic mkdir by connector
 	if err != nil {
 		// Check if it's CommandError to provide more details
@@ -589,9 +627,9 @@ func (s *SSHConnector) GetFileChecksum(ctx context.Context, path string, checksu
 	var checksumCmd string
 	switch strings.ToLower(checksumType) {
 	case "sha256":
-		checksumCmd = fmt.Sprintf("sha256sum %s", path)
+		checksumCmd = fmt.Sprintf("sha256sum -b %s", path)
 	case "md5":
-		checksumCmd = fmt.Sprintf("md5sum %s", path)
+		checksumCmd = fmt.Sprintf("md5sum -b %s", path)
 	default:
 		return "", fmt.Errorf("unsupported checksum type '%s' for remote file %s on host %s", checksumType, path, s.connCfg.Host)
 	}
@@ -617,19 +655,29 @@ type dialSSHFunc func(ctx context.Context, cfg ConnectionCfg, effectiveConnectTi
 
 var actualDialSSH dialSSHFunc = func(ctx context.Context, cfg ConnectionCfg, effectiveConnectTimeout time.Duration) (*ssh.Client, *ssh.Client, error) {
 	var authMethods []ssh.AuthMethod
-	if cfg.Password != "" { authMethods = append(authMethods, ssh.Password(cfg.Password)) }
+	if cfg.Password != "" {
+		authMethods = append(authMethods, ssh.Password(cfg.Password))
+	}
 	if len(cfg.PrivateKey) > 0 {
 		signer, err := ssh.ParsePrivateKey(cfg.PrivateKey)
-		if err != nil { return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to parse private key: %w", err)} }
+		if err != nil {
+			return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to parse private key: %w", err)}
+		}
 		authMethods = append(authMethods, ssh.PublicKeys(signer))
 	} else if cfg.PrivateKeyPath != "" {
 		key, err := os.ReadFile(cfg.PrivateKeyPath)
-		if err != nil { return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to read private key file %s: %w", cfg.PrivateKeyPath, err)} }
+		if err != nil {
+			return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to read private key file %s: %w", cfg.PrivateKeyPath, err)}
+		}
 		signer, err := ssh.ParsePrivateKey(key)
-		if err != nil { return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to parse private key from file %s: %w", cfg.PrivateKeyPath, err)} }
+		if err != nil {
+			return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("failed to parse private key from file %s: %w", cfg.PrivateKeyPath, err)}
+		}
 		authMethods = append(authMethods, ssh.PublicKeys(signer))
 	}
-	if len(authMethods) == 0 { return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("no authentication method provided (password or private key)")} }
+	if len(authMethods) == 0 {
+		return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("no authentication method provided (password or private key)")}
+	}
 
 	hostKeyCallback := cfg.HostKeyCallback
 	if hostKeyCallback == nil {
@@ -648,19 +696,29 @@ var actualDialSSH dialSSHFunc = func(ctx context.Context, cfg ConnectionCfg, eff
 
 	if cfg.BastionCfg != nil {
 		var bastionAuthMethods []ssh.AuthMethod
-		if cfg.BastionCfg.Password != "" { bastionAuthMethods = append(bastionAuthMethods, ssh.Password(cfg.BastionCfg.Password)) }
+		if cfg.BastionCfg.Password != "" {
+			bastionAuthMethods = append(bastionAuthMethods, ssh.Password(cfg.BastionCfg.Password))
+		}
 		if len(cfg.BastionCfg.PrivateKey) > 0 {
 			signer, err := ssh.ParsePrivateKey(cfg.BastionCfg.PrivateKey)
-			if err != nil { return nil, nil, &ConnectionError{Host: cfg.BastionCfg.Host, Err: fmt.Errorf("failed to parse bastion private key: %w", err)} }
+			if err != nil {
+				return nil, nil, &ConnectionError{Host: cfg.BastionCfg.Host, Err: fmt.Errorf("failed to parse bastion private key: %w", err)}
+			}
 			bastionAuthMethods = append(bastionAuthMethods, ssh.PublicKeys(signer))
 		} else if cfg.BastionCfg.PrivateKeyPath != "" {
 			key, err := os.ReadFile(cfg.BastionCfg.PrivateKeyPath)
-			if err != nil { return nil, nil, &ConnectionError{Host: cfg.BastionCfg.Host, Err: fmt.Errorf("failed to read bastion private key file %s: %w", cfg.BastionCfg.PrivateKeyPath, err)} }
+			if err != nil {
+				return nil, nil, &ConnectionError{Host: cfg.BastionCfg.Host, Err: fmt.Errorf("failed to read bastion private key file %s: %w", cfg.BastionCfg.PrivateKeyPath, err)}
+			}
 			signer, err := ssh.ParsePrivateKey(key)
-			if err != nil { return nil, nil, &ConnectionError{Host: cfg.BastionCfg.Host, Err: fmt.Errorf("failed to parse bastion private key from file %s: %w", cfg.BastionCfg.PrivateKeyPath, err)} }
+			if err != nil {
+				return nil, nil, &ConnectionError{Host: cfg.BastionCfg.Host, Err: fmt.Errorf("failed to parse bastion private key from file %s: %w", cfg.BastionCfg.PrivateKeyPath, err)}
+			}
 			bastionAuthMethods = append(bastionAuthMethods, ssh.PublicKeys(signer))
 		}
-		if len(bastionAuthMethods) == 0 { return nil, nil, &ConnectionError{Host: cfg.BastionCfg.Host, Err: fmt.Errorf("no authentication method provided for bastion (password or private key)")} }
+		if len(bastionAuthMethods) == 0 {
+			return nil, nil, &ConnectionError{Host: cfg.BastionCfg.Host, Err: fmt.Errorf("no authentication method provided for bastion (password or private key)")}
+		}
 
 		bastionConfig := &ssh.ClientConfig{
 			User: cfg.BastionCfg.User, Auth: bastionAuthMethods,
@@ -668,7 +726,9 @@ var actualDialSSH dialSSHFunc = func(ctx context.Context, cfg ConnectionCfg, eff
 		}
 		bastionDialAddr := net.JoinHostPort(cfg.BastionCfg.Host, strconv.Itoa(cfg.BastionCfg.Port))
 		bastionSshClient, err = ssh.Dial("tcp", bastionDialAddr, bastionConfig)
-		if err != nil { return nil, nil, &ConnectionError{Host: cfg.BastionCfg.Host, Err: fmt.Errorf("failed to dial bastion: %w", err)} }
+		if err != nil {
+			return nil, nil, &ConnectionError{Host: cfg.BastionCfg.Host, Err: fmt.Errorf("failed to dial bastion: %w", err)}
+		}
 
 		conn, err := bastionSshClient.Dial("tcp", dialAddr)
 		if err != nil {
@@ -683,7 +743,9 @@ var actualDialSSH dialSSHFunc = func(ctx context.Context, cfg ConnectionCfg, eff
 		client = ssh.NewClient(ncc, chans, reqs)
 	} else {
 		client, err = ssh.Dial("tcp", dialAddr, sshConfig)
-		if err != nil { return nil, nil, &ConnectionError{Host: cfg.Host, Err: err} }
+		if err != nil {
+			return nil, nil, &ConnectionError{Host: cfg.Host, Err: err}
+		}
 	}
 	return client, bastionSshClient, nil
 }
@@ -700,4 +762,42 @@ func dialSSH(ctx context.Context, cfg ConnectionCfg, effectiveConnectTimeout tim
 		return G_dialSSHOverride(ctx, cfg, effectiveConnectTimeout)
 	}
 	return actualDialSSH(ctx, cfg, effectiveConnectTimeout)
+}
+
+// 返回值:
+//   - isSudoer: bool, 如果用户是 sudoer，则为 true。
+//   - err: 如果执行检查命令时发生连接或执行错误，则返回非 nil 错误。
+func (s *SSHConnector) IsSudoer(ctx context.Context) (isSudoer bool, err error) {
+	if !s.IsConnected() {
+		return false, &ConnectionError{Host: s.connCfg.Host, Err: fmt.Errorf("not connected")}
+	}
+
+	const checkCmd = "groups"
+
+	stdout, _, err := s.Exec(ctx, checkCmd, nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to execute 'groups' command to check sudo permissions: %w", err)
+	}
+
+	output := strings.TrimSpace(string(stdout))
+
+	parts := strings.Split(output, ":")
+	if len(parts) > 1 {
+		output = strings.TrimSpace(parts[1])
+	}
+
+	groups := strings.Fields(output)
+
+	for _, group := range groups {
+		if group == "sudo" || group == "wheel" {
+			// 找到了！该用户是 sudoer。
+			return true, nil
+		}
+	}
+
+	if s.connCfg.User == "root" {
+		return true, nil
+	}
+
+	return false, nil
 }

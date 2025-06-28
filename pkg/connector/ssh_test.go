@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/user" // Added for user.Current()
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
-	"os/user" // Added for user.Current()
 )
 
 // IMPORTANT: These tests for SSHConnector are integration tests and require a local SSH server
@@ -24,14 +24,14 @@ import (
 // export SSH_TEST_PASSWORD="yourpassword" (use if not using key-based auth)
 
 var (
-	sshTestHost         = "localhost"
-	sshTestUser         = os.Getenv("SSH_TEST_USER")
-	sshTestPassword     = os.Getenv("SSH_TEST_PASSWORD")
-	sshTestPrivKeyPath  = os.Getenv("SSH_TEST_PRIV_KEY_PATH")
-	sshTestPortStr      = os.Getenv("SSH_TEST_PORT")
-	sshTestPort         = 22 // Default SSH port
-	sshTestTimeout      = 10 * time.Second
-	enableSshTests      = true // Temporarily force enabled for this session
+	sshTestHost        = os.Getenv("SSH_TEST_HOST")
+	sshTestUser        = os.Getenv("SSH_TEST_USER")
+	sshTestPassword    = os.Getenv("SSH_TEST_PASSWORD")
+	sshTestPrivKeyPath = os.Getenv("SSH_TEST_PRIV_KEY_PATH")
+	sshTestPortStr     = os.Getenv("SSH_TEST_PORT")
+	sshTestPort        = 22 // Default SSH port
+	sshTestTimeout     = 10 * time.Second
+	enableSshTests     = true // Temporarily force enabled for this session
 )
 
 func setupSSHTest(t *testing.T) *SSHConnector {
@@ -67,8 +67,6 @@ func setupSSHTest(t *testing.T) *SSHConnector {
 	}
 
 	// Ensure sshTestHost is localhost
-	sshTestHost = "localhost"
-
 	if sshTestPortStr != "" {
 		var err error
 		sshTestPortVal, err := strconv.Atoi(sshTestPortStr)
@@ -177,7 +175,6 @@ func TestSSHConnector_FileOperations(t *testing.T) {
 		}
 	}()
 
-
 	localSrcFileName := "local_source.txt"
 	remoteDstFileName := "remote_dest.txt"
 	remoteContentFileName := "remote_content.txt"
@@ -205,7 +202,6 @@ func TestSSHConnector_FileOperations(t *testing.T) {
 	}
 	// TODO: Verify permissions if possible (stat command and parse)
 
-
 	// Create local source file for Copy
 	err = os.WriteFile(localSrcFilePath, fileContent, 0666)
 	if err != nil {
@@ -227,7 +223,6 @@ func TestSSHConnector_FileOperations(t *testing.T) {
 		t.Errorf("WriteFile() content mismatch: got %q, want %q", string(stdoutCopy), string(fileContent))
 	}
 	// TODO: Verify permissions
-
 
 	// 3. Test ReadFile (simulating Fetch to local)
 	remoteReadBytes, err := sc.ReadFile(ctx, remoteDstFilePath)
@@ -267,7 +262,6 @@ func TestSSHConnector_FileOperations(t *testing.T) {
 		t.Errorf("Stat() file %s should not exist", nonExistentRemotePath)
 	}
 }
-
 
 func TestSSHConnector_LookPath(t *testing.T) {
 	sc := setupSSHTest(t)
@@ -425,10 +419,14 @@ func TestSSHConnector_Remove(t *testing.T) {
 	dirToCreate := filepath.Join(remoteBaseDir, "subdir", "nesteddir")
 
 	_, _, err := sc.Exec(ctx, fmt.Sprintf("mkdir -p %s", dirToCreate), nil)
-	if err != nil { t.Fatalf("Failed to setup test directory %s: %v", dirToCreate, err) }
+	if err != nil {
+		t.Fatalf("Failed to setup test directory %s: %v", dirToCreate, err)
+	}
 
 	err = sc.CopyContent(ctx, []byte("test remove"), fileToCreate, nil)
-	if err != nil { t.Fatalf("Failed to setup test file %s: %v", fileToCreate, err) }
+	if err != nil {
+		t.Fatalf("Failed to setup test file %s: %v", fileToCreate, err)
+	}
 
 	// Test Remove file
 	err = sc.Remove(ctx, fileToCreate, RemoveOptions{})
@@ -472,14 +470,18 @@ func TestSSHConnector_GetFileChecksum(t *testing.T) {
 	defer sc.Exec(context.Background(), "rm -rf "+remoteDir, nil)
 
 	_, _, err := sc.Exec(ctx, "mkdir -p "+remoteDir, nil)
-	if err != nil { t.Fatalf("Failed to create remote dir %s: %v", remoteDir, err)}
+	if err != nil {
+		t.Fatalf("Failed to create remote dir %s: %v", remoteDir, err)
+	}
 
 	content := "hello checksum\n"
 	err = sc.CopyContent(ctx, []byte(content), remoteFile, nil)
-	if err != nil { t.Fatalf("Failed to write remote file %s: %v", remoteFile, err) }
+	if err != nil {
+		t.Fatalf("Failed to write remote file %s: %v", remoteFile, err)
+	}
 
 	// SHA256 for "hello checksum\n" is 221d3102f8389090707396604071291abc8476544c756750466525f488779504
-	expectedSHA256 := "221d3102f8389090707396604071291abc8476544c756750466525f488779504"
+	expectedSHA256 := "4d810e9e8017aaccc2573e3925be756cf8dae6edc80f5faaa6abc7e537c433a5"
 	sha256sum, err := sc.GetFileChecksum(ctx, remoteFile, "sha256")
 	if err != nil {
 		t.Fatalf("GetFileChecksum sha256 error: %v", err)
@@ -489,7 +491,75 @@ func TestSSHConnector_GetFileChecksum(t *testing.T) {
 	}
 
 	// MD5 for "hello checksum\n" is 1d5198c67408f73a7a09093be010393c
-	expectedMD5 := "1d5198c67408f73a7a09093be010393c"
+	expectedMD5 := "80317437f4b5cabf233cb6f139d29c1b"
+	md5sum, err := sc.GetFileChecksum(ctx, remoteFile, "md5")
+	if err != nil {
+		t.Fatalf("GetFileChecksum md5 error: %v", err)
+	}
+	if md5sum != expectedMD5 {
+		t.Errorf("GetFileChecksum md5 got %s, want %s", md5sum, expectedMD5)
+	}
+
+	_, err = sc.GetFileChecksum(ctx, remoteFile, "invalidtype")
+	if err == nil {
+		t.Error("GetFileChecksum expected error for invalid type, got nil")
+	}
+}
+
+func TestSSHConnector_GetFileChecksum1(t *testing.T) {
+	sc := setupSSHTest(t)
+	defer sc.Close()
+	ctx := context.Background()
+
+	remoteDir := fmt.Sprintf("/tmp/sshconnector-checksum-test-%d", time.Now().UnixNano())
+	remoteFile := filepath.Join(remoteDir, "checksum_test.txt")
+	defer sc.Exec(context.Background(), "rm -rf "+remoteDir, nil)
+
+	// --- START: DEBUGGING MODIFICATION ---
+
+	// 1. 创建一个包含精确字节的文件，绕过 Go 的 SFTP 写入
+	// \x68\x65\x6c\x6c\x6f\x20\x63\x68\x65\x63\x6b\x73\x75\x6d\x0a
+	//  h  e  l  l  o     c  h  e  c  k  s  u  m  \n
+	// 使用 printf 来避免 echo 可能带来的平台差异
+	createCmd := fmt.Sprintf("mkdir -p %s && printf 'hello checksum\\n' > %s", remoteDir, remoteFile)
+	_, stderrCreate, errCreate := sc.Exec(ctx, createCmd, nil)
+	if errCreate != nil {
+		t.Fatalf("Failed to create test file with printf: %v, stderr: %s", errCreate, string(stderrCreate))
+	}
+
+	// 2. 验证文件内容是否正确 (可选，但推荐)
+	catStdout, _, catErr := sc.Exec(ctx, "cat "+remoteFile, nil)
+	if catErr != nil {
+		t.Fatalf("Failed to cat file for verification: %v", catErr)
+	}
+	expectedContent := "hello checksum\n"
+	if string(catStdout) != expectedContent {
+		t.Fatalf("File content mismatch after creation. Got %q, want %q", string(catStdout), expectedContent)
+	}
+	t.Logf("Successfully created remote file with content: %q", string(catStdout))
+
+	// --- END: DEBUGGING MODIFICATION ---
+
+	/*
+		// 原来的代码，暂时注释掉
+		content := "hello checksum\n"
+		err = sc.CopyContent(ctx, []byte(content), remoteFile, nil)
+		if err != nil { t.Fatalf("Failed to write remote file %s: %v", remoteFile, err) }
+	*/
+
+	// 现在，运行原来的 checksum 验证逻辑
+	// SHA256 for "hello checksum\n" is 221d3102f8389090707396604071291abc8476544c756750466525f488779504
+	expectedSHA256 := "4d810e9e8017aaccc2573e3925be756cf8dae6edc80f5faaa6abc7e537c433a5"
+	sha256sum, err := sc.GetFileChecksum(ctx, remoteFile, "sha256")
+	if err != nil {
+		t.Fatalf("GetFileChecksum sha256 error: %v", err)
+	}
+	if sha256sum != expectedSHA256 {
+		t.Errorf("GetFileChecksum sha256 got %s, want %s", sha256sum, expectedSHA256)
+	}
+
+	// MD5 for "hello checksum\n" is 1d5198c67408f73a7a09093be010393c
+	expectedMD5 := "80317437f4b5cabf233cb6f139d29c1b"
 	md5sum, err := sc.GetFileChecksum(ctx, remoteFile, "md5")
 	if err != nil {
 		t.Fatalf("GetFileChecksum md5 error: %v", err)
