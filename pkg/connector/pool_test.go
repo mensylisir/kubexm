@@ -25,6 +25,16 @@ var (
 	enablePoolSshTests   = os.Getenv("ENABLE_SSH_CONNECTOR_TESTS") == "true" // Use same env var
 )
 
+// SetTestDialerOverride allows overriding the package-level currentDialer function for testing.
+// Returns a cleanup function to restore the original.
+func SetTestDialerOverride(overrideFn dialSSHFunc) func() {
+	original := currentDialer // connector.currentDialer
+	currentDialer = overrideFn
+	return func() {
+		currentDialer = original
+	}
+}
+
 func resetActualDialCount() {
 	actualDialCountMutex.Lock()
 	defer actualDialCountMutex.Unlock()
@@ -63,17 +73,16 @@ type mockDialerSetup struct {
 	mockTargetClient    *mockSSHClient // Used if not using real SSH, for simple mock checks
 	mockBastionClient   *mockSSHClient
 	dialErr         error
-	numTimesToReturn int
+	numTimesToReturn int // How many times this specific setup should be returned before moving to the next in list or default.
 }
 
 // newMockDialer returns a mock dialSSHFunc.
-// If real SSH tests are enabled for the pool, it can use actualDialSSH.
-// Otherwise, it uses simplified mocks or returns errors.
+// Note: The signature of dialSSHFunc changed (no timeout).
 func newMockDialer(keySpecificResponses map[string][]mockDialerSetup, t *testing.T) dialSSHFunc {
 	keyCallCounts := make(map[string]int)
 	var mu sync.Mutex
 
-	return func(ctx context.Context, cfg ConnectionCfg, timeout time.Duration) (*ssh.Client, *ssh.Client, error) {
+	return func(ctx context.Context, cfg ConnectionCfg) (*ssh.Client, *ssh.Client, error) {
 		incrementActualDialCount()
 		mu.Lock()
 		defer mu.Unlock()
@@ -230,7 +239,7 @@ func TestConnectionPool_GetPut_BasicReuse(t *testing.T) {
 		t.Skip("Skipping TestConnectionPool_GetPut_BasicReuse: real SSH config not available or tests disabled.")
 	}
 	// This test now uses real SSH connections.
-	cleanup = SetDialSSHOverrideForTesting(actualDialSSH) // Use actualDialSSH from ssh.go
+	cleanup = SetTestDialerOverride(dialSSH) // Use the real dialSSH from the package
 
 	pool := NewConnectionPool(DefaultPoolConfig())
 	// cfg is already set by getRealSSHConfig
@@ -289,7 +298,7 @@ func TestConnectionPool_MaxPerKeyLimit(t *testing.T) {
 	if !canRunReal {
 		t.Skip("Skipping TestConnectionPool_MaxPerKeyLimit: real SSH config not available or tests disabled.")
 	}
-	cleanup = SetDialSSHOverrideForTesting(actualDialSSH)
+	cleanup = SetTestDialerOverride(dialSSH)
 
 	poolCfg := DefaultPoolConfig()
 	poolCfg.MaxPerKey = 1 // Critical for this test
@@ -353,7 +362,7 @@ func TestConnectionPool_IdleTimeout(t *testing.T) {
 	if !canRunReal {
 		t.Skip("Skipping TestConnectionPool_IdleTimeout: real SSH config not available or tests disabled.")
 	}
-	cleanup = SetDialSSHOverrideForTesting(actualDialSSH)
+	cleanup = SetTestDialerOverride(dialSSH)
 
 	poolCfg := DefaultPoolConfig()
 	poolCfg.IdleTimeout = 50 * time.Millisecond // Short timeout
@@ -420,7 +429,7 @@ func TestConnectionPool_Shutdown(t *testing.T) {
 	// Let's use the same config for simplicity, testing shutdown's effect on one pool.
 	// If testing multiple distinct pools, create cfgB similarly.
 
-	cleanup = SetDialSSHOverrideForTesting(actualDialSSH)
+	cleanup = SetTestDialerOverride(dialSSH)
 
 	pool := NewConnectionPool(DefaultPoolConfig())
 

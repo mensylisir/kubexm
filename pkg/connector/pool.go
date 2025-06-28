@@ -14,6 +14,10 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// currentDialer is a package-level variable holding the function used to dial SSH connections.
+// It defaults to the real dialSSH function but can be overridden for testing.
+var currentDialer dialSSHFunc = dialSSH
+
 // ErrPoolExhausted is returned when Get is called and the pool has reached MaxPerKey for that key.
 var ErrPoolExhausted = errors.New("connection pool exhausted for key")
 
@@ -175,7 +179,8 @@ func (cp *ConnectionPool) Get(ctx context.Context, cfg ConnectionCfg) (*ssh.Clie
 		hcp.numActive++
 		hcp.Unlock()
 
-		targetClient, bastionClient, err := dialSSH(ctx, cfg, cp.config.ConnectTimeout)
+		// The new dialSSH infers timeout from cfg or uses a default.
+	targetClient, bastionClient, err := currentDialer(ctx, cfg)
 		if err != nil {
 			hcp.Lock()
 			hcp.numActive--
