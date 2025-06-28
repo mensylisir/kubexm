@@ -61,8 +61,8 @@ func newTestRunnerForPackage(t *testing.T, osID string) (Runner, *Facts, *MockCo
 		}
 		// Package manager tools
 		if file == "apt-get" && (osID == "ubuntu" || osID == "debian" || osID == "raspbian" || osID == "linuxmint") { return "/usr/bin/apt-get", nil }
-		if file == "yum" && (osID == "centos" || osID == "rhel") { return "/usr/bin/yum", nil }
-		if file == "dnf" && (osID == "fedora" || osID == "rhel" || osID == "almalinux" || osID == "rocky") { return "/usr/bin/dnf", nil } // RHEL 8+ might have dnf
+		if file == "yum" && (osID == "centos" || osID == "rhel" || osID == "fedora"  || osID == "almalinux" || osID == "rocky" ) { return "/usr/bin/yum", nil } // Added fedora etc. to yum path for simplicity if dnf fails
+		if file == "dnf" && (osID == "fedora" || osID == "rhel" || osID == "almalinux" || osID == "rocky") { return "/usr/bin/dnf", nil }
 		// Init system tools
 		if file == "systemctl" { return "/usr/bin/systemctl", nil }
 		if file == "service" { return "/usr/sbin/service", nil }
@@ -74,8 +74,8 @@ func newTestRunnerForPackage(t *testing.T, osID string) (Runner, *Facts, *MockCo
 		return "", fmt.Errorf("LookPath mock (package): command %s not found for OS %s", file, osID)
 	}
 
-	r := NewRunner()
-	facts, err := r.GatherFacts(context.Background(), mockConn)
+	runnerInstance := NewRunner() // Corrected call
+	facts, err := runnerInstance.GatherFacts(context.Background(), mockConn)
 	if err != nil {
 		t.Fatalf("newTestRunnerForPackage: Failed to gather facts for OS %s: %v", osID, err)
 	}
@@ -90,7 +90,7 @@ func newTestRunnerForPackage(t *testing.T, osID string) (Runner, *Facts, *MockCo
 	if facts.InitSystem == nil {
 		t.Logf("Warning: newTestRunnerForPackage for OS '%s': facts.InitSystem is nil. Check mock LookPath for systemctl/service.", osID)
 	}
-	return r, facts, mockConn
+	return runnerInstance, facts, mockConn
 }
 
 
@@ -231,13 +231,13 @@ func TestRunner_IsPackageInstalled_Apt_Installed(t *testing.T) {
 		}
 		return nil, nil, errors.New("IsPackageInstalled apt: unexpected cmd")
 	}
-	installed, err := r.IsPackageInstalled(context.Background(), pkg)
+	installed, err := r.IsPackageInstalled(context.Background(), mockConn, facts, pkg) // Corrected call
 	if err != nil {t.Fatalf("IsPackageInstalled apt error = %v", err)}
 	if !installed {t.Error("IsPackageInstalled apt = false, want true")}
 }
 
 func TestRunner_IsPackageInstalled_Yum_NotInstalled(t *testing.T) {
-	r, mockConn := newTestRunnerForPackage(t, "centos")
+	r, facts, mockConn := newTestRunnerForPackage(t, "centos") // Corrected: assign facts
 	pkg := "nonexistent-pkg"
 	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
 		mockConn.LastExecCmd = cmd
@@ -249,13 +249,13 @@ func TestRunner_IsPackageInstalled_Yum_NotInstalled(t *testing.T) {
 		}
 		return nil, nil, errors.New("IsPackageInstalled yum: unexpected cmd")
 	}
-	installed, err := r.IsPackageInstalled(context.Background(), pkg)
+	installed, err := r.IsPackageInstalled(context.Background(), mockConn, facts, pkg) // Corrected call
 	if err != nil {t.Fatalf("IsPackageInstalled yum error = %v", err)}
 	if installed {t.Error("IsPackageInstalled yum = true, want false")}
 }
 
 func TestRunner_AddRepository_Apt_PPA(t *testing.T) {
-	r, mockConn := newTestRunnerForPackage(t, "ubuntu")
+	r, facts, mockConn := newTestRunnerForPackage(t, "ubuntu") // Corrected: assign facts
 	repoPPA := "ppa:graphics-drivers/ppa"
 
 	var addRepoCmd, updateCmd, installPropsCmd string
@@ -289,14 +289,15 @@ func TestRunner_AddRepository_Apt_PPA(t *testing.T) {
 			addRepoCmd = cmd
 			return nil, nil, nil
 		}
-		if cmd == aptInfo.UpdateCmd && options.Sudo {
+		// Check against facts.PackageManager.UpdateCmd as aptInfo is not available here
+		if facts != nil && facts.PackageManager != nil && cmd == facts.PackageManager.UpdateCmd && options.Sudo {
 			updateCmd = cmd
 			return nil, nil, nil
 		}
 		return nil, nil, fmt.Errorf("AddRepository apt PPA: unexpected cmd: %s", cmd)
 	}
 
-	err := r.AddRepository(context.Background(), repoPPA, false)
+	err := r.AddRepository(context.Background(), mockConn, facts, repoPPA, false) // Corrected call
 	if err != nil {
 		t.Fatalf("AddRepository apt PPA error = %v", err)
 	}

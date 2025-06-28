@@ -303,12 +303,5 @@ func (r *defaultRunner) detectInitSystem(ctx context.Context, conn connector.Con
 // --- User Operations (Implementations will be moved from user.go) ---
 // Implementations are now in user.go
 
-
-// Ensure connector.Connector has ReadFile and WriteFile methods
-// These are assumed by the defaultRunner implementations of ReadFile/WriteFile.
-// If not, those methods need to be implemented via Exec.
-type extendedConnector interface {
-	connector.Connector
-	ReadFile(ctx context.Context, path string) ([]byte, error)
-	WriteFile(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error
-}
+// The extendedConnector interface is no longer needed as ReadFile and WriteFile
+// are now part of the main connector.Connector interface.
