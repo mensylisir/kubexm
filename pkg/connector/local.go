@@ -155,160 +155,254 @@ func (l *LocalConnector) Exec(ctx context.Context, cmd string, options *ExecOpti
 	return stdout, stderr, &CommandError{Cmd: cmd, ExitCode: exitCode, Stdout: string(stdout), Stderr: string(stderr), Underlying: finalErr}
 }
 
-// Copy copies a local file to another local path, with sudo support.
+// Copy copies a local file or directory to another local path, with sudo support.
 func (l *LocalConnector) Copy(ctx context.Context, srcPath, dstPath string, options *FileTransferOptions) error {
-	opts := FileTransferOptions{} // Default empty options
-	if options != nil {
-		opts = *options // Copy to avoid modifying the original
-	}
+    opts := FileTransferOptions{}
+    if options != nil {
+        opts = *options
+    }
 
-	if opts.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
-		defer cancel()
-	}
+    // Apply timeout to the entire Copy operation if specified
+    var cancel context.CancelFunc
+    if opts.Timeout > 0 {
+        ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
+        defer cancel() // Ensure cancel is called to free resources
+    }
 
-	// Open source file first to fail early if it doesn't exist.
-	srcFile, err := os.Open(srcPath)
-	if err != nil {
-		return fmt.Errorf("failed to open source file %s: %w", srcPath, err)
-	}
-	defer srcFile.Close()
+    srcStat, err := os.Stat(srcPath)
+    if err != nil {
+        return fmt.Errorf("source path %s does not exist or is not accessible: %w", srcPath, err)
+    }
 
-	if opts.Sudo {
-		if runtime.GOOS == "windows" {
-			return fmt.Errorf("sudo copy not supported on Windows for path %s", dstPath)
-		}
-		// Ensure destination directory exists using sudo mkdir -p
-		destDir := filepath.Dir(dstPath)
-		if destDir != "." && destDir != "/" {
-			mkdirCmd := fmt.Sprintf("mkdir -p %s", shellEscape(destDir))
-			_, _, err := l.Exec(ctx, mkdirCmd, &ExecOptions{Sudo: true})
-			if err != nil {
-				return fmt.Errorf("failed to create parent directory %s with sudo: %w", destDir, err)
-			}
-		}
+    if !opts.Sudo {
+        // Non-sudo: Use a simple recursive copy.
+        if srcStat.IsDir() {
+            return l.copyDir(srcPath, dstPath, opts)
+        }
+        return l.copyFile(srcPath, dstPath, opts)
+    }
 
-		// Use `cat <src> | sudo tee <dst> > /dev/null` pattern.
-		// `l.Exec` handles sudo password logic.
-		// `tee` writes to the file and also to stdout. We redirect tee's stdout to /dev/null.
-		// The content of srcFile needs to be piped to the command's stdin.
-		// This is a bit complex with the current Exec method as it uses connCfg.Password for stdin with sudo -S.
-		// The `cat` command will produce the content on its stdout, which needs to become stdin for `sudo tee`.
+    // Sudo mode: copy to temp -> sudo mv
+    // Create a temporary directory to stage the copy.
+    tmpDir, err := os.MkdirTemp("", "localconnector-copy-")
+    if err != nil {
+        return fmt.Errorf("failed to create temporary directory: %w", err)
+    }
+    defer os.RemoveAll(tmpDir)
 
-		// The example from the problem description uses `sudoStream{stdin: srcFile}` with ExecOptions.Stream.
-		// This implies ExecOptions.Stream can sometimes act as Stdin.
-		// Let's look at how `Exec` handles `Stream`. It's used for `io.MultiWriter` for Stdout/Stderr.
-		// This `sudoStream` trick is clever if `Exec` can be adapted or if it already has a hidden stdin pipe feature.
+    // Stage the copy into the temporary directory. The destination name inside tmpDir is the basename of the original source.
+    stagedPath := filepath.Join(tmpDir, filepath.Base(srcPath))
 
-		// The provided solution's `Copy` method (sudo path) uses:
-		// cmd := fmt.Sprintf("tee %s > /dev/null", shellEscape(dstPath))
-		// execOpts := &ExecOptions{ Sudo: true, Stream: &sudoStream{stdin: srcFile} }
-		// _, stderr, err := l.Exec(ctx, cmd, execOpts)
-		// This implies `Exec` needs to be aware of `sudoStream` or have a general way to use `Stream` as `Stdin`.
-		// The current `Exec` in `local.go` doesn't show this behavior.
-		// The `sudoStream` in the prompt solution is a placeholder for `Stdin` piping.
-		// The `Exec` in the prompt's `LocalConnector` solution has this `actualCmd.Stdin = strings.NewReader(l.connCfg.Password + "\n")`
-		// This is specific to password.
-		// For `cat | sudo tee`, the `cat` part runs as current user, `sudo tee` as root.
+    // Use non-sudo copy to stage the file/dir into the temp location.
+    // For staging, use default permissions; final permissions are applied by sudo.
+    stagingOpts := FileTransferOptions{} // No specific perms/owner/group for staging copy itself
 
-		// Let's use a direct os/exec.Command approach here for clarity, similar to the WriteFile sudo path.
-		// Command: sh -c "cat <srcPath> | sudo tee <dstPath> > /dev/null"
-		// If sudo needs password: sh -c "cat <srcPath> | sudo -S -p '' tee <dstPath> > /dev/null" (and provide password to sudo's stdin)
+    if srcStat.IsDir() {
+        if err := l.copyDir(srcPath, stagedPath, stagingOpts); err != nil {
+            return fmt.Errorf("failed to stage directory %s to %s: %w", srcPath, stagedPath, err)
+        }
+    } else {
+        if err := l.copyFile(srcPath, stagedPath, stagingOpts); err != nil {
+            return fmt.Errorf("failed to stage file %s to %s: %w", srcPath, stagedPath, err)
+        }
+    }
 
-		shell := []string{"/bin/sh", "-c"}
-		var cmdStr string
-		var actualCmd *exec.Cmd
+    // Ensure final destination parent directory exists using sudo.
+    destParentDir := filepath.Dir(dstPath)
+    if destParentDir != "." && destParentDir != "/" && destParentDir != "" { // Check if it's not current or root
+        mkdirCmd := fmt.Sprintf("mkdir -p %s", shellEscape(destParentDir))
+        _, stderr, mkdirErr := l.Exec(ctx, mkdirCmd, &ExecOptions{Sudo: true})
+        if mkdirErr != nil {
+            return fmt.Errorf("failed to create destination parent directory %s with sudo: %s (underlying error %w)", destParentDir, string(stderr), mkdirErr)
+        }
+    }
 
-		// We need to escape srcPath for cat and dstPath for tee.
-		escapedSrcPath := shellEscape(srcPath)
-		escapedDstPath := shellEscape(dstPath)
+    // Move the staged content to the final destination using sudo.
+    mvCmd := fmt.Sprintf("mv %s %s", shellEscape(stagedPath), shellEscape(dstPath))
+    _, stderr, mvErr := l.Exec(ctx, mvCmd, &ExecOptions{Sudo: true})
+    if mvErr != nil {
+        return fmt.Errorf("failed to move staged content from %s to %s with sudo: %s (underlying error %w)", stagedPath, dstPath, string(stderr), mvErr)
+    }
 
-		if l.connCfg.Password != "" {
-			cmdStr = fmt.Sprintf("cat %s | sudo -S -p '' -E -- tee %s > /dev/null", escapedSrcPath, escapedDstPath)
-			actualCmd = exec.CommandContext(ctx, shell[0], append(shell[1:], cmdStr)...)
-			actualCmd.Stdin = strings.NewReader(l.connCfg.Password + "\n") // sudo -S reads password from stdin
-		} else {
-			cmdStr = fmt.Sprintf("cat %s | sudo -E -- tee %s > /dev/null", escapedSrcPath, escapedDstPath)
-			actualCmd = exec.CommandContext(ctx, shell[0], append(shell[1:], cmdStr)...)
-			// No specific stdin needed beyond what `cat` produces for `tee` if no password for sudo.
-		}
-
-		var stderrBuf bytes.Buffer
-		actualCmd.Stderr = &stderrBuf
-
-		// `cat` part reads from srcFile, its stdout is piped to `sudo tee` by the shell.
-		// So, `srcFile` itself is not `actualCmd.Stdin`.
-		// The `cat` command handles reading `srcFile`.
-
-		if errRun := actualCmd.Run(); errRun != nil {
-			return fmt.Errorf("failed to copy with sudo (cat | tee) from %s to %s: %s (underlying error: %w)", srcPath, dstPath, stderrBuf.String(), errRun)
-		}
-
-	} else {
-		// Standard, non-sudo copy
-		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil { // 0755 for directory permissions
-			return fmt.Errorf("failed to create destination directory for %s: %w", dstPath, err)
-		}
-
-		dstFile, err := os.Create(dstPath)
-		if err != nil {
-			return fmt.Errorf("failed to create destination file %s: %w", dstPath, err)
-		}
-		defer dstFile.Close()
-
-		if _, err = io.Copy(dstFile, srcFile); err != nil {
-			return fmt.Errorf("failed to copy content from %s to %s: %w", srcPath, dstPath, err)
-		}
-	}
-
-	// Apply permissions after copy.
-	if opts.Permissions != "" {
-		perm, parseErr := strconv.ParseUint(opts.Permissions, 8, 32)
-		if parseErr != nil {
-			return fmt.Errorf("invalid permissions format '%s' for %s: %w", opts.Permissions, dstPath, parseErr)
-		}
-
-		if opts.Sudo {
-			// Use l.Exec to run `sudo chmod`
-			chmodCmdStr := fmt.Sprintf("chmod %s %s", opts.Permissions, shellEscape(dstPath))
-			_, stderr, err := l.Exec(ctx, chmodCmdStr, &ExecOptions{Sudo: true})
-			if err != nil {
-				// For sudo chmod, a failure could be a warning if `tee` already set good permissions,
-				// but it's safer to return an error as the requested permissions were not applied.
-				return fmt.Errorf("failed to set permissions with sudo chmod on %s: %s (underlying error: %w)", dstPath, string(stderr), err)
-			}
-		} else {
-			if errChmod := os.Chmod(dstPath, os.FileMode(perm)); errChmod != nil {
-				return fmt.Errorf("failed to set permissions on %s: %w", dstPath, errChmod)
-			}
-		}
-	}
-	return nil
+    // Apply final permissions and ownership using sudo.
+    return l.applySudoPermissions(ctx, dstPath, opts)
 }
 
-// CopyContent copies byte content to a destination file.
-// It now calls the more generic WriteFile method, which includes sudo support.
-func (l *LocalConnector) CopyContent(ctx context.Context, content []byte, dstPath string, options *FileTransferOptions) error {
-	var permissions string
-	var sudo bool
-	effectiveTimeout := time.Duration(0)
+// copyFile is a non-sudo helper for copying a single file.
+func (l *LocalConnector) copyFile(src, dst string, opts FileTransferOptions) error {
+    srcFile, err := os.Open(src)
+    if err != nil {
+        return fmt.Errorf("failed to open source file %s for copyFile: %w", src, err)
+    }
+    defer srcFile.Close()
 
-	if options != nil {
-		permissions = options.Permissions
-		sudo = options.Sudo
-		if options.Timeout > 0 {
-			effectiveTimeout = options.Timeout
+    if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil { // Sensible default for MkdirAll
+        return fmt.Errorf("failed to create destination directory %s for copyFile: %w", filepath.Dir(dst), err)
+    }
+
+    dstFile, err := os.Create(dst)
+    if err != nil {
+        return fmt.Errorf("failed to create destination file %s for copyFile: %w", dst, err)
+    }
+    defer dstFile.Close()
+
+    if _, err := io.Copy(dstFile, srcFile); err != nil {
+        return fmt.Errorf("failed to copy content from %s to %s: %w", src, dst, err)
+    }
+
+    if opts.Permissions != "" {
+        perm, parseErr := strconv.ParseUint(opts.Permissions, 8, 32)
+        if parseErr != nil {
+            return fmt.Errorf("invalid permissions format '%s' for %s: %w", opts.Permissions, dst, parseErr)
+        }
+        if err := os.Chmod(dst, os.FileMode(perm)); err != nil {
+            return fmt.Errorf("failed to set permissions on %s: %w", dst, err)
+        }
+    }
+    // Note: Non-sudo copy does not handle Owner/Group.
+    return nil
+}
+
+// copyDir is a non-sudo helper for recursively copying a directory.
+func (l *LocalConnector) copyDir(src, dst string, opts FileTransferOptions) error {
+    srcInfo, err := os.Stat(src)
+    if err != nil {
+        return fmt.Errorf("failed to stat source directory %s for copyDir: %w", src, err)
+    }
+    // Create destination directory with source directory's permissions.
+    if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+        return fmt.Errorf("failed to create destination directory %s for copyDir: %w", dst, err)
+    }
+
+    entries, err := os.ReadDir(src)
+    if err != nil {
+        return fmt.Errorf("failed to read source directory %s for copyDir: %w", src, err)
+    }
+
+    for _, entry := range entries {
+        srcPath := filepath.Join(src, entry.Name())
+        // Corrected filepath.join to filepath.Join
+        dstPath := filepath.Join(dst, entry.Name())
+
+        if entry.IsDir() {
+            // For subdirectories, pass along the original options (e.g., for permissions on files within)
+            // though copyDir itself mainly uses srcInfo.Mode() for directory creation.
+            // The file copy part will use opts.Permissions if set.
+            if err := l.copyDir(srcPath, dstPath, opts); err != nil {
+                return err // Error already wrapped by recursive call
+            }
+        } else {
+            // This could also handle symlinks, etc. For now, just files.
+            // Pass original opts to copyFile so file permissions are applied if specified.
+            if err := l.copyFile(srcPath, dstPath, opts); err != nil {
+                return err // Error already wrapped by copyFile
+            }
+        }
+    }
+    return nil
+}
+
+// applySudoPermissions is a helper to apply final permissions/ownership via `sudo`.
+func (l *LocalConnector) applySudoPermissions(ctx context.Context, path string, opts FileTransferOptions) error {
+    if opts.Permissions != "" {
+        if _, parseErr := strconv.ParseUint(opts.Permissions, 8, 32); parseErr != nil {
+             return fmt.Errorf("invalid permissions format '%s' for applySudoPermissions on %s: %w", opts.Permissions, path, parseErr)
+        }
+        chmodCmd := fmt.Sprintf("chmod %s %s", shellEscape(opts.Permissions), shellEscape(path))
+        _, stderr, err := l.Exec(ctx, chmodCmd, &ExecOptions{Sudo: true})
+        if err != nil {
+            return fmt.Errorf("failed to set permissions on %s with sudo chmod: %s (underlying error %w)", path, string(stderr), err)
+        }
+    }
+    if opts.Owner != "" {
+        ownerAndGroup := opts.Owner
+		if opts.Group != "" {
+			ownerAndGroup = fmt.Sprintf("%s:%s", opts.Owner, opts.Group)
 		}
-	}
+        // Use -R for chown if it's a directory, check this.
+        // For simplicity, if we copied a dir, it's likely we want recursive chown.
+        // Stat the path to see if it's a directory.
+        targetStat, statErr := os.Stat(path) // Local stat after mv
+        chownFlags := ""
+        if statErr == nil && targetStat.IsDir() {
+            chownFlags = "-R"
+        }
 
-	if effectiveTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, effectiveTimeout)
-		defer cancel()
-	}
+        chownCmd := fmt.Sprintf("chown %s %s %s", chownFlags, shellEscape(ownerAndGroup), shellEscape(path))
+        chownCmd = strings.TrimSpace(strings.ReplaceAll(chownCmd, "  ", " ")) // Clean up potential double space if chownFlags is empty
 
-	return l.WriteFile(ctx, content, dstPath, permissions, sudo)
+        _, stderr, err := l.Exec(ctx, chownCmd, &ExecOptions{Sudo: true})
+        if err != nil {
+            return fmt.Errorf("failed to set ownership on %s with sudo chown: %s (underlying error %w)", path, string(stderr), err)
+        }
+    }
+    return nil
+}
+
+
+// CopyContent for LocalConnector, now uses the `upload -> mv` pattern for sudo.
+func (l *LocalConnector) CopyContent(ctx context.Context, content []byte, dstPath string, options *FileTransferOptions) error {
+    opts := FileTransferOptions{}
+    if options != nil {
+        opts = *options
+    }
+
+    // Apply timeout to the entire CopyContent operation if specified
+    var cancel context.CancelFunc
+    if opts.Timeout > 0 {
+        ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
+        defer cancel() // Ensure cancel is called to free resources
+    }
+
+    if !opts.Sudo {
+        permMode := fs.FileMode(0644) // Default perm
+        if opts.Permissions != "" {
+            if perm, err := strconv.ParseUint(opts.Permissions, 8, 32); err == nil {
+                permMode = fs.FileMode(perm)
+            } else {
+                 return fmt.Errorf("invalid permissions format '%s' for CopyContent to %s: %w", opts.Permissions, dstPath, err)
+            }
+        }
+        if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil { // Sensible default for MkdirAll
+            return fmt.Errorf("failed to create destination directory %s for CopyContent: %w", filepath.Dir(dstPath), err)
+        }
+        return os.WriteFile(dstPath, content, permMode)
+    }
+
+    // Sudo mode: write to temp file -> sudo mv
+    tmpFile, err := os.CreateTemp("", "localconnector-content-")
+    if err != nil {
+        return fmt.Errorf("failed to create temporary file: %w", err)
+    }
+    defer os.Remove(tmpFile.Name()) // Cleanup
+
+    if _, err := tmpFile.Write(content); err != nil {
+        tmpFile.Close()
+        return fmt.Errorf("failed to write content to temporary file %s: %w", tmpFile.Name(), err)
+    }
+    if err := tmpFile.Close(); err != nil { // Close before mv
+        return fmt.Errorf("failed to close temporary file %s: %w", tmpFile.Name(), err)
+    }
+
+
+    // Ensure final destination parent directory exists using sudo.
+    destParentDir := filepath.Dir(dstPath)
+    if destParentDir != "." && destParentDir != "/" && destParentDir != "" {
+        mkdirCmd := fmt.Sprintf("mkdir -p %s", shellEscape(destParentDir))
+        _, stderr, mkdirErr := l.Exec(ctx, mkdirCmd, &ExecOptions{Sudo: true})
+        if mkdirErr != nil {
+            return fmt.Errorf("failed to create destination parent directory %s with sudo: %s (underlying error %w)", destParentDir, string(stderr), mkdirErr)
+        }
+    }
+
+    // Move the temp file to the final destination using sudo.
+    mvCmd := fmt.Sprintf("mv %s %s", shellEscape(tmpFile.Name()), shellEscape(dstPath))
+    _, stderr, mvErr := l.Exec(ctx, mvCmd, &ExecOptions{Sudo: true})
+    if mvErr != nil {
+        return fmt.Errorf("failed to move temporary file from %s to %s with sudo: %s (underlying error %w)", tmpFile.Name(), dstPath, string(stderr), mvErr)
+    }
+
+    return l.applySudoPermissions(ctx, dstPath, opts)
 }
 
 func (l *LocalConnector) Fetch(ctx context.Context, remotePath, localPath string) error {

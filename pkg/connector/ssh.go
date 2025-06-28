@@ -12,6 +12,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"archive/tar"
+	"compress/gzip"
+	"io/fs"
+
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -899,3 +903,193 @@ var _ Connector = &SSHConnector{}
 // The main methods like Connect, IsConnected, Close, Exec, file writes, GetOS are covered by the new code.
 // The `writeFileViaSFTP` was also added to support io.Reader for SFTP.
 // The `ensureSftp` helper is also included.
+
+// Copy handles copying both files and directories to the remote host.
+// For directories, it uses a tar stream to be efficient and preserve permissions.
+func (s *SSHConnector) Copy(ctx context.Context, srcPath, dstPath string, options *FileTransferOptions) error {
+    srcStat, err := os.Stat(srcPath)
+    if err != nil {
+        return fmt.Errorf("source path %s not found or not accessible: %w", srcPath, err)
+    }
+
+    if !srcStat.IsDir() {
+        // It's a file, we can use the existing writeFileFromReader logic.
+        srcFile, err := os.Open(srcPath)
+        if err != nil {
+            return fmt.Errorf("failed to open source file %s: %w", srcPath, err)
+        }
+        defer srcFile.Close()
+        return s.writeFileFromReader(ctx, srcFile, dstPath, options)
+    }
+
+    // It's a directory, use the tar-based copy method.
+    return s.copyDirViaTar(ctx, srcPath, dstPath, options)
+}
+
+// copyDirViaTar copies a local directory to a remote path by creating a tar stream.
+func (s *SSHConnector) copyDirViaTar(ctx context.Context, srcDir, dstDir string, options *FileTransferOptions) error {
+    opts := FileTransferOptions{}
+	if options != nil {
+		opts = *options
+	}
+
+    // Create a pipe. The writer will write the tar archive into the pipe,
+    // and the reader will be used as stdin for the remote command.
+    pr, pw := io.Pipe()
+
+    // Use a goroutine to create the tar archive and write it to the pipe.
+    // Capture error from goroutine.
+    var tarErr error
+    go func() {
+        // It's crucial to close the writer, otherwise the reader will block forever.
+        // Use a defer to ensure it's closed on both success and error paths.
+        defer func() {
+            if r := recover(); r != nil {
+                // Convert panic to error
+                tarErr = fmt.Errorf("panic during tar creation: %v", r)
+                pw.CloseWithError(tarErr) // Close pipe with error if panic occurs
+            }
+            pw.Close() // Ensure pipe writer is closed
+        }()
+
+        gzw := gzip.NewWriter(pw)
+        defer gzw.Close()
+
+        tw := tar.NewWriter(gzw)
+        defer tw.Close()
+
+        // Walk the source directory and add files/dirs to the tar archive.
+        // Corrected srcsrcDir to srcDir
+        walkErr := filepath.Walk(srcDir, func(path string, info fs.FileInfo, errWalk error) error {
+            if errWalk != nil {
+                return fmt.Errorf("error during filepath.Walk at %s: %w", path, errWalk)
+            }
+            // Create tar header
+            header, err := tar.FileInfoHeader(info, info.Name())
+            if err != nil {
+                return fmt.Errorf("failed to create tar header for %s: %w", path, err)
+            }
+            // The path in the tar archive should be relative to the source directory's parent.
+            // This ensures that when extracted in remoteParentDir, it creates srcBaseName/ S
+            header.Name, err = filepath.Rel(filepath.Dir(srcDir), path)
+            if err != nil {
+                return fmt.Errorf("failed to make path relative for tar header %s: %w", path, err)
+            }
+            if info.IsDir() { // Ensure directory names in tar end with a slash
+                header.Name += "/"
+            }
+
+
+            if err := tw.WriteHeader(header); err != nil {
+                return fmt.Errorf("failed to write tar header for %s: %w", path, err)
+            }
+            // If it's a regular file, write its content.
+            if !info.Mode().IsRegular() {
+                return nil
+            }
+            file, err := os.Open(path)
+            if err != nil {
+                return fmt.Errorf("failed to open file %s for tar: %w", path, err)
+            }
+            defer file.Close()
+            if _, err = io.Copy(tw, file); err != nil {
+                return fmt.Errorf("failed to copy file %s content to tar: %w", path, err)
+            }
+            return nil
+        })
+        if walkErr != nil {
+            // Propagate walkErr to tarErr so it can be checked by the main goroutine
+            tarErr = walkErr
+            pw.CloseWithError(walkErr) // Close pipe with error
+        }
+    }()
+
+    // Now, on the remote side, prepare to receive and extract the tar stream.
+    // The command will be run in the parent directory of the destination.
+    remoteParentDir := filepath.Dir(dstDir)
+    // If dstDir is a root path like "/" or "/etc", remoteParentDir might be "." or "/".
+    // `tar -C /` is fine. `tar -C .` is also fine (extracts in current dir).
+    // However, it's safer to ensure remoteParentDir is an actual directory path.
+    // If dstDir is "foo", remoteParentDir is ".". We should ensure remoteParentDir is created if it's not "." or "/".
+
+    execOpts := &ExecOptions{
+        Sudo: opts.Sudo,
+        Stream: readOnlyStream{Reader: pr},
+    }
+
+    // Ensure the remote parent directory exists first.
+    // If remoteParentDir is "." (meaning dstDir is a top-level name in current remote dir),
+    // no need to mkdir "." explicitly.
+    // If remoteParentDir is "/", it always exists.
+    if remoteParentDir != "." && remoteParentDir != "/" && remoteParentDir != "" {
+        mkdirCmd := fmt.Sprintf("mkdir -p %s", shellEscape(remoteParentDir))
+        _, stderr, mkdirErr := s.Exec(ctx, mkdirCmd, &ExecOptions{Sudo: opts.Sudo}) // Use opts.Sudo for mkdir as well
+        if mkdirErr != nil {
+             pr.Close() // Close the reader part of the pipe if mkdir fails
+            return fmt.Errorf("failed to create remote directory %s: %s (underlying error %w)", remoteParentDir, string(stderr), mkdirErr)
+        }
+    }
+
+    // Command to extract. Tar extracts relative to -C target.
+    // The paths in tar are like `basename(srcDir)/file`.
+    // So, if -C is `filepath.Dir(dstDir)`, it will create `filepath.Dir(dstDir)/basename(srcDir)/...`
+    extractCmd := fmt.Sprintf("tar -xzf - -C %s", shellEscape(remoteParentDir))
+
+    // Execute the tar extraction command.
+    _, stderr, execErr := s.Exec(ctx, extractCmd, execOpts)
+    // Check tarErr from the goroutine first. If tar creation failed, execErr might be misleading (e.g. EOF on pipe).
+    if tarErr != nil {
+        return fmt.Errorf("tar creation failed: %w (remote exec stderr, if any: %s)", tarErr, string(stderr))
+    }
+    if execErr != nil {
+        return fmt.Errorf("failed to extract tar stream on remote host into %s: %s (underlying error %w)", remoteParentDir, string(stderr), execErr)
+    }
+
+    // After extraction, the directory will be at `remoteParentDir/basename(srcDir)`.
+    // We need to move it to `dstDir` if `basename(srcDir)` is different from `basename(dstDir)`.
+    // Or if dstDir is not just remoteParentDir/basename(srcDir)
+
+    extractedPath := filepath.Join(remoteParentDir, filepath.Base(srcDir))
+    if extractedPath != dstDir {
+        // Ensure dstDir parent exists (it should due to earlier mkdir for remoteParentDir, but if dstDir is deeper)
+        finalDestParent := filepath.Dir(dstDir)
+        if finalDestParent != "." && finalDestParent != "/" && finalDestParent != "" && finalDestParent != remoteParentDir {
+             mkdirCmdFinal := fmt.Sprintf("mkdir -p %s", shellEscape(finalDestParent))
+            _, stderrMv, mkdirErrMv := s.Exec(ctx, mkdirCmdFinal, &ExecOptions{Sudo: opts.Sudo})
+            if mkdirErrMv != nil {
+                return fmt.Errorf("failed to create final destination parent directory %s for mv: %s (underlying error %w)", finalDestParent, string(stderrMv), mkdirErrMv)
+            }
+        }
+
+        mvCmd := fmt.Sprintf("mv %s %s", shellEscape(extractedPath), shellEscape(dstDir))
+        _, stderr, mvErr := s.Exec(ctx, mvCmd, &ExecOptions{Sudo: opts.Sudo})
+        if mvErr != nil {
+            return fmt.Errorf("failed to move extracted directory from %s to %s: %s (underlying error %w)", extractedPath, dstDir, string(stderr), mvErr)
+        }
+    }
+
+    // Apply final ownership/permissions to the destination directory (now at dstDir).
+    if opts.Permissions != "" {
+         if _, err := strconv.ParseUint(opts.Permissions, 8, 32); err != nil {
+            return fmt.Errorf("invalid permissions format '%s' for %s: %w", opts.Permissions, dstDir, err)
+        }
+        chmodCmd := fmt.Sprintf("chmod -R %s %s", shellEscape(opts.Permissions), shellEscape(dstDir)) // Recursive chmod for dir
+        _, stderr, chmodErr := s.Exec(ctx, chmodCmd, &ExecOptions{Sudo: opts.Sudo})
+        if chmodErr != nil {
+            return fmt.Errorf("failed to set permissions on %s with sudo chmod: %s (underlying error %w)", dstDir, string(stderr), chmodErr)
+        }
+    }
+    if opts.Owner != "" {
+        ownerAndGroup := opts.Owner
+		if opts.Group != "" {
+			ownerAndGroup = fmt.Sprintf("%s:%s", opts.Owner, opts.Group)
+		}
+        chownCmd := fmt.Sprintf("chown -R %s %s", shellEscape(ownerAndGroup), shellEscape(dstDir)) // Recursive chown for dir
+        _, stderr, chownErr := s.Exec(ctx, chownCmd, &ExecOptions{Sudo: opts.Sudo})
+        if chownErr != nil {
+            return fmt.Errorf("failed to set ownership on %s with sudo chown: %s (underlying error %w)", dstDir, string(stderr), chownErr)
+        }
+    }
+
+    return nil
+}
