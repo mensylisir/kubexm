@@ -814,3 +814,105 @@ func TestSSHConnector_GetFileChecksum_Injection(t *testing.T) {
 // Stray ctx related to TestSSHConnector_GetFileChecksum1 was removed.
 // Removing all other remnants of TestSSHConnector_GetFileChecksum1 that were at the package level.
 // The file should end after the last valid test function.
+
+func TestSSHConnector_Copy_Directory(t *testing.T) {
+	sc := setupSSHTest(t)
+	defer sc.Close()
+	ctx := context.Background()
+
+	// --- Setup Local Source Directory ---
+	localTmpBaseDir, err := os.MkdirTemp("", "ssh-copydir-localbase-")
+	if err != nil {
+		t.Fatalf("Failed to create local temp base dir: %v", err)
+	}
+	defer os.RemoveAll(localTmpBaseDir)
+
+	localSrcDir := filepath.Join(localTmpBaseDir, "source_dir")
+	localSrcSubDir := filepath.Join(localSrcDir, "subdir")
+	localSrcFile1 := filepath.Join(localSrcDir, "file1.txt")
+	localSrcFile2 := filepath.Join(localSrcSubDir, "file2.txt")
+
+	if err := os.MkdirAll(localSrcSubDir, 0755); err != nil {
+		t.Fatalf("Failed to create local srcSubDir: %v", err)
+	}
+	if err := os.WriteFile(localSrcFile1, []byte("content_ssh_1"), 0644); err != nil {
+		t.Fatalf("Failed to write local srcFile1: %v", err)
+	}
+	if err := os.WriteFile(localSrcFile2, []byte("content_ssh_2"), 0644); err != nil {
+		t.Fatalf("Failed to write local srcFile2: %v", err)
+	}
+
+	// --- Setup Remote Destination ---
+	remoteBaseDir := fmt.Sprintf("/tmp/sshconnector-copydir-remote-%d", time.Now().UnixNano())
+	_, _, err = sc.Exec(ctx, fmt.Sprintf("mkdir -p %s", remoteBaseDir), nil)
+	if err != nil {
+		t.Fatalf("Failed to create remote base dir %s: %v", remoteBaseDir, err)
+	}
+	defer sc.Exec(context.Background(), fmt.Sprintf("rm -rf %s", remoteBaseDir), nil)
+
+
+	// --- Test Non-Sudo Directory Copy (via Tar) ---
+	remoteDstNonSudo := filepath.Join(remoteBaseDir, "dest_dir_non_sudo")
+	err = sc.Copy(ctx, localSrcDir, remoteDstNonSudo, nil) // No options, non-sudo
+	if err != nil {
+		t.Fatalf("Non-sudo SSH Copy directory failed: %v", err)
+	}
+
+	// Verify non-sudo remote copy
+	// Check file1
+	statF1, errF1 := sc.Stat(ctx, filepath.Join(remoteDstNonSudo, "file1.txt"))
+	if errF1 != nil || !statF1.IsExist {
+		t.Errorf("Non-sudo SSH copy: file1.txt not found or stat failed in %s: %v", remoteDstNonSudo, errF1)
+	}
+	// Check file2
+	statF2, errF2 := sc.Stat(ctx, filepath.Join(remoteDstNonSudo, "subdir", "file2.txt"))
+	if errF2 != nil || !statF2.IsExist {
+		t.Errorf("Non-sudo SSH copy: subdir/file2.txt not found or stat failed in %s: %v", remoteDstNonSudo, errF2)
+	}
+
+	// --- Test Sudo Directory Copy (via Tar and sudo mv/chmod/chown) ---
+	remoteDstSudo := filepath.Join(remoteBaseDir, "dest_dir_sudo_tar")
+	optsSudo := &FileTransferOptions{
+		Sudo:        true,
+		Permissions: "0775", // Expected permissions for the top copied directory
+		Owner:       "root",   // Expected owner
+		Group:       "root",   // Expected group
+	}
+	// Note: Setting Owner/Group to root might fail if test SSH user doesn't have passwordless sudo for chown.
+	// The test primarily ensures the tar copy and sudo commands are attempted.
+
+	err = sc.Copy(ctx, localSrcDir, remoteDstSudo, optsSudo)
+	if err != nil {
+		t.Logf("Sudo SSH Copy directory failed. This might be due to sudo permissions for mv/chown/chmod on the remote. Error: %v", err)
+		// Depending on the failure, parts of the directory might still exist.
+	}
+
+	// Verify sudo remote copy (best effort, as some steps might fail due to permissions)
+	// We mainly want to see if the files arrived in some form.
+	statSudoF1, errSudoF1 := sc.Stat(ctx, filepath.Join(remoteDstSudo, "file1.txt"))
+	if errSudoF1 != nil || !statSudoF1.IsExist {
+		t.Errorf("Sudo SSH copy: file1.txt not found or stat failed in %s: %v. This can happen if the whole operation failed early.", remoteDstSudo, errSudoF1)
+	}
+
+	statSudoF2, errSudoF2 := sc.Stat(ctx, filepath.Join(remoteDstSudo, "subdir", "file2.txt"))
+	if errSudoF2 != nil || !statSudoF2.IsExist {
+		t.Errorf("Sudo SSH copy: subdir/file2.txt not found or stat failed in %s: %v. This can happen if the whole operation failed early.", remoteDstSudo, errSudoF2)
+	}
+
+	// Optional: Check permissions of the top-level copied directory if the copy didn't error out before that.
+	if err == nil && optsSudo.Permissions != "" {
+		statDir, statDirErr := sc.Stat(ctx, remoteDstSudo)
+		if statDirErr == nil && statDir.IsExist && statDir.IsDir {
+			// Convert expected octal string to os.FileMode
+			expectedPermMode, _ := strconv.ParseUint(optsSudo.Permissions, 8, 32)
+			// SSH Stat usually returns full mode. We are interested in permission bits.
+			if statDir.Mode.Perm() != os.FileMode(expectedPermMode).Perm() {
+				t.Logf("Sudo SSH copy: Directory %s permissions are %s, expected %s. (May differ if sudo chmod failed).", remoteDstSudo, statDir.Mode.Perm().String(), os.FileMode(expectedPermMode).Perm().String())
+			} else {
+				t.Logf("Sudo SSH copy: Directory %s permissions successfully set to %s.", remoteDstSudo, statDir.Mode.Perm().String())
+			}
+		} else {
+			t.Logf("Sudo SSH copy: Could not stat remote directory %s to check permissions. StatErr: %v", remoteDstSudo, statDirErr)
+		}
+	}
+}

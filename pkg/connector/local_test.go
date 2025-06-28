@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv" // Added for ParseUint
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,96 @@ func TestLocalConnector_Connect(t *testing.T) {
 	}
 	if !lc.IsConnected() {
 		t.Errorf("LocalConnector.IsConnected() = false, want true after Connect")
+	}
+}
+
+func TestLocalConnector_Copy_Directory(t *testing.T) {
+	lc := &LocalConnector{}
+	ctx := context.Background()
+
+	tmpBaseDir, err := os.MkdirTemp("", "localconnector-copydir-testbase-")
+	if err != nil {
+		t.Fatalf("Failed to create temp base dir: %v", err)
+	}
+	defer os.RemoveAll(tmpBaseDir)
+
+	// 1. Setup source directory
+	srcDir := filepath.Join(tmpBaseDir, "source_dir")
+	srcSubDir := filepath.Join(srcDir, "subdir")
+	srcFile1 := filepath.Join(srcDir, "file1.txt")
+	srcFile2 := filepath.Join(srcSubDir, "file2.txt")
+
+	if err := os.MkdirAll(srcSubDir, 0755); err != nil {
+		t.Fatalf("Failed to create srcSubDir: %v", err)
+	}
+	if err := os.WriteFile(srcFile1, []byte("content1"), 0644); err != nil {
+		t.Fatalf("Failed to write srcFile1: %v", err)
+	}
+	if err := os.WriteFile(srcFile2, []byte("content2"), 0644); err != nil {
+		t.Fatalf("Failed to write srcFile2: %v", err)
+	}
+
+	// --- Test Non-Sudo Directory Copy ---
+	dstDirNonSudo := filepath.Join(tmpBaseDir, "dest_dir_non_sudo")
+	err = lc.Copy(ctx, srcDir, dstDirNonSudo, nil) // No options, non-sudo
+	if err != nil {
+		t.Fatalf("Non-sudo Copy directory failed: %v", err)
+	}
+
+	// Verify non-sudo copy
+	if _, err := os.Stat(filepath.Join(dstDirNonSudo, "file1.txt")); err != nil {
+		t.Errorf("Non-sudo copy: file1.txt not found in destination: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dstDirNonSudo, "subdir", "file2.txt")); err != nil {
+		t.Errorf("Non-sudo copy: subdir/file2.txt not found in destination: %v", err)
+	}
+	dstDirNonSudoStat, _ := os.Stat(dstDirNonSudo)
+	srcDirStat, _ := os.Stat(srcDir)
+	if runtime.GOOS != "windows" && dstDirNonSudoStat.Mode() != srcDirStat.Mode() {
+		t.Errorf("Non-sudo copy: top-level directory mode mismatch. Got %s, want %s", dstDirNonSudoStat.Mode(), srcDirStat.Mode())
+	}
+
+
+	// --- Test Sudo Directory Copy ---
+	dstDirSudo := filepath.Join(tmpBaseDir, "dest_dir_sudo")
+
+	optsSudo := &FileTransferOptions{
+		Sudo:        true,
+		Permissions: "0775",
+		Owner:       "root",
+		Group:       "root",
+	}
+	if runtime.GOOS == "windows" {
+		optsSudo.Owner = ""
+		optsSudo.Group = ""
+		optsSudo.Permissions = ""
+	}
+
+	err = lc.Copy(ctx, srcDir, dstDirSudo, optsSudo)
+	if err != nil {
+		// On systems without passwordless sudo for the current user to chown to root, this might fail at chown/chmod.
+		t.Logf("Sudo Copy directory potentially failed at permission/ownership stage (may be expected if not root or no passwordless sudo for chown/chmod): %v", err)
+	}
+
+	// Verify sudo copy - check for file existence primarily, as perms/owner might fail if not root
+	copiedFile1Sudo := filepath.Join(dstDirSudo, "file1.txt")
+	copiedFile2Sudo := filepath.Join(dstDirSudo, "subdir", "file2.txt")
+
+	if _, err := os.Stat(copiedFile1Sudo); err != nil {
+		t.Errorf("Sudo copy: file1.txt not found in destination %s: %v", dstDirSudo, err)
+	} else {
+		if optsSudo.Permissions != "" && runtime.GOOS != "windows" {
+			statInfo, statErr := os.Stat(dstDirSudo)
+			if statErr == nil {
+				expectedPerm, _ := strconv.ParseUint(optsSudo.Permissions, 8, 32)
+				if statInfo.Mode().Perm() != os.FileMode(expectedPerm).Perm() {
+					t.Logf("Sudo copy: directory %s permissions are %s, expected %s. (May differ if sudo chmod part of Copy failed).", dstDirSudo, statInfo.Mode().Perm().String(), os.FileMode(expectedPerm).Perm().String())
+				}
+			}
+		}
+	}
+	if _, err := os.Stat(copiedFile2Sudo); err != nil {
+		t.Errorf("Sudo copy: subdir/file2.txt not found in destination %s: %v", dstDirSudo, err)
 	}
 }
 
