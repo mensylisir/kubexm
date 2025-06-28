@@ -35,6 +35,7 @@ type BastionCfg struct {
 	PrivateKey     []byte        `json:"-" yaml:"-"`
 	PrivateKeyPath string        `json:"privateKeyPath,omitempty" yaml:"privateKeyPath,omitempty"`
 	Timeout        time.Duration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	HostKeyCallback ssh.HostKeyCallback `json:"-" yaml:"-"` // Callback for verifying bastion's server key
 }
 
 // ProxyCfg defines proxy configuration.
@@ -91,6 +92,7 @@ type Connector interface {
 type RemoveOptions struct {
 	Recursive      bool
 	IgnoreNotExist bool
+	Sudo           bool // Added to support sudo for remove operations
 }
 
 // Host represents a configured host in the cluster.
@@ -103,3 +105,7 @@ type Host interface {
 	GetHostSpec() v1alpha1.HostSpec
 	GetArch() string
 }
+
+// dialSSHFunc defines the signature for a function that can dial an SSH connection.
+// Used for allowing test overrides of the SSH dialing mechanism.
+type dialSSHFunc func(ctx context.Context, cfg ConnectionCfg, connectTimeout time.Duration) (*ssh.Client, *ssh.Client, error)
