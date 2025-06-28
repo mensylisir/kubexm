@@ -9,31 +9,29 @@ import (
 	"text/template"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
+	// "github.com/stretchr/testify/assert" // Removed
 )
 
 // Helper to quickly get a runner with a mock connector for template tests
-func newTestRunnerForTemplate(t *testing.T) (*Runner, *MockConnector) {
+func newTestRunnerForTemplate(t *testing.T) (Runner, *MockConnector) {
 	mockConn := NewMockConnector()
-	// Default GetOS for NewRunner
 	mockConn.GetOSFunc = func(ctx context.Context) (*connector.OS, error) {
 		return &connector.OS{ID: "linux-test", Arch: "amd64", Kernel: "test-kernel"}, nil
 	}
-	// Default Exec for NewRunner fact gathering
 	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
 		mockConn.LastExecCmd = cmd
 		mockConn.LastExecOptions = options
 		if strings.Contains(cmd, "hostname") { return []byte("test-host"), nil, nil }
 		if strings.Contains(cmd, "uname -r") { return []byte("test-kernel"), nil, nil }
 		if strings.Contains(cmd, "nproc") { return []byte("1"), nil, nil }
-		if strings.Contains(cmd, "grep MemTotal") { return []byte("1024"), nil, nil } // 1MB
+		if strings.Contains(cmd, "grep MemTotal") { return []byte("1024"), nil, nil }
 		if strings.Contains(cmd, "ip -4 route") { return []byte("1.1.1.1"), nil, nil }
 		if strings.Contains(cmd, "ip -6 route") { return nil, nil, fmt.Errorf("no ipv6") }
-		return []byte("default exec output"), nil, nil // Fallback for other commands
+		if strings.Contains(cmd, "command -v apt-get") { return []byte("/usr/bin/apt-get"), nil, nil }
+		if strings.Contains(cmd, "command -v systemctl") { return []byte("/usr/bin/systemctl"), nil, nil }
+		return []byte("default exec output"), nil, nil
 	}
-	r, err := NewRunner(context.Background(), mockConn)
-	if err != nil {
-		t.Fatalf("Failed to create runner for template tests: %v", err)
-	}
+	r := NewRunner()
 	return r, mockConn
 }
 
@@ -74,7 +72,7 @@ func TestRunner_Render_Success(t *testing.T) {
 		return nil
 	}
 
-	err = r.Render(context.Background(), tmpl, data, destPath, permissions, useSudo)
+	err = r.Render(context.Background(), mockConn, tmpl, data, destPath, permissions, useSudo)
 	if err != nil {
 		t.Fatalf("Render() error = %v", err)
 	}
@@ -94,7 +92,7 @@ func TestRunner_Render_Success(t *testing.T) {
 }
 
 func TestRunner_Render_TemplateExecuteError(t *testing.T) {
-	r, _ := newTestRunnerForTemplate(t) // mockConn not directly needed here as error is pre-CopyContent
+	r, mockConn := newTestRunnerForTemplate(t)
 
 	tmplString := "Hello {{.NonExistentField}}"
 	tmpl, err := template.New("errorTmpl").Parse(tmplString)
@@ -104,7 +102,7 @@ func TestRunner_Render_TemplateExecuteError(t *testing.T) {
 
 	data := struct{ Name string }{Name: "Test"}
 
-	err = r.Render(context.Background(), tmpl, data, "/test/anypath.txt", "0644", false)
+	err = r.Render(context.Background(), mockConn, tmpl, data, "/test/anypath.txt", "0644", false)
 	if err == nil {
 		t.Fatal("Render() with template execution error expected an error, got nil")
 	}
@@ -125,19 +123,19 @@ func TestRunner_Render_WriteFileError(t *testing.T) {
 		return expectedErr
 	}
 
-	err = r.Render(context.Background(), tmpl, data, "/test/remote.txt", "0600", false)
-	if !errors.Is(err, expectedErr) { // Check if the error is the one we returned or wraps it
+	err := r.Render(context.Background(), mockConn, tmpl, data, "/test/remote.txt", "0600", false)
+	if !errors.Is(err, expectedErr) {
 		t.Fatalf("Render() error = %v, want %v", err, expectedErr)
 	}
 }
 
 func TestRunner_Render_NilTemplate(t *testing.T) {
-	r, _ := newTestRunnerForTemplate(t)
-	err := r.Render(context.Background(), nil, nil, "path", "perms", false)
-	if err == nil {
+	r, mockConn := newTestRunnerForTemplate(t)
+	errRender := r.Render(context.Background(), mockConn, nil, nil, "path", "perms", false)
+	if errRender == nil {
 		t.Fatal("Render() with nil template expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "template cannot be nil") {
-		t.Errorf("Error message mismatch: got %v", err)
+	if !strings.Contains(errRender.Error(), "template cannot be nil") {
+		t.Errorf("Error message mismatch: got %v, want to contain 'template cannot be nil'", errRender)
 	}
 }

@@ -474,13 +474,15 @@ func TestSSHConnector_GetFileChecksum(t *testing.T) {
 		t.Fatalf("Failed to create remote dir %s: %v", remoteDir, err)
 	}
 
-	content := "hello checksum\n"
-	err = sc.CopyContent(ctx, []byte(content), remoteFile, nil)
-	if err != nil {
-		t.Fatalf("Failed to write remote file %s: %v", remoteFile, err)
+	// Use printf to ensure exact byte content for checksum verification
+	content := "hello checksum\\n" // Escaped for printf
+	createCmd := fmt.Sprintf("mkdir -p %s && printf %q > %s", remoteDir, content, remoteFile)
+	_, stderrCreate, errCreate := sc.Exec(ctx, createCmd, nil)
+	if errCreate != nil {
+		t.Fatalf("Failed to create test file with printf: %v, stderr: %s", errCreate, string(stderrCreate))
 	}
 
-	// SHA256 for "hello checksum\n" is 221d3102f8389090707396604071291abc8476544c756750466525f488779504
+	// SHA256 for "hello checksum\n" is 4d810e9e8017aaccc2573e3925be756cf8dae6edc80f5faaa6abc7e537c433a5
 	expectedSHA256 := "4d810e9e8017aaccc2573e3925be756cf8dae6edc80f5faaa6abc7e537c433a5"
 	sha256sum, err := sc.GetFileChecksum(ctx, remoteFile, "sha256")
 	if err != nil {
@@ -490,7 +492,7 @@ func TestSSHConnector_GetFileChecksum(t *testing.T) {
 		t.Errorf("GetFileChecksum sha256 got %s, want %s", sha256sum, expectedSHA256)
 	}
 
-	// MD5 for "hello checksum\n" is 1d5198c67408f73a7a09093be010393c
+	// MD5 for "hello checksum\n" is 80317437f4b5cabf233cb6f139d29c1b
 	expectedMD5 := "80317437f4b5cabf233cb6f139d29c1b"
 	md5sum, err := sc.GetFileChecksum(ctx, remoteFile, "md5")
 	if err != nil {

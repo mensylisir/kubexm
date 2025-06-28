@@ -20,6 +20,7 @@ func TestSetDefaults_Cluster_TypeMetaAndGlobal(t *testing.T) {
 	if cfg.Kind != "Cluster" {
 		t.Errorf("Default Kind not set correctly, got %s, want Cluster", cfg.Kind)
 	}
+	// ClusterSpec.Type was removed. Defaulting is now handled by KubernetesConfig.Type.
 	if cfg.Spec.Global == nil {
 		t.Fatal("Spec.Global should be initialized by SetDefaults_Cluster")
 	}
@@ -102,8 +103,10 @@ func TestSetDefaults_Cluster_ComponentStructsInitialization(t *testing.T) {
 	if cfg.Spec.Network == nil { t.Error("Spec.Network is nil after SetDefaults_Cluster") }
 	if cfg.Spec.HighAvailability == nil { t.Error("Spec.HighAvailability is nil after SetDefaults_Cluster") }
 	if cfg.Spec.Preflight == nil { t.Error("Spec.Preflight is nil after SetDefaults_Cluster") }
-	if cfg.Spec.System == nil { t.Error("Spec.System (which includes former Kernel) is nil after SetDefaults_Cluster") } // Changed Kernel to System
+	if cfg.Spec.System == nil { t.Error("Spec.System (which includes former Kernel) is nil after SetDefaults_Cluster") }
 	if cfg.Spec.Addons == nil { t.Error("Spec.Addons should be initialized to empty slice, not nil") }
+	// DNS is a non-pointer field in ClusterSpec, so it's part of the struct.
+	// SetDefaults_DNS(&cfg.Spec.DNS) is called in SetDefaults_Cluster.
 }
 
 // --- Test Validate_Cluster ---
@@ -119,6 +122,7 @@ func newValidV1alpha1ClusterForTest() *Cluster {
 			Network:    &NetworkConfig{KubePodsCIDR: "10.244.0.0/16"}, // PodSubnet equivalent moved here
 			Etcd:       &EtcdConfig{},    // Etcd section is required by Validate_Cluster
 			ControlPlaneEndpoint: &ControlPlaneEndpointSpec{Address: "1.2.3.4"}, // Ensure CPE is valid by default
+			// DNS is value type, will be zero-value initialized. SetDefaults_DNS will be called.
 			// Other components can be nil if their sections are optional and their Validate_* funcs handle nil
 		},
 	}
@@ -156,25 +160,26 @@ func TestValidate_Cluster_MissingRequiredFields(t *testing.T) {
 	}{
 		{"missing metadata.name", func(c *Cluster) { c.ObjectMeta.Name = "" }, "metadata.name: cannot be empty"},
 		{"missing hosts", func(c *Cluster) { c.Spec.Hosts = []HostSpec{} }, "spec.hosts: must contain at least one host"},
-		{"missing host.name", func(c *Cluster) { c.Spec.Hosts[0].Name = "" }, "spec.hosts[0].name: cannot be empty"}, // Path changes if name is empty
+		// ClusterSpec.Type related test removed.
+		{"missing host.name", func(c *Cluster) { c.Spec.Hosts[0].Name = "" }, "spec.hosts[0].name: cannot be empty"},
 		{"missing host.address", func(c *Cluster) { c.Spec.Hosts[0].Address = "" }, "spec.hosts[0:m1].address: cannot be empty"},
 		{"missing host.user (after global also empty)", func(c *Cluster) {
-			c.Spec.Global.User = ""
-			c.Spec.Hosts[0].User = "" // Will be defaulted from global, so this test needs to ensure global is also empty for it to fail here
-		}, "spec.hosts[0:m1].user: cannot be empty (after defaults)"}, // Adjusted path and added (after defaults)
-		{"missing k8s section", func(c *Cluster) { c.Spec.Kubernetes = nil }, "spec.kubernetes.version: cannot be empty"}, // SetDefaults re-initializes, so version will be empty
-		// Note: Validation for Kubernetes.Version being empty is now in Validate_KubernetesConfig
+			c.Spec.Global.User = "" // Ensure global user is empty
+			c.Spec.Hosts[0].User = "" // Host user relies on global default
+		}, "spec.hosts[0:m1].user: cannot be empty (after defaults)"},
+		{"missing k8s section", func(c *Cluster) { c.Spec.Kubernetes = nil }, "spec.kubernetes: section is required"},
+		// Note: If Kubernetes section is nil, Validate_Cluster adds "spec.kubernetes: section is required".
+		// If Kubernetes section is present but version is empty, Validate_KubernetesConfig handles that.
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := newValidV1alpha1ClusterForTest()
 			tt.mutator(cfg)
-			// SetDefaults is called inside newValidV1alpha1ClusterForTest and again here if needed,
-			// but for validation, we usually validate the state *after* defaults.
-			// The mutator might break something that defaults would fix, or break a requirement post-defaults.
-			SetDefaults_Cluster(cfg) // Re-apply defaults after mutation if the test logic assumes it
-
+			// SetDefaults_Cluster is called in newValidV1alpha1ClusterForTest.
+			// After mutation, we call Validate_Cluster directly.
+			// If a default would fix the mutation, the test might pass unexpectedly if SetDefaults_Cluster is called again.
+			// The goal here is to test if Validate_Cluster catches issues in a (potentially post-defaulted then mutated) state.
 			err := Validate_Cluster(cfg)
 			if err == nil {
 				t.Fatalf("Validate_Cluster() expected error for %s, got nil", tt.name)

@@ -92,7 +92,7 @@ func (r *defaultRunner) AddUser(ctx context.Context, conn connector.Connector, u
 	cmdParts = append(cmdParts, username)
 	cmd := strings.Join(cmdParts, " ")
 
-	_, _, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true})
+	_, _, err = r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true}) // Changed := to =
 	if err != nil {
 		// Stderr is included in the error by RunWithOptions if it's a CommandError
 		return fmt.Errorf("failed to add user %s: %w", username, err)
@@ -125,7 +125,7 @@ func (r *defaultRunner) AddGroup(ctx context.Context, conn connector.Connector, 
 	cmdParts = append(cmdParts, groupname)
 	cmd := strings.Join(cmdParts, " ")
 
-	_, _, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true})
+	_, _, err = r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true}) // Changed := to =
 	if err != nil {
 		return fmt.Errorf("failed to add group %s: %w", groupname, err)
 	}

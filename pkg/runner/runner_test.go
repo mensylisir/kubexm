@@ -100,6 +100,77 @@ func TestDefaultRunner_GatherFacts(t *testing.T) {
 		}
 	})
 
+	t.Run("success_centos_yum", func(t *testing.T) {
+		mockConn := NewMockConnector()
+		mockConn.GetOSFunc = func(ctx context.Context) (*connector.OS, error) {
+			return &connector.OS{ID: "centos", Arch: "amd64", Kernel: "3.10.0-generic"}, nil
+		}
+		mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
+			mockConn.LastExecCmd = cmd
+			if strings.Contains(cmd, "hostname -f") { return []byte("centos-host.local"), nil, nil }
+			if strings.Contains(cmd, "nproc") { return []byte("2"), nil, nil }
+			if strings.Contains(cmd, "grep MemTotal /proc/meminfo") { return []byte("4096000"), nil, nil } // 4GB in KB
+			if strings.Contains(cmd, "ip -4 route get 8.8.8.8") { return []byte("8.8.8.8 via 10.0.2.2 dev eth0 src 10.0.2.15"), nil, nil }
+			if strings.Contains(cmd, "ip -6 route get") { return nil, nil, fmt.Errorf("no ipv6") }
+			if strings.Contains(cmd, "command -v dnf") { return nil, nil, errors.New("dnf not found") } // Simulate dnf not found
+			if strings.Contains(cmd, "command -v yum") { return []byte("/usr/bin/yum"), nil, nil }      // Simulate yum found
+			if strings.Contains(cmd, "command -v systemctl") { return []byte("/usr/bin/systemctl"), nil, nil }
+			return nil, nil, fmt.Errorf("GatherFacts.success_centos_yum: unhandled mock command: %s", cmd)
+		}
+
+		r := NewRunner()
+		facts, err := r.GatherFacts(ctx, mockConn)
+		if err != nil {
+			t.Fatalf("GatherFacts() for centos/yum error = %v, wantErr nil", err)
+		}
+		if facts == nil {
+			t.Fatal("GatherFacts() for centos/yum returned nil facts, want non-nil")
+		}
+		if facts.Hostname != "centos-host.local" {
+			t.Errorf("Facts.Hostname = %s, want centos-host.local", facts.Hostname)
+		}
+		if facts.PackageManager == nil || facts.PackageManager.Type != PackageManagerYum {
+			t.Errorf("Facts.PackageManager.Type = %v, want %v", facts.PackageManager.Type, PackageManagerYum)
+		}
+		if facts.InitSystem == nil || facts.InitSystem.Type != InitSystemSystemd {
+			t.Errorf("Facts.InitSystem.Type = %v, want %v", facts.InitSystem.Type, InitSystemSystemd)
+		}
+		if facts.IPv4Default != "10.0.2.15" {
+			t.Errorf("Facts.IPv4Default = %s, want 10.0.2.15", facts.IPv4Default)
+		}
+	})
+
+	t.Run("success_hostname_fallback", func(t *testing.T) {
+		mockConn := NewMockConnector()
+		mockConn.GetOSFunc = func(ctx context.Context) (*connector.OS, error) {
+			return &connector.OS{ID: "linux", Arch: "amd64", Kernel: "5.4.0-generic"}, nil
+		}
+		mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
+			if strings.Contains(cmd, "hostname -f") {
+				return nil, nil, errors.New("hostname -f failed") // Simulate hostname -f failure
+			}
+			if strings.Contains(cmd, "hostname") && !strings.Contains(cmd, "hostname -f") { // Fallback
+				return []byte("fallback-host"), nil, nil
+			}
+			// Provide minimal successful responses for other commands
+			if strings.Contains(cmd, "nproc") { return []byte("1"), nil, nil }
+			if strings.Contains(cmd, "grep MemTotal") { return []byte("1024000"), nil, nil }
+			if strings.Contains(cmd, "ip -4 route") { return []byte("default via 192.168.1.1 dev eth0 src 192.168.1.101 "), nil, nil }
+			if strings.Contains(cmd, "ip -6 route") { return nil, nil, fmt.Errorf("no ipv6") }
+			if strings.Contains(cmd, "command -v") { return []byte("/usr/bin/somecmd"), nil, nil }
+			return nil, nil, fmt.Errorf("GatherFacts.success_hostname_fallback: unhandled mock command: %s", cmd)
+		}
+
+		r := NewRunner()
+		facts, err := r.GatherFacts(ctx, mockConn)
+		if err != nil {
+			t.Fatalf("GatherFacts() with hostname fallback error = %v", err)
+		}
+		if facts.Hostname != "fallback-host" {
+			t.Errorf("Facts.Hostname = %s, want fallback-host", facts.Hostname)
+		}
+	})
+
 	t.Run("get_os_fails", func(t *testing.T) {
 		mockConn := NewMockConnector()
 		expectedErr := errors.New("mock GetOS failed")
