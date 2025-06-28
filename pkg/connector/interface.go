@@ -108,4 +108,4 @@ type Host interface {
 
 // dialSSHFunc defines the signature for a function that can dial an SSH connection.
 // Used for allowing test overrides of the SSH dialing mechanism.
-type dialSSHFunc func(ctx context.Context, cfg ConnectionCfg) (*ssh.Client, *ssh.Client, error)
+type dialSSHFunc func(ctx context.Context, cfg ConnectionCfg, connectTimeout time.Duration) (*ssh.Client, *ssh.Client, error)

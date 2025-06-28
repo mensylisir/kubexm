@@ -3,6 +3,7 @@ package connector
 import (
 	"bytes"
 	"context"
+	"errors" // Added for errors.Is
 	"fmt"
 	"io"
 	"net"
@@ -42,27 +43,30 @@ func (s *SSHConnector) Connect(ctx context.Context, cfg ConnectionCfg) error {
 
 	// Attempt to get a connection from the pool first (if applicable)
 	if s.pool != nil && cfg.BastionCfg == nil {
-		pooledClient, err := s.pool.Get(ctx, cfg)
-		if err == nil && pooledClient != nil {
-			s.client = pooledClient
+		// pool.Get now returns (client, bastionClient, error) and handles health check internally.
+		targetClient, bClient, err := s.pool.Get(ctx, cfg)
+		if err == nil && targetClient != nil {
+			s.client = targetClient
+			s.bastionClient = bClient // Store bastion client if provided by pool (should be nil for non-bastion cfg)
 			s.isFromPool = true
-			// Perform a lightweight health check on the pooled connection
-			if _, _, err := s.client.SendRequest("keepalive@openssh.com", true, nil); err != nil {
-				fmt.Fprintf(os.Stderr, "SSHConnector: Pooled connection for %s failed health check, closing and falling back to direct dial: %v\n", cfg.Host, err)
-				s.pool.CloseConnection(s.connCfg, s.client) // Invalidate the bad connection
-				s.client = nil
-				s.isFromPool = false
-			} else {
-				s.isConnected = true
-				return nil // Pooled connection is healthy
-			}
-		} else if err != nil {
-			fmt.Fprintf(os.Stderr, "SSHConnector: Failed to get connection from pool for %s: %v. Falling back to direct dial.\n", cfg.Host, err)
+			s.isConnected = true
+			// fmt.Fprintf(os.Stderr, "SSHConnector: Using pooled connection for %s\n", cfg.Host)
+			return nil // Pooled connection is ready
 		}
+		if err != nil && !errors.Is(err, ErrPoolExhausted) { // Log if error is not just exhaustion
+			fmt.Fprintf(os.Stderr, "SSHConnector: Failed to get connection from pool for %s (will attempt direct dial): %v\n", cfg.Host, err)
+		}
+		// If ErrPoolExhausted or other Get error, fall through to direct dial.
 	}
 
-	// Fallback to direct dial if not using pool or if pooled connection failed
-	client, bastionClient, err := dialSSH(ctx, cfg)
+	// Fallback to direct dial if not using pool, pool Get failed, or pool exhausted.
+	// The connectTimeout parameter for dialSSH is passed from SSHConnector.Connect's caller via cfg or default.
+	// For direct dial, cfg.Timeout is the primary source, or dialSSH internal default.
+	// The pool's cp.config.ConnectTimeout is used by pool.Get when it calls dialSSH.
+	// Here, we use cfg.Timeout which might be different.
+	// For consistency, dialSSH should prioritize its direct connectTimeout param.
+	// The current dialSSH in ssh.go takes connectTimeout.
+	client, bastionClient, err := dialSSH(ctx, cfg, cfg.Timeout) // Pass cfg.Timeout for direct dials
 	if err != nil {
 		return err
 	}
@@ -103,27 +107,37 @@ func (s *SSHConnector) Close() error {
 
 	if s.client != nil {
 		if s.isFromPool && s.pool != nil {
-			// Check health before returning to pool
+			isHealthy := false
 			if _, _, err := s.client.SendRequest("keepalive@openssh.com", true, nil); err == nil {
-				s.pool.Put(s.connCfg, s.client, true)
-			} else {
-				s.pool.CloseConnection(s.connCfg, s.client) // Don't return unhealthy connection
+				isHealthy = true
 			}
+			// pool.Put now takes bastionClient as well.
+			// s.bastionClient will be nil if this pooled connection was direct (not via bastion).
+			s.pool.Put(s.connCfg, s.client, s.bastionClient, isHealthy)
 		} else {
+			// Not from pool, or pool is nil: close client and bastion directly.
 			if err := s.client.Close(); err != nil && firstErr == nil {
 				firstErr = err
 			}
+			// Bastion client should only be closed here if it's NOT part of a pooled ManagedConnection
+			// that's being Put back. If isFromPool is false, this SSHConnector instance owns the bastionClient.
+			if s.bastionClient != nil {
+				if err := s.bastionClient.Close(); err != nil && firstErr == nil {
+					firstErr = err
+				}
+			}
 		}
 		s.client = nil
+		s.bastionClient = nil // Clear bastion client whether from pool or direct, as it's now closed or returned.
 	}
 	s.isFromPool = false
-
-	if s.bastionClient != nil {
-		if err := s.bastionClient.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-		s.bastionClient = nil
-	}
+	// s.bastionClient was handled above if not from pool. If from pool, Put handles it.
+	// If s.client was nil, s.bastionClient might still be non-nil if direct dial failed partially,
+	// but standard path is both are set or both are nil post-Connect.
+	// If s.client is nil but s.bastionClient is not (e.g. direct dial failed after bastion connected),
+	// and it's not from pool, that bastionClient still needs closing if Close is called.
+	// This is covered by the s.bastionClient != nil check inside the `else` for non-pooled connections.
+	// If s.client was nil already, the outer `if s.client != nil` handles it.
 	return firstErr
 }
 
@@ -686,23 +700,26 @@ func parseKeyValues(content, delimiter, quoteChar string) map[string]string {
 
 // dialSSH handles the logic for creating an SSH client, including via a bastion.
 // REFACTOR: Broken down from a monolithic function for clarity and maintainability.
-func dialSSH(ctx context.Context, cfg ConnectionCfg) (*ssh.Client, *ssh.Client, error) {
+func dialSSH(ctx context.Context, cfg ConnectionCfg, connectTimeout time.Duration) (*ssh.Client, *ssh.Client, error) {
 	targetAuthMethods, err := buildAuthMethods(cfg)
 	if err != nil {
 		return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("target auth error: %w", err)}
 	}
 
-	// Default timeout for SSH connection attempts if not specified in config.
-	connectTimeout := cfg.Timeout
-	if connectTimeout == 0 {
-		connectTimeout = 30 * time.Second // Default to 30 seconds
+	// Use the provided connectTimeout, or cfg.Timeout if connectTimeout is zero, or default.
+	effectiveTimeout := connectTimeout
+	if effectiveTimeout == 0 {
+		effectiveTimeout = cfg.Timeout
+	}
+	if effectiveTimeout == 0 {
+		effectiveTimeout = 30 * time.Second // Default to 30 seconds
 	}
 
 	targetSSHConfig := &ssh.ClientConfig{
 		User:            cfg.User,
 		Auth:            targetAuthMethods,
 		HostKeyCallback: cfg.HostKeyCallback, // User-provided HostKeyCallback for target
-		Timeout:         connectTimeout,
+		Timeout:         effectiveTimeout,
 	}
 
 	// SECURITY: If no HostKeyCallback is provided for the target, default to a warning and InsecureIgnoreHostKey.
@@ -728,8 +745,8 @@ func dialSSH(ctx context.Context, cfg ConnectionCfg) (*ssh.Client, *ssh.Client, 
 			// Note: ProxyCfg for bastion is not explicitly handled here,
 			// assuming bastion connections are direct or handled by system/SSH config.
 		}
-		// Pass the context to dialViaBastion for timeout propagation
-		return dialViaBastion(ctx, targetDialAddr, targetSSHConfig, bastionFullCfg)
+		// Pass the context and effectiveTimeout (for the bastion connection itself) to dialViaBastion
+		return dialViaBastion(ctx, targetDialAddr, targetSSHConfig, bastionFullCfg, effectiveTimeout)
 	}
 
 	// Direct connection to target
@@ -741,22 +758,26 @@ func dialSSH(ctx context.Context, cfg ConnectionCfg) (*ssh.Client, *ssh.Client, 
 }
 
 // dialViaBastion handles dialing the target through a bastion host.
-func dialViaBastion(ctx context.Context, targetDialAddr string, targetSSHConfig *ssh.ClientConfig, bastionOverallCfg ConnectionCfg) (*ssh.Client, *ssh.Client, error) {
+func dialViaBastion(ctx context.Context, targetDialAddr string, targetSSHConfig *ssh.ClientConfig, bastionOverallCfg ConnectionCfg, bastionConnectTimeoutParam time.Duration) (*ssh.Client, *ssh.Client, error) {
 	bastionAuthMethods, err := buildAuthMethods(bastionOverallCfg)
 	if err != nil {
 		return nil, nil, &ConnectionError{Host: bastionOverallCfg.Host, Err: fmt.Errorf("bastion auth error: %w", err)}
 	}
 
-	bastionConnectTimeout := bastionOverallCfg.Timeout
-	if bastionConnectTimeout == 0 {
-		bastionConnectTimeout = 30 * time.Second // Default for bastion as well
+	// Use the provided bastionConnectTimeoutParam, or bastionOverallCfg.Timeout if param is zero, or default.
+	effectiveBastionTimeout := bastionConnectTimeoutParam
+	if effectiveBastionTimeout == 0 {
+		effectiveBastionTimeout = bastionOverallCfg.Timeout
+	}
+	if effectiveBastionTimeout == 0 {
+		effectiveBastionTimeout = 30 * time.Second // Default for bastion as well
 	}
 
 	bastionSSHConfig := &ssh.ClientConfig{
 		User:            bastionOverallCfg.User,
 		Auth:            bastionAuthMethods,
 		HostKeyCallback: bastionOverallCfg.HostKeyCallback, // User-provided HostKeyCallback for bastion
-		Timeout:         bastionConnectTimeout,
+		Timeout:         effectiveBastionTimeout,
 	}
 
 	// SECURITY: If no HostKeyCallback is provided for the bastion, default to a warning and InsecureIgnoreHostKey.
