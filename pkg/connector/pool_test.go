@@ -15,7 +15,94 @@ import (
 	"unsafe" // For casting mock client, with caveats
 
 	"golang.org/x/crypto/ssh"
+	sshtest "golang.org/x/crypto/ssh/test" // Added for mock server with alias
 )
+
+// sshClient defines the methods we need from an *ssh.Client for our tests.
+type sshClient interface {
+	Close() error
+	NewSession() (*ssh.Session, error) // Changed to *ssh.Session
+	SendRequest(name string, wantReply bool, payload []byte) (bool, []byte, error)
+}
+
+// sshSession defines the methods we need from an *ssh.Session.
+// This interface is still useful if we wanted to mock ssh.Session separately,
+// but for the sshClient interface, we'll directly use *ssh.Session.
+type sshSession interface {
+	Close() error
+	// If needed for testing Exec, Start/Wait etc. can be added here
+}
+
+// Ensure *ssh.Client implements our sshClient interface
+var _ sshClient = (*ssh.Client)(nil)
+// Ensure *ssh.Session implements our sshSession interface (still good for completeness)
+var _ sshSession = (*ssh.Session)(nil)
+
+// newMockDialerWithTestServer creates a dialer that returns real clients connected to an in-memory SSH server.
+// This is the most reliable way to mock for pool tests.
+func newMockDialerWithTestServer(t *testing.T) (dialSSHFunc, func()) {
+	// Create a reusable mock server
+	// serverConf := &test.ServerConfig{
+	// 	PasswordCallback: func(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
+	// 		if conn.User() == "mockuser" && string(password) == "mockpassword" {
+	// 			return nil, nil
+	// 		}
+	// 		return nil, fmt.Errorf("password rejected for %q", conn.User())
+	// 	},
+	// }
+	// Using nil for ServerConfig means it will accept any user/password or public key.
+	server, err := sshtest.NewServer(nil) // Use aliased import
+	if err != nil {
+		t.Fatalf("Failed to start mock SSH server: %v", err)
+	}
+
+	dialerFunc := func(ctx context.Context, cfg ConnectionCfg, connectTimeout time.Duration) (*ssh.Client, *ssh.Client, error) {
+		incrementActualDialCount() // Track dial attempts
+
+		// Dial the in-memory mock server
+		conn, err := server.Dial()
+		if err != nil {
+			return nil, nil, fmt.Errorf("mock server dial failed: %w", err)
+		}
+
+		// Use this connection to create a real ssh.Client
+		// The mock server started with test.NewServer(nil) accepts any user and password.
+		// If a specific user/pass is needed for the test server, it should be configured in ServerConfig.
+		authMethods := []ssh.AuthMethod{}
+		if cfg.Password != "" {
+			authMethods = append(authMethods, ssh.Password(cfg.Password))
+		}
+		// Add other auth methods like public key if needed for specific mock server setups.
+		// For a generic mock server (test.NewServer(nil)), often an empty password or any password works.
+		// Let's use a placeholder password if none is provided in cfg, assuming the mock server is permissive.
+		if len(authMethods) == 0 {
+			authMethods = append(authMethods, ssh.Password("placeholderpassword"))
+		}
+
+
+		sshConfig := &ssh.ClientConfig{
+			User:            cfg.User,
+			Auth:            authMethods,
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(), // For test server, ignore host key
+			Timeout:         connectTimeout,              // Use provided timeout
+		}
+
+		c, chans, reqs, err := ssh.NewClientConn(conn, server.Listener.Addr().String(), sshConfig)
+		if err != nil {
+			conn.Close()
+			return nil, nil, fmt.Errorf("ssh.NewClientConn failed: %w", err)
+		}
+		client := ssh.NewClient(c, chans, reqs)
+		return client, nil, nil // Return a real, usable client, no bastion for this mock
+	}
+
+	// Return the dialer function and a cleanup function to close the server
+	cleanupFunc := func() {
+		server.Close()
+	}
+
+	return dialerFunc, cleanupFunc
+}
 
 // --- Mocking Infrastructure ---
 
@@ -157,30 +244,50 @@ func getRealSSHConfig(t *testing.T) (ConnectionCfg, bool) {
 		}
 		testUser = u.Username
 	}
+
+	testHost := os.Getenv("SSH_TEST_HOST")
+	if testHost == "" {
+		testHost = "localhost" // Default to localhost if not set
+	}
+
 	privKeyPath := os.Getenv("SSH_TEST_PRIV_KEY_PATH")
 	password := os.Getenv("SSH_TEST_PASSWORD")
+
+	// Only try default key if both password and specific key path are missing
 	if privKeyPath == "" && password == "" {
 		homeDir, err := os.UserHomeDir()
 		if err == nil {
 			defaultKey := filepath.Join(homeDir, ".ssh", "id_rsa")
 			if _, errStat := os.Stat(defaultKey); errStat == nil {
 				privKeyPath = defaultKey
+				t.Logf("Using default SSH key: %s", privKeyPath)
 			}
 		}
 	}
+
+	// If still no auth method after checking defaults
 	if privKeyPath == "" && password == "" {
-		t.Logf("Cannot run real SSH test: no SSH_TEST_PRIV_KEY_PATH or SSH_TEST_PASSWORD, and default key not found.")
+		t.Logf("Cannot run real SSH test for host %s: no SSH_TEST_PRIV_KEY_PATH or SSH_TEST_PASSWORD provided, and default key not found or not usable.", testHost)
 		return ConnectionCfg{}, false
 	}
 
-	port := 22
+	port := 22 // Default SSH port
 	if pStr := os.Getenv("SSH_TEST_PORT"); pStr != "" {
-		p, _ := strconv.Atoi(pStr)
-		if p > 0 { port = p }
+		p, err := strconv.Atoi(pStr)
+		if err == nil && p > 0 {
+			port = p
+		} else if err != nil {
+			t.Logf("Warning: Invalid SSH_TEST_PORT value '%s', using default port 22. Error: %v", pStr, err)
+		}
 	}
 
+	// Log the config being used for easier debugging
+	t.Logf("Real SSH Config for pool test: Host=%s, Port=%d, User=%s, PasswordSet=%t, PrivateKeyPath=%s",
+		testHost, port, testUser, password != "", privKeyPath)
+
+
 	return ConnectionCfg{
-		Host:           "localhost",
+		Host:           testHost, // Use the resolved testHost
 		Port:           port,
 		User:           testUser,
 		Password:       password,
@@ -222,6 +329,75 @@ func TestConnectionPool_NewPoolDefaults(t *testing.T) {
     // Check that non-set fields still get defaults
     if pool.config.MaxIdlePerKey != defaults.MaxIdlePerKey {
 		t.Errorf("Expected MaxIdlePerKey %d for custom config, got %d", defaults.MaxIdlePerKey, pool.config.MaxIdlePerKey)
+	}
+}
+
+func TestConnectionPool_GetPut_BasicReuse_Mocked(t *testing.T) {
+	resetActualDialCount()
+	// Use our new, safe mock dialer
+	mockDialer, cleanupDialer := newMockDialerWithTestServer(t)
+	defer cleanupDialer() // Ensure the test server is closed
+
+	// Override the global dialer function
+	restoreOriginalDialer := SetTestDialerOverride(mockDialer)
+	defer restoreOriginalDialer()
+
+	pool := NewConnectionPool(DefaultPoolConfig())
+	// Config content is mainly for pool key generation in this mocked scenario
+	cfg := ConnectionCfg{Host: "mockhost", User: "mockuser", Password: "mockpassword"}
+
+	// 1. Get a connection - should "dial" our mock server
+	client1, _, err := pool.Get(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if client1 == nil {
+		t.Fatal("Get returned nil client")
+	}
+	if getActualDialCount() != 1 {
+		t.Errorf("Expected 1 dial, got %d", getActualDialCount())
+	}
+
+	// This client1 is a fully functional *ssh.Client, capable of passing health checks
+	isHealthy := false
+	if _, _, err := client1.SendRequest("keepalive@openssh.com", true, nil); err == nil {
+		isHealthy = true
+	}
+	if !isHealthy {
+		// It's possible the mock server doesn't handle keepalive@openssh.com by default.
+		// A more robust health check might be to try opening a session.
+		session, sessionErr := client1.NewSession()
+		if sessionErr == nil {
+			isHealthy = true
+			session.Close()
+		} else {
+			t.Logf("SendRequest for health check failed as expected for basic mock server, trying NewSession: %v", err)
+			t.Fatalf("Mocked client NewSession() failed, it should be healthy: %v", sessionErr)
+		}
+	}
+    if !isHealthy {
+        t.Fatal("Mocked client should be healthy (passed SendRequest or NewSession)")
+    }
+
+
+	// 2. Put the connection back into the pool
+	pool.Put(cfg, client1, nil, true)
+
+	// 3. Get again - should reuse from the pool, no new dial
+	client2, _, err := pool.Get(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Second Get failed: %v", err)
+	}
+	if client2 == nil {
+		t.Fatal("Second Get returned nil client")
+	}
+	if getActualDialCount() != 1 { // Dial count should still be 1
+		t.Errorf("Expected 1 dial for reuse, got %d", getActualDialCount())
+	}
+
+	// 4. Verify this is the same client instance
+	if client1 != client2 {
+		t.Errorf("Expected to get the same client instance back (%p), but got a different one (%p).", client1, client2)
 	}
 }
 
