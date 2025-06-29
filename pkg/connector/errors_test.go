@@ -21,7 +21,7 @@ func TestCommandError(t *testing.T) {
 		Underlying: underlyingErr,
 	}
 
-	expectedMsg := "command 'ls -l' failed with exit code 1: permission denied (underlying error: underlying issue)"
+	expectedMsg := "command 'ls -l' failed with exit code 1, stderr: permission denied, underlying error: underlying issue"
 	if cmdErr.Error() != expectedMsg {
 		t.Errorf("CommandError.Error() got %q, want %q", cmdErr.Error(), expectedMsg)
 	}
@@ -35,7 +35,7 @@ func TestCommandError(t *testing.T) {
 		Cmd:      "echo hello",
 		ExitCode: 0,
 	}
-	expectedMsgNoDetails := "command 'echo hello' failed with exit code 0"
+	expectedMsgNoDetails := "command 'echo hello' failed with exit code 0 (no stderr)"
 	if cmdErrNoDetails.Error() != expectedMsgNoDetails {
 		t.Errorf("CommandError.Error() without details got %q, want %q", cmdErrNoDetails.Error(), expectedMsgNoDetails)
 	}
@@ -49,7 +49,7 @@ func TestCommandError(t *testing.T) {
 		ExitCode:   2,
 		Underlying: underlyingErr,
 	}
-	expectedMsgNoStderr := "command 'cat file' failed with exit code 2 (underlying error: underlying issue)"
+	expectedMsgNoStderr := "command 'cat file' failed with exit code 2 (no stderr), underlying error: underlying issue"
 	if cmdErrNoStderr.Error() != expectedMsgNoStderr {
 		t.Errorf("CommandError.Error() with underlying but no stderr got %q, want %q", cmdErrNoStderr.Error(), expectedMsgNoStderr)
 	}
@@ -60,7 +60,7 @@ func TestCommandError(t *testing.T) {
 		ExitCode: 1,
 		Stderr:   "No such file or directory",
 	}
-	expectedMsgNoUnderlying := "command 'rm /nonexistent' failed with exit code 1: No such file or directory"
+	expectedMsgNoUnderlying := "command 'rm /nonexistent' failed with exit code 1, stderr: No such file or directory"
 	if cmdErrNoUnderlying.Error() != expectedMsgNoUnderlying {
 		t.Errorf("CommandError.Error() with stderr but no underlying got %q, want %q", cmdErrNoUnderlying.Error(), expectedMsgNoUnderlying)
 	}

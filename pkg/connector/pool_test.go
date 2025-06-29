@@ -12,165 +12,11 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh" // Keep this if any test-specific SSH logic remains, otherwise remove.
+	// If generatePoolKey uses ssh.HostKeyCallback, it might be needed.
+	// The ConnectionCfg in tests might use ssh.HostKeyCallback.
 )
-
-// --- Mocking Infrastructure (Verified & Correct) ---
-
-var (
-	actualDialCount      int
-	actualDialCountMutex sync.Mutex
-)
-
-// SetTestDialerOverride allows overriding the package-level currentDialer function for testing.
-// Returns a cleanup function to restore the original.
-func SetTestDialerOverride(overrideFn dialSSHFunc) func() {
-	original := currentDialer
-	currentDialer = overrideFn
-	return func() {
-		currentDialer = original
-	}
-}
-
-func resetActualDialCount() {
-	actualDialCountMutex.Lock()
-	defer actualDialCountMutex.Unlock()
-	actualDialCount = 0
-}
-
-func incrementActualDialCount() {
-	actualDialCountMutex.Lock()
-	defer actualDialCountMutex.Unlock()
-	actualDialCount++
-}
-
-func getActualDialCount() int {
-	actualDialCountMutex.Lock()
-	defer actualDialCountMutex.Unlock()
-	return actualDialCount
-}
-
-// createMockSSHServer sets up an in-memory SSH server for testing.
-// It returns the server's address and a cleanup function to close the listener.
-func createMockSSHServer(t *testing.T) (string, func()) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to listen on a port: %v", err)
-	}
-
-	privateKey, err := generateTestKey()
-	if err != nil {
-		t.Fatalf("Failed to generate server key: %v", err)
-	}
-
-	config := &ssh.ServerConfig{
-		NoClientAuth: true,
-	}
-	config.AddHostKey(privateKey)
-
-	go func() {
-		conn, err := listener.Accept()
-		if err != nil {
-			return // Listener closed
-		}
-
-		defer conn.Close() // Ensure the underlying network connection is closed
-
-		sconn, chans, reqs, err := ssh.NewServerConn(conn, config)
-		if err != nil {
-			// conn.Close() is already deferred
-			return // Handshake failed
-		}
-		// sconn is the server-side SSH connection object.
-		// We need to service its requests and channels.
-		// No _ = sconn needed because sconn.Wait() uses it.
-
-		// Goroutine to handle global requests like keepalives
-		go ssh.DiscardRequests(reqs)
-
-		// Goroutine to handle incoming channels (e.g., for sessions)
-		// This needs to run concurrently with sconn.Wait()
-		// and should also terminate when sconn is closing.
-		var wg sync.WaitGroup // Use a WaitGroup for channel handling goroutine
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for newChannel := range chans { // This loop exits when chans is closed
-				if newChannel.ChannelType() == "session" {
-					channel, channelRequests, err := newChannel.Accept()
-					if err != nil {
-						// t.Logf("mock server: could not accept channel type %s: %v", newChannel.ChannelType(), err)
-						continue
-					}
-					// Minimal handling for session channel: discard requests to allow client.NewSession()
-					go ssh.DiscardRequests(channelRequests)
-					// Client is expected to close the session channel. We don't need to manage 'channel' further here.
-					_ = channel // Mark as used
-				} else {
-					if err := newChannel.Reject(ssh.UnknownChannelType, "unknown channel type"); err != nil {
-						// t.Logf("mock server: failed to reject channel type %s: %v", newChannel.ChannelType(), err)
-					}
-				}
-			}
-			// t.Logf("mock server: channel handling loop exited for %s", listener.Addr().String())
-		}()
-
-		// Wait for the SSH connection to terminate. This blocks until the client disconnects
-		// or an error occurs in the SSH layer.
-		// t.Logf("mock server: %s waiting for sconn.Wait()", listener.Addr().String())
-		sconn.Wait()
-		// t.Logf("mock server: %s sconn.Wait() finished", listener.Addr().String())
-
-		// After sconn.Wait() returns, chans will be closed, and the channel handling goroutine should exit.
-		wg.Wait() // Wait for channel handling goroutine to complete.
-		// t.Logf("mock server: %s all server goroutines finished", listener.Addr().String())
-	}()
-
-	cleanup := func() {
-		// t.Logf("createMockSSHServer: cleanup called for listener %s", listener.Addr().String())
-		listener.Close()
-	}
-
-	return listener.Addr().String(), cleanup
-}
-
-// generateTestKey is a helper to create an RSA private key for the mock server.
-func generateTestKey() (ssh.Signer, error) {
-	privateRSAKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate RSA private key: %w", err)
-	}
-	signer, err := ssh.NewSignerFromKey(privateRSAKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create signer from RSA private key: %w", err)
-	}
-	return signer, nil
-}
-
-// newMockDialer creates a dialer that connects to our in-memory SSH server.
-func newMockDialer(serverAddr string) dialSSHFunc {
-	return func(ctx context.Context, cfg ConnectionCfg, connectTimeout time.Duration) (*ssh.Client, *ssh.Client, error) {
-		incrementActualDialCount()
-		dialer := net.Dialer{Timeout: connectTimeout}
-		conn, err := dialer.DialContext(ctx, "tcp", serverAddr)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		sshConfig := &ssh.ClientConfig{
-			User:            cfg.User,
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-			Timeout:         connectTimeout,
-		}
-
-		c, chans, reqs, err := ssh.NewClientConn(conn, serverAddr, sshConfig)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		client := ssh.NewClient(c, chans, reqs)
-		return client, nil, nil // No bastion client in this mock setup
-	}
-}
 
 // --- Test Cases ---
 // TestConnectionPool_GetPut_BasicReuse_Mocked and other _Mocked tests from the fixed version.
@@ -341,7 +187,6 @@ func TestConnectionPool_NewPoolDefaults(t *testing.T) {
 }
 
 func TestConnectionPool_IdleTimeout_Mocked(t *testing.T) {
-	t.Skip("Skipping due to persistent timeout issue, to be investigated separately.")
 	resetActualDialCount()
 	serverAddr, serverCleanup := createMockSSHServer(t)
 	defer serverCleanup()
@@ -358,56 +203,78 @@ func TestConnectionPool_IdleTimeout_Mocked(t *testing.T) {
 
 	cfg := ConnectionCfg{Host: "mockhost", User: "mockuser", Port: 22}
 
-	client1, _, err := pool.Get(context.Background(), cfg)
+	mc1, err := pool.Get(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("Get for IdleTimeout test failed: %v", err)
 	}
-	if client1 == nil {
-		t.Fatal("client1 is nil")
+	if mc1 == nil || mc1.Client() == nil {
+		t.Fatal("mc1 or its client is nil")
 	}
-	pool.Put(cfg, client1, nil, true)
+	client1 := mc1.Client() // Keep a reference to the underlying client for checks
+	pool.Put(mc1, true) // Pass ManagedConnection
 	if getActualDialCount() != 1 {
 		t.Fatalf("Expected 1 dial for initial Get, got %d", getActualDialCount())
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	// Wait longer than IdleTimeout but less than typical network timeouts
+	// Increased from 100ms to 150ms to give more buffer if the mock server or scheduler is slow.
+	// The IdleTimeout is 50ms.
+	time.Sleep(poolCfg.IdleTimeout + 100*time.Millisecond)
 
-	client2, _, err := pool.Get(context.Background(), cfg)
+
+	mc2, err := pool.Get(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("Get after IdleTimeout failed: %v", err)
 	}
-	if client2 == nil {
-		t.Fatal("client2 is nil after idle timeout")
+	if mc2 == nil || mc2.Client() == nil {
+		t.Fatal("mc2 or its client is nil after idle timeout")
 	}
 	if getActualDialCount() != 2 {
 		t.Errorf("Expected 2 dials (one stale, one new), got %d", getActualDialCount())
 	}
+	if mc1.Client() == mc2.Client() {
+		t.Errorf("Expected a new client after idle timeout, but got the same client instance.")
+	}
 
+
+	// Check if the original client (client1) is actually closed.
+	// SendRequest is a good way to check this.
 	_, _, err = client1.SendRequest("keepalive@openssh.com", true, nil)
 	expectedClosedErr := false
 	if err != nil {
-		if strings.Contains(err.Error(), "EOF") || strings.Contains(err.Error(), "closed") {
+		// Check for common error messages indicating a closed connection
+		if strings.Contains(strings.ToLower(err.Error()), "eof") ||
+			strings.Contains(strings.ToLower(err.Error()), "closed") ||
+			strings.Contains(strings.ToLower(err.Error()), "broken pipe") {
 			expectedClosedErr = true
 		}
-	}
-	if !expectedClosedErr {
-		s, sessionErr := client1.NewSession()
-		if sessionErr == nil {
-			s.Close()
-			t.Errorf("Expected client1 to be closed due to idle timeout, but NewSession succeeded.")
-		} else if strings.Contains(sessionErr.Error(), "EOF") || strings.Contains(sessionErr.Error(), "closed") {
-			expectedClosedErr = true
-		}
-	}
-	if !expectedClosedErr {
-		t.Errorf("Expected client1 to be closed (SendRequest or NewSession should fail with EOF/closed), last error: %v", err)
 	}
 
-	pool.Put(cfg, client2, nil, true)
+	if !expectedClosedErr {
+		// If SendRequest didn't error as expected, try NewSession as a secondary check.
+		// This is less direct for checking "closed" but can sometimes reveal issues.
+		session, sessionErr := client1.NewSession()
+		if sessionErr != nil {
+			if strings.Contains(strings.ToLower(sessionErr.Error()), "eof") ||
+				strings.Contains(strings.ToLower(sessionErr.Error()), "closed") ||
+				strings.Contains(strings.ToLower(sessionErr.Error()), "broken pipe") {
+				expectedClosedErr = true
+			}
+		} else {
+			// If NewSession succeeded, the client is definitely not closed.
+			session.Close() // Clean up the session
+			t.Errorf("Expected client1 to be closed due to idle timeout, but SendRequest did not fail as expected (last err: %v) and NewSession succeeded.", err)
+		}
+	}
+
+	if !expectedClosedErr {
+		t.Errorf("Expected client1 to be closed (SendRequest or NewSession should fail with EOF/closed/broken pipe), last error from SendRequest: %v", err)
+	}
+
+	pool.Put(mc2, true) // Pass ManagedConnection
 }
 
 func TestConnectionPool_Shutdown_Mocked(t *testing.T) {
-	t.Skip("Skipping due to persistent timeout issue, to be investigated separately.")
 	resetActualDialCount()
 	serverAddr, serverCleanup := createMockSSHServer(t)
 	defer serverCleanup()
@@ -420,54 +287,67 @@ func TestConnectionPool_Shutdown_Mocked(t *testing.T) {
 
 	cfgA := ConnectionCfg{Host: "mockhostA", User: "mockuserA", Port: 22}
 
-	client1, _, err := pool.Get(context.Background(), cfgA)
+	mc1, err := pool.Get(context.Background(), cfgA)
 	if err != nil {
-		t.Fatalf("Setup Get for client1 failed: %v", err)
+		t.Fatalf("Setup Get for mc1 failed: %v", err)
 	}
-	if client1 == nil {
-		t.Fatal("client1 is nil in shutdown test setup")
+	if mc1 == nil || mc1.Client() == nil {
+		t.Fatal("mc1 or its client is nil in shutdown test setup")
 	}
-	pool.Put(cfgA, client1, nil, true)
+	client1 := mc1.Client() // Keep ref to underlying client for checks
+	pool.Put(mc1, true)    // Use new Put signature
 
 	initialDialCount := getActualDialCount()
-	if initialDialCount == 0 && err == nil {
+	if initialDialCount == 0 && err == nil { // Should be 1 if Get succeeded
 		t.Fatalf("Expected at least 1 dial for setup, got %d", initialDialCount)
 	}
 
 	pool.Shutdown() // Call shutdown being tested
 
+	// Check if the original client (client1 from mc1) is actually closed.
 	_, _, err = client1.SendRequest("keepalive@openssh.com", true, nil)
 	expectedClosedErr := false
 	if err != nil {
-		if strings.Contains(err.Error(), "EOF") || strings.Contains(err.Error(), "closed") {
+		if strings.Contains(strings.ToLower(err.Error()), "eof") ||
+			strings.Contains(strings.ToLower(err.Error()), "closed") ||
+			strings.Contains(strings.ToLower(err.Error()), "broken pipe") {
 			expectedClosedErr = true
+		}
+	}
+
+	if !expectedClosedErr {
+		session, sessionErr := client1.NewSession()
+		if sessionErr != nil {
+			if strings.Contains(strings.ToLower(sessionErr.Error()), "eof") ||
+				strings.Contains(strings.ToLower(sessionErr.Error()), "closed") ||
+				strings.Contains(strings.ToLower(sessionErr.Error()), "broken pipe") {
+				expectedClosedErr = true
+			}
+		} else {
+			session.Close()
+			t.Errorf("Client1 should be closed after pool Shutdown, but SendRequest did not fail as expected (last err: %v) and NewSession succeeded.", err)
 		}
 	}
 	if !expectedClosedErr {
-		s, sessionErr := client1.NewSession()
-		if sessionErr == nil {
-			s.Close()
-			t.Errorf("Client1 should be closed after pool Shutdown, but NewSession succeeded.")
-		} else if strings.Contains(sessionErr.Error(), "EOF") || strings.Contains(sessionErr.Error(), "closed") {
-			expectedClosedErr = true
-		}
-	}
-	 if !expectedClosedErr {
-		t.Errorf("Client1 after Shutdown: expected 'EOF' or 'closed' from SendRequest/NewSession, last error: %v", err)
+		t.Errorf("Client1 after Shutdown: expected 'EOF' or 'closed' or 'broken pipe' from SendRequest/NewSession, last error from SendRequest: %v", err)
 	}
 
-	client2, _, err := pool.Get(context.Background(), cfgA)
+	// Get a new connection after shutdown. Pool should re-initialize or create new.
+	// The old pool instance is shut down, but the 'pool' variable still points to it.
+	// A new Get should ideally still work by creating a new connection if the pool structure allows it,
+	// or the test should reflect that the pool is unusable.
+	// Current Shutdown clears internal maps. A Get should make a new one.
+	mc2, err := pool.Get(context.Background(), cfgA)
 	if err != nil {
 		t.Fatalf("Get for cfgA after Shutdown failed: %v", err)
 	}
-	if client2 == nil {
-		t.Fatal("client2 is nil after shutdown and Get")
+	if mc2 == nil || mc2.Client() == nil {
+		t.Fatal("mc2 or its client is nil after shutdown and Get")
 	}
-	// Defer Put for client2, but also explicitly Shutdown the pool at the end of the test
-	// to ensure resources from this test are cleaned up.
-	defer pool.Put(cfgA, client2, nil, true)
-	defer pool.Shutdown()
-
+	// Defer Put for mc2. Since we called Shutdown, this mc2 is part of a "new" internal pool structure.
+	defer pool.Put(mc2, true)
+	// Note: Calling pool.Shutdown() again in defer might be redundant if the test expects the pool to be mostly inert after the first Shutdown.
+	// However, for cleanup, it's fine.
 
 	if getActualDialCount() != initialDialCount+1 {
 		t.Errorf("Expected %d total dials (new dial after shutdown), got %d", initialDialCount+1, getActualDialCount())
