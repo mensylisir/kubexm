@@ -961,7 +961,7 @@ func (s *SSHConnector) copyDirViaTar(ctx context.Context, srcDir, dstDir string,
 	gzw := gzip.NewWriter(&tarball)
 	tw := tar.NewWriter(gzw)
 
-	err := filepath.Walk(srcDir, func(path string, info fs.FileInfo, errWalk error) error {
+	walkErr := filepath.Walk(srcDir, func(path string, info fs.FileInfo, errWalk error) error {
 		if errWalk != nil {
 			return errWalk
 		}
@@ -970,9 +970,10 @@ func (s *SSHConnector) copyDirViaTar(ctx context.Context, srcDir, dstDir string,
 			return errHeader
 		}
 		// Use relative pathing from the source directory itself.
-		header.Name, err = filepath.Rel(srcDir, path)
-		if err != nil {
-			return fmt.Errorf("failed to make path relative for tar header %s: %w", path, err)
+		var relPathErr error
+		header.Name, relPathErr = filepath.Rel(srcDir, path)
+		if relPathErr != nil {
+			return fmt.Errorf("failed to make path relative for tar header %s: %w", path, relPathErr)
 		}
 		if info.IsDir() {
 			header.Name += "/"
@@ -992,8 +993,8 @@ func (s *SSHConnector) copyDirViaTar(ctx context.Context, srcDir, dstDir string,
 		}
 		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("failed during tarball creation for %s: %w", srcDir, err)
+	if walkErr != nil {
+		return fmt.Errorf("failed during tarball creation for %s: %w", srcDir, walkErr)
 	}
 	// It is crucial to close writers to flush all data to the buffer.
 	if err := tw.Close(); err != nil {
