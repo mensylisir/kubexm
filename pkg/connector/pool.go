@@ -26,6 +26,11 @@ type ManagedConnection struct {
 	createdAt     time.Time   // Timestamp of when the connection was created.
 }
 
+// Client returns the underlying *ssh.Client.
+func (mc *ManagedConnection) Client() *ssh.Client {
+	return mc.client
+}
+
 // PoolKey returns the pool key associated with this managed connection.
 func (mc *ManagedConnection) PoolKey() string {
 	return mc.poolKey

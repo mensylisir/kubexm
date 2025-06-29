@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh" // Added for ssh.InsecureIgnoreHostKey
 )
 
 // IMPORTANT: These tests for SSHConnector are integration tests and require a local SSH server
@@ -111,6 +113,96 @@ func TestSSHConnector_Connect_And_Close(t *testing.T) {
 	// After refactor, IsConnected uses keepalive, so it should be more accurate.
 	if sc.IsConnected() {
 		t.Error("SSHConnector.IsConnected() should be false after Close")
+	}
+}
+
+func TestSSHConnector_WithPool_BasicReuse(t *testing.T) {
+	resetActualDialCount() // From pool_test.go's mocking infrastructure
+	serverAddr, cleanup := createMockSSHServer(t)
+	defer cleanup()
+
+	mockDialer := newMockDialer(serverAddr) // From pool_test.go
+	restore := SetTestDialerOverride(mockDialer) // From pool_test.go
+	defer restore()
+
+	poolCfg := DefaultPoolConfig()
+	pool := NewConnectionPool(poolCfg)
+	defer pool.Shutdown()
+
+	// Use the same ConnectionCfg as pool_test.go, targeting the mock server
+	hostAndPort := strings.Split(serverAddr, ":")
+	mockHost := hostAndPort[0]
+	mockPort, _ := strconv.Atoi(hostAndPort[1])
+
+	cfg := ConnectionCfg{
+		Host:           mockHost,
+		Port:           mockPort,
+		User:           "mockuser", // User for mock dialer
+		Timeout:        5 * time.Second,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // Mock server doesn't need strict host key checking
+	}
+
+	// --- First connection ---
+	sc1 := NewSSHConnector(pool)
+	ctx1, cancel1 := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel1()
+
+	if err := sc1.Connect(ctx1, cfg); err != nil {
+		t.Fatalf("sc1.Connect() failed: %v", err)
+	}
+	if getActualDialCount() != 1 {
+		t.Errorf("Expected 1 dial for the first SSHConnector connect, got %d", getActualDialCount())
+	}
+
+	// Perform a simple operation
+	stdout1, _, execErr1 := sc1.Exec(ctx1, "echo hello_pooled_ssh1", nil)
+	if execErr1 != nil {
+		t.Fatalf("sc1.Exec() failed: %v", execErr1)
+	}
+	if strings.TrimSpace(string(stdout1)) != "hello_pooled_ssh1" {
+		t.Errorf("sc1.Exec() stdout = %q, want 'hello_pooled_ssh1'", string(stdout1))
+	}
+
+	if err := sc1.Close(); err != nil {
+		t.Fatalf("sc1.Close() failed: %v", err)
+	}
+
+	// --- Second connection (should reuse) ---
+	sc2 := NewSSHConnector(pool)
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel2()
+
+	if err := sc2.Connect(ctx2, cfg); err != nil {
+		t.Fatalf("sc2.Connect() failed: %v", err)
+	}
+	// Dial count should still be 1 because the connection should be reused from the pool
+	if getActualDialCount() != 1 {
+		t.Errorf("Expected dial count to remain 1 for second SSHConnector (reuse), got %d", getActualDialCount())
+	}
+	if sc1.client == sc2.client && sc1.client != nil { // Check if underlying client object is the same
+		 t.Logf("Underlying client instance was reused as expected: sc1.client=%p, sc2.client=%p", sc1.client, sc2.client)
+	} else if sc1.client == nil && sc2.client == nil {
+		 t.Logf("Both clients are nil after Close and new Connect, which is expected if sc1.client was cleared by Close.")
+		 // This is fine. The pool manages the actual reuse. SSHConnector gets a client.
+		 // The important part is that dial count didn't increase.
+	} else {
+		// This might happen if the pool decided not to reuse for some reason (e.g. health check failed silently)
+		// OR if the pointers are different but it's still logically a reuse (new wrapper for same conn).
+		// The primary check is getActualDialCount().
+		t.Logf("Note: Underlying client instances are different (sc1.client=%p, sc2.client=%p) or one is nil. Reuse determined by dial count.", sc1.client, sc2.client)
+	}
+
+
+	stdout2, _, execErr2 := sc2.Exec(ctx2, "echo hello_pooled_ssh2", nil)
+	if execErr2 != nil {
+		t.Fatalf("sc2.Exec() failed: %v", execErr2)
+	}
+	if strings.TrimSpace(string(stdout2)) != "hello_pooled_ssh2" {
+		t.Errorf("sc2.Exec() stdout = %q, want 'hello_pooled_ssh2'", string(stdout2))
+	}
+
+	if err := sc2.Close(); err != nil {
+		t.Fatalf("sc2.Close() failed: %v", err)
 	}
 }
 
@@ -317,9 +409,11 @@ func TestSSHConnector_FileOperations(t *testing.T) {
 	}
 
 	// 2. Test WriteFile (simulating Copy from local by reading then writing)
-	// Or, if CopyContent is preferred for raw bytes:
-	// err = sc.CopyContent(ctx, fileContent, remoteDstFilePath, &FileTransferOptions{Permissions: "0600"})
-	err = sc.WriteFile(ctx, fileContent, remoteDstFilePath, "0600", false) // Assuming sudo=false for this test
+	writeOpts := &FileTransferOptions{
+		Permissions: "0600",
+		Sudo:        false,
+	}
+	err = sc.WriteFile(ctx, fileContent, remoteDstFilePath, writeOpts)
 	if err != nil {
 		t.Fatalf("WriteFile() to %s error = %v", remoteDstFilePath, err)
 	}
@@ -495,7 +589,11 @@ func TestSSHConnector_SudoWriteFile(t *testing.T) {
 		t.Fatalf("Failed to set up sudo test directory %s with root ownership: %v. Stderr: %s. Check sudo permissions for user %s.", sudoTestDir, setupErr, string(stderrSetup), sshTestUser)
 	}
 
-	err := sc.WriteFile(ctx, content, sudoTestFilePath, permissions, true)
+	writeOpts := &FileTransferOptions{
+		Permissions: permissions,
+		Sudo:        true,
+	}
+	err := sc.WriteFile(ctx, content, sudoTestFilePath, writeOpts)
 	if err != nil {
 		t.Fatalf("WriteFile with sudo to %s error = %v", sudoTestFilePath, err)
 	}
