@@ -235,16 +235,8 @@ func TestConnectionPool_GetPut_BasicReuse(t *testing.T) {
 	}()
 
 	cfg, canRunReal := getRealSSHConfig(t)
-	// if !canRunReal { // Intentionally enabling test by removing skip
-	//	t.Skip("Skipping TestConnectionPool_GetPut_BasicReuse: real SSH config not available or tests disabled.")
-	//}
 	if !canRunReal {
-		// If real SSH config is not available, we still need a cfg for generatePoolKey,
-		// but the test will likely fail at pool.Get if it tries to dial.
-		// Forcing it to run means it will use the actual dialSSH unless overridden by a specific mock.
-		// The original skip was to prevent failures when SSH_TEST env vars are not set.
-		// User wants to run this, presumably with env vars set in their environment.
-		t.Log("WARN: TestConnectionPool_GetPut_BasicReuse running without guaranteed real SSH config. Requires manual SSH_TEST_ env vars.")
+		t.Skip("Skipping TestConnectionPool_GetPut_BasicReuse: real SSH config not available or ENABLE_SSH_CONNECTOR_TESTS is not true. Set SSH_TEST_USER, SSH_TEST_PRIV_KEY_PATH (or SSH_TEST_PASSWORD), etc.")
 	}
 	// This test now uses real SSH connections if canRunReal is true.
 	// If not, it will use the default dialer which might fail if not mocked.
@@ -304,11 +296,8 @@ func TestConnectionPool_MaxPerKeyLimit(t *testing.T) {
 	}()
 
 	cfg, canRunReal := getRealSSHConfig(t)
-	// if !canRunReal { // Intentionally enabling test
-	//	t.Skip("Skipping TestConnectionPool_MaxPerKeyLimit: real SSH config not available or tests disabled.")
-	//}
 	if !canRunReal {
-		t.Log("WARN: TestConnectionPool_MaxPerKeyLimit running without guaranteed real SSH config. Requires manual SSH_TEST_ env vars.")
+		t.Skip("Skipping TestConnectionPool_MaxPerKeyLimit: real SSH config not available or ENABLE_SSH_CONNECTOR_TESTS is not true. Set SSH_TEST_USER, SSH_TEST_PRIV_KEY_PATH (or SSH_TEST_PASSWORD), etc.")
 	}
 	cleanup = SetTestDialerOverride(dialSSH)
 
@@ -371,11 +360,8 @@ func TestConnectionPool_IdleTimeout(t *testing.T) {
 	}()
 
 	cfg, canRunReal := getRealSSHConfig(t)
-	// if !canRunReal { // Intentionally enabling test
-	//	t.Skip("Skipping TestConnectionPool_IdleTimeout: real SSH config not available or tests disabled.")
-	//}
 	if !canRunReal {
-		t.Log("WARN: TestConnectionPool_IdleTimeout running without guaranteed real SSH config. Requires manual SSH_TEST_ env vars.")
+		t.Skip("Skipping TestConnectionPool_IdleTimeout: real SSH config not available or ENABLE_SSH_CONNECTOR_TESTS is not true. Set SSH_TEST_USER, SSH_TEST_PRIV_KEY_PATH (or SSH_TEST_PASSWORD), etc.")
 	}
 	cleanup = SetTestDialerOverride(dialSSH)
 
@@ -436,11 +422,8 @@ func TestConnectionPool_Shutdown(t *testing.T) {
 	}()
 
 	cfgA, canRunReal := getRealSSHConfig(t)
-	// if !canRunReal { // Intentionally enabling test
-	//	t.Skip("Skipping TestConnectionPool_Shutdown: real SSH config not available or tests disabled.")
-	//}
 	if !canRunReal {
-		t.Log("WARN: TestConnectionPool_Shutdown running without guaranteed real SSH config. Requires manual SSH_TEST_ env vars.")
+		t.Skip("Skipping TestConnectionPool_Shutdown: real SSH config not available or ENABLE_SSH_CONNECTOR_TESTS is not true. Set SSH_TEST_USER, SSH_TEST_PRIV_KEY_PATH (or SSH_TEST_PASSWORD), etc.")
 	}
 	// Modify cfgA slightly to make a different pool key if needed, or use as is.
 	// For this test, we need two distinct configs if we want to test pooling for different keys.
