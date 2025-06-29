@@ -26,6 +26,72 @@ func TestLocalConnector_Connect(t *testing.T) {
 	}
 }
 
+func TestLocalConnector_Remove_WithSudo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Sudo tests are not applicable on Windows")
+	}
+
+	lc := &LocalConnector{}
+	ctx := context.Background()
+	tmpDir, err := os.MkdirTemp("", "local-remove-sudo-")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// File to be removed with sudo
+	sudoFileToRemove := filepath.Join(tmpDir, "sudo_file_to_remove.txt")
+
+	// Create the file as current user first. Sudo rm should still work.
+	if err := os.WriteFile(sudoFileToRemove, []byte("delete me with sudo"), 0644); err != nil {
+		t.Fatalf("Failed to create test file for sudo remove: %v", err)
+	}
+
+	// Attempt to remove with sudo.
+	// This test primarily checks that the sudo path is taken.
+	// Actual success of 'sudo rm' depends on passwordless sudo setup for 'rm'.
+	err = lc.Remove(ctx, sudoFileToRemove, RemoveOptions{Sudo: true})
+	if err == nil {
+		t.Logf("Remove with Sudo for %s unexpectedly succeeded (might be due to passwordless sudo for rm).", sudoFileToRemove)
+		if _, statErr := os.Stat(sudoFileToRemove); !os.IsNotExist(statErr) {
+			t.Errorf("File %s should not exist after successful sudo Remove, stat error: %v", sudoFileToRemove, statErr)
+		}
+	} else {
+		t.Logf("Remove with Sudo for %s expectedly failed or had issues (no passwordless sudo for rm?): %v", sudoFileToRemove, err)
+		// Check that the error is not "not implemented" and mentions sudo if it failed at Exec level
+		if strings.Contains(err.Error(), "sudo not implemented") {
+			t.Errorf("Remove with Sudo should not return 'sudo not implemented', got: %v", err)
+		}
+		// If it failed, the file might still be there.
+		if _, statErr := os.Stat(sudoFileToRemove); os.IsNotExist(statErr) {
+			t.Logf("File %s was indeed removed despite error (maybe rm itself succeeded but chmod/chown like step failed, or error was intermittent).", sudoFileToRemove)
+		}
+	}
+
+	// Test recursive remove with sudo
+	sudoDirToRemove := filepath.Join(tmpDir, "sudo_dir_to_remove")
+	sudoNestedFile := filepath.Join(sudoDirToRemove, "nested.txt")
+	if err := os.Mkdir(sudoDirToRemove, 0755); err != nil {
+		t.Fatalf("Failed to create dir for sudo recursive remove: %v", err)
+	}
+	if err := os.WriteFile(sudoNestedFile, []byte("delete this dir with sudo"), 0644); err != nil {
+		t.Fatalf("Failed to create nested file for sudo recursive remove: %v", err)
+	}
+
+	err = lc.Remove(ctx, sudoDirToRemove, RemoveOptions{Sudo: true, Recursive: true})
+	if err == nil {
+		t.Logf("Recursive Remove with Sudo for %s unexpectedly succeeded.", sudoDirToRemove)
+		if _, statErr := os.Stat(sudoDirToRemove); !os.IsNotExist(statErr) {
+			t.Errorf("Directory %s should not exist after successful sudo Recursive Remove, stat error: %v", sudoDirToRemove, statErr)
+		}
+	} else {
+		t.Logf("Recursive Remove with Sudo for %s expectedly failed or had issues: %v", sudoDirToRemove, err)
+		if strings.Contains(err.Error(), "sudo not implemented") {
+			t.Errorf("Recursive Remove with Sudo should not return 'sudo not implemented', got: %v", err)
+		}
+	}
+}
+
 func TestLocalConnector_Copy_Directory(t *testing.T) {
 	lc := &LocalConnector{}
 	ctx := context.Background()
@@ -288,6 +354,56 @@ exit 0` // Script tries to sleep long
 		}
 	}
 	t.Logf("Retry with timeout error: %v", err)
+
+	// Test retry with main context cancellation
+	mainCancelCtx, mainCancelFunc := context.WithCancel(context.Background())
+
+	cancelScriptPath := filepath.Join(tmpDir, "cancel_script.sh")
+	// This script will always fail, forcing retries.
+	// We will cancel mainCancelCtx during the retries.
+	cancelScriptContent := `#!/bin/sh
+echo "Cancel test: Attempting..." >&2
+exit 1`
+	err = os.WriteFile(cancelScriptPath, []byte(cancelScriptContent), 0755)
+	if err != nil {
+		t.Fatalf("Failed to write cancel script: %v", err)
+	}
+
+	cancelOpts := &ExecOptions{
+		Retries:    5, // High number of retries
+		RetryDelay: 20 * time.Millisecond,
+	}
+
+	var execErr error
+	execDone := make(chan bool)
+
+	go func() {
+		_, _, execErr = lc.Exec(mainCancelCtx, cancelScriptPath, cancelOpts)
+		close(execDone)
+	}()
+
+	// Let a few retries happen, then cancel the main context.
+	time.Sleep(50 * time.Millisecond) // Allow 1-2 retries
+	mainCancelFunc()
+
+	select {
+	case <-execDone:
+		// Execution finished
+	case <-time.After(2 * time.Second): // Safety timeout for the test itself
+		t.Fatal("Exec did not return after main context cancellation within test timeout")
+	}
+
+	if execErr == nil {
+		t.Fatalf("Exec with main context cancellation should have failed, but reported success")
+	}
+	if cmdErr, ok := execErr.(*CommandError); ok {
+		if cmdErr.Underlying != context.Canceled && !strings.Contains(cmdErr.Underlying.Error(), "context canceled") {
+			t.Errorf("Expected underlying error to be context.Canceled or contain 'context canceled', got %v", cmdErr.Underlying)
+		}
+	} else {
+		t.Fatalf("Expected CommandError type for context cancellation, got %T: %v", execErr, execErr)
+	}
+	t.Logf("Exec with main context cancellation correctly failed: %v", execErr)
 }
 
 
@@ -486,27 +602,32 @@ func TestLocalConnector_FileOp_WithSudo(t *testing.T) {
 
 	// Test WriteFile with Sudo
 	writeFileDest := filepath.Join(tmpDir, "sudo_writefile.txt")
-	err = lc.WriteFile(ctx, content, writeFileDest, "0644", true)
+	// Updated to use FileTransferOptions
+	writeOpts := &FileTransferOptions{Permissions: "0644", Sudo: true}
+	if runtime.GOOS == "windows" { // Sudo not applicable on windows
+		writeOpts.Sudo = false
+	}
+
+	err = lc.WriteFile(ctx, content, writeFileDest, writeOpts)
 	if err == nil {
-		// This might pass if passwordless sudo is configured for `tee` or `mkdir` and `chmod`.
-		// In a typical CI, it should fail. We check the file content if it passes.
-		t.Logf("WriteFile with Sudo unexpectedly succeeded. This might happen with passwordless sudo.")
-		// Attempt to read the file to verify content if it passed. This read is non-sudo.
-		// If it succeeded, the file should exist.
+		if writeOpts.Sudo { // Only log unexpected success if sudo was attempted
+			t.Logf("WriteFile with Sudo unexpectedly succeeded. This might happen with passwordless sudo.")
+		}
 		if _, statErr := os.Stat(writeFileDest); os.IsNotExist(statErr) {
-			 t.Errorf("WriteFile with Sudo claimed success but file %s does not exist", writeFileDest)
+			t.Errorf("WriteFile (Sudo: %v) claimed success but file %s does not exist", writeOpts.Sudo, writeFileDest)
 		}
-		// Clean up if it succeeded to avoid interfering with other tests or permissions issues.
-		os.Remove(writeFileDest)
+		os.Remove(writeFileDest) // Clean up
 	} else {
-		t.Logf("WriteFile with Sudo expectedly failed (likely no passwordless sudo): %v", err)
-		if strings.Contains(err.Error(), "sudo not implemented") {
-			t.Errorf("WriteFile with Sudo should not return 'sudo not implemented', got: %v", err)
-		}
-		// Example error on Linux if sudo requires password: "sudo: a terminal is required to read the password"
-		// Or "failed to write to ... with sudo tee: sudo: a password is required"
-		if !strings.Contains(err.Error(), "sudo") && !strings.Contains(err.Error(), "Sudo") {
-			t.Errorf("WriteFile with Sudo error message %q did not contain 'sudo' or 'Sudo'", err.Error())
+		if writeOpts.Sudo { // Only check sudo-specific error messages if sudo was attempted
+			t.Logf("WriteFile with Sudo expectedly failed (likely no passwordless sudo): %v", err)
+			if strings.Contains(err.Error(), "sudo not implemented") && runtime.GOOS != "windows" { // "sudo not implemented" is fine for Windows
+				t.Errorf("WriteFile with Sudo should not return 'sudo not implemented' on non-Windows, got: %v", err)
+			}
+			if !strings.Contains(err.Error(), "sudo") && !strings.Contains(err.Error(), "Sudo") && runtime.GOOS != "windows" {
+				t.Errorf("WriteFile with Sudo error message %q did not contain 'sudo' or 'Sudo' on non-Windows", err.Error())
+			}
+		} else { // If not sudo, any error is unexpected here for this test's basic premise
+			t.Errorf("WriteFile (Sudo: false) failed unexpectedly: %v", err)
 		}
 	}
 

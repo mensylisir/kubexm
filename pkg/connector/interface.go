@@ -82,17 +82,10 @@ type Connector interface {
 	IsConnected() bool
 	GetOS(ctx context.Context) (*OS, error)
 	ReadFile(ctx context.Context, path string) ([]byte, error)
-	WriteFile(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error
+	WriteFile(ctx context.Context, content []byte, destPath string, options *FileTransferOptions) error
 	Mkdir(ctx context.Context, path string, perm string) error
-	Remove(ctx context.Context, path string, opts RemoveOptions) error
+	Remove(ctx context.Context, path string, opts RemoveOptions) error // RemoveOptions will now be resolved from options.go
 	GetFileChecksum(ctx context.Context, path string, checksumType string) (string, error)
-}
-
-// RemoveOptions defines options for file/directory removal.
-type RemoveOptions struct {
-	Recursive      bool
-	IgnoreNotExist bool
-	Sudo           bool // Added to support sudo for remove operations
 }
 
 // Host represents a configured host in the cluster.
