@@ -385,6 +385,48 @@ func (r *defaultRunner) EnsureMount(ctx context.Context, conn connector.Connecto
 	return nil
 }
 
+// Unmount unmounts a filesystem.
+func (r *defaultRunner) Unmount(ctx context.Context, conn connector.Connector, mountPoint string, force bool, sudo bool) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil for Unmount")
+	}
+	if strings.TrimSpace(mountPoint) == "" {
+		return fmt.Errorf("mountPoint cannot be empty for Unmount")
+	}
+
+	// Check if it's even mounted first. If not, consider it a success (idempotency).
+	isMounted, err := r.IsMounted(ctx, conn, mountPoint)
+	if err != nil {
+		return fmt.Errorf("failed to check if %s is mounted before unmounting: %w", mountPoint, err)
+	}
+	if !isMounted {
+		return nil // Not mounted, nothing to do.
+	}
+
+	cmdParts := []string{"umount"}
+	if force {
+		cmdParts = append(cmdParts, "-f") // Force unmount
+	}
+	cmdParts = append(cmdParts, shellEscape(mountPoint))
+	cmd := strings.Join(cmdParts, " ")
+
+	_, stderr, execErr := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: sudo})
+	if execErr != nil {
+		// Check if error is because it's "not mounted" - which can happen in race conditions or if state changed.
+		// This makes the operation more idempotent.
+		var cmdErr *connector.CommandError
+		if errors.As(execErr, &cmdErr) {
+			errMsg := strings.ToLower(string(stderr) + cmdErr.Error()) // Combine stderr and error message
+			if strings.Contains(errMsg, "not mounted") || strings.Contains(errMsg, "not currently mounted") {
+				return nil // Already unmounted or was never mounted, consider success.
+			}
+		}
+		return fmt.Errorf("failed to unmount %s: %w (stderr: %s)", mountPoint, execErr, string(stderr))
+	}
+	return nil
+}
+
+
 func (r *defaultRunner) IsMounted(ctx context.Context, conn connector.Connector, path string) (bool, error) {
 	if conn == nil {
 		return false, fmt.Errorf("connector cannot be nil")
@@ -413,7 +455,7 @@ func (r *defaultRunner) IsMounted(ctx context.Context, conn connector.Connector,
 
 	// First, check if `mountpoint` command exists.
 	if _, err := r.LookPath(ctx, conn, "mountpoint"); err == nil {
-		cmd := fmt.Sprintf("mountpoint -q %s", path) // Path is used directly
+		cmd := fmt.Sprintf("mountpoint -q %s", shellEscape(path)) // Path is used directly
 		// No sudo needed for `mountpoint -q`
 		return r.Check(ctx, conn, cmd, false)
 	}
@@ -434,7 +476,36 @@ func (r *defaultRunner) IsMounted(ctx context.Context, conn connector.Connector,
 	// The path needs to be escaped for regex and shell.
 	// For now, let's stick to `mountpoint` and if not found, return an error or a less reliable check.
 	// For this iteration, if mountpoint is not found, we'll indicate it's not implemented for fallback.
-	return false, fmt.Errorf("IsMounted: 'mountpoint' command not found, and /proc/mounts fallback not fully implemented for all edge cases yet")
+	// return false, fmt.Errorf("IsMounted: 'mountpoint' command not found, and /proc/mounts fallback not fully implemented for all edge cases yet")
+
+	// Fallback 2: Check /proc/mounts (Linux specific)
+	// This is a common way to check, but has edge cases (e.g. symlinked mount points).
+	// We are looking for a line where the second field is exactly the path.
+	// awk '$2 == path_var { found=1; exit } END { if (found) exit 0; else exit 1 }' path_var="$ESCAPED_PATH" /proc/mounts
+	// Using grep for simplicity, but it's less precise than awk for exact field match.
+	// grep -qsE "[[:space:]]${ESCAPED_PATH}[[:space:]]" /proc/mounts
+	// A safer grep: `grep -E "(^| )${ESCAPED_PATH_FOR_REGEX}(\$| )" /proc/mounts`
+	// Let's try a command that checks more directly if path is a mountpoint by comparing its device with its parent's device.
+	// If `stat -c %d <path>` is different from `stat -c %d <path>/..` then it's a mountpoint (for most cases).
+	// This is also not foolproof for all bind mounts or specific setups.
+
+	// Given the complexity of a truly robust cross-platform fallback,
+	// and if `mountpoint` is unavailable, we might have to rely on `df` output or accept limitations.
+	// Let's try parsing `/proc/mounts` as a common Linux fallback.
+	// This requires reading the file and parsing its content.
+	procMounts, err := r.ReadFile(ctx, conn, "/proc/mounts")
+	if err != nil {
+		return false, fmt.Errorf("IsMounted: 'mountpoint' command not found and failed to read /proc/mounts: %w", err)
+	}
+	lines := strings.Split(string(procMounts), "\n")
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[1] == path {
+			return true, nil // Path found as a mount point in /proc/mounts
+		}
+	}
+	// If not found via mountpoint or in /proc/mounts
+	return false, nil
 }
 
 func (r *defaultRunner) MakeFilesystem(ctx context.Context, conn connector.Connector, device, fsType string, force bool) error {

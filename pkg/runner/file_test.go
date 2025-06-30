@@ -60,7 +60,8 @@ func TestRunner_IsMounted(t *testing.T) {
 					return "", fmt.Errorf("[%s] unexpected lookpath: %s", ttName, file)
 				}
 				m.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
-					if cmd == fmt.Sprintf("mountpoint -q %s", path) && !opts.Sudo {
+					// Use shellEscapeFileTest to match the actual command being generated
+					if cmd == fmt.Sprintf("mountpoint -q %s", shellEscapeFileTest(path)) && !opts.Sudo {
 						return nil, nil, nil // Exit 0 means it is a mountpoint
 					}
 					return nil, nil, fmt.Errorf("[%s] unexpected exec: %s", ttName, cmd)
@@ -78,7 +79,7 @@ func TestRunner_IsMounted(t *testing.T) {
 					return "", fmt.Errorf("[%s] unexpected lookpath: %s", ttName, file)
 				}
 				m.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
-					if cmd == fmt.Sprintf("mountpoint -q %s", path) && !opts.Sudo {
+					if cmd == fmt.Sprintf("mountpoint -q %s", shellEscapeFileTest(path)) && !opts.Sudo {
 						return nil, nil, &connector.CommandError{ExitCode: 1} // Exit 1 means not a mountpoint
 					}
 					return nil, nil, fmt.Errorf("[%s] unexpected exec: %s", ttName, cmd)
@@ -131,6 +132,263 @@ func TestRunner_IsMounted(t *testing.T) {
 		})
 	}
 }
+
+
+func TestRunner_Unmount(t *testing.T) {
+	ctx := context.Background()
+	mountPath := "/mnt/mydata"
+
+	tests := []struct {
+		name             string
+		mountPoint       string
+		force            bool
+		sudo             bool
+		setupMock        func(m *MockConnector, tt *testing.T, currentTestName string)
+		expectError      bool
+		errorMsgContains string
+	}{
+		{
+			name:       "success_unmount_not_forced_sudo",
+			mountPoint: mountPath,
+			force:      false,
+			sudo:       true,
+			setupMock: func(m *MockConnector, tt *testing.T, currentTestName string) {
+				// IsMounted check
+				m.LookPathFunc = func(c context.Context, file string) (string, error) {
+					if file == "mountpoint" { return "/usr/bin/mountpoint", nil }
+					return "", fmt.Errorf("[%s] IsMounted LookPath: unexpected %s", currentTestName, file)
+				}
+				isMountedCalled := false
+				umountCalled := false
+				m.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
+					if strings.HasPrefix(cmd, "mountpoint -q") {
+						isMountedCalled = true
+						return nil, nil, nil // Simulate is mounted
+					}
+					if strings.HasPrefix(cmd, "umount") && strings.Contains(cmd, shellEscape(mountPath)) && !strings.Contains(cmd, "-f") && opts.Sudo {
+						umountCalled = true
+						return nil, nil, nil // umount success
+					}
+					return nil, nil, fmt.Errorf("[%s] Unmount: unexpected cmd %q, sudo %v", currentTestName, cmd, opts.Sudo)
+				}
+				// Add a cleanup check to ensure functions were called
+				t.Cleanup(func() {
+					if !isMountedCalled { tt.Errorf("[%s] Expected IsMounted to be called", currentTestName) }
+					if !umountCalled { tt.Errorf("[%s] Expected umount command to be called", currentTestName) }
+				})
+			},
+		},
+		{
+			name:       "success_unmount_forced_no_sudo",
+			mountPoint: mountPath,
+			force:      true,
+			sudo:       false,
+			setupMock: func(m *MockConnector, tt *testing.T, currentTestName string) {
+				m.LookPathFunc = func(c context.Context, file string) (string, error) {
+					if file == "mountpoint" { return "/usr/bin/mountpoint", nil }
+					return "", fmt.Errorf("[%s] IsMounted LookPath: unexpected %s", currentTestName, file)
+				}
+				m.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
+					if strings.HasPrefix(cmd, "mountpoint -q") { return nil, nil, nil } // Is mounted
+					if strings.HasPrefix(cmd, "umount -f") && strings.Contains(cmd, shellEscape(mountPath)) && !opts.Sudo {
+						return nil, nil, nil
+					}
+					return nil, nil, fmt.Errorf("[%s] Unmount: unexpected cmd %q, sudo %v", currentTestName, cmd, opts.Sudo)
+				}
+			},
+		},
+		{
+			name:       "not_mounted_idempotency",
+			mountPoint: mountPath,
+			force:      false,
+			sudo:       false,
+			setupMock: func(m *MockConnector, tt *testing.T, currentTestName string) {
+				m.LookPathFunc = func(c context.Context, file string) (string, error) {
+					if file == "mountpoint" { return "/usr/bin/mountpoint", nil }
+					return "", fmt.Errorf("[%s] IsMounted LookPath: unexpected %s", currentTestName, file)
+				}
+				m.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
+					if strings.HasPrefix(cmd, "mountpoint -q") {
+						return nil, nil, &connector.CommandError{ExitCode: 1} // Not mounted
+					}
+					// umount should not be called if not mounted
+					return nil, nil, fmt.Errorf("[%s] Unmount: umount should not be called if not mounted, cmd %q", currentTestName, cmd)
+				}
+			},
+		},
+		{
+			name:             "empty_mountPoint",
+			mountPoint:       " ",
+			expectError:      true,
+			errorMsgContains: "mountPoint cannot be empty",
+		},
+		{
+			name:       "isMounted_check_fails",
+			mountPoint: mountPath,
+			setupMock: func(m *MockConnector, tt *testing.T, currentTestName string) {
+				m.LookPathFunc = func(c context.Context, file string) (string, error) {
+					if file == "mountpoint" { return "/usr/bin/mountpoint", nil }
+					return "", fmt.Errorf("[%s] IsMounted LookPath: unexpected %s", currentTestName, file)
+				}
+				m.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
+					if strings.HasPrefix(cmd, "mountpoint -q") {
+						return nil, nil, errors.New("failed to run mountpoint") // IsMounted check fails
+					}
+					return nil, nil, fmt.Errorf("[%s] Unmount: unexpected cmd %q", currentTestName, cmd)
+				}
+			},
+			expectError:      true,
+			errorMsgContains: "failed to check if /mnt/mydata is mounted",
+		},
+		{
+			name:       "umount_fails_not_mounted_error_idempotency",
+			mountPoint: mountPath,
+			sudo:       true,
+			setupMock: func(m *MockConnector, tt *testing.T, currentTestName string) {
+				m.LookPathFunc = func(c context.Context, file string) (string, error) {
+					if file == "mountpoint" { return "/usr/bin/mountpoint", nil }
+					return "", fmt.Errorf("[%s] IsMounted LookPath: unexpected %s", currentTestName, file)
+				}
+				m.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
+					if strings.HasPrefix(cmd, "mountpoint -q") { return nil, nil, nil } // Is mounted
+					if strings.HasPrefix(cmd, "umount") && opts.Sudo {
+						return nil, []byte("umount: /mnt/mydata: not mounted."), &connector.CommandError{ExitCode: 1, Stderr: "umount: /mnt/mydata: not mounted."}
+					}
+					return nil, nil, fmt.Errorf("[%s] Unmount: unexpected cmd %q", currentTestName, cmd)
+				}
+			},
+			expectError: false, // Should be idempotent
+		},
+		{
+			name:       "umount_fails_other_error",
+			mountPoint: mountPath,
+			sudo:       true,
+			setupMock: func(m *MockConnector, tt *testing.T, currentTestName string) {
+				m.LookPathFunc = func(c context.Context, file string) (string, error) {
+					if file == "mountpoint" { return "/usr/bin/mountpoint", nil }
+					return "", fmt.Errorf("[%s] IsMounted LookPath: unexpected %s", currentTestName, file)
+				}
+				m.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
+					if strings.HasPrefix(cmd, "mountpoint -q") { return nil, nil, nil } // Is mounted
+					if strings.HasPrefix(cmd, "umount") && opts.Sudo {
+						return nil, []byte("device is busy"), &connector.CommandError{ExitCode: 32, Stderr: "device is busy"}
+					}
+					return nil, nil, fmt.Errorf("[%s] Unmount: unexpected cmd %q", currentTestName, cmd)
+				}
+			},
+			expectError:      true,
+			errorMsgContains: "failed to unmount /mnt/mydata",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, mockConn := newTestRunnerForFileTests(t)
+			if tt.setupMock != nil {
+				tt.setupMock(mockConn, t, tt.name)
+			}
+
+			err := r.Unmount(ctx, mockConn, tt.mountPoint, tt.force, tt.sudo)
+
+			if tt.expectError {
+				if err == nil {
+					t.Fatalf("Expected error containing %q, got nil", tt.errorMsgContains)
+				} else if !strings.Contains(err.Error(), tt.errorMsgContains) {
+					t.Fatalf("Error message %q does not contain %q", err.Error(), tt.errorMsgContains)
+				}
+			} else if err != nil {
+				t.Fatalf("Did not expect error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestRunner_IsMounted_Fallback_ProcMounts(t *testing.T) {
+	ctx := context.Background()
+	mountPath := "/mnt/special"
+	otherPath := "/data/regular"
+
+	tests := []struct {
+		name            string
+		path            string
+		mockProcMounts  string // Content of /proc/mounts
+		mockReadFileErr error
+		expectedMounted bool
+		expectError     bool
+		errorContains   string
+	}{
+		{
+			name:            "is_mounted_found_in_/proc/mounts",
+			path:            mountPath,
+			mockProcMounts:  "sysfs /sys sysfs rw,nosuid,nodev,noexec,relatime 0 0\nproc /proc proc rw,nosuid,nodev,noexec,relatime 0 0\n/dev/sda1 /mnt/special ext4 rw,relatime 0 0\n",
+			expectedMounted: true,
+		},
+		{
+			name:            "not_mounted_not_in_/proc/mounts",
+			path:            otherPath,
+			mockProcMounts:  "sysfs /sys sysfs rw,nosuid,nodev,noexec,relatime 0 0\nproc /proc proc rw,nosuid,nodev,noexec,relatime 0 0\n/dev/sda1 /mnt/special ext4 rw,relatime 0 0\n",
+			expectedMounted: false,
+		},
+		{
+			name:            "read_/proc/mounts_fails",
+			path:            mountPath,
+			mockReadFileErr: errors.New("failed to read"),
+			expectError:     true,
+			errorContains:   "failed to read /proc/mounts",
+		},
+		{
+			name:            "empty_/proc/mounts_file",
+			path:            mountPath,
+			mockProcMounts:  "\n", // Empty or just newline
+			expectedMounted: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, mockConn := newTestRunnerForFileTests(t)
+
+			// Setup: mountpoint command not found, ReadFile for /proc/mounts is controlled
+			mockConn.LookPathFunc = func(c context.Context, file string) (string, error) {
+				if file == "mountpoint" {
+					return "", errors.New("mountpoint not found")
+				}
+				// Allow other lookups if needed by ReadFile's cat fallback (though ReadFile mock below avoids this)
+				return "/usr/bin/"+file, nil
+			}
+
+			// Mock ReadFile specifically for /proc/mounts
+			// This assumes ReadFile is used by IsMounted; if IsMounted uses Exec("cat /proc/mounts"), then ExecFunc needs mocking.
+			// The current IsMounted implementation calls r.ReadFile.
+			mockConn.ReadFileFunc = func(c context.Context, path string) ([]byte, error) {
+				if path == "/proc/mounts" {
+					return []byte(tt.mockProcMounts), tt.mockReadFileErr
+				}
+				return nil, fmt.Errorf("IsMounted fallback test: unexpected ReadFile call for %s", path)
+			}
+			// If ReadFile has a cat fallback that uses Exec, that would also need mocking if ReadFileFunc is not set on mockConn.
+			// However, newTestRunnerForFileTests sets up a general ExecFunc, so r.ReadFile will use that if ReadFileFunc is not set.
+			// For clarity, setting ReadFileFunc is better.
+
+			isMounted, err := r.IsMounted(ctx, mockConn, tt.path)
+
+			if tt.expectError {
+				if err == nil {
+					t.Fatalf("Expected error containing %q, got nil", tt.errorContains)
+				} else if !strings.Contains(err.Error(), tt.errorContains) {
+					t.Fatalf("Error message %q does not contain %q", err.Error(), tt.errorContains)
+				}
+			} else if err != nil {
+				t.Fatalf("Did not expect error, got %v", err)
+			}
+
+			if isMounted != tt.expectedMounted {
+				t.Errorf("Expected mounted %v, got %v", tt.expectedMounted, isMounted)
+			}
+		})
+	}
+}
+
 
 func TestRunner_TouchFile(t *testing.T) {
 	ctx := context.Background()
