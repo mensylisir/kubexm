@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors" // For errors.As
 	"fmt"
+	"regexp" // Added for GetInterfaceAddresses
 	"strings"
 	"time"
 
@@ -127,6 +128,93 @@ func (r *defaultRunner) AddHostEntry(ctx context.Context, conn connector.Connect
 }
 
 // --- Stubs for new network methods from enriched interface ---
+
+// GetInterfaceAddresses retrieves IPv4 and IPv6 addresses for a specific network interface.
+func (r *defaultRunner) GetInterfaceAddresses(ctx context.Context, conn connector.Connector, interfaceName string) (map[string][]string, error) {
+	if conn == nil {
+		return nil, fmt.Errorf("connector cannot be nil for GetInterfaceAddresses")
+	}
+	if strings.TrimSpace(interfaceName) == "" {
+		return nil, fmt.Errorf("interfaceName cannot be empty for GetInterfaceAddresses")
+	}
+
+	osInfo, err := conn.GetOS(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get OS info for GetInterfaceAddresses: %w", err)
+	}
+	if osInfo == nil {
+		return nil, fmt.Errorf("OS info returned as nil by connector, cannot determine command for GetInterfaceAddresses")
+	}
+
+	var cmdStr string
+	var outputParser func(output string) map[string][]string
+
+	// Regexps pre-compiled for efficiency if this were a hot path, but fine here for clarity.
+	// Linux: `ip addr show dev <interfaceName>`
+	// Example inet line: "    inet 192.168.1.100/24 brd 192.168.1.255 scope global dynamic eth0"
+	// Example inet6 line: "   inet6 fe80::211:22ff:fe33:4455/64 scope link "
+	linuxInetRegex := regexp.MustCompile(`^\s*inet\s+([0-9a-fA-F:.]+)/`)
+	linuxInet6Regex := regexp.MustCompile(`^\s*inet6\s+([0-9a-fA-F:.]+)/`)
+
+	// Darwin: `ifconfig <interfaceName>`
+	// Example inet line: "	inet 192.168.1.150 netmask 0xffffff00 broadcast 192.168.1.255"
+	// Example inet6 line: "	inet6 fe80::abc:def:ghi:jkl%en0 prefixlen 64 secured scopeid 0x5 "
+	darwinInetRegex := regexp.MustCompile(`^\s*inet\s+([0-9a-fA-F:.]+)\s+netmask`)
+	darwinInet6Regex := regexp.MustCompile(`^\s*inet6\s+([0-9a-fA-F:.]+)%[a-zA-Z0-9]+\s+prefixlen`) // Capture IP before %
+	darwinInet6SimpleRegex := regexp.MustCompile(`^\s*inet6\s+([0-9a-fA-F:.]+)\s+prefixlen`)      // For IPs without scope ID in the middle
+
+	switch strings.ToLower(osInfo.ID) {
+	case "linux", "ubuntu", "debian", "centos", "rhel", "fedora", "almalinux", "rocky", "raspbian", "linuxmint":
+		cmdStr = fmt.Sprintf("ip addr show dev %s", interfaceName)
+		outputParser = func(output string) map[string][]string {
+			res := map[string][]string{"ipv4": {}, "ipv6": {}}
+			lines := strings.Split(output, "\n")
+			for _, line := range lines {
+				if matches := linuxInetRegex.FindStringSubmatch(line); len(matches) > 1 {
+					res["ipv4"] = append(res["ipv4"], matches[1])
+				} else if matches := linuxInet6Regex.FindStringSubmatch(line); len(matches) > 1 {
+					res["ipv6"] = append(res["ipv6"], matches[1])
+				}
+			}
+			return res
+		}
+	case "darwin":
+		cmdStr = fmt.Sprintf("ifconfig %s", interfaceName)
+		outputParser = func(output string) map[string][]string {
+			res := map[string][]string{"ipv4": {}, "ipv6": {}}
+			lines := strings.Split(output, "\n")
+			for _, line := range lines {
+				trimmedLine := strings.TrimSpace(line)
+				if matches := darwinInetRegex.FindStringSubmatch(trimmedLine); len(matches) > 1 {
+					res["ipv4"] = append(res["ipv4"], matches[1])
+				} else if matches := darwinInet6Regex.FindStringSubmatch(trimmedLine); len(matches) > 1 {
+					res["ipv6"] = append(res["ipv6"], matches[1]) // Regex captures IP before %
+				} else if matches := darwinInet6SimpleRegex.FindStringSubmatch(trimmedLine); len(matches) > 1 {
+					// Handles cases like "inet6 dead:beef::1 prefixlen 64" (no scope in middle)
+					res["ipv6"] = append(res["ipv6"], matches[1])
+				}
+			}
+			return res
+		}
+	default:
+		return nil, fmt.Errorf("GetInterfaceAddresses not supported for OS ID: %s", osInfo.ID)
+	}
+
+	// Execute command (no sudo usually needed for these show commands)
+	stdout, stderr, execErr := r.RunWithOptions(ctx, conn, cmdStr, &connector.ExecOptions{Sudo: false})
+	if execErr != nil {
+		// Check if the error is because the interface does not exist.
+		// For `ip addr show dev <iface>` on Linux, if iface doesn't exist: "Device "<iface>" does not exist." exit code 1.
+		// For `ifconfig <iface>` on macOS, if iface doesn't exist: "ifconfig: interface <iface> does not exist" exit code 1.
+		errStr := strings.ToLower(string(stderr))
+		if strings.Contains(errStr, "does not exist") || strings.Contains(errStr, "no such device") {
+			return map[string][]string{"ipv4": {}, "ipv6": {}}, nil // Interface not found, return empty map, not an error.
+		}
+		return nil, fmt.Errorf("failed to execute command '%s' for interface %s: %w (stderr: %s)", cmdStr, interfaceName, execErr, string(stderr))
+	}
+
+	return outputParser(string(stdout)), nil
+}
 
 func (r *defaultRunner) DisableFirewall(ctx context.Context, conn connector.Connector, facts *Facts) error {
 	if conn == nil {

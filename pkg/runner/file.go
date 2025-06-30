@@ -5,6 +5,7 @@ import (
 	"errors" // Added for errors.As
 	"fmt"
 	"path/filepath" // Added for filepath.Dir
+	"strconv"       // Added for GetDiskUsage
 	"strings"
 
 	"github.com/mensylisir/kubexm/pkg/connector" // Corrected import path
@@ -110,6 +111,94 @@ func (r *defaultRunner) Mkdirp(ctx context.Context, conn connector.Connector, pa
 	return nil
 }
 
+// TouchFile creates an empty file if it doesn't exist, or updates its modification timestamp if it does.
+func (r *defaultRunner) TouchFile(ctx context.Context, conn connector.Connector, path string, sudo bool) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil for TouchFile")
+	}
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("path cannot be empty for TouchFile")
+	}
+
+	parentDir := filepath.Dir(path)
+	if parentDir != "." && parentDir != "/" && parentDir != "" {
+		if err := r.Mkdirp(ctx, conn, parentDir, "0755", sudo); err != nil {
+			return fmt.Errorf("failed to create parent directory %s for touch: %w", parentDir, err)
+		}
+	}
+
+	cmd := fmt.Sprintf("touch %s", shellEscape(path))
+	_, stderr, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: sudo})
+	if err != nil {
+		return fmt.Errorf("failed to touch file %s: %w (stderr: %s)", path, err, string(stderr))
+	}
+	return nil
+}
+
+// GetDiskUsage retrieves disk usage information (total, free, used space in MiB) for the filesystem
+// on which the given path resides.
+func (r *defaultRunner) GetDiskUsage(ctx context.Context, conn connector.Connector, path string) (totalMiB uint64, freeMiB uint64, usedMiB uint64, err error) {
+	if conn == nil {
+		err = fmt.Errorf("connector cannot be nil for GetDiskUsage")
+		return
+	}
+	if strings.TrimSpace(path) == "" {
+		err = fmt.Errorf("path cannot be empty for GetDiskUsage")
+		return
+	}
+
+	cmd := fmt.Sprintf("df -BM -P %s", shellEscape(path))
+	stdoutBytes, stderrBytes, execErr := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: false})
+
+	if execErr != nil {
+		err = fmt.Errorf("failed to execute df command for path %s: %w (stderr: %s)", path, execErr, string(stderrBytes))
+		return
+	}
+
+	output := string(stdoutBytes)
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+
+	if len(lines) < 2 {
+		err = fmt.Errorf("unexpected output format from df for path %s: not enough lines (output: %s)", path, output)
+		return
+	}
+
+	fields := strings.Fields(lines[1])
+	if len(fields) < 4 {
+		err = fmt.Errorf("unexpected output format from df for path %s: not enough fields in data line (line: '%s', output: %s)", path, lines[1], output)
+		return
+	}
+
+	parseMiB := func(valueWithSuffix string) (uint64, error) {
+		if !strings.HasSuffix(valueWithSuffix, "M") {
+			return 0, fmt.Errorf("expected value to end with 'M', got %s", valueWithSuffix)
+		}
+		valueStr := strings.TrimSuffix(valueWithSuffix, "M")
+		val, parseErr := strconv.ParseUint(valueStr, 10, 64)
+		if parseErr != nil {
+			return 0, fmt.Errorf("failed to parse numeric value from %s: %w", valueStr, parseErr)
+		}
+		return val, nil
+	}
+
+	totalMiB, err = parseMiB(fields[1])
+	if err != nil {
+		err = fmt.Errorf("failed to parse total disk space from df output ('%s'): %w", fields[1], err)
+		return
+	}
+	usedMiB, err = parseMiB(fields[2])
+	if err != nil {
+		err = fmt.Errorf("failed to parse used disk space from df output ('%s'): %w", fields[2], err)
+		return
+	}
+	freeMiB, err = parseMiB(fields[3])
+	if err != nil {
+		err = fmt.Errorf("failed to parse free disk space from df output ('%s'): %w", fields[3], err)
+		return
+	}
+	return
+}
+
 // Remove deletes a file or directory (recursively for directories, like 'rm -rf').
 func (r *defaultRunner) Remove(ctx context.Context, conn connector.Connector, path string, sudo bool) error {
 	if conn == nil {
@@ -160,7 +249,8 @@ func (r *defaultRunner) Chown(ctx context.Context, conn connector.Connector, pat
 	if recursive {
 		recursiveFlag = "-R"
 	}
-	cmd := fmt.Sprintf("chown %s %s %s", recursiveFlag, ownerGroupSpec, path)
+	cmdParts := []string{"chown", recursiveFlag, ownerGroupSpec, path}
+	cmd := strings.Join(strings.Fields(strings.Join(cmdParts, " ")), " ") // Build and then normalize spaces
 
 	_, stderr, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true}) // Chown usually requires sudo
 	if err != nil {

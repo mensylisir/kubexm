@@ -122,6 +122,115 @@ func (r *defaultRunner) AddGroup(ctx context.Context, conn connector.Connector, 
 
 // --- Stubs for new user/permission methods from enriched interface ---
 
+// ModifyUser modifies existing user attributes.
+func (r *defaultRunner) ModifyUser(ctx context.Context, conn connector.Connector, username string, modifications UserModifications) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil for ModifyUser")
+	}
+	if strings.TrimSpace(username) == "" {
+		return fmt.Errorf("username cannot be empty for ModifyUser")
+	}
+
+	exists, err := r.UserExists(ctx, conn, username)
+	if err != nil {
+		return fmt.Errorf("failed to check if user %s exists before modifying: %w", username, err)
+	}
+	if !exists {
+		return fmt.Errorf("user %s does not exist, cannot modify", username)
+	}
+
+	cmdParts := []string{"usermod"}
+	modifiedSomething := false
+
+	if modifications.NewUsername != nil {
+		if strings.TrimSpace(*modifications.NewUsername) == "" {
+			return fmt.Errorf("new username cannot be empty if provided")
+		}
+		cmdParts = append(cmdParts, "-l", *modifications.NewUsername)
+		modifiedSomething = true
+	}
+	if modifications.NewPrimaryGroup != nil {
+		if strings.TrimSpace(*modifications.NewPrimaryGroup) == "" {
+			return fmt.Errorf("new primary group cannot be empty if provided")
+		}
+		cmdParts = append(cmdParts, "-g", *modifications.NewPrimaryGroup)
+		modifiedSomething = true
+	}
+	if len(modifications.AppendToGroups) > 0 {
+		// usermod -aG group1,group2,... user
+		// Ensure no empty group names in the list
+		for _, g := range modifications.AppendToGroups {
+			if strings.TrimSpace(g) == "" {
+				return fmt.Errorf("group name in AppendToGroups cannot be empty")
+			}
+		}
+		cmdParts = append(cmdParts, "-aG", strings.Join(modifications.AppendToGroups, ","))
+		modifiedSomething = true
+	}
+	if len(modifications.SetSecondaryGroups) > 0 {
+		// usermod -G group1,group2,... user (replaces all secondary)
+		// Ensure no empty group names in the list
+		for _, g := range modifications.SetSecondaryGroups {
+			if strings.TrimSpace(g) == "" {
+				return fmt.Errorf("group name in SetSecondaryGroups cannot be empty")
+			}
+		}
+		cmdParts = append(cmdParts, "-G", strings.Join(modifications.SetSecondaryGroups, ","))
+		modifiedSomething = true
+	}
+
+	if modifications.NewShell != nil {
+		// Empty shell might be valid (e.g. /sbin/nologin) but usually it's a path.
+		// For now, allow empty if explicitly set via pointer.
+		cmdParts = append(cmdParts, "-s", *modifications.NewShell)
+		modifiedSomething = true
+	}
+	if modifications.NewHomeDir != nil {
+		if strings.TrimSpace(*modifications.NewHomeDir) == "" {
+			return fmt.Errorf("new home directory cannot be empty if provided")
+		}
+		cmdParts = append(cmdParts, "-d", *modifications.NewHomeDir)
+		if modifications.MoveHomeDirContents {
+			cmdParts = append(cmdParts, "-m")
+		}
+		modifiedSomething = true
+	} else if modifications.MoveHomeDirContents {
+		// -m without -d is usually an error or has specific meaning (create if not exist, but that's for useradd)
+		return fmt.Errorf("MoveHomeDirContents can only be true if NewHomeDir is also specified")
+	}
+
+	if modifications.NewComment != nil {
+		// If the comment contains spaces or shell-sensitive characters, it should be quoted
+		// to be treated as a single argument by the shell that `conn.Exec` might invoke.
+		cmdParts = append(cmdParts, "-c", shellEscape(*modifications.NewComment))
+		modifiedSomething = true
+	}
+
+	if !modifiedSomething {
+		return nil // No modifications requested
+	}
+
+	// The username to act upon is the original username, unless NewUsername is set,
+	// in which case usermod applies changes and then renames.
+	// If NewUsername is specified, it's the target of the rename, not the user being looked up initially.
+	// The username argument to usermod should always be the current name of the user.
+	cmdParts = append(cmdParts, username)
+	cmd := strings.Join(cmdParts, " ")
+
+	_, stderr, execErr := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true})
+	if execErr != nil {
+		finalUsername := username
+		if modifications.NewUsername != nil {
+			finalUsername = *modifications.NewUsername
+		}
+		return fmt.Errorf("failed to modify user %s (to %s if renamed): %w (stderr: %s)", username, finalUsername, execErr, string(stderr))
+	}
+
+	// If username was changed, the original username variable for subsequent operations (if any) should be updated.
+	// Not an issue for this single call method.
+	return nil
+}
+
 func (r *defaultRunner) ConfigureSudoer(ctx context.Context, conn connector.Connector, sudoerName, content string) error {
 	if conn == nil {
 		return fmt.Errorf("connector cannot be nil")
@@ -223,4 +332,90 @@ func (r *defaultRunner) ConfigureSudoer(ctx context.Context, conn connector.Conn
 	}
 
 	return nil // Temp file is removed by mv, or by defer if mv fails before that.
+}
+
+// SetUserPassword sets a user's password using a pre-hashed value.
+// The hashedPassword must be in the format expected by `chpasswd` (e.g., SHA512 crypt string).
+func (r *defaultRunner) SetUserPassword(ctx context.Context, conn connector.Connector, username, hashedPassword string) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil for SetUserPassword")
+	}
+	if strings.TrimSpace(username) == "" {
+		return fmt.Errorf("username cannot be empty for SetUserPassword")
+	}
+	if strings.TrimSpace(hashedPassword) == "" {
+		return fmt.Errorf("hashedPassword cannot be empty for SetUserPassword")
+	}
+
+	exists, err := r.UserExists(ctx, conn, username)
+	if err != nil {
+		return fmt.Errorf("failed to check if user %s exists before setting password: %w", username, err)
+	}
+	if !exists {
+		return fmt.Errorf("user %s does not exist, cannot set password", username)
+	}
+
+	// Construct the input for chpasswd
+	chpasswdInput := fmt.Sprintf("%s:%s", username, hashedPassword)
+	// Escape the input for the echo command to handle special characters in username or hash safely
+	escapedInput := shellEscape(chpasswdInput) // shellEscape is from file.go
+
+	// Command: echo 'username:hashed_password' | chpasswd
+	// The sudo applies to chpasswd.
+	cmd := fmt.Sprintf("echo %s | chpasswd", escapedInput)
+
+
+	opts := &connector.ExecOptions{
+		Sudo:   true,
+		Hidden: true, // Hide this command from logs as it contains password info (even if hashed)
+	}
+
+	_, stderr, execErr := r.RunWithOptions(ctx, conn, cmd, opts)
+	if execErr != nil {
+		return fmt.Errorf("failed to set password for user %s using chpasswd: %w (stderr: %s)", username, execErr, string(stderr))
+	}
+	return nil
+}
+
+// GetUserInfo retrieves detailed information about a user.
+func (r *defaultRunner) GetUserInfo(ctx context.Context, conn connector.Connector, username string) (*UserInfo, error) {
+	if conn == nil {
+		return nil, fmt.Errorf("connector cannot be nil for GetUserInfo")
+	}
+	if strings.TrimSpace(username) == "" {
+		return nil, fmt.Errorf("username cannot be empty for GetUserInfo")
+	}
+
+	exists, err := r.UserExists(ctx, conn, username)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check if user %s exists: %w", username, err)
+	}
+	if !exists {
+		return nil, fmt.Errorf("user %s does not exist", username)
+	}
+
+	info := &UserInfo{Username: username}
+
+	uidStr, err := r.Run(ctx, conn, fmt.Sprintf("id -u %s", username), false)
+	if err != nil { return nil, fmt.Errorf("failed to get UID for user %s: %w", username, err) }
+	info.UID = strings.TrimSpace(uidStr)
+
+	gidStr, err := r.Run(ctx, conn, fmt.Sprintf("id -g %s", username), false)
+	if err != nil { return nil, fmt.Errorf("failed to get GID for user %s: %w", username, err) }
+	info.GID = strings.TrimSpace(gidStr)
+
+	getentOut, err := r.Run(ctx, conn, fmt.Sprintf("getent passwd %s", username), false)
+	if err != nil { return nil, fmt.Errorf("failed to get passwd entry for user %s: %w", username, err) }
+	passwdFields := strings.Split(strings.TrimSpace(getentOut), ":")
+	if len(passwdFields) >= 7 {
+		info.Comment = passwdFields[4]
+		info.HomeDir = passwdFields[5]
+		info.Shell = passwdFields[6]
+	} else { return nil, fmt.Errorf("unexpected format from 'getent passwd %s': %s", username, getentOut) }
+
+	groupsStr, err := r.Run(ctx, conn, fmt.Sprintf("id -Gn %s", username), false)
+	if err != nil { return nil, fmt.Errorf("failed to get group names for user %s using 'id -Gn': %w", username, err) }
+	info.Groups = strings.Fields(strings.TrimSpace(groupsStr))
+
+	return info, nil
 }
