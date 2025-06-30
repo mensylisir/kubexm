@@ -140,7 +140,16 @@ func (l *LocalConnector) Exec(ctx context.Context, cmd string, options *ExecOpti
 		}
 	}
 
-	// If we are here, all attempts failed. Wrap the last error.
+	// If we are here, all attempts failed or the context was done.
+	// Check if the overall context was done, which might be why we exited the loop.
+	if ctx.Err() != nil {
+		// If the main context is canceled, this should be the primary error.
+		// The finalErr from the command might be "signal: killed" which is a consequence.
+		// Ensure stdout and stderr from the last attempt are returned.
+		return stdout, stderr, &CommandError{Cmd: cmd, ExitCode: -1, Stdout: string(stdout), Stderr: string(stderr), Underlying: ctx.Err()}
+	}
+
+	// Otherwise, wrap the last command error.
 	exitCode := -1
 	if exitErr, ok := finalErr.(*exec.ExitError); ok {
 		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
@@ -148,7 +157,6 @@ func (l *LocalConnector) Exec(ctx context.Context, cmd string, options *ExecOpti
 		}
 	}
 	// Ensure stdout and stderr from the last attempt are returned with the error.
-	// This requires runOnce to return them even on error, which it does.
 	return stdout, stderr, &CommandError{Cmd: cmd, ExitCode: exitCode, Stdout: string(stdout), Stderr: string(stderr), Underlying: finalErr}
 }
 
