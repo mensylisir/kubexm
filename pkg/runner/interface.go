@@ -60,9 +60,13 @@ type Runner interface {
 	MustRun(ctx context.Context, conn connector.Connector, cmd string, sudo bool) string
 	Check(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (bool, error)
 	RunWithOptions(ctx context.Context, conn connector.Connector, cmd string, opts *connector.ExecOptions) (stdout, stderr []byte, err error)
+	RunInBackground(ctx context.Context, conn connector.Connector, cmd string, sudo bool) error
+	RunRetry(ctx context.Context, conn connector.Connector, cmd string, sudo bool, retries int, delay time.Duration) (string, error)
 	Download(ctx context.Context, conn connector.Connector, facts *Facts, url, destPath string, sudo bool) error
 	Extract(ctx context.Context, conn connector.Connector, facts *Facts, archivePath, destDir string, sudo bool) error
 	DownloadAndExtract(ctx context.Context, conn connector.Connector, facts *Facts, url, destDir string, sudo bool) error
+	Compress(ctx context.Context, conn connector.Connector, facts *Facts, archivePath string, sources []string, sudo bool) error
+	ListArchiveContents(ctx context.Context, conn connector.Connector, facts *Facts, archivePath string, sudo bool) ([]string, error)
 	Exists(ctx context.Context, conn connector.Connector, path string) (bool, error)
 	IsDir(ctx context.Context, conn connector.Connector, path string) (bool, error)
 	ReadFile(ctx context.Context, conn connector.Connector, path string) ([]byte, error)
@@ -106,6 +110,7 @@ type Runner interface {
 
 	// --- Filesystem & Storage ---
 	EnsureMount(ctx context.Context, conn connector.Connector, device, mountPoint, fsType string, options []string, persistent bool) error
+	Unmount(ctx context.Context, conn connector.Connector, mountPoint string, force bool, sudo bool) error
 	IsMounted(ctx context.Context, conn connector.Connector, path string) (bool, error)
 	MakeFilesystem(ctx context.Context, conn connector.Connector, device, fsType string, force bool) error
 	CreateSymlink(ctx context.Context, conn connector.Connector, target, linkPath string, sudo bool) error
