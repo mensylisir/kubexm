@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv" // Added for ParseUint
 	"strings"
 	"time"
 
@@ -34,7 +35,7 @@ type MockConnector struct {
 	CloseFunc func() error
 	// New methods from connector.Connector
 	ReadFileFunc        func(ctx context.Context, path string) ([]byte, error)
-	WriteFileFunc       func(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error
+	WriteFileFunc       func(ctx context.Context, content []byte, destPath string, options *connector.FileTransferOptions) error
 	MkdirFunc           func(ctx context.Context, path string, perm string) error
 	RemoveFunc          func(ctx context.Context, path string, opts connector.RemoveOptions) error
 	GetFileChecksumFunc func(ctx context.Context, path string, checksumType string) (string, error)
@@ -112,17 +113,41 @@ func NewMockConnector() *MockConnector {
 		}
 		return nil, os.ErrNotExist // Default to not found
 	}
-	mc.WriteFileFunc = func(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error {
-		// For mock, just store content, don't worry about perms/sudo for now unless test needs it
+	mc.WriteFileFunc = func(ctx context.Context, content []byte, destPath string, options *connector.FileTransferOptions) error {
 		if mc.mockFileContent == nil { mc.mockFileContent = make(map[string][]byte) }
 		mc.mockFileContent[destPath] = content
 		if mc.mockFs == nil { mc.mockFs = make(map[string]*connector.FileStat) }
-		mc.mockFs[destPath] = &connector.FileStat{Name: destPath, IsExist: true, IsDir: false, Size: int64(len(content))}
+
+		mode := os.FileMode(0644) // Default mode
+		if options != nil && options.Permissions != "" {
+			// strconv is needed here
+			parsedPerm, err := strconv.ParseUint(options.Permissions, 8, 32)
+			if err == nil {
+				mode = os.FileMode(parsedPerm)
+			}
+			// Optionally log parseErr
+		}
+		mc.mockFs[destPath] = &connector.FileStat{
+			Name:    destPath,
+			IsExist: true,
+			IsDir:   false,
+			Size:    int64(len(content)),
+			Mode:    mode,
+			ModTime: time.Now(),
+		}
 		return nil
 	}
 	mc.MkdirFunc = func(ctx context.Context, path string, perm string) error {
 		if mc.mockFs == nil { mc.mockFs = make(map[string]*connector.FileStat) }
-		mc.mockFs[path] = &connector.FileStat{Name: path, IsExist: true, IsDir: true}
+		mode := os.FileMode(0755) // Default for mkdir
+		if perm != "" {
+			// strconv is needed here
+			parsedPerm, err := strconv.ParseUint(perm, 8, 32)
+			if err == nil {
+				mode = os.FileMode(parsedPerm)
+			}
+		}
+		mc.mockFs[path] = &connector.FileStat{Name: path, IsExist: true, IsDir: true, Mode: mode, ModTime: time.Now()}
 		return nil
 	}
 	mc.RemoveFunc = func(ctx context.Context, path string, opts connector.RemoveOptions) error {
@@ -238,9 +263,9 @@ func (m *MockConnector) ReadFile(ctx context.Context, path string) ([]byte, erro
 }
 
 // WriteFile implements the Connector interface.
-func (m *MockConnector) WriteFile(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error {
+func (m *MockConnector) WriteFile(ctx context.Context, content []byte, destPath string, options *connector.FileTransferOptions) error {
 	if m.WriteFileFunc != nil {
-		return m.WriteFileFunc(ctx, content, destPath, permissions, sudo)
+		return m.WriteFileFunc(ctx, content, destPath, options)
 	}
 	return fmt.Errorf("WriteFileFunc not implemented in mock")
 }
