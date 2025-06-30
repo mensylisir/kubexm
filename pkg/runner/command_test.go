@@ -240,3 +240,269 @@ func TestRunner_RunWithOptions_Success(t *testing.T) {
 		t.Errorf("RunWithOptions() stdout = %q, want %q", string(stdout), expectedStdout)
 	}
 }
+
+func TestRunner_RunInBackground_Success_NohupFound(t *testing.T) {
+	r, mockConn := newTestRunnerForCommand(t)
+	testCmd := "sleep 10"
+
+	mockConn.LookPathFunc = func(ctx context.Context, file string) (string, error) {
+		if file == "nohup" {
+			return "/usr/bin/nohup", nil
+		}
+		return "", fmt.Errorf("unexpected LookPath call for %s", file)
+	}
+
+	var executedBgCmd string
+	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
+		executedBgCmd = cmd
+		if !strings.HasPrefix(cmd, "/usr/bin/nohup sh -c 'sleep 10' > /dev/null 2>&1 &") {
+			t.Errorf("RunInBackground command structure incorrect, got: %s", cmd)
+		}
+		if options.Sudo { // Assuming sudo false for this test case
+			t.Error("RunInBackground expected sudo false for this test")
+		}
+		return nil, nil, nil
+	}
+
+	err := r.RunInBackground(context.Background(), mockConn, testCmd, false)
+	if err != nil {
+		t.Fatalf("RunInBackground() error = %v", err)
+	}
+	if executedBgCmd == "" {
+		t.Error("ExecFunc was not called by RunInBackground")
+	}
+}
+
+func TestRunner_RunInBackground_Success_NohupNotFound(t *testing.T) {
+	r, mockConn := newTestRunnerForCommand(t)
+	testCmd := "my_daemon -d"
+
+	mockConn.LookPathFunc = func(ctx context.Context, file string) (string, error) {
+		if file == "nohup" {
+			return "", errors.New("nohup not found")
+		}
+		// Allow other lookups if any were part of a more complex default runner setup
+		return "/usr/bin/"+file, nil // Default for other tools
+	}
+
+	var executedBgCmd string
+	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
+		executedBgCmd = cmd
+		// Expected: sh -c 'my_daemon -d > /dev/null 2>&1 &' (note the space at the end from current impl)
+		expectedPrefix := "sh -c 'my_daemon -d > /dev/null 2>&1 &' "
+		if !strings.HasPrefix(cmd, expectedPrefix) {
+			t.Errorf("RunInBackground command without nohup structure incorrect, got: %q, want prefix %q", cmd, expectedPrefix)
+		}
+		if !options.Sudo { // Assuming sudo true for this test case
+			t.Error("RunInBackground expected sudo true for this test")
+		}
+		return nil, nil, nil
+	}
+
+	err := r.RunInBackground(context.Background(), mockConn, testCmd, true) // Sudo true
+	if err != nil {
+		t.Fatalf("RunInBackground() without nohup error = %v", err)
+	}
+	if executedBgCmd == "" {
+		t.Error("ExecFunc was not called by RunInBackground when nohup not found")
+	}
+}
+
+func TestRunner_RunInBackground_CmdEmpty(t *testing.T) {
+	r, mockConn := newTestRunnerForCommand(t)
+	err := r.RunInBackground(context.Background(), mockConn, " ", false)
+	if err == nil {
+		t.Fatal("RunInBackground() with empty command expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "command cannot be empty") {
+		t.Errorf("Error message mismatch: got %v", err)
+	}
+}
+
+func TestRunner_RunInBackground_LaunchError(t *testing.T) {
+	r, mockConn := newTestRunnerForCommand(t)
+	mockConn.LookPathFunc = func(ctx context.Context, file string) (string, error) { return "/usr/bin/"+file, nil} // Assume nohup found
+
+	expectedErr := errors.New("failed to launch")
+	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
+		return nil, []byte("launch stderr"), expectedErr
+	}
+
+	err := r.RunInBackground(context.Background(), mockConn, "any_cmd", false)
+	if err == nil {
+		t.Fatal("RunInBackground() expected error on launch failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to launch command") || !strings.Contains(err.Error(), "launch stderr") {
+		t.Errorf("Error message from RunInBackground did not contain expected parts: %v", err)
+	}
+}
+
+
+func TestRunner_RunRetry_SuccessOnFirstAttempt(t *testing.T) {
+	r, mockConn := newTestRunnerForCommand(t)
+	expectedOutput := "success"
+	var execCount int
+
+	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
+		execCount++
+		return []byte(expectedOutput), nil, nil
+	}
+
+	out, err := r.RunRetry(context.Background(), mockConn, "test_cmd", false, 3, 1*time.Millisecond)
+	if err != nil {
+		t.Fatalf("RunRetry() error = %v", err)
+	}
+	if out != expectedOutput {
+		t.Errorf("RunRetry() output = %q, want %q", out, expectedOutput)
+	}
+	if execCount != 1 {
+		t.Errorf("RunRetry() expected 1 execution, got %d", execCount)
+	}
+}
+
+func TestRunner_RunRetry_SuccessOnThirdAttempt(t *testing.T) {
+	r, mockConn := newTestRunnerForCommand(t)
+	expectedOutput := "success on 3rd"
+	var execCount int
+
+	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
+		execCount++
+		if execCount < 3 {
+			return []byte("fail output"), nil, errors.New("simulated failure")
+		}
+		return []byte(expectedOutput), nil, nil // Success on 3rd attempt
+	}
+
+	out, err := r.RunRetry(context.Background(), mockConn, "test_cmd_retries", true, 2, 1*time.Millisecond) // 1 initial + 2 retries = 3 attempts
+	if err != nil {
+		t.Fatalf("RunRetry() error = %v", err)
+	}
+	if out != expectedOutput {
+		t.Errorf("RunRetry() output = %q, want %q", out, expectedOutput)
+	}
+	if execCount != 3 {
+		t.Errorf("RunRetry() expected 3 executions, got %d", execCount)
+	}
+}
+
+func TestRunner_RunRetry_AllAttemptsFail(t *testing.T) {
+	r, mockConn := newTestRunnerForCommand(t)
+	var execCount int
+	finalError := errors.New("final failure")
+
+	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
+		execCount++
+		if execCount == 3 { // Total 3 attempts (1 initial + 2 retries)
+			return []byte("last fail output"), nil, finalError
+		}
+		return []byte("intermediate fail"), nil, errors.New("intermediate failure")
+	}
+
+	out, err := r.RunRetry(context.Background(), mockConn, "failing_cmd_always", false, 2, 1*time.Millisecond)
+	if err == nil {
+		t.Fatal("RunRetry() expected error after all attempts fail, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed after 3 attempts") {
+		t.Errorf("Error message missing attempt count: %v", err)
+	}
+	if !errors.Is(err, finalError) { // Check if the last error is wrapped
+		t.Errorf("RunRetry() error should wrap the last execution error. Got: %v, want wrapped: %v", err, finalError)
+	}
+	if execCount != 3 {
+		t.Errorf("RunRetry() expected 3 executions, got %d", execCount)
+	}
+	if !strings.Contains(out, "last fail output") {
+		t.Errorf("RunRetry() output on failure = %q, expected to contain last failure output", out)
+	}
+}
+
+func TestRunner_RunRetry_ContextCancelledDuringDelay(t *testing.T) {
+	r, mockConn := newTestRunnerForCommand(t)
+	var execCount int
+	cancelCtx, cancel := context.WithCancel(context.Background())
+
+	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
+		execCount++
+		// Simulate a delay that would allow cancellation
+		if execCount == 1 { // First attempt fails
+			go func() {
+				time.Sleep(50 * time.Millisecond) // Ensure delay in RunRetry is hit
+				cancel()
+			}()
+			return nil, nil, errors.New("first attempt failure")
+		}
+		return nil, nil, errors.New("should not reach further attempts")
+	}
+
+	_, err := r.RunRetry(cancelCtx, mockConn, "cmd_cancel_delay", false, 3, 200*time.Millisecond) // Long delay
+	if err == nil {
+		t.Fatal("RunRetry() expected error due to context cancellation, got nil")
+	}
+	if !errors.Is(err, context.Canceled) && !strings.Contains(err.Error(), "context cancelled during delay") {
+		t.Errorf("RunRetry() error = %v, expected context.Canceled or specific message", err)
+	}
+	if execCount != 1 { // Should only try once before context is cancelled during delay
+		t.Errorf("RunRetry() expected 1 execution before cancellation, got %d", execCount)
+	}
+}
+
+func TestRunner_RunRetry_ContextCancelledDuringExecution(t *testing.T) {
+	r, mockConn := newTestRunnerForCommand(t)
+	cancelCtx, cancel := context.WithCancel(context.Background())
+	var execCount int
+
+	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
+		execCount++
+		if execCount == 1 { // First attempt
+			// Simulate work then cancellation
+			time.Sleep(10 * time.Millisecond) // some work
+			cancel() // Cancel context during the (mocked) execution of r.Run
+			return nil, nil, ctx.Err() // Return context error as r.Run might
+		}
+		return nil, nil, errors.New("should not be reached")
+	}
+
+	_, err := r.RunRetry(cancelCtx, mockConn, "cmd_cancel_exec", false, 1, 10*time.Millisecond)
+	if err == nil {
+		t.Fatal("RunRetry() expected error due to context cancellation during exec, got nil")
+	}
+
+	// The error from r.Run (which is ctx.Err()) will be wrapped by RunRetry's message
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("RunRetry() error should wrap context.Canceled. Got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "failed after 1 attempts") && !strings.Contains(err.Error(), "context cancelled before command") {
+		// The exact error message depends on when ctx.Done() is checked vs when r.Run returns.
+		// If r.Run itself returns ctx.Err(), then RunRetry will wrap that.
+		// If ctx.Done() is caught by the select before r.Run, a different message is formed.
+		// Both indicate cancellation.
+		t.Logf("RunRetry error: %v (execCount: %d)", err, execCount)
+	}
+
+	if execCount != 1 {
+		t.Errorf("RunRetry() expected 1 execution attempt, got %d", execCount)
+	}
+}
+
+
+func TestRunner_RunRetry_NoRetriesNegativeInput(t *testing.T) {
+	r, mockConn := newTestRunnerForCommand(t)
+	expectedOutput := "success"
+	var execCount int
+
+	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
+		execCount++
+		return []byte(expectedOutput), nil, nil
+	}
+
+	out, err := r.RunRetry(context.Background(), mockConn, "test_cmd_neg_retry", false, -5, 1*time.Millisecond)
+	if err != nil {
+		t.Fatalf("RunRetry() with negative retries error = %v", err)
+	}
+	if out != expectedOutput {
+		t.Errorf("RunRetry() output = %q, want %q", out, expectedOutput)
+	}
+	if execCount != 1 { // Should default to 0 retries (1 attempt)
+		t.Errorf("RunRetry() with negative retries expected 1 execution, got %d", execCount)
+	}
+}
