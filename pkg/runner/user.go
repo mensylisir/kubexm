@@ -333,3 +333,89 @@ func (r *defaultRunner) ConfigureSudoer(ctx context.Context, conn connector.Conn
 
 	return nil // Temp file is removed by mv, or by defer if mv fails before that.
 }
+
+// SetUserPassword sets a user's password using a pre-hashed value.
+// The hashedPassword must be in the format expected by `chpasswd` (e.g., SHA512 crypt string).
+func (r *defaultRunner) SetUserPassword(ctx context.Context, conn connector.Connector, username, hashedPassword string) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil for SetUserPassword")
+	}
+	if strings.TrimSpace(username) == "" {
+		return fmt.Errorf("username cannot be empty for SetUserPassword")
+	}
+	if strings.TrimSpace(hashedPassword) == "" {
+		return fmt.Errorf("hashedPassword cannot be empty for SetUserPassword")
+	}
+
+	exists, err := r.UserExists(ctx, conn, username)
+	if err != nil {
+		return fmt.Errorf("failed to check if user %s exists before setting password: %w", username, err)
+	}
+	if !exists {
+		return fmt.Errorf("user %s does not exist, cannot set password", username)
+	}
+
+	// Construct the input for chpasswd
+	chpasswdInput := fmt.Sprintf("%s:%s", username, hashedPassword)
+	// Escape the input for the echo command to handle special characters in username or hash safely
+	escapedInput := shellEscape(chpasswdInput) // shellEscape is from file.go
+
+	// Command: echo 'username:hashed_password' | chpasswd
+	// The sudo applies to chpasswd.
+	cmd := fmt.Sprintf("echo %s | chpasswd", escapedInput)
+
+
+	opts := &connector.ExecOptions{
+		Sudo:   true,
+		Hidden: true, // Hide this command from logs as it contains password info (even if hashed)
+	}
+
+	_, stderr, execErr := r.RunWithOptions(ctx, conn, cmd, opts)
+	if execErr != nil {
+		return fmt.Errorf("failed to set password for user %s using chpasswd: %w (stderr: %s)", username, execErr, string(stderr))
+	}
+	return nil
+}
+
+// GetUserInfo retrieves detailed information about a user.
+func (r *defaultRunner) GetUserInfo(ctx context.Context, conn connector.Connector, username string) (*UserInfo, error) {
+	if conn == nil {
+		return nil, fmt.Errorf("connector cannot be nil for GetUserInfo")
+	}
+	if strings.TrimSpace(username) == "" {
+		return nil, fmt.Errorf("username cannot be empty for GetUserInfo")
+	}
+
+	exists, err := r.UserExists(ctx, conn, username)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check if user %s exists: %w", username, err)
+	}
+	if !exists {
+		return nil, fmt.Errorf("user %s does not exist", username)
+	}
+
+	info := &UserInfo{Username: username}
+
+	uidStr, err := r.Run(ctx, conn, fmt.Sprintf("id -u %s", username), false)
+	if err != nil { return nil, fmt.Errorf("failed to get UID for user %s: %w", username, err) }
+	info.UID = strings.TrimSpace(uidStr)
+
+	gidStr, err := r.Run(ctx, conn, fmt.Sprintf("id -g %s", username), false)
+	if err != nil { return nil, fmt.Errorf("failed to get GID for user %s: %w", username, err) }
+	info.GID = strings.TrimSpace(gidStr)
+
+	getentOut, err := r.Run(ctx, conn, fmt.Sprintf("getent passwd %s", username), false)
+	if err != nil { return nil, fmt.Errorf("failed to get passwd entry for user %s: %w", username, err) }
+	passwdFields := strings.Split(strings.TrimSpace(getentOut), ":")
+	if len(passwdFields) >= 7 {
+		info.Comment = passwdFields[4]
+		info.HomeDir = passwdFields[5]
+		info.Shell = passwdFields[6]
+	} else { return nil, fmt.Errorf("unexpected format from 'getent passwd %s': %s", username, getentOut) }
+
+	groupsStr, err := r.Run(ctx, conn, fmt.Sprintf("id -Gn %s", username), false)
+	if err != nil { return nil, fmt.Errorf("failed to get group names for user %s using 'id -Gn': %w", username, err) }
+	info.Groups = strings.Fields(strings.TrimSpace(groupsStr))
+
+	return info, nil
+}

@@ -140,3 +140,62 @@ func TestRunner_Render_NilTemplate(t *testing.T) {
 		t.Errorf("Error message mismatch: got %v, want to contain 'template cannot be nil'", errRender)
 	}
 }
+
+func TestRunner_RenderToString_Success(t *testing.T) {
+	r, _ := newTestRunnerForTemplate(t) // Connector not used by RenderToString
+
+	tmplString := "Hello {{.Name}} from {{.Location}}!"
+	tmpl, err := template.New("testRenderStrTmpl").Parse(tmplString)
+	if err != nil {
+		t.Fatalf("Failed to parse template: %v", err)
+	}
+
+	data := struct {
+		Name     string
+		Location string
+	}{
+		Name:     "Stringer",
+		Location: "GoTest",
+	}
+	expectedRenderedContent := "Hello Stringer from GoTest!"
+
+	renderedStr, err := r.RenderToString(context.Background(), tmpl, data)
+	if err != nil {
+		t.Fatalf("RenderToString() error = %v", err)
+	}
+
+	if renderedStr != expectedRenderedContent {
+		t.Errorf("RenderToString() output = %q, want %q", renderedStr, expectedRenderedContent)
+	}
+}
+
+func TestRunner_RenderToString_TemplateExecuteError(t *testing.T) {
+	r, _ := newTestRunnerForTemplate(t)
+
+	tmplString := "Hello {{.NonExistentField}}"
+	tmpl, err := template.New("errorRenderStrTmpl").Parse(tmplString)
+	if err != nil {
+		t.Fatalf("Failed to parse template: %v", err)
+	}
+
+	data := struct{ Name string }{Name: "Test"}
+
+	_, err = r.RenderToString(context.Background(), tmpl, data)
+	if err == nil {
+		t.Fatal("RenderToString() with template execution error expected an error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to execute template for RenderToString") {
+		t.Errorf("RenderToString() error message = %q, expected to contain 'failed to execute template for RenderToString'", err.Error())
+	}
+}
+
+func TestRunner_RenderToString_NilTemplate(t *testing.T) {
+	r, _ := newTestRunnerForTemplate(t)
+	_, errRender := r.RenderToString(context.Background(), nil, nil)
+	if errRender == nil {
+		t.Fatal("RenderToString() with nil template expected error, got nil")
+	}
+	if !strings.Contains(errRender.Error(), "template cannot be nil for RenderToString") {
+		t.Errorf("Error message mismatch: got %v, want to contain 'template cannot be nil for RenderToString'", errRender)
+	}
+}

@@ -109,6 +109,8 @@ type Runner interface {
 	IsMounted(ctx context.Context, conn connector.Connector, path string) (bool, error)
 	MakeFilesystem(ctx context.Context, conn connector.Connector, device, fsType string, force bool) error
 	CreateSymlink(ctx context.Context, conn connector.Connector, target, linkPath string, sudo bool) error
+	GetDiskUsage(ctx context.Context, conn connector.Connector, path string) (total uint64, free uint64, used uint64, err error)
+	TouchFile(ctx context.Context, conn connector.Connector, path string, sudo bool) error
 
 	// --- Networking ---
 	DisableFirewall(ctx context.Context, conn connector.Connector, facts *Facts) error
@@ -117,10 +119,13 @@ type Runner interface {
 	// --- User & Permissions ---
 	ModifyUser(ctx context.Context, conn connector.Connector, username string, modifications UserModifications) error
 	ConfigureSudoer(ctx context.Context, conn connector.Connector, sudoerName, content string) error
+	SetUserPassword(ctx context.Context, conn connector.Connector, username, hashedPassword string) error
+	GetUserInfo(ctx context.Context, conn connector.Connector, username string) (*UserInfo, error)
 
 	// --- High-Level ---
 	DeployAndEnableService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName, configContent, configPath, permissions string, templateData interface{}) error
 	Reboot(ctx context.Context, conn connector.Connector, timeout time.Duration) error
+	RenderToString(ctx context.Context, tmpl *template.Template, data interface{}) (string, error) // Different from Render, no conn/destPath
 }
 
 // UserModifications defines the set of attributes that can be changed for a user.
@@ -135,4 +140,15 @@ type UserModifications struct {
 	NewHomeDir          *string  // New home directory path (-d HOME_DIR)
 	MoveHomeDirContents bool     // If NewHomeDir is set, move contents from old home to new home (requires -m flag with -d)
 	NewComment          *string  // New GECOS comment field (-c COMMENT)
+}
+
+// UserInfo holds detailed information about a user.
+type UserInfo struct {
+	Username string
+	UID      string
+	GID      string
+	Comment  string   // GECOS field
+	HomeDir  string
+	Shell    string
+	Groups   []string // List of group names the user belongs to
 }

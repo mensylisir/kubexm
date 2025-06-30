@@ -520,6 +520,252 @@ func isExecCmdForFactsInUserTest(cmd string) bool {
 	return false
 }
 
+func TestRunner_SetUserPassword(t *testing.T) {
+	ctx := context.Background()
+	username := "testuser"
+	hashedPassword := "$6$rounds=4096$usesomesalt$somesha512cryptstring" // Example
+
+	tests := []struct {
+		name             string
+		username         string
+		hashedPassword   string
+		mockUserExists   bool
+		mockChpasswdErr  error
+		expectError      bool
+		errorMsgContains string
+	}{
+		{
+			name:           "success",
+			username:       username,
+			hashedPassword: hashedPassword,
+			mockUserExists: true,
+		},
+		{
+			name:             "user_not_exists",
+			username:         "nosuchuser",
+			hashedPassword:   hashedPassword,
+			mockUserExists:   false,
+			expectError:      true,
+			errorMsgContains: "user nosuchuser does not exist",
+		},
+		{
+			name:             "chpasswd_fails",
+			username:         username,
+			hashedPassword:   hashedPassword,
+			mockUserExists:   true,
+			mockChpasswdErr:  errors.New("chpasswd execution failed"),
+			expectError:      true,
+			errorMsgContains: "failed to set password",
+		},
+		{
+			name:             "empty_username",
+			username:         " ",
+			hashedPassword:   hashedPassword,
+			expectError:      true,
+			errorMsgContains: "username cannot be empty",
+		},
+		{
+			name:             "empty_password",
+			username:         username,
+			hashedPassword:   " ",
+			expectError:      true,
+			errorMsgContains: "hashedPassword cannot be empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, mockConn := newTestRunnerForUser(t)
+			var chpasswdCmdExecuted string
+
+			mockConn.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
+				if cmd == fmt.Sprintf("id -u %s", tt.username) {
+					if tt.mockUserExists { return nil, nil, nil }
+					return nil, nil, &connector.CommandError{ExitCode: 1}
+				}
+				// Expect: echo 'user:hash' | chpasswd
+				if strings.HasPrefix(cmd, "echo ") && strings.Contains(cmd, "| chpasswd") && opts.Sudo && opts.Hidden {
+					chpasswdCmdExecuted = cmd
+					return nil, nil, tt.mockChpasswdErr
+				}
+				if isExecCmdForFactsInUserTest(cmd) { return []byte("dummy"),nil,nil}
+				return nil, nil, fmt.Errorf("SetUserPassword test: unexpected command %q", cmd)
+			}
+
+			err := r.SetUserPassword(ctx, mockConn, tt.username, tt.hashedPassword)
+
+			if tt.expectError {
+				if err == nil { t.Fatalf("Expected error containing %q, got nil", tt.errorMsgContains) }
+				if !strings.Contains(err.Error(), tt.errorMsgContains) { t.Errorf("Error message %q does not contain %q", err.Error(), tt.errorMsgContains) }
+			} else if err != nil {
+				t.Fatalf("Did not expect error, got %v", err)
+			}
+
+			if !tt.expectError && tt.username != " " && tt.hashedPassword != " " && tt.mockUserExists {
+				expectedCmdPart := fmt.Sprintf("echo %s | chpasswd", shellEscape(fmt.Sprintf("%s:%s", tt.username, tt.hashedPassword)))
+				if chpasswdCmdExecuted != expectedCmdPart {
+					// This check needs to be exact or use strings.Contains if other parts might vary (e.g. sudo path)
+					t.Errorf("Expected command %q, got %q", expectedCmdPart, chpasswdCmdExecuted)
+				}
+			}
+		})
+	}
+}
+
+func TestRunner_GetUserInfo(t *testing.T) {
+	ctx := context.Background()
+	username := "testuser"
+
+	tests := []struct {
+		name              string
+		username          string
+		mockUserExists    bool
+		mockUIDCmdOutput  string
+		mockUserExistsErr error  // New field: For testing errors from the UserExists check itself
+		mockUIDCmdErr     error
+		mockGIDCmdOutput  string
+		mockGIDCmdErr     error
+		mockGetentOutput  string
+		mockGetentErr     error
+		mockGroupsOutput  string
+		mockGroupsErr     error
+		expectedInfo      *UserInfo
+		expectError       bool
+		errorMsgContains  string
+	}{
+		{
+			name:             "success",
+			username:         username,
+			mockUserExists:   true,
+			mockUIDCmdOutput: "1001\n",
+			mockGIDCmdOutput: "1002\n",
+			mockGetentOutput: "testuser:x:1001:1002:Test User:/home/testuser:/bin/bash",
+			mockGroupsOutput: "testuser wheel admin\n",
+			expectedInfo: &UserInfo{
+				Username: username, UID: "1001", GID: "1002",
+				Comment: "Test User", HomeDir: "/home/testuser", Shell: "/bin/bash",
+				Groups: []string{"testuser", "wheel", "admin"},
+			},
+		},
+		{
+			name:             "user_not_exists",
+			username:         "nosuchuser",
+			mockUserExists:   false,
+			expectError:      true,
+			errorMsgContains: "user nosuchuser does not exist",
+		},
+		{
+			name:             "uid_command_fails",
+			username:         username,
+			mockUserExists:   true,
+			mockUIDCmdErr:    errors.New("id -u failed"),
+			expectError:      true,
+			errorMsgContains: "failed to get UID",
+		},
+		{
+			name:             "getent_malformed",
+			username:         username,
+			mockUserExists:   true,
+			mockUIDCmdOutput: "1001", mockGIDCmdOutput: "1002",
+			mockGetentOutput: "short:output", // Malformed
+			expectError:      true,
+			errorMsgContains: "unexpected format from 'getent passwd",
+		},
+		{
+			name:             "groups_command_fails",
+			username:         username,
+			mockUserExists:   true,
+			mockUIDCmdOutput: "1001", mockGIDCmdOutput: "1002",
+			mockGetentOutput: "testuser:x:1001:1002::/home/testuser:/bin/bash",
+			mockGroupsErr:    errors.New("id -Gn failed"),
+			expectError:      true,
+			errorMsgContains: "failed to get group names",
+		},
+		{
+			name:             "user_exists_check_fails",
+			username:         username,
+			mockUserExistsErr: errors.New("failed to run id cmd for UserExists"), // Error from UserExists call
+			mockUserExists:   true, // This won't be reached if mockUserExistsErr is set
+			expectError:      true,
+			errorMsgContains: "failed to check if user testuser exists",
+		},
+		{
+			name:             "empty_username",
+			username:         " ",
+			expectError:      true,
+			errorMsgContains: "username cannot be empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, mockConn := newTestRunnerForUser(t)
+			var idUserCallCount int // To differentiate calls to "id -u"
+
+			mockConn.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
+				if cmd == fmt.Sprintf("id -u %s", tt.username) {
+					idUserCallCount++
+					if idUserCallCount == 1 { // First call is from UserExists
+						if tt.mockUserExistsErr != nil { // If UserExists itself should error out
+							return nil, nil, tt.mockUserExistsErr
+						}
+						if tt.mockUserExists { // UserExists check should succeed or fail based on this
+							return []byte(tt.mockUIDCmdOutput), nil, nil // Success for UserExists
+						}
+						return nil, nil, &connector.CommandError{ExitCode: 1} // User not found for UserExists
+					}
+					// Subsequent calls (e.g., the direct UID fetch in GetUserInfo)
+					return []byte(tt.mockUIDCmdOutput), nil, tt.mockUIDCmdErr
+				}
+				if cmd == fmt.Sprintf("id -g %s", tt.username) {
+					return []byte(tt.mockGIDCmdOutput), nil, tt.mockGIDCmdErr
+				}
+				if cmd == fmt.Sprintf("getent passwd %s", tt.username) {
+					return []byte(tt.mockGetentOutput), nil, tt.mockGetentErr
+				}
+				if cmd == fmt.Sprintf("id -Gn %s", tt.username) {
+					return []byte(tt.mockGroupsOutput), nil, tt.mockGroupsErr
+				}
+				// Allow fact gathering commands from newTestRunnerForUser
+				if isExecCmdForFactsInUserTest(cmd) { return []byte("dummy"), nil, nil }
+				return nil, nil, fmt.Errorf("GetUserInfo test: unexpected command %q", cmd)
+			}
+
+			info, err := r.GetUserInfo(ctx, mockConn, tt.username)
+
+			if tt.expectError {
+				if err == nil { t.Fatalf("Expected error containing %q, got nil", tt.errorMsgContains) }
+				if !strings.Contains(err.Error(), tt.errorMsgContains) { t.Errorf("Error message %q does not contain %q", err.Error(), tt.errorMsgContains) }
+			} else if err != nil {
+				t.Fatalf("Did not expect error, got %v", err)
+			}
+
+			if tt.expectedInfo != nil {
+				if info == nil {
+					t.Fatalf("Expected info %+v, got nil", *tt.expectedInfo)
+				}
+				if info.Username != tt.expectedInfo.Username { t.Errorf("Username mismatch: got %s, want %s", info.Username, tt.expectedInfo.Username) }
+				if info.UID != tt.expectedInfo.UID { t.Errorf("UID mismatch: got %s, want %s", info.UID, tt.expectedInfo.UID) }
+				if info.GID != tt.expectedInfo.GID { t.Errorf("GID mismatch: got %s, want %s", info.GID, tt.expectedInfo.GID) }
+				if info.Comment != tt.expectedInfo.Comment { t.Errorf("Comment mismatch: got %s, want %s", info.Comment, tt.expectedInfo.Comment) }
+				if info.HomeDir != tt.expectedInfo.HomeDir { t.Errorf("HomeDir mismatch: got %s, want %s", info.HomeDir, tt.expectedInfo.HomeDir) }
+				if info.Shell != tt.expectedInfo.Shell { t.Errorf("Shell mismatch: got %s, want %s", info.Shell, tt.expectedInfo.Shell) }
+				if len(info.Groups) != len(tt.expectedInfo.Groups) {
+					t.Errorf("Groups count mismatch: got %v, want %v", info.Groups, tt.expectedInfo.Groups)
+				} else {
+					for i_g := range tt.expectedInfo.Groups {
+						if info.Groups[i_g] != tt.expectedInfo.Groups[i_g] {
+							t.Errorf("Groups mismatch at index %d: got %s, want %s (full: got %v, want %v)", i_g, info.Groups[i_g], tt.expectedInfo.Groups[i_g], info.Groups, tt.expectedInfo.Groups)
+						}
+					}
+				}
+			} else if info != nil && !tt.expectError {
+				t.Errorf("Expected nil info, got %+v", *info)
+			}
+		})
+	}
+}
+
 func TestRunner_ConfigureSudoer(t *testing.T) {
 	ctx := context.Background()
 	sudoerName := "test_sudoer_config"
