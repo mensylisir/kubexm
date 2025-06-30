@@ -124,12 +124,9 @@ func (l *LocalConnector) Exec(ctx context.Context, cmd string, options *ExecOpti
 
 		finalErr = err // Store the last error
 
-		// Don't retry if the context was cancelled (e.g., main context or attempt-specific timeout).
-		// Check attemptCtx.Err() for attempt-specific timeout, and ctx.Err() for overall context cancellation.
-		if attemptCtx.Err() != nil || (ctx.Err() != nil && ctx.Err() != context.Canceled && ctx.Err() != context.DeadlineExceeded) { // Check if the specific attempt timed out or main context done
-			// If main context (ctx) is done, and it's not due to cancellation that might be part of a graceful shutdown, break.
-			// This logic ensures that if the *overall* context is done (e.g. application shutting down), we don't keep retrying.
-			// If only the *attemptCtx* is done (timeout for this specific try), that's also a reason to break if not successful.
+		// Don't retry if the context for the attempt was cancelled (e.g., attempt-specific timeout)
+		// or if the overall context is done.
+		if attemptCtx.Err() != nil || ctx.Err() != nil {
 			break
 		}
 
@@ -504,84 +501,47 @@ func (l *LocalConnector) ReadFile(ctx context.Context, path string) ([]byte, err
 }
 
 // WriteFile writes content to a destination file, with sudo support.
-func (l *LocalConnector) WriteFile(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error {
-	if sudo {
+func (l *LocalConnector) WriteFile(ctx context.Context, content []byte, destPath string, options *FileTransferOptions) error {
+	opts := FileTransferOptions{}
+	if options != nil {
+		opts = *options
+	}
+
+	// Apply timeout to the entire WriteFile operation if specified
+	var cancel context.CancelFunc
+	if opts.Timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
+		defer cancel() // Ensure cancel is called to free resources
+	}
+
+	if opts.Sudo {
 		if runtime.GOOS == "windows" {
 			return fmt.Errorf("sudo write not supported on Windows for path %s", destPath)
 		}
-		// Ensure destination directory exists using sudo mkdir -p
-		// This is important if destPath is in a directory that requires sudo to create.
+
 		destDir := filepath.Dir(destPath)
-		if destDir != "." && destDir != "/" {
-			// We use l.Exec for this to handle sudo password if needed.
-			// The command `mkdir -p` is generally safe and idempotent.
-			// We don't capture stdout/stderr here as it's usually not problematic for mkdir.
-			// A dedicated timeout for this operation might be too granular; it uses the parent context.
+		if destDir != "." && destDir != "/" && destDir != "" {
 			mkdirCmd := fmt.Sprintf("mkdir -p %s", shellEscape(destDir))
-			_, _, err := l.Exec(ctx, mkdirCmd, &ExecOptions{Sudo: true})
+			_, stderr, err := l.Exec(ctx, mkdirCmd, &ExecOptions{Sudo: true})
 			if err != nil {
-				// If mkdir fails (e.g. permission denied even with sudo, which is unlikely for mkdir -p but possible),
-				// wrap the error.
-				return fmt.Errorf("failed to create parent directory %s with sudo: %w", destDir, err)
+				return fmt.Errorf("failed to create parent directory %s with sudo: %s (underlying error: %w)", destDir, string(stderr), err)
 			}
 		}
 
-		// Use `tee` to write the file content. `tee` writes to the file and also to stdout.
-		// We redirect tee's stdout to /dev/null as we only care about the file write.
-		// Removed unused 'cmd' variable below. finalCmdStr is used for the actual command.
-
-		// We need to pass the content as stdin to the command.
-		// The Exec method already handles sudo password input if `l.connCfg.Password` is set
-		// and the command string starts with `sudo -S`.
-		// We'll construct the ExecOptions to provide the content via a custom Stream
-		// or by modifying Exec to accept an io.Reader for Stdin if that becomes cleaner.
-		// For now, Exec options for sudo password handling should cover this if cmd is `sudo -S tee ...`
-		// Let's adjust the cmd string directly for `sudo -S` if password is set.
-		// Removed unused fullCmdString and execOpts from here, as direct exec.CommandContext is used below.
-
-		// If a password is configured, Exec will prepend "sudo -S -p '' -E -- "
-		// and provide the password via stdin.
-		// The `tee` command itself doesn't need -S, it's `sudo` that does.
-		// The `l.Exec` method should correctly form the `sudo -S ... tee ...` command.
-
-		// We need to ensure the content is passed to `tee`'s stdin.
-		// The current `Exec` function passes `l.connCfg.Password` to `sudo -S`.
-		// It does not have a generic way to pass arbitrary data to the command's stdin *after* the password.
-		// This is a limitation.
-		// For `sudo tee`, `sudo` reads password, then `tee` reads from its stdin (which is now the original stdin).
-
-		// Simplest way with current Exec:
-		// 1. If password, `sudo -S -p '' tee ...` -> password from `l.connCfg.Password`
-		// 2. `tee` needs `content` from its stdin.
-		// This requires `Exec` to handle `Stdin` more flexibly.
-		// The example solution directly calls `exec.CommandContext` in `WriteFile` for sudo.
-		// Let's follow that pattern for directness here, as it avoids modifying Exec's Stdin general logic for now.
-
 		shell := []string{"/bin/sh", "-c"}
-		// `sudo -S -p '' -E -- tee /path > /dev/null`
-		// The password will be `l.connCfg.Password + "\n"`
-		// The content will be after that. This is WRONG. `sudo -S` consumes the password, then `tee` gets the rest.
-		// So, `actualCmd.Stdin` should be `password\ncontent`.
-
-		// The provided solution's `WriteFile` with sudo has a direct `exec.CommandContext` call.
-		// Let's adapt that logic.
-		// Removed unused sudoCmdStr. The finalCmdStr is constructed directly.
-		var actualCmd *exec.Cmd
-		// Note: The `> /dev/null` might be tricky with `exec.Command` as it's a shell feature.
-		// Better to use `sh -c "sudo ... tee ... > /dev/null"`
-		// Let's refine the command string for `sh -c`.
-
 		var finalCmdStr string
 		var stdinPipe io.Reader
+
 		if l.connCfg.Password != "" {
 			finalCmdStr = fmt.Sprintf("sudo -S -p '' -E -- tee %s > /dev/null", shellEscape(destPath))
+			// Password first, then content for tee
 			stdinPipe = strings.NewReader(l.connCfg.Password + "\n" + string(content))
 		} else {
 			finalCmdStr = fmt.Sprintf("sudo -E -- tee %s > /dev/null", shellEscape(destPath))
 			stdinPipe = bytes.NewReader(content)
 		}
 
-		actualCmd = exec.CommandContext(ctx, shell[0], append(shell[1:], finalCmdStr)...)
+		actualCmd := exec.CommandContext(ctx, shell[0], append(shell[1:], finalCmdStr)...)
 		actualCmd.Stdin = stdinPipe
 
 		var stderrBuf bytes.Buffer
@@ -590,50 +550,28 @@ func (l *LocalConnector) WriteFile(ctx context.Context, content []byte, destPath
 		if err := actualCmd.Run(); err != nil {
 			return fmt.Errorf("failed to write to %s with sudo tee: %s (underlying error: %w)", destPath, stderrBuf.String(), err)
 		}
+		// After tee, apply permissions and ownership using options
+		return l.applySudoPermissions(ctx, destPath, opts)
 
 	} else {
 		// Non-sudo: standard os.WriteFile after creating parent dirs.
-		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil { // Sensible default for MkdirAll
 			return fmt.Errorf("failed to create parent directory for %s: %w", destPath, err)
 		}
 		permMode := fs.FileMode(0644) // Default permission
-		if permissions != "" {
-			permVal, parseErr := strconv.ParseUint(permissions, 8, 32)
+		if opts.Permissions != "" {
+			permVal, parseErr := strconv.ParseUint(opts.Permissions, 8, 32)
 			if parseErr != nil {
-				return fmt.Errorf("invalid permissions format '%s' for local WriteFile to %s: %w", permissions, destPath, parseErr)
+				return fmt.Errorf("invalid permissions format '%s' for local WriteFile to %s: %w", opts.Permissions, destPath, parseErr)
 			}
 			permMode = fs.FileMode(permVal)
 		}
 		if err := os.WriteFile(destPath, content, permMode); err != nil {
 			return fmt.Errorf("failed to write file %s: %w", destPath, err)
 		}
-	}
-
-	// Apply permissions after copy, works for both sudo and non-sudo cases.
-	// For sudo, this assumes the user running the command (even if it's root via sudo)
-	// can chmod. `tee` itself might create the file with root ownership and default (umask-affected) permissions.
-	// A separate `sudo chmod` command is more reliable for setting permissions with sudo.
-	if permissions != "" {
-		permVal, parseErr := strconv.ParseUint(permissions, 8, 32)
-		if parseErr != nil {
-			return fmt.Errorf("invalid permissions format '%s' for %s: %w", permissions, destPath, parseErr)
-		}
-
-		if sudo {
-			// Use l.Exec to run `sudo chmod`
-			chmodCmdStr := fmt.Sprintf("chmod %s %s", permissions, shellEscape(destPath))
-			// Use a short timeout for chmod, or rely on parent context.
-			// For simplicity, using parent context. Sudo is handled by l.Exec.
-			_, stderr, err := l.Exec(ctx, chmodCmdStr, &ExecOptions{Sudo: true})
-			if err != nil {
-				return fmt.Errorf("failed to set permissions with sudo chmod on %s: %s (underlying error: %w)", destPath, string(stderr), err)
-			}
-		} else {
-			// Non-sudo chmod
-			if errChmod := os.Chmod(destPath, os.FileMode(permVal)); errChmod != nil {
-				return fmt.Errorf("failed to set permissions on %s: %w", destPath, errChmod)
-			}
-		}
+		// Non-sudo chown is generally not possible unless running as root.
+		// If Owner/Group are specified for non-sudo, we might log a warning or ignore.
+		// For now, only permissions are applied for non-sudo.
 	}
 	return nil
 }
@@ -686,14 +624,35 @@ func (l *LocalConnector) Remove(ctx context.Context, path string, opts RemoveOpt
 	}
 
 	var removeErr error
-	if opts.Recursive {
-		removeErr = os.RemoveAll(path)
-	} else {
-		removeErr = os.Remove(path)
-	}
+	if opts.Sudo {
+		if runtime.GOOS == "windows" {
+			return fmt.Errorf("sudo remove not supported on Windows for path %s", path)
+		}
+		cmdParts := []string{"rm"}
+		if opts.Recursive {
+			cmdParts = append(cmdParts, "-r")
+		}
+		cmdParts = append(cmdParts, "-f") // Add -f for force, good with IgnoreNotExist
+		cmdParts = append(cmdParts, shellEscape(path))
+		rmCmd := strings.Join(cmdParts, " ")
 
-	if removeErr != nil {
-		return fmt.Errorf("failed to remove %s: %w", path, removeErr)
+		// Use l.Exec to handle sudo and password if necessary.
+		// Timeout for remove can be inherited from ctx or set in ExecOptions if RemoveOptions had it.
+		_, stderr, err := l.Exec(ctx, rmCmd, &ExecOptions{Sudo: true})
+		if err != nil {
+			return fmt.Errorf("failed to remove %s with sudo: %s (underlying error: %w)", path, string(stderr), err)
+		}
+	} else {
+		if opts.Recursive {
+			removeErr = os.RemoveAll(path)
+		} else {
+			removeErr = os.Remove(path)
+		}
+		if removeErr != nil {
+			// For non-sudo, if IgnoreNotExist is true, this error might be filtered by the caller
+			// if the error is os.ErrNotExist. The check at the beginning handles this.
+			return fmt.Errorf("failed to remove %s: %w", path, removeErr)
+		}
 	}
 	return nil
 }

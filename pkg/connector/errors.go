@@ -15,10 +15,12 @@ type CommandError struct {
 func (e *CommandError) Error() string {
 	errMsg := fmt.Sprintf("command '%s' failed with exit code %d", e.Cmd, e.ExitCode)
 	if e.Stderr != "" {
-		errMsg = fmt.Sprintf("%s: %s", errMsg, e.Stderr)
+		errMsg = fmt.Sprintf("%s, stderr: %s", errMsg, e.Stderr)
+	} else {
+		errMsg = fmt.Sprintf("%s (no stderr)", errMsg)
 	}
 	if e.Underlying != nil {
-		errMsg = fmt.Sprintf("%s (underlying error: %v)", errMsg, e.Underlying)
+		errMsg = fmt.Sprintf("%s, underlying error: %v", errMsg, e.Underlying)
 	}
 	return errMsg
 }

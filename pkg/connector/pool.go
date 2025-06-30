@@ -21,8 +21,19 @@ var ErrPoolExhausted = errors.New("connection pool exhausted for key")
 type ManagedConnection struct {
 	client        *ssh.Client
 	bastionClient *ssh.Client // Associated bastion client, if any.
+	poolKey       string      // The key of the pool this connection belongs to.
 	lastUsed      time.Time   // Timestamp of when the connection was last returned to the pool.
 	createdAt     time.Time   // Timestamp of when the connection was created.
+}
+
+// Client returns the underlying *ssh.Client.
+func (mc *ManagedConnection) Client() *ssh.Client {
+	return mc.client
+}
+
+// PoolKey returns the pool key associated with this managed connection.
+func (mc *ManagedConnection) PoolKey() string {
+	return mc.poolKey
 }
 
 // Close closes both the target client and its bastion client.
@@ -179,8 +190,8 @@ func (cp *ConnectionPool) getOrCreateHostPool(poolKey string) *hostConnectionPoo
 }
 
 // Get retrieves an active connection from the pool or creates a new one.
-// It returns the target client and its associated bastion client (if any).
-func (cp *ConnectionPool) Get(ctx context.Context, cfg ConnectionCfg) (*ssh.Client, *ssh.Client, error) {
+// It now returns a *ManagedConnection.
+func (cp *ConnectionPool) Get(ctx context.Context, cfg ConnectionCfg) (*ManagedConnection, error) {
 	poolKey := generatePoolKey(cfg)
 	hcp := cp.getOrCreateHostPool(poolKey)
 
@@ -191,7 +202,6 @@ func (cp *ConnectionPool) Get(ctx context.Context, cfg ConnectionCfg) (*ssh.Clie
 		mc := hcp.idle[0]
 		hcp.idle = hcp.idle[1:] // Dequeue
 
-		// Check for timeouts before the health check
 		stale := false
 		if cp.config.IdleTimeout > 0 && mc.lastUsed.Add(cp.config.IdleTimeout).Before(time.Now()) {
 			stale = true
@@ -202,91 +212,85 @@ func (cp *ConnectionPool) Get(ctx context.Context, cfg ConnectionCfg) (*ssh.Clie
 
 		if stale {
 			mc.Close()
-			// numActive is decremented when a connection is truly discarded,
-			// which happens here if stale, or in Put if unhealthy/pool full.
-			// Since this mc was from idle, it was already counted in numActive.
-			// When it's closed and not returned, numActive should decrease.
-			// This is subtle: numActive tracks (idle + in-use).
-			// If removed from idle and closed, numActive must decrease.
-			// The original new pool.go code didn't decrement numActive here. This is a fix.
 			hcp.numActive--
-			continue // This connection is stale, try the next one
+			continue
 		}
 
 		if mc.IsHealthy() {
 			mc.lastUsed = time.Now()
-			// This connection is now "in-use", it's no longer idle.
-			// numActive already accounts for it.
 			hcp.Unlock()
-			return mc.client, mc.bastionClient, nil
+			return mc, nil
 		}
-		mc.Close() // Close unhealthy connection
-		hcp.numActive-- // Decrement for unhealthy, closed connection
+		mc.Close()
+		hcp.numActive--
 	}
 
-	// If no idle connections are available, check if we can create a new one
 	if hcp.numActive >= cp.config.MaxPerKey {
 		hcp.Unlock()
-		return nil, nil, fmt.Errorf("%w: %s (max %d reached, active %d)", ErrPoolExhausted, poolKey, cp.config.MaxPerKey, hcp.numActive)
+		return nil, fmt.Errorf("%w: %s (max %d reached, active %d)", ErrPoolExhausted, poolKey, cp.config.MaxPerKey, hcp.numActive)
 	}
 
-	// Create a new connection
-	hcp.numActive++ // Increment count for the new connection to be created
-	hcp.Unlock()    // Unlock before dialing
+	hcp.numActive++
+	hcp.Unlock()
 
 	targetClient, bastionClient, err := currentDialer(ctx, cfg, cp.config.ConnectTimeout)
 	if err != nil {
 		hcp.Lock()
-		hcp.numActive-- // Decrement on dialing failure
+		hcp.numActive--
 		hcp.Unlock()
-		return nil, nil, err // err already includes ConnectionError context from dialSSH
+		return nil, err
 	}
 
-	// Return the client and its bastion (if any)
-	// The caller (SSHConnector) will create a ManagedConnection from this when Put is called.
-	// No, Get should return the ManagedConnection, or Put needs to create it.
-	// The new pool.go's Put takes clients, not ManagedConnection.
-	// This means SSHConnector.Close will call pool.Put(cfg, s.client, s.bastionClient, isHealthy)
-	// And pool.Put will then wrap these into a new ManagedConnection.
-	// The createdAt time will be time.Now() in Put, which is not ideal.
-	// For now, sticking to the provided new pool.go structure.
-	return targetClient, bastionClient, nil
+	// Create ManagedConnection for the new connection.
+	mc := &ManagedConnection{
+		client:        targetClient,
+		bastionClient: bastionClient,
+		poolKey:       poolKey, // Set the poolKey
+		lastUsed:      time.Now(), // lastUsed will be updated when Put back
+		createdAt:     time.Now(), // This is the actual creation time
+	}
+	// Note: This new mc is not added to hcp.idle here. It's returned to the caller.
+	// It will be added to idle when/if Put is called.
+	return mc, nil
 }
 
-// Put returns a connection to the pool.
-// bastionClient can be nil if no bastion was used for this connection.
-func (cp *ConnectionPool) Put(cfg ConnectionCfg, client *ssh.Client, bastionClient *ssh.Client, isHealthy bool) {
-	if client == nil {
-		return // Cannot pool a nil client
+// Put returns a ManagedConnection to the pool.
+func (cp *ConnectionPool) Put(mc *ManagedConnection, isHealthy bool) {
+	if mc == nil || mc.client == nil {
+		// If mc is nil or its client is nil, there's nothing to pool or close explicitly here.
+		// If mc exists but mc.client is nil, it implies it was likely already closed or invalid.
+		// If the intention was to decrement numActive for a connection that was taken from pool
+		// but then found to be unusable before even trying to "Put" it back healthy,
+		// that decrement should happen in Get or the calling code should use CloseConnection.
+		return
 	}
-	poolKey := generatePoolKey(cfg)
-	hcp := cp.getOrCreateHostPool(poolKey)
 
-	mc := &ManagedConnection{
-		client:        client,
-		bastionClient: bastionClient,
-		lastUsed:      time.Now(),
-		// createdAt should ideally be when the connection was established.
-		// If Get returns the ManagedConnection, this would be preserved.
-		// Since Get returns clients, Put has to create a new MC.
-		// For connections from Get that were newly dialed, this is accurate enough.
-		// For connections that were retrieved from idle (already an MC), this effectively resets createdAt.
-		// This is a slight imprecision due to Get not returning the MC wrapper.
-		// The provided new pool.go's Get doesn't return MC.
-		createdAt: time.Now(),
+	// mc.poolKey should have been set by Get. If not, something is wrong.
+	if mc.poolKey == "" {
+		// This ManagedConnection doesn't know which pool it belongs to.
+		// This indicates it wasn't properly obtained from this pool's Get method.
+		// The safest action is to just close it to prevent leaks.
+		// We cannot correctly adjust hcp.numActive without the key.
+		mc.Close()
+		// Consider logging this anomaly.
+		// fmt.Fprintf(os.Stderr, "ConnectionPool: Put called with ManagedConnection lacking a poolKey. Connection closed.\n")
+		return
 	}
+
+	hcp := cp.getOrCreateHostPool(mc.poolKey)
 
 	hcp.Lock()
 	defer hcp.Unlock()
 
 	if !isHealthy || len(hcp.idle) >= cp.config.MaxIdlePerKey {
-		mc.Close()      // Close the client and its bastion
-		hcp.numActive-- // This connection is now gone
+		mc.Close()
+		hcp.numActive--
+		if hcp.numActive < 0 { hcp.numActive = 0 } // Ensure numActive doesn't go negative
 		return
 	}
 
-	// Add to idle. numActive remains the same (was in-use, now idle).
-	hcp.idle = append(hcp.idle, mc)
+	mc.lastUsed = time.Now()
+	hcp.idle = append(hcp.idle, mc) // Add to the end (LIFO behavior for Get)
 }
 
 // CloseConnection is called when SSHConnector knows a connection (potentially from the pool)
