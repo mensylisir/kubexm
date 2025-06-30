@@ -21,7 +21,8 @@ import (
 
 func TestConnectionPool_GetPut_BasicReuse_Mocked(t *testing.T) {
 	resetActualDialCount()
-	serverAddr, cleanup := createMockSSHServer(t)
+	// Use NewMockServer, execHandler can be nil for pool tests not focusing on exec details
+	_, serverAddr, cleanup := NewMockServer(t, nil)
 	defer cleanup()
 
 	mockDialer := newMockDialer(serverAddr)
@@ -88,7 +89,7 @@ func TestConnectionPool_GetPut_BasicReuse_Mocked(t *testing.T) {
 
 func TestConnectionPool_MaxPerKeyLimit_Mocked(t *testing.T) {
 	resetActualDialCount()
-	serverAddr, cleanup := createMockSSHServer(t)
+	_, serverAddr, cleanup := NewMockServer(t, nil) // Pass nil for execBehaviors
 	defer cleanup()
 
 	mockDialer := newMockDialer(serverAddr)
@@ -185,7 +186,7 @@ func TestConnectionPool_NewPoolDefaults(t *testing.T) {
 
 func TestConnectionPool_IdleTimeout_Mocked(t *testing.T) {
 	resetActualDialCount()
-	serverAddr, serverCleanup := createMockSSHServer(t)
+	_, serverAddr, serverCleanup := NewMockServer(t, nil) // Pass nil for execBehaviors
 	defer serverCleanup()
 
 	mockDialer := newMockDialer(serverAddr)
@@ -273,7 +274,7 @@ func TestConnectionPool_IdleTimeout_Mocked(t *testing.T) {
 
 func TestConnectionPool_Shutdown_Mocked(t *testing.T) {
 	resetActualDialCount()
-	serverAddr, serverCleanup := createMockSSHServer(t)
+	_, serverAddr, serverCleanup := NewMockServer(t, nil) // Pass nil for execBehaviors
 	defer serverCleanup()
 
 	mockDialer := newMockDialer(serverAddr)
