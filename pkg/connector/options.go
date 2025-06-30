@@ -46,3 +46,11 @@ type FileTransferOptions struct {
 	// (by writing to a temporary file and then using sudo mv).
 	Sudo bool
 }
+
+// RemoveOptions defines options for file/directory removal.
+// Moved from interface.go for better organization.
+type RemoveOptions struct {
+	Recursive      bool
+	IgnoreNotExist bool
+	Sudo           bool // Added to support sudo for remove operations
+}

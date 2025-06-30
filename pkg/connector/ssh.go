@@ -24,13 +24,14 @@ import (
 // SSHConnector implements the Connector interface for SSH connections.
 type SSHConnector struct {
 	client        *ssh.Client
-	bastionClient *ssh.Client
+	bastionClient *ssh.Client // Only for non-pooled connections or if pool returns it separately
 	sftpClient    *sftp.Client
 	connCfg       ConnectionCfg
 	cachedOS      *OS
 	isConnected   bool
 	pool          *ConnectionPool
 	isFromPool    bool
+	managedConn   *ManagedConnection // Stores the managed connection if obtained from pool
 }
 
 // NewSSHConnector creates a new SSHConnector.
@@ -47,11 +48,12 @@ func (s *SSHConnector) Connect(ctx context.Context, cfg ConnectionCfg) error {
 
 	// Attempt to get a connection from the pool first (if applicable)
 	if s.pool != nil && cfg.BastionCfg == nil {
-		// pool.Get now returns (client, bastionClient, error) and handles health check internally.
-		targetClient, bClient, err := s.pool.Get(ctx, cfg)
-		if err == nil && targetClient != nil {
-			s.client = targetClient
-			s.bastionClient = bClient // Store bastion client if provided by pool (should be nil for non-bastion cfg)
+		mc, err := s.pool.Get(ctx, cfg) // New pool.Get signature
+		if err == nil && mc != nil && mc.Client() != nil {
+			s.managedConn = mc
+			s.client = mc.Client()
+			// s.bastionClient is part of mc.bastionClient, no need to set s.bastionClient separately for pooled conn.
+			// s.bastionClient field in SSHConnector will be used for non-pooled bastion connections.
 			s.isFromPool = true
 			s.isConnected = true
 			// fmt.Fprintf(os.Stderr, "SSHConnector: Using pooled connection for %s\n", cfg.Host)
@@ -60,10 +62,12 @@ func (s *SSHConnector) Connect(ctx context.Context, cfg ConnectionCfg) error {
 		if err != nil && !errors.Is(err, ErrPoolExhausted) { // Log if error is not just exhaustion
 			fmt.Fprintf(os.Stderr, "SSHConnector: Failed to get connection from pool for %s (will attempt direct dial): %v\n", cfg.Host, err)
 		}
-		// If ErrPoolExhausted or other Get error, fall through to direct dial.
+		// If ErrPoolExhausted or other Get error, or mc/mc.Client is nil, fall through to direct dial.
 	}
 
 	// Fallback to direct dial if not using pool, pool Get failed, or pool exhausted.
+	s.isFromPool = false    // Explicitly set for direct dial path
+	s.managedConn = nil // Ensure managedConn is nil for direct dials
 	// The connectTimeout parameter for dialSSH is passed from SSHConnector.Connect's caller via cfg or default.
 	// For direct dial, cfg.Timeout is the primary source, or dialSSH internal default.
 	// The pool's cp.config.ConnectTimeout is used by pool.Get when it calls dialSSH.
@@ -109,39 +113,39 @@ func (s *SSHConnector) Close() error {
 		s.sftpClient = nil
 	}
 
-	if s.client != nil {
-		if s.isFromPool && s.pool != nil {
-			isHealthy := false
-			if _, _, err := s.client.SendRequest("keepalive@openssh.com", true, nil); err == nil {
-				isHealthy = true
-			}
-			// pool.Put now takes bastionClient as well.
-			// s.bastionClient will be nil if this pooled connection was direct (not via bastion).
-			s.pool.Put(s.connCfg, s.client, s.bastionClient, isHealthy)
+	if s.client != nil { // If there's an active client (pooled or direct)
+		if s.isFromPool && s.managedConn != nil && s.pool != nil {
+			isHealthy := s.managedConn.IsHealthy() // Use ManagedConnection's health check
+			s.pool.Put(s.managedConn, isHealthy)
+			// fmt.Fprintf(os.Stderr, "SSHConnector: Returned managed connection to pool for %s, healthy: %t\n", s.connCfg.Host, isHealthy)
 		} else {
-			// Not from pool, or pool is nil: close client and bastion directly.
-			if err := s.client.Close(); err != nil && firstErr == nil {
-				firstErr = err
+			// Not from pool, or pool is nil, or managedConn is nil (should not happen if isFromPool is true):
+			// Close client and s.bastionClient (which is for non-pooled connections) directly.
+			if err := s.client.Close(); err != nil {
+				if firstErr == nil { firstErr = err }
+				fmt.Fprintf(os.Stderr, "SSHConnector: Error closing direct client for %s: %v\n", s.connCfg.Host, err)
 			}
-			// Bastion client should only be closed here if it's NOT part of a pooled ManagedConnection
-			// that's being Put back. If isFromPool is false, this SSHConnector instance owns the bastionClient.
-			if s.bastionClient != nil {
-				if err := s.bastionClient.Close(); err != nil && firstErr == nil {
-					firstErr = err
+			if s.bastionClient != nil { // s.bastionClient is for non-pooled bastion
+				if err := s.bastionClient.Close(); err != nil {
+					if firstErr == nil { firstErr = err }
+					fmt.Fprintf(os.Stderr, "SSHConnector: Error closing direct bastion client for %s: %v\n", s.connCfg.Host, err)
 				}
 			}
 		}
-		s.client = nil
-		s.bastionClient = nil // Clear bastion client whether from pool or direct, as it's now closed or returned.
+	} else if s.bastionClient != nil {
+		// Case: Direct connection failed after bastion was established, but before s.client was set.
+		// s.client is nil, but s.bastionClient (for non-pooled) might exist.
+		if err := s.bastionClient.Close(); err != nil {
+			if firstErr == nil { firstErr = err }
+			fmt.Fprintf(os.Stderr, "SSHConnector: Error closing orphaned direct bastion client for %s: %v\n", s.connCfg.Host, err)
+		}
 	}
+
+	s.client = nil
+	s.bastionClient = nil // Cleared for non-pooled
+	s.managedConn = nil   // Cleared for pooled
 	s.isFromPool = false
-	// s.bastionClient was handled above if not from pool. If from pool, Put handles it.
-	// If s.client was nil, s.bastionClient might still be non-nil if direct dial failed partially,
-	// but standard path is both are set or both are nil post-Connect.
-	// If s.client is nil but s.bastionClient is not (e.g. direct dial failed after bastion connected),
-	// and it's not from pool, that bastionClient still needs closing if Close is called.
-	// This is covered by the s.bastionClient != nil check inside the `else` for non-pooled connections.
-	// If s.client was nil already, the outer `if s.client != nil` handles it.
+	// sftpClient is already handled
 	return firstErr
 }
 
@@ -297,13 +301,12 @@ func (s *SSHConnector) CopyContent(ctx context.Context, content []byte, dstPath 
 	return s.writeFileFromReader(ctx, bytes.NewReader(content), dstPath, options)
 }
 
-// WriteFile writes byte content to a destination file.
-// This method exists for interface compatibility. It also calls writeFileFromReader.
-func (s *SSHConnector) WriteFile(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error {
-	opts := &FileTransferOptions{
-		Permissions: permissions,
-		Sudo:        sudo,
-		// Owner and Group can be added here if the struct supports them
+// WriteFile writes byte content to a destination file, aligning with the Connector interface.
+func (s *SSHConnector) WriteFile(ctx context.Context, content []byte, destPath string, options *FileTransferOptions) error {
+	// Ensure options is not nil, common practice.
+	opts := options
+	if opts == nil {
+		opts = &FileTransferOptions{} // Default options if nil is passed
 	}
 	return s.writeFileFromReader(ctx, bytes.NewReader(content), destPath, opts)
 }
