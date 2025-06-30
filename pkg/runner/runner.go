@@ -370,3 +370,171 @@ func (r *defaultRunner) Reboot(ctx context.Context, conn connector.Connector, ti
 		}
 	}
 }
+
+// --- Stubs for methods defined in interface.go but not yet implemented in defaultRunner ---
+// These are primarily for the extensive QEMU/libvirt and Docker functionalities
+// that are part of the Runner interface but not yet implemented in the core defaultRunner
+// or its specialized files (like archive.go, file.go, etc.).
+
+// --- QEMU/libvirt Methods ---
+func (r *defaultRunner) CreateVMTemplate(ctx context.Context, conn connector.Connector, name string, osVariant string, memoryMB uint, vcpus uint, diskPath string, diskSizeGB uint, network string, graphicsType string, cloudInitISOPath string) error {
+	return fmt.Errorf("not implemented: CreateVMTemplate")
+}
+func (r *defaultRunner) ImportVMTemplate(ctx context.Context, conn connector.Connector, name string, filePath string) error {
+	return fmt.Errorf("not implemented: ImportVMTemplate")
+}
+func (r *defaultRunner) RefreshStoragePool(ctx context.Context, conn connector.Connector, poolName string) error {
+	return fmt.Errorf("not implemented: RefreshStoragePool")
+}
+func (r *defaultRunner) CreateStoragePool(ctx context.Context, conn connector.Connector, name string, poolType string, targetPath string) error {
+	return fmt.Errorf("not implemented: CreateStoragePool")
+}
+func (r *defaultRunner) StoragePoolExists(ctx context.Context, conn connector.Connector, poolName string) (bool, error) {
+	return false, fmt.Errorf("not implemented: StoragePoolExists")
+}
+func (r *defaultRunner) DeleteStoragePool(ctx context.Context, conn connector.Connector, poolName string) error {
+	return fmt.Errorf("not implemented: DeleteStoragePool")
+}
+func (r *defaultRunner) VolumeExists(ctx context.Context, conn connector.Connector, poolName string, volName string) (bool, error) {
+	return false, fmt.Errorf("not implemented: VolumeExists")
+}
+func (r *defaultRunner) CloneVolume(ctx context.Context, conn connector.Connector, poolName string, origVolName string, newVolName string, newSizeGB uint, format string) error {
+	return fmt.Errorf("not implemented: CloneVolume")
+}
+func (r *defaultRunner) ResizeVolume(ctx context.Context, conn connector.Connector, poolName string, volName string, newSizeGB uint) error {
+	return fmt.Errorf("not implemented: ResizeVolume")
+}
+func (r *defaultRunner) DeleteVolume(ctx context.Context, conn connector.Connector, poolName string, volName string) error {
+	return fmt.Errorf("not implemented: DeleteVolume")
+}
+func (r *defaultRunner) CreateVolume(ctx context.Context, conn connector.Connector, poolName string, volName string, sizeGB uint, format string, backingVolName string, backingVolFormat string) error {
+	return fmt.Errorf("not implemented: CreateVolume")
+}
+func (r *defaultRunner) CreateCloudInitISO(ctx context.Context, conn connector.Connector, vmName string, isoDestPath string, userData string, metaData string, networkConfig string) error {
+	return fmt.Errorf("not implemented: CreateCloudInitISO")
+}
+func (r *defaultRunner) CreateVM(ctx context.Context, conn connector.Connector, vmName string, memoryMB uint, vcpus uint, osVariant string, diskPaths []string, networkInterfaces []VMNetworkInterface, graphicsType string, cloudInitISOPath string, bootOrder []string, extraArgs []string) error {
+	return fmt.Errorf("not implemented: CreateVM")
+}
+func (r *defaultRunner) VMExists(ctx context.Context, conn connector.Connector, vmName string) (bool, error) {
+	return false, fmt.Errorf("not implemented: VMExists")
+}
+func (r *defaultRunner) StartVM(ctx context.Context, conn connector.Connector, vmName string) error {
+	return fmt.Errorf("not implemented: StartVM")
+}
+func (r *defaultRunner) ShutdownVM(ctx context.Context, conn connector.Connector, vmName string, force bool, timeout time.Duration) error {
+	return fmt.Errorf("not implemented: ShutdownVM")
+}
+func (r *defaultRunner) DestroyVM(ctx context.Context, conn connector.Connector, vmName string) error {
+	return fmt.Errorf("not implemented: DestroyVM")
+}
+func (r *defaultRunner) UndefineVM(ctx context.Context, conn connector.Connector, vmName string, deleteSnapshots bool, deleteStorage bool, storagePools []string) error {
+	return fmt.Errorf("not implemented: UndefineVM")
+}
+func (r *defaultRunner) GetVMState(ctx context.Context, conn connector.Connector, vmName string) (string, error) {
+	return "", fmt.Errorf("not implemented: GetVMState")
+}
+func (r *defaultRunner) ListVMs(ctx context.Context, conn connector.Connector, all bool) ([]VMInfo, error) {
+	return nil, fmt.Errorf("not implemented: ListVMs")
+}
+func (r *defaultRunner) AttachDisk(ctx context.Context, conn connector.Connector, vmName string, diskPath string, targetDevice string, diskType string, driverType string) error {
+	return fmt.Errorf("not implemented: AttachDisk")
+}
+func (r *defaultRunner) DetachDisk(ctx context.Context, conn connector.Connector, vmName string, targetDeviceOrPath string) error {
+	return fmt.Errorf("not implemented: DetachDisk")
+}
+func (r *defaultRunner) SetVMMemory(ctx context.Context, conn connector.Connector, vmName string, memoryMB uint, current bool) error {
+	return fmt.Errorf("not implemented: SetVMMemory")
+}
+func (r *defaultRunner) SetVMCPUs(ctx context.Context, conn connector.Connector, vmName string, vcpus uint, current bool) error {
+	return fmt.Errorf("not implemented: SetVMCPUs")
+}
+
+// --- Docker Methods ---
+func (r *defaultRunner) PullImage(ctx context.Context, conn connector.Connector, imageName string) error {
+	return fmt.Errorf("not implemented: PullImage")
+}
+func (r *defaultRunner) ImageExists(ctx context.Context, conn connector.Connector, imageName string) (bool, error) {
+	return false, fmt.Errorf("not implemented: ImageExists")
+}
+func (r *defaultRunner) ListImages(ctx context.Context, conn connector.Connector, all bool) ([]ImageInfo, error) {
+	return nil, fmt.Errorf("not implemented: ListImages")
+}
+func (r *defaultRunner) RemoveImage(ctx context.Context, conn connector.Connector, imageName string, force bool) error {
+	return fmt.Errorf("not implemented: RemoveImage")
+}
+func (r *defaultRunner) BuildImage(ctx context.Context, conn connector.Connector, dockerfilePath string, imageNameAndTag string, contextPath string, buildArgs map[string]string) error {
+	return fmt.Errorf("not implemented: BuildImage")
+}
+func (r *defaultRunner) CreateContainer(ctx context.Context, conn connector.Connector, options ContainerCreateOptions) (string, error) {
+	return "", fmt.Errorf("not implemented: CreateContainer")
+}
+func (r *defaultRunner) ContainerExists(ctx context.Context, conn connector.Connector, containerNameOrID string) (bool, error) {
+	return false, fmt.Errorf("not implemented: ContainerExists")
+}
+func (r *defaultRunner) StartContainer(ctx context.Context, conn connector.Connector, containerNameOrID string) error {
+	return fmt.Errorf("not implemented: StartContainer")
+}
+func (r *defaultRunner) StopContainer(ctx context.Context, conn connector.Connector, containerNameOrID string, timeout *time.Duration) error {
+	return fmt.Errorf("not implemented: StopContainer")
+}
+func (r *defaultRunner) RestartContainer(ctx context.Context, conn connector.Connector, containerNameOrID string, timeout *time.Duration) error {
+	return fmt.Errorf("not implemented: RestartContainer")
+}
+func (r *defaultRunner) RemoveContainer(ctx context.Context, conn connector.Connector, containerNameOrID string, force bool, removeVolumes bool) error {
+	return fmt.Errorf("not implemented: RemoveContainer")
+}
+func (r *defaultRunner) ListContainers(ctx context.Context, conn connector.Connector, all bool, filters map[string]string) ([]ContainerInfo, error) {
+	return nil, fmt.Errorf("not implemented: ListContainers")
+}
+func (r *defaultRunner) GetContainerLogs(ctx context.Context, conn connector.Connector, containerNameOrID string, options ContainerLogOptions) (string, error) {
+	return "", fmt.Errorf("not implemented: GetContainerLogs")
+}
+func (r *defaultRunner) GetContainerStats(ctx context.Context, conn connector.Connector, containerNameOrID string, stream bool) (<-chan ContainerStats, error) {
+	return nil, fmt.Errorf("not implemented: GetContainerStats")
+}
+func (r *defaultRunner) InspectContainer(ctx context.Context, conn connector.Connector, containerNameOrID string) (*ContainerDetails, error) {
+	return nil, fmt.Errorf("not implemented: InspectContainer")
+}
+func (r *defaultRunner) PauseContainer(ctx context.Context, conn connector.Connector, containerNameOrID string) error {
+	return fmt.Errorf("not implemented: PauseContainer")
+}
+func (r *defaultRunner) UnpauseContainer(ctx context.Context, conn connector.Connector, containerNameOrID string) error {
+	return fmt.Errorf("not implemented: UnpauseContainer")
+}
+func (r *defaultRunner) ExecInContainer(ctx context.Context, conn connector.Connector, containerNameOrID string, cmd []string, user string, workDir string, tty bool) (string, error) {
+	return "", fmt.Errorf("not implemented: ExecInContainer")
+}
+func (r *defaultRunner) CreateDockerNetwork(ctx context.Context, conn connector.Connector, name string, driver string, subnet string, gateway string, options map[string]string) error {
+	return fmt.Errorf("not implemented: CreateDockerNetwork")
+}
+func (r *defaultRunner) RemoveDockerNetwork(ctx context.Context, conn connector.Connector, networkNameOrID string) error {
+	return fmt.Errorf("not implemented: RemoveDockerNetwork")
+}
+func (r *defaultRunner) ListDockerNetworks(ctx context.Context, conn connector.Connector, filters map[string]string) ([]DockerNetworkInfo, error) {
+	return nil, fmt.Errorf("not implemented: ListDockerNetworks")
+}
+func (r *defaultRunner) ConnectContainerToNetwork(ctx context.Context, conn connector.Connector, containerNameOrID string, networkNameOrID string, ipAddress string) error {
+	return fmt.Errorf("not implemented: ConnectContainerToNetwork")
+}
+func (r *defaultRunner) DisconnectContainerFromNetwork(ctx context.Context, conn connector.Connector, containerNameOrID string, networkNameOrID string, force bool) error {
+	return fmt.Errorf("not implemented: DisconnectContainerFromNetwork")
+}
+func (r *defaultRunner) CreateDockerVolume(ctx context.Context, conn connector.Connector, name string, driver string, driverOpts map[string]string, labels map[string]string) error {
+	return fmt.Errorf("not implemented: CreateDockerVolume")
+}
+func (r *defaultRunner) RemoveDockerVolume(ctx context.Context, conn connector.Connector, volumeName string, force bool) error {
+	return fmt.Errorf("not implemented: RemoveDockerVolume")
+}
+func (r *defaultRunner) ListDockerVolumes(ctx context.Context, conn connector.Connector, filters map[string]string) ([]DockerVolumeInfo, error) {
+	return nil, fmt.Errorf("not implemented: ListDockerVolumes")
+}
+func (r *defaultRunner) InspectDockerVolume(ctx context.Context, conn connector.Connector, volumeName string) (*DockerVolumeDetails, error) {
+	return nil, fmt.Errorf("not implemented: InspectDockerVolume")
+}
+func (r *defaultRunner) DockerInfo(ctx context.Context, conn connector.Connector) (*DockerSystemInfo, error) {
+	return nil, fmt.Errorf("not implemented: DockerInfo")
+}
+func (r *defaultRunner) DockerPrune(ctx context.Context, conn connector.Connector, pruneType string, filters map[string]string, all bool) (string, error) {
+	return "", fmt.Errorf("not implemented: DockerPrune")
+}
