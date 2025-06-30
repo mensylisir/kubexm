@@ -1,5 +1,7 @@
 package connector
 
+//go:generate mockery --name Connector --output ./mocks --outpkg mocks --case underscore
+
 import (
 	"context"
 	// "fmt" // Removed as unused
