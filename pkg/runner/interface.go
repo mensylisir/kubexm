@@ -126,7 +126,749 @@ type Runner interface {
 	DeployAndEnableService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName, configContent, configPath, permissions string, templateData interface{}) error
 	Reboot(ctx context.Context, conn connector.Connector, timeout time.Duration) error
 	RenderToString(ctx context.Context, tmpl *template.Template, data interface{}) (string, error) // Different from Render, no conn/destPath
+
+	// --- QEMU/libvirt Methods ---
+
+	// CreateVMTemplate defines a new virtual machine configuration that can serve as a template.
+	// It sets up the basic XML definition for a VM with specified parameters.
+	// The associated disk image at diskPath should exist or be creatable; this method
+	// will attempt to create a qcow2 disk image of diskSizeGB if diskPath does not exist.
+	// conn: Connector to the host where libvirt is running.
+	// name: Name for the VM template.
+	// osVariant: OS variant string (e.g., "ubuntu22.04") for libvirt.
+	// memoryMB: Memory for the VM in Megabytes.
+	// vcpus: Number of virtual CPUs.
+	// diskPath: Path on the host for the primary disk image.
+	// diskSizeGB: Size of the primary disk in Gigabytes (used if creating the disk).
+	// network: Name of the libvirt network to connect the VM to (e.g., "default").
+	// graphicsType: Type of graphics device (e.g., "vnc", "spice", "none").
+	// cloudInitISOPath: Optional path to a cloud-init ISO image for VM provisioning.
+	CreateVMTemplate(ctx context.Context, conn connector.Connector, name string, osVariant string, memoryMB uint, vcpus uint, diskPath string, diskSizeGB uint, network string, graphicsType string, cloudInitISOPath string) error
+
+	// ImportVMTemplate defines a new VM from an existing libvirt XML definition file.
+	// conn: Connector to the host.
+	// name: Name to assign to the imported VM (Note: libvirt might prioritize name within XML).
+	// filePath: Path on the host to the XML file containing the VM definition.
+	ImportVMTemplate(ctx context.Context, conn connector.Connector, name string, filePath string) error
+
+	// RefreshStoragePool tells libvirt to refresh its view of a storage pool,
+	// detecting any new or changed storage volumes.
+	// conn: Connector to the host.
+	// poolName: Name of the storage pool to refresh.
+	RefreshStoragePool(ctx context.Context, conn connector.Connector, poolName string) error
+
+	// CreateStoragePool defines and builds a new storage pool.
+	// For "dir" type pools, it will create the targetPath if it doesn't exist.
+	// The pool is set to autostart and is started after creation.
+	// conn: Connector to the host.
+	// name: Name for the new storage pool.
+	// poolType: Type of the storage pool (e.g., "dir", "logical", "iscsi").
+	// targetPath: Target path for the pool (e.g., directory path for "dir" type).
+	CreateStoragePool(ctx context.Context, conn connector.Connector, name string, poolType string, targetPath string) error
+
+	// StoragePoolExists checks if a storage pool with the given name is defined in libvirt.
+	// conn: Connector to the host.
+	// poolName: Name of the storage pool to check.
+	StoragePoolExists(ctx context.Context, conn connector.Connector, poolName string) (bool, error)
+
+	// DeleteStoragePool stops (destroys) and undefines a storage pool.
+	// It does not delete the underlying storage (e.g., files in a "dir" pool) by default.
+	// conn: Connector to the host.
+	// poolName: Name of the storage pool to delete.
+	DeleteStoragePool(ctx context.Context, conn connector.Connector, poolName string) error
+
+	// VolumeExists checks if a storage volume exists within a given storage pool.
+	// conn: Connector to the host.
+	// poolName: Name of the storage pool.
+	// volName: Name of the storage volume.
+	VolumeExists(ctx context.Context, conn connector.Connector, poolName string, volName string) (bool, error)
+
+	// CloneVolume creates a new storage volume by cloning an existing volume within the same pool.
+	// conn: Connector to the host.
+	// poolName: Name of the storage pool.
+	// origVolName: Name of the original volume to clone.
+	// newVolName: Name for the new cloned volume.
+	// newSizeGB: Desired size for the new volume in Gigabytes. If 0, defaults to original size.
+	//            Note: Actual resizing capability during clone depends on libvirt version and backend.
+	//            A separate ResizeVolume call might be needed if the clone doesn't expand.
+	// format: Format for the new volume (e.g., "qcow2").
+	CloneVolume(ctx context.Context, conn connector.Connector, poolName string, origVolName string, newVolName string, newSizeGB uint, format string) error
+
+	// ResizeVolume changes the capacity of an existing storage volume.
+	// Currently supports expansion only.
+	// conn: Connector to the host.
+	// poolName: Name of the storage pool containing the volume.
+	// volName: Name of the volume to resize.
+	// newSizeGB: The new total size for the volume in Gigabytes.
+	ResizeVolume(ctx context.Context, conn connector.Connector, poolName string, volName string, newSizeGB uint) error
+
+	// DeleteVolume deletes a storage volume from a pool.
+	// conn: Connector to the host.
+	// poolName: Name of the storage pool.
+	// volName: Name of the volume to delete.
+	DeleteVolume(ctx context.Context, conn connector.Connector, poolName string, volName string) error
+
+	// CreateVolume creates a new storage volume in a pool.
+	// It can create a standalone volume or a volume based on a backing store (linked clone).
+	// conn: Connector to the host.
+	// poolName: Name of the storage pool.
+	// volName: Name for the new volume.
+	// sizeGB: Size of the volume in Gigabytes.
+	// format: Format of the volume (e.g., "qcow2", "raw").
+	// backingVolName: Optional name of the backing volume in the same pool. If empty, a standalone volume is created.
+	// backingVolFormat: Optional format of the backing volume (e.g., "qcow2"). Required if backingVolName is provided.
+	CreateVolume(ctx context.Context, conn connector.Connector, poolName string, volName string, sizeGB uint, format string, backingVolName string, backingVolFormat string) error
+
+	// CreateCloudInitISO generates a cloud-init ISO image on the host.
+	// It requires `genisoimage` or `mkisofs` to be installed on the target host.
+	// conn: Connector to the host.
+	// vmName: Name of the VM, used for temporary directory naming to ensure uniqueness.
+	// isoDestPath: Full path on the host where the generated ISO should be saved.
+	// userData: Content of the user-data file for cloud-init.
+	// metaData: Content of the meta-data file for cloud-init.
+	// networkConfig: Content of the network-config file for cloud-init (optional).
+	CreateCloudInitISO(ctx context.Context, conn connector.Connector, vmName string, isoDestPath string, userData string, metaData string, networkConfig string) error
+
+	// CreateVM defines and starts a new virtual machine based on provided parameters.
+	// conn: Connector to the host.
+	// vmName: Name for the new VM.
+	// memoryMB: Memory for the VM in Megabytes.
+	// vcpus: Number of virtual CPUs.
+	// osVariant: OS variant string (e.g., "ubuntu22.04") for libvirt, helps in setting defaults.
+	// diskPaths: Slice of paths on the host to disk images (e.g., qcow2 files). First disk is typically primary.
+	// networkInterfaces: Slice of VMNetworkInterface configurations for network setup.
+	// graphicsType: Type of graphics (e.g., "vnc", "spice", "none"). Defaults to "vnc".
+	// cloudInitISOPath: Optional path to a cloud-init ISO for provisioning. If provided, "cdrom" is added to boot order.
+	// bootOrder: Slice of boot devices (e.g., "hd", "cdrom"). Defaults to "hd".
+	// extraArgs: Placeholder for future QEMU command-line passthrough arguments (not fully implemented in basic XML).
+	CreateVM(ctx context.Context, conn connector.Connector, vmName string, memoryMB uint, vcpus uint, osVariant string, diskPaths []string, networkInterfaces []VMNetworkInterface, graphicsType string, cloudInitISOPath string, bootOrder []string, extraArgs []string) error
+
+	// VMExists checks if a virtual machine with the given name is defined in libvirt.
+	// conn: Connector to the host.
+	// vmName: Name of the VM to check.
+	VMExists(ctx context.Context, conn connector.Connector, vmName string) (bool, error)
+
+	// StartVM starts a defined (but not running) virtual machine.
+	// If the VM is already running, it does nothing.
+	// conn: Connector to the host.
+	// vmName: Name of the VM to start.
+	StartVM(ctx context.Context, conn connector.Connector, vmName string) error
+
+	// ShutdownVM attempts a graceful shutdown of a virtual machine.
+	// If `force` is true, it will destroy the VM if graceful shutdown fails or times out.
+	// conn: Connector to the host.
+	// vmName: Name of the VM to shut down.
+	// force: If true, forcefully destroy if graceful shutdown fails.
+	// timeout: Duration to wait for graceful shutdown before forcing (if applicable) or returning timeout error.
+	ShutdownVM(ctx context.Context, conn connector.Connector, vmName string, force bool, timeout time.Duration) error
+
+	// DestroyVM forcefully stops (powers off) a virtual machine.
+	// conn: Connector to the host.
+	// vmName: Name of the VM to destroy.
+	DestroyVM(ctx context.Context, conn connector.Connector, vmName string) error
+
+	// UndefineVM removes the definition of a virtual machine from libvirt.
+	// The VM must be shut off.
+	// conn: Connector to the host.
+	// vmName: Name of the VM to undefine.
+	// deleteSnapshots: If true, attempts to delete all snapshots associated with the VM.
+	// deleteStorage: If true, attempts to delete associated storage volumes. This is heuristic and relies on `storagePools`
+	//                to correctly identify volumes if paths are used. Use with caution.
+	// storagePools: A list of storage pool names to help identify volumes if `deleteStorage` is true and disks are path-based.
+	UndefineVM(ctx context.Context, conn connector.Connector, vmName string, deleteSnapshots bool, deleteStorage bool, storagePools []string) error
+
+	// GetVMState retrieves the current state of a virtual machine (e.g., "running", "shut off").
+	// conn: Connector to the host.
+	// vmName: Name of the VM.
+	GetVMState(ctx context.Context, conn connector.Connector, vmName string) (string, error)
+
+	// ListVMs lists virtual machines known to libvirt.
+	// conn: Connector to the host.
+	// all: If true, includes inactive (defined but not running) VMs. If false, lists only active VMs.
+	ListVMs(ctx context.Context, conn connector.Connector, all bool) ([]VMInfo, error)
+
+	// AttachDisk attaches a disk to a VM. Can be done live if VM and libvirt support it.
+	// conn: Connector to the host.
+	// vmName: Name of the VM.
+	// diskPath: Path to the disk image file on the host.
+	// targetDevice: Target device name in the VM (e.g., "vdb", "sdc").
+	// diskType: Type of the disk source (e.g., "file", "block").
+	// driverType: Disk driver type (e.g., "qcow2", "raw").
+	AttachDisk(ctx context.Context, conn connector.Connector, vmName string, diskPath string, targetDevice string, diskType string, driverType string) error
+
+	// DetachDisk detaches a disk from a VM. Can be done live.
+	// conn: Connector to the host.
+	// vmName: Name of the VM.
+	// targetDeviceOrPath: The target device name (e.g., "vdb") or the source file path of the disk to detach.
+	DetachDisk(ctx context.Context, conn connector.Connector, vmName string, targetDeviceOrPath string) error
+
+	// SetVMMemory changes the memory allocation for a VM.
+	// conn: Connector to the host.
+	// vmName: Name of the VM.
+	// memoryMB: New memory size in Megabytes.
+	// current: If true, attempts to apply live if VM is running (and sets current config).
+	//          If false, only sets config for next boot (and current if VM is running and it's supported).
+	SetVMMemory(ctx context.Context, conn connector.Connector, vmName string, memoryMB uint, current bool) error
+
+	// SetVMCPUs changes the number of virtual CPUs for a VM.
+	// conn: Connector to the host.
+	// vmName: Name of the VM.
+	// vcpus: New number of vCPUs.
+	// current: If true, attempts to apply live if VM is running (and sets current config).
+	//          If false, only sets config for next boot (and current if VM is running and it's supported).
+	SetVMCPUs(ctx context.Context, conn connector.Connector, vmName string, vcpus uint, current bool) error
+
+	// --- Docker Methods ---
+
+	// PullImage pulls a Docker image from a registry.
+	// conn: Connector to the host where Docker daemon is running.
+	// imageName: Name of the image to pull (e.g., "ubuntu:latest").
+	PullImage(ctx context.Context, conn connector.Connector, imageName string) error
+
+	// ImageExists checks if a Docker image exists locally on the host.
+	// conn: Connector to the host.
+	// imageName: Name of the image to check.
+	ImageExists(ctx context.Context, conn connector.Connector, imageName string) (bool, error)
+
+	// ListImages lists Docker images available locally on the host.
+	// conn: Connector to the host.
+	// all: If true, includes intermediate image layers. If false, shows top-level images.
+	ListImages(ctx context.Context, conn connector.Connector, all bool) ([]ImageInfo, error)
+
+	// RemoveImage removes a Docker image from the host.
+	// conn: Connector to the host.
+	// imageName: Name of the image to remove.
+	// force: If true, forcefully remove the image (e.g., remove running containers using it).
+	RemoveImage(ctx context.Context, conn connector.Connector, imageName string, force bool) error
+
+	// BuildImage builds a Docker image from a Dockerfile.
+	// Note: Context handling for local paths requires the client to create a tar stream of the context.
+	// This implementation is simplified and might work best with URL contexts or require `r.Run("docker build ...")` for robustness with local file contexts.
+	// conn: Connector to the host.
+	// dockerfilePath: Path to the Dockerfile (can be relative to contextPath or a URL).
+	// imageNameAndTag: Name and tag for the built image (e.g., "myimage:latest").
+	// contextPath: Path to the build context (directory or URL to a git repo).
+	// buildArgs: Map of build-time variables.
+	BuildImage(ctx context.Context, conn connector.Connector, dockerfilePath string, imageNameAndTag string, contextPath string, buildArgs map[string]string) error
+
+	// CreateContainer creates a new Docker container from an image.
+	// conn: Connector to the host.
+	// options: ContainerCreateOptions struct detailing container configuration.
+	// Returns the ID of the created container.
+	CreateContainer(ctx context.Context, conn connector.Connector, options ContainerCreateOptions) (string, error)
+
+	// ContainerExists checks if a Docker container (by name or ID) exists on the host.
+	// conn: Connector to the host.
+	// containerNameOrID: Name or ID of the container.
+	ContainerExists(ctx context.Context, conn connector.Connector, containerNameOrID string) (bool, error)
+
+	// StartContainer starts an existing Docker container.
+	// conn: Connector to the host.
+	// containerNameOrID: Name or ID of the container to start.
+	StartContainer(ctx context.Context, conn connector.Connector, containerNameOrID string) error
+
+	// StopContainer stops a running Docker container.
+	// conn: Connector to the host.
+	// containerNameOrID: Name or ID of the container to stop.
+	// timeout: Optional duration to wait for graceful stop before killing the container. If nil, Docker default is used.
+	StopContainer(ctx context.Context, conn connector.Connector, containerNameOrID string, timeout *time.Duration) error
+
+	// RestartContainer restarts a Docker container.
+	// conn: Connector to the host.
+	// containerNameOrID: Name or ID of the container to restart.
+	// timeout: Optional duration to wait for stop before starting. If nil, Docker default is used.
+	RestartContainer(ctx context.Context, conn connector.Connector, containerNameOrID string, timeout *time.Duration) error
+
+	// RemoveContainer removes a Docker container from the host.
+	// conn: Connector to the host.
+	// containerNameOrID: Name or ID of the container to remove.
+	// force: If true, forcefully remove a running container.
+	// removeVolumes: If true, remove anonymous volumes associated with the container.
+	RemoveContainer(ctx context.Context, conn connector.Connector, containerNameOrID string, force bool, removeVolumes bool) error
+
+	// ListContainers lists Docker containers on the host.
+	// conn: Connector to the host.
+	// all: If true, lists all containers (including stopped). If false, only running.
+	// filters: Map of filters to apply (e.g., {"status": "running"}).
+	ListContainers(ctx context.Context, conn connector.Connector, all bool, filters map[string]string) ([]ContainerInfo, error)
+
+	// GetContainerLogs retrieves logs from a Docker container.
+	// Note: `options.Follow = true` is not suitable for this string-returning function signature;
+	// it would require a streaming approach (e.g., returning a channel).
+	// conn: Connector to the host.
+	// containerNameOrID: Name or ID of the container.
+	// options: ContainerLogOptions specifying how to retrieve logs.
+	GetContainerLogs(ctx context.Context, conn connector.Connector, containerNameOrID string, options ContainerLogOptions) (string, error)
+
+	// GetContainerStats retrieves a stream of live resource usage statistics for a container.
+	// It returns a read-only channel from which `ContainerStats` can be received.
+	// The channel will be closed when the stream ends (e.g., context cancelled, container stops if not streaming indefinitely).
+	// The caller is responsible for consuming from the channel.
+	// conn: Connector to the host.
+	// containerNameOrID: Name or ID of the container.
+	// stream: If true, continuously stream stats. If false, get a single snapshot.
+	GetContainerStats(ctx context.Context, conn connector.Connector, containerNameOrID string, stream bool) (<-chan ContainerStats, error)
+
+	// InspectContainer retrieves detailed information about a Docker container.
+	// Returns nil if container not found (and no error).
+	// conn: Connector to the host.
+	// containerNameOrID: Name or ID of the container.
+	InspectContainer(ctx context.Context, conn connector.Connector, containerNameOrID string) (*ContainerDetails, error)
+
+	// PauseContainer pauses all processes within a running Docker container.
+	// conn: Connector to the host.
+	// containerNameOrID: Name or ID of the container to pause.
+	PauseContainer(ctx context.Context, conn connector.Connector, containerNameOrID string) error
+
+	// UnpauseContainer unpauses all processes within a paused Docker container.
+	// conn: Connector to the host.
+	// containerNameOrID: Name or ID of the container to unpause.
+	UnpauseContainer(ctx context.Context, conn connector.Connector, containerNameOrID string) error
+
+	// ExecInContainer executes a command inside a running Docker container.
+	// conn: Connector to the host.
+	// containerNameOrID: Name or ID of the container.
+	// cmd: Command and arguments to execute.
+	// user: Optional user to run the command as.
+	// workDir: Optional working directory for the command.
+	// tty: If true, allocate a pseudo-TTY. Affects output stream format.
+	// Returns combined stdout/stderr output of the command.
+	ExecInContainer(ctx context.Context, conn connector.Connector, containerNameOrID string, cmd []string, user string, workDir string, tty bool) (string, error)
+
+	// CreateDockerNetwork creates a new Docker network.
+	// conn: Connector to the host.
+	// name: Name for the new network.
+	// driver: Network driver (e.g., "bridge", "overlay"). Defaults to "bridge" if empty by Docker.
+	// subnet: Optional subnet in CIDR format for IPAM configuration.
+	// gateway: Optional gateway for the subnet.
+	// options: Driver-specific options for the network.
+	CreateDockerNetwork(ctx context.Context, conn connector.Connector, name string, driver string, subnet string, gateway string, options map[string]string) error
+
+	// RemoveDockerNetwork removes a Docker network.
+	// conn: Connector to the host.
+	// networkNameOrID: Name or ID of the network to remove.
+	RemoveDockerNetwork(ctx context.Context, conn connector.Connector, networkNameOrID string) error
+
+	// ListDockerNetworks lists Docker networks on the host.
+	// conn: Connector to the host.
+	// filters: Map of filters to apply.
+	ListDockerNetworks(ctx context.Context, conn connector.Connector, filters map[string]string) ([]DockerNetworkInfo, error)
+
+	// ConnectContainerToNetwork connects a container to an existing Docker network.
+	// conn: Connector to the host.
+	// containerNameOrID: Name or ID of the container.
+	// networkNameOrID: Name or ID of the network.
+	// ipAddress: Optional static IPv4 address for the container on this network.
+	ConnectContainerToNetwork(ctx context.Context, conn connector.Connector, containerNameOrID string, networkNameOrID string, ipAddress string) error
+
+	// DisconnectContainerFromNetwork disconnects a container from a Docker network.
+	// conn: Connector to the host.
+	// containerNameOrID: Name or ID of the container.
+	// networkNameOrID: Name or ID of the network.
+	// force: If true, forcefully disconnect.
+	DisconnectContainerFromNetwork(ctx context.Context, conn connector.Connector, containerNameOrID string, networkNameOrID string, force bool) error
+
+	// CreateDockerVolume creates a new Docker volume.
+	// conn: Connector to the host.
+	// name: Name for the new volume.
+	// driver: Volume driver (e.g., "local"). Defaults to "local" if empty by Docker.
+	// driverOpts: Driver-specific options.
+	// labels: Labels to apply to the volume.
+	CreateDockerVolume(ctx context.Context, conn connector.Connector, name string, driver string, driverOpts map[string]string, labels map[string]string) error
+
+	// RemoveDockerVolume removes a Docker volume.
+	// conn: Connector to the host.
+	// volumeName: Name of the volume to remove.
+	// force: If true, forcefully remove the volume (e.g., if in use by a stopped container).
+	RemoveDockerVolume(ctx context.Context, conn connector.Connector, volumeName string, force bool) error
+
+	// ListDockerVolumes lists Docker volumes on the host.
+	// conn: Connector to the host.
+	// filters: Map of filters to apply.
+	ListDockerVolumes(ctx context.Context, conn connector.Connector, filters map[string]string) ([]DockerVolumeInfo, error)
+
+	// InspectDockerVolume retrieves detailed information about a Docker volume.
+	// Returns nil if volume not found (and no error).
+	// conn: Connector to the host.
+	// volumeName: Name of the volume.
+	InspectDockerVolume(ctx context.Context, conn connector.Connector, volumeName string) (*DockerVolumeDetails, error)
+
+	// DockerInfo retrieves system-wide information about the Docker daemon.
+	// conn: Connector to the host.
+	DockerInfo(ctx context.Context, conn connector.Connector) (*DockerSystemInfo, error)
+
+	// DockerPrune reclaims disk space by removing unused Docker resources.
+	// conn: Connector to the host.
+	// pruneType: Type of resource to prune ("containers", "images", "networks", "volumes", "system").
+	// filters: Filters to apply to the prune operation (semantics vary by pruneType).
+	// all: For images, `all=true` prunes all unused images, not just dangling ones. For system, influences image pruning.
+	// Returns a summary string of actions taken and space reclaimed.
+	DockerPrune(ctx context.Context, conn connector.Connector, pruneType string, filters map[string]string, all bool) (string, error)
 }
+
+// --- Docker Supporting Structs ---
+
+// ImageInfo holds basic information about a Docker image.
+type ImageInfo struct {
+	ID          string   // ID of the image.
+	RepoTags    []string // Repository tags associated with the image.
+	Created     string   // Timestamp string of image creation time.
+	Size        int64    // Size of the image in bytes.
+	VirtualSize int64    // Virtual size of the image in bytes (size on disk).
+}
+
+// ContainerPortMapping defines port mappings for a container.
+type ContainerPortMapping struct {
+	HostIP        string // Host IP address to bind to.
+	HostPort      string // Host port number.
+	ContainerPort string // Container port number.
+	Protocol      string // Protocol (e.g., "tcp", "udp").
+}
+
+// ContainerMount defines a mount point for a container.
+type ContainerMount struct {
+	Type        string // Type of mount (e.g., "bind", "volume", "tmpfs").
+	Source      string // Path on the host (for bind mounts) or name of the volume.
+	Destination string // Path inside the container where the mount is visible.
+	Mode        string // Mount mode (e.g., "ro" for read-only, "rw" for read-write).
+}
+
+// ContainerCreateOptions encapsulates parameters for creating a Docker container.
+type ContainerCreateOptions struct {
+	ImageName        string            // Name of the image to use for the container.
+	ContainerName    string            // Optional name for the container; Docker generates one if empty.
+	Ports            []ContainerPortMapping // Port mappings.
+	Volumes          []ContainerMount  // Volume mounts.
+	EnvVars          []string          // Environment variables in "VAR=value" format.
+	Command          []string          // Command to run in the container (overrides image's CMD).
+	Entrypoint       []string          // Entrypoint for the container (overrides image's ENTRYPOINT).
+	WorkingDir       string            // Working directory inside the container.
+	User             string            // Username or UID to run commands as inside the container.
+	RestartPolicy    string            // Restart policy (e.g., "no", "on-failure:3", "always", "unless-stopped").
+	NetworkMode      string            // Network mode (e.g., "bridge", "host", "none", "container:<name|id>", "<network_name>").
+	ExtraHosts       []string          // Hosts to add to the container's /etc/hosts file ("hostname:ip").
+	Labels           map[string]string // Labels to apply to the container.
+	Privileged       bool              // If true, run the container in privileged mode.
+	CapAdd           []string          // Linux capabilities to add to the container.
+	CapDrop          []string          // Linux capabilities to drop from the container.
+	Resources        ContainerResources // CPU, Memory limits/reservations.
+	HealthCheck      *ContainerHealthCheck // Health check configuration for the container.
+	AutoRemove       bool              // If true, automatically remove the container when it exits (--rm flag).
+	VolumesFrom      []string          // Mount volumes from the specified container(s).
+	SecurityOpt      []string          // Security options (e.g., "apparmor:unconfined", "seccomp=unconfined").
+	Sysctls          map[string]string // Kernel parameters (sysctls) to set in the container.
+	DNSServers       []string          // Custom DNS servers for the container.
+	DNSSearchDomains []string          // Custom DNS search domains for the container.
+}
+
+// ContainerResources defines CPU and memory constraints for a container.
+type ContainerResources struct {
+	CPUShares   int64  // Relative CPU shares (weight).
+	Memory      int64  // Memory limit in bytes (0 for unlimited).
+	NanoCPUs    int64  // CPU quota in units of 1e-9 CPUs (e.g., 0.5 CPUs = 500,000,000).
+	PidsLimit   int64  // PID limit for the container (Linux only). 0 or -1 for unlimited (kernel default may vary).
+	BlkioWeight uint16 // Block IO weight (relative weight), range 10 to 1000. 0 to disable.
+}
+
+// ContainerHealthCheck defines health check parameters for a container.
+type ContainerHealthCheck struct {
+	Test        []string      // Command to run to check health (e.g., ["CMD", "curl", "-f", "http://localhost/health"]).
+	Interval    time.Duration // Time between running the check.
+	Timeout     time.Duration // Maximum time to allow one check to run.
+	Retries     int           // Number of consecutive failures needed to consider the container unhealthy.
+	StartPeriod time.Duration // Start period for the container to initialize before health checks begin counting retries.
+}
+
+
+// ContainerInfo holds basic information about a Docker container, typically from a list operation.
+type ContainerInfo struct {
+	ID      string   // ID of the container.
+	Names   []string // Names associated with the container.
+	Image   string   // Image name used to create the container.
+	ImageID string   // ID of the image.
+	Command string   // Command being run.
+	Created int64    // Unix timestamp of container creation time.
+	State   string   // Current state of the container (e.g., "running", "exited", "created").
+	Status  string   // Additional status information (e.g., "Up 2 hours", "Exited (0) 5 minutes ago").
+	Ports   []ContainerPortMapping // Port mappings active for the container.
+	Labels  map[string]string    // Labels applied to the container.
+	Mounts  []ContainerMount     // Mounts configured for the container.
+}
+
+// ContainerLogOptions specifies how to retrieve logs from a container.
+type ContainerLogOptions struct {
+	Follow     bool   // If true, stream logs. Note: string return type of GetContainerLogs is not ideal for Follow=true.
+	Tail       string // Number of lines to show from the end of the logs (e.g., "all", "100").
+	Since      string // Show logs since a specific timestamp (e.g., "2013-01-02T13:23:37Z") or relative duration (e.g., "42m").
+	Until      string // Show logs before a specific timestamp or relative duration.
+	Timestamps bool   // If true, include timestamps in log output.
+	Details    bool   // If true, show extra details provided to logs (rarely used, driver-dependent).
+	ShowStdout bool   // If true, retrieve stdout logs. Defaults to false if neither stdout/stderr is true.
+	ShowStderr bool   // If true, retrieve stderr logs. Defaults to false if neither stdout/stderr is true.
+}
+
+// ContainerStats holds live resource usage statistics for a container.
+type ContainerStats struct {
+	CPUPercentage    float64 // Calculated CPU usage percentage across all cores.
+	MemoryUsageBytes uint64  // Current memory usage in bytes.
+	MemoryLimitBytes uint64  // Memory limit for the container in bytes.
+	NetworkRxBytes   uint64  // Cumulative network bytes received across all interfaces.
+	NetworkTxBytes   uint64  // Cumulative network bytes transmitted across all interfaces.
+	BlockReadBytes   uint64  // Cumulative block I/O bytes read from block devices.
+	BlockWriteBytes  uint64  // Cumulative block I/O bytes written to block devices.
+	PidsCurrent      uint64  // Current number of PIDs (processes/threads) in the container.
+	Error            error   // Used to propagate errors from the stats stream itself (e.g., decoding error).
+}
+
+// ContainerDetails provides detailed information about a container, typically from an "inspect" operation.
+// This is a simplified representation; Docker's inspect output is very rich.
+type ContainerDetails struct {
+	ID              string    // Full ID of the container.
+	Created         string    // Timestamp of container creation.
+	Path            string    // Path to the command being run.
+	Args            []string  // Arguments to the command.
+	State           *ContainerState // Detailed state of the container.
+	Image           string    // Image ID (sha256 hash) the container was created from.
+	ResolvConfPath  string    // Path to the container's resolv.conf file.
+	HostnamePath    string    // Path to the container's hostname file.
+	HostsPath       string    // Path to the container's hosts file.
+	LogPath         string    // Path to the container's log file (driver-dependent).
+	Name            string    // Name of the container.
+	RestartCount    int       // Number of times the container has been restarted.
+	Driver          string    // Storage driver used for the container.
+	Platform        string    // Platform of the container (e.g., "linux").
+	MountLabel      string    // Mount label for SELinux.
+	ProcessLabel    string    // Process label for SELinux.
+	AppArmorProfile string    // AppArmor profile name.
+	ExecIDs         []string  // List of exec instance IDs running in the container.
+	HostConfig      *HostConfig // Host-specific configuration applied to the container.
+	GraphDriver     *GraphDriverData // Information about the storage driver.
+	Mounts          []ContainerMount // List of mounts configured for the container (reflects actual runtime mounts).
+	Config          *ContainerConfig // Container's base configuration as provided at creation time.
+	NetworkSettings *NetworkSettings // Network settings for the container, including IP addresses and connected networks.
+}
+
+// ContainerState holds detailed information about a container's state.
+type ContainerState struct {
+	Status     string // Human-readable status (e.g., "running", "exited", "paused").
+	Running    bool   // True if the container is currently running.
+	Paused     bool   // True if the container is paused.
+	Restarting bool   // True if the container is in the process of restarting.
+	OOMKilled  bool   // True if the container was killed by OOM killer.
+	Dead       bool   // True if the container is dead (Docker internal state).
+	Pid        int    // Process ID of the container's main process on the host.
+	ExitCode   int    // Exit code of the container if it has exited.
+	Error      string // Error message if the container failed to start.
+	StartedAt  string // Timestamp when the container was last started.
+	FinishedAt string // Timestamp when the container last finished.
+}
+
+// HostConfig is a simplified representation of Docker's HostConfig structure,
+// containing host-specific configurations for a container.
+type HostConfig struct {
+	NetworkMode   string // Network mode for the container.
+	RestartPolicy struct { // Restart policy.
+		Name              string // Policy name (e.g., "on-failure").
+		MaximumRetryCount int    // Max number of retries for "on-failure".
+	}
+	PortBindings map[string][]ContainerPortMapping // Port bindings. Key: "containerPort/protocol".
+	Resources    ContainerResources // Resource constraints.
+	Privileged   bool // True if container runs in privileged mode.
+	AutoRemove   bool // True if container should be removed on exit.
+	// Add other commonly used fields from Docker's HostConfig as needed.
+	// e.g., Binds, CapAdd, CapDrop, SecurityOpt, etc.
+}
+
+// GraphDriverData holds information about the storage driver used for a container.
+type GraphDriverData struct {
+	Name string            // Name of the storage driver.
+	Data map[string]string // Driver-specific data.
+}
+
+// ContainerConfig is a simplified representation of Docker's container configuration,
+// as provided at creation time.
+type ContainerConfig struct {
+	Hostname     string   // Hostname of the container.
+	Domainname   string   // Domain name for the container.
+	User         string   // User that commands run as inside the container.
+	AttachStdin  bool     // True if stdin is attached.
+	AttachStdout bool     // True if stdout is attached.
+	AttachStderr bool     // True if stderr is attached.
+	ExposedPorts map[string]struct{} // Ports exposed by the Dockerfile (e.g. "80/tcp": {}).
+	Tty          bool     // True if a TTY is allocated.
+	OpenStdin    bool     // True if stdin is kept open even if not attached.
+	StdinOnce    bool     // True if stdin is closed after the first write.
+	Env          []string // Environment variables.
+	Cmd          []string // Command to run.
+	Image        string   // Image name specified at create time (not the ID).
+	Volumes      map[string]struct{} // Volumes defined in the Dockerfile (e.g. "/var/www": {}).
+	WorkingDir   string   // Working directory.
+	Entrypoint   []string // Entrypoint.
+	Labels       map[string]string // Labels.
+	Healthcheck  *ContainerHealthCheck // Healthcheck configuration from Dockerfile or create options.
+}
+
+// NetworkSettings holds detailed network configuration and runtime state for a container.
+type NetworkSettings struct {
+	Bridge                 string   // Name of the bridge interface on the host if using default bridge network.
+	SandboxID              string   // ID of the network sandbox.
+	HairpinMode            bool     // True if hairpin NAT is enabled.
+	LinkLocalIPv6Address   string   // IPv6 link-local address.
+	LinkLocalIPv6PrefixLen int      // Prefix length for IPv6 link-local address.
+	Ports                  map[string][]ContainerPortMapping // Runtime port mappings.
+	SandboxKey             string   // Key for the network sandbox.
+	SecondaryIPAddresses   []string // Array of secondary IPv4 addresses.
+	SecondaryIPv6Addresses []string // Array of secondary IPv6 addresses.
+	EndpointID             string   // ID of the container's endpoint in the default network.
+	Gateway                string   // Gateway IP address for the default network.
+	GlobalIPv6Address      string   // Global IPv6 address.
+	GlobalIPv6PrefixLen    int      // Prefix length for global IPv6 address.
+	IPAddress              string   // IPv4 address in the default network.
+	IPPrefixLen            int      // Prefix length for IPv4 address.
+	IPv6Gateway            string   // IPv6 gateway address.
+	MacAddress             string   // MAC address for the default network interface.
+	Networks               map[string]*EndpointSettings // Network settings for each network the container is connected to, keyed by network name or ID.
+}
+
+// EndpointSettings holds configuration for a container's network endpoint in a specific network.
+type EndpointSettings struct {
+	IPAMConfig          *EndpointIPAMConfig // IPAM configuration for this endpoint.
+	Links               []string // Links to other containers in this network.
+	Aliases             []string // Aliases for this container in this network.
+	NetworkID           string   // ID of the network.
+	EndpointID          string   // ID of this endpoint.
+	Gateway             string   // Gateway IP address for this network.
+	IPAddress           string   // IPv4 address in this network.
+	IPPrefixLen         int      // Prefix length for IPv4 address in this network.
+	IPv6Gateway         string   // IPv6 gateway address for this network.
+	GlobalIPv6Address   string   // Global IPv6 address in this network.
+	GlobalIPv6PrefixLen int      // Prefix length for global IPv6 address.
+	MacAddress          string   // MAC address for this endpoint.
+	DriverOpts          map[string]string // Driver-specific options for this endpoint.
+}
+
+// EndpointIPAMConfig holds IPAM (IP Address Management) configuration for a network endpoint.
+type EndpointIPAMConfig struct {
+	IPv4Address  string   // Static IPv4 address.
+	IPv6Address  string   // Static IPv6 address.
+	LinkLocalIPs []string // List of link-local IP addresses.
+}
+
+
+// DockerNetworkInfo holds information about a Docker network.
+type DockerNetworkInfo struct {
+	ID         string   // ID of the network.
+	Name       string   // Name of the network.
+	Driver     string   // Driver used for the network (e.g., "bridge", "overlay").
+	Scope      string   // Scope of the network (e.g., "local", "swarm", "global").
+	EnableIPv6 bool     // True if IPv6 is enabled on this network.
+	Subnets    []string // List of subnets in CIDR format associated with this network's IPAM configurations.
+	Gateways   []string // List of gateways associated with this network's IPAM configurations.
+	Containers map[string]string // Map of container ID to container name for containers connected to this network.
+}
+
+// DockerVolumeInfo holds information about a Docker volume.
+type DockerVolumeInfo struct {
+	Name       string            // Name of the volume.
+	Driver     string            // Driver used for the volume (e.g., "local").
+	Mountpoint string            // Path on the host where the volume data is stored.
+	Labels     map[string]string // Labels applied to the volume.
+	Scope      string            // Scope of the volume (e.g., "local", "global").
+}
+
+// DockerVolumeDetails provides detailed information about a Docker volume, typically from an "inspect" operation.
+type DockerVolumeDetails struct {
+	Name       string            // Name of the volume.
+	Driver     string            // Driver used for the volume.
+	Mountpoint string            // Path on the host where the volume data is stored.
+	Status     map[string]string // Driver-specific status information (can be nil).
+	Labels     map[string]string // Labels applied to the volume.
+	Scope      string            // Scope of the volume.
+	Options    map[string]string // Driver options used when the volume was created.
+	CreatedAt  string            // Timestamp of when the volume was created.
+}
+
+// DockerSystemInfo holds general information about the Docker daemon.
+// This is a selection of fields commonly found in the output of `docker info`.
+type DockerSystemInfo struct {
+	ID                string      // Unique ID of the Docker daemon.
+	Containers        int         // Total number of containers managed by the daemon.
+	ContainersRunning int         // Number of containers currently running.
+	ContainersPaused  int         // Number of containers currently paused.
+	ContainersStopped int         // Number of containers currently stopped.
+	Images            int         // Total number of images known to the daemon.
+	Driver            string      // Storage driver being used (e.g., "overlay2", "aufs").
+	DriverStatus      [][2]string // Key-value pairs describing the status of the storage driver.
+	Plugins           struct {    // Information about installed plugins.
+		Volume  []string // List of volume plugin names.
+		Network []string // List of network plugin names.
+		// Add other plugin types as needed (e.g., Authorization, Log)
+	}
+	MemoryLimit       bool   // True if memory limit support is enabled for containers.
+	SwapLimit         bool   // True if swap limit support is enabled for containers.
+	KernelMemory      bool   // True if kernel memory limit support is enabled (deprecated, use KernelMemoryTCP).
+	CPUCfsPeriod      bool   // True if CPU CFS period support is enabled.
+	CPUCfsQuota       bool   // True if CPU CFS quota support is enabled.
+	CPUShares         bool   // True if CPU shares support is enabled.
+	CPUSet            bool   // True if CPU set support (pinning to specific CPUs) is enabled.
+	PidsLimit         bool   // True if PIDs limit support for containers is enabled.
+	IPv4Forwarding    bool   // True if IPv4 forwarding is enabled on the host.
+	BridgeNfIptables  bool   // True if bridge netfilter iptables is enabled (required for Docker networking).
+	BridgeNfIp6tables bool   // True if bridge netfilter ip6tables is enabled.
+	Debug             bool   // True if the Docker daemon is running in debug mode.
+	NFd               int    // Number of file descriptors currently used by the daemon process.
+	OomKillDisable    bool   // True if OOM kill disable support is enabled for containers.
+	NGoroutines       int    // Number of active goroutines in the daemon process.
+	SystemTime        string // Current system time on the daemon host, in RFC3339Nano format.
+	LoggingDriver     string // Default logging driver for containers (e.g., "json-file").
+	CgroupDriver      string // Cgroup driver used by the daemon (e.g., "cgroupfs", "systemd").
+	CgroupVersion     string // Cgroup version in use by the host system (e.g., "1", "2").
+	NEventsListener   int    // Number of event listeners registered with the daemon.
+	KernelVersion     string // Kernel version of the host operating system.
+	OperatingSystem   string // Operating system of the host (e.g., "Docker Desktop", "Ubuntu 20.04.3 LTS").
+	OSType            string // OS type (e.g., "linux", "windows").
+	Architecture      string // Hardware architecture of the host (e.g., "x86_64", "aarch64").
+	IndexServerAddress string // Default registry server address (usually "https://index.docker.io/v1/").
+	RegistryConfig    *RegistryConfig // Information about configured Docker registries, including mirrors and insecure registries.
+	NCPU              int    // Number of logical CPUs available to the daemon.
+	MemTotal          int64  // Total physical memory on the host in bytes.
+	ServerVersion     string // Version of the Docker server (daemon).
+	// Add more fields as needed from `docker info` (e.g. SecurityOptions, Runtimes, LiveRestoreEnabled).
+}
+
+// RegistryConfig mirrors parts of the Docker daemon's registry configuration,
+// such as mirrors and insecure registry settings.
+type RegistryConfig struct {
+	IndexConfigs map[string]*IndexInfo // Configuration for specific registry indexes, keyed by registry hostname (e.g., "docker.io").
+	// InsecureRegistryCIDRs, etc. can be added if detailed insecure registry info is needed.
+}
+
+// IndexInfo holds information about a specific Docker registry index, including its mirrors and security status.
+type IndexInfo struct {
+	Name     string   // Name of the registry (e.g., "docker.io").
+	Mirrors  []string // List of configured mirror URLs for this registry.
+	Secure   bool     // True if the registry is considered secure (HTTPS with valid certificate). Note: This model's `Secure` is inverted from Docker API's `Secure` field.
+	Official bool     // True if this is an official Docker registry (e.g., Docker Hub).
+}
+
+
+// VMNetworkInterface defines network interface parameters for a VM
+type VMNetworkInterface struct {
+	Type       string // e.g., "network", "bridge", "direct"
+	Source     string // e.g., "default" (libvirt network), "br0" (bridge name), "eth0" (direct interface)
+	Model      string // e.g., "virtio"
+	MACAddress string // Optional, specific MAC address
+}
+
+// VMInfo holds basic information about a virtual machine
+type VMInfo struct {
+	Name   string
+	State  string // e.g., "running", "shut off", "paused"
+	CPUs   int
+	Memory uint // in MB
+	UUID   string
+}
+
 
 // UserModifications defines the set of attributes that can be changed for a user.
 // Pointers are used for string fields to distinguish between a requested empty value (not usually applicable for these fields)
