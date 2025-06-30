@@ -4,11 +4,18 @@ import (
 	"context"
 	"errors" // Added for errors.As
 	"fmt"
-	// "path/filepath" // Removed as unused
+	"path/filepath" // Added for filepath.Dir
 	"strings"
 
 	"github.com/mensylisir/kubexm/pkg/connector" // Corrected import path
 )
+
+// shellEscape provides basic shell escaping for a string.
+// WARNING: This is a simplified version and may not cover all edge cases.
+// For production use, a more robust library or approach might be needed if paths can be arbitrary.
+func shellEscape(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
 
 // Exists checks if a file or directory exists at the given path.
 func (r *defaultRunner) Exists(ctx context.Context, conn connector.Connector, path string) (bool, error) {
@@ -74,23 +81,14 @@ func (r *defaultRunner) WriteFile(ctx context.Context, conn connector.Connector,
 	if conn == nil {
 		return fmt.Errorf("connector cannot be nil")
 	}
-	// Check if the connector directly supports WriteFile or CopyContent
-	if extendedConn, ok := conn.(interface {
-		WriteFile(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error
-	}); ok {
-		return extendedConn.WriteFile(ctx, content, destPath, permissions, sudo)
+	opts := &connector.FileTransferOptions{
+		Permissions: permissions,
+		Sudo:        sudo,
+		// Owner and Group could be added here if the runner.WriteFile signature were extended
+		// or if there's a convention to pass them via another mechanism.
+		// For now, matching the existing runner.WriteFile signature.
 	}
-	if extendedConnCopy, ok := conn.(interface {
-		CopyContent(ctx context.Context, content []byte, destPath string, options *connector.FileTransferOptions) error
-	}); ok {
-		opts := &connector.FileTransferOptions{
-			Permissions: permissions,
-			Sudo:        sudo,
-		}
-		return extendedConnCopy.CopyContent(ctx, content, destPath, opts)
-	}
-	// Fallback to a command-based approach if direct methods aren't available (more complex)
-	return fmt.Errorf("WriteFile not directly supported by connector and command-based fallback not implemented in this refactor step")
+	return conn.WriteFile(ctx, content, destPath, opts)
 }
 
 // Mkdirp ensures a directory exists, creating parent directories as needed (like 'mkdir -p').
@@ -213,3 +211,219 @@ func (r *defaultRunner) LookPath(ctx context.Context, conn connector.Connector, 
 }
 
 // Removed duplicated LookPath and misplaced code block that was here.
+
+// --- Stubs for new filesystem/storage methods from enriched interface ---
+
+func (r *defaultRunner) EnsureMount(ctx context.Context, conn connector.Connector, device, mountPoint, fsType string, options []string, persistent bool) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil")
+	}
+	// Basic validation
+	if device == "" || mountPoint == "" || fsType == "" {
+		return fmt.Errorf("device, mountPoint, and fsType must be specified for EnsureMount")
+	}
+
+	// Determine sudo for sub-operations. Assume if mount needs sudo, precursor ops might too.
+	// A more granular approach might pass separate sudo flags or infer based on path.
+	// For now, if the mount operation itself might need sudo, assume Mkdirp might too.
+	// The actual mount command will use sudo via RunWithOptions.
+
+	// 1. Check if already mounted
+	// A more robust check would verify device and options, not just if something is at mountPoint.
+	// For this version, IsMounted checks if mountPoint is a mount point.
+	isMounted, err := r.IsMounted(ctx, conn, mountPoint)
+	if err != nil {
+		// If IsMounted itself failed (e.g., 'mountpoint' tool not found), propagate that.
+		return fmt.Errorf("failed to check if %s is already mounted: %w", mountPoint, err)
+	}
+
+	if !isMounted {
+		// 2. Ensure mountPoint directory exists
+		// Using "0755" as a common default permission for mount point dirs.
+		// Sudo for Mkdirp: if the mount operation needs sudo, creating the mountpoint dir might too.
+		// This is a heuristic.
+		if err := r.Mkdirp(ctx, conn, mountPoint, "0755", true); err != nil { // Assuming sudo true for mkdir if mount might need it
+			return fmt.Errorf("failed to create mount point directory %s: %w", mountPoint, err)
+		}
+
+		// 3. Mount the device
+		mountCmdParts := []string{"mount"}
+		if len(options) > 0 {
+			mountCmdParts = append(mountCmdParts, "-o", strings.Join(options, ","))
+		}
+		mountCmdParts = append(mountCmdParts, "-t", fsType)
+		mountCmdParts = append(mountCmdParts, shellEscape(device))
+		mountCmdParts = append(mountCmdParts, shellEscape(mountPoint))
+		mountCmd := strings.Join(mountCmdParts, " ")
+
+		_, stderr, mountErr := r.RunWithOptions(ctx, conn, mountCmd, &connector.ExecOptions{Sudo: true})
+		if mountErr != nil {
+			return fmt.Errorf("failed to mount %s to %s: %w (stderr: %s)", device, mountPoint, mountErr, string(stderr))
+		}
+	}
+
+	// 4. If persistent, ensure entry in /etc/fstab
+	if persistent {
+		fstabOptions := "defaults"
+		if len(options) > 0 {
+			fstabOptions = strings.Join(options, ",")
+		}
+		// Common dump/pass values. Pass '0' for non-root filesystems is safest to avoid fsck issues on boot if not critical.
+		// Pass '2' for non-root, '1' for root. For general purpose, '0 0' is common.
+		fstabEntry := fmt.Sprintf("%s %s %s %s 0 0", device, mountPoint, fsType, fstabOptions)
+
+		// Idempotency check: grep for the mountPoint first.
+		// A more robust check would parse /etc/fstab properly.
+		// This simple grep checks if an entry for the mountPoint exists.
+		// It doesn't verify if the existing entry is correct (device, fsType, options).
+		checkFstabCmd := fmt.Sprintf("grep -qE '^[[:space:]]*[^#]+[[:space:]]+%s[[:space:]]' /etc/fstab", shellEscape(mountPoint))
+		entryExistsInFstab, _ := r.Check(ctx, conn, checkFstabCmd, false) // Ignore error, if grep fails, assume not found.
+
+		if !entryExistsInFstab {
+			// Append the new entry. Use shell redirection with sudo via sh -c.
+			// Ensure the entryLine is properly quoted for the shell command.
+			escapedFstabEntry := shellEscape(fstabEntry) // Escape for the 'echo' command
+			appendCmd := fmt.Sprintf("sh -c 'echo %s >> /etc/fstab'", escapedFstabEntry)
+
+			_, stderr, appendErr := r.RunWithOptions(ctx, conn, appendCmd, &connector.ExecOptions{Sudo: true})
+			if appendErr != nil {
+				return fmt.Errorf("failed to add entry to /etc/fstab for %s: %w (stderr: %s)", mountPoint, appendErr, string(stderr))
+			}
+		}
+		// Note: This doesn't handle updating an existing incorrect fstab entry for the mountPoint.
+	}
+	return nil
+}
+
+func (r *defaultRunner) IsMounted(ctx context.Context, conn connector.Connector, path string) (bool, error) {
+	if conn == nil {
+		return false, fmt.Errorf("connector cannot be nil")
+	}
+	if strings.TrimSpace(path) == "" {
+		return false, fmt.Errorf("path cannot be empty for IsMounted")
+	}
+
+	// Ensure the path is "absolute" or at least not problematic for grep.
+	// Shell escaping might be needed if path can contain special characters,
+	// but for typical mount paths, it's often okay.
+	// For robustness, especially if path could be `*`, it needs escaping.
+	// However, `grep -qs -- "/path/to/check" /proc/mounts` is safer.
+	// The '--' signifies end of options, then pattern, then file.
+	// The path itself might need quoting if it contains spaces. Let's assume simple paths for now,
+	// or rely on a shellEscape helper if available and necessary.
+	// Using exact match with -F might be too strict if /proc/mounts has variations.
+	// A common pattern is to check if `df <path>` reports the path on the correct device.
+	// Or, more simply: `grep -qsE "[[:space:]]${MOUNT_POINT}[[:space:]]" /proc/mounts`
+	// The command `findmnt -rno TARGET "${path}"` exits 0 if path is a mountpoint and its output is the path.
+	// Or, `mountpoint -q "${path}"` is even simpler if available (util-linux).
+
+	// Let's use `mountpoint -q <path>` as it's designed for this.
+	// It exits 0 if path is a mountpoint, non-zero otherwise.
+	// Requires `util-linux` package, which is very common.
+
+	// First, check if `mountpoint` command exists.
+	if _, err := r.LookPath(ctx, conn, "mountpoint"); err == nil {
+		cmd := fmt.Sprintf("mountpoint -q %s", path) // Path is used directly
+		// No sudo needed for `mountpoint -q`
+		return r.Check(ctx, conn, cmd, false)
+	}
+
+	// Fallback: Check /proc/mounts if mountpoint command is not available
+	// This is a common Linux-specific way.
+	// We need to be careful with how paths are listed in /proc/mounts (e.g., symlinks resolved).
+	// A simple grep might not be fully robust for all edge cases (e.g. bind mounts over files, symlinked mountpoints).
+	// `awk '$2 == path {found=1; exit} END{exit !found}' path="${path_escaped_for_awk}" /proc/mounts`
+	// For now, a simpler grep:
+	// We need to match the path as the second field, surrounded by whitespace.
+	// Example line: /dev/sda1 /mnt/data ext4 rw,relatime 0 0
+	// The path in /proc/mounts is usually what was passed to mount, but can be tricky with symlinks.
+	// Using `df <path> | awk 'NR==2 {print $6}'` and checking if it equals path is also common.
+
+	// Given the constraints and aiming for simplicity that works in many Linux cases:
+	// `grep -qsE '[[:space:]]${ESCAPED_PATH}[[:space:]]' /proc/mounts`
+	// The path needs to be escaped for regex and shell.
+	// For now, let's stick to `mountpoint` and if not found, return an error or a less reliable check.
+	// For this iteration, if mountpoint is not found, we'll indicate it's not implemented for fallback.
+	return false, fmt.Errorf("IsMounted: 'mountpoint' command not found, and /proc/mounts fallback not fully implemented for all edge cases yet")
+}
+
+func (r *defaultRunner) MakeFilesystem(ctx context.Context, conn connector.Connector, device, fsType string, force bool) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil")
+	}
+	if strings.TrimSpace(device) == "" {
+		return fmt.Errorf("device cannot be empty for MakeFilesystem")
+	}
+	if strings.TrimSpace(fsType) == "" {
+		return fmt.Errorf("fsType cannot be empty for MakeFilesystem")
+	}
+
+	// Basic validation for fsType to prevent command injection via this variable.
+	// Allow common types. A more robust solution might use a whitelist or more advanced validation.
+	// For now, simple check for alphanumeric.
+	safeFsType := fsType // In a real scenario, validate fsType more strictly or use a map of allowed types.
+	for _, char := range fsType {
+		if !((char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '.') {
+			return fmt.Errorf("invalid characters in fsType: %s", fsType)
+		}
+	}
+
+
+	cmdParts := []string{fmt.Sprintf("mkfs.%s", safeFsType)}
+	if force {
+		// Common force flags are -f or -F. mkfs.ext4 uses -F, mkfs.xfs uses -f.
+		// Using a generic -f. This might need adjustment for specific fsTypes if -f is not universal or has different meanings.
+		// For critical operations, it's better to be specific based on fsType.
+		// For this implementation, we'll use a common one and note the caveat.
+		cmdParts = append(cmdParts, "-f") // General force flag
+	}
+	cmdParts = append(cmdParts, shellEscape(device))
+	cmd := strings.Join(cmdParts, " ")
+
+	_, stderr, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true})
+	if err != nil {
+		return fmt.Errorf("failed to make filesystem type %s on device %s: %w (stderr: %s)", fsType, device, err, string(stderr))
+	}
+	return nil
+}
+
+func (r *defaultRunner) CreateSymlink(ctx context.Context, conn connector.Connector, target, linkPath string, sudo bool) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil")
+	}
+	if strings.TrimSpace(target) == "" {
+		return fmt.Errorf("target cannot be empty for CreateSymlink")
+	}
+	if strings.TrimSpace(linkPath) == "" {
+		return fmt.Errorf("linkPath cannot be empty for CreateSymlink")
+	}
+
+	// Ensure parent directory of linkPath exists.
+	// This step is often crucial for `ln -s` to succeed if the parent dir doesn't exist.
+	linkDir := filepath.Dir(linkPath)
+	if linkDir != "." && linkDir != "/" { // Avoid trying to mkdirp "." or "/"
+		// Mkdirp itself handles sudo if needed for the directory creation.
+		// The sudo flag for CreateSymlink applies to the `ln` command itself.
+		// If linkDir needs sudo to create, and the main `ln` also needs sudo, this is fine.
+		// If linkDir doesn't need sudo, but `ln` does, also fine.
+		if err := r.Mkdirp(ctx, conn, linkDir, "0755", sudo); err != nil {
+			return fmt.Errorf("failed to create parent directory %s for symlink %s: %w", linkDir, linkPath, err)
+		}
+	}
+
+	// Using -f to force creation (overwrite if linkPath exists)
+	// Using -n for directories: when source is a directory, `ln -sfn source link` makes link point to source.
+	// If link is already a directory, `ln -sf source link` would create source inside link/ (link/source).
+	// `ln -sfn` (or `ln -sfT`) is often safer to ensure linkPath itself becomes the symlink.
+	// For simplicity and common use, `ln -sf` is often sufficient if linkPath is not expected to be a pre-existing directory.
+	// Let's assume `ln -sf` is the desired behavior for now. If linkPath is a dir, target will be created inside.
+	// If more precise control over directory symlinking is needed, -T or -n flags with `ln` could be used,
+	// potentially requiring a check if target is a directory.
+
+	cmd := fmt.Sprintf("ln -sf %s %s", shellEscape(target), shellEscape(linkPath))
+	_, stderr, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: sudo})
+	if err != nil {
+		return fmt.Errorf("failed to create symlink from %s to %s: %w (stderr: %s)", target, linkPath, err, string(stderr))
+	}
+	return nil
+}

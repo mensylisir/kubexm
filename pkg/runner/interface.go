@@ -94,4 +94,31 @@ type Runner interface {
 	GroupExists(ctx context.Context, conn connector.Connector, groupname string) (bool, error)
 	AddUser(ctx context.Context, conn connector.Connector, username, group, shell string, homeDir string, createHome bool, systemUser bool) error
 	AddGroup(ctx context.Context, conn connector.Connector, groupname string, systemGroup bool) error
+
+	// --- System & Kernel ---
+	LoadModule(ctx context.Context, conn connector.Connector, facts *Facts, moduleName string, params ...string) error
+	IsModuleLoaded(ctx context.Context, conn connector.Connector, moduleName string) (bool, error)
+	ConfigureModuleOnBoot(ctx context.Context, conn connector.Connector, facts *Facts, moduleName string, params ...string) error
+	SetSysctl(ctx context.Context, conn connector.Connector, key, value string, persistent bool) error
+	SetTimezone(ctx context.Context, conn connector.Connector, facts *Facts, timezone string) error
+	DisableSwap(ctx context.Context, conn connector.Connector, facts *Facts) error
+	IsSwapEnabled(ctx context.Context, conn connector.Connector) (bool, error)
+
+	// --- Filesystem & Storage ---
+	EnsureMount(ctx context.Context, conn connector.Connector, device, mountPoint, fsType string, options []string, persistent bool) error
+	IsMounted(ctx context.Context, conn connector.Connector, path string) (bool, error)
+	MakeFilesystem(ctx context.Context, conn connector.Connector, device, fsType string, force bool) error
+	CreateSymlink(ctx context.Context, conn connector.Connector, target, linkPath string, sudo bool) error
+
+	// --- Networking ---
+	DisableFirewall(ctx context.Context, conn connector.Connector, facts *Facts) error
+	// GetInterfaceAddresses(...) // Placeholder if to be added later
+
+	// --- User & Permissions ---
+	// ModifyUser(...) // Placeholder if to be added later
+	ConfigureSudoer(ctx context.Context, conn connector.Connector, sudoerName, content string) error
+
+	// --- High-Level ---
+	DeployAndEnableService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName, configContent, configPath, permissions string, templateData interface{}) error
+	Reboot(ctx context.Context, conn connector.Connector, timeout time.Duration) error
 }

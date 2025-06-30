@@ -83,11 +83,10 @@ func (l *LocalConnector) Exec(ctx context.Context, cmd string, options *ExecOpti
 
 		// IMPORTANT: This Stdin logic is for `sudo -S` reading password.
 		// It should not interfere with commands that genuinely need their own stdin,
-		// like `tee` in the WriteFile/Copy sudo path (which now use direct exec.Command).
-		if effectiveOptions.Sudo && l.connCfg.Password != "" && strings.HasPrefix(fullCmdString, "sudo -S") {
+		// like `tee` in the WriteFile sudo path (which now use direct exec.Command).
+		if effectiveOptions.Sudo && l.connCfg.Password != "" { // Simplified condition
 			actualCmd.Stdin = strings.NewReader(l.connCfg.Password + "\n")
 		}
-
 		var stdoutBuf, stderrBuf bytes.Buffer
 		if effectiveOptions.Stream != nil {
 			actualCmd.Stdout = io.MultiWriter(&stdoutBuf, effectiveOptions.Stream)
