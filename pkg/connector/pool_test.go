@@ -2,20 +2,17 @@ package connector
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
+	// "crypto/rand" // Marked as unused by compiler
+	// "crypto/rsa"   // Marked as unused by compiler
 	"errors"
 	"fmt"
-	"golang.org/x/crypto/ssh"
-	"net"
+	// "golang.org/x/crypto/ssh" // Also marked as unused by compiler
+	// "net"          // Marked as unused by compiler
 	"strings"
-	"sync"
+	// "sync"         // Marked as unused by compiler
 	"testing"
 	"time"
-
-	"golang.org/x/crypto/ssh" // Keep this if any test-specific SSH logic remains, otherwise remove.
-	// If generatePoolKey uses ssh.HostKeyCallback, it might be needed.
-	// The ConnectionCfg in tests might use ssh.HostKeyCallback.
+	// Removed redundant import of "golang.org/x/crypto/ssh"
 )
 
 // --- Test Cases ---
