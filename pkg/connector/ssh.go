@@ -74,7 +74,7 @@ func (s *SSHConnector) Connect(ctx context.Context, cfg ConnectionCfg) error {
 	// Here, we use cfg.Timeout which might be different.
 	// For consistency, dialSSH should prioritize its direct connectTimeout param.
 	// The current dialSSH in ssh.go takes connectTimeout.
-	client, bastionClient, err := dialSSH(ctx, cfg, cfg.Timeout) // Pass cfg.Timeout for direct dials
+	client, bastionClient, err := currentDialer(ctx, cfg, cfg.Timeout) // Use currentDialer for direct dials
 	if err != nil {
 		return err
 	}
@@ -163,11 +163,13 @@ func (s *SSHConnector) Exec(ctx context.Context, cmd string, options *ExecOption
 
 	// runOnce helper encapsulates the logic for a single command execution attempt.
 	runOnce := func(runCtx context.Context, stdinPipe io.Reader) ([]byte, []byte, error) {
+		// fmt.Fprintf(os.Stderr, "[SSHConnector.Exec.runOnce] Attempting to create new session...\n")
 		session, err := s.client.NewSession()
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to create session: %w", err)
 		}
 		defer session.Close()
+		// fmt.Fprintf(os.Stderr, "[SSHConnector.Exec.runOnce] New session created.\n")
 
 		if len(effectiveOptions.Env) > 0 {
 			for _, envVar := range effectiveOptions.Env {
@@ -202,34 +204,48 @@ func (s *SSHConnector) Exec(ctx context.Context, cmd string, options *ExecOption
 			session.Stderr = &stderrBuf
 		}
 
+		// fmt.Fprintf(os.Stderr, "[SSHConnector.Exec.runOnce] Attempting to session.Start(%s)...\n", finalCmd)
 		// Use Start() for non-blocking execution
 		if err := session.Start(finalCmd); err != nil {
+			// fmt.Fprintf(os.Stderr, "[SSHConnector.Exec.runOnce] session.Start failed: %v\n", err)
 			return stdoutBuf.Bytes(), stderrBuf.Bytes(), fmt.Errorf("failed to start command '%s': %w", finalCmd, err)
 		}
+		// fmt.Fprintf(os.Stderr, "[SSHConnector.Exec.runOnce] session.Start successful. Waiting for command to finish...\n")
 
 		// Wait for the command to finish or the context to be cancelled.
 		doneCh := make(chan error, 1)
 		go func() {
+			// fmt.Fprintf(os.Stderr, "[SSHConnector.Exec.runOnce-goroutine] Calling session.Wait()...\n")
 			doneCh <- session.Wait()
+			// fmt.Fprintf(os.Stderr, "[SSHConnector.Exec.runOnce-goroutine] session.Wait() returned.\n")
 		}()
 
+		// fmt.Fprintf(os.Stderr, "[SSHConnector.Exec.runOnce] Entering select. runCtx.Err() is initially: %v\n", runCtx.Err())
 		select {
 		case <-runCtx.Done():
+			// fmt.Fprintf(os.Stderr, "[SSHConnector.Exec.runOnce] Context done. Signaling session...\n")
 			// Context timed out or was cancelled.
 			// It's good practice to send a signal to the remote process.
 			// SIGKILL is forceful but effective for timeouts.
 			_ = session.Signal(ssh.SIGKILL)
-			// We must still wait for session.Wait() to return to clean up resources.
-			<-doneCh
+			// fmt.Fprintf(os.Stderr, "[SSHConnector.Exec.runOnce] Waiting for doneCh after context done (max 1s)...\n")
+			select {
+			case <-doneCh:
+				// fmt.Fprintf(os.Stderr, "[SSHConnector.Exec.runOnce] doneCh received after context done.\n")
+			case <-time.After(1 * time.Second): // Safety timeout for session.Wait() to return
+				// fmt.Fprintf(os.Stderr, "[SSHConnector.Exec.runOnce] Timeout waiting for session.Wait() after context cancellation.\n")
+				// Potentially return a more specific error here, though runCtx.Err() is primary
+			}
 			// Return the context's error (e.g., context.DeadlineExceeded).
 			return stdoutBuf.Bytes(), stderrBuf.Bytes(), runCtx.Err()
 		case err := <-doneCh:
+			// fmt.Fprintf(os.Stderr, "[SSHConnector.Exec.runOnce] Command finished naturally. Error: %v\n", err)
 			// Command finished on its own.
 			return stdoutBuf.Bytes(), stderrBuf.Bytes(), err
 		}
 	}
 
-	var finalErr error
+	// var finalErr error // Removed
 	var stdinReader io.Reader = bytes.NewReader(nil) // Default empty stdin for commands not needing piped input
 	// Check if options.Stream is intended to be used as stdin
 	if roStream, ok := effectiveOptions.Stream.(readOnlyStream); ok {
@@ -261,22 +277,63 @@ func (s *SSHConnector) Exec(ctx context.Context, cmd string, options *ExecOption
 		if err == nil {
 			return stdout, stderr, nil // Success
 		}
-		finalErr = err
+		// Use new variables for each attempt's results
+		attemptStdout, attemptStderr, attemptErr := runOnce(attemptCtx, stdinReader)
 
-		if attemptCtx.Err() != nil { // This checks if the attemptCtx itself was "Done"
-			break // Context timed out or was cancelled, no more retries
+		// Always store the results of the current attempt for the final return if all retries fail
+		// These are the function-scoped stdout, stderr, err that will be returned by Exec
+		stdout = attemptStdout
+		stderr = attemptStderr
+		err = attemptErr
+
+		if attemptCancel != nil {
+			attemptCancel() // Clean up the per-attempt context
 		}
 
-		if i < effectiveOptions.Retries && effectiveOptions.RetryDelay > 0 {
-			time.Sleep(effectiveOptions.RetryDelay)
+		if err == nil { // Success on this attempt
+			return stdout, stderr, nil
+		}
+
+		// If we are here, err != nil for this attempt.
+		// Check if the *overall* context for the Exec operation is done.
+		if ctx.Err() != nil {
+			// Overall context is done, so no more retries.
+			// The 'err' from this attempt (which might be its own context error) is the one we'll return,
+			// potentially wrapped if ctx.Err() is the more direct cause.
+			// If err is already ctx.Err() or a derivative, that's fine.
+			// If err is some other command error, but ctx also timed out, ctx.Err() is more representative.
+			// For now, we let 'err' (the attempt's error) be the one that gets wrapped by CommandError.
+			// A more nuanced approach might be needed if specific overall context errors need to supersede attempt errors.
+			break
+		}
+
+		if i < effectiveOptions.Retries { // If there are more retries left
+			if effectiveOptions.RetryDelay > 0 {
+				select {
+				case <-ctx.Done(): // Check overall context before sleeping
+					// Overall context cancelled during delay period. 'err' holds current attempt's error.
+					// We should return this 'err' (from current attempt) as it's the most recent failure.
+					// The CommandError wrapping will happen after the loop.
+					return stdout, stderr, err // Return current attempt's stdout/stderr/err
+				case <-time.After(effectiveOptions.RetryDelay):
+					// Sleep finished, proceed to next retry
+				}
+			}
+			// Continue to next retry iteration
+		} else {
+			// This was the last attempt (i == effectiveOptions.Retries), and it failed.
+			break // Exit retry loop, 'err' holds the error of this final attempt.
 		}
 	}
 
+	// If loop finished, 'err' holds the error from the last attempt.
+	// Wrap it in CommandError before returning.
 	exitCode := -1
-	if exitErr, ok := finalErr.(*ssh.ExitError); ok {
+	if exitErr, ok := err.(*ssh.ExitError); ok {
 		exitCode = exitErr.ExitStatus()
 	}
-	return stdout, stderr, &CommandError{Cmd: cmd, ExitCode: exitCode, Stdout: string(stdout), Stderr: string(stderr), Underlying: finalErr}
+	// Ensure Underlying is 'err' from the last attempt.
+	return stdout, stderr, &CommandError{Cmd: cmd, ExitCode: exitCode, Stdout: string(stdout), Stderr: string(stderr), Underlying: err}
 }
 
 // ensureSftp initializes the SFTP client if it hasn't been already.
