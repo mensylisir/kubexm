@@ -99,29 +99,42 @@ func TestRunner_AddUser_Success(t *testing.T) {
 	shell := "/bin/bash"
 	homeDir := "/home/newuser"
 
-	var addUserCmd string
+	var userExistsCmdCalled, userAddCmdCalled bool
+
 	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
 		mockConn.LastExecCmd = cmd
 		mockConn.LastExecOptions = options
-		if strings.HasPrefix(cmd, "useradd") && options.Sudo {
-			addUserCmd = cmd
+
+		expectedUserExistsCmd := fmt.Sprintf("id -u %s", username)
+		if cmd == expectedUserExistsCmd {
+			userExistsCmdCalled = true
+			return nil, nil, &connector.CommandError{ExitCode: 1} // Simulate user does not exist
+		}
+
+		// Check for useradd command (be a bit flexible with flag order)
+		if strings.HasPrefix(cmd, "useradd") && strings.Contains(cmd, username) && options.Sudo {
+			userAddCmdCalled = true
 			if !strings.Contains(cmd, username) { t.Errorf("AddUser cmd missing username: %s", cmd)}
 			if !strings.Contains(cmd, "-g "+group) { t.Errorf("AddUser cmd missing group: %s", cmd)}
 			if !strings.Contains(cmd, "-s "+shell) { t.Errorf("AddUser cmd missing shell: %s", cmd)}
 			if !strings.Contains(cmd, "-m") { t.Errorf("AddUser cmd missing -m (createHome): %s", cmd)}
 			if !strings.Contains(cmd, "-d "+homeDir) {t.Errorf("AddUser cmd missing -d homeDir: %s", cmd)}
-			return nil, nil, nil
+			return nil, nil, nil // Simulate useradd success
 		}
+
 		if isExecCmdForFactsInUserTest(cmd) { return []byte("dummy"), nil, nil }
-		return nil, nil, fmt.Errorf("AddUser Success: unexpected cmd %s", cmd)
+		return nil, nil, fmt.Errorf("TestRunner_AddUser_Success: unexpected cmd %s", cmd)
 	}
 
 	err := r.AddUser(context.Background(), mockConn, username, group, shell, homeDir, true, false)
 	if err != nil {
 		t.Fatalf("AddUser() error = %v", err)
 	}
-	if addUserCmd == "" {
-		t.Error("AddUser did not seem to execute useradd command")
+	if !userExistsCmdCalled {
+		t.Error("UserExists command (id -u) was not called by AddUser")
+	}
+	if !userAddCmdCalled {
+		t.Error("useradd command was not called by AddUser")
 	}
 }
 
@@ -129,25 +142,35 @@ func TestRunner_AddGroup_Success(t *testing.T) {
 	r, mockConn := newTestRunnerForUser(t)
 	groupname := "newgroup"
 
-	var addGroupCmd string
+	var groupExistsCmdCalled, groupAddCmdCalled bool
 	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
 		mockConn.LastExecCmd = cmd
 		mockConn.LastExecOptions = options
-		if strings.HasPrefix(cmd, "groupadd") && options.Sudo {
-			addGroupCmd = cmd
+
+		expectedGroupExistsCmd := fmt.Sprintf("getent group %s", groupname)
+		if cmd == expectedGroupExistsCmd {
+			groupExistsCmdCalled = true
+			return nil, nil, &connector.CommandError{ExitCode: 1} // Simulate group does not exist
+		}
+
+		if strings.HasPrefix(cmd, "groupadd") && strings.Contains(cmd, groupname) && options.Sudo {
+			groupAddCmdCalled = true
 			if !strings.Contains(cmd, groupname) {t.Errorf("AddGroup missing groupname: %s", cmd)}
 			if strings.Contains(cmd, "-r") {t.Errorf("AddGroup unexpectedly has -r for non-system group: %s", cmd)}
-			return nil, nil, nil
+			return nil, nil, nil // Simulate groupadd success
 		}
 		if isExecCmdForFactsInUserTest(cmd) { return []byte("dummy"), nil, nil }
-		return nil, nil, fmt.Errorf("AddGroup Success: unexpected cmd %s", cmd)
+		return nil, nil, fmt.Errorf("TestRunner_AddGroup_Success: unexpected cmd %s", cmd)
 	}
 	err := r.AddGroup(context.Background(), mockConn, groupname, false)
 	if err != nil {
 		t.Fatalf("AddGroup() error = %v", err)
 	}
-	if addGroupCmd == "" {
-		t.Error("AddGroup did not seem to execute groupadd command")
+	if !groupExistsCmdCalled {
+		t.Error("GroupExists command (getent group) was not called by AddGroup")
+	}
+	if !groupAddCmdCalled {
+		t.Error("groupadd command was not called by AddGroup")
 	}
 }
 
@@ -155,27 +178,37 @@ func TestRunner_AddUser_SystemUserNoHome(t *testing.T) {
 	r, mockConn := newTestRunnerForUser(t)
 	username := "sysuser"
 
-	var addUserCmd string
+	var userExistsCmdCalled, userAddCmdCalled bool
 	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
 		mockConn.LastExecCmd = cmd
 		mockConn.LastExecOptions = options
-		if strings.HasPrefix(cmd, "useradd") && options.Sudo {
-			addUserCmd = cmd
+
+		expectedUserExistsCmd := fmt.Sprintf("id -u %s", username)
+		if cmd == expectedUserExistsCmd {
+			userExistsCmdCalled = true
+			return nil, nil, &connector.CommandError{ExitCode: 1} // Simulate user does not exist
+		}
+
+		if strings.HasPrefix(cmd, "useradd") && strings.Contains(cmd, username) && options.Sudo {
+			userAddCmdCalled = true
 			if !strings.Contains(cmd, "-r") { t.Errorf("AddUser (system) cmd missing -r: %s", cmd)}
 			if !strings.Contains(cmd, "-M") { t.Errorf("AddUser (system, no home) cmd missing -M: %s", cmd)}
-			if strings.Contains(cmd, " -m ") {t.Errorf("AddUser (system, no home) cmd unexpectedly has -m: %s", cmd)}
-			return nil, nil, nil
+			if strings.Contains(cmd, " -m ") {t.Errorf("AddUser (system, no home) cmd unexpectedly has -m: %s", cmd)} // Note: " -m " to avoid matching "-d /home/..."
+			return nil, nil, nil // Simulate useradd success
 		}
 		if isExecCmdForFactsInUserTest(cmd) { return []byte("dummy"), nil, nil }
 
-		return nil, nil, fmt.Errorf("AddUser system: unexpected cmd %s", cmd)
+		return nil, nil, fmt.Errorf("TestRunner_AddUser_SystemUserNoHome: unexpected cmd %s", cmd)
 	}
 	err := r.AddUser(context.Background(), mockConn, username, "", "", "", false, true)
 	if err != nil {
 		t.Fatalf("AddUser() for system user error = %v", err)
 	}
-	if addUserCmd == "" {
-		t.Error("AddUser for system user did not execute useradd")
+	if !userExistsCmdCalled {
+		t.Error("UserExists command (id -u) was not called by AddUser (system user)")
+	}
+	if !userAddCmdCalled {
+		t.Error("useradd command was not called by AddUser (system user)")
 	}
 }
 
@@ -189,4 +222,12 @@ func isExecCmdForFactsInUserTest(cmd string) bool {
 		strings.Contains(cmd, "ip -6 route") ||
 		strings.Contains(cmd, "command -v") ||
 		strings.Contains(cmd, "test -e /etc/init.d")
+}
+
+func TestRunner_ConfigureSudoer_NotImplemented(t *testing.T) {
+	r, mockConn := newTestRunnerForUser(t)
+	err := r.ConfigureSudoer(context.Background(), mockConn, "testsudoer", "test ALL=(ALL) NOPASSWD: ALL")
+	if err == nil || !strings.Contains(err.Error(), "not implemented") {
+		t.Errorf("ConfigureSudoer expected 'not implemented' error, got %v", err)
+	}
 }

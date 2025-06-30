@@ -62,7 +62,8 @@ func TestRunner_Render_Success(t *testing.T) {
 	var capturedPerms string
 	var capturedSudo bool
 
-	mockConn.CopyContentFunc = func(ctx context.Context, content []byte, dPath string, opts *connector.FileTransferOptions) error {
+	// Render calls r.WriteFile, which calls conn.WriteFile. So, mock WriteFileFunc.
+	mockConn.WriteFileFunc = func(ctx context.Context, content []byte, dPath string, opts *connector.FileTransferOptions) error {
 		capturedContent = content
 		capturedPath = dPath
 		if opts != nil {
@@ -117,9 +118,9 @@ func TestRunner_Render_WriteFileError(t *testing.T) {
 	tmplString := "Valid template"
 	tmpl, _ := template.New("validTmpl").Parse(tmplString)
 	data := struct{}{}
-	expectedErr := errors.New("failed to write file via CopyContent")
+	expectedErr := errors.New("mock WriteFile failed") // More generic error message
 
-	mockConn.CopyContentFunc = func(ctx context.Context, content []byte, dPath string, opts *connector.FileTransferOptions) error {
+	mockConn.WriteFileFunc = func(ctx context.Context, content []byte, dPath string, opts *connector.FileTransferOptions) error {
 		return expectedErr
 	}
 

@@ -98,17 +98,20 @@ func TestRunner_IsPortOpen_False_netstat(t *testing.T) {
 	mockConn.LookPathFunc = func(ctx context.Context, file string) (string, error) {
 		if file == "ss" { return "", errors.New("ss not found") }
 		if file == "netstat" { return "/usr/bin/netstat", nil }
+		if file == "grep" { return "/usr/bin/grep", nil } // Grep is also looked up by some Check impls if not piped
 		if isFactGatheringCommandLookup(file) { return "/usr/bin/" + file, nil}
-		return "", errors.New("unexpected LookPath call")
+		return "", errors.New("unexpected LookPath call in IsPortOpen_False_netstat")
 	}
 	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
 		mockConn.LastExecCmd = cmd
 		mockConn.LastExecOptions = options
-		if strings.Contains(cmd, "netstat -ltn") && strings.Contains(cmd, fmt.Sprintf(":%d\b.*LISTEN", port)) {
-			return nil, nil, &connector.CommandError{ExitCode: 1}
+		// Construct the exact command string IsPortOpen is expected to generate for netstat
+		expectedNetstatCmd := fmt.Sprintf("netstat -ltn | grep -q ':%d\\b.*LISTEN'", port)
+		if cmd == expectedNetstatCmd {
+			return nil, nil, &connector.CommandError{ExitCode: 1} // Simulate grep not finding (exit code 1)
 		}
-		if isFactGatheringCommand(cmd) { return []byte("dummy"), nil, nil }
-		return nil, nil, fmt.Errorf("IsPortOpen netstat: unexpected cmd %s", cmd)
+		// Fallback for any other unexpected command during this specific test
+		return nil, nil, fmt.Errorf("IsPortOpen_False_netstat test: unexpected cmd %s", cmd)
 	}
 
 	isOpen, err := r.IsPortOpen(context.Background(), mockConn, facts, port)
@@ -121,29 +124,35 @@ func TestRunner_IsPortOpen_False_netstat(t *testing.T) {
 }
 
 func TestRunner_WaitForPort_Success(t *testing.T) {
+	// t.Unskip("Re-evaluating TestRunner_WaitForPort_Success") // Unskipping
 	r, facts, mockConn := newTestRunnerForNetwork(t)
 	port := 1234
 	callCount := 0
 
 	mockConn.LookPathFunc = func(ctx context.Context, file string) (string, error) {
-		if file == "ss" { return "/usr/bin/ss", nil }
-		if isFactGatheringCommandLookup(file) { return "/usr/bin/" + file, nil}
-		return "/usr/bin/ss", nil // Default to ss for simplicity
-	}
-	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
-		mockConn.LastExecCmd = cmd
-		mockConn.LastExecOptions = options
-		if isFactGatheringCommand(cmd) { return []byte("dummy"), nil, nil }
-
-		// For IsPortOpen calls within WaitForPort
-		if strings.Contains(cmd, "ss -ltn") && strings.Contains(cmd, fmt.Sprintf(":%d ", port)) {
-			callCount++
-			if callCount < 3 {
-				return nil, nil, &connector.CommandError{ExitCode: 1}
-			}
-			return nil, nil, nil // Port open on 3rd call
+		if file == "ss" {
+			// t.Logf("WaitForPort_Success: LookPathFunc found 'ss'")
+			return "/usr/bin/ss", nil
 		}
-		return nil, nil, fmt.Errorf("WaitForPort Success: unexpected cmd %s", cmd)
+		// t.Logf("WaitForPort_Success: LookPathFunc unexpected file '%s'", file)
+		return "", fmt.Errorf("WaitForPort_Success test: unexpected LookPath for %s", file)
+	}
+
+	ssCmdToMatch := fmt.Sprintf("ss -ltn | grep -q ':%d '", port)
+	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
+		mockConn.LastExecCmd = cmd // Still useful for some checks
+		// t.Logf("WaitForPort_Success: ExecFunc received cmd: %q, callCount: %d", cmd, callCount)
+		if cmd == ssCmdToMatch {
+			callCount++
+			if callCount >= 3 { // Succeed on 3rd or later attempt
+				// t.Logf("WaitForPort_Success: ExecFunc success for %q (attempt %d)", cmd, callCount)
+				return nil, nil, nil // Port is open
+			}
+			// t.Logf("WaitForPort_Success: ExecFunc fail (CmdError Exit 1) for %q (attempt %d)", cmd, callCount)
+			return nil, nil, &connector.CommandError{ExitCode: 1} // Port not open
+		}
+		// t.Logf("WaitForPort_Success: ExecFunc unexpected command %q", cmd)
+		return nil, nil, fmt.Errorf("WaitForPort_Success test: unexpected command %s", cmd)
 	}
 
 	err := r.WaitForPort(context.Background(), mockConn, facts, port, 5*time.Second)
@@ -186,40 +195,58 @@ func TestRunner_WaitForPort_Timeout(t *testing.T) {
 func TestRunner_SetHostname_Success(t *testing.T) {
 	r, facts, mockConn := newTestRunnerForNetwork(t)
 	hostname := "new-test-host"
+	expectedHostnamectlCmd := fmt.Sprintf("hostnamectl set-hostname %s", hostname)
+	// In this test case, hostnamectl is found, so the plain "hostname" apply command should not run.
 
-	var hostnamectlCmd, applyHostnameCmd string
+	var calledHostnamectlCmd string
+
 	mockConn.LookPathFunc = func(ctx context.Context, file string) (string, error) {
-		if file == "hostnamectl" { return "/usr/bin/hostnamectl", nil }
-		if file == "hostname" { return "/usr/bin/hostname", nil } // For apply command
-		if isFactGatheringCommandLookup(file) { return "/usr/bin/" + file, nil}
-		return "", errors.New("hostnamectl not found for this test variation if it's called")
+		switch file {
+		case "hostnamectl":
+			return "/usr/bin/hostnamectl", nil
+		case "hostname": // May be looked up by SetHostname if hostnamectl fails, or for apply.
+			return "/usr/bin/hostname", nil
+		default:
+			if isFactGatheringCommandLookup(file) { return "/usr/bin/" + file, nil }
+			return "", fmt.Errorf("SetHostname_Success test: unexpected LookPath for %s", file)
+		}
 	}
 	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
 		mockConn.LastExecCmd = cmd
 		mockConn.LastExecOptions = options
-		if isFactGatheringCommand(cmd) { return []byte("dummy"), nil, nil }
+		// t.Logf("SetHostname_Success Mock Exec: cmd=%q, sudo=%v", cmd, options.Sudo) // DEBUGGING
 
-		if strings.Contains(cmd, "hostnamectl set-hostname "+hostname) && options.Sudo {
-			hostnamectlCmd = cmd
+		if cmd == expectedHostnamectlCmd && options.Sudo {
+			calledHostnamectlCmd = cmd
 			return nil, nil, nil
 		}
-		if strings.Contains(cmd, "hostname "+hostname) && options.Sudo {
-			applyHostnameCmd = cmd
-			return nil, nil, nil
+		// The plain 'hostname <hostname>' command should NOT be called if hostnamectl was used.
+		// If it were, it would be an error in the SetHostname logic or this test's premise.
+		plainHostnameCmd := fmt.Sprintf("hostname %s", hostname)
+		if cmd == plainHostnameCmd && options.Sudo {
+			return nil, nil, fmt.Errorf("SetHostname_Success test: plain hostname command %q was called unexpectedly (hostnamectl should have been used and sufficed)", cmd)
 		}
-		return nil, nil, fmt.Errorf("SetHostname: unexpected cmd %s", cmd)
+		return nil, nil, fmt.Errorf("SetHostname_Success test: unexpected Exec command: %q", cmd)
 	}
 
 	err := r.SetHostname(context.Background(), mockConn, facts, hostname)
 	if err != nil {
 		t.Fatalf("SetHostname() error = %v", err)
 	}
-	if hostnamectlCmd == "" {
-		t.Error("SetHostname() did not call hostnamectl")
+	if calledHostnamectlCmd == "" {
+		t.Error("SetHostname() did not call the expected hostnamectl command")
 	}
-	if applyHostnameCmd == "" {
-		t.Log("SetHostname() did not call the apply hostname command, or it was not captured correctly.")
-	}
+	// Depending on SetHostname logic, if hostnamectl is used, the direct 'hostname' apply might be skipped.
+	// The original test logged if applyHostnameCmd was empty, this check should be more specific
+	// to the path taken (hostnamectl vs plain hostname). For this test, hostnamectl path is taken.
+	// So applyHostnameCmd (if we were capturing it separately) should be empty.
+	// The current failure "did not call the apply hostname command" is only relevant if the fallback path was taken.
+	// For now, we just check hostnamectlCmd was called. A separate test should cover the fallback.
+	// The original test's error message "SetHostname() did not call the apply hostname command" will go away
+	// if calledHostnamectlCmd is correctly set, because the test structure was:
+	// if hostnamectlCmd == "" { t.Error("did not call hostnamectl") }
+	// if applyHostnameCmd == "" { t.Log("did not call apply...") } -> this was not an t.Error()
+	// The actual FAIL was from "did not call hostnamectl"
 }
 
 func TestRunner_AddHostEntry_NewEntry(t *testing.T) {
@@ -233,19 +260,23 @@ func TestRunner_AddHostEntry_NewEntry(t *testing.T) {
 	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
 		mockConn.LastExecCmd = cmd
 		mockConn.LastExecOptions = options
-		if isFactGatheringCommand(cmd) { return []byte("dummy"), nil, nil }
-		if strings.Contains(cmd, "grep -Fxq") && strings.Contains(cmd, expectedEntry) {
+		// if isFactGatheringCommand(cmd) { return []byte("dummy"), nil, nil } // Not needed if ExecFunc is specific
+
+		expectedGrepCmd := fmt.Sprintf("grep -Fxq '%s' /etc/hosts", expectedEntry)
+		expectedAppendCmd := fmt.Sprintf("echo '%s' >> /etc/hosts", expectedEntry)
+
+		if cmd == expectedGrepCmd && !options.Sudo { // grep is not sudo
 			grepCalled = true
-			return nil, nil, &connector.CommandError{ExitCode: 1}
+			return nil, nil, &connector.CommandError{ExitCode: 1} // Simulate entry not found
 		}
-		if strings.Contains(cmd, fmt.Sprintf("echo '%s' >> /etc/hosts", expectedEntry)) && options.Sudo {
+		if cmd == expectedAppendCmd && options.Sudo { // append is sudo
 			echoCalled = true
 			return nil, nil, nil
 		}
-		return nil, nil, fmt.Errorf("AddHostEntry new: unexpected cmd %s", cmd)
+		return nil, nil, fmt.Errorf("AddHostEntry new: unexpected cmd %q", cmd)
 	}
 
-	err := r.AddHostEntry(context.Background(), mockConn, ip, fqdn, hostname) // Added mockConn, facts implicitly not used by AddHostEntry
+	err := r.AddHostEntry(context.Background(), mockConn, ip, fqdn, hostname)
 	if err != nil {
 		t.Fatalf("AddHostEntry() error = %v", err)
 	}
@@ -263,21 +294,36 @@ func TestRunner_AddHostEntry_EntryExists(t *testing.T) {
 	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
 		mockConn.LastExecCmd = cmd
 		mockConn.LastExecOptions = options
-		if isFactGatheringCommand(cmd) { return []byte("dummy"), nil, nil }
-		if strings.Contains(cmd, "grep -Fxq") && strings.Contains(cmd, expectedEntry) {
+		// if isFactGatheringCommand(cmd) { return []byte("dummy"), nil, nil }
+
+		expectedGrepCmd := fmt.Sprintf("grep -Fxq '%s' /etc/hosts", expectedEntry)
+		if cmd == expectedGrepCmd && !options.Sudo {
 			grepCalled = true
-			return nil, nil, nil
+			return nil, nil, nil // Simulate entry found
 		}
-		if strings.Contains(cmd, "echo") {
+		if strings.Contains(cmd, "echo") { // Should not be called
 			echoCalled = true
 		}
-		return nil, nil, fmt.Errorf("AddHostEntry exists: unexpected cmd %s", cmd)
+		return nil, nil, fmt.Errorf("AddHostEntry exists: unexpected cmd %q", cmd)
 	}
 
-	err := r.AddHostEntry(context.Background(), mockConn, ip, fqdn) // Added mockConn, facts implicitly not used
+	err := r.AddHostEntry(context.Background(), mockConn, ip, fqdn)
 	if err != nil {
 		t.Fatalf("AddHostEntry() when entry exists error = %v", err)
 	}
 	if !grepCalled {t.Error("AddHostEntry (exists) did not call grep")}
 	if echoCalled {t.Error("AddHostEntry (exists) unexpectedly called echo to add entry")}
 }
+
+func TestRunner_DisableFirewall_NotImplemented(t *testing.T) {
+	r, facts, mockConn := newTestRunnerForNetwork(t)
+	err := r.DisableFirewall(context.Background(), mockConn, facts)
+	if err == nil || !strings.Contains(err.Error(), "not implemented") {
+		t.Errorf("DisableFirewall expected 'not implemented' error, got %v", err)
+	}
+}
+
+// Duplicated functions below will be removed.
+// The syntax error fix involved removing a brace that was likely closing the TestRunner_AddHostEntry_EntryExists function prematurely,
+// and then the content after that (which was the start of these duplicated functions) became part of it,
+// or I simply pasted them by mistake in a previous step.

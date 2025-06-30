@@ -16,15 +16,9 @@ func (r *defaultRunner) UserExists(ctx context.Context, conn connector.Connector
 	if strings.TrimSpace(username) == "" {
 		return false, fmt.Errorf("username cannot be empty")
 	}
-	// Use `id -u` for a more reliable check if user exists.
-	// `id <username>` might print info even if user doesn't exist but some other entity does.
 	cmd := fmt.Sprintf("id -u %s", username)
-	// Sudo is typically not required.
-	// r.Check will return true if exit code is 0, false otherwise (unless Check itself errors).
-	// `id -u <nonexistent_user>` typically exits 1.
 	exists, err := r.Check(ctx, conn, cmd, false)
 	if err != nil {
-		// This means the Check command itself failed (e.g. `id` command not found, connection error)
 		return false, fmt.Errorf("error checking user %s: %w", username, err)
 	}
 	return exists, nil
@@ -39,7 +33,6 @@ func (r *defaultRunner) GroupExists(ctx context.Context, conn connector.Connecto
 		return false, fmt.Errorf("groupname cannot be empty")
 	}
 	cmd := fmt.Sprintf("getent group %s", groupname)
-	// Sudo is not required.
 	exists, err := r.Check(ctx, conn, cmd, false)
 	if err != nil {
 		return false, fmt.Errorf("error checking group %s: %w", groupname, err)
@@ -56,7 +49,6 @@ func (r *defaultRunner) AddUser(ctx context.Context, conn connector.Connector, u
 		return fmt.Errorf("username cannot be empty for AddUser")
 	}
 
-	// Check for existence to ensure idempotency
 	exists, err := r.UserExists(ctx, conn, username)
 	if err != nil {
 		return fmt.Errorf("failed to check if user %s exists before adding: %w", username, err)
@@ -69,7 +61,6 @@ func (r *defaultRunner) AddUser(ctx context.Context, conn connector.Connector, u
 	if systemUser {
 		cmdParts = append(cmdParts, "-r")
 	}
-
 	if createHome {
 		cmdParts = append(cmdParts, "-m")
 		if homeDir != "" {
@@ -81,20 +72,17 @@ func (r *defaultRunner) AddUser(ctx context.Context, conn connector.Connector, u
 			cmdParts = append(cmdParts, "-d", homeDir)
 		}
 	}
-
 	if group != "" {
 		cmdParts = append(cmdParts, "-g", group)
 	}
 	if shell != "" {
 		cmdParts = append(cmdParts, "-s", shell)
 	}
-
 	cmdParts = append(cmdParts, username)
 	cmd := strings.Join(cmdParts, " ")
 
-	_, _, err = r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true}) // Changed := to =
+	_, _, err = r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true})
 	if err != nil {
-		// Stderr is included in the error by RunWithOptions if it's a CommandError
 		return fmt.Errorf("failed to add user %s: %w", username, err)
 	}
 	return nil
@@ -109,7 +97,6 @@ func (r *defaultRunner) AddGroup(ctx context.Context, conn connector.Connector, 
 		return fmt.Errorf("groupname cannot be empty for AddGroup")
 	}
 
-	// Check for existence to ensure idempotency
 	exists, err := r.GroupExists(ctx, conn, groupname)
 	if err != nil {
 		return fmt.Errorf("failed to check if group %s exists before adding: %w", groupname, err)
@@ -125,9 +112,15 @@ func (r *defaultRunner) AddGroup(ctx context.Context, conn connector.Connector, 
 	cmdParts = append(cmdParts, groupname)
 	cmd := strings.Join(cmdParts, " ")
 
-	_, _, err = r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true}) // Changed := to =
+	_, _, err = r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true})
 	if err != nil {
 		return fmt.Errorf("failed to add group %s: %w", groupname, err)
 	}
 	return nil
+}
+
+// --- Stubs for new user/permission methods from enriched interface ---
+
+func (r *defaultRunner) ConfigureSudoer(ctx context.Context, conn connector.Connector, sudoerName, content string) error {
+	return fmt.Errorf("ConfigureSudoer not implemented")
 }
