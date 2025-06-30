@@ -124,6 +124,73 @@ func TestRunner_StartService_Systemd(t *testing.T) {
 	}
 }
 
+func TestRunner_IsServiceActive_SysV(t *testing.T) {
+	serviceName := "apache-httpd"
+
+	tests := []struct {
+		name           string
+		mockStdout     string
+		mockErr        error
+		expectedActive bool
+		expectError    bool
+		errorContains  string
+	}{
+		{
+			name:           "active_running_in_stdout",
+			mockStdout:     "apache-httpd (pid 1234) is running...",
+			mockErr:        nil, // Exit 0
+			expectedActive: true,
+		},
+		{
+			name:           "active_exit_0_generic_stdout",
+			mockStdout:     "Apache HTTP Server is configured to start.", // No explicit "running"
+			mockErr:        nil,                                      // Exit 0
+			expectedActive: true, // Current behavior defaults to true on exit 0
+		},
+		{
+			name:           "inactive_command_error_exit_3", // e.g. LSB status codes often use 3 for not running
+			mockStdout:     "apache-httpd is stopped",
+			mockErr:        &connector.CommandError{ExitCode: 3, Stderr: "Not running"},
+			expectedActive: false,
+		},
+		{
+			name:          "execution_error",
+			mockStdout:    "",
+			mockErr:       errors.New("failed to execute service command"),
+			expectError:   true,
+			errorContains: "failed to check SysV service status",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, facts, mockConn := newTestRunnerForService(t, false) // SysV
+			if facts.InitSystem.Type != InitSystemSysV {
+				t.Fatal("Test setup error: Expected SysV init system")
+			}
+			expectedCmd := fmt.Sprintf(facts.InitSystem.IsActiveCmd, serviceName)
+
+			mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
+				if isExecCmdForFactsInServiceTest(cmd) { return []byte("dummy"), nil, nil }
+				if cmd == expectedCmd && (options == nil || !options.Sudo) {
+					return []byte(tt.mockStdout), nil, tt.mockErr
+				}
+				return nil, nil, fmt.Errorf("IsServiceActive SysV test: unexpected cmd %s", cmd)
+			}
+
+			active, err := r.IsServiceActive(context.Background(), mockConn, facts, serviceName)
+
+			if tt.expectError {
+				if err == nil { t.Errorf("Expected error containing %q, got nil", tt.errorContains) }
+				if err != nil && !strings.Contains(err.Error(), tt.errorContains) { t.Errorf("Error message %q does not contain %q", err.Error(), tt.errorContains) }
+			} else if err != nil {
+				t.Errorf("Did not expect error, got %v", err)
+			}
+			if active != tt.expectedActive { t.Errorf("Expected active %v, got %v", tt.expectedActive, active) }
+		})
+	}
+}
+
 func TestRunner_StopService_SysV(t *testing.T) {
 	r, facts, mockConn := newTestRunnerForService(t, false) // SysV
 	serviceName := "apache2"
@@ -248,6 +315,55 @@ func TestRunner_EnableService_Systemd(t *testing.T) {
 	if cmdExecuted != expectedCmd {
 		t.Errorf("EnableService systemd command mismatch. Got: %s, Want: %s", cmdExecuted, expectedCmd)
 	}
+}
+
+func TestRunner_EnableService_SysV_Unsupported(t *testing.T) {
+	r, facts, mockConn := newTestRunnerForService(t, false) // SysV
+	serviceName := "legacy-app"
+
+	// Modify facts to simulate an unsupported SysV enable command
+	originalEnableCmd := facts.InitSystem.EnableCmd
+	facts.InitSystem.EnableCmd = "chkconfig_no_placeholder" // Not a template string
+
+	err := r.EnableService(context.Background(), mockConn, facts, serviceName)
+	if err == nil {
+		t.Fatalf("EnableService for SysV with bad command template expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "not reliably supported for detected SysV init variant") {
+		t.Errorf("Error message mismatch: got %q", err.Error())
+	}
+
+	facts.InitSystem.EnableCmd = "" // Empty command
+	err = r.EnableService(context.Background(), mockConn, facts, serviceName)
+	if err == nil {
+		t.Fatalf("EnableService for SysV with empty command template expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "not reliably supported for detected SysV init variant") {
+		t.Errorf("Error message mismatch for empty cmd: got %q", err.Error())
+	}
+	facts.InitSystem.EnableCmd = originalEnableCmd // Restore
+}
+
+func TestRunner_EnableService_SysV_Supported(t *testing.T) {
+	r, facts, mockConn := newTestRunnerForService(t, false) // SysV
+	serviceName := "mycustom-svc"
+
+	// Ensure facts.InitSystem.EnableCmd is a valid template for this test
+	facts.InitSystem.EnableCmd = "update-rc.d %s defaults" // A common SysV enable pattern
+	expectedCmd := fmt.Sprintf(facts.InitSystem.EnableCmd, serviceName)
+	var cmdExecuted string
+
+	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
+		if isExecCmdForFactsInServiceTest(cmd) { return []byte("dummy"), nil, nil }
+		if cmd == expectedCmd && options.Sudo {
+			cmdExecuted = cmd; return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("EnableService SysV (supported): unexpected cmd %s", cmd)
+	}
+
+	err := r.EnableService(context.Background(), mockConn, facts, serviceName)
+	if err != nil { t.Fatalf("EnableService for SysV (supported) error: %v", err) }
+	if cmdExecuted != expectedCmd { t.Errorf("EnableService SysV (supported) cmd = %q, want %q", cmdExecuted, expectedCmd) }
 }
 
 // isExecCmdForFactsInServiceTest helper (can be shared or local if variations needed)

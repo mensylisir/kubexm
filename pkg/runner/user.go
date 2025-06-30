@@ -122,6 +122,115 @@ func (r *defaultRunner) AddGroup(ctx context.Context, conn connector.Connector, 
 
 // --- Stubs for new user/permission methods from enriched interface ---
 
+// ModifyUser modifies existing user attributes.
+func (r *defaultRunner) ModifyUser(ctx context.Context, conn connector.Connector, username string, modifications UserModifications) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil for ModifyUser")
+	}
+	if strings.TrimSpace(username) == "" {
+		return fmt.Errorf("username cannot be empty for ModifyUser")
+	}
+
+	exists, err := r.UserExists(ctx, conn, username)
+	if err != nil {
+		return fmt.Errorf("failed to check if user %s exists before modifying: %w", username, err)
+	}
+	if !exists {
+		return fmt.Errorf("user %s does not exist, cannot modify", username)
+	}
+
+	cmdParts := []string{"usermod"}
+	modifiedSomething := false
+
+	if modifications.NewUsername != nil {
+		if strings.TrimSpace(*modifications.NewUsername) == "" {
+			return fmt.Errorf("new username cannot be empty if provided")
+		}
+		cmdParts = append(cmdParts, "-l", *modifications.NewUsername)
+		modifiedSomething = true
+	}
+	if modifications.NewPrimaryGroup != nil {
+		if strings.TrimSpace(*modifications.NewPrimaryGroup) == "" {
+			return fmt.Errorf("new primary group cannot be empty if provided")
+		}
+		cmdParts = append(cmdParts, "-g", *modifications.NewPrimaryGroup)
+		modifiedSomething = true
+	}
+	if len(modifications.AppendToGroups) > 0 {
+		// usermod -aG group1,group2,... user
+		// Ensure no empty group names in the list
+		for _, g := range modifications.AppendToGroups {
+			if strings.TrimSpace(g) == "" {
+				return fmt.Errorf("group name in AppendToGroups cannot be empty")
+			}
+		}
+		cmdParts = append(cmdParts, "-aG", strings.Join(modifications.AppendToGroups, ","))
+		modifiedSomething = true
+	}
+	if len(modifications.SetSecondaryGroups) > 0 {
+		// usermod -G group1,group2,... user (replaces all secondary)
+		// Ensure no empty group names in the list
+		for _, g := range modifications.SetSecondaryGroups {
+			if strings.TrimSpace(g) == "" {
+				return fmt.Errorf("group name in SetSecondaryGroups cannot be empty")
+			}
+		}
+		cmdParts = append(cmdParts, "-G", strings.Join(modifications.SetSecondaryGroups, ","))
+		modifiedSomething = true
+	}
+
+	if modifications.NewShell != nil {
+		// Empty shell might be valid (e.g. /sbin/nologin) but usually it's a path.
+		// For now, allow empty if explicitly set via pointer.
+		cmdParts = append(cmdParts, "-s", *modifications.NewShell)
+		modifiedSomething = true
+	}
+	if modifications.NewHomeDir != nil {
+		if strings.TrimSpace(*modifications.NewHomeDir) == "" {
+			return fmt.Errorf("new home directory cannot be empty if provided")
+		}
+		cmdParts = append(cmdParts, "-d", *modifications.NewHomeDir)
+		if modifications.MoveHomeDirContents {
+			cmdParts = append(cmdParts, "-m")
+		}
+		modifiedSomething = true
+	} else if modifications.MoveHomeDirContents {
+		// -m without -d is usually an error or has specific meaning (create if not exist, but that's for useradd)
+		return fmt.Errorf("MoveHomeDirContents can only be true if NewHomeDir is also specified")
+	}
+
+	if modifications.NewComment != nil {
+		// If the comment contains spaces or shell-sensitive characters, it should be quoted
+		// to be treated as a single argument by the shell that `conn.Exec` might invoke.
+		cmdParts = append(cmdParts, "-c", shellEscape(*modifications.NewComment))
+		modifiedSomething = true
+	}
+
+	if !modifiedSomething {
+		return nil // No modifications requested
+	}
+
+	// The username to act upon is the original username, unless NewUsername is set,
+	// in which case usermod applies changes and then renames.
+	// If NewUsername is specified, it's the target of the rename, not the user being looked up initially.
+	// The username argument to usermod should always be the current name of the user.
+	cmdParts = append(cmdParts, username)
+	cmd := strings.Join(cmdParts, " ")
+
+	_, stderr, execErr := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true})
+	if execErr != nil {
+		finalUsername := username
+		if modifications.NewUsername != nil {
+			finalUsername = *modifications.NewUsername
+		}
+		return fmt.Errorf("failed to modify user %s (to %s if renamed): %w (stderr: %s)", username, finalUsername, execErr, string(stderr))
+	}
+
+	// If username was changed, the original username variable for subsequent operations (if any) should be updated.
+	// Not an issue for this single call method.
+	return nil
+}
+
 func (r *defaultRunner) ConfigureSudoer(ctx context.Context, conn connector.Connector, sudoerName, content string) error {
 	if conn == nil {
 		return fmt.Errorf("connector cannot be nil")
