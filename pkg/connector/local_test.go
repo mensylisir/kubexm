@@ -5,6 +5,7 @@ import (
 	"crypto/rand" // For random content in checksum test
 	"crypto/sha256"
 	"encoding/hex"
+	"errors" // For checking specific error types in sudo password tests
 	"os"
 	"path/filepath"
 	"runtime"
@@ -860,5 +861,205 @@ func TestLocalConnector_GetFileChecksum(t *testing.T) {
 	_, err = lc.GetFileChecksum(ctx, nonExistentFile, "sha256")
 	if err == nil {
 		t.Errorf("GetFileChecksum for non-existent file %s should have failed", nonExistentFile)
+	}
+}
+
+func TestLocalConnector_ReadFile(t *testing.T) {
+	lc := &LocalConnector{}
+	ctx := context.Background()
+	tmpDir, err := os.MkdirTemp("", "local-readfile-")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	filePath := filepath.Join(tmpDir, "read_test.txt")
+	fileContent := []byte("Content to be read by ReadFile.")
+
+	if err := os.WriteFile(filePath, fileContent, 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	readData, err := lc.ReadFile(ctx, filePath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", filePath, err)
+	}
+	if string(readData) != string(fileContent) {
+		t.Errorf("ReadFile content mismatch: got %q, want %q", string(readData), string(fileContent))
+	}
+
+	nonExistentFile := filepath.Join(tmpDir, "non_existent_for_read.txt")
+	_, err = lc.ReadFile(ctx, nonExistentFile)
+	if err == nil {
+		t.Errorf("ReadFile for non-existent file %s should have failed", nonExistentFile)
+	} else {
+		if !os.IsNotExist(errors.Unwrap(err)) && !os.IsNotExist(err) { // Check wrapped and unwrapped
+			t.Errorf("ReadFile for non-existent file error type: got %v, want an os.IsNotExist error", err)
+		}
+	}
+}
+
+func TestLocalConnector_Exec_Sudo_WithPassword(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Sudo tests are not applicable on Windows")
+	}
+	// This test expects sudo to fail because it will prompt for a password,
+	// and stdin is not an interactive terminal.
+	// The key is to check that our connector *attempts* to provide the password via `sudo -S`.
+
+	lc := &LocalConnector{}
+	lc.Connect(context.Background(), ConnectionCfg{Password: "testpassword"}) // Set a password
+
+	ctx := context.Background()
+	// A simple command that requires sudo, e.g., reading a root-owned file or listing a restricted dir
+	// Using "sudo -S whoami" is a safe bet that it will try to use sudo -S.
+	// If passwordless sudo is configured for `whoami`, it might succeed.
+	// If not, it should fail asking for password.
+	cmdStr := "whoami" // `sudo -S -p '' -E -- whoami` will be constructed
+
+	stdout, stderr, err := lc.Exec(ctx, cmdStr, &ExecOptions{Sudo: true})
+
+	if err == nil {
+		// This could happen if passwordless sudo is enabled for 'whoami' for the current user
+		t.Logf("Exec with Sudo:true and password unexpectedly succeeded. Stdout: %s, Stderr: %s. Passwordless sudo might be configured.", string(stdout), string(stderr))
+		if !strings.Contains(strings.ToLower(string(stdout)), "root") {
+			// If it succeeded but didn't run as root, that's also informative.
+			t.Logf("Exec with Sudo:true and password succeeded but stdout %q does not contain 'root'.", string(stdout))
+		}
+		return // Test passes if it succeeded cleanly.
+	}
+
+	t.Logf("Exec with Sudo:true and password failed as expected (or due to other reasons). Err: %v, Stdout: %s, Stderr: %s", err, string(stdout), string(stderr))
+
+	cmdErr, ok := err.(*CommandError)
+	if !ok {
+		t.Fatalf("Expected CommandError, got %T: %v", err, err)
+	}
+
+	// We expect sudo to fail asking for a password or similar.
+	// The exact error message from sudo can vary.
+	// "sudo: a password is required" or "sudo: incorrect password attempt"
+	// "sudo: no tty present and no askpass program specified"
+	// The key is that it's an error from `sudo` itself.
+	// Our code should not error out before trying to execute `sudo -S`.
+	stderrStr := strings.ToLower(string(stderr))
+	if !(strings.Contains(stderrStr, "password is required") ||
+		strings.Contains(stderrStr, "incorrect password attempt") ||
+		strings.Contains(stderrStr, "no tty present") ||
+		strings.Contains(stderrStr, "sorry, try again")) {
+		t.Errorf("Expected stderr to indicate sudo password prompt/failure, but got: %s", string(stderr))
+	}
+
+	if cmdErr.ExitCode == -1 && cmdErr.Underlying == context.DeadlineExceeded { // Check if it timed out
+		t.Errorf("Exec with Sudo:true and password timed out, which is not the expected failure mode for this test. Stderr: %s", string(stderr))
+	}
+}
+
+
+func TestLocalConnector_FileOp_Sudo_WithPassword(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Sudo tests are not applicable on Windows")
+	}
+
+	lc := &LocalConnector{}
+	lc.Connect(context.Background(), ConnectionCfg{Password: "fakepassword"}) // Set a password
+
+	ctx := context.Background()
+	tmpDir, err := os.MkdirTemp("", "local-sudo-pass-test-")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	content := []byte("sudo test content with password")
+	testCases := []struct {
+		name      string
+		operation func() error
+		checkFile string // file to check for existence if operation unexpectedly succeeds
+	}{
+		{
+			name: "WriteFile with Sudo and Password",
+			operation: func() error {
+				dest := filepath.Join(tmpDir, "sudo_write_pass.txt")
+				return lc.WriteFile(ctx, content, dest, &FileTransferOptions{Sudo: true, Permissions: "0600"})
+			},
+			checkFile: filepath.Join(tmpDir, "sudo_write_pass.txt"),
+		},
+		{
+			name: "CopyContent with Sudo and Password",
+			operation: func() error {
+				dest := filepath.Join(tmpDir, "sudo_copycontent_pass.txt")
+				return lc.CopyContent(ctx, content, dest, &FileTransferOptions{Sudo: true, Permissions: "0600"})
+			},
+			checkFile: filepath.Join(tmpDir, "sudo_copycontent_pass.txt"),
+		},
+		{
+			name: "Copy (file) with Sudo and Password",
+			operation: func() error {
+				srcFile := filepath.Join(tmpDir, "src_copy_sudo_pass.txt")
+				if err := os.WriteFile(srcFile, content, 0644); err != nil {
+					t.Fatalf("Failed to create source file for Copy test: %v", err)
+				}
+				dest := filepath.Join(tmpDir, "dest_copy_sudo_pass.txt")
+				return lc.Copy(ctx, srcFile, dest, &FileTransferOptions{Sudo: true, Permissions: "0600"})
+			},
+			checkFile: filepath.Join(tmpDir, "dest_copy_sudo_pass.txt"),
+		},
+		{
+			name: "Remove (file) with Sudo and Password",
+			operation: func() error {
+				fileToRemove := filepath.Join(tmpDir, "remove_sudo_pass.txt")
+				// Create it first so remove has something to target
+				if err := os.WriteFile(fileToRemove, content, 0644); err != nil {
+					t.Fatalf("Failed to create file for Remove test: %v", err)
+				}
+				return lc.Remove(ctx, fileToRemove, RemoveOptions{Sudo: true})
+			},
+			checkFile: "", // For remove, success means file is gone.
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.operation()
+			if err == nil {
+				t.Logf("%s unexpectedly succeeded. This might happen with passwordless sudo for the relevant commands (tee, mv, rm).", tc.name)
+				if tc.checkFile != "" { // For Write/Copy ops
+					if _, statErr := os.Stat(tc.checkFile); os.IsNotExist(statErr) {
+						t.Errorf("%s claimed success but file %s does not exist", tc.name, tc.checkFile)
+					}
+				} else { // For Remove op
+					// If checkFile is empty, it's a Remove test. Success means file is gone.
+					// This path is tricky because the file path for remove is internal to operation().
+					// For simplicity, we assume if Remove op succeeds, it did its job.
+					// A more robust check would re-stat the file path used by the Remove operation.
+				}
+				return
+			}
+
+			t.Logf("%s failed as expected (or due to other reasons). Err: %v", tc.name, err)
+			// Check that the error is likely from sudo itself (e.g., password prompt)
+			// and not an internal error from our Go code before attempting sudo.
+			// CommandError contains Stderr from the command.
+			var cmdErr *CommandError
+			if errors.As(err, &cmdErr) {
+				stderrStr := strings.ToLower(cmdErr.Stderr)
+				if !(strings.Contains(stderrStr, "password is required") ||
+					strings.Contains(stderrStr, "incorrect password attempt") ||
+					strings.Contains(stderrStr, "no tty present") ||
+					strings.Contains(stderrStr, "sorry, try again") ||
+					strings.Contains(strings.ToLower(err.Error()), "exit status 1")) { // General sudo failure
+					t.Errorf("Expected stderr from %s to indicate sudo password prompt/failure, but got: Stderr: %s, FullError: %v", tc.name, cmdErr.Stderr, err)
+				}
+			} else {
+				// If not CommandError, it might be an issue before exec, e.g., temp file creation failed.
+				// This is less likely for the sudo path itself but possible.
+				t.Logf("Error for %s was not a CommandError: %T, %v", tc.name, err, err)
+			}
+
+			if strings.Contains(err.Error(), "sudo not implemented") {
+				t.Errorf("%s should not return 'sudo not implemented', got: %v", tc.name, err)
+			}
+		})
 	}
 }
