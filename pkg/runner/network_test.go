@@ -243,10 +243,48 @@ func TestRunner_SetHostname_Success(t *testing.T) {
 	// The current failure "did not call the apply hostname command" is only relevant if the fallback path was taken.
 	// For now, we just check hostnamectlCmd was called. A separate test should cover the fallback.
 	// The original test's error message "SetHostname() did not call the apply hostname command" will go away
-	// if calledHostnamectlCmd is correctly set, because the test structure was:
-	// if hostnamectlCmd == "" { t.Error("did not call hostnamectl") }
-	// if applyHostnameCmd == "" { t.Log("did not call apply...") } -> this was not an t.Error()
-	// The actual FAIL was from "did not call hostnamectl"
+	// if calledHostnamectlCmd is correctly set.
+}
+
+func TestRunner_SetHostname_Fallback(t *testing.T) {
+	r, facts, mockConn := newTestRunnerForNetwork(t)
+	hostname := "fallback-host"
+	expectedSetCmd := fmt.Sprintf("hostname %s", hostname)
+	// The apply command is identical in this fallback scenario
+
+	var setCmdCalled, applyCmdCalled bool
+
+	mockConn.LookPathFunc = func(ctx context.Context, file string) (string, error) {
+		switch file {
+		case "hostnamectl":
+			return "", errors.New("hostnamectl not found") // Force fallback
+		case "hostname":
+			return "/usr/bin/hostname", nil
+		default:
+			if isFactGatheringCommandLookup(file) { return "/usr/bin/" + file, nil }
+			return "", fmt.Errorf("SetHostname_Fallback test: unexpected LookPath for %s", file)
+		}
+	}
+	mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
+		mockConn.LastExecCmd = cmd
+		mockConn.LastExecOptions = options
+		if cmd == expectedSetCmd && options.Sudo {
+			if !setCmdCalled { // First call is the primary set attempt
+				setCmdCalled = true
+			} else { // Second call is the apply attempt
+				applyCmdCalled = true
+			}
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("SetHostname_Fallback test: unexpected Exec command: %q", cmd)
+	}
+
+	err := r.SetHostname(context.Background(), mockConn, facts, hostname)
+	if err != nil {
+		t.Fatalf("SetHostname() fallback error = %v", err)
+	}
+	if !setCmdCalled { t.Error("SetHostname() fallback did not call primary 'hostname set' command") }
+	if !applyCmdCalled { t.Error("SetHostname() fallback did not call secondary 'hostname apply' command") }
 }
 
 func TestRunner_AddHostEntry_NewEntry(t *testing.T) {
@@ -439,6 +477,23 @@ func TestRunner_DisableFirewall(t *testing.T) {
 			expectError:      true,
 			errorMsgContains: "OS facts not available",
 		},
+		{
+			name:       "firewalld_found_but_not_systemd",
+			factsToUse: factsNonSystemd, // factsNonSystemd has InitSystem.Type = InitSystemUnknown
+			setupMock: func(m *MockConnector, ttName string) {
+				m.LookPathFunc = func(c context.Context, file string) (string, error) {
+					if file == "firewall-cmd" { return "/usr/bin/firewall-cmd", nil }
+					// No other tools should be looked up if firewall-cmd is found.
+					return "", errors.New("tool not relevant for firewalld_no_systemd test path: " + file)
+				}
+				// ExecFunc should not be called if it errors out before trying to stop/disable service
+				m.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
+					return nil, nil, fmt.Errorf("[%s] unexpected exec for firewalld_no_systemd: %s", ttName, cmd)
+				}
+			},
+			expectError:      true,
+			errorMsgContains: "firewall-cmd found but not on a recognized systemd system",
+		},
 	}
 
 	for _, tt := range tests {
@@ -468,3 +523,169 @@ func TestRunner_DisableFirewall(t *testing.T) {
 // The syntax error fix involved removing a brace that was likely closing the TestRunner_AddHostEntry_EntryExists function prematurely,
 // and then the content after that (which was the start of these duplicated functions) became part of it,
 // or I simply pasted them by mistake in a previous step.
+
+func TestRunner_GetInterfaceAddresses(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name             string
+		osID             string // To mock OS detection
+		interfaceName    string
+		mockCmdOutput    string
+		mockCmdErr       error
+		mockGetOSErr     error
+		expectedAddrs    map[string][]string
+		expectError      bool
+		errorMsgContains string
+	}{
+		{
+			name:          "linux_success_ipv4_ipv6",
+			osID:          "linux",
+			interfaceName: "eth0",
+			mockCmdOutput: "2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP group default qlen 1000\n" +
+				"    link/ether 00:1a:2b:3c:4d:5e brd ff:ff:ff:ff:ff:ff\n" +
+				"    inet 192.168.1.10/24 brd 192.168.1.255 scope global eth0\n" +
+				"    inet 10.0.0.1/8 scope global secondary eth0\n" +
+				"    inet6 2001:db8::1/64 scope global \n" +
+				"    inet6 fe80::21a:2bff:fe3c:4d5e/64 scope link \n",
+			expectedAddrs: map[string][]string{
+				"ipv4": {"192.168.1.10", "10.0.0.1"},
+				"ipv6": {"2001:db8::1", "fe80::21a:2bff:fe3c:4d5e"},
+			},
+		},
+		{
+			name:          "darwin_success_ipv4_ipv6",
+			osID:          "darwin",
+			interfaceName: "en0",
+			mockCmdOutput: "en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500\n" +
+				"\tether 00:1a:2b:3c:4d:5e \n" +
+				"\tinet6 fe80::1%en0 prefixlen 64 scopeid 0x4\n" + // Darwin specific with scope
+				"\tinet 192.168.1.100 netmask 0xffffff00 broadcast 192.168.1.255\n" +
+				"\tinet6 2001:db8::c0ca:1dea prefixlen 64 autoconf secured \n" + // Darwin specific without scope in middle
+				"\tinet 10.10.10.10 netmask 0xffffff00 broadcast 10.10.10.255\n" + // Second IPv4
+				"\tnd6 options=201<PERFORMNUD,DAD>\n" +
+				"\tmedia: autoselect\n" +
+				"\tstatus: active\n",
+			expectedAddrs: map[string][]string{
+				"ipv4": {"192.168.1.100", "10.10.10.10"},
+				"ipv6": {"fe80::1", "2001:db8::c0ca:1dea"},
+			},
+		},
+		{
+			name:          "interface_not_found_linux",
+			osID:          "linux",
+			interfaceName: "eth1",
+			mockCmdErr:    &connector.CommandError{Stderr: "Device \"eth1\" does not exist."},
+			expectedAddrs: map[string][]string{"ipv4": {}, "ipv6": {}}, // Empty map, no error
+		},
+		{
+			name:          "interface_not_found_darwin",
+			osID:          "darwin",
+			interfaceName: "en1",
+			mockCmdErr:    &connector.CommandError{Stderr: "ifconfig: interface en1 does not exist"},
+			expectedAddrs: map[string][]string{"ipv4": {}, "ipv6": {}}, // Empty map, no error
+		},
+		{
+			name:             "unsupported_os",
+			osID:             "windows",
+			interfaceName:    "eth0",
+			expectError:      true,
+			errorMsgContains: "GetInterfaceAddresses not supported for OS",
+		},
+		{
+			name:             "empty_interface_name",
+			osID:             "linux",
+			interfaceName:    "  ",
+			expectError:      true,
+			errorMsgContains: "interfaceName cannot be empty",
+		},
+		{
+			name:             "get_os_fails",
+			osID:             "linux", // This won't be used if GetOS fails
+			interfaceName:    "eth0",
+			mockGetOSErr:     errors.New("failed to detect OS"),
+			expectError:      true,
+			errorMsgContains: "failed to get OS info",
+		},
+		{
+			name:             "command_exec_fails_other_reason",
+			osID:             "linux",
+			interfaceName:    "eth0",
+			mockCmdErr:       errors.New("random exec error"),
+			expectError:      true,
+			errorMsgContains: "failed to execute command",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, _, mockConn := newTestRunnerForNetwork(t) // Ignore facts from base helper for this test
+
+			mockConn.GetOSFunc = func(ctx context.Context) (*connector.OS, error) {
+				if tt.mockGetOSErr != nil {
+					return nil, tt.mockGetOSErr
+				}
+				return &connector.OS{ID: tt.osID}, nil // OS struct likely doesn't have Name
+			}
+
+			mockConn.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
+				var expectedCmdPart string
+				if tt.osID == "linux" {
+					expectedCmdPart = "ip addr show dev " + tt.interfaceName
+				} else if tt.osID == "darwin" {
+					expectedCmdPart = "ifconfig " + tt.interfaceName
+				}
+
+				if expectedCmdPart != "" && !strings.Contains(cmd, expectedCmdPart) {
+					if isFactGatheringCommand(cmd) { return []byte("dummy fact"), nil, nil}
+					return nil, nil, fmt.Errorf("unexpected command: got %q, expected to contain %q", cmd, expectedCmdPart)
+				}
+
+				var stderr []byte
+				if tt.mockCmdErr != nil {
+					if cerr, ok := tt.mockCmdErr.(*connector.CommandError); ok {
+						stderr = []byte(cerr.Stderr)
+					}
+				}
+				return []byte(tt.mockCmdOutput), stderr, tt.mockCmdErr
+			}
+
+			addrs, err := r.GetInterfaceAddresses(ctx, mockConn, tt.interfaceName)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error containing %q, got nil", tt.errorMsgContains)
+				} else if !strings.Contains(err.Error(), tt.errorMsgContains) {
+					t.Errorf("Error message %q does not contain %q", err.Error(), tt.errorMsgContains)
+				}
+			} else if err != nil {
+				t.Errorf("Did not expect error, got %v", err)
+			}
+
+			if tt.expectedAddrs != nil {
+				if len(addrs["ipv4"]) != len(tt.expectedAddrs["ipv4"]) {
+					t.Errorf("IPv4 count mismatch: got %v, want %v", addrs["ipv4"], tt.expectedAddrs["ipv4"])
+				} else {
+					for i := range tt.expectedAddrs["ipv4"] {
+						if addrs["ipv4"][i] != tt.expectedAddrs["ipv4"][i] {
+							t.Errorf("IPv4 mismatch at index %d: got %s, want %s", i, addrs["ipv4"][i], tt.expectedAddrs["ipv4"][i])
+						}
+					}
+				}
+				if len(addrs["ipv6"]) != len(tt.expectedAddrs["ipv6"]) {
+					t.Errorf("IPv6 count mismatch: got %v, want %v", addrs["ipv6"], tt.expectedAddrs["ipv6"])
+				} else {
+					for i := range tt.expectedAddrs["ipv6"] {
+						if addrs["ipv6"][i] != tt.expectedAddrs["ipv6"][i] {
+							t.Errorf("IPv6 mismatch at index %d: got %s, want %s", i, addrs["ipv6"][i], tt.expectedAddrs["ipv6"][i])
+						}
+					}
+				}
+			} else if len(addrs["ipv4"]) > 0 || len(addrs["ipv6"]) > 0  {
+				if !tt.expectError {
+					t.Errorf("Expected nil or empty addresses, got %v", addrs)
+				}
+			}
+		})
+	}
+}

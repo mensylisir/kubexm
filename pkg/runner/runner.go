@@ -68,8 +68,11 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 			memCmd = "sysctl -n hw.memsize"
 			memIsKb = false
 		default:
-			cpuCmd = "nproc"
-			memCmd = "grep MemTotal /proc/meminfo | awk '{print $2}'"
+			// For unknown OS, try nproc and /proc/meminfo as a common fallback, but be prepared for failure.
+			// Alternatively, leave cpuCmd/memCmd empty or return an error earlier.
+			// For now, we let it try, and errors will be caught below.
+			cpuCmd = "nproc" // Common fallback
+			memCmd = "grep MemTotal /proc/meminfo | awk '{print $2}'" // Common fallback
 			memIsKb = true
 		}
 		if cpuCmd != "" {
@@ -79,10 +82,12 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 				if parseErr == nil {
 					facts.TotalCPU = parsedCPU
 				} else {
-					fmt.Fprintf(os.Stderr, "Warning: failed to parse CPU output for %s on %s: %v\n", facts.OS.ID, facts.Hostname, parseErr)
+					// Return error to errgroup
+					return fmt.Errorf("failed to parse CPU output for %s on %s: %w", facts.OS.ID, facts.Hostname, parseErr)
 				}
 			} else {
-				fmt.Fprintf(os.Stderr, "Warning: failed to exec CPU command '%s' for %s on %s: %v\n", cpuCmd, facts.OS.ID, facts.Hostname, execErr)
+				// Return error to errgroup
+				return fmt.Errorf("failed to exec CPU command '%s' for %s on %s: %w", cpuCmd, facts.OS.ID, facts.Hostname, execErr)
 			}
 		}
 		if memCmd != "" {
@@ -91,15 +96,17 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 				memVal, parseErr := strconv.ParseUint(strings.TrimSpace(string(memBytes)), 10, 64)
 				if parseErr == nil {
 					if memIsKb {
-						facts.TotalMemory = memVal / 1024
+						facts.TotalMemory = memVal / 1024 // Convert KB to MiB
 					} else {
-						facts.TotalMemory = memVal / (1024 * 1024)
+						facts.TotalMemory = memVal / (1024 * 1024) // Convert Bytes to MiB
 					}
 				} else {
-					fmt.Fprintf(os.Stderr, "Warning: failed to parse Memory output for %s on %s: %v\n", facts.OS.ID, facts.Hostname, parseErr)
+					// Return error to errgroup
+					return fmt.Errorf("failed to parse Memory output for %s on %s: %w", facts.OS.ID, facts.Hostname, parseErr)
 				}
 			} else {
-				fmt.Fprintf(os.Stderr, "Warning: failed to exec Memory command '%s' for %s on %s: %v\n", memCmd, facts.OS.ID, facts.Hostname, execErr)
+				// Return error to errgroup
+				return fmt.Errorf("failed to exec Memory command '%s' for %s on %s: %w", memCmd, facts.OS.ID, facts.Hostname, execErr)
 			}
 		}
 		return nil
@@ -110,19 +117,31 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 		switch strings.ToLower(facts.OS.ID) {
 		case "linux", "ubuntu", "debian", "centos", "rhel", "fedora", "almalinux", "rocky", "raspbian", "linuxmint":
 			ip4Cmd = "ip -4 route get 8.8.8.8 | awk '{print $7}' | head -n1"
-			ip6Cmd = "ip -6 route get 2001:4860:4860::8888 | awk '{print $10}' | head -n1"
+			ip6Cmd = "ip -6 route get 2001:4860:4860::8888 | awk '{print $10}' | head -n1" // Note: $10 for IPv6 source addr with `ip route get`
 		case "darwin":
-			// Placeholder for darwin IP logic
+			// Placeholder for darwin IP logic. Example: ipconfig getifaddr en0 (for primary NIC, usually Wi-Fi or Ethernet)
+			// For default route IP: `route -n get default | grep 'interface:' | awk '{print $2}'` then `ifconfig <iface> inet | awk '/inet / {print $2}'`
+			// This is more complex and might need specific interface detection.
+			// For now, we'll leave it as a warning if not found.
 		default:
 			// Placeholder for other OS IP logic
 		}
 		if ip4Cmd != "" {
-			ip4Bytes, _, _ := conn.Exec(gCtx, ip4Cmd, nil)
-			facts.IPv4Default = strings.TrimSpace(string(ip4Bytes))
+			ip4Bytes, _, execErr := conn.Exec(gCtx, ip4Cmd, nil)
+			if execErr != nil {
+				// Log as warning, as IP might not be critical for all operations and might fail on systems without external connectivity.
+				fmt.Fprintf(os.Stderr, "Warning: failed to get IPv4 default route for host %s (%s): %v\n", facts.Hostname, facts.OS.ID, execErr)
+			} else {
+				facts.IPv4Default = strings.TrimSpace(string(ip4Bytes))
+			}
 		}
 		if ip6Cmd != "" {
-			ip6Bytes, _, _ := conn.Exec(gCtx, ip6Cmd, nil)
-			facts.IPv6Default = strings.TrimSpace(string(ip6Bytes))
+			ip6Bytes, _, execErr := conn.Exec(gCtx, ip6Cmd, nil)
+			if execErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to get IPv6 default route for host %s (%s): %v\n", facts.Hostname, facts.OS.ID, execErr)
+			} else {
+				facts.IPv6Default = strings.TrimSpace(string(ip6Bytes))
+			}
 		}
 		return nil
 	})
@@ -172,8 +191,13 @@ func (r *defaultRunner) detectPackageManager(ctx context.Context, conn connector
 	default:
 		if _, err := r.LookPath(ctx, conn, "apt-get"); err == nil { return &aptInfo, nil }
 		if _, err := r.LookPath(ctx, conn, "dnf"); err == nil {
-			dnfSpecificInfo := yumDnfInfoBase
-			dnfSpecificInfo.Type = PackageManagerDnf; dnfSpecificInfo.UpdateCmd = "dnf update -y"; dnfSpecificInfo.InstallCmd = "dnf install -y %s"; dnfSpecificInfo.RemoveCmd = "dnf remove -y %s"; dnfSpecificInfo.CacheCleanCmd = "dnf clean all"
+			// Apply multiline formatting for readability
+			dnfSpecificInfo := yumDnfInfoBase // Start with yum base
+			dnfSpecificInfo.Type = PackageManagerDnf
+			dnfSpecificInfo.UpdateCmd = "dnf update -y"
+			dnfSpecificInfo.InstallCmd = "dnf install -y %s"
+			dnfSpecificInfo.RemoveCmd = "dnf remove -y %s"
+			dnfSpecificInfo.CacheCleanCmd = "dnf clean all"
 			return &dnfSpecificInfo, nil
 		}
 		if _, err := r.LookPath(ctx, conn, "yum"); err == nil { return &yumDnfInfoBase, nil }
@@ -286,23 +310,29 @@ func (r *defaultRunner) Reboot(ctx context.Context, conn connector.Connector, ti
 	// For simplicity, just `reboot`. If the connection drops immediately, the error might be suppressed by some shells.
 	// Let's use a slightly delayed reboot to allow the command to likely return.
 	// `systemd-run --on-active=5s reboot` or `sh -c "sleep 5 && reboot" &`
+	// Adding a small delay and running in background for robustness: "sh -c 'sleep 2 && reboot' > /dev/null 2>&1 &"
+	rebootCmd := "sh -c 'sleep 2 && reboot > /dev/null 2>&1 &'" // Basic reboot command, slight delay, backgrounded
 
-	rebootCmd := "reboot" // Basic reboot command
 	// Attempt to issue the reboot command. We might not get a clean exit if the system reboots too fast.
-	_, _, execErr := r.RunWithOptions(ctx, conn, rebootCmd, &connector.ExecOptions{Sudo: true, Timeout: 15 * time.Second})
+	_, _, execErr := r.RunWithOptions(ctx, conn, rebootCmd, &connector.ExecOptions{Sudo: true, Timeout: 10 * time.Second}) // Short timeout for sending the command
+
 	// We don't strictly fail on execErr here, as the command might succeed in rebooting even if the SSH session is terminated abruptly.
 	// However, if execErr indicates command not found or immediate permission denied, that's a failure.
 	if execErr != nil {
-		// If it's a CommandError, it means the command was attempted.
-		// If it's another error (e.g. connection failed before command ran), that's more problematic.
-		// For now, we log the error and proceed to wait phase if it seems like a command execution attempt was made.
-		// A more specific error check could be done here.
-		fmt.Fprintf(os.Stderr, "Reboot command returned error (this might be expected if connection dropped): %v\n", execErr)
+		// Check if the error is a context deadline exceeded, which is expected if the command is backgrounded and connection closes.
+		// Or if the error message suggests the connection was closed.
+		if !(strings.Contains(execErr.Error(), "context deadline exceeded") ||
+			strings.Contains(execErr.Error(), "session channel closed") ||
+			strings.Contains(execErr.Error(), "connection lost") || // common with some SSH libraries
+			strings.Contains(execErr.Error(), "EOF")) { // common for abrupt closes
+			return fmt.Errorf("failed to issue reboot command: %w", execErr)
+		}
+		fmt.Fprintf(os.Stderr, "Reboot command initiated, connection may have dropped as expected: %v\n", execErr)
 	}
 
-	// Wait for the host to go down and come back up.
-	// First, wait a bit for the shutdown to initiate.
-	time.Sleep(2 * time.Second) // Reduced initial grace period for shutdown
+	// Wait a grace period for the shutdown to initiate properly.
+	fmt.Fprintf(os.Stderr, "Reboot command sent. Waiting for shutdown to initiate...\n")
+	time.Sleep(10 * time.Second) // Grace period for shutdown to start
 
 	rebootCtx, cancel := context.WithTimeout(ctx, timeout) // Overall timeout for waiting
 	defer cancel()

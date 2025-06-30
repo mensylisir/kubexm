@@ -160,7 +160,8 @@ func (r *defaultRunner) Chown(ctx context.Context, conn connector.Connector, pat
 	if recursive {
 		recursiveFlag = "-R"
 	}
-	cmd := fmt.Sprintf("chown %s %s %s", recursiveFlag, ownerGroupSpec, path)
+	cmdParts := []string{"chown", recursiveFlag, ownerGroupSpec, path}
+	cmd := strings.Join(strings.Fields(strings.Join(cmdParts, " ")), " ") // Build and then normalize spaces
 
 	_, stderr, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true}) // Chown usually requires sudo
 	if err != nil {
