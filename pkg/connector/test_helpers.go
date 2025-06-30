@@ -4,29 +4,34 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"fmt"
+	"fmt" // Needed for fmt.Errorf
 	"net"
-	"strings" // Added import
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/ssh" // SSH import
+	"golang.org/x/crypto/ssh"
 )
-
-// Shared mocking infrastructure for connector tests
 
 var (
 	actualDialCount      int
 	actualDialCountMutex sync.Mutex
 )
 
-// SetTestDialerOverride allows overriding the package-level currentDialer function for testing.
-// currentDialer should be a package variable in pool.go (or another central place) like:
-// var currentDialer dialSSHFunc = dialSSH (where dialSSH is the real implementation)
-// This helper needs access to that currentDialer.
+type ExecHandlerFunc func(command string, ch ssh.Channel, t *testing.T)
+
+type MockServer struct {
+	listener    net.Listener
+	config      *ssh.ServerConfig
+	t           *testing.T
+	ExecHandler ExecHandlerFunc
+	serverDone chan struct{} // Closed when the acceptLoop exits
+	wg         sync.WaitGroup
+}
+
 func SetTestDialerOverride(overrideFn dialSSHFunc) func() {
-	original := currentDialer // Assumes currentDialer is accessible in this package
+	original := currentDialer
 	currentDialer = overrideFn
 	return func() {
 		currentDialer = original
@@ -51,120 +56,156 @@ func getActualDialCount() int {
 	return actualDialCount
 }
 
-// createMockSSHServer sets up an in-memory SSH server for testing.
-// It returns the server's address and a cleanup function to close the listener.
-func createMockSSHServer(t *testing.T) (string, func()) {
+func NewMockServer(t *testing.T, execHandler ExecHandlerFunc) (server *MockServer, addr string, cleanup func()) {
+	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("Failed to listen on a port: %v", err)
+		t.Fatalf("NewMockServer: Failed to listen: %v", err)
 	}
 
 	privateKey, err := generateTestKey()
 	if err != nil {
-		t.Fatalf("Failed to generate server key: %v", err)
-	}
-
-	config := &ssh.ServerConfig{
-		NoClientAuth: true, // For simplicity in tests, don't require client auth
-	}
-	config.AddHostKey(privateKey)
-
-	go func() {
-		for { // Loop to accept multiple connections
-			conn, err := listener.Accept()
-			if err != nil {
-				if ne, ok := err.(net.Error); ok && ne.Temporary() {
-					time.Sleep(5 * time.Millisecond)
-					continue
-				}
-				return // Listener closed or other fatal error
-			}
-
-			go func(c net.Conn) { // Handle each connection in its own goroutine
-				defer c.Close()
-				sconn, chans, reqs, handshakeErr := ssh.NewServerConn(c, config)
-				if handshakeErr != nil {
-					return // Handshake failed for this client
-				}
-
-				go ssh.DiscardRequests(reqs)
-
-				var wg sync.WaitGroup
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					for newChannel := range chans {
-						if newChannel.ChannelType() == "session" {
-							channel, channelRequests, acceptErr := newChannel.Accept()
-							if acceptErr != nil {
-								// t.Logf("mock server: could not accept channel type %s: %v", newChannel.ChannelType(), acceptErr)
-								continue
-							}
-							// Handle exec requests on the session channel
-							go func(in <-chan *ssh.Request, ch ssh.Channel) {
-								for req := range in {
-									ok := false
-									switch req.Type {
-									case "exec":
-										var payload struct{ Command string }
-										ssh.Unmarshal(req.Payload, &payload)
-										// t.Logf("mock server: exec request for command: %s", payload.Command)
-
-										if strings.HasPrefix(payload.Command, "echo ") {
-											echoContent := strings.TrimPrefix(payload.Command, "echo ")
-											ch.Write([]byte(echoContent + "\n"))
-										}
-										// Simulate successful execution for any exec command
-										ok = true
-										// Send exit-status 0 for success
-										statusPayload := struct{ Status uint32 }{0}
-										// Log error if sending exit-status fails, but don't stop the test for it
-										if _, errSendStatus := ch.SendRequest("exit-status", false, ssh.Marshal(&statusPayload)); errSendStatus != nil {
-											// t.Logf("mock server: failed to send exit-status for exec %s: %v", payload.Command, errSendStatus)
-										}
-										// Do NOT close the channel here. The client (session) should close it.
-										// The client's session.Close() will send an EOF, then a "close" channel message.
-										// The server's mux will then see the channel as closed.
-									case "shell", "pty-req", "subsystem":
-										// Deny these for simplicity
-										if req.WantReply {
-											req.Reply(false, nil)
-										}
-									default:
-										// t.Logf("mock server: discarding/ignoring session request type %s", req.Type)
-										if req.WantReply {
-											req.Reply(true, nil) // Default positive reply if unsure
-										}
-									}
-									// If request required a reply and we haven't sent one (e.g. for non-exec)
-									if req.WantReply && !ok { // ok would be true if handled above
-										req.Reply(ok, nil)
-									}
-								}
-							}(channelRequests, channel)
-						} else {
-							// t.Logf("mock server: rejecting unknown channel type: %s", newChannel.ChannelType())
-							if rejectErr := newChannel.Reject(ssh.UnknownChannelType, "unknown channel type"); rejectErr != nil {
-								// t.Logf("mock server: failed to reject channel type %s: %v", newChannel.ChannelType(), rejectErr)
-							}
-						}
-					}
-					// t.Logf("mock server: channel handling loop exited for client %s", c.RemoteAddr())
-				}()
-				sconn.Wait()
-				wg.Wait()
-				// t.Logf("mock server: %s all server goroutines finished for client %s", listener.Addr().String(), c.RemoteAddr())
-			}(conn)
-		}
-	}()
-
-	cleanup := func() {
 		listener.Close()
+		t.Fatalf("NewMockServer: Failed to generate key: %v", err)
 	}
-	return listener.Addr().String(), cleanup
+
+	serverConfig := &ssh.ServerConfig{
+		NoClientAuth: true,
+	}
+	serverConfig.AddHostKey(privateKey)
+
+	ms := &MockServer{
+		listener:    listener,
+		config:      serverConfig,
+		t:           t,
+		ExecHandler: execHandler,
+		serverDone:  make(chan struct{}),
+	}
+
+	ms.wg.Add(1) // For the acceptLoop itself
+	go ms.acceptLoop()
+
+	cleanupFunc := func() {
+		ms.listener.Close()
+		<-ms.serverDone      // Wait for acceptLoop to finish
+		ms.wg.Wait()         // Wait for all handleConnection goroutines
+	}
+	return ms, listener.Addr().String(), cleanupFunc
 }
 
-// generateTestKey is a helper to create an RSA private key for the mock server.
+func (ms *MockServer) acceptLoop() {
+	defer ms.wg.Done()
+	defer close(ms.serverDone) // Signal that acceptLoop has exited
+	for {
+		conn, err := ms.listener.Accept()
+		if err != nil {
+			// Check if the error is due to the listener being closed.
+			if opErr, ok := err.(*net.OpError); ok && opErr.Err.Error() == "use of closed network connection" {
+				return // Normal shutdown
+			}
+			// ms.t.Logf("MockServer: Accept error: %v. Exiting acceptLoop.", err) // t.Logf can't be used in non-test goroutine
+			return
+		}
+		ms.wg.Add(1) // Add for the handleConnection goroutine
+		go ms.handleConnection(conn)
+	}
+}
+
+func (ms *MockServer) handleConnection(c net.Conn) {
+	defer ms.wg.Done() // Decrement counter when this connection handler exits
+	defer c.Close()
+	sconn, chans, globalReqs, err := ssh.NewServerConn(c, ms.config)
+	if err != nil {
+		// ms.t.Logf("MockServer: Handshake error with %s: %v", c.RemoteAddr(), err)
+		return
+	}
+	defer sconn.Close() // Ensure SSH transport is closed
+
+	go ssh.DiscardRequests(globalReqs) // Handle keepalives etc.
+
+	// This simplified handler only deals with the connection lifecycle.
+	// It does not process session channels or exec requests.
+	// This is for testing basic connect/disconnect and pool keepalives.
+	// For exec testing, the more complex handler (commented out below) is needed.
+
+	// Wait for the SSH connection to terminate, or server shutdown.
+	select {
+	case <-sconn.Context().Done(): // Connection closed by client or error
+		// ms.t.Logf("MockServer: sconn context done for %s: %v", sconn.RemoteAddr(), sconn.Context().Err())
+	case <-ms.serverDone:          // Server is shutting down
+		// ms.t.Logf("MockServer: serverDone signaled for %s, closing sconn.", sconn.RemoteAddr())
+		// sconn.Close() already deferred
+	}
+	// sconn.Wait() // sconn.Context().Done() is usually preferred for select
+}
+
+
+/* // Original more complex handleConnection - keep for reference or future exec/sftp tests
+func (ms *MockServer) handleConnection_Full(c net.Conn) {
+	defer ms.wg.Done()
+	defer c.Close()
+	sconn, chans, globalReqs, err := ssh.NewServerConn(c, ms.config)
+	if err != nil {
+		return
+	}
+	defer sconn.Close()
+	go ssh.DiscardRequests(globalReqs)
+
+	var connChanWg sync.WaitGroup
+	for newChannel := range chans {
+		if newChannel.ChannelType() != "session" {
+			newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
+			continue
+		}
+		channel, requests, err := newChannel.Accept()
+		if err != nil {
+			continue
+		}
+		connChanWg.Add(1)
+		go func(ch ssh.Channel, reqsChan <-chan *ssh.Request) {
+			defer connChanWg.Done()
+			defer ch.Close()
+			for req := range reqsChan {
+				switch req.Type {
+				case "exec":
+					var payload struct{ Command string }
+					ssh.Unmarshal(req.Payload, &payload)
+					if req.WantReply {
+						req.Reply(true, nil)
+					}
+					if ms.ExecHandler != nil {
+						ms.ExecHandler(payload.Command, ch, ms.t)
+					} else {
+						if strings.HasPrefix(payload.Command, "echo ") {
+							ch.Write([]byte(strings.TrimPrefix(payload.Command, "echo ") + "\n"))
+						}
+						ch.CloseWrite()
+						statusPayload := struct{ Status uint32 }{0}
+						ch.SendRequest("exit-status", false, ssh.Marshal(&statusPayload))
+						ch.Close()
+					}
+					return
+				case "subsystem":
+					var payload struct{ Name string }
+					ssh.Unmarshal(req.Payload, &payload)
+					if payload.Name == "sftp" {
+						if req.WantReply { req.Reply(true, nil) }
+					} else {
+						if req.WantReply { req.Reply(false, nil) }
+					}
+				case "shell", "pty-req":
+					if req.WantReply { req.Reply(false, nil) }
+				default:
+					if req.WantReply { req.Reply(false, nil) }
+				}
+			}
+		}(channel, requests)
+	}
+	connChanWg.Wait()
+	sconn.Wait()
+}
+*/
+
 func generateTestKey() (ssh.Signer, error) {
 	privateRSAKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -177,19 +218,15 @@ func generateTestKey() (ssh.Signer, error) {
 	return signer, nil
 }
 
-// newMockDialer creates a dialer that connects to our in-memory SSH server.
-// It uses the incrementActualDialCount helper.
 func newMockDialer(serverAddr string) dialSSHFunc {
 	return func(ctx context.Context, cfg ConnectionCfg, connectTimeout time.Duration) (*ssh.Client, *ssh.Client, error) {
 		incrementActualDialCount()
-		// Use the connectTimeout from parameters for the net.Dialer
 		dialer := net.Dialer{Timeout: connectTimeout}
 		conn, err := dialer.DialContext(ctx, "tcp", serverAddr)
 		if err != nil {
 			return nil, nil, err
 		}
 
-		// Use cfg.User for ClientConfig, and cfg.HostKeyCallback if provided, otherwise InsecureIgnoreHostKey
 		hostKeyCallback := cfg.HostKeyCallback
 		if hostKeyCallback == nil {
 			hostKeyCallback = ssh.InsecureIgnoreHostKey()
@@ -197,21 +234,20 @@ func newMockDialer(serverAddr string) dialSSHFunc {
 
 		sshConfig := &ssh.ClientConfig{
 			User:            cfg.User,
-			Auth:            []ssh.AuthMethod{}, // Mock dialer doesn't need real auth for mock server
+			Auth:            []ssh.AuthMethod{},
 			HostKeyCallback: hostKeyCallback,
-			Timeout:         connectTimeout, // This timeout is for the SSH handshake itself
+			Timeout:         connectTimeout,
 		}
-		if cfg.Password != "" { // Allow password for completeness, though mock server doesn't check
+		if cfg.Password != "" {
 			sshConfig.Auth = append(sshConfig.Auth, ssh.Password(cfg.Password))
 		}
 
-
-		c, chans, reqs, err := ssh.NewClientConn(conn, serverAddr, sshConfig)
+		clientConn, chans, reqs, err := ssh.NewClientConn(conn, serverAddr, sshConfig)
 		if err != nil {
 			return nil, nil, err
 		}
 
-		client := ssh.NewClient(c, chans, reqs)
-		return client, nil, nil // No bastion client in this simplified mock setup
+		client := ssh.NewClient(clientConn, chans, reqs)
+		return client, nil, nil
 	}
 }
