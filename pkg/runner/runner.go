@@ -3,29 +3,23 @@ package runner
 import (
 	"context"
 	"fmt"
-	"os" // Added for os.Stderr
-	// "io" // Removed as unused
-	// "net" // Removed as unused
-	// "path/filepath" // Removed as unused
+	"bytes" // For template rendering
+	"os"
 	"strconv"
 	"strings"
-	// "text/template" // Removed as unused
-	// "time" // Removed as unused
+	"text/template" // For template rendering
+	"time"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"golang.org/x/sync/errgroup"
 )
 
-// defaultRunner is a stateless struct that implements the Runner interface.
 type defaultRunner struct{}
 
-// NewRunner creates a new stateless Runner service.
-// Renamed from New() to match test expectations.
 func NewRunner() Runner {
 	return &defaultRunner{}
 }
 
-// GatherFacts gathers information about the host.
 func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connector) (*Facts, error) {
 	if conn == nil {
 		return nil, fmt.Errorf("connector cannot be nil for GatherFacts")
@@ -37,7 +31,6 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 	facts := &Facts{}
 	var err error
 
-	// Step 1: Get OS information synchronously as other facts may depend on it.
 	facts.OS, err = conn.GetOS(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get OS info: %w", err)
@@ -46,14 +39,11 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 		return nil, fmt.Errorf("conn.GetOS returned nil OS without error")
 	}
 
-	// Step 2: Gather other facts, potentially in parallel if they are independent.
 	g, gCtx := errgroup.WithContext(ctx)
 
-	// Get hostname
 	g.Go(func() error {
 		hostnameBytes, _, execErr := conn.Exec(gCtx, "hostname -f", nil)
 		if execErr != nil {
-			// Fallback to simple hostname if hostname -f fails
 			hostnameBytes, _, execErr = conn.Exec(gCtx, "hostname", nil)
 			if execErr != nil {
 				return fmt.Errorf("failed to get hostname: %w", execErr)
@@ -63,48 +53,25 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 		return nil
 	})
 
-	// Get kernel version (already part of facts.OS.Kernel, but can be re-verified or kept if OS.Kernel is minimal)
-	// For now, we assume facts.OS.Kernel is sufficient. If not, this can be added:
-	/*
-		g.Go(func() error {
-			kernelBytes, _, execErr := conn.Exec(gCtx, "uname -r", nil)
-			if execErr != nil {
-				return fmt.Errorf("failed to get kernel version: %w", execErr)
-			}
-			facts.Kernel = strings.TrimSpace(string(kernelBytes)) // This might override OS.Kernel
-			return nil
-		})
-	*/
-	// If facts.OS.Kernel is populated by conn.GetOS, facts.Kernel field in Facts struct might be redundant
-	// or should be explicitly set from facts.OS.Kernel.
-	// For now, let's ensure facts.Kernel is set from facts.OS.Kernel.
 	facts.Kernel = facts.OS.Kernel
 
-	// Get CPU and Memory
 	g.Go(func() error {
 		var cpuCmd, memCmd string
 		memIsKb := false
-
-		// Use facts.OS.ID for OS-specific commands
 		switch strings.ToLower(facts.OS.ID) {
 		case "linux", "ubuntu", "debian", "centos", "rhel", "fedora", "almalinux", "rocky", "raspbian", "linuxmint":
 			cpuCmd = "nproc"
-			memCmd = "grep MemTotal /proc/meminfo | awk '{print $2}'" // Output is in KB
+			memCmd = "grep MemTotal /proc/meminfo | awk '{print $2}'"
 			memIsKb = true
 		case "darwin":
 			cpuCmd = "sysctl -n hw.ncpu"
-			memCmd = "sysctl -n hw.memsize" // Output is in Bytes
+			memCmd = "sysctl -n hw.memsize"
 			memIsKb = false
 		default:
-			// Fallback or error for unsupported OS for CPU/Mem
-			// Try generic, but they might fail.
-			cpuCmd = "nproc" // Attempt Linux default
-			memCmd = "grep MemTotal /proc/meminfo | awk '{print $2}'" // Attempt Linux default
+			cpuCmd = "nproc"
+			memCmd = "grep MemTotal /proc/meminfo | awk '{print $2}'"
 			memIsKb = true
-			// Or return an error/warning:
-			// fmt.Fprintf(os.Stderr, "Warning: Unsupported OS '%s' for specific CPU/Mem fact gathering, attempting defaults.\n", facts.OS.ID)
 		}
-
 		if cpuCmd != "" {
 			cpuBytes, _, execErr := conn.Exec(gCtx, cpuCmd, nil)
 			if execErr == nil {
@@ -113,104 +80,81 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 					facts.TotalCPU = parsedCPU
 				} else {
 					fmt.Fprintf(os.Stderr, "Warning: failed to parse CPU output for %s on %s: %v\n", facts.OS.ID, facts.Hostname, parseErr)
-					facts.TotalCPU = 0 // Default or mark as unknown
 				}
 			} else {
 				fmt.Fprintf(os.Stderr, "Warning: failed to exec CPU command '%s' for %s on %s: %v\n", cpuCmd, facts.OS.ID, facts.Hostname, execErr)
-				facts.TotalCPU = 0 // Default or mark as unknown
 			}
 		}
-
-
 		if memCmd != "" {
 			memBytes, _, execErr := conn.Exec(gCtx, memCmd, nil)
 			if execErr == nil {
 				memVal, parseErr := strconv.ParseUint(strings.TrimSpace(string(memBytes)), 10, 64)
 				if parseErr == nil {
 					if memIsKb {
-						facts.TotalMemory = memVal / 1024 // Convert KB to MiB
-					} else { // Assumed Bytes
-						facts.TotalMemory = memVal / (1024 * 1024) // Convert Bytes to MiB
+						facts.TotalMemory = memVal / 1024
+					} else {
+						facts.TotalMemory = memVal / (1024 * 1024)
 					}
 				} else {
 					fmt.Fprintf(os.Stderr, "Warning: failed to parse Memory output for %s on %s: %v\n", facts.OS.ID, facts.Hostname, parseErr)
-					facts.TotalMemory = 0 // Default
 				}
 			} else {
 				fmt.Fprintf(os.Stderr, "Warning: failed to exec Memory command '%s' for %s on %s: %v\n", memCmd, facts.OS.ID, facts.Hostname, execErr)
-				facts.TotalMemory = 0 // Default
 			}
 		}
 		return nil
 	})
 
-	// Get default IP addresses
 	g.Go(func() error {
 		var ip4Cmd, ip6Cmd string
-		// Use facts.OS.ID for OS-specific commands
 		switch strings.ToLower(facts.OS.ID) {
 		case "linux", "ubuntu", "debian", "centos", "rhel", "fedora", "almalinux", "rocky", "raspbian", "linuxmint":
 			ip4Cmd = "ip -4 route get 8.8.8.8 | awk '{print $7}' | head -n1"
 			ip6Cmd = "ip -6 route get 2001:4860:4860::8888 | awk '{print $10}' | head -n1"
 		case "darwin":
-			// For macOS, `route get default | grep interface | awk '{print $2}'` gets interface, then `ipconfig getifaddr <iface>`
-			// This is more complex; for simplicity, we might leave it or use a simpler heuristic if available.
-			// Example: ipconfig getifaddr en0 (but en0 might not be the default)
-			// For now, let's keep it Linux-focused for IPs or accept it might be empty for others.
-			// A common way:
-			// ip4Cmd = "route -n get default | grep 'interface:' | awk '{print $2}' | xargs -I {} ipconfig getifaddr {}" (very basic)
+			// Placeholder for darwin IP logic
 		default:
-			// fmt.Fprintf(os.Stderr, "Warning: OS '%s' not specifically handled for IP fact gathering.\n", facts.OS.ID)
+			// Placeholder for other OS IP logic
 		}
-
 		if ip4Cmd != "" {
-			ip4Bytes, _, _ := conn.Exec(gCtx, ip4Cmd, nil) // Errors ignored as IPs might not exist or command fails
+			ip4Bytes, _, _ := conn.Exec(gCtx, ip4Cmd, nil)
 			facts.IPv4Default = strings.TrimSpace(string(ip4Bytes))
 		}
 		if ip6Cmd != "" {
-			ip6Bytes, _, _ := conn.Exec(gCtx, ip6Cmd, nil) // Errors ignored
+			ip6Bytes, _, _ := conn.Exec(gCtx, ip6Cmd, nil)
 			facts.IPv6Default = strings.TrimSpace(string(ip6Bytes))
 		}
 		return nil
 	})
 
 	if err := g.Wait(); err != nil {
-		// Log individual errors from goroutines if needed, errgroup returns the first non-nil error.
-		return facts, fmt.Errorf("failed during concurrent fact gathering: %w", err) // Return partially filled facts
+		return facts, fmt.Errorf("failed during concurrent fact gathering: %w", err)
 	}
 
-	// Step 3: Detect package manager and init system (these depend on facts.OS).
 	var pmErr, initErr error
 	facts.PackageManager, pmErr = r.detectPackageManager(ctx, conn, facts)
 	if pmErr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to detect package manager for host %s (%s): %v\n", facts.Hostname, facts.OS.ID, pmErr)
-		// facts.PackageManager will be nil, subsequent package operations will fail gracefully.
 	}
 	facts.InitSystem, initErr = r.detectInitSystem(ctx, conn, facts)
 	if initErr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to detect init system for host %s (%s): %v\n", facts.Hostname, facts.OS.ID, initErr)
-		// facts.InitSystem will be nil, subsequent service operations will fail gracefully.
 	}
-
 	return facts, nil
 }
 
-// detectPackageManager attempts to identify the package manager on the host.
 func (r *defaultRunner) detectPackageManager(ctx context.Context, conn connector.Connector, facts *Facts) (*PackageInfo, error) {
 	if facts == nil || facts.OS == nil {
 		return nil, fmt.Errorf("OS facts not available, cannot detect package manager")
 	}
-
-	// Define package manager info structures (as in the old runner)
 	aptInfo := PackageInfo{
 		Type: PackageManagerApt, UpdateCmd: "apt-get update -y", InstallCmd: "apt-get install -y %s",
 		RemoveCmd: "apt-get remove -y %s", PkgQueryCmd: "dpkg-query -W -f='${Status}' %s", CacheCleanCmd: "apt-get clean",
 	}
-	yumDnfInfoBase := PackageInfo{ // Base for yum/dnf
+	yumDnfInfoBase := PackageInfo{
 		Type: PackageManagerYum, UpdateCmd: "yum update -y", InstallCmd: "yum install -y %s",
 		RemoveCmd: "yum remove -y %s", PkgQueryCmd: "rpm -q %s", CacheCleanCmd: "yum clean all",
 	}
-
 	switch strings.ToLower(facts.OS.ID) {
 	case "ubuntu", "debian", "raspbian", "linuxmint":
 		return &aptInfo, nil
@@ -226,27 +170,21 @@ func (r *defaultRunner) detectPackageManager(ctx context.Context, conn connector
 		}
 		return &yumDnfInfoBase, nil
 	default:
-		if _, err := r.LookPath(ctx, conn, "apt-get"); err == nil {
-			return &aptInfo, nil
-		}
+		if _, err := r.LookPath(ctx, conn, "apt-get"); err == nil { return &aptInfo, nil }
 		if _, err := r.LookPath(ctx, conn, "dnf"); err == nil {
 			dnfSpecificInfo := yumDnfInfoBase
 			dnfSpecificInfo.Type = PackageManagerDnf; dnfSpecificInfo.UpdateCmd = "dnf update -y"; dnfSpecificInfo.InstallCmd = "dnf install -y %s"; dnfSpecificInfo.RemoveCmd = "dnf remove -y %s"; dnfSpecificInfo.CacheCleanCmd = "dnf clean all"
 			return &dnfSpecificInfo, nil
 		}
-		if _, err := r.LookPath(ctx, conn, "yum"); err == nil {
-			return &yumDnfInfoBase, nil
-		}
+		if _, err := r.LookPath(ctx, conn, "yum"); err == nil { return &yumDnfInfoBase, nil }
 		return nil, fmt.Errorf("unsupported OS or unable to detect package manager for OS ID: %s", facts.OS.ID)
 	}
 }
 
-// detectInitSystem attempts to identify the init system on the host.
 func (r *defaultRunner) detectInitSystem(ctx context.Context, conn connector.Connector, facts *Facts) (*ServiceInfo, error) {
 	if facts == nil || facts.OS == nil {
 		return nil, fmt.Errorf("OS facts not available, cannot detect init system")
 	}
-
 	systemdInfo := ServiceInfo{
 		Type: InitSystemSystemd, StartCmd: "systemctl start %s", StopCmd: "systemctl stop %s",
 		EnableCmd: "systemctl enable %s", DisableCmd: "systemctl disable %s", RestartCmd: "systemctl restart %s",
@@ -257,51 +195,148 @@ func (r *defaultRunner) detectInitSystem(ctx context.Context, conn connector.Con
 		EnableCmd: "chkconfig %s on", DisableCmd: "chkconfig %s off", RestartCmd: "service %s restart",
 		IsActiveCmd: "service %s status", DaemonReloadCmd: "",
 	}
-
-	if _, err := r.LookPath(ctx, conn, "systemctl"); err == nil {
-		return &systemdInfo, nil
-	}
-	if _, err := r.LookPath(ctx, conn, "service"); err == nil {
-		return &sysvinitInfo, nil
-	}
-	// Simplified Exists check for /etc/init.d (original runner.Exists uses conn.Stat)
-	if exists, _ := r.Exists(ctx, conn, "/etc/init.d"); exists {
-		return &sysvinitInfo, nil
-	}
+	if _, err := r.LookPath(ctx, conn, "systemctl"); err == nil { return &systemdInfo, nil }
+	if _, err := r.LookPath(ctx, conn, "service"); err == nil { return &sysvinitInfo, nil }
+	if exists, _ := r.Exists(ctx, conn, "/etc/init.d"); exists { return &sysvinitInfo, nil }
 	return nil, fmt.Errorf("unable to detect a supported init system (systemd, sysvinit) on OS ID: %s", facts.OS.ID)
 }
 
+// Stubs for methods implemented in specialized files (command.go, archive.go, file.go, network.go, package.go, service.go, template.go, user.go, system.go)
+// are NOT duplicated here. Those files define these methods for defaultRunner.
 
-// --- Command Execution (Implementations will be moved from command.go) ---
-// Implementations are now in command.go
+// Stubs ONLY for very high-level or miscellaneous "enriched interface" methods
+// that don't clearly fit into the existing specialized files yet.
+func (r *defaultRunner) DeployAndEnableService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName, configContent, configPath, permissions string, templateData interface{}) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil for DeployAndEnableService")
+	}
+	if facts == nil {
+		return fmt.Errorf("facts cannot be nil for DeployAndEnableService")
+	}
+	if serviceName == "" {
+		return fmt.Errorf("serviceName cannot be empty")
+	}
+	if configPath == "" {
+		return fmt.Errorf("configPath cannot be empty")
+	}
 
+	var contentBytes []byte
 
-// --- Archive Operations (Implementations will be moved from archive.go) ---
-// Implementations are now in archive.go
+	// 1. Render configuration if templateData is provided
+	if templateData != nil {
+		if configContent == "" {
+			return fmt.Errorf("configContent cannot be empty if templateData is provided")
+		}
+		tmpl, err := template.New(serviceName + "-config").Parse(configContent)
+		if err != nil {
+			return fmt.Errorf("failed to parse config content as template for service %s: %w", serviceName, err)
+		}
+		var buf bytes.Buffer
+		if err := tmpl.Execute(&buf, templateData); err != nil {
+			return fmt.Errorf("failed to execute template for service %s with data: %w", serviceName, err)
+		}
+		contentBytes = buf.Bytes()
+	} else {
+		contentBytes = []byte(configContent)
+	}
 
+	// 2. Write configuration file
+	// Assuming sudo is required for writing service configuration files.
+	// Permissions should be appropriate for config files, e.g., "0644" or "0600".
+	// If permissions is empty, WriteFile might use a default or the connector's default.
+	// Let's ensure a sensible default if not provided.
+	effectivePermissions := permissions
+	if effectivePermissions == "" {
+		effectivePermissions = "0644"
+	}
+	if err := r.WriteFile(ctx, conn, contentBytes, configPath, effectivePermissions, true); err != nil {
+		return fmt.Errorf("failed to write configuration file %s for service %s: %w", configPath, serviceName, err)
+	}
 
-// --- File Operations (Implementations will be moved from file.go) ---
-// Implementations are now in file.go
+	// 3. Daemon Reload (important after changing service unit files or some configs)
+	if err := r.DaemonReload(ctx, conn, facts); err != nil {
+		// Non-fatal for some init systems (like basic SysV), but log or return if critical.
+		// For now, let's consider it important enough to return error.
+		return fmt.Errorf("failed to perform daemon-reload after writing config for service %s: %w", serviceName, err)
+	}
 
+	// 4. Enable Service
+	if err := r.EnableService(ctx, conn, facts, serviceName); err != nil {
+		return fmt.Errorf("failed to enable service %s: %w", serviceName, err)
+	}
 
-// --- Network Operations (Implementations will be moved from network.go) ---
-// Implementations are now in network.go
+	// 5. Restart Service (or Start if preferred, Restart is often safer for config changes)
+	if err := r.RestartService(ctx, conn, facts, serviceName); err != nil {
+		return fmt.Errorf("failed to restart service %s: %w", serviceName, err)
+	}
 
+	return nil
+}
 
-// --- Package Operations (Implementations will be moved from package.go) ---
-// Implementations are now in package.go
+func (r *defaultRunner) Reboot(ctx context.Context, conn connector.Connector, timeout time.Duration) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil for Reboot")
+	}
 
+	// Issue the reboot command.
+	// Using "reboot" command which is common. Sudo is typically required.
+	// We don't necessarily wait for this command to complete if it hangs the session.
+	// A common strategy is to run it in a way that it detaches, e.g. `nohup reboot &`
+	// or use a command that inherently does that like `shutdown -r +1 "Rebooting..."`.
+	// For simplicity, just `reboot`. If the connection drops immediately, the error might be suppressed by some shells.
+	// Let's use a slightly delayed reboot to allow the command to likely return.
+	// `systemd-run --on-active=5s reboot` or `sh -c "sleep 5 && reboot" &`
 
-// --- Service Operations (Implementations will be moved from service.go) ---
-// Implementations are now in service.go
+	rebootCmd := "reboot" // Basic reboot command
+	// Attempt to issue the reboot command. We might not get a clean exit if the system reboots too fast.
+	_, _, execErr := r.RunWithOptions(ctx, conn, rebootCmd, &connector.ExecOptions{Sudo: true, Timeout: 15 * time.Second})
+	// We don't strictly fail on execErr here, as the command might succeed in rebooting even if the SSH session is terminated abruptly.
+	// However, if execErr indicates command not found or immediate permission denied, that's a failure.
+	if execErr != nil {
+		// If it's a CommandError, it means the command was attempted.
+		// If it's another error (e.g. connection failed before command ran), that's more problematic.
+		// For now, we log the error and proceed to wait phase if it seems like a command execution attempt was made.
+		// A more specific error check could be done here.
+		fmt.Fprintf(os.Stderr, "Reboot command returned error (this might be expected if connection dropped): %v\n", execErr)
+	}
 
+	// Wait for the host to go down and come back up.
+	// First, wait a bit for the shutdown to initiate.
+	time.Sleep(2 * time.Second) // Reduced initial grace period for shutdown
 
-// --- Template Operations (Implementations will be moved from template.go) ---
-// Implementation is now in template.go
+	rebootCtx, cancel := context.WithTimeout(ctx, timeout) // Overall timeout for waiting
+	defer cancel()
 
+	ticker := time.NewTicker(2 * time.Second) // Poll every 2 seconds
+	defer ticker.Stop()
 
-// --- User Operations (Implementations will be moved from user.go) ---
-// Implementations are now in user.go
+	fmt.Fprintf(os.Stderr, "Waiting for host to become responsive after reboot (up to %s)...\n", timeout)
 
-// The extendedConnector interface is no longer needed as ReadFile and WriteFile
-// are now part of the main connector.Connector interface.
+	for {
+		select {
+		case <-rebootCtx.Done():
+			return fmt.Errorf("timed out waiting for host to become responsive after reboot: %w", rebootCtx.Err())
+		case <-ticker.C:
+			// Attempt a simple command to check if the host is back up and responsive.
+			// The existing 'conn' might be stale. Ideally, we'd re-establish a connection.
+			// Since defaultRunner is stateless and doesn't store ConnectionCfg,
+			// we rely on the passed 'conn' object. If it has internal reconnect logic, it might work.
+			// If not, this check will likely fail until a new 'conn' is provided externally after reboot.
+			// This implementation of Reboot is therefore limited by the statelessness of Runner.
+			// A more robust reboot-and-wait would be part of a higher-level stateful orchestration.
+
+			// For now, we'll just try a simple check. If it fails, we assume host is not ready.
+			// If the original connection is truly dead, this check will always fail.
+			// This highlights a limitation of a stateless runner handling reboot-and-wait fully.
+			checkCmd := "uptime" // A simple command that should work on a booted system
+			_, _, checkErr := conn.Exec(rebootCtx, checkCmd, &connector.ExecOptions{Timeout: 5 * time.Second}) // Use rebootCtx for timeout of this check
+
+			if checkErr == nil {
+				fmt.Fprintf(os.Stderr, "Host is responsive after reboot.\n")
+				return nil // Host is back up
+			}
+			// If checkErr is not nil, continue waiting.
+			// fmt.Fprintf(os.Stderr, "Host not yet responsive: %v\n", checkErr) // Verbose
+		}
+	}
+}
