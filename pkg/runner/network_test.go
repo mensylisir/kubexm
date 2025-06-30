@@ -315,13 +315,154 @@ func TestRunner_AddHostEntry_EntryExists(t *testing.T) {
 	if echoCalled {t.Error("AddHostEntry (exists) unexpectedly called echo to add entry")}
 }
 
-func TestRunner_DisableFirewall_NotImplemented(t *testing.T) {
-	r, facts, mockConn := newTestRunnerForNetwork(t)
-	err := r.DisableFirewall(context.Background(), mockConn, facts)
-	if err == nil || !strings.Contains(err.Error(), "not implemented") {
-		t.Errorf("DisableFirewall expected 'not implemented' error, got %v", err)
+func TestRunner_DisableFirewall(t *testing.T) {
+	ctx := context.Background()
+
+	// Base facts for systemd, specific firewall tools will be controlled by LookPath mock
+	factsSystemd := &Facts{
+		OS:             &connector.OS{ID: "linux-systemd"},
+		InitSystem:     &ServiceInfo{Type: InitSystemSystemd, StopCmd: "systemctl stop %s", DisableCmd: "systemctl disable %s"},
+		PackageManager: &PackageInfo{Type: PackageManagerApt}, // Dummy
+	}
+	factsNonSystemd := &Facts{ // For testing ufw/iptables without systemd service management for firewalld
+		OS:             &connector.OS{ID: "linux-generic"},
+		InitSystem:     &ServiceInfo{Type: InitSystemUnknown}, // Simulate unknown or non-systemd
+		PackageManager: &PackageInfo{Type: PackageManagerApt},
+	}
+
+
+	tests := []struct {
+		name             string
+		factsToUse       *Facts
+		setupMock        func(m *MockConnector, ttName string)
+		expectError      bool
+		errorMsgContains string
+		expectedCmds     []string // For checking if specific commands were called
+	}{
+		{
+			name:       "firewalld detected and disabled",
+			factsToUse: factsSystemd,
+			setupMock: func(m *MockConnector, ttName string) {
+				m.LookPathFunc = func(c context.Context, file string) (string, error) {
+					if file == "firewall-cmd" { return "/usr/bin/firewall-cmd", nil }
+					return "", errors.New("tool not relevant for this firewalld test path")
+				}
+				var stopped, disabled bool
+				m.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
+					// t.Logf("[%s] Exec: %s", ttName, cmd)
+					if cmd == "systemctl stop firewalld" && opts.Sudo {
+						stopped = true
+						return nil, nil, nil
+					}
+					if cmd == "systemctl disable firewalld" && opts.Sudo {
+						disabled = true
+						return nil, nil, nil
+					}
+					return nil, nil, fmt.Errorf("[%s] unexpected exec: %s", ttName, cmd)
+				}
+				// Add a check for the actual calls after the main function runs
+				t.Cleanup(func() { // Use t.Cleanup for checks after the tested function
+					if !stopped { t.Errorf("[%s] systemctl stop firewalld was not called", ttName) }
+					if !disabled { t.Errorf("[%s] systemctl disable firewalld was not called", ttName) }
+				})
+			},
+			expectError: false,
+		},
+		{
+			name:       "ufw detected and disabled",
+			factsToUse: factsNonSystemd, // ufw doesn't strictly depend on systemd for disable command
+			setupMock: func(m *MockConnector, ttName string) {
+				m.LookPathFunc = func(c context.Context, file string) (string, error) {
+					if file == "firewall-cmd" { return "", errors.New("firewall-cmd not found") }
+					if file == "ufw" { return "/usr/sbin/ufw", nil }
+					return "", errors.New("tool not relevant for ufw test path")
+				}
+				var ufwDisabledCalled bool
+				m.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
+					if cmd == "ufw disable" && opts.Sudo {
+						ufwDisabledCalled = true
+						return nil, nil, nil
+					}
+					return nil, nil, fmt.Errorf("[%s] unexpected exec: %s", ttName, cmd)
+				}
+				t.Cleanup(func(){ if !ufwDisabledCalled { t.Errorf("[%s] ufw disable was not called", ttName) }})
+			},
+			expectError: false,
+		},
+		{
+			name:       "iptables flushed when others not found",
+			factsToUse: factsNonSystemd,
+			setupMock: func(m *MockConnector, ttName string) {
+				m.LookPathFunc = func(c context.Context, file string) (string, error) {
+					if file == "firewall-cmd" { return "", errors.New("not found") }
+					if file == "ufw" { return "", errors.New("not found") }
+					if file == "iptables" { return "/usr/sbin/iptables", nil }
+					if file == "ip6tables" { return "/usr/sbin/ip6tables", nil } // Assume ip6tables also found
+					return "", errors.New("tool not relevant")
+				}
+				var cmdCounts = make(map[string]int)
+				m.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
+					if strings.HasPrefix(cmd, "iptables") && opts.Sudo {
+						cmdCounts[cmd]++
+						return nil, nil, nil
+					}
+					if strings.HasPrefix(cmd, "ip6tables") && opts.Sudo {
+						cmdCounts[cmd]++
+						return nil, nil, nil
+					}
+					return nil, nil, fmt.Errorf("[%s] unexpected exec: %s", ttName, cmd)
+				}
+				t.Cleanup(func(){
+					expectedIp4Cmds := []string{ "iptables -P INPUT ACCEPT", "iptables -P FORWARD ACCEPT", "iptables -P OUTPUT ACCEPT", "iptables -F", "iptables -X", "iptables -Z"}
+					expectedIp6Cmds := []string{ "ip6tables -P INPUT ACCEPT", "ip6tables -P FORWARD ACCEPT", "ip6tables -P OUTPUT ACCEPT", "ip6tables -F", "ip6tables -X", "ip6tables -Z"}
+					for _, eCmd := range expectedIp4Cmds { if cmdCounts[eCmd] != 1 { t.Errorf("[%s] expected cmd %q to be called once, called %d times", ttName, eCmd, cmdCounts[eCmd])}}
+					for _, eCmd := range expectedIp6Cmds { if cmdCounts[eCmd] != 1 { t.Errorf("[%s] expected cmd %q to be called once, called %d times", ttName, eCmd, cmdCounts[eCmd])}}
+				})
+			},
+			expectError: false,
+		},
+		{
+			name:       "no known firewall tool found",
+			factsToUse: factsNonSystemd,
+			setupMock: func(m *MockConnector, ttName string) {
+				m.LookPathFunc = func(c context.Context, file string) (string, error) {
+					return "", errors.New(file + " not found") // All relevant tools not found
+				}
+			},
+			expectError:      true,
+			errorMsgContains: "no known firewall management tool",
+		},
+		{
+			name:       "nil facts provided",
+			factsToUse: nil, // Test nil facts
+			setupMock:  func(m *MockConnector, ttName string) {},
+			expectError:      true,
+			errorMsgContains: "OS facts not available",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, _, mockConn := newTestRunnerForNetwork(t) // Correctly receive 3 values, ignore facts from helper
+			                                         // We override LookPath and ExecFunc via tt.setupMock for DisableFirewall specific logic
+			tt.setupMock(mockConn, tt.name)
+
+			err := r.DisableFirewall(ctx, mockConn, tt.factsToUse)
+
+			if tt.expectError {
+				if err == nil {
+					t.Fatalf("Expected an error, got nil")
+				}
+				if !strings.Contains(err.Error(), tt.errorMsgContains) {
+					t.Errorf("Error message %q does not contain %q", err.Error(), tt.errorMsgContains)
+				}
+			} else if err != nil {
+				t.Fatalf("Did not expect an error, got %v", err)
+			}
+		})
 	}
 }
+
 
 // Duplicated functions below will be removed.
 // The syntax error fix involved removing a brace that was likely closing the TestRunner_AddHostEntry_EntryExists function prematurely,

@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors" // For errors.As
 	"fmt"
 	"strings"
 	"time"
@@ -128,5 +129,109 @@ func (r *defaultRunner) AddHostEntry(ctx context.Context, conn connector.Connect
 // --- Stubs for new network methods from enriched interface ---
 
 func (r *defaultRunner) DisableFirewall(ctx context.Context, conn connector.Connector, facts *Facts) error {
-	return fmt.Errorf("DisableFirewall not implemented")
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil")
+	}
+	if facts == nil || facts.OS == nil {
+		return fmt.Errorf("OS facts not available, cannot determine how to disable firewall")
+	}
+	if facts.InitSystem == nil {
+		// InitSystem facts are needed for systemd checks, though some tools might be checked via LookPath alone.
+		// However, for firewalld, InitSystem.Type is important.
+		// We can proceed with LookPath checks but might not be able to disable firewalld service reliably.
+		fmt.Printf("Warning: InitSystem facts not available for DisableFirewall. Will rely on LookPath only for some checks.\n")
+	}
+
+	// 1. Check for firewalld
+	// Prefer checking for 'firewall-cmd' as 'firewalld-cmd' might be a typo in my earlier thought process.
+	// 'firewall-cmd' is the command-line client for firewalld.
+	if _, err := r.LookPath(ctx, conn, "firewall-cmd"); err == nil {
+		if facts.InitSystem != nil && facts.InitSystem.Type == InitSystemSystemd {
+			stopCmd := fmt.Sprintf(facts.InitSystem.StopCmd, "firewalld")
+			disableServiceCmd := fmt.Sprintf(facts.InitSystem.DisableCmd, "firewalld") // Corrected from EnableCmd
+
+			_, _, errStop := r.RunWithOptions(ctx, conn, stopCmd, &connector.ExecOptions{Sudo: true})
+			if errStop != nil {
+				// Log error but continue; disabling might still work or it was already stopped.
+				// Consider using a logger if available instead of fmt.Printf to stderr.
+				fmt.Printf("Warning: command '%s' failed during DisableFirewall: %v. Attempting to disable service.\n", stopCmd, errStop)
+			}
+			_, _, errDisable := r.RunWithOptions(ctx, conn, disableServiceCmd, &connector.ExecOptions{Sudo: true})
+			if errDisable != nil {
+				return fmt.Errorf("failed to disable firewalld service using systemctl: %w", errDisable)
+			}
+			fmt.Println("firewalld service stopped and disabled.")
+			return nil
+		} else {
+			// If not systemd, but firewall-cmd exists, it's an unusual setup.
+			// We might try `firewall-cmd --permanent --remove-service=ssh` (example) then `firewall-cmd --reload`
+			// but "disabling" it without systemd is less standard.
+			// For now, indicate this specific scenario is not fully handled.
+			return fmt.Errorf("firewall-cmd found but not on a recognized systemd system for service management; automatic disable not fully supported")
+		}
+	}
+
+	// 2. Check for ufw
+	if _, err := r.LookPath(ctx, conn, "ufw"); err == nil {
+		// `ufw disable` is generally idempotent.
+		// It might output "Firewall stopped and disabled on system startup"
+		cmd := "ufw disable"
+		_, stderr, errExec := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true})
+		if errExec != nil {
+			// ufw might return non-zero if it's already disabled, depending on version/config.
+			// "Firewall not enabled" is common output for already disabled.
+			// We should check stderr or error type if possible.
+			// For now, if a CommandError occurs, check its Stderr.
+			var cmdErr *connector.CommandError
+			if errors.As(errExec, &cmdErr) && strings.Contains(strings.ToLower(string(stderr)), "firewall not enabled") {
+				fmt.Println("ufw is already disabled.")
+				return nil // Already disabled, consider it success
+			}
+			return fmt.Errorf("failed to execute 'ufw disable': %w (stderr: %s)", errExec, string(stderr))
+		}
+		fmt.Println("ufw disabled.")
+		return nil
+	}
+
+	// 3. Fallback to trying to flush iptables
+	if _, err := r.LookPath(ctx, conn, "iptables"); err == nil {
+		fmt.Println("Attempting to disable firewall by flushing iptables rules and setting default policies to ACCEPT.")
+		commands := []string{
+			"iptables -P INPUT ACCEPT",
+			"iptables -P FORWARD ACCEPT",
+			"iptables -P OUTPUT ACCEPT",
+			"iptables -F",
+			"iptables -X",
+			"iptables -Z",
+		}
+		// Also for ip6tables if present
+		if _, errIp6 := r.LookPath(ctx, conn, "ip6tables"); errIp6 == nil {
+			commands = append(commands,
+				"ip6tables -P INPUT ACCEPT",
+				"ip6tables -P FORWARD ACCEPT",
+				"ip6tables -P OUTPUT ACCEPT",
+				"ip6tables -F",
+				"ip6tables -X",
+				"ip6tables -Z",
+			)
+		}
+
+		var encounteredError bool
+		for _, cmd := range commands {
+			_, stderr, errExec := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true})
+			if errExec != nil {
+				fmt.Printf("Warning: command '%s' failed during iptables configuration: %v (stderr: %s). Continuing...\n", cmd, errExec, string(stderr))
+				encounteredError = true
+			}
+		}
+		// Note: This doesn't handle persistent iptables rules services like iptables-persistent or netfilter-persistent.
+		// A true "disable" might involve stopping and disabling such services.
+		if encounteredError {
+			return fmt.Errorf("one or more iptables commands failed; firewall may not be fully open. Check warnings.")
+		}
+		fmt.Println("iptables rules flushed and default policies set to ACCEPT. Note: This may not prevent rules from being reloaded by a persistence service.")
+		return nil
+	}
+
+	return fmt.Errorf("no known firewall management tool (firewalld, ufw, iptables) found. Cannot automatically disable firewall.")
 }
