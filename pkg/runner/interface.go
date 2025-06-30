@@ -109,16 +109,46 @@ type Runner interface {
 	IsMounted(ctx context.Context, conn connector.Connector, path string) (bool, error)
 	MakeFilesystem(ctx context.Context, conn connector.Connector, device, fsType string, force bool) error
 	CreateSymlink(ctx context.Context, conn connector.Connector, target, linkPath string, sudo bool) error
+	GetDiskUsage(ctx context.Context, conn connector.Connector, path string) (total uint64, free uint64, used uint64, err error)
+	TouchFile(ctx context.Context, conn connector.Connector, path string, sudo bool) error
 
 	// --- Networking ---
 	DisableFirewall(ctx context.Context, conn connector.Connector, facts *Facts) error
-	// GetInterfaceAddresses(...) // Placeholder if to be added later
+	GetInterfaceAddresses(ctx context.Context, conn connector.Connector, interfaceName string) (map[string][]string, error)
 
 	// --- User & Permissions ---
-	// ModifyUser(...) // Placeholder if to be added later
+	ModifyUser(ctx context.Context, conn connector.Connector, username string, modifications UserModifications) error
 	ConfigureSudoer(ctx context.Context, conn connector.Connector, sudoerName, content string) error
+	SetUserPassword(ctx context.Context, conn connector.Connector, username, hashedPassword string) error
+	GetUserInfo(ctx context.Context, conn connector.Connector, username string) (*UserInfo, error)
 
 	// --- High-Level ---
 	DeployAndEnableService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName, configContent, configPath, permissions string, templateData interface{}) error
 	Reboot(ctx context.Context, conn connector.Connector, timeout time.Duration) error
+	RenderToString(ctx context.Context, tmpl *template.Template, data interface{}) (string, error) // Different from Render, no conn/destPath
+}
+
+// UserModifications defines the set of attributes that can be changed for a user.
+// Pointers are used for string fields to distinguish between a requested empty value (not usually applicable for these fields)
+// and a value that should not be changed (nil pointer).
+type UserModifications struct {
+	NewUsername         *string  // New login name (-l NEW_LOGIN)
+	NewPrimaryGroup     *string  // New primary group name or GID (-g GROUP)
+	AppendToGroups      []string // Groups to add the user to (appends to existing secondary groups -aG GROUP1,GROUP2)
+	SetSecondaryGroups  []string // Explicitly set secondary groups (replaces all existing secondary groups -G GROUP1,GROUP2)
+	NewShell            *string  // New login shell (-s SHELL)
+	NewHomeDir          *string  // New home directory path (-d HOME_DIR)
+	MoveHomeDirContents bool     // If NewHomeDir is set, move contents from old home to new home (requires -m flag with -d)
+	NewComment          *string  // New GECOS comment field (-c COMMENT)
+}
+
+// UserInfo holds detailed information about a user.
+type UserInfo struct {
+	Username string
+	UID      string
+	GID      string
+	Comment  string   // GECOS field
+	HomeDir  string
+	Shell    string
+	Groups   []string // List of group names the user belongs to
 }

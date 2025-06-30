@@ -132,6 +132,228 @@ func TestRunner_IsMounted(t *testing.T) {
 	}
 }
 
+func TestRunner_TouchFile(t *testing.T) {
+	ctx := context.Background()
+	filePath := "/tmp/testfile.touch"
+
+	tests := []struct {
+		name          string
+		path          string
+		sudo          bool
+		setupMock     func(m *MockConnector, ttName string, expectSudo bool)
+		expectError   bool
+		errorContains string
+	}{
+		{
+			name: "success_no_sudo",
+			path: filePath,
+			sudo: false,
+			setupMock: func(m *MockConnector, ttName string, expectSudo bool) {
+				m.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
+					if strings.HasPrefix(cmd, "mkdir -p") && strings.Contains(cmd, filepath.Dir(filePath)) && opts.Sudo == expectSudo {
+						return nil, nil, nil
+					}
+					if strings.HasPrefix(cmd, "chmod") && strings.Contains(cmd, filepath.Dir(filePath)) && opts.Sudo == expectSudo {
+						return nil, nil, nil
+					}
+					if cmd == fmt.Sprintf("touch %s", shellEscape(filePath)) && opts.Sudo == expectSudo {
+						return nil, nil, nil
+					}
+					return nil, nil, fmt.Errorf("[%s] unexpected exec: %s, sudo: %v", ttName, cmd, opts.Sudo)
+				}
+			},
+		},
+		{
+			name: "success_with_sudo",
+			path: "/root/testfile.touch", // Path that might need sudo for parent dir
+			sudo: true,
+			setupMock: func(m *MockConnector, ttName string, expectSudo bool) {
+				m.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
+					if strings.HasPrefix(cmd, "mkdir -p") && opts.Sudo == expectSudo {
+						return nil, nil, nil
+					}
+					if strings.HasPrefix(cmd, "chmod") && opts.Sudo == expectSudo {
+						return nil, nil, nil
+					}
+					if strings.HasPrefix(cmd, "touch") && opts.Sudo == expectSudo {
+						return nil, nil, nil
+					}
+					return nil, nil, fmt.Errorf("[%s] unexpected exec: %s, sudo: %v", ttName, cmd, opts.Sudo)
+				}
+			},
+		},
+		{
+			name:          "empty_path",
+			path:          " ",
+			expectError:   true,
+			errorContains: "path cannot be empty",
+		},
+		{
+			name: "mkdir_parent_fails",
+			path: "/opt/newdir/file.touch",
+			sudo: false,
+			setupMock: func(m *MockConnector, ttName string, expectSudo bool) {
+				m.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
+					if strings.HasPrefix(cmd, "mkdir -p") {
+						return nil, nil, errors.New("mkdir failed")
+					}
+					return nil, nil, fmt.Errorf("[%s] unexpected exec: %s", ttName, cmd)
+				}
+			},
+			expectError:   true,
+			errorContains: "failed to create parent directory",
+		},
+		{
+			name: "touch_command_fails",
+			path: filePath,
+			sudo: false,
+			setupMock: func(m *MockConnector, ttName string, expectSudo bool) {
+				m.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
+					if strings.HasPrefix(cmd, "mkdir -p") { return nil, nil, nil }
+					if strings.HasPrefix(cmd, "chmod") { return nil, nil, nil }
+					if strings.HasPrefix(cmd, "touch") {
+						return nil, nil, errors.New("touch command failed")
+					}
+					return nil, nil, fmt.Errorf("[%s] unexpected exec: %s", ttName, cmd)
+				}
+			},
+			expectError:   true,
+			errorContains: "failed to touch file",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, mockConn := newTestRunnerForFileTests(t)
+			if tt.setupMock != nil {
+				tt.setupMock(mockConn, tt.name, tt.sudo)
+			}
+
+			err := r.TouchFile(ctx, mockConn, tt.path, tt.sudo)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error containing %q, got nil", tt.errorContains)
+				} else if !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("Error message %q does not contain %q", err.Error(), tt.errorContains)
+				}
+			} else if err != nil {
+				t.Errorf("Did not expect error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestRunner_GetDiskUsage(t *testing.T) {
+	ctx := context.Background()
+	testPath := "/mnt/data"
+
+	tests := []struct {
+		name             string
+		path             string
+		mockDfOutput     string
+		mockDfError      error
+		expectedTotal    uint64
+		expectedFree     uint64
+		expectedUsed     uint64
+		expectError      bool
+		errorMsgContains string
+	}{
+		{
+			name:         "success",
+			path:         testPath,
+			mockDfOutput: "Filesystem     1M-blocks  Used Available Use% Mounted on\n/dev/sda1         19976M 7930M    11018M  42% /mnt/data\n",
+			expectedTotal: 19976,
+			expectedUsed:  7930,
+			expectedFree:  11018,
+		},
+		{
+			name:             "df_command_fails",
+			path:             testPath,
+			mockDfError:      errors.New("df execution failed"),
+			expectError:      true,
+			errorMsgContains: "failed to execute df command",
+		},
+		{
+			name:             "df_output_too_few_lines",
+			path:             testPath,
+			mockDfOutput:     "Filesystem     1M-blocks  Used Available Use% Mounted on\n",
+			expectError:      true,
+			errorMsgContains: "not enough lines",
+		},
+		{
+			name:             "df_output_too_few_fields",
+			path:             testPath,
+			mockDfOutput:     "Filesystem     1M-blocks  Used Available Use% Mounted on\n/dev/sda1 19976M 7930M\n",
+			expectError:      true,
+			errorMsgContains: "not enough fields",
+		},
+		{
+			name:             "df_output_total_not_parseable",
+			path:             testPath,
+			mockDfOutput:     "Filesystem     1M-blocks  Used Available Use% Mounted on\n/dev/sda1         X19976M 7930M    11018M  42% /\n",
+			expectError:      true,
+			errorMsgContains: "failed to parse total disk space",
+		},
+		{
+			name:             "df_output_used_no_M_suffix",
+			path:             testPath,
+			mockDfOutput:     "Filesystem     1M-blocks  Used Available Use% Mounted on\n/dev/sda1         19976M 7930    11018M  42% /\n",
+			expectError:      true,
+			errorMsgContains: "failed to parse used disk space",
+		},
+		{
+			name:             "df_output_free_invalid_number",
+			path:             testPath,
+			mockDfOutput:     "Filesystem     1M-blocks  Used Available Use% Mounted on\n/dev/sda1         19976M 7930M    XYZM  42% /\n",
+			expectError:      true,
+			errorMsgContains: "failed to parse free disk space",
+		},
+		{
+			name:             "empty_path",
+			path:             "",
+			expectError:      true,
+			errorMsgContains: "path cannot be empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, mockConn := newTestRunnerForFileTests(t)
+			mockConn.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
+				if strings.HasPrefix(cmd, "df -BM -P") && strings.Contains(cmd, shellEscape(tt.path)) {
+					return []byte(tt.mockDfOutput), nil, tt.mockDfError
+				}
+				return nil, nil, fmt.Errorf("GetDiskUsage test: unexpected command %q", cmd)
+			}
+
+			total, free, used, err := r.GetDiskUsage(ctx, mockConn, tt.path)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error containing %q, got nil", tt.errorMsgContains)
+				} else if !strings.Contains(err.Error(), tt.errorMsgContains) {
+					t.Errorf("Error message %q does not contain %q", err.Error(), tt.errorMsgContains)
+				}
+			} else if err != nil {
+				t.Errorf("Did not expect error, got %v", err)
+			}
+
+			if !tt.expectError {
+				if total != tt.expectedTotal {
+					t.Errorf("Expected total %d, got %d", tt.expectedTotal, total)
+				}
+				if free != tt.expectedFree {
+					t.Errorf("Expected free %d, got %d", tt.expectedFree, free)
+				}
+				if used != tt.expectedUsed {
+					t.Errorf("Expected used %d, got %d", tt.expectedUsed, used)
+				}
+			}
+		})
+	}
+}
+
 func TestRunner_CreateSymlink(t *testing.T) {
 	ctx := context.Background()
 	targetPath := "/original/file"

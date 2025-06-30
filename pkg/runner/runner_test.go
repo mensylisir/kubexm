@@ -107,6 +107,35 @@ func TestDefaultRunner_GatherFacts(t *testing.T) {
 		}
 	})
 
+	t.Run("cpu_info_fails", func(t *testing.T) {
+		mockConn := NewMockConnector() // GetOSFunc will use default mock (success: linux)
+		expectedErr := errors.New("nproc command failed")
+		mockConn.ExecFunc = func(ctx context.Context, cmd string, options *connector.ExecOptions) ([]byte, []byte, error) {
+			if strings.Contains(cmd, "hostname -f") { // Hostname succeeds
+				return []byte("test-host"), nil, nil
+			}
+			if strings.Contains(cmd, "nproc") { // CPU info fails
+				return nil, nil, expectedErr
+			}
+			// Other commands for other facts succeed
+			if strings.Contains(cmd, "grep MemTotal") { return []byte("1024000"), nil, nil } // 1GB
+			if strings.Contains(cmd, "ip -4 route") { return []byte("1.1.1.1 dev eth0 src 1.1.1.1"), nil, nil }
+			if strings.Contains(cmd, "ip -6 route") { return nil, nil, fmt.Errorf("no ipv6") }
+			if strings.Contains(cmd, "command -v") { return []byte("found"), nil, nil} // for package/init detection
+			return nil, nil, fmt.Errorf("cpu_info_fails: unhandled mock command: %s", cmd)
+		}
+
+		r := NewRunner()
+		_, err := r.GatherFacts(ctx, mockConn)
+		if err == nil {
+			t.Fatalf("GatherFacts() with nproc failing expected error, got nil")
+		}
+		// errgroup returns the first error encountered by any of its Go routines.
+		if !strings.Contains(err.Error(), "failed during concurrent fact gathering") || !errors.Is(err, expectedErr) {
+			t.Errorf("GatherFacts() error = %v, want error containing 'failed during concurrent fact gathering' and wrapping mock nproc error", err)
+		}
+	})
+
 	t.Run("success_centos_yum", func(t *testing.T) {
 		mockConn := NewMockConnector()
 		mockConn.GetOSFunc = func(ctx context.Context) (*connector.OS, error) {
@@ -430,10 +459,11 @@ func TestRunner_Reboot(t *testing.T) {
 				m.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
 					execCallCount++
 					// t.Logf("Reboot success mock: cmd=%s, count=%d", cmd, execCallCount)
-					if cmd == "reboot" && opts.Sudo {
+					// Match the actual command pattern used by Reboot()
+					if strings.Contains(cmd, "reboot") && strings.Contains(cmd, "sh -c") && opts.Sudo {
 						rebootCmdIssued = true
-						// Simulate connection drop by returning an error that might not be fatal for reboot cmd itself
-						return nil, nil, errors.New("connection dropped after reboot command")
+						// Simulate connection drop by returning an error that Reboot() is expected to ignore
+						return nil, nil, errors.New("session channel closed") // This error should be ignored by Reboot()
 					}
 					if rebootCmdIssued && cmd == "uptime" { // Liveness check
 						if execCallCount >= 3 { // Succeeds on the 2nd uptime check (3rd exec overall)
@@ -453,9 +483,11 @@ func TestRunner_Reboot(t *testing.T) {
 				rebootCmdIssued := false
 				m.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
 					// t.Logf("Reboot timeout mock: cmd=%s", cmd)
-					if cmd == "reboot" && opts.Sudo {
+					// Match the actual command pattern used by Reboot()
+					if strings.Contains(cmd, "reboot") && strings.Contains(cmd, "sh -c") && opts.Sudo {
 						rebootCmdIssued = true
-						return nil, nil, errors.New("connection dropped after reboot command")
+						// Simulate connection drop by returning an error that Reboot() is expected to ignore
+						return nil, nil, errors.New("session channel closed") // This error should be ignored by Reboot()
 					}
 					if rebootCmdIssued && cmd == "uptime" { // Liveness check always fails
 						return nil, nil, errors.New("host still not responsive")
@@ -471,24 +503,17 @@ func TestRunner_Reboot(t *testing.T) {
 			timeout: shortTimeout, // Timeout doesn't matter much if initial cmd fails hard
 			setupMock: func(m *MockConnector) {
 				m.ExecFunc = func(c context.Context, cmd string, opts *connector.ExecOptions) ([]byte, []byte, error) {
-					if cmd == "reboot" && opts.Sudo {
-						return nil, []byte("reboot not found"), &connector.CommandError{ExitCode:127, Stderr: "reboot not found"}
+					// The actual command sent by Reboot is "sh -c 'sleep 2 && reboot > /dev/null 2>&1 &'"
+					if strings.Contains(cmd, "reboot") && strings.Contains(cmd, "sh -c") && opts.Sudo { // More robust check
+						// This error should NOT contain "context deadline exceeded", "session channel closed", "connection lost", or "EOF"
+						// to trigger the early return from Reboot.
+						return nil, []byte("critical reboot error"), &connector.CommandError{Stderr: "reboot command execution failed critically", ExitCode: 1}
 					}
 					return nil, nil, fmt.Errorf("Reboot cmd fail mock: unexpected command %s", cmd)
 				}
 			},
-			expectError: true,
-			// The error from Reboot will wrap the execErr from rebootCmd.
-			// The fmt.Fprintf in Reboot might print to Stderr, but the function returns the error.
-			// The test should check for the error returned by the Reboot function.
-			// The current Reboot impl logs execErr from reboot cmd but doesn't return it if it proceeds to wait.
-			// This test case needs Reboot to return early if reboot cmd itself fails critically.
-			// Let's adjust Reboot to return error if reboot command fails in a way that indicates it won't proceed.
-			// For now, the test will expect the timeout because the current Reboot logs but continues.
-			// To make this test meaningful, Reboot should return the error from the reboot command if it's critical.
-			// Modify this test to expect timeout for now, or adjust Reboot impl.
-			// Let's assume the current Reboot() logs the error from "reboot" cmd and then times out on polling.
-			errorContains: "timed out waiting for host",
+			expectError:   true,
+			errorContains: "failed to issue reboot command", // This reflects the updated Reboot() behavior
 		},
 	}
 
