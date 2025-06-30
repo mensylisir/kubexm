@@ -6,7 +6,6 @@ import (
 	"crypto/rsa"
 	"fmt" // Needed for fmt.Errorf
 	"net"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -114,7 +113,7 @@ func (ms *MockServer) acceptLoop() {
 func (ms *MockServer) handleConnection(c net.Conn) {
 	defer ms.wg.Done() // Decrement counter when this connection handler exits
 	defer c.Close()
-	sconn, chans, globalReqs, err := ssh.NewServerConn(c, ms.config)
+	sconn, _, globalReqs, err := ssh.NewServerConn(c, ms.config) // chans removed
 	if err != nil {
 		// ms.t.Logf("MockServer: Handshake error with %s: %v", c.RemoteAddr(), err)
 		return
@@ -129,10 +128,11 @@ func (ms *MockServer) handleConnection(c net.Conn) {
 	// For exec testing, the more complex handler (commented out below) is needed.
 
 	// Wait for the SSH connection to terminate, or server shutdown.
+	// Temporarily removing sconn.Context().Done() due to build issues.
 	select {
-	case <-sconn.Context().Done(): // Connection closed by client or error
-		// ms.t.Logf("MockServer: sconn context done for %s: %v", sconn.RemoteAddr(), sconn.Context().Err())
-	case <-ms.serverDone:          // Server is shutting down
+	// case <-sconn.Context().Done(): // Connection closed by client or error
+	// ms.t.Logf("MockServer: sconn context done for %s: %v", sconn.RemoteAddr(), sconn.Context().Err())
+	case <-ms.serverDone: // Server is shutting down
 		// ms.t.Logf("MockServer: serverDone signaled for %s, closing sconn.", sconn.RemoteAddr())
 		// sconn.Close() already deferred
 	}
