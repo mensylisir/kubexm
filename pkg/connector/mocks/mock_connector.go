@@ -270,17 +270,17 @@ func (mr *MockConnectorMockRecorder) Stat(ctx, path any) *gomock.Call {
 }
 
 // WriteFile mocks base method.
-func (m *MockConnector) WriteFile(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error {
+func (m *MockConnector) WriteFile(ctx context.Context, content []byte, destPath string, options *connector.FileTransferOptions) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "WriteFile", ctx, content, destPath, permissions, sudo)
+	ret := m.ctrl.Call(m, "WriteFile", ctx, content, destPath, options)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // WriteFile indicates an expected call of WriteFile.
-func (mr *MockConnectorMockRecorder) WriteFile(ctx, content, destPath, permissions, sudo any) *gomock.Call {
+func (mr *MockConnectorMockRecorder) WriteFile(ctx, content, destPath, options any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteFile", reflect.TypeOf((*MockConnector)(nil).WriteFile), ctx, content, destPath, permissions, sudo)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteFile", reflect.TypeOf((*MockConnector)(nil).WriteFile), ctx, content, destPath, options)
 }
 
 // MockHost is a mock of Host interface.
