@@ -377,12 +377,6 @@ func (r *defaultRunner) Reboot(ctx context.Context, conn connector.Connector, ti
 // or its specialized files (like archive.go, file.go, etc.).
 
 // --- QEMU/libvirt Methods ---
-func (r *defaultRunner) CreateVMTemplate(ctx context.Context, conn connector.Connector, name string, osVariant string, memoryMB uint, vcpus uint, diskPath string, diskSizeGB uint, network string, graphicsType string, cloudInitISOPath string) error {
-	return fmt.Errorf("not implemented: CreateVMTemplate")
-}
-func (r *defaultRunner) ImportVMTemplate(ctx context.Context, conn connector.Connector, name string, filePath string) error {
-	return fmt.Errorf("not implemented: ImportVMTemplate")
-}
 func (r *defaultRunner) RefreshStoragePool(ctx context.Context, conn connector.Connector, poolName string) error {
 	return fmt.Errorf("not implemented: RefreshStoragePool")
 }
