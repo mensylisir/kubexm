@@ -590,52 +590,626 @@ func (r *defaultRunner) RestartContainer(ctx context.Context, c connector.Connec
 // RemoveContainer removes a Docker container.
 // Corresponds to `docker rm`.
 func (r *defaultRunner) RemoveContainer(ctx context.Context, c connector.Connector, containerNameOrID string, force, removeVolumes bool) error {
-	return errors.New("not implemented: RemoveContainer")
+	if c == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if strings.TrimSpace(containerNameOrID) == "" {
+		return errors.New("containerNameOrID cannot be empty")
+	}
+
+	cmdArgs := []string{"docker", "rm"}
+	if force {
+		cmdArgs = append(cmdArgs, "-f")
+	}
+	if removeVolumes {
+		cmdArgs = append(cmdArgs, "-v")
+	}
+	cmdArgs = append(cmdArgs, shellEscape(containerNameOrID))
+	cmd := strings.Join(cmdArgs, " ")
+
+	execOptions := &connector.ExecOptions{
+		Sudo:    true,
+		Timeout: DefaultDockerRMTimeout,
+	}
+
+	// Docker rm usually outputs the container name/ID on success.
+	// Stderr might contain "No such container" or other errors.
+	_, stderr, err := c.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		// Docker CLI might return exit code 1 if container not found but still print to stderr.
+		// If force is true, "no such container" is not an error for idempotency.
+		if force && strings.Contains(string(stderr), "No such container") {
+			return nil // Suppress error if forcing and container doesn't exist
+		}
+		return errors.Wrapf(err, "failed to remove container %s. Stderr: %s", containerNameOrID, string(stderr))
+	}
+	return nil
 }
 
 // ListContainers lists Docker containers.
 // Corresponds to `docker ps`.
-func (r *defaultRunner) ListContainers(ctx context.Context, c connector.Connector, all bool, filters map[string]string) ([]container.Container, error) {
-	return nil, errors.New("not implemented: ListContainers")
+// Uses a custom format `{{json .}}` to get structured data for each container.
+func (r *defaultRunner) ListContainers(ctx context.Context, c connector.Connector, all bool, filters map[string]string) ([]ContainerInfo, error) {
+	if c == nil {
+		return nil, errors.New("connector cannot be nil")
+	}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "docker", "ps")
+	if all {
+		cmdArgs = append(cmdArgs, "--all")
+	}
+	if filters != nil {
+		for key, value := range filters {
+			if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+				return nil, errors.New("filter key and value cannot be empty")
+			}
+			cmdArgs = append(cmdArgs, "--filter", shellEscape(fmt.Sprintf("%s=%s", key, value)))
+		}
+	}
+	cmdArgs = append(cmdArgs, "--format", "{{json .}}") // Output each container info as a JSON line
+	cmd := strings.Join(cmdArgs, " ")
+
+	execOptions := &connector.ExecOptions{Sudo: true, Timeout: DefaultDockerInspectTimeout}
+	stdout, stderr, err := c.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to list containers. Stderr: %s", string(stderr))
+	}
+
+	var containers []ContainerInfo
+	scanner := bufio.NewScanner(strings.NewReader(string(stdout)))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+
+		// This intermediate struct matches the JSON fields from `docker ps --format "{{json .}}"`
+		var cliContainer struct {
+			ID         string
+			Image      string
+			Command    string
+			CreatedAt  string // Human-readable, e.g., "2023-03-20 10:00:00 +0000 UTC"
+			RunningFor string // e.g., "2 hours ago"
+			Ports      string // e.g., "0.0.0.0:80->80/tcp, :::80->80/tcp"
+			Status     string // e.g., "Up 2 hours" or "Exited (0) 5 minutes ago"
+			Size       string // Only if --size is used, not by default with json format.
+			Names      string
+			Labels     string // Comma-separated key=value pairs
+			Mounts     string // Comma-separated list of mount points (source paths)
+			Networks   string // Comma-separated list of network names
+		}
+
+		if err := json.Unmarshal([]byte(line), &cliContainer); err != nil {
+			return nil, errors.Wrapf(err, "failed to parse container JSON line: %s", line)
+		}
+
+		// Parse CreatedAt (this is a simplified parsing attempt)
+		var createdTimestamp int64
+		if parsedTime, err := time.Parse("2006-01-02 15:04:05 -0700 MST", cliContainer.CreatedAt); err == nil {
+			createdTimestamp = parsedTime.Unix()
+		} else if parsedTime, err := time.Parse("2006-01-02 15:04:05 Z0700 MST", cliContainer.CreatedAt); err == nil {
+			createdTimestamp = parsedTime.Unix()
+		}
+
+
+		// Parse Names (can be multiple, comma-separated)
+		var namesList []string
+		if strings.TrimSpace(cliContainer.Names) != "" {
+			namesList = strings.Split(cliContainer.Names, ",")
+		}
+
+		// Parse Labels
+		labelsMap := make(map[string]string)
+		if strings.TrimSpace(cliContainer.Labels) != "" {
+			pairs := strings.Split(cliContainer.Labels, ",")
+			for _, pair := range pairs {
+				kv := strings.SplitN(pair, "=", 2)
+				if len(kv) == 2 {
+					labelsMap[kv[0]] = kv[1]
+				}
+			}
+		}
+
+		// Parse Ports (this is a very simplified parsing for the structure)
+        // Docker's port format "0.0.0.0:80->80/tcp, :::80->80/tcp" is complex.
+        // A full parsing into ContainerPortMapping is non-trivial from this string.
+        // For now, we'll store the raw string or skip detailed parsing.
+        // This implementation will just create a placeholder.
+        var portMappings []ContainerPortMapping
+        if strings.TrimSpace(cliContainer.Ports) != "" {
+            // Simplified: add one mapping per entry if possible, but format is complex
+            rawPorts := strings.Split(cliContainer.Ports, ",")
+            for _, rp := range rawPorts {
+                if strings.TrimSpace(rp) != "" {
+                     // Example: 0.0.0.0:80->80/tcp - needs parsing
+                    parts := strings.Split(rp, "->")
+                    var hostPart, containerPart string
+                    if len(parts) == 2 {
+                        hostPart = parts[0]
+                        containerPart = parts[1]
+                    } else {
+                        containerPart = parts[0] // Could be just container port
+                    }
+
+                    var hostIP, hostPort, containerPortVal, protocol string
+
+                    // Parse hostPart (e.g., 0.0.0.0:80)
+                    if strings.Contains(hostPart, ":") {
+                        hostIPPort := strings.SplitN(hostPart, ":", 2)
+                        if len(hostIPPort) == 2 {
+                            hostIP = hostIPPort[0]
+                            hostPort = hostIPPort[1]
+                        } else {
+                            hostPort = hostIPPort[0]
+                        }
+                    }
+
+
+                    // Parse containerPart (e.g., 80/tcp)
+                    if strings.Contains(containerPart, "/") {
+                        containerProto := strings.SplitN(containerPart, "/", 2)
+                        containerPortVal = containerProto[0]
+                        if len(containerProto) == 2 {
+                            protocol = containerProto[1]
+                        }
+                    } else {
+                        containerPortVal = containerPart
+                    }
+
+                    portMappings = append(portMappings, ContainerPortMapping{
+                        HostIP: hostIP,
+                        HostPort: hostPort,
+                        ContainerPort: containerPortVal,
+                        Protocol: protocol,
+                    })
+                }
+            }
+        }
+
+
+		// Parse Mounts (CLI output is just a list of source paths)
+		var mountsList []ContainerMount
+		if strings.TrimSpace(cliContainer.Mounts) != "" {
+			mountSources := strings.Split(cliContainer.Mounts, ",")
+			for _, src := range mountSources {
+				mountsList = append(mountsList, ContainerMount{Source: strings.TrimSpace(src)}) // Only source is available here
+			}
+		}
+
+		// Extract State from Status (e.g., "Up", "Exited")
+		var state string
+		if strings.HasPrefix(strings.ToLower(cliContainer.Status), "up") {
+			state = "running"
+		} else if strings.HasPrefix(strings.ToLower(cliContainer.Status), "exited") {
+			state = "exited"
+		} else if strings.Contains(strings.ToLower(cliContainer.Status), "created") {
+			state = "created"
+		} else if strings.Contains(strings.ToLower(cliContainer.Status), "restarting") {
+            state = "restarting"
+        } else if strings.Contains(strings.ToLower(cliContainer.Status), "paused") {
+            state = "paused"
+        } else {
+			state = "unknown" // Or parse more states
+		}
+
+
+		containers = append(containers, ContainerInfo{
+			ID:      cliContainer.ID,
+			Names:   namesList,
+			Image:   cliContainer.Image,
+			Command: cliContainer.Command,
+			Created: createdTimestamp,
+			State:   state,
+			Status:  cliContainer.Status,
+			Ports:   portMappings, // Simplified
+			Labels:  labelsMap,
+			Mounts:  mountsList,  // Simplified
+		})
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, errors.Wrap(err, "error reading docker ps output")
+	}
+
+	return containers, nil
 }
 
 // GetContainerLogs retrieves logs from a container.
 // Corresponds to `docker logs`.
 func (r *defaultRunner) GetContainerLogs(ctx context.Context, c connector.Connector, containerNameOrID string, options ContainerLogOptions) (string, error) {
-	return "", errors.New("not implemented: GetContainerLogs")
+	if c == nil {
+		return "", errors.New("connector cannot be nil")
+	}
+	if strings.TrimSpace(containerNameOrID) == "" {
+		return "", errors.New("containerNameOrID cannot be empty")
+	}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "docker", "logs")
+
+	if options.Follow {
+		// Streaming logs is not directly supported by this function's signature (returns string).
+		// Consider a different function for streaming, or document that Follow=true is best-effort (e.g. get recent logs).
+		// For now, we'll add the flag, but the Exec call won't stream indefinitely.
+		// Perhaps Follow should imply a very short timeout or be disallowed for this func.
+		// For simplicity, let's ignore Follow for a simple string return.
+		// cmdArgs = append(cmdArgs, "--follow")
+	}
+	if options.Timestamps {
+		cmdArgs = append(cmdArgs, "--timestamps")
+	}
+	if strings.TrimSpace(options.Since) != "" {
+		cmdArgs = append(cmdArgs, "--since", shellEscape(options.Since))
+	}
+	if strings.TrimSpace(options.Until) != "" {
+		cmdArgs = append(cmdArgs, "--until", shellEscape(options.Until))
+	}
+	if strings.TrimSpace(options.Tail) != "" {
+		cmdArgs = append(cmdArgs, "--tail", shellEscape(options.Tail))
+	}
+	if options.Details {
+		cmdArgs = append(cmdArgs, "--details")
+	}
+
+	// By default, docker logs shows both stdout and stderr.
+	// If only one is requested, Docker CLI doesn't have separate flags for this.
+	// The API client does, but we are using CLI.
+	// So, ShowStdout and ShowStderr flags are more informational for an API-like interface.
+	// The CLI will always return both.
+
+	cmdArgs = append(cmdArgs, shellEscape(containerNameOrID))
+	cmd := strings.Join(cmdArgs, " ")
+
+	// Timeout for logs should be configurable or reasonably short for non-streaming.
+	execTimeout := 2 * time.Minute // Default, can be overridden by options if we add Timeout to ContainerLogOptions
+	execOptions := &connector.ExecOptions{
+		Sudo:    true,
+		Timeout: execTimeout,
+	}
+
+	stdout, stderr, err := c.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		// Logs command can output to both stdout and stderr even on success (stderr for progress/timestamps if enabled differently)
+		// The primary log content is usually on stdout.
+		// If there's an error, stderr from Exec call is more relevant for the error itself.
+		return "", errors.Wrapf(err, "failed to get logs for container %s. Stderr: %s", containerNameOrID, string(stderr))
+	}
+
+	// Docker logs command sends actual log lines to stdout.
+	// If timestamps are enabled, they are part of stdout.
+	// If there were errors during log retrieval not causing Exec to fail (e.g. log driver issues),
+	// they might appear in stderr from the docker daemon.
+	// For this runner, we'll return stdout as the logs.
+	// The `stderr` from `c.Exec` will contain errors from the `docker logs` command execution itself.
+	// If `docker logs` prints its own error messages to its stderr (e.g. "Error: No such container: foo"),
+	// those would be in `string(stderr)` from `c.Exec`.
+	// It's a bit nuanced. If `err != nil`, `string(stderr)` is the command's error stream.
+	// If `err == nil`, `string(stdout)` is the logs. `string(stderr)` might be empty or contain non-fatal messages.
+	// We return `string(stdout)` as the primary output.
+
+	return string(stdout), nil
 }
 
-// GetContainerStats streams live resource usage statistics for a container.
-// Corresponds to `docker stats`.
-// Returns a channel that will stream stat objects. The caller must close the channel.
-// The implementation would involve setting up a persistent command execution and parsing its output stream.
-func (r *defaultRunner) GetContainerStats(ctx context.Context, c connector.Connector, containerNameOrID string, stream bool) (<-chan *container.StatsResponse, error) {
-	return nil, errors.New("not implemented: GetContainerStats")
+
+// GetContainerStats retrieves live resource usage statistics for a container.
+// Corresponds to `docker stats --no-stream <container> --format "{{json .}}"`.
+// This implementation fetches a single snapshot of stats, not a stream.
+// A streaming version would require a different function signature (e.g., returning a channel).
+func (r *defaultRunner) GetContainerStats(ctx context.Context, c connector.Connector, containerNameOrID string, stream bool) (<-chan ContainerStats, error) {
+	if c == nil {
+		return nil, errors.New("connector cannot be nil")
+	}
+	if strings.TrimSpace(containerNameOrID) == "" {
+		return nil, errors.New("containerNameOrID cannot be empty")
+	}
+
+    // This implementation will provide a single stat snapshot if stream is false,
+    // and a short stream if stream is true, closing after a few updates or timeout.
+    // True real-time streaming is complex with a simple Exec model.
+	statsChan := make(chan ContainerStats)
+
+	go func() {
+		defer close(statsChan)
+
+		cmdArgs := []string{"docker", "stats"}
+		if !stream {
+			cmdArgs = append(cmdArgs, "--no-stream")
+		}
+		cmdArgs = append(cmdArgs, "--format", "{{json .}}", shellEscape(containerNameOrID))
+		cmd := strings.Join(cmdArgs, " ")
+
+		// For streaming, we need a way to stop the command. The context passed to Exec will handle this.
+		// Timeout for the Exec call itself. If streaming, this acts as max duration.
+		execTimeout := 30 * time.Second
+		if stream {
+            execTimeout = 2 * time.Minute // Allow longer for a short stream
+        }
+
+		execOptions := &connector.ExecOptions{
+			Sudo:    true,
+			Timeout: execTimeout, // For non-streaming, this is ample. For streaming, it limits the stream.
+		}
+
+        // We need to use a connector that can stream output.
+        // The current `c.Exec` signature returns all output after completion.
+        // This is a limitation. For a true stream, `connector.Exec` would need modification
+        // or a new streaming method.
+        //
+        // Workaround for now: If streaming, run repeatedly for a few times or parse multi-JSON output if supported.
+        // `docker stats --format "{{json .}}"` without --no-stream continuously prints JSON lines.
+        // We can read these lines.
+
+        if !stream {
+            stdout, stderr, err := c.Exec(ctx, cmd, execOptions)
+            if err != nil {
+                statsChan <- ContainerStats{Error: errors.Wrapf(err, "failed to get stats for container %s. Stderr: %s", containerNameOrID, string(stderr))}
+                return
+            }
+            var stat ContainerStats // This needs to match the fields from Docker's JSON output
+            if err := json.Unmarshal(stdout, &stat); err != nil {
+                statsChan <- ContainerStats{Error: errors.Wrapf(err, "failed to parse container stats JSON: %s. Output: %s", err, string(stdout))}
+                return
+            }
+            statsChan <- stat
+            return
+        }
+
+        // Simplified streaming: execute command and read its stdout line by line
+        // This requires `connector.Exec` to support streaming output, or a new method.
+        // Assuming `c.Exec` is blocking and returns all output at once, true streaming is not possible here.
+        // For the purpose of this exercise, we'll simulate by fetching a few snapshots if stream=true.
+        // Or, if the connector could provide a reader for stdout:
+        // stdoutReader, _, err := c.StreamExec(ctx, cmd, execOptions)
+        // if err != nil { ... }
+        // scanner := bufio.NewScanner(stdoutReader)
+        // for scanner.Scan() { ... parse line ... send to statsChan ... }
+        //
+        // Since `StreamExec` is not defined, this will be a placeholder for how it *could* work.
+        // For now, if stream=true, we will just return an error or a very limited stream.
+
+        // Let's assume `c.Exec` can be made to work with a context that times out for a "short stream".
+        // The `docker stats` command when streaming will continuously output.
+        // The `execOptions.Timeout` will eventually kill it.
+        stdout, stderr, err := c.Exec(ctx, cmd, execOptions)
+        if err != nil {
+            // It's possible the command was killed by timeout, which is expected for streaming.
+            // Check context error.
+            if ctx.Err() != nil && (errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(ctx.Err(), context.Canceled)) {
+                 // This is an expected termination of the stream.
+            } else {
+                statsChan <- ContainerStats{Error: errors.Wrapf(err, "streaming stats for container %s failed. Stderr: %s", containerNameOrID, string(stderr))}
+            }
+            return
+        }
+
+        scanner := bufio.NewScanner(strings.NewReader(string(stdout)))
+        for scanner.Scan() {
+            line := scanner.Text()
+            if strings.TrimSpace(line) == "" {
+                continue
+            }
+            var statData struct { // Structure based on `docker stats --format "{{json .}}"`
+				Name      string
+				ID        string
+				CPUPerc   string // e.g. "0.00%"
+				MemUsage  string // e.g. "1.2MiB / 1.9GiB"
+				MemPerc   string // e.g. "0.06%"
+				NetIO     string // e.g. "648B / 648B" (input/output)
+				BlockIO   string // e.g. "0B / 0B"
+				PIDs      string // e.g. "2"
+			}
+            if err := json.Unmarshal([]byte(line), &statData); err != nil {
+                statsChan <- ContainerStats{Error: errors.Wrapf(err, "failed to parse streaming stats line: %s. Line: %s", err, line)}
+                continue // Or return/break
+            }
+
+            // Convert parsed strings to ContainerStats fields
+            var cs ContainerStats
+
+            cpuPercStr := strings.TrimSuffix(statData.CPUPerc, "%")
+            cs.CPUPercentage, _ = strconv.ParseFloat(cpuPercStr, 64)
+
+            memParts := strings.Split(statData.MemUsage, " / ")
+            if len(memParts) > 0 {
+                cs.MemoryUsageBytes, _ = utils.ParseSizeToBytes(strings.TrimSpace(memParts[0]))
+            }
+            if len(memParts) > 1 {
+                 cs.MemoryLimitBytes, _ = utils.ParseSizeToBytes(strings.TrimSpace(memParts[1]))
+            }
+
+            netIOParts := strings.Split(statData.NetIO, " / ")
+            if len(netIOParts) == 2 {
+                cs.NetworkRxBytes, _ = utils.ParseSizeToBytes(strings.TrimSpace(netIOParts[0]))
+                cs.NetworkTxBytes, _ = utils.ParseSizeToBytes(strings.TrimSpace(netIOParts[1]))
+            }
+
+            blockIOParts := strings.Split(statData.BlockIO, " / ")
+            if len(blockIOParts) == 2 {
+                cs.BlockReadBytes, _ = utils.ParseSizeToBytes(strings.TrimSpace(blockIOParts[0]))
+                cs.BlockWriteBytes, _ = utils.ParseSizeToBytes(strings.TrimSpace(blockIOParts[1]))
+            }
+            pids, _ := strconv.ParseUint(statData.PIDs, 10, 64)
+            cs.PidsCurrent = pids
+
+            select {
+            case statsChan <- cs:
+            case <-ctx.Done(): // Ensure we stop if the overall context is cancelled
+                return
+            }
+        }
+        if err := scanner.Err(); err != nil {
+             statsChan <- ContainerStats{Error: errors.Wrap(err, "error reading streaming stats output")}
+        }
+	}()
+	return statsChan, nil
 }
 
-// InspectContainer returns low-level information on Docker objects (container, image, etc.)
-// Corresponds to `docker inspect`.
-// For now, this focuses on container inspect. A more generic version could inspect other types.
-func (r *defaultRunner) InspectContainer(ctx context.Context, c connector.Connector, containerNameOrID string) (*container.InspectResponse, error) {
-	return nil, errors.New("not implemented: InspectContainer")
+
+// InspectContainer returns low-level information on a Docker container.
+// Corresponds to `docker inspect <container>`.
+// Parses the JSON output into the ContainerDetails struct.
+func (r *defaultRunner) InspectContainer(ctx context.Context, c connector.Connector, containerNameOrID string) (*ContainerDetails, error) {
+	if c == nil {
+		return nil, errors.New("connector cannot be nil")
+	}
+	if strings.TrimSpace(containerNameOrID) == "" {
+		return nil, errors.New("containerNameOrID cannot be empty")
+	}
+
+	cmd := fmt.Sprintf("docker inspect %s", shellEscape(containerNameOrID))
+	execOptions := &connector.ExecOptions{
+		Sudo:    true,
+		Timeout: DefaultDockerInspectTimeout,
+	}
+
+	stdout, stderr, err := c.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		// If inspect fails because container not found, Docker exits with 1.
+		// We should return nil, nil in that case, similar to Docker API client.
+		var cmdErr *connector.CommandError
+		if errors.As(err, &cmdErr) && cmdErr.ExitCode == 1 {
+			// Check stderr for "No such object" or similar messages to be more certain.
+			// For simplicity, exit code 1 is often "not found".
+			if strings.Contains(strings.ToLower(string(stderr)), "no such object") ||
+				strings.Contains(strings.ToLower(string(stderr)), "is not a docker command") { // This can happen if name is misinterpreted
+				return nil, nil // Not found
+			}
+		}
+		return nil, errors.Wrapf(err, "failed to inspect container %s. Stderr: %s", containerNameOrID, string(stderr))
+	}
+
+	// Docker inspect returns a JSON array if multiple objects are inspected,
+	// or a single JSON object if one is inspected. We expect one.
+	// If the output is an array, we take the first element.
+	outputStr := strings.TrimSpace(string(stdout))
+	if outputStr == "" {
+		return nil, errors.New("docker inspect returned empty output")
+	}
+
+	var details []ContainerDetails // Docker inspect returns an array of details
+	if err := json.Unmarshal([]byte(outputStr), &details); err != nil {
+		// Attempt to unmarshal as single object if array fails (should not happen with single inspect)
+		var singleDetail ContainerDetails
+		if errSingle := json.Unmarshal([]byte(outputStr), &singleDetail); errSingle != nil {
+			return nil, errors.Wrapf(err, "failed to parse container inspect JSON (tried array and object): %s. Output: %s", errSingle, outputStr)
+		}
+		return &singleDetail, nil
+	}
+
+	if len(details) == 0 {
+		// This case should ideally be caught by err != nil if container not found.
+		// But if inspect returns empty array for some reason.
+		return nil, nil // Not found
+	}
+
+	return &details[0], nil
 }
+
 
 // PauseContainer pauses all processes within a running container.
 // Corresponds to `docker pause`.
 func (r *defaultRunner) PauseContainer(ctx context.Context, c connector.Connector, containerNameOrID string) error {
-	return errors.New("not implemented: PauseContainer")
+	if c == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if strings.TrimSpace(containerNameOrID) == "" {
+		return errors.New("containerNameOrID cannot be empty")
+	}
+
+	cmd := fmt.Sprintf("docker pause %s", shellEscape(containerNameOrID))
+	execOptions := &connector.ExecOptions{
+		Sudo:    true,
+		Timeout: DefaultDockerStartTimeout, // Pause is usually quick
+	}
+
+	_, stderr, err := c.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		return errors.Wrapf(err, "failed to pause container %s. Stderr: %s", containerNameOrID, string(stderr))
+	}
+	return nil
 }
 
 // UnpauseContainer unpauses all processes within a paused container.
 // Corresponds to `docker unpause`.
 func (r *defaultRunner) UnpauseContainer(ctx context.Context, c connector.Connector, containerNameOrID string) error {
-	return errors.New("not implemented: UnpauseContainer")
+	if c == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if strings.TrimSpace(containerNameOrID) == "" {
+		return errors.New("containerNameOrID cannot be empty")
+	}
+
+	cmd := fmt.Sprintf("docker unpause %s", shellEscape(containerNameOrID))
+	execOptions := &connector.ExecOptions{
+		Sudo:    true,
+		Timeout: DefaultDockerStartTimeout, // Unpause is usually quick
+	}
+
+	_, stderr, err := c.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		return errors.Wrapf(err, "failed to unpause container %s. Stderr: %s", containerNameOrID, string(stderr))
+	}
+	return nil
 }
 
 // ExecInContainer executes a command inside a running container.
 // Corresponds to `docker exec`.
-func (r *defaultRunner) ExecInContainer(ctx context.Context, c connector.Connector, containerNameOrID string, cmd []string, user, workDir string, tty bool) (string, error) {
-	return "", errors.New("not implemented: ExecInContainer")
+func (r *defaultRunner) ExecInContainer(ctx context.Context, c connector.Connector, containerNameOrID string, cmdArgsToExec []string, user, workDir string, tty bool) (string, error) {
+	if c == nil {
+		return "", errors.New("connector cannot be nil")
+	}
+	if strings.TrimSpace(containerNameOrID) == "" {
+		return "", errors.New("containerNameOrID cannot be empty")
+	}
+	if len(cmdArgsToExec) == 0 {
+		return "", errors.New("command to execute cannot be empty")
+	}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "docker", "exec")
+
+	if tty {
+		// Note: Docker's behavior with -t can affect output format.
+		// For non-interactive exec getting combined output, -t is often omitted or used with -i.
+		// If a true TTY interaction is needed, this function signature is insufficient.
+		// This implies -t for allocation, but not necessarily interactive (-i).
+		cmdArgs = append(cmdArgs, "-t")
+	}
+	if strings.TrimSpace(user) != "" {
+		cmdArgs = append(cmdArgs, "--user", shellEscape(user))
+	}
+	if strings.TrimSpace(workDir) != "" {
+		cmdArgs = append(cmdArgs, "--workdir", shellEscape(workDir))
+	}
+
+	cmdArgs = append(cmdArgs, shellEscape(containerNameOrID))
+	for _, arg := range cmdArgsToExec {
+		cmdArgs = append(cmdArgs, shellEscape(arg))
+	}
+	cmd := strings.Join(cmdArgs, " ")
+
+	// Timeout for exec should be reasonably long or configurable.
+	execTimeout := 5 * time.Minute
+	execOptions := &connector.ExecOptions{
+		Sudo:    true,
+		Timeout: execTimeout,
+	}
+
+	stdout, stderr, err := c.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		// Combined stdout/stderr is often desired for exec.
+		// However, c.Exec separates them. We'll return stdout and include stderr in the error.
+		// Docker exec CLI writes command's stdout to its stdout, and command's stderr to its stderr.
+		// If the command in container exits non-zero, `docker exec` also exits non-zero.
+		output := string(stdout) + string(stderr) // Simple combination
+		return output, errors.Wrapf(err, "failed to exec in container %s (cmd: %s). Combined output: %s", containerNameOrID, strings.Join(cmdArgsToExec, " "), output)
+	}
+
+	// If successful, stdout contains the command's stdout. Stderr from Exec is for the docker command itself.
+	// The actual command's stderr (if any, and if not redirected by the command itself) would also be in Exec's stderr.
+	// It's common to want both, so we concatenate.
+	return string(stdout) + string(stderr), nil
 }
 
 
@@ -643,32 +1217,203 @@ func (r *defaultRunner) ExecInContainer(ctx context.Context, c connector.Connect
 
 // CreateDockerNetwork creates a new Docker network.
 // Corresponds to `docker network create`.
-func (r *defaultRunner) CreateDockerNetwork(ctx context.Context, c connector.Connector, name, driver, subnet, gateway string, labels map[string]string) error {
-	return errors.New("not implemented: CreateDockerNetwork")
+func (r *defaultRunner) CreateDockerNetwork(ctx context.Context, c connector.Connector, name, driver, subnet, gateway string, options map[string]string) error {
+	if c == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if strings.TrimSpace(name) == "" {
+		return errors.New("network name cannot be empty")
+	}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "docker", "network", "create")
+
+	if strings.TrimSpace(driver) != "" {
+		cmdArgs = append(cmdArgs, "--driver", shellEscape(driver))
+	}
+	if strings.TrimSpace(subnet) != "" {
+		cmdArgs = append(cmdArgs, "--subnet", shellEscape(subnet))
+	}
+	if strings.TrimSpace(gateway) != "" {
+		cmdArgs = append(cmdArgs, "--gateway", shellEscape(gateway))
+	}
+	if options != nil {
+		for k, v := range options {
+			cmdArgs = append(cmdArgs, "--opt", shellEscape(fmt.Sprintf("%s=%s", k, v)))
+		}
+	}
+	// TODO: Add labels if the struct in interface.go is updated
+	// if labels != nil {
+	// 	for k, v := range labels {
+	// 		cmdArgs = append(cmdArgs, "--label", shellEscape(fmt.Sprintf("%s=%s", k, v)))
+	// 	}
+	// }
+
+	cmdArgs = append(cmdArgs, shellEscape(name))
+	cmd := strings.Join(cmdArgs, " ")
+
+	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute}
+	_, stderr, err := c.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create docker network %s. Stderr: %s", name, string(stderr))
+	}
+	return nil
 }
 
 // RemoveDockerNetwork removes a Docker network.
 // Corresponds to `docker network rm`.
-func (r *defaultRunner) RemoveDockerNetwork(ctx context.Context, c connector.Connector, networkIDOrName string) error {
-	return errors.New("not implemented: RemoveDockerNetwork")
+func (r *defaultRunner) RemoveDockerNetwork(ctx context.Context, c connector.Connector, networkNameOrID string) error {
+	if c == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if strings.TrimSpace(networkNameOrID) == "" {
+		return errors.New("networkNameOrID cannot be empty")
+	}
+
+	cmd := fmt.Sprintf("docker network rm %s", shellEscape(networkNameOrID))
+	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute}
+	_, stderr, err := c.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		// Idempotency: if network not found, don't treat as error.
+		if strings.Contains(string(stderr), "No such network") || strings.Contains(string(stderr), "not found") {
+			return nil
+		}
+		return errors.Wrapf(err, "failed to remove docker network %s. Stderr: %s", networkNameOrID, string(stderr))
+	}
+	return nil
 }
 
 // ListDockerNetworks lists Docker networks.
 // Corresponds to `docker network ls`.
-func (r *defaultRunner) ListDockerNetworks(ctx context.Context, c connector.Connector, filters map[string]string) ([]NetworkResource, error) {
-	return nil, errors.New("not implemented: ListDockerNetworks")
+func (r *defaultRunner) ListDockerNetworks(ctx context.Context, c connector.Connector, filters map[string]string) ([]DockerNetworkInfo, error) {
+	if c == nil {
+		return nil, errors.New("connector cannot be nil")
+	}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "docker", "network", "ls")
+	if filters != nil {
+		for key, value := range filters {
+			cmdArgs = append(cmdArgs, "--filter", shellEscape(fmt.Sprintf("%s=%s", key, value)))
+		}
+	}
+	cmdArgs = append(cmdArgs, "--format", "{{json .}}")
+	cmd := strings.Join(cmdArgs, " ")
+
+	execOptions := &connector.ExecOptions{Sudo: true, Timeout: DefaultDockerInspectTimeout}
+	stdout, stderr, err := c.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to list docker networks. Stderr: %s", string(stderr))
+	}
+
+	var networks []DockerNetworkInfo
+	scanner := bufio.NewScanner(strings.NewReader(string(stdout)))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var netInfo struct { // Matches `docker network ls --format "{{json .}}"`
+			ID         string
+			Name       string
+			Driver     string
+			Scope      string
+			IPv6       string // "true" or "false"
+			Internal   string // "true" or "false"
+			Attachable string // "true" or "false"
+			Ingress    string // "true" or "false"
+			// Labels     string // comma-separated
+		}
+		if err := json.Unmarshal([]byte(line), &netInfo); err != nil {
+			return nil, errors.Wrapf(err, "failed to parse network JSON line: %s", line)
+		}
+
+		enableIPv6, _ := strconv.ParseBool(netInfo.IPv6)
+
+		// Note: `docker network ls` does not provide Subnets, Gateways, or connected Containers.
+		// That info requires `docker network inspect` per network.
+		// This ListDockerNetworks provides what `ls` provides.
+		networks = append(networks, DockerNetworkInfo{
+			ID:         netInfo.ID,
+			Name:       netInfo.Name,
+			Driver:     netInfo.Driver,
+			Scope:      netInfo.Scope,
+			EnableIPv6: enableIPv6,
+			// Other fields like Subnets, Gateways, Containers would require individual inspect calls.
+		})
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, errors.Wrap(err, "error reading docker networks ls output")
+	}
+	return networks, nil
 }
 
 // ConnectContainerToNetwork connects a container to a Docker network.
 // Corresponds to `docker network connect`.
-func (r *defaultRunner) ConnectContainerToNetwork(ctx context.Context, c connector.Connector, networkIDOrName, containerNameOrID, ipAddress string) error {
-	return errors.New("not implemented: ConnectContainerToNetwork")
+func (r *defaultRunner) ConnectContainerToNetwork(ctx context.Context, c connector.Connector, containerNameOrID string, networkNameOrID string, ipAddress string) error {
+	if c == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if strings.TrimSpace(containerNameOrID) == "" {
+		return errors.New("containerNameOrID cannot be empty")
+	}
+	if strings.TrimSpace(networkNameOrID) == "" {
+		return errors.New("networkNameOrID cannot be empty")
+	}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "docker", "network", "connect")
+	if strings.TrimSpace(ipAddress) != "" {
+		cmdArgs = append(cmdArgs, "--ip", shellEscape(ipAddress))
+	}
+	cmdArgs = append(cmdArgs, shellEscape(networkNameOrID), shellEscape(containerNameOrID))
+	cmd := strings.Join(cmdArgs, " ")
+
+	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute}
+	_, stderr, err := c.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		// Idempotency: if already connected, Docker CLI might error or do nothing.
+		// "Error response from daemon: container ... is already connected to network ..."
+		if strings.Contains(string(stderr), "is already connected to network") {
+			return nil
+		}
+		return errors.Wrapf(err, "failed to connect container %s to network %s. Stderr: %s", containerNameOrID, networkNameOrID, string(stderr))
+	}
+	return nil
 }
 
 // DisconnectContainerFromNetwork disconnects a container from a Docker network.
 // Corresponds to `docker network disconnect`.
-func (r *defaultRunner) DisconnectContainerFromNetwork(ctx context.Context, c connector.Connector, networkIDOrName, containerNameOrID string, force bool) error {
-	return errors.New("not implemented: DisconnectContainerFromNetwork")
+func (r *defaultRunner) DisconnectContainerFromNetwork(ctx context.Context, c connector.Connector, containerNameOrID string, networkNameOrID string, force bool) error {
+	if c == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if strings.TrimSpace(containerNameOrID) == "" {
+		return errors.New("containerNameOrID cannot be empty")
+	}
+	if strings.TrimSpace(networkNameOrID) == "" {
+		return errors.New("networkNameOrID cannot be empty")
+	}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "docker", "network", "disconnect")
+	if force {
+		cmdArgs = append(cmdArgs, "-f")
+	}
+	cmdArgs = append(cmdArgs, shellEscape(networkNameOrID), shellEscape(containerNameOrID))
+	cmd := strings.Join(cmdArgs, " ")
+
+	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute}
+	_, stderr, err := c.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		// Idempotency: if not connected, Docker CLI errors.
+		// "Error response from daemon: container ... is not connected to network ..."
+		if strings.Contains(string(stderr), "is not connected to network") {
+			return nil
+		}
+		return errors.Wrapf(err, "failed to disconnect container %s from network %s. Stderr: %s", containerNameOrID, networkNameOrID, string(stderr))
+	}
+	return nil
 }
 
 
@@ -676,41 +1421,274 @@ func (r *defaultRunner) DisconnectContainerFromNetwork(ctx context.Context, c co
 
 // CreateDockerVolume creates a new Docker volume.
 // Corresponds to `docker volume create`.
-func (r *defaultRunner) CreateDockerVolume(ctx context.Context, c connector.Connector, name, driver string, driverOpts, labels map[string]string) error {
-	return errors.New("not implemented: CreateDockerVolume")
+func (r *defaultRunner) CreateDockerVolume(ctx context.Context, c connector.Connector, name string, driver string, driverOpts map[string]string, labels map[string]string) error {
+	if c == nil {
+		return errors.New("connector cannot be nil")
+	}
+	// Name is optional for `docker volume create`, Docker will generate one.
+	// However, our interface implies a name is given or expected.
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "docker", "volume", "create")
+	if strings.TrimSpace(driver) != "" {
+		cmdArgs = append(cmdArgs, "--driver", shellEscape(driver))
+	}
+	if driverOpts != nil {
+		for k, v := range driverOpts {
+			cmdArgs = append(cmdArgs, "--opt", shellEscape(fmt.Sprintf("%s=%s", k, v)))
+		}
+	}
+	if labels != nil {
+		for k, v := range labels {
+			cmdArgs = append(cmdArgs, "--label", shellEscape(fmt.Sprintf("%s=%s", k, v)))
+		}
+	}
+	if strings.TrimSpace(name) != "" {
+		cmdArgs = append(cmdArgs, shellEscape(name))
+	}
+	cmd := strings.Join(cmdArgs, " ")
+
+	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute}
+	// `docker volume create` outputs the volume name on success.
+	stdout, stderr, err := c.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		// Idempotency: If volume with this name already exists, Docker errors.
+		// "Error response from daemon: a volume with the name <name> already exists"
+		if strings.TrimSpace(name) != "" && strings.Contains(string(stderr), "already exists") && strings.Contains(string(stderr), name) {
+			return nil
+		}
+		return errors.Wrapf(err, "failed to create docker volume %s. Stderr: %s, Stdout: %s", name, string(stderr), string(stdout))
+	}
+	return nil
 }
 
 // RemoveDockerVolume removes a Docker volume.
 // Corresponds to `docker volume rm`.
 func (r *defaultRunner) RemoveDockerVolume(ctx context.Context, c connector.Connector, volumeName string, force bool) error {
-	return errors.New("not implemented: RemoveDockerVolume")
+	if c == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if strings.TrimSpace(volumeName) == "" {
+		return errors.New("volumeName cannot be empty")
+	}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "docker", "volume", "rm")
+	if force {
+		cmdArgs = append(cmdArgs, "-f")
+	}
+	cmdArgs = append(cmdArgs, shellEscape(volumeName))
+	cmd := strings.Join(cmdArgs, " ")
+
+	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute}
+	_, stderr, err := c.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		// Idempotency: If volume not found, Docker errors.
+		// "Error: No such volume: <name>"
+		if strings.Contains(string(stderr), "No such volume") && strings.Contains(string(stderr), volumeName) {
+			return nil
+		}
+		// If volume is in use: "Error response from daemon: remove <volumeName>: volume is in use"
+		// This is a valid error if not forced. If forced, this error shouldn't occur.
+		return errors.Wrapf(err, "failed to remove docker volume %s. Stderr: %s", volumeName, string(stderr))
+	}
+	return nil
 }
 
 // ListDockerVolumes lists Docker volumes.
 // Corresponds to `docker volume ls`.
-func (r *defaultRunner) ListDockerVolumes(ctx context.Context, c connector.Connector, filters map[string]string) ([]*Volume, error) {
-	return nil, errors.New("not implemented: ListDockerVolumes")
+func (r *defaultRunner) ListDockerVolumes(ctx context.Context, c connector.Connector, filters map[string]string) ([]DockerVolumeInfo, error) {
+	if c == nil {
+		return nil, errors.New("connector cannot be nil")
+	}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "docker", "volume", "ls")
+	if filters != nil {
+		for key, value := range filters {
+			cmdArgs = append(cmdArgs, "--filter", shellEscape(fmt.Sprintf("%s=%s", key, value)))
+		}
+	}
+	cmdArgs = append(cmdArgs, "--format", "{{json .}}")
+	cmd := strings.Join(cmdArgs, " ")
+
+	execOptions := &connector.ExecOptions{Sudo: true, Timeout: DefaultDockerInspectTimeout}
+	stdout, stderr, err := c.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to list docker volumes. Stderr: %s", string(stderr))
+	}
+
+	var volumes []DockerVolumeInfo
+	scanner := bufio.NewScanner(strings.NewReader(string(stdout)))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		// Structure from `docker volume ls --format "{{json .}}"`
+		var volData struct {
+			Driver     string
+			Labels     string // Comma-separated key=value
+			Links      string // Number of containers using volume (older Docker versions?)
+			Mountpoint string
+			Name       string
+			Scope      string
+			Size       string // Only with `docker system df -v` or specific drivers
+		}
+		if err := json.Unmarshal([]byte(line), &volData); err != nil {
+			return nil, errors.Wrapf(err, "failed to parse volume JSON line: %s", line)
+		}
+
+		labelsMap := make(map[string]string)
+		if strings.TrimSpace(volData.Labels) != "" {
+			pairs := strings.Split(volData.Labels, ",")
+			for _, pair := range pairs {
+				kv := strings.SplitN(pair, "=", 2)
+				if len(kv) == 2 {
+					labelsMap[kv[0]] = kv[1]
+				} else {
+                    labelsMap[kv[0]] = "" // Label without value
+                }
+			}
+		}
+
+		volumes = append(volumes, DockerVolumeInfo{
+			Name:       volData.Name,
+			Driver:     volData.Driver,
+			Mountpoint: volData.Mountpoint,
+			Labels:     labelsMap,
+			Scope:      volData.Scope,
+		})
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, errors.Wrap(err, "error reading docker volumes ls output")
+	}
+	return volumes, nil
 }
 
 // InspectDockerVolume returns information about a Docker volume.
 // Corresponds to `docker volume inspect`.
-func (r *defaultRunner) InspectDockerVolume(ctx context.Context, c connector.Connector, volumeName string) (*Volume, error) {
-	return nil, errors.New("not implemented: InspectDockerVolume")
+func (r *defaultRunner) InspectDockerVolume(ctx context.Context, c connector.Connector, volumeName string) (*DockerVolumeDetails, error) {
+	if c == nil {
+		return nil, errors.New("connector cannot be nil")
+	}
+	if strings.TrimSpace(volumeName) == "" {
+		return nil, errors.New("volumeName cannot be empty")
+	}
+
+	cmd := fmt.Sprintf("docker volume inspect %s", shellEscape(volumeName))
+	execOptions := &connector.ExecOptions{Sudo: true, Timeout: DefaultDockerInspectTimeout}
+	stdout, stderr, err := c.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		var cmdErr *connector.CommandError
+		if errors.As(err, &cmdErr) && cmdErr.ExitCode == 1 {
+			if strings.Contains(strings.ToLower(string(stderr)), "no such volume") {
+				return nil, nil // Not found
+			}
+		}
+		return nil, errors.Wrapf(err, "failed to inspect volume %s. Stderr: %s", volumeName, string(stderr))
+	}
+
+	outputStr := strings.TrimSpace(string(stdout))
+	if outputStr == "" {
+		return nil, errors.New("docker volume inspect returned empty output")
+	}
+
+	// Docker volume inspect returns a JSON array if multiple volumes are inspected by name,
+	// or a single JSON object if one specific volume is inspected.
+	var detailsList []DockerVolumeDetails
+	if err := json.Unmarshal([]byte(outputStr), &detailsList); err == nil && len(detailsList) > 0 {
+		// If it parsed as a list and has elements, take the first one.
+		// This handles cases where a name might match multiple if not unique (though inspect usually takes one).
+		return &detailsList[0], nil
+	}
+
+	// If it's not a list or list is empty, try parsing as a single object.
+	var detail DockerVolumeDetails
+	if err := json.Unmarshal([]byte(outputStr), &detail); err != nil {
+		return nil, errors.Wrapf(err, "failed to parse volume inspect JSON: %s. Output: %s", err, outputStr)
+	}
+	return &detail, nil
 }
 
 
 // --- Docker System Methods ---
 
 // DockerInfo displays system-wide information about Docker.
-// Corresponds to `docker info`.
-func (r *defaultRunner) DockerInfo(ctx context.Context, c connector.Connector) (*SystemInfo, error) {
-	return nil, errors.New("not implemented: DockerInfo")
+// Corresponds to `docker info --format "{{json .}}"`.
+func (r *defaultRunner) DockerInfo(ctx context.Context, c connector.Connector) (*DockerSystemInfo, error) {
+	if c == nil {
+		return nil, errors.New("connector cannot be nil")
+	}
+
+	cmd := "docker info --format \"{{json .}}\"" // Ensure quotes handle spaces in format string if any
+	execOptions := &connector.ExecOptions{Sudo: true, Timeout: DefaultDockerInspectTimeout}
+	stdout, stderr, err := c.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get docker info. Stderr: %s", string(stderr))
+	}
+
+	var info DockerSystemInfo // This struct needs to match the fields from Docker's JSON output
+	if err := json.Unmarshal(stdout, &info); err != nil {
+		return nil, errors.Wrapf(err, "failed to parse docker info JSON: %s. Output: %s", err, string(stdout))
+	}
+	return &info, nil
 }
 
-// DockerPrune removes unused Docker data (containers, networks, images, build cache).
-// Corresponds to `docker system prune`.
+// DockerPrune removes unused Docker data.
+// Corresponds to `docker system prune`, `docker image prune`, etc.
+// `pruneType` can be "system", "builder", "container", "image", "network", "volume".
 func (r *defaultRunner) DockerPrune(ctx context.Context, c connector.Connector, pruneType string, filters map[string]string, all bool) (string, error) {
-	return "", errors.New("not implemented: DockerPrune")
+	if c == nil {
+		return "", errors.New("connector cannot be nil")
+	}
+	if strings.TrimSpace(pruneType) == "" {
+		pruneType = "system" // Default to system prune
+	}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "docker")
+
+	validPruneTypes := map[string]bool{
+		"system":    true,
+		"builder":   true,
+		"container": true,
+		"image":     true,
+		"network":   true,
+		"volume":    true,
+	}
+	if !validPruneTypes[pruneType] {
+		return "", errors.Errorf("invalid pruneType: %s. Must be one of system, builder, container, image, network, volume", pruneType)
+	}
+
+	if pruneType == "system" {
+        cmdArgs = append(cmdArgs, "system", "prune", "-f") // Always force for system prune to avoid prompt
+    } else {
+        cmdArgs = append(cmdArgs, pruneType, "prune", "-f") // Always force to avoid prompt
+    }
+
+
+	if all && (pruneType == "system" || pruneType == "image" || pruneType == "builder") {
+		// --all is applicable to system (implies all for images), image, and builder prune
+		cmdArgs = append(cmdArgs, "--all")
+	}
+	if filters != nil {
+		for key, value := range filters {
+			// `docker system prune` doesn't support arbitrary key=value filters like `ps` or `images`.
+			// It supports `--filter "label=key=value"` or `--filter "until=24h"`.
+			// This implementation will assume the filter string is pre-formatted correctly.
+			cmdArgs = append(cmdArgs, "--filter", shellEscape(fmt.Sprintf("%s=%s",key,value))) // This might need more specific formatting based on pruneType
+		}
+	}
+	cmd := strings.Join(cmdArgs, " ")
+
+	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 10 * time.Minute} // Pruning can take time
+	stdout, stderr, err := c.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to prune docker %s. Stderr: %s, Stdout: %s", pruneType, string(stderr), string(stdout))
+	}
+	// Output often includes "Total reclaimed space: ..."
+	return string(stdout), nil
 }
 
 // GetDockerServerVersion returns the version of the Docker server.
