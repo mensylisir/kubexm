@@ -110,6 +110,149 @@ func (r *defaultRunner) PullImage(ctx context.Context, c connector.Connector, im
 	return nil
 }
 
+const dockerDaemonConfigPath = "/etc/docker/daemon.json"
+
+// GetDockerDaemonConfig retrieves the current Docker daemon configuration.
+// It reads /etc/docker/daemon.json and unmarshals it.
+// Returns an empty DockerDaemonOptions if the file doesn't exist or is empty.
+func (r *defaultRunner) GetDockerDaemonConfig(ctx context.Context, conn connector.Connector) (*DockerDaemonOptions, error) {
+	if conn == nil {
+		return nil, errors.New("connector cannot be nil")
+	}
+
+	configContent, err := r.ReadFile(ctx, conn, dockerDaemonConfigPath)
+	if err != nil {
+		// If file doesn't exist, it's not an error; return empty config.
+		// This assumes ReadFile returns a specific error for "not found" that can be checked.
+		// For simplicity, if any error occurs (incl. not found), we'll try to proceed as if empty,
+		// or return a wrapped error if it's not a simple "not found".
+		// A more robust way: check with r.Exists first.
+		exists, _ := r.Exists(ctx, conn, dockerDaemonConfigPath)
+		if !exists {
+			return &DockerDaemonOptions{}, nil // File not found, return empty/default struct
+		}
+		return nil, errors.Wrapf(err, "failed to read Docker daemon config file %s", dockerDaemonConfigPath)
+	}
+
+	if len(configContent) == 0 {
+		return &DockerDaemonOptions{}, nil // File is empty
+	}
+
+	var opts DockerDaemonOptions
+	if err := json.Unmarshal(configContent, &opts); err != nil {
+		return nil, errors.Wrapf(err, "failed to unmarshal Docker daemon config from %s. Content: %s", dockerDaemonConfigPath, string(configContent))
+	}
+	return &opts, nil
+}
+
+// ConfigureDockerDaemon applies new daemon configurations.
+// It reads the existing daemon.json, merges new options, writes back, and optionally restarts Docker.
+func (r *defaultRunner) ConfigureDockerDaemon(ctx context.Context, conn connector.Connector, newOpts DockerDaemonOptions, restartService bool) error {
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+
+	// 1. Get current config
+	currentOpts, err := r.GetDockerDaemonConfig(ctx, conn)
+	if err != nil {
+		// If GetDockerDaemonConfig failed for a reason other than "not found" or "empty", propagate error.
+		// If it returned an empty struct due to not found/empty, currentOpts will be non-nil.
+		return errors.Wrap(err, "failed to get current Docker daemon config before applying new settings")
+	}
+	if currentOpts == nil { // Should not happen if GetDockerDaemonConfig is correct
+		currentOpts = &DockerDaemonOptions{}
+	}
+
+	// 2. Merge newOpts into currentOpts
+	// This is a shallow merge. For deep merge of maps/slices, more logic would be needed.
+	// Pointers in newOpts allow distinguishing between "not set" and "set to empty/zero value".
+
+	// Example of merging a few fields. This should be done for all fields in DockerDaemonOptions.
+	// This can be done more generically using reflection, but direct assignment is clearer for fewer fields.
+	// For a production system, a library for merging structs or a more detailed merge logic is advised.
+
+	// Helper for merging string slices like RegistryMirrors, InsecureRegistries, ExecOpts, DNS, Hosts
+	mergeStringSlice := func(current, new *[]string) *[]string {
+		if new == nil { // New value not provided
+			return current
+		}
+		// If new value is provided (even if empty slice), it overwrites current.
+		return new
+	}
+	// Helper for merging map[string]string like LogOpts
+	mergeMapStringString := func(current, new *map[string]string) *map[string]string {
+		if new == nil {
+			return current
+		}
+		return new
+	}
+	// Helper for merging map[string]DockerRuntime like Runtimes
+	mergeMapStringRuntime := func(current, new *map[string]DockerRuntime) *map[string]DockerRuntime {
+		if new == nil {
+			return current
+		}
+		return new
+	}
+
+
+	if newOpts.LogDriver != nil { currentOpts.LogDriver = newOpts.LogDriver }
+	if newOpts.LogOpts != nil { currentOpts.LogOpts = mergeMapStringString(currentOpts.LogOpts, newOpts.LogOpts) }
+	if newOpts.StorageDriver != nil { currentOpts.StorageDriver = newOpts.StorageDriver }
+	if newOpts.StorageOpts != nil { currentOpts.StorageOpts = mergeStringSlice(currentOpts.StorageOpts, newOpts.StorageOpts) }
+	if newOpts.RegistryMirrors != nil { currentOpts.RegistryMirrors = mergeStringSlice(currentOpts.RegistryMirrors, newOpts.RegistryMirrors) }
+	if newOpts.InsecureRegistries != nil { currentOpts.InsecureRegistries = mergeStringSlice(currentOpts.InsecureRegistries, newOpts.InsecureRegistries) }
+	if newOpts.ExecOpts != nil { currentOpts.ExecOpts = mergeStringSlice(currentOpts.ExecOpts, newOpts.ExecOpts) }
+	if newOpts.Bridge != nil { currentOpts.Bridge = newOpts.Bridge }
+	if newOpts.Bip != nil { currentOpts.Bip = newOpts.Bip }
+	if newOpts.FixedCIDR != nil { currentOpts.FixedCIDR = newOpts.FixedCIDR }
+	if newOpts.DefaultGateway != nil { currentOpts.DefaultGateway = newOpts.DefaultGateway }
+	if newOpts.DNS != nil { currentOpts.DNS = mergeStringSlice(currentOpts.DNS, newOpts.DNS) }
+	if newOpts.IPTables != nil { currentOpts.IPTables = newOpts.IPTables }
+	if newOpts.Experimental != nil { currentOpts.Experimental = newOpts.Experimental }
+	if newOpts.Debug != nil { currentOpts.Debug = newOpts.Debug }
+	if newOpts.APICorsHeader != nil { currentOpts.APICorsHeader = newOpts.APICorsHeader }
+	if newOpts.Hosts != nil { currentOpts.Hosts = mergeStringSlice(currentOpts.Hosts, newOpts.Hosts) }
+	if newOpts.UserlandProxy != nil { currentOpts.UserlandProxy = newOpts.UserlandProxy }
+	if newOpts.LiveRestore != nil { currentOpts.LiveRestore = newOpts.LiveRestore }
+	if newOpts.CgroupParent != nil { currentOpts.CgroupParent = newOpts.CgroupParent }
+	if newOpts.DefaultRuntime != nil { currentOpts.DefaultRuntime = newOpts.DefaultRuntime }
+	if newOpts.Runtimes != nil { currentOpts.Runtimes = mergeMapStringRuntime(currentOpts.Runtimes, newOpts.Runtimes) }
+	if newOpts.Graph != nil { currentOpts.Graph = newOpts.Graph } // Deprecated
+	if newOpts.DataRoot != nil { currentOpts.DataRoot = newOpts.DataRoot }
+	if newOpts.MaxConcurrentDownloads != nil { currentOpts.MaxConcurrentDownloads = newOpts.MaxConcurrentDownloads }
+	if newOpts.MaxConcurrentUploads != nil { currentOpts.MaxConcurrentUploads = newOpts.MaxConcurrentUploads }
+	if newOpts.ShutdownTimeout != nil { currentOpts.ShutdownTimeout = newOpts.ShutdownTimeout }
+
+
+	// 3. Marshal merged config back to JSON
+	mergedConfigBytes, err := json.MarshalIndent(currentOpts, "", "  ")
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal merged Docker daemon config to JSON")
+	}
+
+	// 4. Write to /etc/docker/daemon.json
+	// Ensure directory /etc/docker exists
+	if err := r.Mkdirp(ctx, conn, filepath.Dir(dockerDaemonConfigPath), "0755", true); err != nil {
+		return errors.Wrapf(err, "failed to create directory for %s", dockerDaemonConfigPath)
+	}
+	if err := r.WriteFile(ctx, conn, mergedConfigBytes, dockerDaemonConfigPath, "0644", true); err != nil {
+		return errors.Wrapf(err, "failed to write Docker daemon config to %s", dockerDaemonConfigPath)
+	}
+
+	// 5. Optionally restart Docker service
+	if restartService {
+		// Need to get facts to know how to restart service
+		facts, errFacts := r.GatherFacts(ctx, conn)
+		if errFacts != nil {
+			return errors.Wrap(errFacts, "failed to gather facts for restarting Docker service")
+		}
+		if err := r.RestartService(ctx, conn, facts, "docker"); err != nil {
+			return errors.Wrap(err, "failed to restart Docker service after configuration change")
+		}
+	}
+
+	return nil
+}
 // ImageExists checks if a Docker image exists locally.
 func (r *defaultRunner) ImageExists(ctx context.Context, c connector.Connector, imageName string) (bool, error) {
 	if c == nil {
