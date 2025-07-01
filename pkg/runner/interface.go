@@ -695,6 +695,214 @@ type HelmVersionInfo struct { // Based on `helm version -o json`
 	GoVersion  string `json:"goVersion"`
 }
 
+// --- Kubectl Supporting Structs ---
+
+type KubectlApplyOptions struct {
+	KubeconfigPath string   // Path to kubeconfig file
+	Namespace      string   // Namespace for the apply operation
+	Force          bool     // Force apply updates
+	Prune          bool     // Prune unmanaged resources
+	Selector       string   // Selector (label query) to filter on for pruning
+	DryRun         string   // "none", "client", or "server". Default "none".
+	Validate       bool     // Validate schemas. Default true. (For older kubectl, might be string "true"/"false")
+	Filenames      []string // List of filenames, URLs, or '-' for stdin. If using stdin, FileContent must be provided.
+	FileContent    string   // Content to apply if Filenames contains '-'.
+	Recursive      bool     // If true, process directory recursively.
+	Sudo           bool
+}
+
+type KubectlGetOptions struct {
+	KubeconfigPath string   // Path to kubeconfig file
+	Namespace      string   // Namespace for the get operation
+	AllNamespaces  bool     // If true, get from all namespaces
+	OutputFormat   string   // Output format: json, yaml, wide, name, custom-columns=..., go-template=...
+	Selector       string   // Selector (label query) to filter on
+	FieldSelector  string   // Selector (field query) to filter on
+	Watch          bool     // Watch for changes
+	IgnoreNotFound bool     // If true, ignore "not found" errors
+	ChunkSize      int64    // Return large lists in chunks rather than all at once. (0 for no chunking)
+	LabelColumns   []string // Additional columns to display for wide output
+	ShowLabels     bool     // When printing, show all labels as columns
+	Sudo           bool
+}
+
+type KubectlDescribeOptions struct {
+	KubeconfigPath string // Path to kubeconfig file
+	Namespace      string // Namespace for the describe operation
+	Selector       string // Selector (label query) to filter on
+	ShowEvents     bool   // Include events in describe output (default true)
+	Sudo           bool
+}
+
+type KubectlDeleteOptions struct {
+	KubeconfigPath string   // Path to kubeconfig file
+	Namespace      string   // Namespace for the delete operation
+	Force          bool     // Force deletion ofgrace period 0
+	GracePeriod    *int64   // Period of time in seconds given to the resource to terminate gracefully. Ignored if negative.
+	Timeout        time.Duration // The length of time to wait before giving up on a delete, zero means determine a timeout from the grace period
+	Wait           bool     // If true, wait for resources to be gone before returning. This may be slow.
+	Selector       string   // Selector (label query) to filter on
+	Filenames      []string // List of filenames, URLs, or '-' for stdin.
+	FileContent    string   // Content to delete if Filenames contains '-'.
+	Recursive      bool     // If true, process directory recursively.
+	IgnoreNotFound bool     // If true, ignore "not found" errors
+	Cascade        string   // "true", "false", or "orphan". If true, cascade the deletion of the resources managed by this resource (e.g. Pods created by a ReplicaSet).
+	Sudo           bool
+}
+
+type KubectlLogOptions struct {
+	KubeconfigPath string // Path to kubeconfig file
+	Namespace      string // Namespace of the pod
+	Container      string // Container name within the pod
+	Follow         bool   // Follow the log stream
+	Previous       bool   // Print the logs for the previous instance of the container in a pod if it exists
+	SinceTime      string // Only return logs newer than a specific date (RFC3339)
+	SinceSeconds   *int64 // Only return logs newer than a relative duration like 5s, 2m, or 1h.
+	TailLines      *int64 // If set, the number of lines from the end of the logs to show.
+	LimitBytes     *int64 // If set, the maximum number of bytes to read from the log.
+	Timestamps     bool   // Include timestamps on each line in the log output
+	Sudo           bool
+}
+
+type KubectlExecOptions struct {
+	KubeconfigPath string        // Path to kubeconfig file
+	Namespace      string        // Namespace of the pod
+	Container      string        // Container name within the pod
+	Stdin          bool          // Pass stdin to the container
+	TTY            bool          // Allocate a pseudo-TTY
+	CommandTimeout time.Duration // Timeout for the exec command itself (not for the process in container unless it's interactive and this runner handles it)
+	Sudo           bool
+}
+
+type KubectlVersionInfo struct { // Based on `kubectl version -o json`
+	ClientVersion struct {
+		Major        string `json:"major"`
+		Minor        string `json:"minor"`
+		GitVersion   string `json:"gitVersion"`
+		GitCommit    string `json:"gitCommit"`
+		GitTreeState string `json:"gitTreeState"`
+		BuildDate    string `json:"buildDate"`
+		GoVersion    string `json:"goVersion"`
+		Compiler     string `json:"compiler"`
+		Platform     string `json:"platform"`
+	} `json:"clientVersion"`
+	ServerVersion *struct { // ServerVersion can be null if server is unreachable
+		Major        string `json:"major"`
+		Minor        string `json:"minor"`
+		GitVersion   string `json:"gitVersion"`
+		GitCommit    string `json:"gitCommit"`
+		GitTreeState string `json:"gitTreeState"`
+		BuildDate    string `json:"buildDate"`
+		GoVersion    string `json:"goVersion"`
+		Compiler     string `json:"compiler"`
+		Platform     string `json:"platform"`
+	} `json:"serverVersion,omitempty"`
+}
+
+// KubectlNodeInfo is a simplified struct for `kubectl get nodes -o json` items
+type KubectlNodeInfo struct {
+	APIVersion string `json:"apiVersion"`
+	Kind       string `json:"kind"`
+	Metadata   struct {
+		Name              string            `json:"name"`
+		UID               string            `json:"uid"`
+		CreationTimestamp string            `json:"creationTimestamp"`
+		Labels            map[string]string `json:"labels"`
+		Annotations       map[string]string `json:"annotations"`
+	} `json:"metadata"`
+	Spec struct {
+		PodCIDR           string `json:"podCIDR"`
+		ProviderID        string `json:"providerID"`
+		Unschedulable     bool   `json:"unschedulable,omitempty"`
+		// Taints might be here
+	} `json:"spec"`
+	Status struct {
+		Capacity    map[string]string `json:"capacity"`
+		Allocatable map[string]string `json:"allocatable"`
+		Conditions  []struct {
+			Type               string `json:"type"` // e.g., Ready, MemoryPressure
+			Status             string `json:"status"` // True, False, Unknown
+			LastHeartbeatTime  string `json:"lastHeartbeatTime"`
+			LastTransitionTime string `json:"lastTransitionTime"`
+			Reason             string `json:"reason"`
+			Message            string `json:"message"`
+		} `json:"conditions"`
+		Addresses []struct {
+			Type    string `json:"type"` // e.g., InternalIP, Hostname
+			Address string `json:"address"`
+		} `json:"addresses"`
+		NodeInfo struct {
+			MachineID               string `json:"machineID"`
+			SystemUUID              string `json:"systemUUID"`
+			BootID                  string `json:"bootID"`
+			KernelVersion           string `json:"kernelVersion"`
+			OSImage                 string `json:"osImage"`
+			ContainerRuntimeVersion string `json:"containerRuntimeVersion"`
+			KubeletVersion          string `json:"kubeletVersion"`
+			KubeProxyVersion        string `json:"kubeProxyVersion"`
+		} `json:"nodeInfo"`
+		// Images, DaemonEndpoints might be here
+	} `json:"status"`
+}
+
+// KubectlPodInfo is a simplified struct for `kubectl get pods -o json` items
+type KubectlPodInfo struct {
+	APIVersion string `json:"apiVersion"`
+	Kind       string `json:"kind"`
+	Metadata   struct {
+		Name              string            `json:"name"`
+		Namespace         string            `json:"namespace"`
+		UID               string            `json:"uid"`
+		CreationTimestamp string            `json:"creationTimestamp"`
+		Labels            map[string]string `json:"labels"`
+		Annotations       map[string]string `json:"annotations"`
+		OwnerReferences   []struct {
+			APIVersion string `json:"apiVersion"`
+			Kind       string `json:"kind"`
+			Name       string `json:"name"`
+			UID        string `json:"uid"`
+		} `json:"ownerReferences,omitempty"`
+	} `json:"metadata"`
+	Spec struct {
+		NodeName   string `json:"nodeName"`
+		Containers []struct {
+			Name  string `json:"name"`
+			Image string `json:"image"`
+			// Ports, Env, Resources, VolumeMounts etc.
+		} `json:"containers"`
+		// Volumes, RestartPolicy, TerminationGracePeriodSeconds etc.
+	} `json:"spec"`
+	Status struct {
+		Phase             string `json:"phase"` // Pending, Running, Succeeded, Failed, Unknown
+		HostIP            string `json:"hostIP"`
+		PodIP             string `json:"podIP"`
+		StartTime         string `json:"startTime,omitempty"`
+		ContainerStatuses []struct {
+			Name        string `json:"name"`
+			State       map[string]interface{} `json:"state"` // e.g. {"running":{"startedAt":"..."}} or {"terminated":{"exitCode":0,...}}
+			LastState   map[string]interface{} `json:"lastState,omitempty"`
+			Ready       bool   `json:"ready"`
+			RestartCount int32  `json:"restartCount"`
+			Image       string `json:"image"`
+			ImageID     string `json:"imageID"`
+			ContainerID string `json:"containerID"` // e.g. containerd://<hash>
+		} `json:"containerStatuses,omitempty"`
+		Conditions []struct {
+			Type   string `json:"type"`
+			Status string `json:"status"`
+			// LastProbeTime, LastTransitionTime
+		} `json:"conditions,omitempty"`
+		// QOSClass
+	} `json:"status"`
+}
+
+
+// KubectlServiceInfo for `kubectl get svc -o json`
+// KubectlDeploymentInfo for `kubectl get deploy -o json`
+// KubectlRolloutOptions, KubectlScaleOptions, KubectlPortForwardOptions, KubectlConfigViewOptions, KubectlContextInfo, KubectlMetricsInfo, KubectlContainerMetricsInfo
+// would also need to be defined based on their respective kubectl command flags and JSON outputs.
+// For brevity, these are listed as comments but would be fully fleshed out.
+
 
 // --- Containerd/ctr Supporting Structs ---
 

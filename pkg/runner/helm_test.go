@@ -333,7 +333,131 @@ func TestDefaultRunner_HelmVersion(t *testing.T) {
     assert.Contains(t, err.Error(), "helm version failed")
 }
 
-// TODO: Add tests for HelmSearchRepo, HelmPull, HelmPackage once implemented.
-// The pattern would involve mocking `helm search repo -o json`, `helm pull`, `helm package` commands
-// and parsing their respective outputs or verifying arguments.
-// For HelmPull and HelmPackage, the return value (path to chart) would also be asserted.
+func TestDefaultRunner_HelmSearchRepo(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	keyword := "nginx"
+
+	sampleSearchOutput := `[
+    {"name":"bitnami/nginx","version":"13.2.22","app_version":"1.23.3","description":"NGINX Open Source is a web server that can be also used as a reverse proxy..."},
+    {"name":"ingress-nginx/ingress-nginx","version":"4.7.0","app_version":"1.8.0","description":"Ingress controller for Kubernetes using NGINX as a reverse proxy and load balancer"}
+]`
+	expectedCharts := []HelmChartInfo{
+		{Name: "bitnami/nginx", Version: "13.2.22", AppVersion: "1.23.3", Description: "NGINX Open Source is a web server that can be also used as a reverse proxy..."},
+		{Name: "ingress-nginx/ingress-nginx", Version: "4.7.0", AppVersion: "1.8.0", Description: "Ingress controller for Kubernetes using NGINX as a reverse proxy and load balancer"},
+	}
+
+	// Test Case 1: Successful search
+	opts := HelmSearchOptions{}
+	expectedCmd := fmt.Sprintf("helm search repo %s -o json", shellEscape(keyword))
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte(sampleSearchOutput), []byte{}, nil).Times(1)
+	charts, err := runner.HelmSearchRepo(ctx, mockConn, keyword, opts)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedCharts, charts)
+
+	// Test Case 2: Search with --versions and --devel
+	optsVersions := HelmSearchOptions{Versions: true, Devel: true}
+	expectedCmdVersions := fmt.Sprintf("helm search repo %s --devel --versions -o json", shellEscape(keyword))
+	mockConn.EXPECT().Exec(ctx, expectedCmdVersions, gomock.Any()).Return([]byte(sampleSearchOutput), []byte{}, nil).Times(1) // Same output for simplicity
+	charts, err = runner.HelmSearchRepo(ctx, mockConn, keyword, optsVersions)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedCharts, charts)
+
+	// Test Case 3: No results (empty JSON array)
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte("[]"), []byte{}, nil).Times(1)
+	charts, err = runner.HelmSearchRepo(ctx, mockConn, keyword, opts)
+	assert.NoError(t, err)
+	assert.Empty(t, charts)
+
+	// Test Case 4: Command fails
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).
+		Return(nil, []byte("search error"), fmt.Errorf("exec search error")).Times(1)
+	charts, err = runner.HelmSearchRepo(ctx, mockConn, keyword, opts)
+	assert.Error(t, err)
+	assert.Nil(t, charts)
+	assert.Contains(t, err.Error(), "helm search repo for keyword")
+}
+
+func TestDefaultRunner_HelmPull(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	chartPath := "stable/mysql"
+
+	// Test Case 1: Successful pull
+	opts := HelmPullOptions{Version: "1.6.7", Destination: "/tmp/charts"}
+	expectedCmd := fmt.Sprintf("helm pull %s --destination %s --version %s",
+		shellEscape(chartPath), shellEscape(opts.Destination), shellEscape(opts.Version))
+	expectedOutput := "Successfully downloaded chart to /tmp/charts/mysql-1.6.7.tgz"
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte(expectedOutput+"\n"), []byte{}, nil).Times(1)
+
+	outputPath, err := runner.HelmPull(ctx, mockConn, chartPath, opts)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedOutput, outputPath)
+
+	// Test Case 2: Pull with untar
+	optsUntar := HelmPullOptions{Untar: true, UntarDir: "/tmp/untarred_mysql"}
+	expectedCmdUntar := fmt.Sprintf("helm pull %s --untar --untardir %s", shellEscape(chartPath), shellEscape(optsUntar.UntarDir))
+	expectedOutputUntar := "Successfully downloaded chart to /tmp/untarred_mysql/mysql"
+	mockConn.EXPECT().Exec(ctx, expectedCmdUntar, gomock.Any()).Return([]byte(expectedOutputUntar), []byte{}, nil).Times(1)
+
+	outputPath, err = runner.HelmPull(ctx, mockConn, chartPath, optsUntar)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedOutputUntar, outputPath)
+
+	// Test Case 3: Command fails
+	mockConn.EXPECT().Exec(ctx, gomock.Any(), gomock.Any()). // Use Any for cmd as it varies with options
+		Return(nil, []byte("pull error"), fmt.Errorf("exec pull error")).Times(1)
+	outputPath, err = runner.HelmPull(ctx, mockConn, chartPath, HelmPullOptions{})
+	assert.Error(t, err)
+	assert.Empty(t, outputPath)
+	assert.Contains(t, err.Error(), "helm pull for chart")
+}
+
+func TestDefaultRunner_HelmPackage(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	chartSourcePath := "./mychartdir" // Path to the chart source directory
+
+	// Test Case 1: Successful package
+	opts := HelmPackageOptions{Destination: "/tmp/packages"}
+	expectedCmd := fmt.Sprintf("helm package %s --destination %s", shellEscape(chartSourcePath), shellEscape(opts.Destination))
+	helmOutput := "Successfully packaged chart and saved it to: /tmp/packages/mychartdir-0.1.0.tgz"
+	expectedPackagePath := "/tmp/packages/mychartdir-0.1.0.tgz"
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte(helmOutput+"\n"), []byte{}, nil).Times(1)
+
+	packagePath, err := runner.HelmPackage(ctx, mockConn, chartSourcePath, opts)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedPackagePath, packagePath)
+
+	// Test Case 2: Package with version and appVersion override
+	optsVersioned := HelmPackageOptions{Version: "0.2.0", AppVersion: "1.1.0"}
+	expectedCmdVersioned := fmt.Sprintf("helm package %s --version %s --app-version %s",
+		shellEscape(chartSourcePath), shellEscape(optsVersioned.Version), shellEscape(optsVersioned.AppVersion))
+	helmOutputVersioned := "Successfully packaged chart and saved it to: mychartdir-0.2.0.tgz" // Assuming default destination "."
+	expectedPackagePathVersioned := "mychartdir-0.2.0.tgz"
+	mockConn.EXPECT().Exec(ctx, expectedCmdVersioned, gomock.Any()).Return([]byte(helmOutputVersioned), []byte{}, nil).Times(1)
+
+	packagePath, err = runner.HelmPackage(ctx, mockConn, chartSourcePath, optsVersioned)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedPackagePathVersioned, packagePath)
+
+	// Test Case 3: Command fails
+	mockConn.EXPECT().Exec(ctx, gomock.Any(), gomock.Any()). // Use Any for cmd
+		Return(nil, []byte("package error"), fmt.Errorf("exec package error")).Times(1)
+	packagePath, err = runner.HelmPackage(ctx, mockConn, chartSourcePath, HelmPackageOptions{})
+	assert.Error(t, err)
+	assert.Empty(t, packagePath)
+	assert.Contains(t, err.Error(), "helm package for chart at")
+}

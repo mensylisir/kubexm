@@ -569,17 +569,125 @@ func (r *defaultRunner) CtrExecInContainer(ctx context.Context, conn connector.C
 
 
 // --- Containerd/crictl Methods ---
-// These will be placeholders for now, as their implementation is extensive.
 
+// CrictlListImages lists images visible to the CRI runtime.
+// Corresponds to `crictl images [options]`.
 func (r *defaultRunner) CrictlListImages(ctx context.Context, conn connector.Connector, filters map[string]string) ([]CrictlImageInfo, error) {
-	return nil, errors.New("not implemented: CrictlListImages")
+	if conn == nil {
+		return nil, errors.New("connector cannot be nil")
+	}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "crictl", "images")
+
+	if filters != nil {
+		for key, value := range filters {
+			// crictl image filter format is typically `--filter key=value` or specific flags like `--image <image_ref>`
+			// For simplicity, assuming filters map to query params if crictl supports them directly,
+			// or specific flags. `crictl images --help` shows options like:
+			// --digest value Digest by which to filter images
+			// --image value  Image name or ID to filter images
+			// --label value  Label to filter images by (e.g. foo=bar)
+			// --quiet        Only show image IDs
+			// --verbose      Show verbose output for images
+			// A generic filter map isn't directly translatable without knowing crictl's exact filter syntax.
+			// For now, we'll assume a simple key=value filter if it's for labels.
+			// If 'image' or 'digest' is a key, use those specific flags.
+			if key == "image" || key == "digest" {
+				cmdArgs = append(cmdArgs, fmt.Sprintf("--%s", key), shellEscape(value))
+			} else { // Assume label filter
+				cmdArgs = append(cmdArgs, "--label", shellEscape(fmt.Sprintf("%s=%s", key, value)))
+			}
+		}
+	}
+	cmdArgs = append(cmdArgs, "-o", "json") // Request JSON output
+
+	cmd := strings.Join(cmdArgs, " ")
+	execOptions := &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout}
+
+	stdout, stderr, err := conn.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		return nil, errors.Wrapf(err, "crictl images failed. Stderr: %s", string(stderr))
+	}
+
+	// crictl images -o json output is typically: {"images": [ ... ]}
+	var result struct {
+		Images []CrictlImageInfo `json:"images"`
+	}
+	if err := json.Unmarshal(stdout, &result); err != nil {
+		// Handle cases where output might be just an empty array "[]" if no images and JSON structure is different
+		if strings.TrimSpace(string(stdout)) == "[]" || strings.TrimSpace(string(stdout)) == "" {
+			return []CrictlImageInfo{}, nil
+		}
+		return nil, errors.Wrapf(err, "failed to parse crictl images JSON output. Output: %s", string(stdout))
+	}
+	return result.Images, nil
 }
+
+// CrictlPullImage pulls an image using crictl.
+// Corresponds to `crictl pull [options] IMAGE`.
 func (r *defaultRunner) CrictlPullImage(ctx context.Context, conn connector.Connector, imageName string, authCreds string, sandboxConfigPath string) error {
-	return errors.New("not implemented: CrictlPullImage")
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if strings.TrimSpace(imageName) == "" {
+		return errors.New("imageName cannot be empty for CrictlPullImage")
+	}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "crictl", "pull")
+	if authCreds != "" { // Format: "USERNAME[:PASSWORD]"
+		cmdArgs = append(cmdArgs, "--auth", shellEscape(authCreds))
+	}
+	if sandboxConfigPath != "" {
+		// This is for pulling sandbox image usually, e.g. pause image.
+		// `crictl pull --cri-socket /path/to/crio.sock --runtime-endpoint /path/to/crio.sock image`
+		// The sandboxConfigPath is more for `runc` or specific runtime configs, not directly a `crictl pull` flag.
+		// `crictl` uses runtime endpoint and image endpoint from its config `/etc/crictl.yaml`.
+		// For now, we'll assume `crictl` is configured correctly on the host.
+		// If `sandboxConfigPath` implies a specific runtime endpoint, that's a global crictl flag.
+		// Example: `crictl --runtime-endpoint unix:///run/containerd/containerd.sock pull ...`
+		// This runner does not yet support global crictl flags per command.
+		// For now, this parameter is noted but not directly used in the command construction unless it maps to a specific pull flag.
+	}
+	cmdArgs = append(cmdArgs, shellEscape(imageName))
+	cmd := strings.Join(cmdArgs, " ")
+
+	// Pulling can take a long time.
+	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 15 * time.Minute}
+	_, stderr, err := conn.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		return errors.Wrapf(err, "crictl pull image %s failed. Stderr: %s", imageName, string(stderr))
+	}
+	// crictl pull output is usually minimal on success.
+	return nil
 }
+
+// CrictlRemoveImage removes an image using crictl.
+// Corresponds to `crictl rmi IMAGE`.
 func (r *defaultRunner) CrictlRemoveImage(ctx context.Context, conn connector.Connector, imageName string) error {
-	return errors.New("not implemented: CrictlRemoveImage")
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if strings.TrimSpace(imageName) == "" {
+		return errors.New("imageName cannot be empty for CrictlRemoveImage")
+	}
+
+	cmd := fmt.Sprintf("crictl rmi %s", shellEscape(imageName)) // imageName can be ID or name
+	execOptions := &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout}
+	_, stderr, err := conn.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		// Idempotency: If image not found, crictl rmi usually errors.
+		// Stderr: "FATA[0000] rpc error: code = NotFound desc = image ... not found"
+		// Or "INFO[0000] image ... not found, FATA[0000] 1 error occurred:"
+		if strings.Contains(string(stderr), "not found") {
+			return nil // Consider "not found" as success for removal idempotency
+		}
+		return errors.Wrapf(err, "crictl rmi image %s failed. Stderr: %s", imageName, string(stderr))
+	}
+	return nil
 }
+
 func (r *defaultRunner) CrictlInspectImage(ctx context.Context, conn connector.Connector, imageName string) (*CrictlImageDetails, error) {
 	return nil, errors.New("not implemented: CrictlInspectImage")
 }

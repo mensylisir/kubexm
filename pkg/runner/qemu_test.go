@@ -479,3 +479,214 @@ func TestDefaultRunner_ImportVMTemplate(t *testing.T) {
     assert.Error(t, err)
     assert.Contains(t, err.Error(), "failed to define VM")
 }
+
+func TestDefaultRunner_CloneVolume(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+
+	poolName := "default-pool"
+	origVolName := "base-image.qcow2"
+	newVolName := "cloned-vm-disk.qcow2"
+
+	// Test Case 1: Successful clone, no resize
+	cloneCmd := fmt.Sprintf("virsh vol-clone --pool %s %s %s", shellEscape(poolName), shellEscape(origVolName), shellEscape(newVolName))
+	mockConn.EXPECT().Exec(ctx, cloneCmd, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+	err := runner.CloneVolume(ctx, mockConn, poolName, origVolName, newVolName, 0, "qcow2") // newSizeGB = 0 means no resize
+	assert.NoError(t, err)
+
+	// Test Case 2: Successful clone, with resize
+	newSizeGB := uint(30)
+	resizeCmd := fmt.Sprintf("virsh vol-resize --pool %s %s %sG", shellEscape(poolName), shellEscape(newVolName), fmt.Sprint(newSizeGB))
+	gomock.InOrder(
+		mockConn.EXPECT().Exec(ctx, cloneCmd, gomock.Any()).Return(nil, []byte{}, nil).Times(1),
+		mockConn.EXPECT().Exec(ctx, resizeCmd, gomock.Any()).Return(nil, []byte{}, nil).Times(1),
+	)
+	err = runner.CloneVolume(ctx, mockConn, poolName, origVolName, newVolName, newSizeGB, "qcow2")
+	assert.NoError(t, err)
+
+	// Test Case 3: Clone fails
+	mockConn.EXPECT().Exec(ctx, cloneCmd, gomock.Any()).Return(nil, []byte("clone error"), fmt.Errorf("exec clone error")).Times(1)
+	err = runner.CloneVolume(ctx, mockConn, poolName, origVolName, newVolName, 0, "qcow2")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to clone volume")
+
+	// Test Case 4: Clone succeeds, but resize fails
+	mockConn.EXPECT().Exec(ctx, cloneCmd, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+	mockConn.EXPECT().Exec(ctx, resizeCmd, gomock.Any()).Return(nil, []byte("resize error"), fmt.Errorf("exec resize error")).Times(1)
+	err = runner.CloneVolume(ctx, mockConn, poolName, origVolName, newVolName, newSizeGB, "qcow2")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "cloned successfully, but failed to resize")
+}
+
+func TestDefaultRunner_ResizeVolume(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+
+	poolName := "images"
+	volName := "vm-disk1.img"
+	newSizeGB := uint(50)
+
+	// Test Case 1: Successful resize
+	expectedCmd := fmt.Sprintf("virsh vol-resize --pool %s %s %sG", shellEscape(poolName), shellEscape(volName), fmt.Sprint(newSizeGB))
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+	err := runner.ResizeVolume(ctx, mockConn, poolName, volName, newSizeGB)
+	assert.NoError(t, err)
+
+	// Test Case 2: Resize command fails
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return(nil, []byte("resize error"), fmt.Errorf("exec resize error")).Times(1)
+	err = runner.ResizeVolume(ctx, mockConn, poolName, volName, newSizeGB)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to resize volume")
+
+	// Test Case 3: Invalid arguments (e.g. size 0)
+	err = runner.ResizeVolume(ctx, mockConn, poolName, volName, 0)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "non-zero newSizeGB")
+}
+
+func TestDefaultRunner_DeleteVolume(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	poolName := "default"
+	volName := "test-vol-to-delete.qcow2"
+
+	// Test Case 1: Successful delete
+	cmd := fmt.Sprintf("virsh vol-delete --pool %s %s", shellEscape(poolName), shellEscape(volName))
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+	err := runner.DeleteVolume(ctx, mockConn, poolName, volName)
+	assert.NoError(t, err)
+
+	// Test Case 2: Volume not found (idempotency)
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).
+		Return(nil, []byte("error: Failed to get volume 'test-vol-to-delete.qcow2'"), &connector.CommandError{ExitCode: 1}).Times(1)
+	err = runner.DeleteVolume(ctx, mockConn, poolName, volName)
+	assert.NoError(t, err)
+
+	// Test Case 3: Other command execution error
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).
+		Return(nil, []byte("some other delete error"), fmt.Errorf("exec delete error")).Times(1)
+	err = runner.DeleteVolume(ctx, mockConn, poolName, volName)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to delete volume")
+}
+
+func TestDefaultRunner_CreateVolume(t *testing.T) {
+    ctrl := gomock.NewController(t)
+    defer ctrl.Finish()
+
+    mockConn := mocks.NewMockConnector(ctrl)
+    runner := NewDefaultRunner()
+    ctx := context.Background()
+
+    poolName := "vms"
+    volName := "new-disk.img"
+    sizeGB := uint(15)
+    format := "raw"
+
+    // Test Case 1: Simple volume creation
+    expectedCmdSimple := fmt.Sprintf("virsh vol-create-as %s %s %dG --format %s",
+        shellEscape(poolName), shellEscape(volName), sizeGB, shellEscape(format))
+    mockConn.EXPECT().Exec(ctx, expectedCmdSimple, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+    err := runner.CreateVolume(ctx, mockConn, poolName, volName, sizeGB, format, "", "")
+    assert.NoError(t, err)
+
+    // Test Case 2: Creation with backing store
+    backingVolName := "base.qcow2"
+    backingVolFormat := "qcow2"
+    expectedCmdBacking := fmt.Sprintf("virsh vol-create-as %s %s %dG --format %s --backing-vol %s --backing-vol-format %s",
+        shellEscape(poolName), shellEscape(volName), sizeGB, shellEscape(format), shellEscape(backingVolName), shellEscape(backingVolFormat))
+    mockConn.EXPECT().Exec(ctx, expectedCmdBacking, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+    err = runner.CreateVolume(ctx, mockConn, poolName, volName, sizeGB, format, backingVolName, backingVolFormat)
+    assert.NoError(t, err)
+
+    // Test Case 3: Volume already exists (idempotency)
+    mockConn.EXPECT().Exec(ctx, expectedCmdSimple, gomock.Any()).
+        Return(nil, []byte(fmt.Sprintf("error: operation failed: storage volume '%s' already exists", volName)), &connector.CommandError{ExitCode: 1}).Times(1)
+    err = runner.CreateVolume(ctx, mockConn, poolName, volName, sizeGB, format, "", "")
+    assert.NoError(t, err)
+
+    // Test Case 4: Missing backingVolFormat when backingVolName is provided
+    err = runner.CreateVolume(ctx, mockConn, poolName, volName, sizeGB, format, backingVolName, "")
+    assert.Error(t, err)
+    assert.Contains(t, err.Error(), "backingVolFormat is required")
+}
+
+func TestDefaultRunner_CreateCloudInitISO(t *testing.T) {
+    ctrl := gomock.NewController(t)
+    defer ctrl.Finish()
+
+    mockConn := mocks.NewMockConnector(ctrl)
+    runner := NewDefaultRunner()
+    ctx := context.Background()
+
+    vmName := "my-vm-iso"
+    isoDestPath := "/opt/isos/my-vm-iso-cloud-init.iso"
+    isoDir := "/opt/isos"
+    userData := "user-data-content"
+    metaData := "meta-data-content"
+
+    // Using gomock.Any() for tmpDirPath as it's time-dependent and hard to predict exactly.
+    // We can check for parts of the command.
+
+    // Mock Mkdirp for tmpDirPath and isoDir
+    mockConn.EXPECT().Mkdirp(ctx, mockConn, gomock.AssignableToTypeOf("string"), "0700", true).
+        DoAndReturn(func(_ context.Context, _ connector.Connector, path string, _ string, _ bool) error {
+            assert.Contains(t, path, "/tmp/cloud-init-tmp-"+vmName)
+            return nil
+        }).Times(1)
+    mockConn.EXPECT().Mkdirp(ctx, mockConn, isoDir, "0755", true).Return(nil).Times(1)
+
+
+    // Mock WriteFile for user-data and meta-data
+    mockConn.EXPECT().WriteFile(ctx, mockConn, []byte(userData), gomock.Contains("user-data"), "0644", true).Return(nil).Times(1)
+    mockConn.EXPECT().WriteFile(ctx, mockConn, []byte(metaData), gomock.Contains("meta-data"), "0644", true).Return(nil).Times(1)
+
+    // Mock LookPath for genisoimage (assume it exists)
+    mockConn.EXPECT().LookPath(ctx, mockConn, "genisoimage").Return("/usr/bin/genisoimage", nil).Times(1)
+
+    // Mock Exec for genisoimage
+    // Example: genisoimage -o /opt/isos/my-vm-iso-cloud-init.iso -V cidata -r -J /tmp/cloud-init-tmp-my-vm-iso-167...
+    mockConn.EXPECT().Exec(ctx, gomock. दट(func(cmd string) bool {
+        return strings.HasPrefix(cmd, "genisoimage -o "+shellEscape(isoDestPath)) &&
+               strings.Contains(cmd, "-V cidata -r -J") &&
+               strings.Contains(cmd, "/tmp/cloud-init-tmp-"+vmName)
+    }), gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+
+
+    // Mock Remove for cleanup
+    mockConn.EXPECT().Remove(ctx, mockConn, gomock.Contains("/tmp/cloud-init-tmp-"+vmName), true).Return(nil).Times(1)
+
+
+    err := runner.CreateCloudInitISO(ctx, mockConn, vmName, isoDestPath, userData, metaData, "")
+    assert.NoError(t, err)
+
+    // Test case with mkisofs fallback
+    mockConn.EXPECT().Mkdirp(ctx, mockConn, gomock.AssignableToTypeOf("string"), "0700", true).Return(nil).Times(1)
+    mockConn.EXPECT().Mkdirp(ctx, mockConn, isoDir, "0755", true).Return(nil).Times(1)
+    mockConn.EXPECT().WriteFile(ctx, mockConn, []byte(userData), gomock.Contains("user-data"), "0644", true).Return(nil).Times(1)
+    mockConn.EXPECT().WriteFile(ctx, mockConn, []byte(metaData), gomock.Contains("meta-data"), "0644", true).Return(nil).Times(1)
+
+    mockConn.EXPECT().LookPath(ctx, mockConn, "genisoimage").Return("", fmt.Errorf("not found")).Times(1)
+    mockConn.EXPECT().LookPath(ctx, mockConn, "mkisofs").Return("/usr/bin/mkisofs", nil).Times(1)
+
+    mockConn.EXPECT().Exec(ctx, gomock. दट(func(cmd string) bool {
+        return strings.HasPrefix(cmd, "mkisofs -o "+shellEscape(isoDestPath))
+    }), gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+    mockConn.EXPECT().Remove(ctx, mockConn, gomock.Contains("/tmp/cloud-init-tmp-"+vmName), true).Return(nil).Times(1)
+
+    err = runner.CreateCloudInitISO(ctx, mockConn, vmName, isoDestPath, userData, metaData, "")
+    assert.NoError(t, err)
+
+}
