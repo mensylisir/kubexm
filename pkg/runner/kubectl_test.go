@@ -86,7 +86,9 @@ func TestDefaultRunner_KubectlExec(t *testing.T) {
 func TestDefaultRunner_KubectlGetNodes(t *testing.T) {
     ctrl := gomock.NewController(t); defer ctrl.Finish()
     mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background()
-    sampleJSON := `{"items": [{"metadata": {"name": "node1"}}]}`, var expected []KubectlNodeInfo; json.Unmarshal([]byte(sampleJSON), &struct{Items []KubectlNodeInfo `json:"items"`}{Items: &expected})
+    sampleJSON := `{"items": [{"metadata": {"name": "node1"}}]}`
+	var expected []KubectlNodeInfo
+	json.Unmarshal([]byte(sampleJSON), &struct{Items []KubectlNodeInfo `json:"items"`}{Items: &expected})
     mockConn.EXPECT().Exec(ctx, "kubectl get nodes -o json", gomock.Any()).Return([]byte(sampleJSON), nil, nil).Times(1)
     nodes, err := runner.KubectlGetNodes(ctx, mockConn, KubectlGetOptions{}); assert.NoError(t, err); assert.Equal(t, expected, nodes)
 }
@@ -94,7 +96,9 @@ func TestDefaultRunner_KubectlGetNodes(t *testing.T) {
 func TestDefaultRunner_KubectlGetPods(t *testing.T) {
     ctrl := gomock.NewController(t); defer ctrl.Finish()
     mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background(); ns := "appns"
-    sampleJSON := `{"items": [{"metadata": {"name": "poda"}}]}`, var expected []KubectlPodInfo; json.Unmarshal([]byte(sampleJSON), &struct{Items []KubectlPodInfo `json:"items"`}{Items: &expected})
+    sampleJSON := `{"items": [{"metadata": {"name": "poda"}}]}`
+	var expected []KubectlPodInfo
+	json.Unmarshal([]byte(sampleJSON), &struct{Items []KubectlPodInfo `json:"items"`}{Items: &expected})
     mockConn.EXPECT().Exec(ctx, fmt.Sprintf("kubectl get pods --namespace %s -o json", shellEscape(ns)), gomock.Any()).Return([]byte(sampleJSON), nil, nil).Times(1)
     pods, err := runner.KubectlGetPods(ctx, mockConn, ns, KubectlGetOptions{}); assert.NoError(t, err); assert.Equal(t, expected, pods)
 }
@@ -102,7 +106,9 @@ func TestDefaultRunner_KubectlGetPods(t *testing.T) {
 func TestDefaultRunner_KubectlGetServices(t *testing.T) {
 	ctrl := gomock.NewController(t); defer ctrl.Finish()
 	mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background(); ns := "prod"
-	sampleJSON := `{"items": [{"metadata": {"name": "svca"}}]}`, var expected []KubectlServiceInfo; json.Unmarshal([]byte(sampleJSON), &struct{Items []KubectlServiceInfo `json:"items"`}{Items: &expected})
+	sampleJSON := `{"items": [{"metadata": {"name": "svca"}}]}`
+	var expected []KubectlServiceInfo
+	json.Unmarshal([]byte(sampleJSON), &struct{Items []KubectlServiceInfo `json:"items"`}{Items: &expected})
 	mockConn.EXPECT().Exec(ctx, fmt.Sprintf("kubectl get services --namespace %s -o json", shellEscape(ns)), gomock.Any()).Return([]byte(sampleJSON), nil, nil).Times(1)
 	svcs, err := runner.KubectlGetServices(ctx, mockConn, ns, KubectlGetOptions{}); assert.NoError(t, err); assert.Equal(t, expected, svcs)
 }
@@ -110,7 +116,9 @@ func TestDefaultRunner_KubectlGetServices(t *testing.T) {
 func TestDefaultRunner_KubectlGetDeployments(t *testing.T) {
 	ctrl := gomock.NewController(t); defer ctrl.Finish()
 	mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background(); ns := "dev"
-	sampleJSON := `{"items": [{"metadata": {"name": "depx"}}]}`, var expected []KubectlDeploymentInfo; json.Unmarshal([]byte(sampleJSON), &struct{Items []KubectlDeploymentInfo `json:"items"`}{Items: &expected})
+	sampleJSON := `{"items": [{"metadata": {"name": "depx"}}]}`
+	var expected []KubectlDeploymentInfo
+	json.Unmarshal([]byte(sampleJSON), &struct{Items []KubectlDeploymentInfo `json:"items"`}{Items: &expected})
 	mockConn.EXPECT().Exec(ctx, fmt.Sprintf("kubectl get deployments --namespace %s -o json", shellEscape(ns)), gomock.Any()).Return([]byte(sampleJSON), nil, nil).Times(1)
 	deps, err := runner.KubectlGetDeployments(ctx, mockConn, ns, KubectlGetOptions{}); assert.NoError(t, err); assert.Equal(t, expected, deps)
 }

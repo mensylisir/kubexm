@@ -18,7 +18,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/utils"
+	"github.com/mensylisir/kubexm/pkg/util"
 )
 
 const (
