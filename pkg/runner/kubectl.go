@@ -299,30 +299,229 @@ func (r *defaultRunner) KubectlVersion(ctx context.Context, conn connector.Conne
 }
 
 
-// --- Placeholder implementations for other Kubectl methods ---
-
+// KubectlDescribe displays detailed information about a specific resource or group of resources.
 func (r *defaultRunner) KubectlDescribe(ctx context.Context, conn connector.Connector, resourceType, resourceName string, opts KubectlDescribeOptions) (string, error) {
-	return "", errors.New("not implemented: KubectlDescribe")
+	if conn == nil {
+		return "", errors.New("connector cannot be nil")
+	}
+	if resourceType == "" { // resourceName can be empty if selector is used
+		return "", errors.New("resourceType is required for KubectlDescribe")
+	}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "kubectl", "describe", shellEscape(resourceType))
+	if resourceName != "" {
+		cmdArgs = append(cmdArgs, shellEscape(resourceName))
+	}
+
+	if opts.Namespace != "" {
+		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+	}
+	if opts.KubeconfigPath != "" {
+		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+	}
+	if opts.Selector != "" && resourceName == "" { // Selector is usually used when not specifying a name
+		cmdArgs = append(cmdArgs, "-l", shellEscape(opts.Selector))
+	}
+	if !opts.ShowEvents { // Default is true, so add flag if false (kubectl describe has --show-events=true by default)
+		// Kubectl does not have a --show-events=false. This option is more for API consistency.
+		// The output will always contain events unless filtered by other means post-command.
+	}
+
+	cmd := strings.Join(cmdArgs, " ")
+	execOptions := &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultKubectlTimeout}
+
+	stdout, stderr, err := conn.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		// Describe can output to both stdout and stderr for different parts of info or errors.
+		return string(stdout) + string(stderr), errors.Wrapf(err, "kubectl describe %s %s failed. Output: %s", resourceType, resourceName, string(stdout)+string(stderr))
+	}
+	return string(stdout), nil // Primarily returns stdout
 }
 
+// KubectlLogs prints the logs for a container in a pod.
 func (r *defaultRunner) KubectlLogs(ctx context.Context, conn connector.Connector, podName string, opts KubectlLogOptions) (string, error) {
-	return "", errors.New("not implemented: KubectlLogs")
+	if conn == nil {
+		return "", errors.New("connector cannot be nil")
+	}
+	if podName == "" {
+		return "", errors.New("podName is required for KubectlLogs")
+	}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "kubectl", "logs", shellEscape(podName))
+
+	if opts.Namespace != "" {
+		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+	}
+	if opts.KubeconfigPath != "" {
+		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+	}
+	if opts.Container != "" {
+		cmdArgs = append(cmdArgs, "-c", shellEscape(opts.Container))
+	}
+	if opts.Follow {
+		cmdArgs = append(cmdArgs, "-f")
+	}
+	if opts.Previous {
+		cmdArgs = append(cmdArgs, "-p")
+	}
+	if opts.SinceTime != "" {
+		cmdArgs = append(cmdArgs, "--since-time="+shellEscape(opts.SinceTime))
+	}
+	if opts.SinceSeconds != nil {
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--since=%ds", *opts.SinceSeconds))
+	}
+	if opts.TailLines != nil {
+		if *opts.TailLines == -1 { // -1 means all lines
+			cmdArgs = append(cmdArgs, "--tail=-1")
+		} else {
+			cmdArgs = append(cmdArgs, fmt.Sprintf("--tail=%d", *opts.TailLines))
+		}
+	}
+	if opts.LimitBytes != nil {
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--limit-bytes=%d", *opts.LimitBytes))
+	}
+	if opts.Timestamps {
+		cmdArgs = append(cmdArgs, "--timestamps")
+	}
+
+	cmd := strings.Join(cmdArgs, " ")
+	execTimeout := DefaultKubectlTimeout
+	if opts.Follow { // Follow can be long-running
+		execTimeout = 1 * time.Hour // Arbitrary long timeout, should be context-controlled
+	}
+	execOptions := &connector.ExecOptions{Sudo: opts.Sudo, Timeout: execTimeout}
+
+	stdout, stderr, err := conn.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		// Logs are usually on stdout, errors on stderr.
+		return string(stdout), errors.Wrapf(err, "kubectl logs for pod %s failed. Stdout: %s, Stderr: %s", podName, string(stdout), string(stderr))
+	}
+	return string(stdout), nil
 }
 
+// KubectlExec executes a command in a container.
 func (r *defaultRunner) KubectlExec(ctx context.Context, conn connector.Connector, podName, containerName string, command []string, opts KubectlExecOptions) (string, error) {
-	return "", errors.New("not implemented: KubectlExec")
+	if conn == nil {
+		return "", errors.New("connector cannot be nil")
+	}
+	if podName == "" || len(command) == 0 {
+		return "", errors.New("podName and command are required for KubectlExec")
+	}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "kubectl", "exec")
+
+	if opts.Namespace != "" {
+		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+	}
+	if opts.KubeconfigPath != "" {
+		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+	}
+	if containerName != "" {
+		cmdArgs = append(cmdArgs, "-c", shellEscape(containerName))
+	}
+	if opts.Stdin {
+		cmdArgs = append(cmdArgs, "-i")
+	}
+	if opts.TTY {
+		cmdArgs = append(cmdArgs, "-t")
+	}
+
+	cmdArgs = append(cmdArgs, shellEscape(podName))
+	cmdArgs = append(cmdArgs, "--") // Separator before command and its args
+	for _, arg := range command {
+		cmdArgs = append(cmdArgs, shellEscape(arg))
+	}
+
+	cmd := strings.Join(cmdArgs, " ")
+	execTimeout := DefaultKubectlTimeout
+	if opts.CommandTimeout > 0 {
+		execTimeout = opts.CommandTimeout
+	} else if opts.Stdin || opts.TTY { // Interactive sessions might need longer
+		execTimeout = 1 * time.Hour
+	}
+
+	execOptions := &connector.ExecOptions{Sudo: opts.Sudo, Timeout: execTimeout}
+	// If opts.Stdin is true, caller needs to provide input via execOptions.Stdin if not using a real TTY setup.
+	// This simplified runner doesn't handle interactive TTY well; it's more for command execution and output capture.
+
+	stdout, stderr, err := conn.Exec(ctx, cmd, execOptions)
+	combinedOutput := string(stdout) + string(stderr)
+	if err != nil {
+		return combinedOutput, errors.Wrapf(err, "kubectl exec in pod %s failed (command: %v). Output: %s", podName, command, combinedOutput)
+	}
+	return combinedOutput, nil
 }
 
+// KubectlClusterInfo displays cluster information.
 func (r *defaultRunner) KubectlClusterInfo(ctx context.Context, conn connector.Connector) (string, error) {
-	return "", errors.New("not implemented: KubectlClusterInfo")
+	if conn == nil {
+		return "", errors.New("connector cannot be nil")
+	}
+	cmd := "kubectl cluster-info"
+	// Kubeconfig might be needed if not default
+	// Add opts KubectlClusterInfoOptions if flags like --kubeconfig are needed
+	execOptions := &connector.ExecOptions{Sudo: false, Timeout: DefaultKubectlTimeout}
+	stdout, stderr, err := conn.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		return string(stdout) + string(stderr), errors.Wrapf(err, "kubectl cluster-info failed. Output: %s", string(stdout)+string(stderr))
+	}
+	return string(stdout), nil
 }
 
+
+// KubectlGetNodes retrieves a list of nodes.
 func (r *defaultRunner) KubectlGetNodes(ctx context.Context, conn connector.Connector, opts KubectlGetOptions) ([]KubectlNodeInfo, error) {
-	return nil, errors.New("not implemented: KubectlGetNodes")
+	opts.OutputFormat = "json" // Ensure JSON output for parsing
+	rawJSON, err := r.KubectlGet(ctx, conn, "nodes", "", opts)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get nodes raw JSON")
+	}
+	if rawJSON == "" && opts.IgnoreNotFound { // If not found and ignored, result is empty list
+		return []KubectlNodeInfo{}, nil
+	}
+	if rawJSON == "" { // Not found and not ignored, or other issue leading to empty output
+		return []KubectlNodeInfo{}, nil // Or an error indicating no data
+	}
+
+	var list struct {
+		Items []KubectlNodeInfo `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(rawJSON), &list); err != nil {
+		return nil, errors.Wrapf(err, "failed to unmarshal nodes list JSON. Raw: %s", rawJSON)
+	}
+	return list.Items, nil
 }
 
+// KubectlGetPods retrieves a list of pods.
 func (r *defaultRunner) KubectlGetPods(ctx context.Context, conn connector.Connector, namespace string, opts KubectlGetOptions) ([]KubectlPodInfo, error) {
-	return nil, errors.New("not implemented: KubectlGetPods")
+	opts.OutputFormat = "json" // Ensure JSON output for parsing
+	opts.Namespace = namespace  // Set namespace from argument
+
+	resourceName := "" // Get all pods in the namespace (or all namespaces if opts.AllNamespaces)
+	rawJSON, err := r.KubectlGet(ctx, conn, "pods", resourceName, opts)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get pods raw JSON")
+	}
+	if rawJSON == "" && opts.IgnoreNotFound {
+		return []KubectlPodInfo{}, nil
+	}
+	if rawJSON == "" {
+		return []KubectlPodInfo{}, nil
+	}
+
+	var list struct {
+		Items []KubectlPodInfo `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(rawJSON), &list); err != nil {
+		return nil, errors.Wrapf(err, "failed to unmarshal pods list JSON. Raw: %s", rawJSON)
+	}
+	return list.Items, nil
+}
+
+// --- Placeholder implementations for other Kubectl methods ---
 }
 
 // ... and so on for KubectlGetServices, KubectlGetDeployments, etc. ...

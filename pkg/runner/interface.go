@@ -509,6 +509,9 @@ type Runner interface {
 	// all: For images, `all=true` prunes all unused images, not just dangling ones. For system, influences image pruning.
 	// Returns a summary string of actions taken and space reclaimed.
 	DockerPrune(ctx context.Context, conn connector.Connector, pruneType string, filters map[string]string, all bool) (string, error)
+	GetDockerDaemonConfig(ctx context.Context, conn connector.Connector) (*DockerDaemonOptions, error)
+	ConfigureDockerDaemon(ctx context.Context, conn connector.Connector, opts DockerDaemonOptions, restartService bool) error
+
 
 	// --- Containerd/ctr Methods ---
 	CtrListNamespaces(ctx context.Context, conn connector.Connector) ([]string, error)
@@ -545,6 +548,10 @@ type Runner interface {
 	CrictlPortForward(ctx context.Context, conn connector.Connector, podID string, ports []string) (string, error) // Returns request ID or output
 	CrictlVersion(ctx context.Context, conn connector.Connector) (*CrictlVersionInfo, error)
 	CrictlRuntimeConfig(ctx context.Context, conn connector.Connector) (string, error) // Returns raw config string
+	ConfigureCrictl(ctx context.Context, conn connector.Connector, configFileContent string) error
+	GetContainerdConfig(ctx context.Context, conn connector.Connector) (*ContainerdConfigOptions, error) // Assuming TOML or a structured format
+	ConfigureContainerd(ctx context.Context, conn connector.Connector, opts ContainerdConfigOptions, restartService bool) error
+
 
 	// --- Helm Methods ---
 	HelmInstall(ctx context.Context, conn connector.Connector, releaseName, chartPath string, opts HelmInstallOptions) error
@@ -906,6 +913,41 @@ type KubectlPodInfo struct {
 
 // --- Containerd/ctr Supporting Structs ---
 
+// ContainerdConfigOptions represents a subset of configurable options for Containerd's config.toml.
+// This is highly simplified. Real config.toml is complex and uses TOML.
+// Representing it fully in Go structs for JSON-like merging is non-trivial.
+// Often, users might provide a full template or specific sections to merge.
+// For this example, we'll keep it very basic.
+// A more robust approach for TOML would involve a TOML parser/merger.
+type ContainerdConfigOptions struct {
+	Version      *int    `toml:"version,omitempty" json:"version,omitempty"` // config.toml version
+	Root         *string `toml:"root,omitempty" json:"root,omitempty"`       // containerd root directory
+	State        *string `toml:"state,omitempty" json:"state,omitempty"`      // containerd state directory
+	GRPC         *ContainerdGRPCConfig `toml:"grpc,omitempty" json:"grpc,omitempty"`
+	Metrics      *ContainerdMetricsConfig `toml:"metrics,omitempty" json:"metrics,omitempty"`
+	DisabledPlugins *[]string `toml:"disabled_plugins,omitempty" json:"disabled_plugins,omitempty"`
+	// Plugins map allows for arbitrary plugin configuration.
+	// map[string]map[string]interface{} would be `[plugins."io.containerd.grpc.v1.cri".registry.mirrors."docker.io"]`
+	// This is very hard to model generically with strong types for all possible plugins.
+	// For specific common needs like registry mirrors, dedicated fields are better.
+	PluginConfigs *map[string]interface{} `toml:"plugins,omitempty" json:"plugins,omitempty"` // For arbitrary plugin sections
+	RegistryMirrors map[string][]string `toml:"-" json:"-"` // Special handling: map of registry to list of mirror endpoints
+}
+
+type ContainerdGRPCConfig struct {
+	Address        *string `toml:"address,omitempty" json:"address,omitempty"`
+	UID            *int    `toml:"uid,omitempty" json:"uid,omitempty"`
+	GID            *int    `toml:"gid,omitempty" json:"gid,omitempty"`
+	MaxRecvMsgSize *int    `toml:"max_recv_message_size,omitempty" json:"max_recv_message_size,omitempty"`
+	MaxSendMsgSize *int    `toml:"max_send_message_size,omitempty" json:"max_send_message_size,omitempty"`
+}
+
+type ContainerdMetricsConfig struct {
+	Address       *string `toml:"address,omitempty" json:"address,omitempty"`
+	GRPCHistogram *bool   `toml:"grpc_histogram,omitempty" json:"grpc_histogram,omitempty"`
+}
+
+
 type CtrImageInfo struct {
 	Name   string   // Image name (e.g., docker.io/library/alpine:latest)
 	Digest string   // Image digest (e.g., sha256:...)
@@ -1079,6 +1121,48 @@ type CrictlVersionInfo struct { // Based on `crictl version`
 
 
 // --- Docker Supporting Structs ---
+
+// DockerDaemonOptions represents a subset of configurable options in daemon.json.
+// Fields are pointers to distinguish between a deliberately empty value (e.g., empty array)
+// and a value that should not be configured (nil pointer).
+type DockerDaemonOptions struct {
+	LogDriver         *string            `json:"log-driver,omitempty"`
+	LogOpts           *map[string]string `json:"log-opts,omitempty"`
+	StorageDriver     *string            `json:"storage-driver,omitempty"`
+	StorageOpts       *[]string          `json:"storage-opts,omitempty"`
+	RegistryMirrors   *[]string          `json:"registry-mirrors,omitempty"`
+	InsecureRegistries *[]string          `json:"insecure-registries,omitempty"`
+	ExecOpts          *[]string          `json:"exec-opts,omitempty"` // e.g., ["native.cgroupdriver=systemd"]
+	Bridge            *string            `json:"bridge,omitempty"`    // e.g., "docker0"
+	Bip               *string            `json:"bip,omitempty"`       // e.g., "192.168.1.5/24"
+	FixedCIDR         *string            `json:"fixed-cidr,omitempty"`
+	DefaultGateway    *string            `json:"default-gateway,omitempty"`
+	DNS               *[]string          `json:"dns,omitempty"`
+	IPTables          *bool              `json:"iptables,omitempty"`
+	Experimental      *bool              `json:"experimental,omitempty"`
+	Debug             *bool              `json:"debug,omitempty"`
+	APICorsHeader     *string            `json:"api-cors-header,omitempty"`
+	Hosts             *[]string          `json:"hosts,omitempty"` // e.g. ["tcp://0.0.0.0:2375", "unix:///var/run/docker.sock"]
+	UserlandProxy     *bool              `json:"userland-proxy,omitempty"`
+	LiveRestore       *bool              `json:"live-restore,omitempty"`
+	CgroupParent      *string            `json:"cgroup-parent,omitempty"`
+	DefaultRuntime    *string            `json:"default-runtime,omitempty"`
+	Runtimes          *map[string]DockerRuntime `json:"runtimes,omitempty"`
+	Graph             *string            `json:"graph,omitempty"` // Deprecated: use data-root
+	DataRoot          *string            `json:"data-root,omitempty"` // e.g. /var/lib/docker
+	MaxConcurrentDownloads *int          `json:"max-concurrent-downloads,omitempty"`
+	MaxConcurrentUploads   *int          `json:"max-concurrent-uploads,omitempty"`
+	ShutdownTimeout        *int          `json:"shutdown-timeout,omitempty"`
+	// Add more fields as needed from https://docs.docker.com/engine/reference/commandline/dockerd/#daemon-configuration-file
+	// Using pointers for all fields to allow distinguishing between unset and explicitly set to default (e.g. false for bool)
+}
+
+// DockerRuntime defines the structure for runtime configurations within DockerDaemonOptions.
+type DockerRuntime struct {
+	Path string `json:"path"`
+	RuntimeArgs []string `json:"runtimeArgs,omitempty"`
+}
+
 
 // ImageInfo holds basic information about a Docker image.
 type ImageInfo struct {

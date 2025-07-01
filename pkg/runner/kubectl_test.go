@@ -247,6 +247,169 @@ func TestDefaultRunner_KubectlVersion(t *testing.T) {
 	assert.Contains(t, err.Error(), "kubectl version failed")
 }
 
+func TestDefaultRunner_KubectlDescribe(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+
+	resourceType := "pod"
+	resourceName := "my-test-pod"
+	namespace := "testing"
+	expectedOutput := "Name: my-test-pod\nNamespace: testing\nStatus: Running..."
+
+	// Test Case 1: Successful describe
+	opts := KubectlDescribeOptions{Namespace: namespace}
+	expectedCmd := fmt.Sprintf("kubectl describe %s %s --namespace %s",
+		shellEscape(resourceType), shellEscape(resourceName), shellEscape(namespace))
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte(expectedOutput), []byte{}, nil).Times(1)
+	output, err := runner.KubectlDescribe(ctx, mockConn, resourceType, resourceName, opts)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedOutput, output)
+
+	// Test Case 2: Describe with selector
+	optsSelector := KubectlDescribeOptions{Namespace: namespace, Selector: "app=test"}
+	expectedCmdSelector := fmt.Sprintf("kubectl describe %s --namespace %s -l %s",
+		shellEscape(resourceType), shellEscape(namespace), shellEscape(optsSelector.Selector))
+	mockConn.EXPECT().Exec(ctx, expectedCmdSelector, gomock.Any()).Return([]byte("Describing matching pods..."), []byte{}, nil).Times(1)
+	output, err = runner.KubectlDescribe(ctx, mockConn, resourceType, "", optsSelector) // No specific name
+	assert.NoError(t, err)
+	assert.Equal(t, "Describing matching pods...", output)
+
+	// Test Case 3: Command fails
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).
+		Return([]byte("Error: pod not found"), []byte("Error from server (NotFound)"), fmt.Errorf("exec error")).Times(1)
+	output, err = runner.KubectlDescribe(ctx, mockConn, resourceType, resourceName, opts)
+	assert.Error(t, err)
+	assert.Contains(t, output, "Error: pod not foundError from server (NotFound)") // Combined output
+	assert.Contains(t, err.Error(), "kubectl describe pod my-test-pod failed")
+}
+
+func TestDefaultRunner_KubectlLogs(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	podName := "logger-pod"
+	namespace := "logging"
+
+	// Test Case 1: Basic logs
+	opts := KubectlLogOptions{Namespace: namespace, Container: "app-container"}
+	expectedCmd := fmt.Sprintf("kubectl logs %s --namespace %s -c %s",
+		shellEscape(podName), shellEscape(namespace), shellEscape(opts.Container))
+	logContent := "Log line 1\nLog line 2"
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte(logContent), []byte{}, nil).Times(1)
+	output, err := runner.KubectlLogs(ctx, mockConn, podName, opts)
+	assert.NoError(t, err)
+	assert.Equal(t, logContent, output)
+
+	// Test Case 2: Logs with --previous and --tail
+	tailLines := int64(50)
+	optsPrev := KubectlLogOptions{Namespace: namespace, Previous: true, TailLines: &tailLines}
+	expectedCmdPrev := fmt.Sprintf("kubectl logs %s --namespace %s -p --tail=50", shellEscape(podName), shellEscape(namespace))
+	mockConn.EXPECT().Exec(ctx, expectedCmdPrev, gomock.Any()).Return([]byte("Previous logs..."), []byte{}, nil).Times(1)
+	output, err = runner.KubectlLogs(ctx, mockConn, podName, optsPrev)
+	assert.NoError(t, err)
+	assert.Equal(t, "Previous logs...", output)
+}
+
+func TestDefaultRunner_KubectlExec(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+
+	podName := "exec-target-pod"
+	namespace := "exec-ns"
+	containerName := "target-container"
+	command := []string{"/bin/sh", "-c", "echo hello world"}
+
+	// Test Case 1: Successful exec
+	opts := KubectlExecOptions{Namespace: namespace, Container: containerName, TTY: true, Stdin: true}
+	expectedCmd := fmt.Sprintf("kubectl exec --namespace %s -c %s -i -t %s -- %s %s %s",
+		shellEscape(namespace), shellEscape(containerName), shellEscape(podName),
+		shellEscape(command[0]), shellEscape(command[1]), shellEscape(command[2]))
+
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte("hello world\n"), []byte{}, nil).Times(1)
+	output, err := runner.KubectlExec(ctx, mockConn, podName, containerName, command, opts)
+	assert.NoError(t, err)
+	assert.Equal(t, "hello world\n", output)
+
+	// Test Case 2: Exec fails (command in container returns error)
+	mockConn.EXPECT().Exec(ctx, gomock.Any(), gomock.Any()). // Use Any cmd due to complexity for this case
+		Return([]byte(""), []byte("OCI runtime exec failed: exec failed: ...: exit status 1"), &connector.CommandError{ExitCode: 1}).Times(1)
+	output, err = runner.KubectlExec(ctx, mockConn, podName, containerName, command, opts)
+	assert.Error(t, err)
+	assert.Contains(t, output, "OCI runtime exec failed")
+	assert.Contains(t, err.Error(), "kubectl exec in pod exec-target-pod failed")
+}
+
+func TestDefaultRunner_KubectlGetNodes(t *testing.T) {
+    ctrl := gomock.NewController(t)
+    defer ctrl.Finish()
+    mockConn := mocks.NewMockConnector(ctrl)
+    runner := NewDefaultRunner()
+    ctx := context.Background()
+
+    sampleNodesJSON := `{
+        "apiVersion": "v1",
+        "kind": "List",
+        "items": [
+            {
+                "metadata": {"name": "node1", "uid": "uid1"},
+                "spec": {"podCIDR": "10.244.0.0/24"},
+                "status": {"nodeInfo": {"kubeletVersion": "v1.25.0"}}
+            },
+            {
+                "metadata": {"name": "node2", "uid": "uid2"},
+                "spec": {"podCIDR": "10.244.1.0/24"},
+                "status": {"nodeInfo": {"kubeletVersion": "v1.25.1"}}
+            }
+        ]
+    }`
+    expectedCmd := "kubectl get nodes -o json" // Base command for KubectlGetNodes with default opts
+    mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte(sampleNodesJSON), []byte{}, nil).Times(1)
+
+    nodes, err := runner.KubectlGetNodes(ctx, mockConn, KubectlGetOptions{})
+    assert.NoError(t, err)
+    assert.Len(t, nodes, 2)
+    assert.Equal(t, "node1", nodes[0].Metadata.Name)
+    assert.Equal(t, "v1.25.1", nodes[1].Status.NodeInfo.KubeletVersion)
+}
+
+func TestDefaultRunner_KubectlGetPods(t *testing.T) {
+    ctrl := gomock.NewController(t)
+    defer ctrl.Finish()
+    mockConn := mocks.NewMockConnector(ctrl)
+    runner := NewDefaultRunner()
+    ctx := context.Background()
+    namespace := "app-ns"
+
+    samplePodsJSON := `{
+        "apiVersion": "v1",
+        "kind": "List",
+        "items": [
+            {
+                "metadata": {"name": "pod-a", "namespace": "app-ns"},
+                "spec": {"nodeName": "node1"},
+                "status": {"phase": "Running", "podIP": "10.1.1.2"}
+            }
+        ]
+    }`
+    expectedCmd := fmt.Sprintf("kubectl get pods --namespace %s -o json", shellEscape(namespace))
+    mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte(samplePodsJSON), []byte{}, nil).Times(1)
+
+    pods, err := runner.KubectlGetPods(ctx, mockConn, namespace, KubectlGetOptions{})
+    assert.NoError(t, err)
+    assert.Len(t, pods, 1)
+    assert.Equal(t, "pod-a", pods[0].Metadata.Name)
+    assert.Equal(t, "Running", pods[0].Status.Phase)
+}
+
+
 // TODO: Add tests for KubectlDescribe, KubectlLogs, KubectlExec, etc.
 // and specific Getters like KubectlGetNodes, KubectlGetPods once implemented.
 // The pattern will be similar: mock kubectl command, check args, mock output, assert results/errors.
