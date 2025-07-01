@@ -122,6 +122,173 @@ func (r *defaultRunner) GetDockerDaemonConfig(ctx context.Context, conn connecto
 
 	configContent, err := r.ReadFile(ctx, conn, dockerDaemonConfigPath)
 	if err != nil {
+		exists, _ := r.Exists(ctx, conn, dockerDaemonConfigPath)
+		if !exists {
+			return &DockerDaemonOptions{}, nil
+		}
+		return nil, errors.Wrapf(err, "failed to read Docker daemon config file %s", dockerDaemonConfigPath)
+	}
+
+	if len(configContent) == 0 {
+		return &DockerDaemonOptions{}, nil
+	}
+
+	var opts DockerDaemonOptions
+	if err := json.Unmarshal(configContent, &opts); err != nil {
+		return nil, errors.Wrapf(err, "failed to unmarshal Docker daemon config from %s. Content: %s", dockerDaemonConfigPath, string(configContent))
+	}
+	return &opts, nil
+}
+
+// ConfigureDockerDaemon applies new daemon configurations.
+// It reads the existing daemon.json, merges new options, writes back, and optionally restarts Docker.
+func (r *defaultRunner) ConfigureDockerDaemon(ctx context.Context, conn connector.Connector, newOpts DockerDaemonOptions, restartService bool) error {
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+
+	currentOpts, err := r.GetDockerDaemonConfig(ctx, conn)
+	if err != nil {
+		return errors.Wrap(err, "failed to get current Docker daemon config before applying new settings")
+	}
+	if currentOpts == nil {
+		currentOpts = &DockerDaemonOptions{}
+	}
+
+	// Merge Strategy: newOpts fields overwrite currentOpts fields if newOpts field is not nil.
+	// For slices and maps, the new value completely replaces the old one if provided.
+	// A more sophisticated deep merge could be implemented if partial updates to slices/maps are needed.
+
+	if newOpts.LogDriver != nil { currentOpts.LogDriver = newOpts.LogDriver }
+	if newOpts.LogOpts != nil { currentOpts.LogOpts = newOpts.LogOpts }
+	if newOpts.StorageDriver != nil { currentOpts.StorageDriver = newOpts.StorageDriver }
+	if newOpts.StorageOpts != nil { currentOpts.StorageOpts = newOpts.StorageOpts }
+	if newOpts.RegistryMirrors != nil { currentOpts.RegistryMirrors = newOpts.RegistryMirrors }
+	if newOpts.InsecureRegistries != nil { currentOpts.InsecureRegistries = newOpts.InsecureRegistries }
+	if newOpts.ExecOpts != nil { currentOpts.ExecOpts = newOpts.ExecOpts }
+	if newOpts.Bridge != nil { currentOpts.Bridge = newOpts.Bridge }
+	if newOpts.Bip != nil { currentOpts.Bip = newOpts.Bip }
+	if newOpts.FixedCIDR != nil { currentOpts.FixedCIDR = newOpts.FixedCIDR }
+	if newOpts.DefaultGateway != nil { currentOpts.DefaultGateway = newOpts.DefaultGateway }
+	if newOpts.DNS != nil { currentOpts.DNS = newOpts.DNS }
+	if newOpts.IPTables != nil { currentOpts.IPTables = newOpts.IPTables }
+	if newOpts.Experimental != nil { currentOpts.Experimental = newOpts.Experimental }
+	if newOpts.Debug != nil { currentOpts.Debug = newOpts.Debug }
+	if newOpts.APICorsHeader != nil { currentOpts.APICorsHeader = newOpts.APICorsHeader }
+	if newOpts.Hosts != nil { currentOpts.Hosts = newOpts.Hosts }
+	if newOpts.UserlandProxy != nil { currentOpts.UserlandProxy = newOpts.UserlandProxy }
+	if newOpts.LiveRestore != nil { currentOpts.LiveRestore = newOpts.LiveRestore }
+	if newOpts.CgroupParent != nil { currentOpts.CgroupParent = newOpts.CgroupParent }
+	if newOpts.DefaultRuntime != nil { currentOpts.DefaultRuntime = newOpts.DefaultRuntime }
+	if newOpts.Runtimes != nil { currentOpts.Runtimes = newOpts.Runtimes }
+	if newOpts.Graph != nil { currentOpts.Graph = newOpts.Graph }
+	if newOpts.DataRoot != nil { currentOpts.DataRoot = newOpts.DataRoot }
+	if newOpts.MaxConcurrentDownloads != nil { currentOpts.MaxConcurrentDownloads = newOpts.MaxConcurrentDownloads }
+	if newOpts.MaxConcurrentUploads != nil { currentOpts.MaxConcurrentUploads = newOpts.MaxConcurrentUploads }
+	if newOpts.ShutdownTimeout != nil { currentOpts.ShutdownTimeout = newOpts.ShutdownTimeout }
+
+	mergedConfigBytes, err := json.MarshalIndent(currentOpts, "", "  ")
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal merged Docker daemon config to JSON")
+	}
+
+	if err := r.Mkdirp(ctx, conn, filepath.Dir(dockerDaemonConfigPath), "0755", true); err != nil {
+		return errors.Wrapf(err, "failed to create directory for %s", dockerDaemonConfigPath)
+	}
+	if err := r.WriteFile(ctx, conn, mergedConfigBytes, dockerDaemonConfigPath, "0644", true); err != nil {
+		return errors.Wrapf(err, "failed to write Docker daemon config to %s", dockerDaemonConfigPath)
+	}
+
+	if restartService {
+		facts, errFacts := r.GatherFacts(ctx, conn)
+		if errFacts != nil {
+			return errors.Wrap(errFacts, "failed to gather facts for restarting Docker service")
+		}
+		if err := r.RestartService(ctx, conn, facts, "docker"); err != nil {
+			return errors.Wrap(err, "failed to restart Docker service after configuration change")
+		}
+	}
+	return nil
+}
+
+// EnsureDefaultDockerConfig ensures that a default Docker daemon configuration exists.
+// If /etc/docker/daemon.json does not exist or is empty, it creates one with sensible defaults.
+func (r *defaultRunner) EnsureDefaultDockerConfig(ctx context.Context, conn connector.Connector, facts *Facts, restartService bool) error {
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+
+	exists, err := r.Exists(ctx, conn, dockerDaemonConfigPath)
+	if err != nil {
+		return errors.Wrapf(err, "failed to check existence of %s", dockerDaemonConfigPath)
+	}
+
+	createDefaults := false
+	if !exists {
+		createDefaults = true
+	} else {
+		content, errRead := r.ReadFile(ctx, conn, dockerDaemonConfigPath)
+		if errRead != nil {
+			return errors.Wrapf(errRead, "failed to read existing %s to check if empty", dockerDaemonConfigPath)
+		}
+		if len(strings.TrimSpace(string(content))) == 0 || string(content) == "{}" { // Empty or just empty JSON object
+			createDefaults = true
+		}
+	}
+
+	if createDefaults {
+		// Define sensible defaults
+		logOpts := map[string]string{"max-size": "100m"}
+		execOpts := []string{"native.cgroupdriver=systemd"}
+		// Detect storage driver based on facts if possible, otherwise default to overlay2
+		storageDriver := "overlay2"
+		if facts != nil && facts.OS != nil && facts.OS.Family == "rhel" && facts.OS.Major < 8 {
+			// Older RHEL/CentOS might prefer devicemapper or have issues with overlay2 on certain kernels/filesystems
+			// This is a simplistic check; a real check would be more involved.
+		}
+
+		defaultOpts := DockerDaemonOptions{
+			ExecOpts:      &execOpts,
+			LogDriver:     strPtr("json-file"),
+			LogOpts:       &logOpts,
+			StorageDriver: &storageDriver,
+			// Add other defaults like registry mirrors if there's a global default for the organization
+		}
+
+		// Use ConfigureDockerDaemon to write these defaults.
+		// Pass restartService=false initially, as ConfigureDockerDaemon will handle the final restart if needed.
+		// The `ConfigureDockerDaemon` function will merge these defaults with an empty current config.
+		if err := r.ConfigureDockerDaemon(ctx, conn, defaultOpts, false); err != nil {
+			return errors.Wrap(err, "failed to apply default Docker daemon configuration")
+		}
+
+		// If a restart is requested for the default config action itself
+		if restartService {
+			if facts == nil { // Gather facts if not provided
+				facts, err = r.GatherFacts(ctx, conn)
+				if err != nil {
+					return errors.Wrap(err, "failed to gather facts for restarting Docker service after ensuring default config")
+				}
+			}
+			if err := r.RestartService(ctx, conn, facts, "docker"); err != nil {
+				return errors.Wrap(err, "failed to restart Docker service after ensuring default config")
+			}
+		}
+	}
+	return nil
+}
+const dockerDaemonConfigPath = "/etc/docker/daemon.json"
+
+// GetDockerDaemonConfig retrieves the current Docker daemon configuration.
+// It reads /etc/docker/daemon.json and unmarshals it.
+// Returns an empty DockerDaemonOptions if the file doesn't exist or is empty.
+func (r *defaultRunner) GetDockerDaemonConfig(ctx context.Context, conn connector.Connector) (*DockerDaemonOptions, error) {
+	if conn == nil {
+		return nil, errors.New("connector cannot be nil")
+	}
+
+	configContent, err := r.ReadFile(ctx, conn, dockerDaemonConfigPath)
+	if err != nil {
 		// If file doesn't exist, it's not an error; return empty config.
 		// This assumes ReadFile returns a specific error for "not found" that can be checked.
 		// For simplicity, if any error occurs (incl. not found), we'll try to proceed as if empty,

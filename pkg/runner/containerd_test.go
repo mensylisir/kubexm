@@ -839,4 +839,208 @@ func TestDefaultRunner_CrictlRemoveImage(t *testing.T) {
 	assert.Contains(t, err.Error(), "crictl rmi image failed")
 }
 
+func TestDefaultRunner_GetContainerdConfig(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+
+	// Test Case 1: File exists, but parsing is not fully supported by this simplified Get
+	mockConn.EXPECT().ReadFile(ctx, mockConn, containerdConfigPath).Return([]byte("[plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"docker.io\"]\n  endpoint = [\"https://mirror.example.com\"]"), nil).Times(1)
+	config, err := runner.GetContainerdConfig(ctx, mockConn)
+	assert.Error(t, err)
+	assert.NotNil(t, config)
+	assert.Contains(t, err.Error(), "full TOML parsing into struct not supported")
+
+	// Test Case 2: File does not exist - should return empty struct and no error
+	mockConn.EXPECT().ReadFile(ctx, mockConn, containerdConfigPath).Return(nil, fmt.Errorf("file not found")).Times(1)
+	mockConn.EXPECT().Exists(ctx, mockConn, containerdConfigPath).Return(false, nil).Times(1)
+	config, err = runner.GetContainerdConfig(ctx, mockConn)
+	assert.NoError(t, err)
+	assert.NotNil(t, config)
+	assert.Nil(t, config.Root)
+
+	// Test Case 3: File is empty - should return empty struct and no error
+	mockConn.EXPECT().ReadFile(ctx, mockConn, containerdConfigPath).Return([]byte(""), nil).Times(1)
+	config, err = runner.GetContainerdConfig(ctx, mockConn)
+	assert.NoError(t, err)
+	assert.NotNil(t, config)
+	assert.Nil(t, config.Root)
+}
+
+func TestDefaultRunner_ConfigureContainerd_RegistryMirrorsOnly(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+
+	opts := ContainerdConfigOptions{
+		RegistryMirrors: map[string][]string{
+			"docker.io": {"https://dockerhub.mirror.example.com"},
+		},
+	}
+	expectedSnippetDocker := "[plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"docker.io\"]\n  endpoint = [\"https://dockerhub.mirror.example.com\"]"
+
+	mockConn.EXPECT().ReadFile(ctx, mockConn, containerdConfigPath).Return([]byte(""), nil).Times(1) // Simulate empty existing config
+	mockConn.EXPECT().Mkdirp(ctx, mockConn, filepath.Dir(containerdConfigPath), "0755", true).Return(nil).Times(1)
+
+	mockConn.EXPECT().WriteFile(ctx, mockConn, gomock.Any(), containerdConfigPath, "0644", true).
+		DoAndReturn(func(_ context.Context, _ connector.Connector, content []byte, _ string, _ string, _ bool) error {
+			contentStr := string(content)
+			assert.Contains(t, contentStr, "[plugins.\"io.containerd.grpc.v1.cri\".registry]")
+			assert.Contains(t, contentStr, expectedSnippetDocker)
+			return nil
+		}).Times(1)
+
+	err := runner.ConfigureContainerd(ctx, mockConn, opts, false)
+	assert.NoError(t, err)
+}
+
+
+func TestDefaultRunner_ConfigureCrictl(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+
+	configFileContent := "runtime-endpoint: unix:///run/containerd/containerd.sock\nimage-endpoint: unix:///run/containerd/containerd.sock\ntimeout: 10\ndebug: true\n"
+
+	mockConn.EXPECT().Mkdirp(ctx, mockConn, filepath.Dir(crictlConfigPath), "0755", true).Return(nil).Times(1)
+	mockConn.EXPECT().WriteFile(ctx, mockConn, []byte(configFileContent), crictlConfigPath, "0644", true).Return(nil).Times(1)
+
+	err := runner.ConfigureCrictl(ctx, mockConn, configFileContent)
+	assert.NoError(t, err)
+}
+
+func TestDefaultRunner_CrictlInspectImage(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	imageName := "docker.io/library/alpine:latest"
+
+	sampleInspectiJSON := `{"status": {"id": "sha256:123abc...","repoTags": ["alpine:latest"],"size": "2.8MB"}, "info": {}}`
+	var expectedDetails CrictlImageDetails
+	json.Unmarshal([]byte(sampleInspectiJSON), &expectedDetails)
+
+
+	cmd := fmt.Sprintf("crictl inspecti %s -o json", shellEscape(imageName))
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte(sampleInspectiJSON), []byte{}, nil).Times(1)
+
+	details, err := runner.CrictlInspectImage(ctx, mockConn, imageName)
+	assert.NoError(t, err)
+	assert.Equal(t, &expectedDetails, details)
+
+	// Test Not Found
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return(nil, []byte("FATA[0000] image \"docker.io/library/alpine:latest\" not found"), &connector.CommandError{ExitCode:1}).Times(1)
+	details, err = runner.CrictlInspectImage(ctx, mockConn, imageName)
+	assert.NoError(t, err) // Not found should be nil, nil
+	assert.Nil(t, details)
+}
+
+func TestDefaultRunner_CrictlImageFSInfo(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+
+	sampleFsInfoJSON := `{"filesystems": [{"timestamp": 1670000000, "fsId": {"mountpoint": "/var/lib/containerd"}, "usedBytes": "10GB", "inodesUsed": "1000"}]}`
+	var expectedFsInfoStruct struct { FileSystems []CrictlFSInfo `json:"filesystems"`}
+	json.Unmarshal([]byte(sampleFsInfoJSON), &expectedFsInfoStruct)
+
+	cmd := "crictl imagefsinfo -o json"
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte(sampleFsInfoJSON), []byte{}, nil).Times(1)
+	fsInfo, err := runner.CrictlImageFSInfo(ctx, mockConn)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedFsInfoStruct.FileSystems, fsInfo)
+}
+
+func TestDefaultRunner_CrictlListPods(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+
+	samplePodsJSON := `{"items": [{"id": "podid1", "name": "pod1-name", "state": "SANDBOX_READY"}]}`
+	var expectedPodsStruct struct { Items []CrictlPodInfo `json:"items"`}
+	json.Unmarshal([]byte(samplePodsJSON), &expectedPodsStruct)
+
+	cmd := "crictl pods -o json"
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte(samplePodsJSON), []byte{}, nil).Times(1)
+	pods, err := runner.CrictlListPods(ctx, mockConn, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedPodsStruct.Items, pods)
+
+	// Test with filter
+	filters := map[string]string{"name": "pod1-name"}
+	cmdFiltered := "crictl pods --name 'pod1-name' -o json"
+	mockConn.EXPECT().Exec(ctx, cmdFiltered, gomock.Any()).Return([]byte(samplePodsJSON), []byte{}, nil).Times(1)
+	pods, err = runner.CrictlListPods(ctx, mockConn, filters)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedPodsStruct.Items, pods)
+}
+
+
+func TestDefaultRunner_CrictlRunPod(t *testing.T) {
+    ctrl := gomock.NewController(t)
+    defer ctrl.Finish()
+    mockConn := mocks.NewMockConnector(ctrl)
+    runner := NewDefaultRunner()
+    ctx := context.Background()
+    configFile := "/tmp/pod-config.json"
+    expectedPodID := "new-pod-12345"
+
+    mockConn.EXPECT().Exists(ctx, mockConn, configFile).Return(true, nil).Times(1)
+    cmd := fmt.Sprintf("crictl runp %s", shellEscape(configFile))
+    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte(expectedPodID+"\n"), []byte{}, nil).Times(1)
+
+    podID, err := runner.CrictlRunPod(ctx, mockConn, configFile)
+    assert.NoError(t, err)
+    assert.Equal(t, expectedPodID, podID)
+}
+
+func TestDefaultRunner_CrictlStopPod(t *testing.T) {
+    ctrl := gomock.NewController(t)
+    defer ctrl.Finish()
+    mockConn := mocks.NewMockConnector(ctrl)
+    runner := NewDefaultRunner()
+    ctx := context.Background()
+    podID := "pod-to-stop-123"
+
+    cmd := fmt.Sprintf("crictl stopp %s", shellEscape(podID))
+    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte("Stopped sandbox "+podID), []byte{}, nil).Times(1)
+    err := runner.CrictlStopPod(ctx, mockConn, podID)
+    assert.NoError(t, err)
+
+    // Idempotency: already stopped or not found
+    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return(nil, []byte("could not find sandbox"), &connector.CommandError{ExitCode: 1}).Times(1)
+    err = runner.CrictlStopPod(ctx, mockConn, podID)
+    assert.NoError(t, err)
+}
+
+func TestDefaultRunner_CrictlRemovePod(t *testing.T) {
+    ctrl := gomock.NewController(t)
+    defer ctrl.Finish()
+    mockConn := mocks.NewMockConnector(ctrl)
+    runner := NewDefaultRunner()
+    ctx := context.Background()
+    podID := "pod-to-rm-123"
+
+    cmd := fmt.Sprintf("crictl rmp %s", shellEscape(podID))
+    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte("Removed sandbox "+podID), []byte{}, nil).Times(1)
+    err := runner.CrictlRemovePod(ctx, mockConn, podID)
+    assert.NoError(t, err)
+
+    // Idempotency: already removed or not found
+    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return(nil, []byte("could not find sandbox"), &connector.CommandError{ExitCode: 1}).Times(1)
+    err = runner.CrictlRemovePod(ctx, mockConn, podID)
+    assert.NoError(t, err)
+}
+
 // TODO: Add tests for remaining crictl functions once implemented.

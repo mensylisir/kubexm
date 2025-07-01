@@ -905,8 +905,206 @@ type KubectlPodInfo struct {
 
 
 // KubectlServiceInfo for `kubectl get svc -o json`
+type KubectlServiceInfo struct {
+	APIVersion string `json:"apiVersion"`
+	Kind       string `json:"kind"`
+	Metadata   struct {
+		Name              string            `json:"name"`
+		Namespace         string            `json:"namespace"`
+		UID               string            `json:"uid"`
+		CreationTimestamp string            `json:"creationTimestamp"`
+		Labels            map[string]string `json:"labels"`
+		Annotations       map[string]string `json:"annotations"`
+	} `json:"metadata"`
+	Spec struct {
+		Ports []struct {
+			Name       string `json:"name,omitempty"`
+			Protocol   string `json:"protocol"`
+			Port       int32  `json:"port"`
+			TargetPort any    `json:"targetPort"` // Can be int or string
+			NodePort   int32  `json:"nodePort,omitempty"`
+		} `json:"ports"`
+		Selector      map[string]string `json:"selector,omitempty"`
+		ClusterIP     string            `json:"clusterIP"`
+		ClusterIPs    []string          `json:"clusterIPs,omitempty"`
+		Type          string            `json:"type"` // e.g., ClusterIP, NodePort, LoadBalancer
+		SessionAffinity string          `json:"sessionAffinity"`
+		ExternalIPs   []string          `json:"externalIPs,omitempty"`
+		LoadBalancerIP string           `json:"loadBalancerIP,omitempty"`
+		// ... other fields like healthCheckNodePort, externalTrafficPolicy etc.
+	} `json:"spec"`
+	Status struct {
+		LoadBalancer struct {
+			Ingress []struct {
+				IP       string `json:"ip,omitempty"`
+				Hostname string `json:"hostname,omitempty"`
+			} `json:"ingress,omitempty"`
+		} `json:"loadBalancer,omitempty"`
+	} `json:"status,omitempty"`
+}
+
 // KubectlDeploymentInfo for `kubectl get deploy -o json`
-// KubectlRolloutOptions, KubectlScaleOptions, KubectlPortForwardOptions, KubectlConfigViewOptions, KubectlContextInfo, KubectlMetricsInfo, KubectlContainerMetricsInfo
+type KubectlDeploymentInfo struct {
+	APIVersion string `json:"apiVersion"`
+	Kind       string `json:"kind"`
+	Metadata   struct {
+		Name              string            `json:"name"`
+		Namespace         string            `json:"namespace"`
+		UID               string            `json:"uid"`
+		CreationTimestamp string            `json:"creationTimestamp"`
+		Labels            map[string]string `json:"labels"`
+		Annotations       map[string]string `json:"annotations"`
+		Generation        int64             `json:"generation"`
+	} `json:"metadata"`
+	Spec struct {
+		Replicas *int32 `json:"replicas"`
+		Selector struct {
+			MatchLabels map[string]string `json:"matchLabels"`
+		} `json:"selector"`
+		Template struct {
+			// PodTemplateSpec metadata and spec
+		} `json:"template"`
+		Strategy struct {
+			Type    string `json:"type"`
+			RollingUpdate *struct {
+				MaxUnavailable any `json:"maxUnavailable,omitempty"` // int or string
+				MaxSurge       any `json:"maxSurge,omitempty"`       // int or string
+			} `json:"rollingUpdate,omitempty"`
+		} `json:"strategy"`
+		MinReadySeconds      int32 `json:"minReadySeconds,omitempty"`
+		RevisionHistoryLimit *int32 `json:"revisionHistoryLimit,omitempty"`
+		Paused               bool   `json:"paused,omitempty"`
+		ProgressDeadlineSeconds *int32 `json:"progressDeadlineSeconds,omitempty"`
+	} `json:"spec"`
+	Status struct {
+		ObservedGeneration  int64 `json:"observedGeneration,omitempty"`
+		Replicas            int32 `json:"replicas,omitempty"`
+		UpdatedReplicas     int32 `json:"updatedReplicas,omitempty"`
+		ReadyReplicas       int32 `json:"readyReplicas,omitempty"`
+		AvailableReplicas   int32 `json:"availableReplicas,omitempty"`
+		UnavailableReplicas int32 `json:"unavailableReplicas,omitempty"`
+		Conditions []struct {
+			Type   string `json:"type"` // e.g. Available, Progressing
+			Status string `json:"status"`
+			// LastUpdateTime, LastTransitionTime, Reason, Message
+		} `json:"conditions,omitempty"`
+	} `json:"status,omitempty"`
+}
+
+
+type KubectlRolloutOptions struct {
+	KubeconfigPath string        // Path to kubeconfig file
+	Namespace      string        // Namespace for the resource
+	Watch          bool          // Watch the status of the rollout until it's done
+	Timeout        time.Duration // Timeout for watching the rollout status
+	Sudo           bool
+}
+
+type KubectlScaleOptions struct {
+	KubeconfigPath    string        // Path to kubeconfig file
+	Namespace         string        // Namespace for the resource
+	CurrentReplicas   *int32        // Precondition for current replicas
+	ResourceVersion   *string       // Precondition for resource version
+	Timeout           time.Duration // Timeout for the operation to complete
+	Sudo              bool
+}
+
+type KubectlPortForwardOptions struct {
+	KubeconfigPath string   // Path to kubeconfig file
+	Namespace      string   // Namespace for the pod/service
+	Address        []string // Addresses to listen on (default: localhost). Use "0.0.0.0" for all interfaces.
+	PodRunningTimeout time.Duration // The length of time to wait for a pod to be running
+	Sudo           bool
+	// Note: PortForward is typically a long-running process. This runner function might start it in background
+	// or require a way to manage its lifecycle (e.g., return a process handle or use context for cancellation).
+	// For simplicity, it might just establish the forward and return, or block.
+}
+
+type KubectlConfigViewOptions struct {
+	KubeconfigPath string // Path to kubeconfig file(s)
+	Minify         bool   // Remove all information not used by current-context
+	Raw            bool   // Display raw byte data
+	OutputFormat   string // json or yaml
+	Sudo           bool
+}
+
+// KubectlConfigInfo represents parsed output of `kubectl config view -o json`
+// This is a complex structure, so a simplified version or map[string]interface{} might be used initially.
+type KubectlConfigInfo struct {
+	APIVersion     string `json:"apiVersion"`
+	Clusters       []struct {
+		Name    string `json:"name"`
+		Cluster struct {
+			Server                   string `json:"server"`
+			CertificateAuthorityData string `json:"certificate-authority-data,omitempty"` // Base64 encoded
+			// InsecureSkipTLSVerify  bool   `json:"insecure-skip-tls-verify,omitempty"`
+		} `json:"cluster"`
+	} `json:"clusters"`
+	Contexts []struct {
+		Name    string `json:"name"`
+		Context struct {
+			Cluster   string `json:"cluster"`
+			User      string `json:"user"`
+			Namespace string `json:"namespace,omitempty"`
+		} `json:"context"`
+	} `json:"contexts"`
+	CurrentContext string `json:"current-context"`
+	Kind           string `json:"kind"`
+	Preferences    map[string]interface{} `json:"preferences"`
+	Users []struct {
+		Name string `json:"name"`
+		User struct {
+			ClientCertificateData string `json:"client-certificate-data,omitempty"` // Base64
+			ClientKeyData         string `json:"client-key-data,omitempty"`         // Base64
+			Token                 string `json:"token,omitempty"`
+			// Username, Password, AuthProvider, Exec etc.
+		} `json:"user"`
+	} `json:"users"`
+}
+
+
+type KubectlContextInfo struct { // From `kubectl config get-contexts -o json`
+	Name    string `json:"name"`
+	Cluster string `json:"cluster"`
+	AuthInfo string `json:"user"` // "user" in JSON output refers to AuthInfo
+	Namespace string `json:"namespace,omitempty"`
+	Current bool   // Indicated by '*' in text output, needs special handling if parsing text or specific JSON field if available
+}
+
+
+// KubectlMetricsInfo for `kubectl top node/pod -o json` (common fields)
+type KubectlMetricsInfo struct {
+	Metadata struct {
+		Name              string    `json:"name"`
+		CreationTimestamp time.Time `json:"timestamp"` // Kubectl top uses "timestamp"
+	} `json:"metadata"`
+	Timestamp string `json:"timestamp"` // Top-level timestamp for the metrics
+	Window    string `json:"window"`    // e.g., "1m0s"
+	Containers []KubectlContainerMetricsInfo `json:"containers,omitempty"` // For top pod
+	CPU struct {
+		UsageNanoCores string `json:"usageNanoCores,omitempty"` // String like "12345n"
+		UsageCoreNanos *int64 `json:"-"` // Parsed value
+	} `json:"cpu,omitempty"` // For top node, CPU is directly under root
+	Memory struct {
+		UsageBytes string `json:"usageBytes,omitempty"` // String like "12345Ki" or "6789Mi"
+		UsageBytesParsed *int64 `json:"-"` // Parsed value in bytes
+	} `json:"memory,omitempty"` // For top node, Memory is directly under root
+}
+
+type KubectlContainerMetricsInfo struct { // For `kubectl top pod <pod> --containers -o json`
+	Name string `json:"name"`
+	CPU struct {
+		UsageNanoCores string `json:"usageNanoCores,omitempty"`
+		UsageCoreNanos *int64 `json:"-"`
+	} `json:"cpu"`
+	Memory struct {
+		UsageBytes string `json:"usageBytes,omitempty"`
+		UsageBytesParsed *int64 `json:"-"`
+	} `json:"memory"`
+}
+
+
+// KubectlRolloutOptions, KubectlScaleOptions, KubectlPortForwardOptions
 // would also need to be defined based on their respective kubectl command flags and JSON outputs.
 // For brevity, these are listed as comments but would be fully fleshed out.
 

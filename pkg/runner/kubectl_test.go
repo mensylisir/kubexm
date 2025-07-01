@@ -410,8 +410,203 @@ func TestDefaultRunner_KubectlGetPods(t *testing.T) {
 }
 
 
-// TODO: Add tests for KubectlDescribe, KubectlLogs, KubectlExec, etc.
-// and specific Getters like KubectlGetNodes, KubectlGetPods once implemented.
-// The pattern will be similar: mock kubectl command, check args, mock output, assert results/errors.
-// For Getters that parse into specific structs (e.g. KubectlNodeInfo), tests will need sample JSON
-// for those structs and assert fields.
+func TestDefaultRunner_KubectlGetServices(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	namespace := "production"
+
+	sampleServicesJSON := `{
+		"apiVersion": "v1",
+		"kind": "List",
+		"items": [
+			{
+				"metadata": {"name": "service-a", "namespace": "production"},
+				"spec": {"type": "ClusterIP", "clusterIP": "10.0.0.100", "ports": [{"port": 80, "targetPort": 8080}]},
+				"status": {}
+			}
+		]
+	}`
+	opts := KubectlGetOptions{} // Using default get options, namespace will be set by func
+	expectedCmd := fmt.Sprintf("kubectl get services --namespace %s -o json", shellEscape(namespace))
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte(sampleServicesJSON), []byte{}, nil).Times(1)
+
+	services, err := runner.KubectlGetServices(ctx, mockConn, namespace, opts)
+	assert.NoError(t, err)
+	assert.Len(t, services, 1)
+	assert.Equal(t, "service-a", services[0].Metadata.Name)
+	assert.Equal(t, "ClusterIP", services[0].Spec.Type)
+}
+
+func TestDefaultRunner_KubectlGetDeployments(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	namespace := "dev"
+
+	sampleDeploymentsJSON := `{
+		"apiVersion": "v1",
+		"kind": "List",
+		"items": [
+			{
+				"metadata": {"name": "deploy-x", "namespace": "dev", "generation": 1},
+				"spec": {"replicas": 3},
+				"status": {"readyReplicas": 3, "availableReplicas": 3}
+			}
+		]
+	}`
+	opts := KubectlGetOptions{}
+	expectedCmd := fmt.Sprintf("kubectl get deployments --namespace %s -o json", shellEscape(namespace))
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte(sampleDeploymentsJSON), []byte{}, nil).Times(1)
+
+	deployments, err := runner.KubectlGetDeployments(ctx, mockConn, namespace, opts)
+	assert.NoError(t, err)
+	assert.Len(t, deployments, 1)
+	assert.Equal(t, "deploy-x", deployments[0].Metadata.Name)
+	assert.Equal(t, int32(3), *deployments[0].Spec.Replicas)
+}
+
+func TestDefaultRunner_KubectlRolloutStatus(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+
+	resourceType := "deployment"
+	resourceName := "my-app"
+	namespace := "apps"
+	successOutput := "deployment \"my-app\" successfully rolled out"
+
+	// Test Case 1: Successful rollout status
+	opts := KubectlRolloutOptions{Namespace: namespace, Watch: true, Timeout: 60 * time.Second}
+	expectedCmd := fmt.Sprintf("kubectl rollout status %s/%s --namespace %s --watch --timeout %s",
+		shellEscape(resourceType), shellEscape(resourceName), shellEscape(namespace), opts.Timeout.String())
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte(successOutput), []byte{}, nil).Times(1)
+
+	output, err := runner.KubectlRolloutStatus(ctx, mockConn, resourceType, resourceName, opts)
+	assert.NoError(t, err)
+	assert.Equal(t, successOutput, output)
+
+	// Test Case 2: Rollout status command fails
+	mockConn.EXPECT().Exec(ctx, gomock.Any(), gomock.Any()).
+		Return(nil, []byte("Error: timed out waiting for condition"), fmt.Errorf("exec error")).Times(1)
+	output, err = runner.KubectlRolloutStatus(ctx, mockConn, resourceType, resourceName, opts)
+	assert.Error(t, err)
+	assert.Contains(t, output, "Error: timed out waiting for condition")
+	assert.Contains(t, err.Error(), "kubectl rollout status for deployment/my-app failed")
+}
+
+func TestDefaultRunner_KubectlScale(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+
+	resourceType := "replicaset"
+	resourceName := "my-rs"
+	namespace := "scaling"
+	replicas := 5
+	successOutput := "replicaset.apps/my-rs scaled"
+
+	// Test Case 1: Successful scale
+	opts := KubectlScaleOptions{Namespace: namespace}
+	expectedCmd := fmt.Sprintf("kubectl scale %s %s --replicas=%d --namespace %s",
+		shellEscape(resourceType), shellEscape(resourceName), replicas, shellEscape(namespace))
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte(successOutput), []byte{}, nil).Times(1)
+
+	output, err := runner.KubectlScale(ctx, mockConn, resourceType, resourceName, replicas, opts)
+	assert.NoError(t, err)
+	assert.Equal(t, successOutput, output)
+
+	// Test Case 2: Scale command fails
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).
+		Return(nil, []byte("Error: scaling failed"), fmt.Errorf("exec error")).Times(1)
+	output, err = runner.KubectlScale(ctx, mockConn, resourceType, resourceName, replicas, opts)
+	assert.Error(t, err)
+	assert.Contains(t, output, "Error: scaling failed")
+	assert.Contains(t, err.Error(), "kubectl scale for replicaset/my-rs failed")
+}
+
+func TestDefaultRunner_KubectlConfigView(t *testing.T) {
+    ctrl := gomock.NewController(t)
+    defer ctrl.Finish()
+    mockConn := mocks.NewMockConnector(ctrl)
+    runner := NewDefaultRunner()
+    ctx := context.Background()
+
+    sampleConfigJSON := `{
+        "apiVersion": "v1",
+        "clusters": [{"name": "cluster1", "cluster": {"server": "https://localhost:6443"}}],
+        "contexts": [{"name": "context1", "context": {"cluster": "cluster1", "user": "user1"}}],
+        "current-context": "context1",
+        "kind": "Config",
+        "users": [{"name": "user1", "user": {}}]
+    }`
+    var expectedConfig KubectlConfigInfo
+    json.Unmarshal([]byte(sampleConfigJSON), &expectedConfig)
+
+    cmd := "kubectl config view -o json"
+    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte(sampleConfigJSON), []byte{}, nil).Times(1)
+
+    config, err := runner.KubectlConfigView(ctx, mockConn, KubectlConfigViewOptions{})
+    assert.NoError(t, err)
+    assert.Equal(t, &expectedConfig, config)
+}
+
+func TestDefaultRunner_KubectlConfigGetContexts(t *testing.T) {
+    ctrl := gomock.NewController(t)
+    defer ctrl.Finish()
+    mockConn := mocks.NewMockConnector(ctrl)
+    runner := NewDefaultRunner()
+    ctx := context.Background()
+
+    sampleConfigJSON := `{
+        "apiVersion": "v1",
+        "clusters": [{"name": "c1", "cluster": {"server":"s1"}}, {"name": "c2", "cluster": {"server":"s2"}}],
+        "contexts": [
+            {"name": "ctx1", "context": {"cluster": "c1", "user": "u1", "namespace": "ns1"}},
+            {"name": "ctx2", "context": {"cluster": "c2", "user": "u2"}}
+        ],
+        "current-context": "ctx1",
+        "kind": "Config",
+        "users": [{"name": "u1", "user": {}}, {"name": "u2", "user": {}}]
+    }`
+	expectedContexts := []KubectlContextInfo{
+		{Name: "ctx1", Cluster: "c1", AuthInfo: "u1", Namespace: "ns1", Current: true},
+		{Name: "ctx2", Cluster: "c2", AuthInfo: "u2", Namespace: "", Current: false},
+	}
+
+    // KubectlConfigGetContexts internally calls KubectlConfigView
+    mockConn.EXPECT().Exec(ctx, "kubectl config view -o json", gomock.Any()).Return([]byte(sampleConfigJSON), []byte{}, nil).Times(1)
+
+    contexts, err := runner.KubectlConfigGetContexts(ctx, mockConn)
+    assert.NoError(t, err)
+    assert.Equal(t, expectedContexts, contexts)
+}
+
+func TestDefaultRunner_KubectlConfigUseContext(t *testing.T) {
+    ctrl := gomock.NewController(t)
+    defer ctrl.Finish()
+    mockConn := mocks.NewMockConnector(ctrl)
+    runner := NewDefaultRunner()
+    ctx := context.Background()
+    contextName := "new-context"
+
+    cmd := fmt.Sprintf("kubectl config use-context %s", shellEscape(contextName))
+    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte(fmt.Sprintf("Switched to context \"%s\".", contextName)), []byte{}, nil).Times(1)
+    err := runner.KubectlConfigUseContext(ctx, mockConn, contextName)
+    assert.NoError(t, err)
+
+    // Test failure
+    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return(nil, []byte("error: no context exists with the name"), fmt.Errorf("exec error")).Times(1)
+    err = runner.KubectlConfigUseContext(ctx, mockConn, contextName)
+    assert.Error(t, err)
+}
+
+// TODO: Add tests for KubectlPortForward, KubectlTopNode, KubectlTopPod once implemented.

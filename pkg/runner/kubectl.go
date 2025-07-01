@@ -524,44 +524,173 @@ func (r *defaultRunner) KubectlGetPods(ctx context.Context, conn connector.Conne
 // --- Placeholder implementations for other Kubectl methods ---
 }
 
-// ... and so on for KubectlGetServices, KubectlGetDeployments, etc. ...
-// KubectlGetServices, KubectlGetDeployments, KubectlRolloutStatus, KubectlScale, KubectlPortForward
-// KubectlConfigView, KubectlConfigGetContexts, KubectlConfigUseContext
-// KubectlTopNode, KubectlTopPod
+// KubectlGetServices retrieves a list of services.
+func (r *defaultRunner) KubectlGetServices(ctx context.Context, conn connector.Connector, namespace string, opts KubectlGetOptions) ([]KubectlServiceInfo, error) {
+	opts.OutputFormat = "json"
+	opts.Namespace = namespace
+	rawJSON, err := r.KubectlGet(ctx, conn, "services", "", opts)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get services raw JSON")
+	}
+	if rawJSON == "" && opts.IgnoreNotFound { return []KubectlServiceInfo{}, nil }
+	if rawJSON == "" { return []KubectlServiceInfo{}, nil }
 
-// Add specific Get functions as needed, e.g.
-// func (r *defaultRunner) KubectlGetServices(ctx context.Context, conn connector.Connector, namespace string, opts KubectlGetOptions) ([]KubectlServiceInfo, error) {
-//  rawJson, err := r.KubectlGet(ctx, conn, "service", "", KubectlGetOptions{Namespace: namespace, OutputFormat: "json", AllNamespaces: opts.AllNamespaces /* pass other opts */})
-//  if err != nil { return nil, err }
-//  var list struct{ Items []KubectlServiceInfo `json:"items"` }
-//  if err := json.Unmarshal([]byte(rawJson), &list); err != nil { return nil, err }
-//  return list.Items, nil
-// }
+	var list struct { Items []KubectlServiceInfo `json:"items"` }
+	if err := json.Unmarshal([]byte(rawJSON), &list); err != nil {
+		return nil, errors.Wrapf(err, "failed to unmarshal services list JSON. Raw: %s", rawJSON)
+	}
+	return list.Items, nil
+}
 
-// ... other placeholder Kubectl functions ...
-func (r *defaultRunner) KubectlGetServices(ctx context.Context, conn connector.Connector, namespace string, opts KubectlGetOptions) (string, error) { // Placeholder, should return []KubectlServiceInfo
-    return "", errors.New("not implemented: KubectlGetServices, use KubectlGet with type 'service' and parse JSON")
+// KubectlGetDeployments retrieves a list of deployments.
+func (r *defaultRunner) KubectlGetDeployments(ctx context.Context, conn connector.Connector, namespace string, opts KubectlGetOptions) ([]KubectlDeploymentInfo, error) {
+	opts.OutputFormat = "json"
+	opts.Namespace = namespace
+	rawJSON, err := r.KubectlGet(ctx, conn, "deployments", "", opts)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get deployments raw JSON")
+	}
+	if rawJSON == "" && opts.IgnoreNotFound { return []KubectlDeploymentInfo{}, nil }
+	if rawJSON == "" { return []KubectlDeploymentInfo{}, nil }
+
+	var list struct { Items []KubectlDeploymentInfo `json:"items"`	}
+	if err := json.Unmarshal([]byte(rawJSON), &list); err != nil {
+		return nil, errors.Wrapf(err, "failed to unmarshal deployments list JSON. Raw: %s", rawJSON)
+	}
+	return list.Items, nil
 }
-func (r *defaultRunner) KubectlGetDeployments(ctx context.Context, conn connector.Connector, namespace string, opts KubectlGetOptions) (string, error) { // Placeholder
-    return "", errors.New("not implemented: KubectlGetDeployments, use KubectlGet with type 'deployment' and parse JSON")
+
+// KubectlRolloutStatus checks the status of a rollout.
+// Corresponds to `kubectl rollout status <RESOURCE>/<NAME> [options]`
+func (r *defaultRunner) KubectlRolloutStatus(ctx context.Context, conn connector.Connector, resourceType, resourceName string, opts KubectlRolloutOptions) (string, error) {
+	if conn == nil { return "", errors.New("connector cannot be nil") }
+	if resourceType == "" || resourceName == "" { return "", errors.New("resourceType and resourceName are required") }
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "kubectl", "rollout", "status", fmt.Sprintf("%s/%s", shellEscape(resourceType), shellEscape(resourceName)))
+	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace)) }
+	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath)) }
+	if opts.Watch { cmdArgs = append(cmdArgs, "--watch") }
+	if opts.Timeout > 0 { cmdArgs = append(cmdArgs, "--timeout", opts.Timeout.String()) }
+
+	cmd := strings.Join(cmdArgs, " ")
+	execTimeout := DefaultKubectlTimeout
+	if opts.Watch && opts.Timeout > 0 { execTimeout = opts.Timeout + 1*time.Minute
+	} else if opts.Watch { execTimeout = 15 * time.Minute } // Default watch timeout for exec
+
+	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: opts.Sudo, Timeout: execTimeout})
+	output := string(stdout) + string(stderr) // Rollout status often prints to stderr too
+	if err != nil {
+		return output, errors.Wrapf(err, "kubectl rollout status for %s/%s failed. Output: %s", resourceType, resourceName, output)
+	}
+	return output, nil
 }
-func (r *defaultRunner) KubectlRolloutStatus(ctx context.Context, conn connector.Connector, resourceType, resourceName string, opts KubectlGetOptions /*KubectlRolloutOptions*/) (string, error) {
-    return "", errors.New("not implemented: KubectlRolloutStatus")
+
+// KubectlScale scales a resource (e.g., deployment, replicaset).
+// Corresponds to `kubectl scale <RESOURCE> --replicas=<COUNT> [options]`
+func (r *defaultRunner) KubectlScale(ctx context.Context, conn connector.Connector, resourceType, resourceName string, replicas int, opts KubectlScaleOptions) (string, error) {
+	if conn == nil { return "", errors.New("connector cannot be nil") }
+	if resourceType == "" || resourceName == "" { return "", errors.New("resourceType and resourceName are required")}
+	if replicas < 0 { return "", errors.New("replicas must be non-negative")}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "kubectl", "scale", shellEscape(resourceType), shellEscape(resourceName), fmt.Sprintf("--replicas=%d", replicas))
+
+	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace)) }
+	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath)) }
+	if opts.CurrentReplicas != nil { cmdArgs = append(cmdArgs, fmt.Sprintf("--current-replicas=%d", *opts.CurrentReplicas)) }
+	if opts.ResourceVersion != nil { cmdArgs = append(cmdArgs, "--resource-version=%s", shellEscape(*opts.ResourceVersion)) }
+	if opts.Timeout > 0 { cmdArgs = append(cmdArgs, "--timeout", opts.Timeout.String()) }
+
+	cmd := strings.Join(cmdArgs, " ")
+	execTimeout := DefaultKubectlTimeout
+	if opts.Timeout > 0 { execTimeout = opts.Timeout + 1*time.Minute }
+
+	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: opts.Sudo, Timeout: execTimeout})
+	output := string(stdout) + string(stderr)
+	if err != nil {
+		return output, errors.Wrapf(err, "kubectl scale for %s/%s failed. Output: %s", resourceType, resourceName, output)
+	}
+	return output, nil
 }
-func (r *defaultRunner) KubectlScale(ctx context.Context, conn connector.Connector, resourceType, resourceName string, replicas int, opts KubectlGetOptions /*KubectlScaleOptions*/) (string, error) {
-    return "", errors.New("not implemented: KubectlScale")
+
+// KubectlConfigView displays мерged kubeconfig settings or a specified kubeconfig file.
+func (r *defaultRunner) KubectlConfigView(ctx context.Context, conn connector.Connector, opts KubectlConfigViewOptions) (*KubectlConfigInfo, error) {
+	if conn == nil { return nil, errors.New("connector cannot be nil") }
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "kubectl", "config", "view")
+	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath)) }
+	if opts.Minify { cmdArgs = append(cmdArgs, "--minify") }
+	if opts.Raw { cmdArgs = append(cmdArgs, "--raw") }
+	cmdArgs = append(cmdArgs, "-o", "json") // Always use JSON for parsing
+
+	cmd := strings.Join(cmdArgs, " ")
+	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultKubectlTimeout})
+	if err != nil {
+		return nil, errors.Wrapf(err, "kubectl config view failed. Stderr: %s", string(stderr))
+	}
+
+	var configInfo KubectlConfigInfo
+	if err := json.Unmarshal(stdout, &configInfo); err != nil {
+		return nil, errors.Wrapf(err, "failed to parse kubectl config view JSON. Output: %s", string(stdout))
+	}
+	return &configInfo, nil
 }
+
+// KubectlConfigGetContexts displays one or many contexts.
+func (r *defaultRunner) KubectlConfigGetContexts(ctx context.Context, conn connector.Connector) ([]KubectlContextInfo, error) {
+	if conn == nil { return nil, errors.New("connector cannot be nil") }
+
+	// `kubectl config get-contexts -o json` is not directly available.
+	// We get the full config view and extract contexts.
+	// A more direct way if available for specific kubectl versions could be used.
+	// Or parse `kubectl config get-contexts -o name` and then `kubectl config view -o json --minify --context=<name>` for each.
+	// For now, using full view.
+
+	fullConfig, err := r.KubectlConfigView(ctx, conn, KubectlConfigViewOptions{OutputFormat: "json"})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get full config for KubectlConfigGetContexts")
+	}
+	if fullConfig == nil {
+		return []KubectlContextInfo{}, nil
+	}
+
+	var contexts []KubectlContextInfo
+	for _, ctxEntry := range fullConfig.Contexts {
+		isCurrent := ctxEntry.Name == fullConfig.CurrentContext
+		contexts = append(contexts, KubectlContextInfo{
+			Name:      ctxEntry.Name,
+			Cluster:   ctxEntry.Context.Cluster,
+			AuthInfo:  ctxEntry.Context.User,
+			Namespace: ctxEntry.Context.Namespace,
+			Current:   isCurrent,
+		})
+	}
+	return contexts, nil
+}
+
+// KubectlConfigUseContext sets the current-context in a kubeconfig file.
+func (r *defaultRunner) KubectlConfigUseContext(ctx context.Context, conn connector.Connector, contextName string) error {
+	if conn == nil { return errors.New("connector cannot be nil") }
+	if contextName == "" { return errors.New("contextName is required") }
+
+	cmd := fmt.Sprintf("kubectl config use-context %s", shellEscape(contextName))
+	// Kubeconfig path can be set via KUBECONFIG env var or --kubeconfig global flag.
+	// This function assumes it's handled by the environment or a global KUBECONFIG setup if not passed via options (which this func doesn't take yet).
+	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: false, Timeout: DefaultKubectlTimeout})
+	if err != nil {
+		return errors.Wrapf(err, "kubectl config use-context %s failed. Stderr: %s", contextName, string(stderr))
+	}
+	return nil
+}
+
+// --- Placeholder implementations for other Kubectl methods ---
+// KubectlPortForward, KubectlTopNode, KubectlTopPod
+// Specific Getters for Services, Deployments etc. are now implemented above.
+
 func (r *defaultRunner) KubectlPortForward(ctx context.Context, conn connector.Connector, resourceTypeOrPodName string, resourceNameIfType string, ports []string, opts KubectlGetOptions /* KubectlPortForwardOptions */) (string, error) {
     return "", errors.New("not implemented: KubectlPortForward")
-}
-func (r *defaultRunner) KubectlConfigView(ctx context.Context, conn connector.Connector, opts KubectlGetOptions /*KubectlConfigViewOptions*/) (string, error) { // Placeholder, should return *KubectlConfigInfo
-    return "", errors.New("not implemented: KubectlConfigView")
-}
-func (r *defaultRunner) KubectlConfigGetContexts(ctx context.Context, conn connector.Connector) (string, error) { // Placeholder, should return []KubectlContextInfo
-    return "", errors.New("not implemented: KubectlConfigGetContexts")
-}
-func (r *defaultRunner) KubectlConfigUseContext(ctx context.Context, conn connector.Connector, contextName string) error {
-    return errors.New("not implemented: KubectlConfigUseContext")
 }
 func (r *defaultRunner) KubectlTopNode(ctx context.Context, conn connector.Connector, nodeName string) (string, error) { // Placeholder *KubectlMetricsInfo
     return "", errors.New("not implemented: KubectlTopNode")
