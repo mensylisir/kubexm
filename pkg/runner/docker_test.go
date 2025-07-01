@@ -33,7 +33,7 @@ func TestPullImage(t *testing.T) {
 	})
 
 	t.Run("EmptyImageName", func(t *testing.T) {
-		mockConn := mocks.NewConnector(t) // Provide a mock connector
+		mockConn := mocks.NewConnector(t)
 		err := r.PullImage(ctx, mockConn, "  ")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "imageName cannot be empty")
@@ -137,7 +137,7 @@ func TestImageExists(t *testing.T) {
 	})
 
 	t.Run("EmptyImageName", func(t *testing.T) {
-		mockConn := mocks.NewConnector(t) // Create a mock connector instance
+		mockConn := mocks.NewConnector(t)
 		exists, err := r.ImageExists(ctx, mockConn, "  ")
 		assert.Error(t, err)
 		assert.False(t, exists)
@@ -145,7 +145,6 @@ func TestImageExists(t *testing.T) {
 	})
 
 	t.Run("NilConnector", func(t *testing.T) {
-		// r is from TestImageExists scope
 		exists, err := r.ImageExists(ctx, nil, "alpine:latest")
 		assert.Error(t, err)
 		assert.False(t, exists)
@@ -295,12 +294,11 @@ func TestRemoveImage(t *testing.T) {
 		err := r.RemoveImage(ctx, mockConn, imageName, false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to remove image")
-		// Check for either the wrapped original error or a key part of the stderr
 		assert.True(t, errors.Is(err, simulatedError) || strings.Contains(string(simulatedStderr), "conflict: unable to remove repository reference"), "Error should wrap simulated error or stderr should indicate conflict")
 	})
 
 	t.Run("EmptyImageName", func(t *testing.T) {
-		mockConn := mocks.NewConnector(t) // Provide a mock connector
+		mockConn := mocks.NewConnector(t)
 		err := r.RemoveImage(ctx, mockConn, "  ", false)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "imageName cannot be empty")
@@ -312,6 +310,252 @@ func TestRemoveImage(t *testing.T) {
 		assert.Contains(t, err.Error(), "connector cannot be nil")
 	})
 }
+
+// TestBuildImage contains specific unit tests for the BuildImage method.
+func TestBuildImage(t *testing.T) {
+	r := &defaultRunner{}
+	ctx := context.Background()
+
+	defaultImageNameTag := "myimage:latest"
+	defaultContextPath := "/remote/context"
+	defaultDockerfilePath := ""
+	defaultBuildArgs := map[string]string{"VERSION": "1.0", "EMPTY_ARG": ""}
+
+
+	t.Run("Success_Simple", func(t *testing.T) {
+		mockConn := mocks.NewConnector(t)
+		expectedCmd := fmt.Sprintf("docker build -t %s %s", shellEscape(defaultImageNameTag), shellEscape(defaultContextPath))
+
+		mockConn.On("Exec", mock.Anything, expectedCmd, mock.MatchedBy(func(opts *connector.ExecOptions) bool {
+			return opts.Sudo && opts.Timeout == 60*time.Minute
+		})).Return([]byte("Successfully built..."), nil, nil).Once()
+
+		err := r.BuildImage(ctx, mockConn, defaultDockerfilePath, defaultImageNameTag, defaultContextPath, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Success_WithDockerfileAndBuildArgs", func(t *testing.T) {
+		mockConn := mocks.NewConnector(t)
+		dockerfilePath := "/remote/context/custom.Dockerfile"
+		arg1 := shellEscape("VERSION=1.0")
+		arg2 := shellEscape("EMPTY_ARG=")
+
+		expectedCmdPart1 := fmt.Sprintf("docker build -f %s -t %s", shellEscape(dockerfilePath), shellEscape(defaultImageNameTag))
+
+		mockConn.On("Exec", mock.Anything, mock.MatchedBy(func(cmd string) bool {
+			return strings.HasPrefix(cmd, expectedCmdPart1) &&
+				   strings.Contains(cmd, "--build-arg "+arg1) &&
+				   strings.Contains(cmd, "--build-arg "+arg2) &&
+				   strings.HasSuffix(cmd, shellEscape(defaultContextPath))
+		}), mock.MatchedBy(func(opts *connector.ExecOptions) bool {
+			return opts.Sudo
+		})).Return([]byte("Successfully built..."), nil, nil).Once()
+
+		err := r.BuildImage(ctx, mockConn, dockerfilePath, defaultImageNameTag, defaultContextPath, defaultBuildArgs)
+		assert.NoError(t, err)
+	})
+
+	t.Run("Failure_CommandError", func(t *testing.T) {
+		mockConn := mocks.NewConnector(t)
+		expectedCmd := fmt.Sprintf("docker build -t %s %s", shellEscape(defaultImageNameTag), shellEscape(defaultContextPath))
+		simulatedError := errors.New("build failed")
+		simulatedStdout := "Step 1/2 : FROM alpine\n ---> abcdef123456"
+		simulatedStderr := "Error: The command '/bin/sh -c unknown-command' returned a non-zero code: 127"
+
+		mockConn.On("Exec", mock.Anything, expectedCmd, mock.AnythingOfType("*connector.ExecOptions")).Return([]byte(simulatedStdout), []byte(simulatedStderr), simulatedError).Once()
+
+		err := r.BuildImage(ctx, mockConn, defaultDockerfilePath, defaultImageNameTag, defaultContextPath, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to build image")
+		assert.Contains(t, err.Error(), simulatedError.Error())
+		assert.Contains(t, err.Error(), "Stdout: "+simulatedStdout)
+		assert.Contains(t, err.Error(), "Stderr: "+simulatedStderr)
+	})
+
+	t.Run("Failure_EmptyImageNameTag", func(t *testing.T) {
+		mockConn := mocks.NewConnector(t)
+		err := r.BuildImage(ctx, mockConn, defaultDockerfilePath, " ", defaultContextPath, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "imageNameAndTag cannot be empty")
+	})
+
+	t.Run("Failure_EmptyContextPath", func(t *testing.T) {
+		mockConn := mocks.NewConnector(t)
+		err := r.BuildImage(ctx, mockConn, defaultDockerfilePath, defaultImageNameTag, " ", nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "contextPath cannot be empty")
+	})
+
+	t.Run("Failure_EmptyBuildArgKey", func(t *testing.T) {
+		mockConn := mocks.NewConnector(t)
+		invalidBuildArgs := map[string]string{"": "value"}
+		err := r.BuildImage(ctx, mockConn, defaultDockerfilePath, defaultImageNameTag, defaultContextPath, invalidBuildArgs)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "buildArg key cannot be empty")
+	})
+
+	t.Run("Failure_NilConnector", func(t *testing.T) {
+		err := r.BuildImage(ctx, nil, defaultDockerfilePath, defaultImageNameTag, defaultContextPath, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "connector cannot be nil")
+	})
+
+} // End of TestBuildImage
+
+
+// TestCreateContainer contains specific unit tests for the CreateContainer method.
+func TestCreateContainer(t *testing.T) {
+	r := &defaultRunner{}
+	ctx := context.Background()
+	defaultImage := "alpine:latest"
+	defaultContainerID := "a1b2c3d4e5f6"
+
+	baseOptions := ContainerCreateOptions{ImageName: defaultImage}
+
+	t.Run("Success_Minimal", func(t *testing.T) {
+		mockConn := mocks.NewConnector(t)
+		opts := baseOptions
+		expectedCmd := fmt.Sprintf("docker create %s", shellEscape(defaultImage))
+
+		mockConn.On("Exec", mock.Anything, expectedCmd, mock.MatchedBy(func(execOpts *connector.ExecOptions) bool {
+			return execOpts.Sudo && execOpts.Timeout == 1*time.Minute
+		})).Return([]byte(defaultContainerID+"\n"), nil, nil).Once()
+
+		id, err := r.CreateContainer(ctx, mockConn, opts)
+		assert.NoError(t, err)
+		assert.Equal(t, defaultContainerID, id)
+	})
+
+	t.Run("Success_WithNameAndPorts", func(t *testing.T) {
+		mockConn := mocks.NewConnector(t)
+		opts := ContainerCreateOptions{
+			ImageName:     defaultImage,
+			ContainerName: "my-container",
+			Ports: []ContainerPortMapping{
+				{HostPort: "8080", ContainerPort: "80"},
+				{HostIP: "127.0.0.1", HostPort: "9090", ContainerPort: "90", Protocol: "udp"},
+			},
+		}
+		mockConn.On("Exec", mock.Anything, mock.MatchedBy(func(cmd string) bool {
+			return strings.Contains(cmd, "docker create") &&
+				strings.Contains(cmd, "--name 'my-container'") &&
+				strings.Contains(cmd, "-p '8080:80'") &&
+				strings.Contains(cmd, "-p '127.0.0.1:9090:90/udp'") &&
+				strings.HasSuffix(cmd, shellEscape(defaultImage))
+		}), mock.AnythingOfType("*connector.ExecOptions")).Return([]byte(defaultContainerID), nil, nil).Once()
+
+		id, err := r.CreateContainer(ctx, mockConn, opts)
+		assert.NoError(t, err)
+		assert.Equal(t, defaultContainerID, id)
+	})
+
+	t.Run("Success_WithVolumesAndEnv", func(t *testing.T) {
+		mockConn := mocks.NewConnector(t)
+		opts := ContainerCreateOptions{
+			ImageName: defaultImage,
+			Volumes: []ContainerMount{
+				{Source: "/host/path", Destination: "/container/path"},
+				{Source: "named-volume", Destination: "/data", Mode: "ro"},
+			},
+			EnvVars: []string{"FOO=bar", "BAZ=qux"},
+		}
+
+		mockConn.On("Exec", mock.Anything, mock.MatchedBy(func(cmd string) bool {
+			return strings.Contains(cmd, "docker create") &&
+				strings.Contains(cmd, "-v '/host/path:/container/path'") &&
+				strings.Contains(cmd, "-v 'named-volume:/data:ro'") &&
+				strings.Contains(cmd, "-e 'FOO=bar'") &&
+				strings.Contains(cmd, "-e 'BAZ=qux'") &&
+				strings.HasSuffix(cmd, shellEscape(defaultImage))
+		}), mock.AnythingOfType("*connector.ExecOptions")).Return([]byte(defaultContainerID), nil, nil).Once()
+
+		id, err := r.CreateContainer(ctx, mockConn, opts)
+		assert.NoError(t, err)
+		assert.Equal(t, defaultContainerID, id)
+	})
+
+	t.Run("Success_WithEntrypointAndCommand", func(t *testing.T) {
+		mockConn := mocks.NewConnector(t)
+		opts := ContainerCreateOptions{
+			ImageName:  defaultImage,
+			Entrypoint: []string{"/app/custom-entry"},
+			Command:    []string{"arg1", "val with space"},
+		}
+		expectedCmd := fmt.Sprintf("docker create --entrypoint '/app/custom-entry' %s 'arg1' 'val with space'", shellEscape(defaultImage))
+		mockConn.On("Exec", mock.Anything, expectedCmd, mock.AnythingOfType("*connector.ExecOptions")).Return([]byte(defaultContainerID), nil, nil).Once()
+
+		id, err := r.CreateContainer(ctx, mockConn, opts)
+		assert.NoError(t, err)
+		assert.Equal(t, defaultContainerID, id)
+	})
+
+	t.Run("Success_WithRestartPolicyPrivilegedAutoRemove", func(t *testing.T) {
+		mockConn := mocks.NewConnector(t)
+		opts := ContainerCreateOptions{
+			ImageName:     defaultImage,
+			RestartPolicy: "on-failure:3",
+			Privileged:    true,
+			AutoRemove:    true,
+		}
+		mockConn.On("Exec", mock.Anything, mock.MatchedBy(func(cmd string) bool {
+			return strings.Contains(cmd, "docker create") &&
+				strings.Contains(cmd, "--restart 'on-failure:3'") &&
+				strings.Contains(cmd, "--privileged") &&
+				strings.Contains(cmd, "--rm") &&
+				strings.HasSuffix(cmd, shellEscape(defaultImage))
+		}), mock.AnythingOfType("*connector.ExecOptions")).Return([]byte(defaultContainerID), nil, nil).Once()
+
+		id, err := r.CreateContainer(ctx, mockConn, opts)
+		assert.NoError(t, err)
+		assert.Equal(t, defaultContainerID, id)
+	})
+
+
+	t.Run("Failure_EmptyImageName", func(t *testing.T) {
+		mockConn := mocks.NewConnector(t)
+		opts := ContainerCreateOptions{ImageName: " "}
+		_, err := r.CreateContainer(ctx, mockConn, opts)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "options.ImageName cannot be empty")
+	})
+
+	t.Run("Failure_NilConnector", func(t *testing.T) {
+		opts := baseOptions
+		_, err := r.CreateContainer(ctx, nil, opts)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "connector cannot be nil")
+	})
+
+	t.Run("Failure_DockerCommandError", func(t *testing.T) {
+		mockConn := mocks.NewConnector(t)
+		opts := baseOptions
+		expectedCmd := fmt.Sprintf("docker create %s", shellEscape(defaultImage))
+		simulatedError := errors.New("docker create failed")
+		simulatedStderr := "Error response from daemon: Something went wrong"
+
+		mockConn.On("Exec", mock.Anything, expectedCmd, mock.AnythingOfType("*connector.ExecOptions")).Return(nil, []byte(simulatedStderr), simulatedError).Once()
+
+		_, err := r.CreateContainer(ctx, mockConn, opts)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to create container")
+		assert.Contains(t, err.Error(), simulatedError.Error())
+		assert.Contains(t, err.Error(), simulatedStderr)
+	})
+
+	t.Run("Failure_EmptyContainerID", func(t *testing.T) {
+		mockConn := mocks.NewConnector(t)
+		opts := baseOptions
+		expectedCmd := fmt.Sprintf("docker create %s", shellEscape(defaultImage))
+
+		mockConn.On("Exec", mock.Anything, expectedCmd, mock.AnythingOfType("*connector.ExecOptions")).Return([]byte("  \n"), nil, nil).Once() // Empty/whitespace ID
+
+		_, err := r.CreateContainer(ctx, mockConn, opts)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "docker create succeeded but returned an empty container ID")
+	})
+
+} // End TestCreateContainer
+
 
 // TestDockerMethodStubs_Remaining asserts that remaining Docker methods currently return "not implemented".
 func TestDockerMethodStubs_Remaining(t *testing.T) {
@@ -326,10 +570,7 @@ func TestDockerMethodStubs_Remaining(t *testing.T) {
 			assert.Contains(t, err.Error(), "not implemented: "+methodName, "Error message should indicate 'not implemented'")
 		}
 	}
-	assertNotImplementedBool := func(t *testing.T, val bool, err error, methodName string) {
-		assert.False(t, val, "Expected bool value to be false for %s", methodName)
-		assertNotImplemented(t, err, methodName)
-	}
+	// assertNotImplementedBool is removed as ContainerExists now has its own Test function
 	assertNotImplementedString := func(t *testing.T, val string, err error, methodName string) {
 		assert.Empty(t, val, "Expected string value to be empty for %s", methodName)
 		assertNotImplemented(t, err, methodName)
@@ -348,18 +589,11 @@ func TestDockerMethodStubs_Remaining(t *testing.T) {
 	}
 
 	// Stubs for methods that are not yet fully implemented with specific tests
-	t.Run("BuildImage", func(t *testing.T) {
-		err := r.BuildImage(ctx, mockConn, "", "", "", nil)
-		assertNotImplemented(t, err, "BuildImage")
-	})
-	t.Run("CreateContainer", func(t *testing.T) {
-		val, err := r.CreateContainer(ctx, mockConn, ContainerCreateOptions{})
-		assertNotImplementedString(t, val, err, "CreateContainer")
-	})
-	t.Run("ContainerExists", func(t *testing.T) {
-		val, err := r.ContainerExists(ctx, mockConn, "")
-		assertNotImplementedBool(t, val, err, "ContainerExists")
-	})
+	// PullImage, ImageExists, ListImages, RemoveImage, BuildImage, CreateContainer, ContainerExists
+	// now have dedicated TestXxx functions.
+	// Keep stubs here ONLY for methods not yet having their own TestXxx function.
+	// t.Run("ContainerExists", ...) was removed as it has its own TestContainerExists
+
 	t.Run("StartContainer", func(t *testing.T) {
 		err := r.StartContainer(ctx, mockConn, "")
 		assertNotImplemented(t, err, "StartContainer")
@@ -428,9 +662,6 @@ func TestDockerMethodStubs_Remaining(t *testing.T) {
 		err := r.CreateDockerVolume(ctx, mockConn, "", "", nil, nil)
 		assertNotImplemented(t, err, "CreateDockerVolume")
 	})
-	// Note: The original t.Run for RemoveDockerVolume was inside TestDockerMethodStubs.
-	// If it's still a stub, it should be here. If it was implemented, it needs its own TestRemoveDockerVolume.
-	// Assuming it's still a stub for now.
 	t.Run("RemoveDockerVolume", func(t *testing.T) {
 		err := r.RemoveDockerVolume(ctx, mockConn, "", false)
 		assertNotImplemented(t, err, "RemoveDockerVolume")
@@ -451,4 +682,4 @@ func TestDockerMethodStubs_Remaining(t *testing.T) {
 		val, err := r.DockerPrune(ctx, mockConn, "", nil, false)
 		assertNotImplementedString(t, val, err, "DockerPrune")
 	})
-}
+} // End of TestDockerMethodStubs_Remaining
