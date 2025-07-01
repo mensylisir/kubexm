@@ -277,15 +277,252 @@ func (r *defaultRunner) RemoveImage(ctx context.Context, conn connector.Connecto
 	return nil
 }
 
+// BuildImage builds a Docker image from a Dockerfile.
+// Assumes contextPath is accessible on the remote host or is a URL.
+// Sudo is used by default for Docker commands.
 func (r *defaultRunner) BuildImage(ctx context.Context, conn connector.Connector, dockerfilePath string, imageNameAndTag string, contextPath string, buildArgs map[string]string) error {
-	return fmt.Errorf("not implemented: BuildImage")
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil for BuildImage")
+	}
+	if strings.TrimSpace(imageNameAndTag) == "" {
+		return fmt.Errorf("imageNameAndTag cannot be empty for BuildImage")
+	}
+	if strings.TrimSpace(contextPath) == "" {
+		return fmt.Errorf("contextPath cannot be empty for BuildImage")
+	}
+
+	cmdArgs := []string{"docker", "build"}
+
+	if strings.TrimSpace(dockerfilePath) != "" {
+		cmdArgs = append(cmdArgs, "-f", shellEscape(dockerfilePath))
+	}
+
+	cmdArgs = append(cmdArgs, "-t", shellEscape(imageNameAndTag))
+
+	if buildArgs != nil {
+		for key, value := range buildArgs {
+			if strings.TrimSpace(key) == "" {
+				return fmt.Errorf("buildArg key cannot be empty")
+			}
+			// Values can be empty, Docker CLI allows this.
+			cmdArgs = append(cmdArgs, "--build-arg", shellEscape(fmt.Sprintf("%s=%s", key, value)))
+		}
+	}
+
+	cmdArgs = append(cmdArgs, shellEscape(contextPath)) // contextPath must be the last argument before options like --platform
+	cmd := strings.Join(cmdArgs, " ")
+
+	// Docker builds can take a very long time.
+	cmdTimeout := 60 * time.Minute // Default to 1 hour
+	if deadline, ok := ctx.Deadline(); ok {
+		if time.Until(deadline) < cmdTimeout {
+			cmdTimeout = time.Until(deadline)
+			if cmdTimeout < 0 { cmdTimeout = 0 }
+		}
+	}
+
+	// Stdout from `docker build` contains build logs. Stderr might also contain info or errors.
+	stdoutBytes, stderrBytes, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{
+		Sudo:    true,
+		Timeout: cmdTimeout,
+		// Consider if LiveOutput to os.Stdout/Stderr is needed for long builds,
+		// or if capturing all output is sufficient. For now, capture.
+	})
+
+	if err != nil {
+		// Combine stdout and stderr for more complete error context from build.
+		return fmt.Errorf("failed to build image '%s': %w. Stdout: %s, Stderr: %s", imageNameAndTag, err, string(stdoutBytes), string(stderrBytes))
+	}
+
+	// Typically, successful `docker build` output (build steps) is on stdout.
+	// We can optionally log stdout for information.
+	// fmt.Fprintf(os.Stdout, "Docker build output for %s:\n%s\n", imageNameAndTag, string(stdoutBytes))
+	return nil
 }
+
+// CreateContainer creates a new Docker container from an image with the specified options.
+// It returns the ID of the created container.
+// Sudo is used by default for Docker commands.
 func (r *defaultRunner) CreateContainer(ctx context.Context, conn connector.Connector, options ContainerCreateOptions) (string, error) {
-	return "", fmt.Errorf("not implemented: CreateContainer")
+	if conn == nil {
+		return "", fmt.Errorf("connector cannot be nil for CreateContainer")
+	}
+	if strings.TrimSpace(options.ImageName) == "" {
+		return "", fmt.Errorf("options.ImageName cannot be empty for CreateContainer")
+	}
+
+	cmdArgs := []string{"docker", "create"}
+
+	if strings.TrimSpace(options.ContainerName) != "" {
+		cmdArgs = append(cmdArgs, "--name", shellEscape(options.ContainerName))
+	}
+	// If Entrypoint is set, use its first element. Docker CLI's --entrypoint is a single string.
+	if len(options.Entrypoint) > 0 && strings.TrimSpace(options.Entrypoint[0]) != "" {
+		cmdArgs = append(cmdArgs, "--entrypoint", shellEscape(options.Entrypoint[0]))
+	}
+	if strings.TrimSpace(options.WorkingDir) != "" {
+		cmdArgs = append(cmdArgs, "-w", shellEscape(options.WorkingDir))
+	}
+	if strings.TrimSpace(options.User) != "" {
+		cmdArgs = append(cmdArgs, "-u", shellEscape(options.User))
+	}
+	if strings.TrimSpace(options.RestartPolicy) != "" {
+		cmdArgs = append(cmdArgs, "--restart", shellEscape(options.RestartPolicy))
+	}
+	if strings.TrimSpace(options.NetworkMode) != "" {
+		cmdArgs = append(cmdArgs, "--network", shellEscape(options.NetworkMode))
+	}
+
+	for _, envVar := range options.EnvVars {
+		if strings.TrimSpace(envVar) != "" {
+			cmdArgs = append(cmdArgs, "-e", shellEscape(envVar))
+		}
+	}
+	for _, portMap := range options.Ports {
+		var p string
+		if portMap.HostIP != "" {
+			p = fmt.Sprintf("%s:%s:%s", portMap.HostIP, portMap.HostPort, portMap.ContainerPort)
+		} else {
+			p = fmt.Sprintf("%s:%s", portMap.HostPort, portMap.ContainerPort)
+		}
+		if portMap.Protocol != "" {
+			p = fmt.Sprintf("%s/%s", p, portMap.Protocol)
+		}
+		cmdArgs = append(cmdArgs, "-p", shellEscape(p))
+	}
+	for _, volumeMap := range options.Volumes {
+		v := fmt.Sprintf("%s:%s", volumeMap.Source, volumeMap.Destination)
+		if volumeMap.Mode != "" {
+			v = fmt.Sprintf("%s:%s", v, volumeMap.Mode)
+		}
+		cmdArgs = append(cmdArgs, "-v", shellEscape(v))
+	}
+	for _, extraHost := range options.ExtraHosts {
+		if strings.TrimSpace(extraHost) != "" {
+			cmdArgs = append(cmdArgs, "--add-host", shellEscape(extraHost))
+		}
+	}
+	for key, value := range options.Labels {
+		cmdArgs = append(cmdArgs, "--label", shellEscape(fmt.Sprintf("%s=%s", key, value)))
+	}
+	if options.Privileged {
+		cmdArgs = append(cmdArgs, "--privileged")
+	}
+	for _, capAdd := range options.CapAdd {
+		cmdArgs = append(cmdArgs, "--cap-add", shellEscape(capAdd))
+	}
+	for _, capDrop := range options.CapDrop {
+		cmdArgs = append(cmdArgs, "--cap-drop", shellEscape(capDrop))
+	}
+	if options.AutoRemove {
+		cmdArgs = append(cmdArgs, "--rm")
+	}
+	for _, volFrom := range options.VolumesFrom {
+		cmdArgs = append(cmdArgs, "--volumes-from", shellEscape(volFrom))
+	}
+	for _, secOpt := range options.SecurityOpt {
+		cmdArgs = append(cmdArgs, "--security-opt", shellEscape(secOpt))
+	}
+	for key, value := range options.Sysctls {
+		cmdArgs = append(cmdArgs, "--sysctl", shellEscape(fmt.Sprintf("%s=%s", key, value)))
+	}
+	for _, dns := range options.DNSServers {
+		cmdArgs = append(cmdArgs, "--dns", shellEscape(dns))
+	}
+	for _, dnsSearch := range options.DNSSearchDomains {
+		cmdArgs = append(cmdArgs, "--dns-search", shellEscape(dnsSearch))
+	}
+
+	// Resources (simplified for now, Docker has more granular options)
+	if options.Resources.NanoCPUs > 0 { // Using NanoCPUs as it's more precise
+		cpus := float64(options.Resources.NanoCPUs) / 1e9
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--cpus=%.3f", cpus))
+	}
+	if options.Resources.Memory > 0 { // Memory in bytes
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--memory=%db", options.Resources.Memory))
+	}
+
+
+	// Image name must come after options that modify the container but before the command/args for the container
+	cmdArgs = append(cmdArgs, shellEscape(options.ImageName))
+
+	// Command and its arguments for the container
+	if len(options.Command) > 0 {
+		for _, segment := range options.Command {
+			cmdArgs = append(cmdArgs, shellEscape(segment))
+		}
+	}
+
+	cmd := strings.Join(cmdArgs, " ")
+
+	cmdTimeout := 1 * time.Minute // `docker create` should be quick.
+	if deadline, ok := ctx.Deadline(); ok {
+		if time.Until(deadline) < cmdTimeout {
+			cmdTimeout = time.Until(deadline)
+			if cmdTimeout < 0 { cmdTimeout = 0 }
+		}
+	}
+
+	stdoutBytes, stderrBytes, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{
+		Sudo:    true,
+		Timeout: cmdTimeout,
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("failed to create container from image '%s' with name '%s': %w. Stderr: %s", options.ImageName, options.ContainerName, err, string(stderrBytes))
+	}
+
+	containerID := strings.TrimSpace(string(stdoutBytes))
+	if containerID == "" {
+		return "", fmt.Errorf("docker create succeeded but returned an empty container ID. Stdout: %s, Stderr: %s", string(stdoutBytes), string(stderrBytes))
+	}
+
+	return containerID, nil
 }
+
+// ContainerExists checks if a Docker container (by name or ID) exists on the host.
+// Sudo is used by default for Docker commands.
 func (r *defaultRunner) ContainerExists(ctx context.Context, conn connector.Connector, containerNameOrID string) (bool, error) {
-	return false, fmt.Errorf("not implemented: ContainerExists")
+	if conn == nil {
+		return false, fmt.Errorf("connector cannot be nil for ContainerExists")
+	}
+	if strings.TrimSpace(containerNameOrID) == "" {
+		return false, fmt.Errorf("containerNameOrID cannot be empty for ContainerExists")
+	}
+
+	// `docker inspect [container]` exits with 0 if found, 1 if not.
+	// Redirecting output as we only care about the exit code.
+	cmd := fmt.Sprintf("docker inspect %s > /dev/null 2>&1", shellEscape(containerNameOrID))
+
+	cmdTimeout := 30 * time.Second // Inspect should be quick.
+	if deadline, ok := ctx.Deadline(); ok {
+		if time.Until(deadline) < cmdTimeout {
+			cmdTimeout = time.Until(deadline)
+			if cmdTimeout < 0 { cmdTimeout = 0 }
+		}
+	}
+
+	_, stderrBytes, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{
+		Sudo:    true,
+		Timeout: cmdTimeout,
+	})
+
+	if err == nil {
+		return true, nil // Command succeeded, container exists.
+	}
+
+	var cmdErr *connector.CommandError
+	if errors.As(err, &cmdErr) {
+		if cmdErr.ExitCode == 1 {
+			// Stderr might contain "Error: No such object:" or similar.
+			return false, nil // Container does not exist.
+		}
+	}
+
+	// Any other error.
+	return false, fmt.Errorf("failed to check if container '%s' exists: %w. Stderr: %s", containerNameOrID, err, string(stderrBytes))
 }
+
 func (r *defaultRunner) StartContainer(ctx context.Context, conn connector.Connector, containerNameOrID string) error {
 	return fmt.Errorf("not implemented: StartContainer")
 }
