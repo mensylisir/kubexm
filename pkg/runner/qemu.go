@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,6 +14,49 @@ import (
 	// Consider adding a libvirt client library if direct XML manipulation or more complex operations are needed,
 	// but for now, we'll stick to `virsh` commands for simplicity, aligning with the Docker implementation style.
 )
+
+var (
+	// Regex to parse memory like "1024 MiB" or "2 GiB" from virsh output
+	memRegex = regexp.MustCompile(`(\d+)\s*(KiB|MiB|GiB|TiB)`)
+)
+
+// parseIntFromString tries to parse an integer from a string.
+func parseIntFromString(s string) (int, error) {
+	return strconv.Atoi(strings.TrimSpace(s))
+}
+
+// parseMemStringToKB converts memory strings like "2048 MiB" or "2 GiB" to KiB.
+func parseMemStringToKB(memStr string) (uint64, error) {
+	matches := memRegex.FindStringSubmatch(memStr)
+	if len(matches) != 3 {
+		// Fallback for plain numbers, assume KiB
+		val, err := strconv.ParseUint(strings.TrimSpace(memStr), 10, 64)
+		if err == nil {
+			return val, nil
+		}
+		return 0, fmt.Errorf("invalid memory format: '%s'", memStr)
+	}
+
+	value, err := strconv.ParseUint(matches[1], 10, 64)
+	if err != nil {
+		return 0, errors.Wrapf(err, "parsing memory value from '%s'", matches[1])
+	}
+
+	unit := strings.ToLower(matches[2])
+	switch unit {
+	case "kib":
+		return value, nil
+	case "mib":
+		return value * 1024, nil
+	case "gib":
+		return value * 1024 * 1024, nil
+	case "tib":
+		return value * 1024 * 1024 * 1024, nil
+	default:
+		return 0, fmt.Errorf("unknown memory unit: '%s'", unit)
+	}
+}
+
 
 // CreateVMTemplate defines a new virtual machine configuration that can serve as a template.
 // For now, this will be a placeholder as generating complex libvirt XML via shell commands is error-prone.
@@ -46,6 +91,13 @@ func (r *defaultRunner) CreateVMTemplate(ctx context.Context, conn connector.Con
 		}
 	}
 	// Placeholder for actual VM definition logic using virsh define
+	// A proper implementation would involve generating or using an XML template, then:
+	// tempXMLPath := fmt.Sprintf("/tmp/vm_template_%s.xml", name)
+	// err = r.WriteFile(ctx, conn, []byte(generatedOrTemplateXML), tempXMLPath, "0600", true)
+	// defineCmd := fmt.Sprintf("virsh define %s", tempXMLPath)
+	// _, _, err = conn.Exec(ctx, defineCmd, &connector.ExecOptions{Sudo: true})
+	// r.Remove(ctx, conn, tempXMLPath, true) // Cleanup
+	// if err != nil { return errors.Wrap(err, "failed to define VM template") }
 	return errors.New("CreateVMTemplate: virsh define from generated XML is not fully implemented via CLI runner; disk creation part is present")
 }
 
@@ -53,11 +105,18 @@ func (r *defaultRunner) CreateVMTemplate(ctx context.Context, conn connector.Con
 func (r *defaultRunner) VMExists(ctx context.Context, conn connector.Connector, vmName string) (bool, error) {
 	if conn == nil { return false, errors.New("connector cannot be nil") }
 	if strings.TrimSpace(vmName) == "" { return false, errors.New("vmName cannot be empty") }
+	// `virsh dominfo <domain>` exits 0 if domain exists, non-zero otherwise (e.g. 1 if not found)
 	cmd := fmt.Sprintf("virsh dominfo %s > /dev/null 2>&1", shellEscape(vmName))
 	_, _, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
-	if err == nil { return true, nil }
+	if err == nil { return true, nil } // Exit code 0 means domain exists
+
+	// Check if the error is due to the domain not being found
 	var cmdErr *connector.CommandError
-	if errors.As(err, &cmdErr) && cmdErr.ExitCode != 0 { return false, nil }
+	if errors.As(err, &cmdErr) && cmdErr.ExitCode != 0 { // Any non-zero exit code from dominfo likely means not found or other error
+		// More specific check could parse stderr for "Domain not found" or "error: failed to get domain"
+		return false, nil // Treat non-zero exit as "does not exist" for simplicity of this check
+	}
+	// For other types of errors (e.g., connection issue), propagate the error
 	return false, errors.Wrapf(err, "failed to check if VM %s exists", vmName)
 }
 
@@ -66,12 +125,17 @@ func (r *defaultRunner) StartVM(ctx context.Context, conn connector.Connector, v
 	if conn == nil { return errors.New("connector cannot be nil") }
 	if strings.TrimSpace(vmName) == "" { return errors.New("vmName cannot be empty") }
 
-	stateCmd := fmt.Sprintf("virsh domstate %s", shellEscape(vmName))
-	stateStdout, stateStderr, err := conn.Exec(ctx, stateCmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
-	if err != nil {
-		return errors.Wrapf(err, "failed to get VM state for %s. Stderr: %s", vmName, string(stateStderr))
+	// Check current state first to make it idempotent
+	state, errState := r.GetVMState(ctx, conn, vmName)
+	if errState != nil {
+		return errors.Wrapf(errState, "failed to get current state of VM %s before starting", vmName)
 	}
-	if strings.TrimSpace(string(stateStdout)) == "running" { return nil }
+	if state == "running" {
+		return nil // Already running
+	}
+	if state != "shut off" && state != "pmsuspended" { // Add other valid pre-start states if needed
+		return errors.Errorf("VM %s is in state '%s', cannot start", vmName, state)
+	}
 
 	startCmd := fmt.Sprintf("virsh start %s", shellEscape(vmName))
 	_, stderr, err := conn.Exec(ctx, startCmd, &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute})
@@ -86,13 +150,20 @@ func (r *defaultRunner) ShutdownVM(ctx context.Context, conn connector.Connector
 	if conn == nil { return errors.New("connector cannot be nil") }
 	if strings.TrimSpace(vmName) == "" { return errors.New("vmName cannot be empty") }
 
-	stateCmd := fmt.Sprintf("virsh domstate %s", shellEscape(vmName))
-	stateStdout, stateStderr, err := conn.Exec(ctx, stateCmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
-	if err != nil {
-		if strings.Contains(string(stateStderr), "Domain not found") { return nil }
-		return errors.Wrapf(err, "failed to get VM state for %s. Stderr: %s", vmName, string(stateStderr))
+	state, errState := r.GetVMState(ctx, conn, vmName)
+	if errState != nil {
+		// If domain not found, consider it already shut down for idempotency.
+		if strings.Contains(errState.Error(), "Domain not found") || strings.Contains(errState.Error(), "failed to get domain") {
+			return nil
+		}
+		return errors.Wrapf(errState, "failed to get VM state for %s before shutdown", vmName)
 	}
-	if strings.TrimSpace(string(stateStdout)) == "shut off" { return nil }
+	if state == "shut off" {
+		return nil // Already shut off
+	}
+	if state != "running" && state != "paused" { // Can only shutdown running or paused VMs
+		return errors.Errorf("VM %s is in state '%s', cannot initiate shutdown", vmName, state)
+	}
 
 	shutdownCmd := fmt.Sprintf("virsh shutdown %s", shellEscape(vmName))
 	_, stderrShutdown, errShutdown := conn.Exec(ctx, shutdownCmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
@@ -102,23 +173,32 @@ func (r *defaultRunner) ShutdownVM(ctx context.Context, conn connector.Connector
 		defer cancelWait()
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
+
 		for {
 			select {
-			case <-waitCtx.Done():
-				if force { return r.DestroyVM(waitCtx, conn, vmName) }
-				return errors.Errorf("VM %s graceful shutdown timed out", vmName)
+			case <-waitCtx.Done(): // Timeout reached
+				if force {
+					return r.DestroyVM(ctx, conn, vmName) // Use original ctx for DestroyVM
+				}
+				return errors.Errorf("VM %s graceful shutdown timed out after %v", vmName, timeout)
 			case <-ticker.C:
-				sStdout, _, sErr := conn.Exec(waitCtx, stateCmd, &connector.ExecOptions{Sudo: true, Timeout: 10 * time.Second})
-				if sErr != nil { continue } // Error checking state, continue polling
-				if strings.TrimSpace(string(sStdout)) == "shut off" { return nil }
+				currentState, err := r.GetVMState(waitCtx, conn, vmName)
+				if err != nil {
+					// If error checking state (e.g., domain disappeared), assume it's off.
+					return nil
+				}
+				if currentState == "shut off" {
+					return nil // Successfully shut down
+				}
 			}
 		}
-	} else if !force { // Shutdown command failed and not forcing
-		return errors.Wrapf(errShutdown, "failed to issue graceful shutdown for %s. Stderr: %s", vmName, string(stderrShutdown))
 	}
-	// If shutdown failed and force is true, or if graceful timed out and force is true
-	if force { return r.DestroyVM(ctx, conn, vmName) }
-	return errors.Errorf("VM %s graceful shutdown failed", vmName) // Should not be reached if logic is correct
+
+	// Graceful shutdown command failed
+	if force {
+		return r.DestroyVM(ctx, conn, vmName)
+	}
+	return errors.Wrapf(errShutdown, "failed to issue graceful shutdown for VM %s. Stderr: %s", vmName, string(stderrShutdown))
 }
 
 // DestroyVM forcefully stops (powers off) a virtual machine.
@@ -128,11 +208,11 @@ func (r *defaultRunner) DestroyVM(ctx context.Context, conn connector.Connector,
 
 	// Check if already off or non-existent for idempotency
 	state, errState := r.GetVMState(ctx, conn, vmName)
-	if errState != nil { // Error getting state (e.g. not found)
+	if errState != nil {
 		if strings.Contains(errState.Error(), "Domain not found") || strings.Contains(errState.Error(), "failed to get domain") {
-			return nil // Effectively destroyed
+			return nil // Effectively destroyed if not found
 		}
-		// Some other error getting state, proceed with destroy as best effort
+		// For other errors getting state, proceed with destroy as a best effort.
 	} else if state == "shut off" {
 		return nil // Already off
 	}
@@ -140,8 +220,9 @@ func (r *defaultRunner) DestroyVM(ctx context.Context, conn connector.Connector,
 	cmd := fmt.Sprintf("virsh destroy %s", shellEscape(vmName))
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if err != nil {
+		// Idempotency: if already not running or not found, virsh destroy might error but that's okay.
 		if strings.Contains(string(stderr), "Domain not found") || strings.Contains(string(stderr), "domain is not running") {
-			return nil // Idempotent
+			return nil
 		}
 		return errors.Wrapf(err, "failed to destroy VM %s. Stderr: %s", vmName, string(stderr))
 	}
@@ -159,21 +240,34 @@ func (r *defaultRunner) UndefineVM(ctx context.Context, conn connector.Connector
 		if errDestroy := r.DestroyVM(ctx, conn, vmName); errDestroy != nil {
 			return errors.Wrapf(errDestroy, "failed to destroy VM %s prior to undefine", vmName)
 		}
-		time.Sleep(2 * time.Second) // Give time for destroy to settle
+		// Wait a moment for destroy to complete before undefining
+		select {
+		case <-time.After(2 * time.Second):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	} else if errState != nil && !(strings.Contains(errState.Error(), "Domain not found") || strings.Contains(errState.Error(), "failed to get domain")) {
-		// If error getting state is not "not found", it's an issue.
 		return errors.Wrapf(errState, "failed to get state of VM %s before undefine", vmName)
 	}
 	// If state is "shut off" or domain not found, proceed.
 
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "virsh", "undefine", shellEscape(vmName))
-	if deleteSnapshots { cmdArgs = append(cmdArgs, "--snapshots-metadata") }
-	if deleteStorage { cmdArgs = append(cmdArgs, "--remove-all-storage") }
+	if deleteSnapshots {
+		cmdArgs = append(cmdArgs, "--snapshots-metadata") // Deletes snapshot metadata
+	}
+	if deleteStorage {
+		cmdArgs = append(cmdArgs, "--remove-all-storage") // Attempts to remove storage volumes
+		// --storage-pools <pool_name>[,<pool_name>...] can be added if storagePools is not empty
+		// However, the exact syntax and support for this with --remove-all-storage needs careful checking.
+		// For now, --remove-all-storage is a broad attempt.
+	}
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute})
 	if err != nil {
-		if strings.Contains(string(stderr), "Domain not found") { return nil } // Idempotent
+		if strings.Contains(string(stderr), "Domain not found") {
+			return nil // Idempotent
+		}
 		return errors.Wrapf(err, "failed to undefine VM %s. Stderr: %s", vmName, string(stderr))
 	}
 	return nil
@@ -186,6 +280,7 @@ func (r *defaultRunner) GetVMState(ctx context.Context, conn connector.Connector
 	cmd := fmt.Sprintf("virsh domstate %s", shellEscape(vmName))
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
 	if err != nil {
+		// If domain not found, virsh domstate errors. This should be handled by caller if needed.
 		return "", errors.Wrapf(err, "failed to get state for VM %s. Stderr: %s", vmName, string(stderr))
 	}
 	return strings.TrimSpace(string(stdout)), nil
@@ -194,7 +289,7 @@ func (r *defaultRunner) GetVMState(ctx context.Context, conn connector.Connector
 // ListVMs lists virtual machines known to libvirt.
 func (r *defaultRunner) ListVMs(ctx context.Context, conn connector.Connector, all bool) ([]VMInfo, error) {
     if conn == nil { return nil, errors.New("connector cannot be nil") }
-    listCmdArgs := []string{"virsh", "list", "--name"}
+    listCmdArgs := []string{"virsh", "list", "--name"} // Get names first
     if all { listCmdArgs = append(listCmdArgs, "--all") }
 
     stdoutNames, stderrNames, err := conn.Exec(ctx, strings.Join(listCmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
@@ -206,17 +301,27 @@ func (r *defaultRunner) ListVMs(ctx context.Context, conn connector.Connector, a
         trimmedName := strings.TrimSpace(name)
         if trimmedName != "" { vmNames = append(vmNames, trimmedName) }
     }
+
     if len(vmNames) == 0 { return []VMInfo{}, nil }
 
     var vms []VMInfo
     for _, vmName := range vmNames {
+        // Get state for each VM
         state, errState := r.GetVMState(ctx, conn, vmName)
-        if errState != nil { continue } // Skip if error getting state
+        if errState != nil {
+            // If we can't get the state, we might still list the VM with unknown state or skip it.
+            // For now, let's include it with an error state or empty state.
+            // Or, more simply, skip if state cannot be determined for robustness.
+            // Let's try to get dominfo anyway.
+        }
 
         dominfoCmd := fmt.Sprintf("virsh dominfo %s", shellEscape(vmName))
-        infoStdout, _, errInfo := conn.Exec(ctx, dominfoCmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
+        infoStdout, infoStderr, errInfo := conn.Exec(ctx, dominfoCmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
         if errInfo != nil {
-            vms = append(vms, VMInfo{Name: vmName, State: state}); continue
+            // If dominfo fails, we might have a problem with this VM.
+            // Add with available info or log a warning.
+             vms = append(vms, VMInfo{Name: vmName, State: state}) // Add with what we have
+            continue
         }
 
         vmInfo := VMInfo{Name: vmName, State: state}
@@ -224,21 +329,25 @@ func (r *defaultRunner) ListVMs(ctx context.Context, conn connector.Connector, a
         for _, line := range infoLines {
             parts := strings.SplitN(line, ":", 2)
             if len(parts) != 2 { continue }
-            key, value := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+            key := strings.TrimSpace(parts[0])
+            value := strings.TrimSpace(parts[1])
+
             switch key {
-            case "UUID": vmInfo.UUID = value
-            case "CPU(s)": vmInfo.CPUs, _ = parseIntFromString(value)
-            case "Max memory", "Memory":
-                memKB, _ := parseMemStringToKB(value)
-                vmInfo.Memory = uint(memKB / 1024)
-            }
-        }
-        if vmInfo.State == "" { // Fallback for state from dominfo if GetVMState had issues earlier
-            for _, line := range infoLines {
-                 if strings.HasPrefix(line, "State:") {
-                    vmInfo.State = strings.TrimSpace(strings.TrimPrefix(line, "State:"))
-                    break
+            case "UUID":
+                vmInfo.UUID = value
+            case "CPU(s)":
+                vmInfo.CPUs, _ = parseIntFromString(value)
+            case "Max memory", "Current memory", "Memory": // Prefer Max memory, fallback to Current memory then Memory
+                if vmInfo.Memory == 0 { // Only set if not already set by a preferred key
+                    memKB, parseErr := parseMemStringToKB(value)
+                    if parseErr == nil {
+                        vmInfo.Memory = uint(memKB / 1024) // Convert KiB to MiB
+                    }
                 }
+            case "State": // If GetVMState failed earlier, try to get it from dominfo
+                 if vmInfo.State == "" {
+                    vmInfo.State = value
+                 }
             }
         }
         vms = append(vms, vmInfo)
@@ -246,12 +355,9 @@ func (r *defaultRunner) ListVMs(ctx context.Context, conn connector.Connector, a
     return vms, nil
 }
 
-func parseIntFromString(s string) (int, error) { /* ... as previously defined ... */ return 0, nil }
-func parseMemStringToKB(s string) (uint64, error) { /* ... as previously defined ... */ return 0, nil }
-
 func (r *defaultRunner) ImportVMTemplate(ctx context.Context, conn connector.Connector, name string, filePath string) error {
 	if conn == nil { return errors.New("connector cannot be nil") }
-	if name == "" || filePath == "" { return errors.New("name and filePath are required") }
+	if name == "" || filePath == "" { return errors.New("name and filePath are required for importing VM template") }
 	cmd := fmt.Sprintf("virsh define %s", shellEscape(filePath))
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if err != nil { return errors.Wrapf(err, "failed to define VM %s from %s. Stderr: %s", name, filePath, string(stderr)) }
@@ -262,41 +368,61 @@ func (r *defaultRunner) RefreshStoragePool(ctx context.Context, conn connector.C
 	if conn == nil { return errors.New("connector cannot be nil") }
 	if poolName == "" { return errors.New("poolName cannot be empty") }
 	cmd := fmt.Sprintf("virsh pool-refresh %s", shellEscape(poolName))
-	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute})
-	if err != nil { return errors.Wrapf(err, "failed to refresh pool %s. Stderr: %s", poolName, string(stderr)) }
+	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute}) // Refresh can take time
+	if err != nil { return errors.Wrapf(err, "failed to refresh storage pool %s. Stderr: %s", poolName, string(stderr)) }
 	return nil
 }
 
 func (r *defaultRunner) CreateStoragePool(ctx context.Context, conn connector.Connector, name string, poolType string, targetPath string) error {
 	if conn == nil { return errors.New("connector cannot be nil") }
-	if name == "" || poolType == "" || targetPath == "" { return errors.New("name, poolType, targetPath required") }
-	if poolType == "dir" {
+	if name == "" || poolType == "" || targetPath == "" { return errors.New("name, poolType, and targetPath are required") }
+
+	// Idempotency: Check if pool already exists
+	exists, errExists := r.StoragePoolExists(ctx, conn, name)
+	if errExists != nil { return errors.Wrapf(errExists, "failed to check if storage pool %s exists", name) }
+	if exists { return nil } // Already exists
+
+	if poolType == "dir" { // Ensure directory exists for dir-type pools
 		if err := r.Mkdirp(ctx, conn, targetPath, "0755", true); err != nil {
-			return errors.Wrapf(err, "failed to create dir %s for pool", targetPath)
+			return errors.Wrapf(err, "failed to create directory %s for pool %s", targetPath, name)
 		}
 	}
+
 	var defineCmd string
 	switch poolType {
-	case "dir": defineCmd = fmt.Sprintf("virsh pool-define-as %s dir --target %s", shellEscape(name), shellEscape(targetPath))
-	default: return errors.Errorf("unsupported poolType: %s", poolType)
+	case "dir":
+		defineCmd = fmt.Sprintf("virsh pool-define-as %s dir --target %s", shellEscape(name), shellEscape(targetPath))
+	// Add other pool types (logical, iscsi, etc.) as needed
+	default:
+		return errors.Errorf("unsupported poolType: %s", poolType)
 	}
+
 	_, stderrDefine, errDefine := conn.Exec(ctx, defineCmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
-	if errDefine != nil && !(strings.Contains(string(stderrDefine), "already defined") || strings.Contains(string(stderrDefine), "already exists")) {
-		return errors.Wrapf(errDefine, "failed to define pool %s. Stderr: %s", name, string(stderrDefine))
+	if errDefine != nil {
+		// If it already defined but we missed in exists check (race or other issue), that's fine.
+		if !(strings.Contains(string(stderrDefine), "already defined") || strings.Contains(string(stderrDefine), "already exists")) {
+			return errors.Wrapf(errDefine, "failed to define pool %s. Stderr: %s", name, string(stderrDefine))
+		}
 	}
+
 	buildCmd := fmt.Sprintf("virsh pool-build %s", shellEscape(name))
 	_, stderrBuild, errBuild := conn.Exec(ctx, buildCmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
-	if errBuild != nil && !(strings.Contains(string(stderrBuild), "already built") || strings.Contains(string(stderrBuild), "No action required")) {
-		return errors.Wrapf(errBuild, "failed to build pool %s. Stderr: %s", name, string(stderrBuild))
+	if errBuild != nil {
+		if !(strings.Contains(string(stderrBuild), "already built") || strings.Contains(string(stderrBuild), "No action required")) {
+			return errors.Wrapf(errBuild, "failed to build pool %s. Stderr: %s", name, string(stderrBuild))
+		}
 	}
+
 	startCmd := fmt.Sprintf("virsh pool-start %s", shellEscape(name))
 	_, stderrStart, errStart := conn.Exec(ctx, startCmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if errStart != nil && !strings.Contains(string(stderrStart), "already active") {
 		return errors.Wrapf(errStart, "failed to start pool %s. Stderr: %s", name, string(stderrStart))
 	}
+
 	autostartCmd := fmt.Sprintf("virsh pool-autostart %s", shellEscape(name))
 	if _, _, errAutostart := conn.Exec(ctx, autostartCmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second}); errAutostart != nil {
-		// Log warning, not critical failure
+		// Log as warning, not a critical failure if pool is otherwise operational
+		// fmt.Printf("Warning: failed to set autostart for pool %s: %v\n", name, errAutostart)
 	}
 	return nil
 }
@@ -306,23 +432,37 @@ func (r *defaultRunner) StoragePoolExists(ctx context.Context, conn connector.Co
 	if poolName == "" { return false, errors.New("poolName cannot be empty") }
 	cmd := fmt.Sprintf("virsh pool-info %s > /dev/null 2>&1", shellEscape(poolName))
 	_, _, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
-	if err == nil { return true, nil }
-	if cmdErr, ok := err.(*connector.CommandError); ok && cmdErr.ExitCode != 0 { return false, nil }
-	return false, errors.Wrapf(err, "failed to check pool %s existence", poolName)
+	if err == nil { return true, nil } // Exit 0 means pool exists
+	if cmdErr, ok := err.(*connector.CommandError); ok && cmdErr.ExitCode != 0 {
+		// Non-zero exit usually means not found (e.g. "error: failed to get pool '...'")
+		return false, nil
+	}
+	return false, errors.Wrapf(err, "failed to check storage pool %s existence", poolName)
 }
 
 func (r *defaultRunner) DeleteStoragePool(ctx context.Context, conn connector.Connector, poolName string) error {
 	if conn == nil { return errors.New("connector cannot be nil") }
 	if poolName == "" { return errors.New("poolName cannot be empty") }
+
+	// Attempt to destroy (stop) the pool first. This is idempotent.
 	destroyCmd := fmt.Sprintf("virsh pool-destroy %s", shellEscape(poolName))
 	_, stderrDestroy, errDestroy := conn.Exec(ctx, destroyCmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
-	if errDestroy != nil && !(strings.Contains(string(stderrDestroy), "not found") || strings.Contains(string(stderrDestroy), "not active") || strings.Contains(string(stderrDestroy), "not running")) {
-		return errors.Wrapf(errDestroy, "failed to destroy pool %s. Stderr: %s", poolName, string(stderrDestroy))
+	if errDestroy != nil {
+		// Ignore errors if pool not found or not active, as that's fine for deletion.
+		if !(strings.Contains(string(stderrDestroy), "not found") ||
+			strings.Contains(string(stderrDestroy), "not active") ||
+			strings.Contains(string(stderrDestroy), "not running")) { // "not running" for some virsh versions
+			return errors.Wrapf(errDestroy, "failed to destroy pool %s. Stderr: %s", poolName, string(stderrDestroy))
+		}
 	}
+
+	// Undefine the pool. This is also idempotent.
 	undefineCmd := fmt.Sprintf("virsh pool-undefine %s", shellEscape(poolName))
 	_, stderrUndefine, errUndefine := conn.Exec(ctx, undefineCmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
-	if errUndefine != nil && !strings.Contains(string(stderrUndefine), "not found") {
-		return errors.Wrapf(errUndefine, "failed to undefine pool %s. Stderr: %s", poolName, string(stderrUndefine))
+	if errUndefine != nil {
+		if !strings.Contains(string(stderrUndefine), "not found") { // Ignore "not found" for undefine
+			return errors.Wrapf(errUndefine, "failed to undefine pool %s. Stderr: %s", poolName, string(stderrUndefine))
+		}
 	}
 	return nil
 }
@@ -333,21 +473,36 @@ func (r *defaultRunner) VolumeExists(ctx context.Context, conn connector.Connect
 	cmd := fmt.Sprintf("virsh vol-info --pool %s %s > /dev/null 2>&1", shellEscape(poolName), shellEscape(volName))
 	_, _, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
 	if err == nil { return true, nil }
-	if cmdErr, ok := err.(*connector.CommandError); ok && cmdErr.ExitCode != 0 { return false, nil }
+	if cmdErr, ok := err.(*connector.CommandError); ok && cmdErr.ExitCode != 0 {
+		// e.g. "error: Failed to get volume '...' from pool '...'"
+		return false, nil
+	}
 	return false, errors.Wrapf(err, "failed to check volume %s in pool %s", volName, poolName)
 }
 
 func (r *defaultRunner) CloneVolume(ctx context.Context, conn connector.Connector, poolName string, origVolName string, newVolName string, newSizeGB uint, format string) error {
 	if conn == nil { return errors.New("connector cannot be nil") }
-	if poolName == "" || origVolName == "" || newVolName == "" { return errors.New("poolName, origVolName, newVolName required") }
+	if poolName == "" || origVolName == "" || newVolName == "" { return errors.New("poolName, origVolName, and newVolName are required") }
 
-	cloneCmd := fmt.Sprintf("virsh vol-clone --pool %s %s %s", shellEscape(poolName), shellEscape(origVolName), shellEscape(newVolName))
-	_, stderr, err := conn.Exec(ctx, cloneCmd, &connector.ExecOptions{Sudo: true, Timeout: 5 * time.Minute})
-	if err != nil { return errors.Wrapf(err, "failed to clone vol %s to %s. Stderr: %s", origVolName, newVolName, string(stderr)) }
+	// virsh vol-clone [--pool <string>] <vol> <newname> [--new-format <string>] [--new-capacity <bytes>]
+	cloneCmdArgs := []string{"virsh", "vol-clone", "--pool", shellEscape(poolName), shellEscape(origVolName), shellEscape(newVolName)}
+	if format != "" { // Assuming format here refers to new-format for clone, not capacity format.
+		cloneCmdArgs = append(cloneCmdArgs, "--new-format", shellEscape(format))
+	}
+	// Note: vol-clone can also take --new-capacity. If newSizeGB is for the final state after potential resize,
+	// it might be better to clone first, then resize. Or, if libvirt supports it well, use --new-capacity here.
+	// For simplicity and explicit control, we'll clone then resize if newSizeGB > 0.
+
+	_, stderr, err := conn.Exec(ctx, strings.Join(cloneCmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 5 * time.Minute}) // Cloning can take time
+	if err != nil {
+		return errors.Wrapf(err, "failed to clone volume %s to %s in pool %s. Stderr: %s", origVolName, newVolName, poolName, string(stderr))
+	}
 
 	if newSizeGB > 0 {
+		// Check current size first? Or just attempt resize.
+		// For simplicity, just attempt resize.
 		if errResize := r.ResizeVolume(ctx, conn, poolName, newVolName, newSizeGB); errResize != nil {
-			return errors.Wrapf(errResize, "vol %s cloned, but failed to resize to %dGB", newVolName, newSizeGB)
+			return errors.Wrapf(errResize, "volume %s cloned successfully, but failed to resize to %dGB", newVolName, newSizeGB)
 		}
 	}
 	return nil
@@ -355,11 +510,11 @@ func (r *defaultRunner) CloneVolume(ctx context.Context, conn connector.Connecto
 
 func (r *defaultRunner) ResizeVolume(ctx context.Context, conn connector.Connector, poolName string, volName string, newSizeGB uint) error {
 	if conn == nil { return errors.New("connector cannot be nil") }
-	if poolName == "" || volName == "" || newSizeGB == 0 { return errors.New("poolName, volName, and non-zero newSizeGB required") }
-	capacityStr := fmt.Sprintf("%dG", newSizeGB)
+	if poolName == "" || volName == "" || newSizeGB == 0 { return errors.New("poolName, volName, and non-zero newSizeGB are required") }
+	capacityStr := fmt.Sprintf("%dG", newSizeGB) // virsh vol-resize takes size like "10G"
 	cmd := fmt.Sprintf("virsh vol-resize --pool %s %s %s", shellEscape(poolName), shellEscape(volName), shellEscape(capacityStr))
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute})
-	if err != nil { return errors.Wrapf(err, "failed to resize vol %s to %s. Stderr: %s", volName, capacityStr, string(stderr)) }
+	if err != nil { return errors.Wrapf(err, "failed to resize volume %s in pool %s to %s. Stderr: %s", volName, poolName, capacityStr, string(stderr)) }
 	return nil
 }
 
@@ -369,55 +524,105 @@ func (r *defaultRunner) DeleteVolume(ctx context.Context, conn connector.Connect
 	cmd := fmt.Sprintf("virsh vol-delete --pool %s %s", shellEscape(poolName), shellEscape(volName))
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if err != nil {
-		if strings.Contains(string(stderr), "Failed to get volume") || strings.Contains(string(stderr), "Storage volume not found") { return nil }
-		return errors.Wrapf(err, "failed to delete vol %s. Stderr: %s", volName, string(stderr))
+		// Idempotency: if volume not found, it's okay.
+		if strings.Contains(string(stderr), "Failed to get volume") || strings.Contains(string(stderr), "Storage volume not found") {
+			return nil
+		}
+		return errors.Wrapf(err, "failed to delete volume %s from pool %s. Stderr: %s", volName, poolName, string(stderr))
 	}
 	return nil
 }
 
 func (r *defaultRunner) CreateVolume(ctx context.Context, conn connector.Connector, poolName string, volName string, sizeGB uint, format string, backingVolName string, backingVolFormat string) error {
 	if conn == nil { return errors.New("connector cannot be nil") }
-	if poolName == "" || volName == "" || sizeGB == 0 { return errors.New("poolName, volName, non-zero sizeGB required") }
+	if poolName == "" || volName == "" || sizeGB == 0 { return errors.New("poolName, volName, and non-zero sizeGB are required") }
+
+	// Idempotency: Check if volume already exists
+	exists, errExists := r.VolumeExists(ctx, conn, poolName, volName)
+	if errExists != nil { return errors.Wrapf(errExists, "failed to check if volume %s in pool %s exists", volName, poolName) }
+	if exists { return nil } // Already exists
 
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "virsh", "vol-create-as", shellEscape(poolName), shellEscape(volName), fmt.Sprintf("%dG", sizeGB))
-	if format != "" { cmdArgs = append(cmdArgs, "--format", shellEscape(format)) }
-	if backingVolName != "" {
-		if backingVolFormat == "" { return errors.New("backingVolFormat required with backingVolName") }
-		cmdArgs = append(cmdArgs, "--backing-vol", shellEscape(backingVolName), "--backing-vol-format", shellEscape(backingVolFormat))
+	if format != "" {
+		cmdArgs = append(cmdArgs, "--format", shellEscape(format))
 	}
+	if backingVolName != "" {
+		if backingVolFormat == "" {
+			return errors.New("backingVolFormat is required when backingVolName is provided")
+		}
+		cmdArgs = append(cmdArgs, "--backing-vol", shellEscape(backingVolName))
+		cmdArgs = append(cmdArgs, "--backing-vol-format", shellEscape(backingVolFormat))
+	}
+
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute})
 	if err != nil {
-		if strings.Contains(string(stderr), "already exists") { return nil }
-		return errors.Wrapf(err, "failed to create vol %s. Stderr: %s", volName, string(stderr))
+		// Double check for already exists, in case of race or if Exists check failed silently
+		if strings.Contains(string(stderr), "already exists") {
+			return nil
+		}
+		return errors.Wrapf(err, "failed to create volume %s in pool %s. Stderr: %s", volName, poolName, string(stderr))
 	}
 	return nil
 }
 
 func (r *defaultRunner) CreateCloudInitISO(ctx context.Context, conn connector.Connector, vmName string, isoDestPath string, userData string, metaData string, networkConfig string) error {
 	if conn == nil { return errors.New("connector cannot be nil") }
-	if vmName == "" || isoDestPath == "" || userData == "" || metaData == "" { return errors.New("vmName, isoDestPath, userData, metaData required") }
+	if vmName == "" || isoDestPath == "" || userData == "" || metaData == "" { return errors.New("vmName, isoDestPath, userData, and metaData are required") }
 
-	remoteBaseTmpDir := "/tmp"
-	tmpDirName := fmt.Sprintf("cloud-init-tmp-%s-%d", vmName, time.Now().UnixNano())
+	remoteBaseTmpDir := "/tmp" // Standard temporary directory on Linux
+	tmpDirName := fmt.Sprintf("kubexm-cloud-init-tmp-%s-%d", vmName, time.Now().UnixNano())
 	tmpDirPath := filepath.Join(remoteBaseTmpDir, tmpDirName)
-	if err := r.Mkdirp(ctx, conn, tmpDirPath, "0700", true); err != nil { return errors.Wrapf(err, "failed to create temp dir %s", tmpDirPath) }
-	defer r.Remove(ctx, conn, tmpDirPath, true)
 
-	if err := r.WriteFile(ctx, conn, []byte(userData), filepath.Join(tmpDirPath, "user-data"), "0644", true); err != nil { return err }
-	if err := r.WriteFile(ctx, conn, []byte(metaData), filepath.Join(tmpDirPath, "meta-data"), "0644", true); err != nil { return err }
+	// Ensure the base temp directory exists (usually /tmp does, but good practice)
+	// r.Mkdirp(ctx, conn, remoteBaseTmpDir, "0777", true) // /tmp should exist and be writable
+
+	if err := r.Mkdirp(ctx, conn, tmpDirPath, "0700", true); err != nil { // 0700 for restricted access
+		return errors.Wrapf(err, "failed to create temporary directory %s on remote host", tmpDirPath)
+	}
+	defer r.Remove(ctx, conn, tmpDirPath, true) // Cleanup temporary directory
+
+	if err := r.WriteFile(ctx, conn, []byte(userData), filepath.Join(tmpDirPath, "user-data"), "0644", true); err != nil {
+		return errors.Wrapf(err, "failed to write user-data to %s", tmpDirPath)
+	}
+	if err := r.WriteFile(ctx, conn, []byte(metaData), filepath.Join(tmpDirPath, "meta-data"), "0644", true); err != nil {
+		return errors.Wrapf(err, "failed to write meta-data to %s", tmpDirPath)
+	}
 	if networkConfig != "" {
-		if err := r.WriteFile(ctx, conn, []byte(networkConfig), filepath.Join(tmpDirPath, "network-config"), "0644", true); err != nil { return err }
+		if err := r.WriteFile(ctx, conn, []byte(networkConfig), filepath.Join(tmpDirPath, "network-config"), "0644", true); err != nil {
+			return errors.Wrapf(err, "failed to write network-config to %s", tmpDirPath)
+		}
 	}
-	if err := r.Mkdirp(ctx, conn, filepath.Dir(isoDestPath), "0755", true); err != nil { return errors.Wrapf(err, "failed to create ISO dir %s", filepath.Dir(isoDestPath)) }
 
-	isoCmdTool := "genisoimage"
-	if _, err := r.LookPath(ctx, conn, "genisoimage"); err != nil {
-		if _, err = r.LookPath(ctx, conn, "mkisofs"); err == nil { isoCmdTool = "mkisofs" } else { return errors.New("genisoimage or mkisofs not found") }
+	// Ensure destination directory for ISO exists
+	isoDir := filepath.Dir(isoDestPath)
+	if err := r.Mkdirp(ctx, conn, isoDir, "0755", true); err != nil {
+		return errors.Wrapf(err, "failed to create directory %s for ISO image", isoDir)
 	}
-	isoCmd := fmt.Sprintf("%s -o %s -V cidata -r -J %s", isoCmdTool, shellEscape(isoDestPath), shellEscape(tmpDirPath))
+
+	// Determine which ISO creation tool to use
+	isoCmdTool := "genisoimage" // Default
+	if _, err := r.LookPath(ctx, conn, "genisoimage"); err != nil {
+		// genisoimage not found, try mkisofs
+		if _, errMkisofs := r.LookPath(ctx, conn, "mkisofs"); errMkisofs == nil {
+			isoCmdTool = "mkisofs"
+		} else {
+			return errors.New("neither genisoimage nor mkisofs found on the remote host")
+		}
+	}
+
+	// Command to create ISO: genisoimage -o <output.iso> -V cidata -r -J <path_to_cloud_init_files_dir>
+	// or: mkisofs -o <output.iso> -V cidata -r -J <path_to_cloud_init_files_dir>
+	isoCmd := fmt.Sprintf("%s -o %s -V cidata -r -J %s",
+		isoCmdTool,
+		shellEscape(isoDestPath),
+		shellEscape(tmpDirPath), // Use the directory containing user-data, meta-data
+	)
+
 	_, stderr, err := conn.Exec(ctx, isoCmd, &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute})
-	if err != nil { return errors.Wrapf(err, "failed to create cloud-init ISO %s. Stderr: %s", isoDestPath, string(stderr)) }
+	if err != nil {
+		return errors.Wrapf(err, "failed to create cloud-init ISO %s using %s. Stderr: %s", isoDestPath, isoCmdTool, string(stderr))
+	}
 	return nil
 }
 
@@ -426,85 +631,91 @@ func (r *defaultRunner) CreateVM(ctx context.Context, conn connector.Connector, 
 	if vmName == "" || memoryMB == 0 || vcpus == 0 || len(diskPaths) == 0 || diskPaths[0] == "" {
 		return errors.New("vmName, memoryMB, vcpus, and at least one diskPath are required")
 	}
-	if len(networkInterfaces) == 0 { // Require at least one network interface
+	if len(networkInterfaces) == 0 {
 		return errors.New("at least one networkInterface is required")
 	}
 
 	exists, err := r.VMExists(ctx, conn, vmName)
-	if err != nil {
-		return errors.Wrapf(err, "failed to check if VM %s already exists", vmName)
-	}
-	if exists {
-		return errors.Errorf("VM %s already exists", vmName)
-	}
+	if err != nil { return errors.Wrapf(err, "failed to check if VM %s already exists", vmName) }
+	if exists { return errors.Errorf("VM %s already exists", vmName) }
 
 	var xmlBuilder strings.Builder
 	xmlBuilder.WriteString(fmt.Sprintf("<domain type='kvm'>\n"))
 	xmlBuilder.WriteString(fmt.Sprintf("  <name>%s</name>\n", vmName))
-	xmlBuilder.WriteString(fmt.Sprintf("  <memory unit='KiB'>%d</memory>\n", memoryMB*1024))
-	xmlBuilder.WriteString(fmt.Sprintf("  <currentMemory unit='KiB'>%d</currentMemory>\n", memoryMB*1024))
+	xmlBuilder.WriteString(fmt.Sprintf("  <uuid>%s</uuid>\n", utils.GenerateUUID())) // Generate a UUID
+	xmlBuilder.WriteString(fmt.Sprintf("  <memory unit='MiB'>%d</memory>\n", memoryMB))
+	xmlBuilder.WriteString(fmt.Sprintf("  <currentMemory unit='MiB'>%d</currentMemory>\n", memoryMB))
 	xmlBuilder.WriteString(fmt.Sprintf("  <vcpu placement='static'>%d</vcpu>\n", vcpus))
-	xmlBuilder.WriteString("  <os>\n    <type arch='x86_64' machine='pc-q35-rhel8.6.0'>hvm</type>\n") // Machine type might need to be more generic or detected
-
+	xmlBuilder.WriteString("  <os>\n")
+	if osVariant == "" { osVariant = "generic" } // Default OS variant if not specified
+	xmlBuilder.WriteString(fmt.Sprintf("    <type arch='x86_64' machine='pc-q35-rhel8.6.0'>hvm</type>\n")) // Machine type might need to be more generic or detected
+	// Add os-variant if provided, or a loader for UEFI if needed
+	// <smbios mode='sysinfo'/> might be useful
 	if len(bootOrder) == 0 {
 		bootOrder = []string{"hd"}
 		if cloudInitISOPath != "" { bootOrder = append(bootOrder, "cdrom") }
 	}
 	for _, dev := range bootOrder { xmlBuilder.WriteString(fmt.Sprintf("    <boot dev='%s'/>\n", dev)) }
 	xmlBuilder.WriteString("  </os>\n")
+
 	xmlBuilder.WriteString("  <features><acpi/><apic/><vmport state='off'/></features>\n")
-	xmlBuilder.WriteString("  <cpu mode='host-model' check='partial'/>\n")
+	xmlBuilder.WriteString("  <cpu mode='host-passthrough' check='none'/>\n") // host-passthrough for better perf, or host-model
 	xmlBuilder.WriteString("  <clock offset='utc'><timer name='rtc' tickpolicy='catchup'/><timer name='pit' tickpolicy='delay'/><timer name='hpet' present='no'/></clock>\n")
 	xmlBuilder.WriteString("  <on_poweroff>destroy</on_poweroff>\n  <on_reboot>restart</on_reboot>\n  <on_crash>destroy</on_crash>\n")
 	xmlBuilder.WriteString("  <pm><suspend-to-mem enabled='no'/><suspend-to-disk enabled='no'/></pm>\n")
-	xmlBuilder.WriteString("  <devices>\n    <emulator>/usr/libexec/qemu-kvm</emulator>\n") // Path might vary
+	xmlBuilder.WriteString("  <devices>\n    <emulator>/usr/libexec/qemu-kvm</emulator>\n") // Path might vary based on distro
 
 	diskTargetLetter := 'a'
-	pciBus := 4 // Start PCI bus number for disks
+	pciSlot := 0x04 // Starting PCI slot for disks
 	for i, diskPath := range diskPaths {
 		if diskPath == "" { continue }
-		xmlBuilder.WriteString(fmt.Sprintf("    <disk type='file' device='disk'>\n"))
-		xmlBuilder.WriteString(fmt.Sprintf("      <driver name='qemu' type='qcow2'/>\n"))
+		xmlBuilder.WriteString("    <disk type='file' device='disk'>\n")
+		xmlBuilder.WriteString("      <driver name='qemu' type='qcow2' cache='none' io='native'/>\n") // Common settings
 		xmlBuilder.WriteString(fmt.Sprintf("      <source file='%s'/>\n", diskPath))
 		xmlBuilder.WriteString(fmt.Sprintf("      <target dev='vd%c' bus='virtio'/>\n", diskTargetLetter))
-		xmlBuilder.WriteString(fmt.Sprintf("      <address type='pci' domain='0x0000' bus='0x%02x' slot='0x00' function='0x0'/>\n", pciBus+i))
+		// Assign unique PCI address
+		xmlBuilder.WriteString(fmt.Sprintf("      <address type='pci' domain='0x0000' bus='0x00' slot='0x%02x' function='0x0'/>\n", pciSlot))
 		xmlBuilder.WriteString("    </disk>\n")
 		diskTargetLetter++
+		pciSlot++
 	}
 
 	if cloudInitISOPath != "" {
 		xmlBuilder.WriteString("    <disk type='file' device='cdrom'>\n")
 		xmlBuilder.WriteString("      <driver name='qemu' type='raw'/>\n")
 		xmlBuilder.WriteString(fmt.Sprintf("      <source file='%s'/>\n", cloudInitISOPath))
-		xmlBuilder.WriteString("      <target dev='sda' bus='sata'/>\n")
+		xmlBuilder.WriteString("      <target dev='sda' bus='sata'/>\n") // Use a common bus like sata for cdrom
 		xmlBuilder.WriteString("      <readonly/>\n")
-		xmlBuilder.WriteString("      <address type='drive' controller='0' bus='0' target='0' unit='0'/>\n")
+		xmlBuilder.WriteString(fmt.Sprintf("      <address type='drive' controller='0' bus='0' target='0' unit='%d'/>\n", 0)) // Unit 0 for first SATA CD-ROM
 		xmlBuilder.WriteString("    </disk>\n")
 	}
 
-	networkPCIBus := 2 // Start PCI bus for NICs differently from disks
-	for i, nic := range networkInterfaces {
-		xmlBuilder.WriteString("    <interface type='network'>\n")
-		if nic.Source == "" { nic.Source = "default" }
-		xmlBuilder.WriteString(fmt.Sprintf("      <source network='%s'/>\n", nic.Source))
+	networkPCISlot := pciSlot // Continue PCI slot numbering for NICs
+	for _, nic := range networkInterfaces {
+		xmlBuilder.WriteString(fmt.Sprintf("    <interface type='%s'>\n", nic.Type)) // e.g. network, bridge
+		xmlBuilder.WriteString(fmt.Sprintf("      <source %s='%s'/>\n", nic.Type, nic.Source)) // e.g. <source network='default'/> or <source bridge='br0'/>
 		if nic.MACAddress != "" { xmlBuilder.WriteString(fmt.Sprintf("      <mac address='%s'/>\n", nic.MACAddress)) }
 		if nic.Model == "" { nic.Model = "virtio" }
 		xmlBuilder.WriteString(fmt.Sprintf("      <model type='%s'/>\n", nic.Model))
-		xmlBuilder.WriteString(fmt.Sprintf("      <address type='pci' domain='0x0000' bus='0x%02x' slot='0x00' function='0x0'/>\n", networkPCIBus+i))
+		xmlBuilder.WriteString(fmt.Sprintf("      <address type='pci' domain='0x0000' bus='0x00' slot='0x%02x' function='0x0'/>\n", networkPCISlot))
 		xmlBuilder.WriteString("    </interface>\n")
+		networkPCISlot++
 	}
 
 	if graphicsType == "" { graphicsType = "vnc" }
 	if graphicsType != "none" {
 		xmlBuilder.WriteString(fmt.Sprintf("    <graphics type='%s' port='-1' autoport='yes' listen='0.0.0.0'>\n", graphicsType))
 		xmlBuilder.WriteString("      <listen type='address' address='0.0.0.0'/>\n    </graphics>\n")
-		xmlBuilder.WriteString("    <video>\n      <model type='qxl' ram='65536' vram='65536' vgamem='16384' heads='1' primary='yes'/>\n    </video>\n")
+		xmlBuilder.WriteString("    <video>\n      <model type='qxl' ram='65536' vram='65536' vgamem='16384' heads='1' primary='yes'/>\n    </video>\n") // qxl is a good default
 	}
 
 	xmlBuilder.WriteString("    <serial type='pty'><target type='isa-serial' port='0'><model name='isa-serial'/></target></serial>\n")
 	xmlBuilder.WriteString("    <console type='pty'><target type='serial' port='0'/></console>\n")
+	xmlBuilder.WriteString("    <channel type='unix'>\n      <target type='virtio' name='org.qemu.guest_agent.0'/>\n") // QEMU guest agent channel
+	xmlBuilder.WriteString(fmt.Sprintf("      <address type='virtio-serial' controller='0' bus='0' port='%d'/>\n", 1)) // Port 1 for guest agent
+	xmlBuilder.WriteString("    </channel>\n")
 	xmlBuilder.WriteString("    <input type='tablet' bus='usb'/><input type='mouse' bus='ps2'/><input type='keyboard' bus='ps2'/>\n")
-	xmlBuilder.WriteString("    <memballoon model='virtio'><address type='pci' domain='0x0000' bus='0x05' slot='0x00' function='0x0'/></memballoon>\n")
+	xmlBuilder.WriteString(fmt.Sprintf("    <memballoon model='virtio'><address type='pci' domain='0x0000' bus='0x00' slot='0x%02x' function='0x0'/></memballoon>\n", networkPCISlot)) // Next available PCI slot
 	xmlBuilder.WriteString("  </devices>\n</domain>\n")
 
 	vmXML := xmlBuilder.String()
@@ -531,20 +742,14 @@ func (r *defaultRunner) AttachDisk(ctx context.Context, conn connector.Connector
 	if vmName == "" || diskPath == "" || targetDevice == "" {
 		return errors.New("vmName, diskPath, and targetDevice are required")
 	}
-	// virsh attach-disk <domain> <source> <target> --driver <driver_name> --type <driver_type> --subdriver <subdriver> --config --live
-	// Example: virsh attach-disk myvm /path/to/newdisk.qcow2 vdb --driver qemu --type qcow2 --config --live
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "virsh", "attach-disk", shellEscape(vmName), shellEscape(diskPath), shellEscape(targetDevice))
-	if driverType != "" { // e.g. qcow2, raw
-		cmdArgs = append(cmdArgs, "--driver", "qemu", "--subdriver", shellEscape(driverType)) // Common for qemu driver
+	if driverType != "" {
+		cmdArgs = append(cmdArgs, "--driver", "qemu", "--subdriver", shellEscape(driverType))
 	}
-	if diskType != "" { // e.g. file, block
-		// This is often implied or part of driver choice; virsh attach-disk is simpler.
-		// The --type flag for attach-disk refers to disk device type (cdrom, disk, floppy, lun), not file format.
-		// We will omit --type for now, relying on libvirt to infer or using driver/subdriver for format.
-	}
-	cmdArgs = append(cmdArgs, "--config") // Make change persistent
-	cmdArgs = append(cmdArgs, "--live")   // Attempt live attach
+	// diskType for attach-disk usually means 'cdrom', 'floppy', 'disk', 'lun'. 'file' or 'block' are source types.
+	// For simplicity, we'll assume it's a regular disk and not set --type unless explicitly needed.
+	cmdArgs = append(cmdArgs, "--config", "--live") // Make persistent and apply live
 
 	cmd := strings.Join(cmdArgs, " ")
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
@@ -559,13 +764,11 @@ func (r *defaultRunner) DetachDisk(ctx context.Context, conn connector.Connector
 	if vmName == "" || targetDeviceOrPath == "" {
 		return errors.New("vmName and targetDeviceOrPath are required")
 	}
-	// virsh detach-disk <domain> <target> --config --live
 	cmd := fmt.Sprintf("virsh detach-disk %s %s --config --live", shellEscape(vmName), shellEscape(targetDeviceOrPath))
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if err != nil {
-		// Idempotency: If disk not found, "error: No disk found for target..."
-		if strings.Contains(string(stderr), "No disk found for target") || strings.Contains(string(stderr),"no target device found") {
-			return nil
+		if strings.Contains(string(stderr), "No disk found for target") || strings.Contains(string(stderr),"no target device found") || strings.Contains(string(stderr), "not found") {
+			return nil // Idempotent
 		}
 		return errors.Wrapf(err, "failed to detach disk %s from VM %s. Stderr: %s", targetDeviceOrPath, vmName, string(stderr))
 	}
@@ -576,24 +779,16 @@ func (r *defaultRunner) SetVMMemory(ctx context.Context, conn connector.Connecto
 	if vmName == "" || memoryMB == 0 {
 		return errors.New("vmName and non-zero memoryMB are required")
 	}
-
-	// `virsh setmem <domain> <count>[<scale>] [--config] [--live] [--current]`
-	// <scale> can be k, K, KiB, m, M, MiB, g, G, GiB, t, T, TiB
-	// We are given memoryMB, so convert to KiB for libvirt as it's a common base unit.
 	memoryKiB := memoryMB * 1024
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "virsh", "setmem", shellEscape(vmName), fmt.Sprintf("%dK", memoryKiB)) // Using K for KiB shortcut
+	cmdArgs = append(cmdArgs, "virsh", "setmem", shellEscape(vmName), fmt.Sprintf("%dK", memoryKiB))
 
-	if current { // Affect running VM and make persistent if also --config
-		cmdArgs = append(cmdArgs, "--live", "--config") // --current is implied by --live for setmem. --config makes it persistent.
-	} else { // Affect persistent config only (next boot)
+	if current {
+		cmdArgs = append(cmdArgs, "--live", "--config")
+	} else {
 		cmdArgs = append(cmdArgs, "--config")
 	}
-	// Note: `virsh setmaxmem` might be needed first if the new memory exceeds current max memory defined for the VM.
-	// This simplified version assumes new memory is within allowed max.
-	// A more robust version would check `virsh dominfo` or `dumpxml` for max memory and call `setmaxmem` if needed.
-
 	cmd := strings.Join(cmdArgs, " ")
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if err != nil {
@@ -608,20 +803,13 @@ func (r *defaultRunner) SetVMCPUs(ctx context.Context, conn connector.Connector,
 		return errors.New("vmName and non-zero vcpus are required")
 	}
 
-	// `virsh setvcpus <domain> <count> [--config] [--live] [--current] [--guest]`
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "virsh", "setvcpus", shellEscape(vmName), fmt.Sprintf("%d", vcpus))
-
 	if current {
-		cmdArgs = append(cmdArgs, "--live", "--config") // Similar to setmem, --live implies --current, --config makes it persistent
+		cmdArgs = append(cmdArgs, "--live", "--config")
 	} else {
 		cmdArgs = append(cmdArgs, "--config")
 	}
-	// Note: This sets the *current* number of vCPUs. The maximum vCPUs is defined in the domain XML
-	// and might need to be adjusted separately if `vcpus` exceeds that maximum.
-	// `virsh dumpxml <domain>` then `virsh define` with modified XML, or `virsh edit` can change max vCPUs.
-	// This simplified version assumes new vcpu count is within allowed max.
-
 	cmd := strings.Join(cmdArgs, " ")
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if err != nil {
@@ -630,4 +818,80 @@ func (r *defaultRunner) SetVMCPUs(ctx context.Context, conn connector.Connector,
 	return nil
 }
 
-[end of pkg/runner/qemu.go]
+// EnsureLibvirtDaemonRunning checks and ensures libvirtd is running.
+func (r *defaultRunner) EnsureLibvirtDaemonRunning(ctx context.Context, conn connector.Connector, facts *Facts) error {
+	if conn == nil { return errors.New("connector cannot be nil") }
+	if facts == nil || facts.InitSystem == nil || facts.InitSystem.Type == InitSystemUnknown {
+		return errors.New("cannot ensure libvirtd state without init system info from facts")
+	}
+
+	serviceName := "libvirtd" // Common name for libvirtd service
+
+	isActive, err := r.IsServiceActive(ctx, conn, facts, serviceName)
+	if err != nil {
+		// If IsServiceActive fails (e.g. service not found), try starting it anyway
+		// as IsServiceActive might be restrictive.
+	}
+	if isActive {
+		// If active, ensure it's enabled
+		if errEnable := r.EnableService(ctx, conn, facts, serviceName); errEnable != nil {
+			// Log warning or return error? For "Ensure", probably error.
+			return errors.Wrapf(errEnable, "libvirtd service is active but failed to enable")
+		}
+		return nil // Active and enabled
+	}
+
+	// Not active, try to start
+	if errStart := r.StartService(ctx, conn, facts, serviceName); errStart != nil {
+		return errors.Wrapf(errStart, "failed to start libvirtd service")
+	}
+	// Started, now enable
+	if errEnable := r.EnableService(ctx, conn, facts, serviceName); errEnable != nil {
+		return errors.Wrapf(errEnable, "libvirtd service started but failed to enable")
+	}
+	return nil
+}
+// Placeholder for AttachNetInterface - requires complex XML manipulation or specific virsh commands
+func (r *defaultRunner) AttachNetInterface(ctx context.Context, conn connector.Connector, vmName string, iface VMNetworkInterface, persistent bool) error {
+	return errors.New("AttachNetInterface not fully implemented via CLI runner")
+}
+
+// Placeholder for DetachNetInterface
+func (r *defaultRunner) DetachNetInterface(ctx context.Context, conn connector.Connector, vmName string, macAddress string, persistent bool) error {
+	return errors.New("DetachNetInterface not fully implemented via CLI runner")
+}
+
+// Placeholder for ListNetInterfaces
+func (r *defaultRunner) ListNetInterfaces(ctx context.Context, conn connector.Connector, vmName string) ([]VMNetworkInterfaceDetail, error) {
+	return nil, errors.New("ListNetInterfaces not fully implemented via CLI runner")
+}
+
+// Placeholder for CreateSnapshot
+func (r *defaultRunner) CreateSnapshot(ctx context.Context, conn connector.Connector, vmName, snapshotName, description string, diskSpecs []VMSnapshotDiskSpec, noMetadata, halt, diskOnly, reuseExisting, quiesce, atomic bool) error {
+	return errors.New("CreateSnapshot not fully implemented via CLI runner")
+}
+
+// Placeholder for DeleteSnapshot
+func (r *defaultRunner) DeleteSnapshot(ctx context.Context, conn connector.Connector, vmName, snapshotName string, children, metadata bool) error {
+	return errors.New("DeleteSnapshot not fully implemented via CLI runner")
+}
+
+// Placeholder for ListSnapshots
+func (r *defaultRunner) ListSnapshots(ctx context.Context, conn connector.Connector, vmName string) ([]VMSnapshotInfo, error) {
+	return nil, errors.New("ListSnapshots not fully implemented via CLI runner")
+}
+
+// Placeholder for RevertToSnapshot
+func (r *defaultRunner) RevertToSnapshot(ctx context.Context, conn connector.Connector, vmName, snapshotName string, force, running bool) error {
+	return errors.New("RevertToSnapshot not fully implemented via CLI runner")
+}
+
+// Placeholder for GetVMInfo (more detailed than dominfo)
+func (r *defaultRunner) GetVMInfo(ctx context.Context, conn connector.Connector, vmName string) (*VMDetails, error) {
+	return nil, errors.New("GetVMInfo (detailed XML parsing) not fully implemented via CLI runner")
+}
+
+// Placeholder for GetVNCPort
+func (r *defaultRunner) GetVNCPort(ctx context.Context, conn connector.Connector, vmName string) (string, error) {
+	return "", errors.New("GetVNCPort not fully implemented via CLI runner (requires XML parsing)")
+}

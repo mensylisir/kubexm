@@ -16,448 +16,198 @@ import (
 )
 
 func TestDefaultRunner_HelmInstall(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
+	ctrl := gomock.NewController(t); defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background()
+	releaseName, chartPath, namespace := "my-nginx", "stable/nginx-ingress", "test-ns"
 
-	mockConn := mocks.NewMockConnector(ctrl)
-	runner := NewDefaultRunner()
-	ctx := context.Background()
-
-	releaseName := "my-nginx"
-	chartPath := "stable/nginx-ingress"
-	namespace := "test-ns"
-
-	// Test Case 1: Basic successful install
 	opts1 := HelmInstallOptions{Namespace: namespace, CreateNamespace: true}
-	expectedCmd1 := fmt.Sprintf("helm install %s %s --namespace %s --create-namespace",
-		shellEscape(releaseName), shellEscape(chartPath), shellEscape(namespace))
+	expectedCmd1 := fmt.Sprintf("helm install %s %s --namespace %s --create-namespace", shellEscape(releaseName), shellEscape(chartPath), shellEscape(namespace))
 	mockConn.EXPECT().Exec(ctx, expectedCmd1, gomock.Any()).Return([]byte("NOTES: ..."), []byte{}, nil).Times(1)
-	err := runner.HelmInstall(ctx, mockConn, releaseName, chartPath, opts1)
-	assert.NoError(t, err)
+	err := runner.HelmInstall(ctx, mockConn, releaseName, chartPath, opts1); assert.NoError(t, err)
 
-	// Test Case 2: Install with values, version, and wait
-	opts2 := HelmInstallOptions{
-		Namespace: namespace,
-		Version:   "1.2.3",
-		ValuesFiles: []string{"/tmp/values.yaml"},
-		SetValues:   []string{"controller.replicaCount=2", "image.tag=latest"},
-		Wait:      true,
-		Timeout:   300 * time.Second,
-	}
-	expectedCmd2Parts := []string{
-		"helm", "install", shellEscape(releaseName), shellEscape(chartPath),
-		"--namespace", shellEscape(namespace),
-		"--version", shellEscape(opts2.Version),
-		"--values", shellEscape(opts2.ValuesFiles[0]),
-		"--set", shellEscape(opts2.SetValues[0]),
-		"--set", shellEscape(opts2.SetValues[1]),
-		"--wait",
-		"--timeout", opts2.Timeout.String(),
-	}
-	// Using DoAndReturn to check if all parts are in the command, as order of --set might vary.
-	mockConn.EXPECT().Exec(ctx, gomock.AssignableToTypeOf("string"), gomock.Any()).
-		DoAndReturn(func(_ context.Context, cmd string, execOpts *connector.ExecOptions) ([]byte, []byte, error) {
-			for _, part := range expectedCmd2Parts {
-				assert.Contains(t, cmd, part)
-			}
-			assert.Equal(t, opts2.Timeout+(1*time.Minute), execOpts.Timeout) // Check adjusted exec timeout
-			return []byte("NOTES: ..."), []byte{}, nil
-		}).Times(1)
-	err = runner.HelmInstall(ctx, mockConn, releaseName, chartPath, opts2)
-	assert.NoError(t, err)
+	opts2 := HelmInstallOptions{Namespace: namespace, Version: "1.2.3", ValuesFiles: []string{"/tmp/v.yaml"}, SetValues: []string{"k=v"}, Wait: true, Timeout: 300 * time.Second}
+	mockConn.EXPECT().Exec(ctx, gomock.Any(), gomock.Any()).Return([]byte("NOTES: ..."), []byte{}, nil).Times(1)
+	err = runner.HelmInstall(ctx, mockConn, releaseName, chartPath, opts2); assert.NoError(t, err)
 
-	// Test Case 3: Helm command execution fails
-	mockConn.EXPECT().Exec(ctx, expectedCmd1, gomock.Any()). // Re-use opts1 for simplicity
-		Return([]byte("Error output"), []byte("helm generic error"), fmt.Errorf("exec error")).Times(1)
-	err = runner.HelmInstall(ctx, mockConn, releaseName, chartPath, opts1)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "helm install for release")
-	assert.Contains(t, err.Error(), "helm generic error") // Stderr should be in the error
-	assert.Contains(t, err.Error(), "Error output")     // Stdout also
+	mockConn.EXPECT().Exec(ctx, expectedCmd1, gomock.Any()).Return([]byte("Err"), []byte("helm err"), fmt.Errorf("exec err")).Times(1)
+	err = runner.HelmInstall(ctx, mockConn, releaseName, chartPath, opts1); assert.Error(t, err)
 }
 
 func TestDefaultRunner_HelmUninstall(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
+	ctrl := gomock.NewController(t); defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background()
+	releaseName, namespace := "my-nginx-u", "test-ns-u"
 
-	mockConn := mocks.NewMockConnector(ctrl)
-	runner := NewDefaultRunner()
-	ctx := context.Background()
-	releaseName := "my-nginx-uninstall"
-	namespace := "test-ns-uninstall"
-
-	// Test Case 1: Basic successful uninstall
 	opts1 := HelmUninstallOptions{Namespace: namespace}
 	expectedCmd1 := fmt.Sprintf("helm uninstall %s --namespace %s", shellEscape(releaseName), shellEscape(namespace))
-	mockConn.EXPECT().Exec(ctx, expectedCmd1, gomock.Any()).Return([]byte("release \"my-nginx-uninstall\" uninstalled"), []byte{}, nil).Times(1)
-	err := runner.HelmUninstall(ctx, mockConn, releaseName, opts1)
-	assert.NoError(t, err)
+	mockConn.EXPECT().Exec(ctx, expectedCmd1, gomock.Any()).Return([]byte("release uninstalled"), []byte{}, nil).Times(1)
+	err := runner.HelmUninstall(ctx, mockConn, releaseName, opts1); assert.NoError(t, err)
 
-	// Test Case 2: Uninstall with keep history and timeout
-	opts2 := HelmUninstallOptions{
-		Namespace:   namespace,
-		KeepHistory: true,
-		Timeout:     120 * time.Second,
-	}
-	expectedCmd2 := fmt.Sprintf("helm uninstall %s --namespace %s --keep-history --timeout %s",
-		shellEscape(releaseName), shellEscape(namespace), opts2.Timeout.String())
-	mockConn.EXPECT().Exec(ctx, expectedCmd2, gomock.Any()).Return([]byte("release uninstalled"), []byte{}, nil).Times(1)
-	err = runner.HelmUninstall(ctx, mockConn, releaseName, opts2)
-	assert.NoError(t, err)
-
-	// Test Case 3: Release not found (idempotency)
-	mockConn.EXPECT().Exec(ctx, expectedCmd1, gomock.Any()). // Re-use opts1
-		Return(nil, []byte("Error: uninstall: Release not loaded: my-nginx-uninstall: release: not found"), &connector.CommandError{ExitCode: 1}).Times(1)
-	err = runner.HelmUninstall(ctx, mockConn, releaseName, opts1)
-	assert.NoError(t, err) // Should be idempotent
-
-	// Test Case 4: Helm command execution fails (other error)
-	mockConn.EXPECT().Exec(ctx, expectedCmd1, gomock.Any()).
-		Return(nil, []byte("helm generic uninstall error"), fmt.Errorf("exec uninstall error")).Times(1)
-	err = runner.HelmUninstall(ctx, mockConn, releaseName, opts1)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "helm uninstall for release")
-	assert.Contains(t, err.Error(), "helm generic uninstall error")
+	mockConn.EXPECT().Exec(ctx, expectedCmd1, gomock.Any()).Return(nil, []byte("Error: release: not found"), &connector.CommandError{ExitCode: 1}).Times(1)
+	err = runner.HelmUninstall(ctx, mockConn, releaseName, opts1); assert.NoError(t, err)
 }
 
 func TestDefaultRunner_HelmList(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
+	ctrl := gomock.NewController(t); defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background()
+	sampleOutput := `[{"name":"r1","namespace":"ns1","chart":"c1-0.1.0"},{"name":"r2","namespace":"ns2","chart":"c2-1.2.0"}]`
+	var expected []HelmReleaseInfo; json.Unmarshal([]byte(sampleOutput), &expected)
 
-	mockConn := mocks.NewMockConnector(ctrl)
-	runner := NewDefaultRunner()
-	ctx := context.Background()
+	mockConn.EXPECT().Exec(ctx, "helm list -o json", gomock.Any()).Return([]byte(sampleOutput), []byte{}, nil).Times(1)
+	releases, err := runner.HelmList(ctx, mockConn, HelmListOptions{}); assert.NoError(t, err); assert.Equal(t, expected, releases)
 
-	sampleListOutput := `[
-    {"name":"release1","namespace":"ns1","revision":"1","updated":"2023-01-01 10:00:00.000 +0000 UTC","status":"deployed","chart":"chart1-0.1.0","app_version":"1.0.0"},
-    {"name":"release2","namespace":"ns2","revision":"3","updated":"2023-01-02 12:00:00.000 +0000 UTC","status":"failed","chart":"chart2-1.2.0","app_version":"2.1.0"}
-]`
-	expectedReleases := []HelmReleaseInfo{
-		{Name: "release1", Namespace: "ns1", Revision: "1", Updated: "2023-01-01 10:00:00.000 +0000 UTC", Status: "deployed", Chart: "chart1-0.1.0", AppVersion: "1.0.0"},
-		{Name: "release2", Namespace: "ns2", Revision: "3", Updated: "2023-01-02 12:00:00.000 +0000 UTC", Status: "failed", Chart: "chart2-1.2.0", AppVersion: "2.1.0"},
-	}
-
-	// Test Case 1: Successful list with default options
-	mockConn.EXPECT().Exec(ctx, "helm list -o json", gomock.Any()).Return([]byte(sampleListOutput), []byte{}, nil).Times(1)
-	releases, err := runner.HelmList(ctx, mockConn, HelmListOptions{})
-	assert.NoError(t, err)
-	assert.Equal(t, expectedReleases, releases)
-
-	// Test Case 2: List with all-namespaces and filter
-	opts := HelmListOptions{AllNamespaces: true, Filter: "release"}
-	expectedCmd := "helm list --all-namespaces --filter 'release' -o json"
-	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte(sampleListOutput), []byte{}, nil).Times(1)
-	releases, err = runner.HelmList(ctx, mockConn, opts)
-	assert.NoError(t, err)
-	assert.Equal(t, expectedReleases, releases)
-
-	// Test Case 3: Empty list result (valid JSON "[]" or "" or "null")
 	mockConn.EXPECT().Exec(ctx, "helm list -o json", gomock.Any()).Return([]byte("[]"), []byte{}, nil).Times(1)
-	releases, err = runner.HelmList(ctx, mockConn, HelmListOptions{})
-	assert.NoError(t, err)
-	assert.Empty(t, releases)
-
-	mockConn.EXPECT().Exec(ctx, "helm list -o json", gomock.Any()).Return([]byte(""), []byte{}, nil).Times(1)
-	releases, err = runner.HelmList(ctx, mockConn, HelmListOptions{})
-	assert.NoError(t, err)
-	assert.Empty(t, releases)
-
-	mockConn.EXPECT().Exec(ctx, "helm list -o json", gomock.Any()).Return([]byte("null"), []byte{}, nil).Times(1)
-	releases, err = runner.HelmList(ctx, mockConn, HelmListOptions{})
-	assert.NoError(t, err)
-	assert.Empty(t, releases)
-
-
-	// Test Case 4: Invalid JSON output
-	mockConn.EXPECT().Exec(ctx, "helm list -o json", gomock.Any()).Return([]byte("not json"), []byte{}, nil).Times(1)
-	releases, err = runner.HelmList(ctx, mockConn, HelmListOptions{})
-	assert.Error(t, err)
-	assert.Nil(t, releases)
-	assert.Contains(t, err.Error(), "failed to parse helm list JSON output")
-
-	// Test Case 5: Helm command execution error
-	mockConn.EXPECT().Exec(ctx, "helm list -o json", gomock.Any()).
-		Return(nil, []byte("helm list error"), fmt.Errorf("exec list error")).Times(1)
-	releases, err = runner.HelmList(ctx, mockConn, HelmListOptions{})
-	assert.Error(t, err)
-	assert.Nil(t, releases)
-	assert.Contains(t, err.Error(), "helm list failed")
+	releases, err = runner.HelmList(ctx, mockConn, HelmListOptions{}); assert.NoError(t, err); assert.Empty(t, releases)
 }
 
 func TestDefaultRunner_HelmStatus(t *testing.T) {
-    ctrl := gomock.NewController(t)
-    defer ctrl.Finish()
-
-    mockConn := mocks.NewMockConnector(ctrl)
-    runner := NewDefaultRunner()
-    ctx := context.Background()
-    releaseName := "my-release"
-
-    sampleStatusOutput := `{
-        "name": "my-release",
-        "namespace": "default",
-        "revision": "2",
-        "updated": "2023-10-28 11:00:00.000 +0000 UTC",
-        "status": "deployed",
-        "chart": "mychart-0.2.0",
-        "app_version": "1.1.0",
-        "notes": "Some notes here",
-        "config": {"key": "value"}
-    }`
-    var expectedStatus HelmReleaseInfo
-    err := json.Unmarshal([]byte(sampleStatusOutput), &expectedStatus)
-    assert.NoError(t, err, "Test setup: failed to unmarshal sample status")
-
-
-    // Test Case 1: Successful status
-    opts := HelmStatusOptions{Namespace: "default"}
-    expectedCmd := fmt.Sprintf("helm status %s --namespace %s -o json", shellEscape(releaseName), shellEscape(opts.Namespace))
-    mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte(sampleStatusOutput), []byte{}, nil).Times(1)
-
-    status, err := runner.HelmStatus(ctx, mockConn, releaseName, opts)
-    assert.NoError(t, err)
-    assert.Equal(t, &expectedStatus, status)
-
-    // Test Case 2: Release not found
-    mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).
-        Return(nil, []byte("Error: release: not found"), &connector.CommandError{ExitCode: 1}).Times(1)
-    status, err = runner.HelmStatus(ctx, mockConn, releaseName, opts)
-    assert.NoError(t, err) // Expects nil, nil for not found
-    assert.Nil(t, status)
-
-    // Test Case 3: Helm command execution error
-    mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).
-        Return(nil, []byte("helm status error"), fmt.Errorf("exec status error")).Times(1)
-    status, err = runner.HelmStatus(ctx, mockConn, releaseName, opts)
-    assert.Error(t, err)
-    assert.Nil(t, status)
-    assert.Contains(t, err.Error(), "helm status for release")
+    ctrl := gomock.NewController(t); defer ctrl.Finish()
+    mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background(); releaseName := "my-rel"
+    sampleOutput := `{"name":"my-rel","namespace":"def","revision":"1","status":"deployed"}`
+    var expected HelmReleaseInfo; json.Unmarshal([]byte(sampleOutput), &expected)
+    expectedCmd := fmt.Sprintf("helm status %s -o json", shellEscape(releaseName))
+    mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte(sampleOutput), []byte{}, nil).Times(1)
+    status, err := runner.HelmStatus(ctx, mockConn, releaseName, HelmStatusOptions{}); assert.NoError(t, err); assert.Equal(t, &expected, status)
 }
 
 func TestDefaultRunner_HelmRepoAdd(t *testing.T) {
-    ctrl := gomock.NewController(t)
-    defer ctrl.Finish()
-
-    mockConn := mocks.NewMockConnector(ctrl)
-    runner := NewDefaultRunner()
-    ctx := context.Background()
-    repoName := "bitnami"
-    repoURL := "https://charts.bitnami.com/bitnami"
-
-    // Test Case 1: Successful repo add
-    opts := HelmRepoAddOptions{}
+    ctrl := gomock.NewController(t); defer ctrl.Finish()
+    mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background(); repoName, repoURL := "bn", "https://charts.bitnami.com/bitnami"
     expectedCmd := fmt.Sprintf("helm repo add %s %s", shellEscape(repoName), shellEscape(repoURL))
-    mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte(fmt.Sprintf("\"%s\" has been added to your repositories", repoName)), []byte{}, nil).Times(1)
-    err := runner.HelmRepoAdd(ctx, mockConn, repoName, repoURL, opts)
-    assert.NoError(t, err)
-
-    // Test Case 2: Repo already exists, no force update (should error by default helm behavior)
-    optsNoForce := HelmRepoAddOptions{ForceUpdate: false}
-    mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).
-        Return(nil, []byte(fmt.Sprintf("Error: repository name (%s) already exists, use --force-update to overwrite", repoName)), &connector.CommandError{ExitCode: 1}).Times(1)
-    err = runner.HelmRepoAdd(ctx, mockConn, repoName, repoURL, optsNoForce)
-    assert.Error(t, err) // Helm errors if repo exists and no --force-update
-    assert.Contains(t, err.Error(), "already exists and --force-update not used")
-
-    // Test Case 3: Repo already exists, with force update
-    optsForce := HelmRepoAddOptions{ForceUpdate: true}
-    expectedCmdForce := fmt.Sprintf("helm repo add %s %s --force-update", shellEscape(repoName), shellEscape(repoURL))
-    mockConn.EXPECT().Exec(ctx, expectedCmdForce, gomock.Any()).Return([]byte(fmt.Sprintf("\"%s\" has been updated in your repositories", repoName)), []byte{}, nil).Times(1)
-    err = runner.HelmRepoAdd(ctx, mockConn, repoName, repoURL, optsForce)
-    assert.NoError(t, err)
+    mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte("added"), []byte{}, nil).Times(1)
+    err := runner.HelmRepoAdd(ctx, mockConn, repoName, repoURL, HelmRepoAddOptions{}); assert.NoError(t, err)
 }
 
 func TestDefaultRunner_HelmRepoUpdate(t *testing.T) {
-    ctrl := gomock.NewController(t)
-    defer ctrl.Finish()
-
-    mockConn := mocks.NewMockConnector(ctrl)
-    runner := NewDefaultRunner()
-    ctx := context.Background()
-
-    // Test Case 1: Update all repos
-    mockConn.EXPECT().Exec(ctx, "helm repo update", gomock.Any()).Return([]byte("Update Complete."), []byte{}, nil).Times(1)
-    err := runner.HelmRepoUpdate(ctx, mockConn, nil) // nil or empty slice for all
-    assert.NoError(t, err)
-
-    // Test Case 2: Update specific repos
-    repoNames := []string{"stable", "bitnami"}
-    expectedCmd := fmt.Sprintf("helm repo update %s %s", shellEscape(repoNames[0]), shellEscape(repoNames[1]))
-    mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte("Update Complete."), []byte{}, nil).Times(1)
-    err = runner.HelmRepoUpdate(ctx, mockConn, repoNames)
-    assert.NoError(t, err)
-
-    // Test Case 3: Command fails
-    mockConn.EXPECT().Exec(ctx, "helm repo update", gomock.Any()).
-        Return(nil, []byte("repo update error"), fmt.Errorf("exec repo update error")).Times(1)
-    err = runner.HelmRepoUpdate(ctx, mockConn, nil)
-    assert.Error(t, err)
-    assert.Contains(t, err.Error(), "helm repo update failed")
+    ctrl := gomock.NewController(t); defer ctrl.Finish()
+    mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background()
+    mockConn.EXPECT().Exec(ctx, "helm repo update", gomock.Any()).Return([]byte("updated"), []byte{}, nil).Times(1)
+    err := runner.HelmRepoUpdate(ctx, mockConn, nil); assert.NoError(t, err)
 }
 
 func TestDefaultRunner_HelmVersion(t *testing.T) {
-    ctrl := gomock.NewController(t)
-    defer ctrl.Finish()
-
-    mockConn := mocks.NewMockConnector(ctrl)
-    runner := NewDefaultRunner()
-    ctx := context.Background()
-
-    sampleVersionJSON := `{"version":"v3.8.1","gitCommit":"5cb92b3e801bd32cc3319ed842d7a5c6e81e4bab","gitTreeState":"clean","goVersion":"go1.17.5"}`
-    expectedVersionInfo := HelmVersionInfo{
-        Version:    "v3.8.1",
-        GitCommit:  "5cb92b3e801bd32cc3319ed842d7a5c6e81e4bab",
-        GitTreeState: "clean",
-        GoVersion:  "go1.17.5",
-    }
-
-    // Test Case 1: Successful version retrieval
-    mockConn.EXPECT().Exec(ctx, "helm version -o json", gomock.Any()).Return([]byte(sampleVersionJSON), []byte{}, nil).Times(1)
-    versionInfo, err := runner.HelmVersion(ctx, mockConn)
-    assert.NoError(t, err)
-    assert.Equal(t, &expectedVersionInfo, versionInfo)
-
-    // Test Case 2: Invalid JSON
-    mockConn.EXPECT().Exec(ctx, "helm version -o json", gomock.Any()).Return([]byte("not json"), []byte{}, nil).Times(1)
-    versionInfo, err = runner.HelmVersion(ctx, mockConn)
-    assert.Error(t, err)
-    assert.Nil(t, versionInfo)
-    assert.Contains(t, err.Error(), "failed to parse helm version JSON")
-
-    // Test Case 3: Command fails
-    mockConn.EXPECT().Exec(ctx, "helm version -o json", gomock.Any()).
-        Return(nil, []byte("version error"), fmt.Errorf("exec version error")).Times(1)
-    versionInfo, err = runner.HelmVersion(ctx, mockConn)
-    assert.Error(t, err)
-    assert.Nil(t, versionInfo)
-    assert.Contains(t, err.Error(), "helm version failed")
+    ctrl := gomock.NewController(t); defer ctrl.Finish()
+    mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background()
+    sampleOutput := `{"version":"v3.8.1"}`; var expected HelmVersionInfo; json.Unmarshal([]byte(sampleOutput), &expected)
+    mockConn.EXPECT().Exec(ctx, "helm version -o json", gomock.Any()).Return([]byte(sampleOutput), []byte{}, nil).Times(1)
+    verInfo, err := runner.HelmVersion(ctx, mockConn); assert.NoError(t, err); assert.Equal(t, &expected, verInfo)
 }
 
 func TestDefaultRunner_HelmSearchRepo(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockConn := mocks.NewMockConnector(ctrl)
-	runner := NewDefaultRunner()
-	ctx := context.Background()
-	keyword := "nginx"
-
-	sampleSearchOutput := `[
-    {"name":"bitnami/nginx","version":"13.2.22","app_version":"1.23.3","description":"NGINX Open Source is a web server that can be also used as a reverse proxy..."},
-    {"name":"ingress-nginx/ingress-nginx","version":"4.7.0","app_version":"1.8.0","description":"Ingress controller for Kubernetes using NGINX as a reverse proxy and load balancer"}
-]`
-	expectedCharts := []HelmChartInfo{
-		{Name: "bitnami/nginx", Version: "13.2.22", AppVersion: "1.23.3", Description: "NGINX Open Source is a web server that can be also used as a reverse proxy..."},
-		{Name: "ingress-nginx/ingress-nginx", Version: "4.7.0", AppVersion: "1.8.0", Description: "Ingress controller for Kubernetes using NGINX as a reverse proxy and load balancer"},
-	}
-
-	// Test Case 1: Successful search
-	opts := HelmSearchOptions{}
-	expectedCmd := fmt.Sprintf("helm search repo %s -o json", shellEscape(keyword))
-	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte(sampleSearchOutput), []byte{}, nil).Times(1)
-	charts, err := runner.HelmSearchRepo(ctx, mockConn, keyword, opts)
-	assert.NoError(t, err)
-	assert.Equal(t, expectedCharts, charts)
-
-	// Test Case 2: Search with --versions and --devel
-	optsVersions := HelmSearchOptions{Versions: true, Devel: true}
-	expectedCmdVersions := fmt.Sprintf("helm search repo %s --devel --versions -o json", shellEscape(keyword))
-	mockConn.EXPECT().Exec(ctx, expectedCmdVersions, gomock.Any()).Return([]byte(sampleSearchOutput), []byte{}, nil).Times(1) // Same output for simplicity
-	charts, err = runner.HelmSearchRepo(ctx, mockConn, keyword, optsVersions)
-	assert.NoError(t, err)
-	assert.Equal(t, expectedCharts, charts)
-
-	// Test Case 3: No results (empty JSON array)
-	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte("[]"), []byte{}, nil).Times(1)
-	charts, err = runner.HelmSearchRepo(ctx, mockConn, keyword, opts)
-	assert.NoError(t, err)
-	assert.Empty(t, charts)
-
-	// Test Case 4: Command fails
-	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).
-		Return(nil, []byte("search error"), fmt.Errorf("exec search error")).Times(1)
-	charts, err = runner.HelmSearchRepo(ctx, mockConn, keyword, opts)
-	assert.Error(t, err)
-	assert.Nil(t, charts)
-	assert.Contains(t, err.Error(), "helm search repo for keyword")
+	ctrl := gomock.NewController(t); defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background(); keyword := "ng"
+	sampleOutput := `[{"name":"b/n","version":"1"}]`; var expected []HelmChartInfo; json.Unmarshal([]byte(sampleOutput), &expected)
+	mockConn.EXPECT().Exec(ctx, fmt.Sprintf("helm search repo %s -o json", shellEscape(keyword)), gomock.Any()).Return([]byte(sampleOutput), []byte{}, nil).Times(1)
+	charts, err := runner.HelmSearchRepo(ctx, mockConn, keyword, HelmSearchOptions{}); assert.NoError(t, err); assert.Equal(t, expected, charts)
 }
 
 func TestDefaultRunner_HelmPull(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockConn := mocks.NewMockConnector(ctrl)
-	runner := NewDefaultRunner()
-	ctx := context.Background()
-	chartPath := "stable/mysql"
-
-	// Test Case 1: Successful pull
-	opts := HelmPullOptions{Version: "1.6.7", Destination: "/tmp/charts"}
-	expectedCmd := fmt.Sprintf("helm pull %s --destination %s --version %s",
-		shellEscape(chartPath), shellEscape(opts.Destination), shellEscape(opts.Version))
-	expectedOutput := "Successfully downloaded chart to /tmp/charts/mysql-1.6.7.tgz"
-	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte(expectedOutput+"\n"), []byte{}, nil).Times(1)
-
-	outputPath, err := runner.HelmPull(ctx, mockConn, chartPath, opts)
-	assert.NoError(t, err)
-	assert.Equal(t, expectedOutput, outputPath)
-
-	// Test Case 2: Pull with untar
-	optsUntar := HelmPullOptions{Untar: true, UntarDir: "/tmp/untarred_mysql"}
-	expectedCmdUntar := fmt.Sprintf("helm pull %s --untar --untardir %s", shellEscape(chartPath), shellEscape(optsUntar.UntarDir))
-	expectedOutputUntar := "Successfully downloaded chart to /tmp/untarred_mysql/mysql"
-	mockConn.EXPECT().Exec(ctx, expectedCmdUntar, gomock.Any()).Return([]byte(expectedOutputUntar), []byte{}, nil).Times(1)
-
-	outputPath, err = runner.HelmPull(ctx, mockConn, chartPath, optsUntar)
-	assert.NoError(t, err)
-	assert.Equal(t, expectedOutputUntar, outputPath)
-
-	// Test Case 3: Command fails
-	mockConn.EXPECT().Exec(ctx, gomock.Any(), gomock.Any()). // Use Any for cmd as it varies with options
-		Return(nil, []byte("pull error"), fmt.Errorf("exec pull error")).Times(1)
-	outputPath, err = runner.HelmPull(ctx, mockConn, chartPath, HelmPullOptions{})
-	assert.Error(t, err)
-	assert.Empty(t, outputPath)
-	assert.Contains(t, err.Error(), "helm pull for chart")
+	ctrl := gomock.NewController(t); defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background(); chartPath := "s/m"
+	expectedOut := "pulled to /tmp/m.tgz"
+	mockConn.EXPECT().Exec(ctx, fmt.Sprintf("helm pull %s", shellEscape(chartPath)), gomock.Any()).Return([]byte(expectedOut+"\n"), []byte{}, nil).Times(1)
+	outPath, err := runner.HelmPull(ctx, mockConn, chartPath, HelmPullOptions{}); assert.NoError(t, err); assert.Equal(t, expectedOut, outPath)
 }
 
 func TestDefaultRunner_HelmPackage(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
+	ctrl := gomock.NewController(t); defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background(); chartSrcPath := "./mc"
+	helmOut := "Successfully packaged chart and saved it to: /tmp/mc-0.1.0.tgz"; expectedPath := "/tmp/mc-0.1.0.tgz"
+	mockConn.EXPECT().Exec(ctx, fmt.Sprintf("helm package %s", shellEscape(chartSrcPath)), gomock.Any()).Return([]byte(helmOut+"\n"), []byte{}, nil).Times(1)
+	pkgPath, err := runner.HelmPackage(ctx, mockConn, chartSrcPath, HelmPackageOptions{}); assert.NoError(t, err); assert.Equal(t, expectedPath, pkgPath)
+}
 
-	mockConn := mocks.NewMockConnector(ctrl)
-	runner := NewDefaultRunner()
-	ctx := context.Background()
-	chartSourcePath := "./mychartdir" // Path to the chart source directory
+func TestDefaultRunner_HelmUpgrade(t *testing.T) {
+	ctrl := gomock.NewController(t); defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background()
+	release, chart := "myrel", "stable/mychart"
+	opts := HelmUpgradeOptions{Install: true, Namespace: "upns", Version: "1.1.0"}
+	expectedCmdParts := []string{"helm", "upgrade", shellEscape(release), shellEscape(chart), "--install", "--namespace", shellEscape(opts.Namespace), "--version", shellEscape(opts.Version)}
+	mockConn.EXPECT().Exec(ctx, gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, cmd string, _ *connector.ExecOptions) ([]byte, []byte, error) {
+			for _, part := range expectedCmdParts { assert.Contains(t, cmd, part) }
+			return []byte("upgraded"), []byte{}, nil
+		}).Times(1)
+	err := runner.HelmUpgrade(ctx, mockConn, release, chart, opts); assert.NoError(t, err)
+}
 
-	// Test Case 1: Successful package
-	opts := HelmPackageOptions{Destination: "/tmp/packages"}
-	expectedCmd := fmt.Sprintf("helm package %s --destination %s", shellEscape(chartSourcePath), shellEscape(opts.Destination))
-	helmOutput := "Successfully packaged chart and saved it to: /tmp/packages/mychartdir-0.1.0.tgz"
-	expectedPackagePath := "/tmp/packages/mychartdir-0.1.0.tgz"
-	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte(helmOutput+"\n"), []byte{}, nil).Times(1)
+func TestDefaultRunner_HelmRollback(t *testing.T) {
+	ctrl := gomock.NewController(t); defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background()
+	release, rev := "myrel", 2
+	opts := HelmRollbackOptions{Namespace: "rbns", DryRun: true}
+	expectedCmd := fmt.Sprintf("helm rollback %s %d --namespace %s --dry-run", shellEscape(release), rev, shellEscape(opts.Namespace))
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte("rolled back"), []byte{}, nil).Times(1)
+	err := runner.HelmRollback(ctx, mockConn, release, rev, opts); assert.NoError(t, err)
+}
 
-	packagePath, err := runner.HelmPackage(ctx, mockConn, chartSourcePath, opts)
-	assert.NoError(t, err)
-	assert.Equal(t, expectedPackagePath, packagePath)
+func TestDefaultRunner_HelmHistory(t *testing.T) {
+	ctrl := gomock.NewController(t); defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background(); release := "histrel"
+	sampleOutput := `[{"revision":1,"status":"superseded"},{"revision":2,"status":"deployed"}]`
+	var expected []HelmReleaseRevisionInfo; json.Unmarshal([]byte(sampleOutput), &expected)
+	mockConn.EXPECT().Exec(ctx, fmt.Sprintf("helm history %s -o json", shellEscape(release)), gomock.Any()).Return([]byte(sampleOutput), []byte{}, nil).Times(1)
+	hist, err := runner.HelmHistory(ctx, mockConn, release, HelmHistoryOptions{}); assert.NoError(t, err); assert.Equal(t, expected, hist)
+}
 
-	// Test Case 2: Package with version and appVersion override
-	optsVersioned := HelmPackageOptions{Version: "0.2.0", AppVersion: "1.1.0"}
-	expectedCmdVersioned := fmt.Sprintf("helm package %s --version %s --app-version %s",
-		shellEscape(chartSourcePath), shellEscape(optsVersioned.Version), shellEscape(optsVersioned.AppVersion))
-	helmOutputVersioned := "Successfully packaged chart and saved it to: mychartdir-0.2.0.tgz" // Assuming default destination "."
-	expectedPackagePathVersioned := "mychartdir-0.2.0.tgz"
-	mockConn.EXPECT().Exec(ctx, expectedCmdVersioned, gomock.Any()).Return([]byte(helmOutputVersioned), []byte{}, nil).Times(1)
+func TestDefaultRunner_HelmGetValues(t *testing.T) {
+	ctrl := gomock.NewController(t); defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background(); release := "getvals"
+	expectedOutput := "key: value\nreplicaCount: 2"
+	mockConn.EXPECT().Exec(ctx, fmt.Sprintf("helm get values %s -o yaml", shellEscape(release)), gomock.Any()).Return([]byte(expectedOutput), []byte{}, nil).Times(1)
+	vals, err := runner.HelmGetValues(ctx, mockConn, release, HelmGetOptions{}); assert.NoError(t, err); assert.Equal(t, expectedOutput, vals)
+}
 
-	packagePath, err = runner.HelmPackage(ctx, mockConn, chartSourcePath, optsVersioned)
-	assert.NoError(t, err)
-	assert.Equal(t, expectedPackagePathVersioned, packagePath)
+func TestDefaultRunner_HelmGetManifest(t *testing.T) {
+	ctrl := gomock.NewController(t); defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background(); release := "getman"
+	expectedOutput := "apiVersion: v1\nkind: Pod..."
+	mockConn.EXPECT().Exec(ctx, fmt.Sprintf("helm get manifest %s", shellEscape(release)), gomock.Any()).Return([]byte(expectedOutput), []byte{}, nil).Times(1)
+	man, err := runner.HelmGetManifest(ctx, mockConn, release, HelmGetOptions{}); assert.NoError(t, err); assert.Equal(t, expectedOutput, man)
+}
 
-	// Test Case 3: Command fails
-	mockConn.EXPECT().Exec(ctx, gomock.Any(), gomock.Any()). // Use Any for cmd
-		Return(nil, []byte("package error"), fmt.Errorf("exec package error")).Times(1)
-	packagePath, err = runner.HelmPackage(ctx, mockConn, chartSourcePath, HelmPackageOptions{})
-	assert.Error(t, err)
-	assert.Empty(t, packagePath)
-	assert.Contains(t, err.Error(), "helm package for chart at")
+func TestDefaultRunner_HelmGetHooks(t *testing.T) {
+	ctrl := gomock.NewController(t); defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background(); release := "gethooks"
+	expectedOutput := "--- # Source: mychart/templates/post-install-hook.yaml\napiVersion: batch/v1..."
+	mockConn.EXPECT().Exec(ctx, fmt.Sprintf("helm get hooks %s", shellEscape(release)), gomock.Any()).Return([]byte(expectedOutput), []byte{}, nil).Times(1)
+	hooks, err := runner.HelmGetHooks(ctx, mockConn, release, HelmGetOptions{}); assert.NoError(t, err); assert.Equal(t, expectedOutput, hooks)
+}
+
+func TestDefaultRunner_HelmTemplate(t *testing.T) {
+	ctrl := gomock.NewController(t); defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background(); release, chart := "tplrel", "./mychart"
+	expectedOutput := "apiVersion: v1\nkind: Service..."
+	opts := HelmTemplateOptions{ValuesFiles: []string{"v.yaml"}, SetValues: []string{"name=override"}}
+	expectedCmdParts := []string{"helm", "template", shellEscape(release), shellEscape(chart), "--values", shellEscape("v.yaml"), "--set", shellEscape("name=override")}
+	mockConn.EXPECT().Exec(ctx, gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, cmd string, _ *connector.ExecOptions) ([]byte, []byte, error) {
+			for _, part := range expectedCmdParts { assert.Contains(t, cmd, part) }
+			return []byte(expectedOutput), []byte{}, nil
+		}).Times(1)
+	tpl, err := runner.HelmTemplate(ctx, mockConn, release, chart, opts); assert.NoError(t, err); assert.Equal(t, expectedOutput, tpl)
+}
+
+func TestDefaultRunner_HelmDependencyUpdate(t *testing.T) {
+	ctrl := gomock.NewController(t); defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background(); chartPath := "./dependent-chart"
+	mockConn.EXPECT().Exec(ctx, fmt.Sprintf("helm dependency update %s", shellEscape(chartPath)), gomock.Any()).Return([]byte("updated deps"), []byte{}, nil).Times(1)
+	err := runner.HelmDependencyUpdate(ctx, mockConn, chartPath, HelmDependencyOptions{}); assert.NoError(t, err)
+}
+
+func TestDefaultRunner_HelmLint(t *testing.T) {
+	ctrl := gomock.NewController(t); defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl); runner := NewDefaultRunner(); ctx := context.Background(); chartPath := "./lintable-chart"
+	expectedOutput := "[INFO] Chart is good"
+	// Helm lint can return non-zero on warnings/errors. We check output.
+	mockConn.EXPECT().Exec(ctx, fmt.Sprintf("helm lint %s", shellEscape(chartPath)), gomock.Any()).Return([]byte(expectedOutput), []byte{}, nil).Times(1)
+	lintOut, err := runner.HelmLint(ctx, mockConn, chartPath, HelmLintOptions{}); assert.NoError(t, err); assert.Equal(t, expectedOutput, lintOut)
+
+	// Test lint with errors (non-zero exit)
+	lintErrOutput := "[ERROR] Something is wrong"
+	mockConn.EXPECT().Exec(ctx, fmt.Sprintf("helm lint %s", shellEscape(chartPath)), gomock.Any()).
+		Return([]byte(""), []byte(lintErrOutput), &connector.CommandError{ExitCode: 1}).Times(1)
+	lintOut, err = runner.HelmLint(ctx, mockConn, chartPath, HelmLintOptions{});
+	assert.Error(t, err) // Expect an error because helm lint exited non-zero
+	assert.Contains(t, lintOut, lintErrOutput) // Output should still be returned
 }

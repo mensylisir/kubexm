@@ -133,195 +133,41 @@ type Runner interface {
 	RenderToString(ctx context.Context, tmpl *template.Template, data interface{}) (string, error) // Different from Render, no conn/destPath
 
 	// --- QEMU/libvirt Methods ---
-
-	// CreateVMTemplate defines a new virtual machine configuration that can serve as a template.
-	// It sets up the basic XML definition for a VM with specified parameters.
-	// The associated disk image at diskPath should exist or be creatable; this method
-	// will attempt to create a qcow2 disk image of diskSizeGB if diskPath does not exist.
-	// conn: Connector to the host where libvirt is running.
-	// name: Name for the VM template.
-	// osVariant: OS variant string (e.g., "ubuntu22.04") for libvirt.
-	// memoryMB: Memory for the VM in Megabytes.
-	// vcpus: Number of virtual CPUs.
-	// diskPath: Path on the host for the primary disk image.
-	// diskSizeGB: Size of the primary disk in Gigabytes (used if creating the disk).
-	// network: Name of the libvirt network to connect the VM to (e.g., "default").
-	// graphicsType: Type of graphics device (e.g., "vnc", "spice", "none").
-	// cloudInitISOPath: Optional path to a cloud-init ISO image for VM provisioning.
 	CreateVMTemplate(ctx context.Context, conn connector.Connector, name string, osVariant string, memoryMB uint, vcpus uint, diskPath string, diskSizeGB uint, network string, graphicsType string, cloudInitISOPath string) error
-
-	// ImportVMTemplate defines a new VM from an existing libvirt XML definition file.
-	// conn: Connector to the host.
-	// name: Name to assign to the imported VM (Note: libvirt might prioritize name within XML).
-	// filePath: Path on the host to the XML file containing the VM definition.
 	ImportVMTemplate(ctx context.Context, conn connector.Connector, name string, filePath string) error
-
-	// RefreshStoragePool tells libvirt to refresh its view of a storage pool,
-	// detecting any new or changed storage volumes.
-	// conn: Connector to the host.
-	// poolName: Name of the storage pool to refresh.
 	RefreshStoragePool(ctx context.Context, conn connector.Connector, poolName string) error
-
-	// CreateStoragePool defines and builds a new storage pool.
-	// For "dir" type pools, it will create the targetPath if it doesn't exist.
-	// The pool is set to autostart and is started after creation.
-	// conn: Connector to the host.
-	// name: Name for the new storage pool.
-	// poolType: Type of the storage pool (e.g., "dir", "logical", "iscsi").
-	// targetPath: Target path for the pool (e.g., directory path for "dir" type).
 	CreateStoragePool(ctx context.Context, conn connector.Connector, name string, poolType string, targetPath string) error
-
-	// StoragePoolExists checks if a storage pool with the given name is defined in libvirt.
-	// conn: Connector to the host.
-	// poolName: Name of the storage pool to check.
 	StoragePoolExists(ctx context.Context, conn connector.Connector, poolName string) (bool, error)
-
-	// DeleteStoragePool stops (destroys) and undefines a storage pool.
-	// It does not delete the underlying storage (e.g., files in a "dir" pool) by default.
-	// conn: Connector to the host.
-	// poolName: Name of the storage pool to delete.
 	DeleteStoragePool(ctx context.Context, conn connector.Connector, poolName string) error
-
-	// VolumeExists checks if a storage volume exists within a given storage pool.
-	// conn: Connector to the host.
-	// poolName: Name of the storage pool.
-	// volName: Name of the storage volume.
 	VolumeExists(ctx context.Context, conn connector.Connector, poolName string, volName string) (bool, error)
-
-	// CloneVolume creates a new storage volume by cloning an existing volume within the same pool.
-	// conn: Connector to the host.
-	// poolName: Name of the storage pool.
-	// origVolName: Name of the original volume to clone.
-	// newVolName: Name for the new cloned volume.
-	// newSizeGB: Desired size for the new volume in Gigabytes. If 0, defaults to original size.
-	//            Note: Actual resizing capability during clone depends on libvirt version and backend.
-	//            A separate ResizeVolume call might be needed if the clone doesn't expand.
-	// format: Format for the new volume (e.g., "qcow2").
 	CloneVolume(ctx context.Context, conn connector.Connector, poolName string, origVolName string, newVolName string, newSizeGB uint, format string) error
-
-	// ResizeVolume changes the capacity of an existing storage volume.
-	// Currently supports expansion only.
-	// conn: Connector to the host.
-	// poolName: Name of the storage pool containing the volume.
-	// volName: Name of the volume to resize.
-	// newSizeGB: The new total size for the volume in Gigabytes.
 	ResizeVolume(ctx context.Context, conn connector.Connector, poolName string, volName string, newSizeGB uint) error
-
-	// DeleteVolume deletes a storage volume from a pool.
-	// conn: Connector to the host.
-	// poolName: Name of the storage pool.
-	// volName: Name of the volume to delete.
 	DeleteVolume(ctx context.Context, conn connector.Connector, poolName string, volName string) error
-
-	// CreateVolume creates a new storage volume in a pool.
-	// It can create a standalone volume or a volume based on a backing store (linked clone).
-	// conn: Connector to the host.
-	// poolName: Name of the storage pool.
-	// volName: Name for the new volume.
-	// sizeGB: Size of the volume in Gigabytes.
-	// format: Format of the volume (e.g., "qcow2", "raw").
-	// backingVolName: Optional name of the backing volume in the same pool. If empty, a standalone volume is created.
-	// backingVolFormat: Optional format of the backing volume (e.g., "qcow2"). Required if backingVolName is provided.
 	CreateVolume(ctx context.Context, conn connector.Connector, poolName string, volName string, sizeGB uint, format string, backingVolName string, backingVolFormat string) error
-
-	// CreateCloudInitISO generates a cloud-init ISO image on the host.
-	// It requires `genisoimage` or `mkisofs` to be installed on the target host.
-	// conn: Connector to the host.
-	// vmName: Name of the VM, used for temporary directory naming to ensure uniqueness.
-	// isoDestPath: Full path on the host where the generated ISO should be saved.
-	// userData: Content of the user-data file for cloud-init.
-	// metaData: Content of the meta-data file for cloud-init.
-	// networkConfig: Content of the network-config file for cloud-init (optional).
 	CreateCloudInitISO(ctx context.Context, conn connector.Connector, vmName string, isoDestPath string, userData string, metaData string, networkConfig string) error
-
-	// CreateVM defines and starts a new virtual machine based on provided parameters.
-	// conn: Connector to the host.
-	// vmName: Name for the new VM.
-	// memoryMB: Memory for the VM in Megabytes.
-	// vcpus: Number of virtual CPUs.
-	// osVariant: OS variant string (e.g., "ubuntu22.04") for libvirt, helps in setting defaults.
-	// diskPaths: Slice of paths on the host to disk images (e.g., qcow2 files). First disk is typically primary.
-	// networkInterfaces: Slice of VMNetworkInterface configurations for network setup.
-	// graphicsType: Type of graphics (e.g., "vnc", "spice", "none"). Defaults to "vnc".
-	// cloudInitISOPath: Optional path to a cloud-init ISO for provisioning. If provided, "cdrom" is added to boot order.
-	// bootOrder: Slice of boot devices (e.g., "hd", "cdrom"). Defaults to "hd".
-	// extraArgs: Placeholder for future QEMU command-line passthrough arguments (not fully implemented in basic XML).
 	CreateVM(ctx context.Context, conn connector.Connector, vmName string, memoryMB uint, vcpus uint, osVariant string, diskPaths []string, networkInterfaces []VMNetworkInterface, graphicsType string, cloudInitISOPath string, bootOrder []string, extraArgs []string) error
-
-	// VMExists checks if a virtual machine with the given name is defined in libvirt.
-	// conn: Connector to the host.
-	// vmName: Name of the VM to check.
 	VMExists(ctx context.Context, conn connector.Connector, vmName string) (bool, error)
-
-	// StartVM starts a defined (but not running) virtual machine.
-	// If the VM is already running, it does nothing.
-	// conn: Connector to the host.
-	// vmName: Name of the VM to start.
 	StartVM(ctx context.Context, conn connector.Connector, vmName string) error
-
-	// ShutdownVM attempts a graceful shutdown of a virtual machine.
-	// If `force` is true, it will destroy the VM if graceful shutdown fails or times out.
-	// conn: Connector to the host.
-	// vmName: Name of the VM to shut down.
-	// force: If true, forcefully destroy if graceful shutdown fails.
-	// timeout: Duration to wait for graceful shutdown before forcing (if applicable) or returning timeout error.
 	ShutdownVM(ctx context.Context, conn connector.Connector, vmName string, force bool, timeout time.Duration) error
-
-	// DestroyVM forcefully stops (powers off) a virtual machine.
-	// conn: Connector to the host.
-	// vmName: Name of the VM to destroy.
 	DestroyVM(ctx context.Context, conn connector.Connector, vmName string) error
-
-	// UndefineVM removes the definition of a virtual machine from libvirt.
-	// The VM must be shut off.
-	// conn: Connector to the host.
-	// vmName: Name of the VM to undefine.
-	// deleteSnapshots: If true, attempts to delete all snapshots associated with the VM.
-	// deleteStorage: If true, attempts to delete associated storage volumes. This is heuristic and relies on `storagePools`
-	//                to correctly identify volumes if paths are used. Use with caution.
-	// storagePools: A list of storage pool names to help identify volumes if `deleteStorage` is true and disks are path-based.
 	UndefineVM(ctx context.Context, conn connector.Connector, vmName string, deleteSnapshots bool, deleteStorage bool, storagePools []string) error
-
-	// GetVMState retrieves the current state of a virtual machine (e.g., "running", "shut off").
-	// conn: Connector to the host.
-	// vmName: Name of the VM.
 	GetVMState(ctx context.Context, conn connector.Connector, vmName string) (string, error)
-
-	// ListVMs lists virtual machines known to libvirt.
-	// conn: Connector to the host.
-	// all: If true, includes inactive (defined but not running) VMs. If false, lists only active VMs.
 	ListVMs(ctx context.Context, conn connector.Connector, all bool) ([]VMInfo, error)
-
-	// AttachDisk attaches a disk to a VM. Can be done live if VM and libvirt support it.
-	// conn: Connector to the host.
-	// vmName: Name of the VM.
-	// diskPath: Path to the disk image file on the host.
-	// targetDevice: Target device name in the VM (e.g., "vdb", "sdc").
-	// diskType: Type of the disk source (e.g., "file", "block").
-	// driverType: Disk driver type (e.g., "qcow2", "raw").
 	AttachDisk(ctx context.Context, conn connector.Connector, vmName string, diskPath string, targetDevice string, diskType string, driverType string) error
-
-	// DetachDisk detaches a disk from a VM. Can be done live.
-	// conn: Connector to the host.
-	// vmName: Name of the VM.
-	// targetDeviceOrPath: The target device name (e.g., "vdb") or the source file path of the disk to detach.
 	DetachDisk(ctx context.Context, conn connector.Connector, vmName string, targetDeviceOrPath string) error
-
-	// SetVMMemory changes the memory allocation for a VM.
-	// conn: Connector to the host.
-	// vmName: Name of the VM.
-	// memoryMB: New memory size in Megabytes.
-	// current: If true, attempts to apply live if VM is running (and sets current config).
-	//          If false, only sets config for next boot (and current if VM is running and it's supported).
 	SetVMMemory(ctx context.Context, conn connector.Connector, vmName string, memoryMB uint, current bool) error
-
-	// SetVMCPUs changes the number of virtual CPUs for a VM.
-	// conn: Connector to the host.
-	// vmName: Name of the VM.
-	// vcpus: New number of vCPUs.
-	// current: If true, attempts to apply live if VM is running (and sets current config).
-	//          If false, only sets config for next boot (and current if VM is running and it's supported).
 	SetVMCPUs(ctx context.Context, conn connector.Connector, vmName string, vcpus uint, current bool) error
+	AttachNetInterface(ctx context.Context, conn connector.Connector, vmName string, iface VMNetworkInterface, persistent bool) error
+	DetachNetInterface(ctx context.Context, conn connector.Connector, vmName string, macAddress string, persistent bool) error
+	ListNetInterfaces(ctx context.Context, conn connector.Connector, vmName string) ([]VMNetworkInterfaceDetail, error)
+	CreateSnapshot(ctx context.Context, conn connector.Connector, vmName, snapshotName, description string, diskSpecs []VMSnapshotDiskSpec, noMetadata, halt, diskOnly, reuseExisting, quiesce, atomic bool) error
+	DeleteSnapshot(ctx context.Context, conn connector.Connector, vmName, snapshotName string, children, metadata bool) error
+	ListSnapshots(ctx context.Context, conn connector.Connector, vmName string) ([]VMSnapshotInfo, error)
+	RevertToSnapshot(ctx context.Context, conn connector.Connector, vmName, snapshotName string, force, running bool) error
+	GetVMInfo(ctx context.Context, conn connector.Connector, vmName string) (*VMDetails, error)
+	GetVNCPort(ctx context.Context, conn connector.Connector, vmName string) (string, error)
+	EnsureLibvirtDaemonRunning(ctx context.Context, conn connector.Connector, facts *Facts) error
+
 
 	// --- Docker Methods ---
 
@@ -511,6 +357,7 @@ type Runner interface {
 	DockerPrune(ctx context.Context, conn connector.Connector, pruneType string, filters map[string]string, all bool) (string, error)
 	GetDockerDaemonConfig(ctx context.Context, conn connector.Connector) (*DockerDaemonOptions, error)
 	ConfigureDockerDaemon(ctx context.Context, conn connector.Connector, opts DockerDaemonOptions, restartService bool) error
+	EnsureDefaultDockerConfig(ctx context.Context, conn connector.Connector, facts *Facts) error
 
 
 	// --- Containerd/ctr Methods ---
@@ -526,6 +373,7 @@ type Runner interface {
 	CtrExecInContainer(ctx context.Context, conn connector.Connector, namespace, containerID string, opts CtrExecOptions, cmd []string) (string, error)
 	CtrImportImage(ctx context.Context, conn connector.Connector, namespace, filePath string, allPlatforms bool) error
 	CtrExportImage(ctx context.Context, conn connector.Connector, namespace, imageName, outputFilePath string, allPlatforms bool) error
+	CtrContainerInfo(ctx context.Context, conn connector.Connector, namespace, containerID string) (*CtrContainerInfo, error) // For single container inspection
 
 	// --- Containerd/crictl Methods ---
 	CrictlListImages(ctx context.Context, conn connector.Connector, filters map[string]string) ([]CrictlImageInfo, error)
@@ -534,22 +382,29 @@ type Runner interface {
 	CrictlInspectImage(ctx context.Context, conn connector.Connector, imageName string) (*CrictlImageDetails, error)
 	CrictlImageFSInfo(ctx context.Context, conn connector.Connector) ([]CrictlFSInfo, error)
 	CrictlListPods(ctx context.Context, conn connector.Connector, filters map[string]string) ([]CrictlPodInfo, error)
-	CrictlRunPod(ctx context.Context, conn connector.Connector, podSandboxConfigFile string) (string, error) // Returns Pod ID
-	CrictlStopPod(ctx context.Context, conn connector.Connector, podID string) error
-	CrictlRemovePod(ctx context.Context, conn connector.Connector, podID string) error
-	CrictlInspectPod(ctx context.Context, conn connector.Connector, podID string) (*CrictlPodDetails, error) // Define CrictlPodDetails
-	CrictlCreateContainer(ctx context.Context, conn connector.Connector, podID string, containerConfigFile string, podSandboxConfigFile string) (string, error) // Returns Container ID
-	CrictlStartContainer(ctx context.Context, conn connector.Connector, containerID string) error
-	CrictlStopContainer(ctx context.Context, conn connector.Connector, containerID string, timeout int64) error // timeout in seconds
-	CrictlRemoveContainerForce(ctx context.Context, conn connector.Connector, containerID string) error // crictl rm -f
-	CrictlInspectContainer(ctx context.Context, conn connector.Connector, containerID string) (*CrictlContainerDetails, error) // Define CrictlContainerDetails
-	CrictlLogs(ctx context.Context, conn connector.Connector, containerID string, opts CrictlLogOptions) (string, error)
-	CrictlExec(ctx context.Context, conn connector.Connector, containerID string, timeout time.Duration, sync bool, cmd []string) (string, error)
-	CrictlPortForward(ctx context.Context, conn connector.Connector, podID string, ports []string) (string, error) // Returns request ID or output
+	CrictlRunPodSandbox(ctx context.Context, conn connector.Connector, podSandboxConfigFile string, runtimeHandler string) (string, error) // Returns Pod ID, replaces CrictlRunPod
+	CrictlStopPodSandbox(ctx context.Context, conn connector.Connector, podID string) error // Replaces CrictlStopPod
+	CrictlRemovePodSandbox(ctx context.Context, conn connector.Connector, podID string) error // Replaces CrictlRemovePod
+	CrictlInspectPod(ctx context.Context, conn connector.Connector, podID string) (*CrictlPodDetails, error)
+	CrictlPodSandboxStatus(ctx context.Context, conn connector.Connector, podID string, verbose bool) (*CrictlPodDetails, error) // verbose for more details
+	CrictlCreateContainerInPod(ctx context.Context, conn connector.Connector, podID string, containerConfigFile string, podSandboxConfigFile string) (string, error) // Replaces CrictlCreateContainer
+	CrictlStartContainerInPod(ctx context.Context, conn connector.Connector, containerID string) error // Replaces CrictlStartContainer
+	CrictlStopContainerInPod(ctx context.Context, conn connector.Connector, containerID string, timeout int64) error // Replaces CrictlStopContainer
+	CrictlRemoveContainerInPod(ctx context.Context, conn connector.Connector, containerID string, force bool) error // Replaces CrictlRemoveContainerForce, add force flag
+	CrictlInspectContainerInPod(ctx context.Context, conn connector.Connector, containerID string) (*CrictlContainerDetails, error) // Replaces CrictlInspectContainer
+	CrictlContainerStatus(ctx context.Context, conn connector.Connector, containerID string, verbose bool) (*CrictlContainerDetails, error) // verbose for more details
+	CrictlLogsForContainer(ctx context.Context, conn connector.Connector, containerID string, opts CrictlLogOptions) (string, error) // Replaces CrictlLogs
+	CrictlExecInContainerSync(ctx context.Context, conn connector.Connector, containerID string, timeout time.Duration, cmd []string) (stdout, stderr string, err error) // Replaces CrictlExec, sync version
+	CrictlExecInContainerAsync(ctx context.Context, conn connector.Connector, containerID string, cmd []string) (string, error) // For async exec, returns request ID or similar
+	CrictlPortForward(ctx context.Context, conn connector.Connector, podID string, ports []string) (string, error)
 	CrictlVersion(ctx context.Context, conn connector.Connector) (*CrictlVersionInfo, error)
-	CrictlRuntimeConfig(ctx context.Context, conn connector.Connector) (string, error) // Returns raw config string
-	ConfigureCrictl(ctx context.Context, conn connector.Connector, configFileContent string) error
-	GetContainerdConfig(ctx context.Context, conn connector.Connector) (*ContainerdConfigOptions, error) // Assuming TOML or a structured format
+	CrictlInfo(ctx context.Context, conn connector.Connector) (*CrictlRuntimeInfo, error) // For `crictl info`
+	CrictlRuntimeConfig(ctx context.Context, conn connector.Connector) (string, error)
+	CrictlStats(ctx context.Context, conn connector.Connector, resourceID string, outputFormat string) (string, error) // resourceID can be pod or container ID
+	CrictlPodStats(ctx context.Context, conn connector.Connector, outputFormat string, podID string) (string, error)
+	ConfigureCrictl(ctx context.Context, conn connector.Connector, configFileContent string, configFilePath string) error
+	EnsureDefaultContainerdConfig(ctx context.Context, conn connector.Connector, facts *Facts) error
+	GetContainerdConfig(ctx context.Context, conn connector.Connector) (*ContainerdConfigOptions, error)
 	ConfigureContainerd(ctx context.Context, conn connector.Connector, opts ContainerdConfigOptions, restartService bool) error
 
 
@@ -562,8 +417,17 @@ type Runner interface {
 	HelmRepoUpdate(ctx context.Context, conn connector.Connector, repoNames []string) error
 	HelmSearchRepo(ctx context.Context, conn connector.Connector, keyword string, opts HelmSearchOptions) ([]HelmChartInfo, error)
 	HelmPull(ctx context.Context, conn connector.Connector, chartPath string, opts HelmPullOptions) (string, error) // Returns path to downloaded chart
-	HelmPackage(ctx context.Context, conn connector.Connector, chartPath string, opts HelmPackageOptions) (string, error) // Returns path to packaged chart
+	HelmPackage(ctx context.Context, conn connector.Connector, chartPath string, opts HelmPackageOptions) (string, error)
 	HelmVersion(ctx context.Context, conn connector.Connector) (*HelmVersionInfo, error)
+	HelmUpgrade(ctx context.Context, conn connector.Connector, releaseName, chartPath string, opts HelmUpgradeOptions) error
+	HelmRollback(ctx context.Context, conn connector.Connector, releaseName string, revision int, opts HelmRollbackOptions) error
+	HelmHistory(ctx context.Context, conn connector.Connector, releaseName string, opts HelmHistoryOptions) ([]HelmReleaseRevisionInfo, error)
+	HelmGetValues(ctx context.Context, conn connector.Connector, releaseName string, opts HelmGetOptions) (string, error)    // Returns raw values (YAML string)
+	HelmGetManifest(ctx context.Context, conn connector.Connector, releaseName string, opts HelmGetOptions) (string, error) // Returns raw manifest (YAML string)
+	HelmGetHooks(ctx context.Context, conn connector.Connector, releaseName string, opts HelmGetOptions) (string, error)    // Returns raw hooks (YAML string)
+	HelmTemplate(ctx context.Context, conn connector.Connector, releaseName, chartPath string, opts HelmTemplateOptions) (string, error) // Returns rendered YAML string
+	HelmDependencyUpdate(ctx context.Context, conn connector.Connector, chartPath string, opts HelmDependencyOptions) error
+	HelmLint(ctx context.Context, conn connector.Connector, chartPath string, opts HelmLintOptions) (string, error) // Returns linting output
 }
 
 // --- Helm Supporting Structs ---
@@ -695,8 +559,90 @@ type HelmPackageOptions struct {
 	Sudo         bool
 }
 
+type HelmUpgradeOptions struct {
+	HelmInstallOptions // Embeds most common options from install
+	Install          bool // If a release by this name doesn't already exist, run an install
+	Force            bool // Force resource updates through a replacement strategy
+	ResetValues      bool // When upgrading, reset the values to the ones built into the chart
+	ReuseValues      bool // When upgrading, reuse the last release's values and merge in any overrides from the command line via --set and -f
+	CleanupOnFail    bool // Allow deletion of new resources created in this upgrade when upgrade fails
+	MaxHistory       int  // Limit the maximum number of revisions saved per release. Use 0 for no limit (default 10)
+}
+
+type HelmRollbackOptions struct {
+	Namespace      string        // Namespace of the release
+	KubeconfigPath string        // Path to kubeconfig file
+	Timeout        time.Duration // Time to wait for any individual Kubernetes operation
+	Wait           bool          // If set, will wait until all Pods, PVCs, Services, and minimum number of Pods of a Deployment are in a ready state
+	CleanupOnFail  bool          // Allow deletion of new resources created in this rollback when rollback fails
+	DryRun         bool          // Simulate a rollback
+	Force          bool          // Force resource updates through a replacement strategy
+	NoHooks        bool          // Prevent hooks from running during rollback
+	RecreatePods   bool          // Performs pods restart for the resource if applicable
+	Sudo           bool
+}
+
+type HelmHistoryOptions struct {
+	Namespace      string // Namespace of the release
+	KubeconfigPath string // Path to kubeconfig file
+	OutputFormat   string // Output format: table, json, yaml. Default is table.
+	Max            int    // Maximum number of revisions to include in history (0 for no limit)
+	Sudo           bool
+}
+
+type HelmReleaseRevisionInfo struct { // Based on `helm history <release> -o json`
+	Revision    int    `json:"revision"`
+	Updated     string `json:"updated"` // Timestamp string
+	Status      string `json:"status"`  // e.g. "superseded", "deployed"
+	Chart       string `json:"chart"`   // e.g. "nginx-1.12.3"
+	AppVersion  string `json:"app_version"`
+	Description string `json:"description"`
+}
+
+type HelmGetOptions struct { // For `helm get values/manifest/hooks`
+	Namespace      string // Namespace of the release
+	KubeconfigPath string // Path to kubeconfig file
+	Revision       int    // Get the named release at a specific revision
+	AllValues      bool   // When used with `get values`, dump all computed values (implies --output json or yaml)
+	Sudo           bool
+}
+
+type HelmTemplateOptions struct {
+	Namespace       string   // Namespace to install the release into
+	KubeconfigPath  string   // Path to kubeconfig file
+	ValuesFiles     []string // List of paths to values files
+	SetValues       []string // List of set values
+	ReleaseName     string   // Use this name for the release (defaults to "RELEASE-NAME")
+	CreateNamespace bool     // Whether to create the namespace if it doesn't exist
+	ShowOnly        []string // Only show manifests rendered from the given templates
+	SkipCrds        bool     // If true, no CRDs will be installed. By default, CRDs are installed if not already present
+	Validate        bool     // Validate your manifests against the Kubernetes cluster you are currently targeting
+	IncludeCrds     bool     // Include CRDs in the templated output
+	IsUpgrade       bool     // Set .Release.IsUpgrade instead of .Release.IsInstall
+	Sudo            bool
+}
+
+type HelmDependencyOptions struct { // For `helm dependency update/build/list`
+	Keyring        string // Keyring containing public keys (default "$HOME/.gnupg/pubring.gpg")
+	SkipRefresh    bool   // Do not refresh the local repository cache
+	Verify         bool   // Verify the packages against signatures
+	Sudo           bool
+}
+
+type HelmLintOptions struct {
+	Strict         bool     // Fail on lint warnings
+	ValuesFiles    []string // List of paths to values files
+	SetValues      []string // List of set values
+	Quiet          bool     // Print only warnings and errors
+	WithSubcharts  bool     // Lint subcharts also
+	Namespace      string   // Namespace to install the release into (used for validation)
+	KubeVersion    string   // Kubernetes version to validate against (e.g., "v1.25.0")
+	Sudo           bool
+}
+
+
 type HelmVersionInfo struct { // Based on `helm version -o json`
-	Version    string `json:"version"`    // e.g. "v3.7.0"
+	Version      string `json:"version"`    // e.g. "v3.7.0"
 	GitCommit  string `json:"gitCommit"`
 	GitTreeState string `json:"gitTreeState"`
 	GoVersion  string `json:"goVersion"`
@@ -1107,7 +1053,32 @@ type KubectlContainerMetricsInfo struct { // For `kubectl top pod <pod> --contai
 // KubectlRolloutOptions, KubectlScaleOptions, KubectlPortForwardOptions
 // would also need to be defined based on their respective kubectl command flags and JSON outputs.
 // For brevity, these are listed as comments but would be fully fleshed out.
-
+	KubectlTopNodes(ctx context.Context, conn connector.Connector, opts KubectlTopOptions) ([]KubectlMetricsInfo, error)
+	KubectlTopPods(ctx context.Context, conn connector.Connector, opts KubectlTopOptions) ([]KubectlMetricsInfo, error)
+	KubectlPortForward(ctx context.Context, conn connector.Connector, resourceType, resourceName string, ports []string, opts KubectlPortForwardOptions) error // Typically long-running, might need backgrounding/cancellation
+	KubectlExplain(ctx context.Context, conn connector.Connector, resourceType string, opts KubectlExplainOptions) (string, error)
+	KubectlDrainNode(ctx context.Context, conn connector.Connector, nodeName string, opts KubectlDrainOptions) error
+	KubectlCordonNode(ctx context.Context, conn connector.Connector, nodeName string, opts KubectlCordonUncordonOptions) error
+	KubectlUncordonNode(ctx context.Context, conn connector.Connector, nodeName string, opts KubectlCordonUncordonOptions) error
+	KubectlTaintNode(ctx context.Context, conn connector.Connector, nodeName string, taints []string, opts KubectlTaintOptions) error
+	KubectlCreateSecretGeneric(ctx context.Context, conn connector.Connector, namespace, name string, fromLiterals map[string]string, fromFiles map[string]string, opts KubectlCreateOptions) error
+	KubectlCreateSecretDockerRegistry(ctx context.Context, conn connector.Connector, namespace, name, dockerServer, dockerUsername, dockerPassword, dockerEmail string, opts KubectlCreateOptions) error
+	KubectlCreateSecretTLS(ctx context.Context, conn connector.Connector, namespace, name, certPath, keyPath string, opts KubectlCreateOptions) error
+	KubectlCreateConfigMap(ctx context.Context, conn connector.Connector, namespace, name string, fromLiterals map[string]string, fromFiles map[string]string, fromEnvFile string, opts KubectlCreateOptions) error
+	KubectlCreateServiceAccount(ctx context.Context, conn connector.Connector, namespace, name string, opts KubectlCreateOptions) error
+	KubectlCreateRole(ctx context.Context, conn connector.Connector, namespace, name string, verbs, resources, resourceNames []string, opts KubectlCreateOptions) error
+	KubectlCreateClusterRole(ctx context.Context, conn connector.Connector, name string, verbs, resources, resourceNames []string, aggregationRule string, opts KubectlCreateOptions) error
+	KubectlCreateRoleBinding(ctx context.Context, conn connector.Connector, namespace, name, role, serviceAccount string, users, groups []string, opts KubectlCreateOptions) error
+	KubectlCreateClusterRoleBinding(ctx context.Context, conn connector.Connector, name, clusterRole, serviceAccount string, users, groups []string, opts KubectlCreateOptions) error
+	KubectlSetImage(ctx context.Context, conn connector.Connector, resourceType, resourceName, containerName, newImage string, opts KubectlSetOptions) error
+	KubectlSetEnv(ctx context.Context, conn connector.Connector, resourceType, resourceName, containerName string, envVars map[string]string, removeEnvVars []string, fromSecret, fromConfigMap string, opts KubectlSetOptions) error
+	KubectlSetResources(ctx context.Context, conn connector.Connector, resourceType, resourceName, containerName string, limits, requests map[string]string, opts KubectlSetOptions) error
+	KubectlAutoscale(ctx context.Context, conn connector.Connector, resourceType, resourceName string, minReplicas, maxReplicas int32, cpuPercent int32, opts KubectlAutoscaleOptions) error
+	KubectlCompletion(ctx context.Context, conn connector.Connector, shell string) (string, error) // shell: bash, zsh, fish, powershell
+	KubectlWait(ctx context.Context, conn connector.Connector, resourceType, resourceName string, condition string, opts KubectlWaitOptions) error
+	KubectlLabel(ctx context.Context, conn connector.Connector, resourceType, resourceName string, labels map[string]string, overwrite bool, opts KubectlLabelOptions) error
+	KubectlAnnotate(ctx context.Context, conn connector.Connector, resourceType, resourceName string, annotations map[string]string, overwrite bool, opts KubectlAnnotateOptions) error
+	KubectlPatch(ctx context.Context, conn connector.Connector, resourceType, resourceName string, patchType, patchContent string, opts KubectlPatchOptions) error
 
 // --- Containerd/ctr Supporting Structs ---
 
@@ -1736,6 +1707,9 @@ type UserModifications struct {
 	NewHomeDir          *string  // New home directory path (-d HOME_DIR)
 	MoveHomeDirContents bool     // If NewHomeDir is set, move contents from old home to new home (requires -m flag with -d)
 	NewComment          *string  // New GECOS comment field (-c COMMENT)
+	LockPassword        bool     // Lock the user's password (-L)
+	UnlockPassword      bool     // Unlock the user's password (-U)
+	ExpireDate          *string  // Set password expiration date YYYY-MM-DD (-e EXPIRE_DATE)
 }
 
 // UserInfo holds detailed information about a user.
@@ -1747,4 +1721,213 @@ type UserInfo struct {
 	HomeDir  string
 	Shell    string
 	Groups   []string // List of group names the user belongs to
+	PasswordStatus string // e.g. P (Passworded), L (Locked), NP (No Password)
+}
+
+// --- QEMU/libvirt Supporting Structs (Continued) ---
+
+type VMNetworkInterfaceDetail struct {
+	VMNetworkInterface
+	InterfaceName string // e.g., vnet0, macvtap0
+	State         string // e.g., active, inactive
+	// Other details like RX/TX bytes could be added if virsh domiflist provides them easily
+}
+
+type VMSnapshotDiskSpec struct {
+	Name       string // Disk name (e.g., vda, sdb)
+	Snapshot   string // "internal", "external", "no" (default: "internal")
+	DriverType string // e.g., "qcow2" (only if snapshot=external)
+	File       string // Path for external snapshot file (only if snapshot=external)
+}
+
+type VMSnapshotInfo struct {
+	Name        string
+	Description string
+	CreatedAt   string // Timestamp
+	State       string // e.g., "running", "shutoff", "disk-snapshot"
+	HasParent   bool
+	Children    []string // Names of child snapshots
+	Disks       map[string]string // Disk name -> snapshot type/file
+}
+
+type VMInterfaceAddress struct {
+	Addr    string `json:"addr"`
+	Prefix  int    `json:"prefix"`
+}
+
+type VMInterfaceInfo struct {
+	Name          string               `json:"name"`
+	MAC           string               `json:"mac"`
+	Source        string               `json:"source,omitempty"` // e.g. bridge name for bridged interfaces
+	IPAddresses   []VMInterfaceAddress `json:"ip-addresses,omitempty"` // From guest agent if available
+}
+
+type VMBlockDeviceInfo struct {
+	Device     string `json:"device"`      // e.g. "vda"
+	Type       string `json:"type"`        // e.g. "file", "block"
+	SourceFile string `json:"source-file,omitempty"` // Path to image file
+	DriverType string `json:"driver-type,omitempty"` // e.g. "qcow2"
+	TargetBus  string `json:"target-bus,omitempty"` // e.g. "virtio"
+	Size       uint64 `json:"size-bytes,omitempty"` // From guest agent or qemu-img info
+}
+
+
+type VMDetails struct {
+	VMInfo             // Embeds basic info
+	OSVariant          string
+	DomainType         string // e.g. "kvm", "qemu"
+	Architecture       string
+	EmulatorPath       string
+	Graphics           []VMGraphicsInfo
+	Disks              []VMBlockDeviceInfo
+	NetworkInterfaces  []VMInterfaceInfo // More detailed than VMNetworkInterface
+	PersistentConfig   bool
+	Autostart          bool
+	EffectiveMemory    uint // Current memory in MB, if different from configured
+	EffectiveVCPUs     uint // Current vCPUs, if different
+	RawXML             string // Full XML definition
+}
+
+type VMGraphicsInfo struct {
+	Type     string // e.g. "vnc", "spice"
+	Port     string
+	Listen   string
+	Password string // Might be "yes" or "no" if set/not set
+	Keymap   string
+}
+
+
+// --- Containerd/crictl Supporting Structs (Continued) ---
+
+type CrictlRuntimeInfo struct { // For `crictl info` output
+	Config struct {
+		Containerd struct {
+			Snapshotter string `json:"snapshotter"`
+			Runtimes    map[string]struct {
+				Type          string `json:"runtimeType"`
+				Engine        string `json:"runtimeEngine"`
+				Root          string `json:"runtimeRoot"`
+				SandboxMode   string `json:"sandboxMode"`
+			} `json:"runtimes"`
+		} `json:"containerd"`
+		// Other fields like CNI config, etc.
+	} `json:"config"`
+	Status map[string]interface{} `json:"status"` // Runtime specific status
+}
+
+// --- Kubectl Supporting Structs (Continued) ---
+
+type KubectlTopOptions struct {
+	KubeconfigPath string   // Path to kubeconfig file
+	Namespace      string   // Namespace for "top pod"
+	AllNamespaces  bool     // If true, "top pod" from all namespaces
+	Selector       string   // Selector (label query) to filter pods/nodes
+	Containers     bool     // For "top pod", show container metrics
+	SortBy         string   // cpu|memory
+	UseHeapster    bool     // Use Heapster to get metrics
+	Sudo           bool
+}
+
+type KubectlExplainOptions struct {
+	KubeconfigPath string // Path to kubeconfig file
+	APIVersion     string // API version for the resource e.g. "apps/v1"
+	Recursive      bool   // Print the fields of fields recursively
+	Sudo           bool
+}
+
+type KubectlDrainOptions struct {
+	KubeconfigPath      string        // Path to kubeconfig file
+	Force               bool          // Continue even if there are pods not managed by a ReplicationController, ReplicaSet, Job, DaemonSet or StatefulSet.
+	GracePeriod         int           // Period of time in seconds given to each pod to terminate gracefully. If negative, the default value specified in the pod will be used.
+	IgnoreDaemonSets    bool          // Ignore DaemonSet-managed pods.
+	DeleteLocalData     bool          // Even if there are pods using emptyDir (data won't be preserved), delete them.
+	Selector            string        // Selector (label query) to filter pods.
+	Timeout             time.Duration // The length of time to wait before giving up, zero means infinite
+	DisableEviction     bool          // Force drain to use delete, even if eviction is supported. This will bypass checking PodDisruptionBudgets.
+	SkipWaitForDeleteTimeout int    // If pod DeletionTimestamp in the future, skip waiting for the pod.  Seconds before pod deletion. 0 means default behavior.
+	Sudo                bool
+}
+
+type KubectlCordonUncordonOptions struct {
+	KubeconfigPath string // Path to kubeconfig file
+	Selector       string // Selector (label query) to filter nodes
+	Sudo           bool
+}
+
+type KubectlTaintOptions struct {
+	KubeconfigPath string // Path to kubeconfig file
+	Selector       string // Selector (label query) to filter nodes
+	Overwrite      bool   // If true, overwrite existing taints
+	All            bool   // Select all nodes in the cluster
+	Sudo           bool
+}
+
+type KubectlCreateOptions struct {
+	KubeconfigPath string // Path to kubeconfig file
+	DryRun         string // "none", "client", or "server". Default "none".
+	Validate       bool   // Validate schemas. Default true.
+	Sudo           bool
+}
+
+type KubectlSetOptions struct {
+	KubeconfigPath string   // Path to kubeconfig file
+	Namespace      string   // Namespace for the resource
+	All            bool     // If true, select all resources
+	Selector       string   // Selector (label query) to filter resources
+	Local          bool     // If true, calculate the patch locally and print it. Do not send it to the server.
+	DryRun         string   // "none", "client", or "server". Default "none".
+	Sudo           bool
+}
+
+type KubectlAutoscaleOptions struct {
+	KubeconfigPath string // Path to kubeconfig file
+	Namespace      string // Namespace for the resource
+	Name           string // Name for the HPA object. If not specified, it's derived from the resource.
+	DryRun         string // "none", "client", or "server". Default "none".
+	Sudo           bool
+}
+
+type KubectlWaitOptions struct {
+	KubeconfigPath string        // Path to kubeconfig file
+	Namespace      string        // Namespace for the resource
+	AllNamespaces  bool          // If true, wait for resources in all namespaces
+	Selector       string        // Selector (label query) to filter resources
+	FieldSelector  string        // Selector (field query) to filter resources
+	For            string        // The condition to wait on: "delete", "jsonpath={...}", "condition=..."
+	Timeout        time.Duration // How long to wait before giving up
+	Sudo           bool
+}
+
+type KubectlLabelOptions struct {
+	KubeconfigPath string        // Path to kubeconfig file
+	Namespace      string        // Namespace for the resource
+	AllNamespaces  bool          // If true, operate on resources in all namespaces
+	Selector       string        // Selector (label query) to filter resources
+	Overwrite      bool          // If true, allow labels to be overwritten
+	Local          bool          // If true, calculate the patch locally and print it.
+	DryRun         string        // "none", "client", or "server". Default "none".
+	ListLabels     bool          // If true, list the labels for a resource or resources
+	Timeout        time.Duration // Timeout for the operation
+	Sudo           bool
+}
+
+type KubectlAnnotateOptions struct {
+	KubeconfigPath string        // Path to kubeconfig file
+	Namespace      string        // Namespace for the resource
+	AllNamespaces  bool          // If true, operate on resources in all namespaces
+	Selector       string        // Selector (label query) to filter resources
+	Overwrite      bool          // If true, allow annotations to be overwritten
+	Local          bool          // If true, calculate the patch locally and print it.
+	DryRun         string        // "none", "client", or "server". Default "none".
+	ListAnnotations bool         // If true, list the annotations for a resource or resources
+	Timeout        time.Duration // Timeout for the operation
+	Sudo           bool
+}
+
+type KubectlPatchOptions struct {
+	KubeconfigPath string // Path to kubeconfig file
+	Namespace      string // Namespace for the resource
+	Local          bool   // If true, calculate the patch locally and print it.
+	DryRun         string // "none", "client", or "server". Default "none".
+	Sudo           bool
 }
