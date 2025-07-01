@@ -480,6 +480,66 @@ func TestDefaultRunner_ImportVMTemplate(t *testing.T) {
     assert.Contains(t, err.Error(), "failed to define VM")
 }
 
+func TestDefaultRunner_CreateVM_Basic(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+
+	vmName := "test-vm-create"
+	memoryMB := uint(1024)
+	vcpus := uint(2)
+	diskPaths := []string{"/var/lib/libvirt/images/test-vm-create.qcow2"}
+	networkInterfaces := []VMNetworkInterface{{Type: "network", Source: "default", Model: "virtio"}}
+
+	// Mock VMExists -> false
+	mockConn.EXPECT().Exec(ctx, fmt.Sprintf("virsh dominfo %s > /dev/null 2>&1", shellEscape(vmName)), gomock.Any()).
+		Return(nil, []byte("error: failed to get domain 'test-vm-create'"), &connector.CommandError{ExitCode: 1}).Times(1)
+
+	// Mock WriteFile for the temporary XML
+	var capturedXMLBytes []byte
+	mockConn.EXPECT().WriteFile(ctx, mockConn, gomock.Any(), gomock.Contains(fmt.Sprintf("/tmp/kubexm-vmdef-%s-", vmName)), "0600", true).
+		DoAndReturn(func(_ context.Context, _ connector.Connector, content []byte, path string, _ string, _ bool) error {
+			capturedXMLBytes = content // Capture the XML
+			// fmt.Printf("Captured XML for CreateVM test:\n%s\n", string(content)) // For debugging test
+			assert.Contains(t, string(content), fmt.Sprintf("<name>%s</name>", vmName))
+			assert.Contains(t, string(content), fmt.Sprintf("<memory unit='KiB'>%d</memory>", memoryMB*1024))
+			assert.Contains(t, string(content), fmt.Sprintf("<vcpu placement='static'>%d</vcpu>", vcpus))
+			assert.Contains(t, string(content), fmt.Sprintf("<source file='%s'/>", diskPaths[0]))
+			assert.Contains(t, string(content), fmt.Sprintf("<source network='%s'/>", networkInterfaces[0].Source))
+			return nil
+		}).Times(1)
+
+	// Mock virsh define
+	defineCmdMatcher := gomock. दट(func(x interface{}) bool {
+		cmdStr, ok := x.(string)
+		if !ok { return false }
+		return strings.HasPrefix(cmdStr, "virsh define /tmp/kubexm-vmdef-")
+	})
+	mockConn.EXPECT().Exec(ctx, defineCmdMatcher, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+
+	// Mock Remove (for temp XML file)
+	removeCmdMatcher := gomock. दट(func(x interface{}) bool {
+		cmdStr, ok := x.(string)
+		if !ok { return false }
+		// This is a bit tricky as Remove uses a direct command.
+		// We can check if it's trying to remove the temp file path.
+		return strings.HasPrefix(cmdStr, "rm -rf /tmp/kubexm-vmdef-") || strings.HasPrefix(cmdStr, "rm -f /tmp/kubexm-vmdef-")
+	})
+	mockConn.EXPECT().Run(ctx, mockConn, removeCmdMatcher, true).Return("", nil).Times(1)
+
+
+	// Mock StartVM sequence (domstate then start)
+	mockConn.EXPECT().Exec(ctx, fmt.Sprintf("virsh domstate %s", shellEscape(vmName)), gomock.Any()).Return([]byte("shut off\n"), []byte{}, nil).Times(1)
+	mockConn.EXPECT().Exec(ctx, fmt.Sprintf("virsh start %s", shellEscape(vmName)), gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+
+
+	err := runner.CreateVM(ctx, mockConn, vmName, memoryMB, vcpus, "rhel8.6", diskPaths, networkInterfaces, "vnc", "", nil, nil)
+	assert.NoError(t, err)
+}
+
 func TestDefaultRunner_CloneVolume(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -622,6 +682,126 @@ func TestDefaultRunner_CreateVolume(t *testing.T) {
     assert.Error(t, err)
     assert.Contains(t, err.Error(), "backingVolFormat is required")
 }
+
+func TestDefaultRunner_AttachDisk(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+
+	vmName := "my-vm"
+	diskPath := "/vms/disks/newdisk.qcow2"
+	target := "vdc"
+	driverType := "qcow2"
+
+	// Test Case 1: Successful attach
+	expectedCmd := fmt.Sprintf("virsh attach-disk %s %s %s --driver qemu --subdriver %s --config --live",
+		shellEscape(vmName), shellEscape(diskPath), shellEscape(target), shellEscape(driverType))
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+	err := runner.AttachDisk(ctx, mockConn, vmName, diskPath, target, "", driverType) // diskType (file/block) omitted for this cmd
+	assert.NoError(t, err)
+
+	// Test Case 2: Attach fails
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).
+		Return(nil, []byte("error attaching disk"), fmt.Errorf("exec attach error")).Times(1)
+	err = runner.AttachDisk(ctx, mockConn, vmName, diskPath, target, "", driverType)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to attach disk")
+}
+
+func TestDefaultRunner_SetVMMemory(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+
+	vmName := "mem-test-vm"
+	memoryMB := uint(2048)
+	memoryKiB := memoryMB * 1024
+
+	// Test Case 1: Set memory live and config
+	expectedCmdLiveConfig := fmt.Sprintf("virsh setmem %s %dK --live --config", shellEscape(vmName), memoryKiB)
+	mockConn.EXPECT().Exec(ctx, expectedCmdLiveConfig, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+	err := runner.SetVMMemory(ctx, mockConn, vmName, memoryMB, true)
+	assert.NoError(t, err)
+
+	// Test Case 2: Set memory config only
+	expectedCmdConfigOnly := fmt.Sprintf("virsh setmem %s %dK --config", shellEscape(vmName), memoryKiB)
+	mockConn.EXPECT().Exec(ctx, expectedCmdConfigOnly, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+	err = runner.SetVMMemory(ctx, mockConn, vmName, memoryMB, false)
+	assert.NoError(t, err)
+
+	// Test Case 3: Command fails
+	mockConn.EXPECT().Exec(ctx, expectedCmdLiveConfig, gomock.Any()).
+		Return(nil, []byte("setmem error"), fmt.Errorf("exec setmem error")).Times(1)
+	err = runner.SetVMMemory(ctx, mockConn, vmName, memoryMB, true)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to set memory")
+}
+
+func TestDefaultRunner_SetVMCPUs(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+
+	vmName := "cpu-test-vm"
+	vcpus := uint(4)
+
+	// Test Case 1: Set vCPUs live and config
+	expectedCmdLiveConfig := fmt.Sprintf("virsh setvcpus %s %d --live --config", shellEscape(vmName), vcpus)
+	mockConn.EXPECT().Exec(ctx, expectedCmdLiveConfig, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+	err := runner.SetVMCPUs(ctx, mockConn, vmName, vcpus, true)
+	assert.NoError(t, err)
+
+	// Test Case 2: Set vCPUs config only
+	expectedCmdConfigOnly := fmt.Sprintf("virsh setvcpus %s %d --config", shellEscape(vmName), vcpus)
+	mockConn.EXPECT().Exec(ctx, expectedCmdConfigOnly, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+	err = runner.SetVMCPUs(ctx, mockConn, vmName, vcpus, false)
+	assert.NoError(t, err)
+
+	// Test Case 3: Command fails
+	mockConn.EXPECT().Exec(ctx, expectedCmdLiveConfig, gomock.Any()).
+		Return(nil, []byte("setvcpus error"), fmt.Errorf("exec setvcpus error")).Times(1)
+	err = runner.SetVMCPUs(ctx, mockConn, vmName, vcpus, true)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to set vCPUs")
+}
+
+
+func TestDefaultRunner_DetachDisk(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+
+	vmName := "another-vm"
+	target := "vdc"
+
+	// Test Case 1: Successful detach
+	expectedCmd := fmt.Sprintf("virsh detach-disk %s %s --config --live", shellEscape(vmName), shellEscape(target))
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+	err := runner.DetachDisk(ctx, mockConn, vmName, target)
+	assert.NoError(t, err)
+
+	// Test Case 2: Detach fails (e.g., disk not found) - should be idempotent based on current impl
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).
+		Return(nil, []byte("error: No disk found for target 'vdc'"), &connector.CommandError{ExitCode: 1}).Times(1)
+	err = runner.DetachDisk(ctx, mockConn, vmName, target)
+	assert.NoError(t, err) // Idempotent
+
+	// Test Case 3: Detach fails (other error)
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).
+		Return(nil, []byte("some other detach error"), fmt.Errorf("exec detach error")).Times(1)
+	err = runner.DetachDisk(ctx, mockConn, vmName, target)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to detach disk")
+}
+
 
 func TestDefaultRunner_CreateCloudInitISO(t *testing.T) {
     ctrl := gomock.NewController(t)
