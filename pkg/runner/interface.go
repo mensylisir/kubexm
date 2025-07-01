@@ -509,7 +509,366 @@ type Runner interface {
 	// all: For images, `all=true` prunes all unused images, not just dangling ones. For system, influences image pruning.
 	// Returns a summary string of actions taken and space reclaimed.
 	DockerPrune(ctx context.Context, conn connector.Connector, pruneType string, filters map[string]string, all bool) (string, error)
+
+	// --- Containerd/ctr Methods ---
+	CtrListNamespaces(ctx context.Context, conn connector.Connector) ([]string, error)
+	CtrListImages(ctx context.Context, conn connector.Connector, namespace string) ([]CtrImageInfo, error)
+	CtrPullImage(ctx context.Context, conn connector.Connector, namespace, imageName string, allPlatforms bool, user string) error
+	CtrRemoveImage(ctx context.Context, conn connector.Connector, namespace, imageName string) error
+	CtrTagImage(ctx context.Context, conn connector.Connector, namespace, sourceImage, targetImage string) error
+	CtrListContainers(ctx context.Context, conn connector.Connector, namespace string) ([]CtrContainerInfo, error)
+	CtrRunContainer(ctx context.Context, conn connector.Connector, namespace string, opts ContainerdContainerCreateOptions) (string, error) // Returns container ID
+	CtrStopContainer(ctx context.Context, conn connector.Connector, namespace, containerID string, timeout time.Duration) error
+	CtrRemoveContainer(ctx context.Context, conn connector.Connector, namespace, containerID string) error
+	CtrExecInContainer(ctx context.Context, conn connector.Connector, namespace, containerID string, opts CtrExecOptions, cmd []string) (string, error)
+	CtrImportImage(ctx context.Context, conn connector.Connector, namespace, filePath string, allPlatforms bool) error
+	CtrExportImage(ctx context.Context, conn connector.Connector, namespace, imageName, outputFilePath string, allPlatforms bool) error
+
+	// --- Containerd/crictl Methods ---
+	CrictlListImages(ctx context.Context, conn connector.Connector, filters map[string]string) ([]CrictlImageInfo, error)
+	CrictlPullImage(ctx context.Context, conn connector.Connector, imageName string, authCreds string, sandboxConfigPath string) error
+	CrictlRemoveImage(ctx context.Context, conn connector.Connector, imageName string) error
+	CrictlInspectImage(ctx context.Context, conn connector.Connector, imageName string) (*CrictlImageDetails, error)
+	CrictlImageFSInfo(ctx context.Context, conn connector.Connector) ([]CrictlFSInfo, error)
+	CrictlListPods(ctx context.Context, conn connector.Connector, filters map[string]string) ([]CrictlPodInfo, error)
+	CrictlRunPod(ctx context.Context, conn connector.Connector, podSandboxConfigFile string) (string, error) // Returns Pod ID
+	CrictlStopPod(ctx context.Context, conn connector.Connector, podID string) error
+	CrictlRemovePod(ctx context.Context, conn connector.Connector, podID string) error
+	CrictlInspectPod(ctx context.Context, conn connector.Connector, podID string) (*CrictlPodDetails, error) // Define CrictlPodDetails
+	CrictlCreateContainer(ctx context.Context, conn connector.Connector, podID string, containerConfigFile string, podSandboxConfigFile string) (string, error) // Returns Container ID
+	CrictlStartContainer(ctx context.Context, conn connector.Connector, containerID string) error
+	CrictlStopContainer(ctx context.Context, conn connector.Connector, containerID string, timeout int64) error // timeout in seconds
+	CrictlRemoveContainerForce(ctx context.Context, conn connector.Connector, containerID string) error // crictl rm -f
+	CrictlInspectContainer(ctx context.Context, conn connector.Connector, containerID string) (*CrictlContainerDetails, error) // Define CrictlContainerDetails
+	CrictlLogs(ctx context.Context, conn connector.Connector, containerID string, opts CrictlLogOptions) (string, error)
+	CrictlExec(ctx context.Context, conn connector.Connector, containerID string, timeout time.Duration, sync bool, cmd []string) (string, error)
+	CrictlPortForward(ctx context.Context, conn connector.Connector, podID string, ports []string) (string, error) // Returns request ID or output
+	CrictlVersion(ctx context.Context, conn connector.Connector) (*CrictlVersionInfo, error)
+	CrictlRuntimeConfig(ctx context.Context, conn connector.Connector) (string, error) // Returns raw config string
+
+	// --- Helm Methods ---
+	HelmInstall(ctx context.Context, conn connector.Connector, releaseName, chartPath string, opts HelmInstallOptions) error
+	HelmUninstall(ctx context.Context, conn connector.Connector, releaseName string, opts HelmUninstallOptions) error
+	HelmList(ctx context.Context, conn connector.Connector, opts HelmListOptions) ([]HelmReleaseInfo, error)
+	HelmStatus(ctx context.Context, conn connector.Connector, releaseName string, opts HelmStatusOptions) (*HelmReleaseInfo, error) // Single release status
+	HelmRepoAdd(ctx context.Context, conn connector.Connector, name, url string, opts HelmRepoAddOptions) error
+	HelmRepoUpdate(ctx context.Context, conn connector.Connector, repoNames []string) error
+	HelmSearchRepo(ctx context.Context, conn connector.Connector, keyword string, opts HelmSearchOptions) ([]HelmChartInfo, error)
+	HelmPull(ctx context.Context, conn connector.Connector, chartPath string, opts HelmPullOptions) (string, error) // Returns path to downloaded chart
+	HelmPackage(ctx context.Context, conn connector.Connector, chartPath string, opts HelmPackageOptions) (string, error) // Returns path to packaged chart
+	HelmVersion(ctx context.Context, conn connector.Connector) (*HelmVersionInfo, error)
 }
+
+// --- Helm Supporting Structs ---
+
+type HelmInstallOptions struct {
+	Namespace       string   // Namespace to install the release into
+	KubeconfigPath  string   // Path to kubeconfig file on the target host
+	ValuesFiles     []string // List of paths to values files
+	SetValues       []string // List of set values (e.g., "key1=value1,key2.subkey=value2")
+	Version         string   // Specify chart version
+	CreateNamespace bool     // Whether to create the namespace if it doesn't exist
+	Wait            bool     // If true, will wait until all Pods, PVCs, Services, and minimum number of Pods of a Deployment, StatefulSet, or ReplicaSet are in a ready state
+	Timeout         time.Duration // Time to wait for any individual Kubernetes operation (like Jobs for hooks)
+	Atomic          bool     // If true, installation process purges chart on fail. The --wait flag will be set automatically if --atomic is used
+	DryRun          bool     // Simulate an install
+	Devel           bool     // Use development versions, too. Equivalent to version '>0.0.0-0'. If --version is set, this is ignored.
+	Description     string   // Add a custom description
+	Sudo            bool     // If helm command itself needs sudo
+	Retries         int      // Number of retries for the command execution
+	RetryDelay      time.Duration // Delay between retries
+}
+
+type HelmUninstallOptions struct {
+	Namespace      string        // Namespace of the release
+	KubeconfigPath string        // Path to kubeconfig file
+	KeepHistory    bool          // If true, remove all associated resources and mark the release as deleted, but retain the release history
+	Timeout        time.Duration // Time to wait for any individual Kubernetes operation (like Jobs for hooks)
+	DryRun         bool          // Simulate an uninstall
+	Sudo           bool
+}
+
+type HelmListOptions struct {
+	Namespace      string            // Scope this list to a specific namespace
+	KubeconfigPath string            // Path to kubeconfig file
+	AllNamespaces  bool              // List releases across all namespaces
+	Filter         string            // A regular expression (Perl compatible) to filter the list (e.g., `helm list --filter 'myrelease.+`)
+	Selector       string            // Selector (label query) to filter on, supports '=', '==', and '!='.(e.g. -l key1=value1,key2=value2)
+	Max            int               // Maximum number of releases to fetch (0 for no limit)
+	Offset         int               // Next release index in the list, used to offset from start value
+	ByDate         bool              // Sort by release date
+	SortReverse    bool              // Sort in reverse order (implies --by-date)
+	Deployed       bool              // Show deployed releases. If no other is specified, this will be automatically enabled
+	Failed         bool              // Show failed releases
+	Pending        bool              // Show pending releases
+	Uninstalled    bool              // Show uninstalled releases (if 'helm list --uninstalled')
+	Uninstalling   bool              // Show releases that are currently uninstalling
+	Sudo           bool
+}
+
+type HelmReleaseInfo struct { // Based on `helm list -o json` and `helm status -o json`
+	Name         string `json:"name"`
+	Namespace    string `json:"namespace"`
+	Revision     string `json:"revision"` // string because it can be large
+	Updated      string `json:"updated"`  // Timestamp string e.g. "2023-10-27 10:30:00.123 -0700 MST"
+	Status       string `json:"status"`   // e.g. "deployed", "failed", "pending-install"
+	Chart        string `json:"chart"`    // Chart name with version e.g. "nginx-1.12.3"
+	AppVersion   string `json:"app_version"` // Application version from the chart
+	Notes        string `json:"notes,omitempty"` // Only from `helm status`
+	Config       map[string]interface{} `json:"config,omitempty"` // User-supplied values, only from `helm status`
+	Manifest     string `json:"manifest,omitempty"` // Rendered manifest, only from `helm status` (can be huge)
+	Version      int    `json:"version"` // Alias for revision, sometimes present
+}
+
+
+type HelmStatusOptions struct {
+	Namespace      string // Namespace of the release
+	KubeconfigPath string // Path to kubeconfig file
+	Revision       int    // If set, display the status of the named release at a specific revision
+	ShowDesc       bool   // If true, display the description given to the release
+	Sudo           bool
+}
+
+type HelmRepoAddOptions struct {
+	Username       string // Chart repository username
+	Password       string // Chart repository password
+	CAFile         string // Verify certificates of HTTPS-enabled servers using this CA bundle
+	CertFile       string // Identify HTTPS client using this SSL certificate file
+	KeyFile        string // Identify HTTPS client using this SSL key file
+	Insecure       bool   // Skip TLS certificate checks for the repository
+	ForceUpdate    bool   // Replace the repository if it already exists
+	PassCredentials bool  // Pass credentials to all domains
+	Sudo           bool
+}
+
+type HelmSearchOptions struct { // For `helm search repo`
+	Regexp      bool   // Use regular expressions for searching
+	Devel       bool   // Use development versions, too (equivalent to version '>0.0.0-0')
+	Version     string // Specify a version constraint for the chart version (e.g. "~1.0.0")
+	Versions    bool   // Show all versions of charts (equivalent to --version '>')
+	OutputFormat string // Output format: table, json, yaml. Default is table.
+	Sudo        bool
+}
+
+type HelmChartInfo struct { // Based on `helm search repo -o json`
+	Name        string `json:"name"`        // e.g. "stable/nginx-ingress"
+	Version     string `json:"version"`     // e.g. "1.41.3"
+	AppVersion  string `json:"app_version"` // e.g. "0.30.0"
+	Description string `json:"description"`
+}
+
+type HelmPullOptions struct {
+	Destination    string // Location to write the chart. If this and tardir are specified, tardir is appended to destination
+	Prov           bool   // Fetch the provenance file, but don't perform verification
+	Untar          bool   // If set to true, pull the chart then untar it in tardir
+	UntarDir       string // If untar is specified, this flag specifies the directory to untar the chart after downloading it (default ".")
+	Verify         bool   // Verify the package against its signature
+	Keyring        string // Keyring containing public keys (default "$HOME/.gnupg/pubring.gpg")
+	Version        string // Specify a version constraint for the chart version. If this is not specified, the latest version is downloaded
+	CAFile         string // Verify certificates of HTTPS-enabled servers using this CA bundle
+	CertFile       string // Identify HTTPS client using this SSL certificate file
+	KeyFile        string // Identify HTTPS client using this SSL key file
+	Insecure       bool   // Skip TLS certificate checks for the repository
+	Devel          bool   // Use development versions too. Equivalent to version '>0.0.0-0'. If --version is set, this is ignored.
+	PassCredentials bool  // Pass credentials to all domains
+	Username       string // Chart repository username
+	Password       string // Chart repository password
+	Sudo           bool
+}
+
+type HelmPackageOptions struct {
+	Destination  string   // Location to write the chart archive (default ".")
+	Sign         bool     // Use a GPG key to sign this package
+	Key          string   // Name of the GPG key to use when signing
+	Keyring      string   // Keyring containing private keys (default "$HOME/.gnupg/secring.gpg")
+	PassphraseFile string // Location of a file containing the GPG passphrase
+	Version      string   // Set the package version. Overrides the version in Chart.yaml
+	AppVersion   string   // Set the appVersion. Overrides the appVersion in Chart.yaml
+	DependencyUpdate bool // Update chart dependencies before packaging
+	Sudo         bool
+}
+
+type HelmVersionInfo struct { // Based on `helm version -o json`
+	Version    string `json:"version"`    // e.g. "v3.7.0"
+	GitCommit  string `json:"gitCommit"`
+	GitTreeState string `json:"gitTreeState"`
+	GoVersion  string `json:"goVersion"`
+}
+
+
+// --- Containerd/ctr Supporting Structs ---
+
+type CtrImageInfo struct {
+	Name   string   // Image name (e.g., docker.io/library/alpine:latest)
+	Digest string   // Image digest (e.g., sha256:...)
+	Size   string   // Human-readable size (e.g., "2.83 MiB")
+	OSArch string   // OS/Architecture (e.g., linux/amd64)
+	Labels map[string]string
+}
+
+type CtrContainerInfo struct {
+	ID      string
+	Image   string
+	Runtime string // e.g., io.containerd.runc.v2
+	Status  string // e.g., RUNNING, STOPPED, CREATED - Needs parsing from `ctr c list`
+	Labels  map[string]string
+}
+
+// ContainerdContainerCreateOptions mirrors relevant fields from `ctr run` or `ctr c create`
+type ContainerdContainerCreateOptions struct {
+	ImageName     string   // Image to use
+	ContainerID   string   // ID for the new container
+	Snapshotter   string   // Snapshotter to use (e.g., "overlayfs")
+	ConfigPath    string   // Path to OCI spec file (optional, ctr can generate)
+	Runtime       string   // Runtime to use (e.g., "io.containerd.runc.v2")
+	NetHost       bool     // Use host network
+	TTY           bool     // Allocate TTY
+	Env           []string // Environment variables "KEY=value"
+	Mounts        []string // Mounts in "type=TYPE,src=SRC,dst=DST,options=OPT" format
+	Command       []string // Command to run
+	Labels        map[string]string
+	RemoveExisting bool    // Remove container with same ID if it exists
+	Privileged    bool
+	ReadOnlyRootFS bool
+	User          string // user[:group]
+	Cwd           string // Working directory
+	Platforms     []string // For multi-platform images, e.g. "linux/amd64"
+}
+
+type CtrExecOptions struct {
+	TTY  bool
+	User string // user[:group]
+	Cwd  string
+}
+
+
+// --- Containerd/crictl Supporting Structs ---
+
+type CrictlImageInfo struct {
+	ID          string   `json:"id"`
+	RepoTags    []string `json:"repoTags"`
+	RepoDigests []string `json:"repoDigests"`
+	Size        string   `json:"size"` // crictl outputs size as string e.g. "5.57MB"
+	UID         *int64   `json:"uid"`  // User ID to run the image as
+	Username    string   `json:"username"`
+}
+
+type CrictlImageDetails struct { // Based on `crictl inspecti`
+	Status struct {
+		ID          string   `json:"id"`
+		RepoTags    []string `json:"repoTags"`
+		RepoDigests []string `json:"repoDigests"`
+		Size        string   `json:"size"`
+		Username    string   `json:"username"`
+		UID         *int64   `json:"uid"`
+	} `json:"status"`
+	Info map[string]interface{} `json:"info"` // Raw JSON info from image config
+}
+
+type CrictlFSInfo struct {
+	Timestamp int64 `json:"timestamp"`
+	FsID struct {
+		Mountpoint string `json:"mountpoint"`
+	} `json:"fsId"`
+	UsedBytes  string `json:"usedBytes"` // e.g., "1.23GB"
+	InodesUsed string `json:"inodesUsed"`
+}
+
+type CrictlPodInfo struct {
+	ID             string            `json:"id"`
+	Name           string            `json:"name"`
+	Namespace      string            `json:"namespace"`
+	Attempt        uint32            `json:"attempt"`
+	State          string            `json:"state"` // e.g., "SANDBOX_READY", "SANDBOX_NOTREADY"
+	CreatedAt      string            `json:"createdAt"` // Timestamp string
+	Labels         map[string]string `json:"labels"`
+	Annotations    map[string]string `json:"annotations"`
+	RuntimeHandler string            `json:"runtimeHandler"`
+}
+
+type CrictlPodDetails struct { // Based on `crictl inspectp`
+	Status struct {
+		ID             string            `json:"id"`
+		Metadata struct {
+			Name      string `json:"name"`
+			Namespace string `json:"namespace"`
+			Attempt   uint32 `json:"attempt"`
+			UID       string `json:"uid"`
+		} `json:"metadata"`
+		State          string            `json:"state"`
+		CreatedAt      string            `json:"createdAt"`
+		Network struct {
+			IP       string `json:"ip"`
+			// AdditionalIPs might be present
+		} `json:"network"`
+		Linux struct {
+			Namespaces struct {
+				Options struct {
+					Network string `json:"network"` // "POD", "NODE"
+					Pid     string `json:"pid"`     // "POD", "NODE", "TARGET" (for container)
+					Ipc     string `json:"ipc"`     // "POD", "NODE"
+				} `json:"options"`
+			} `json:"namespaces"`
+		} `json:"linux"`
+		Labels         map[string]string `json:"labels"`
+		Annotations    map[string]string `json:"annotations"`
+		RuntimeHandler string            `json:"runtimeHandler"`
+	} `json:"status"`
+	Info map[string]interface{} `json:"info"` // Raw JSON from runtime
+}
+
+
+type CrictlContainerDetails struct { // Based on `crictl inspect` (for containers)
+	Status struct {
+		ID       string `json:"id"`
+		Metadata struct {
+			Name    string `json:"name"`
+			Attempt uint32 `json:"attempt"`
+		} `json:"metadata"`
+		State       string            `json:"state"` // e.g., "CONTAINER_RUNNING", "CONTAINER_EXITED"
+		CreatedAt   string            `json:"createdAt"`
+		StartedAt   string            `json:"startedAt"`
+		FinishedAt  string            `json:"finishedAt"`
+		ExitCode    int32             `json:"exitCode"`
+		Image struct {
+			Image string `json:"image"` // Image name
+			ID    string `json:"id"`    // Image ID
+		} `json:"image"`
+		ImageRef    string            `json:"imageRef"` // Image ID (same as Image.ID usually)
+		Reason      string            `json:"reason"`
+		Message     string            `json:"message"`
+		Labels      map[string]string `json:"labels"`
+		Annotations map[string]string `json:"annotations"`
+		Mounts      []struct {
+			ContainerPath  string `json:"containerPath"`
+			HostPath       string `json:"hostPath"`
+			Readonly       bool   `json:"readonly"`
+			Propagation    string `json:"propagation"` // e.g. "PROPAGATION_PRIVATE"
+			SelinuxRelabel bool   `json:"selinuxRelabel"`
+		} `json:"mounts"`
+		LogPath     string `json:"logPath"`
+	} `json:"status"`
+	Pid  int                    `json:"pid"`
+	Info map[string]interface{} `json:"info"` // Raw JSON from runtime
+}
+
+
+type CrictlLogOptions struct { // Based on `crictl logs` flags
+	Follow     bool   // -f, --follow
+	TailLines  *int64 // -t, --tail (use pointer to distinguish 0 from not set)
+	Since      string // --since (duration like 10s, 1m, or RFC3339Nano timestamp)
+	Timestamps bool   // --timestamps
+	Latest     bool   // --latest (deprecated, use tail)
+	NumLines   *int64 // -l, --lines (alternative to tail)
+}
+
+type CrictlVersionInfo struct { // Based on `crictl version`
+	Version           string
+	RuntimeName       string
+	RuntimeVersion    string
+	RuntimeApiVersion string
+}
+
 
 // --- Docker Supporting Structs ---
 
