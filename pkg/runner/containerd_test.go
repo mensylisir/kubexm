@@ -421,5 +421,196 @@ func TestDefaultRunner_CtrExecInContainer(t *testing.T) {
     assert.Contains(t, err.Error(), "failed to exec in container")
 }
 
-// TODO: Add tests for CtrImportImage, CtrExportImage
-// TODO: Add tests for the crictl functions once implemented.
+func TestDefaultRunner_CtrImportImage(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	namespace := "user-ns"
+	filePath := "/mnt/images/myimage.tar"
+
+	// Test Case 1: Successful import
+	expectedCmd := fmt.Sprintf("ctr -n %s images import %s", shellEscape(namespace), shellEscape(filePath))
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+	err := runner.CtrImportImage(ctx, mockConn, namespace, filePath, false)
+	assert.NoError(t, err)
+
+	// Test Case 2: Successful import with all platforms
+	expectedCmdAllPlatforms := fmt.Sprintf("ctr -n %s images import --all-platforms %s", shellEscape(namespace), shellEscape(filePath))
+	mockConn.EXPECT().Exec(ctx, expectedCmdAllPlatforms, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+	err = runner.CtrImportImage(ctx, mockConn, namespace, filePath, true)
+	assert.NoError(t, err)
+
+	// Test Case 3: Import command fails
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).
+		Return(nil, []byte("import error"), fmt.Errorf("exec import error")).Times(1)
+	err = runner.CtrImportImage(ctx, mockConn, namespace, filePath, false)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to import image")
+}
+
+func TestDefaultRunner_CtrExportImage(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	namespace := "user-ns"
+	imageName := "docker.io/library/busybox:latest"
+	outputFilePath := "/mnt/exports/busybox.tar"
+
+	// Test Case 1: Successful export
+	expectedCmd := fmt.Sprintf("ctr -n %s images export %s %s",
+		shellEscape(namespace), shellEscape(outputFilePath), shellEscape(imageName))
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+	err := runner.CtrExportImage(ctx, mockConn, namespace, imageName, outputFilePath, false)
+	assert.NoError(t, err)
+
+	// Test Case 2: Successful export with all platforms
+	expectedCmdAllPlatforms := fmt.Sprintf("ctr -n %s images export --all-platforms %s %s",
+		shellEscape(namespace), shellEscape(outputFilePath), shellEscape(imageName))
+	mockConn.EXPECT().Exec(ctx, expectedCmdAllPlatforms, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+	err = runner.CtrExportImage(ctx, mockConn, namespace, imageName, outputFilePath, true)
+	assert.NoError(t, err)
+
+	// Test Case 3: Export command fails
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).
+		Return(nil, []byte("export error"), fmt.Errorf("exec export error")).Times(1)
+	err = runner.CtrExportImage(ctx, mockConn, namespace, imageName, outputFilePath, false)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to export image")
+}
+
+
+func TestDefaultRunner_CrictlListImages(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+
+	// Test Case 1: Successful list with JSON output
+	sampleCrictlImagesJSON := `{
+"images": [
+    {
+        "id": "sha256:abcdef123456",
+        "repoTags": ["docker.io/library/alpine:latest", "alpine:latest"],
+        "repoDigests": ["docker.io/library/alpine@sha256:digest1"],
+        "size": "5.57MB",
+        "uid": null,
+        "username": ""
+    },
+    {
+        "id": "sha256:fedcba654321",
+        "repoTags": ["k8s.gcr.io/pause:3.5"],
+        "repoDigests": ["k8s.gcr.io/pause@sha256:digest2"],
+        "size": "296kB",
+        "uid": null,
+        "username": ""
+    }
+]
+}`
+	expectedImages := []CrictlImageInfo{
+		{ID: "sha256:abcdef123456", RepoTags: []string{"docker.io/library/alpine:latest", "alpine:latest"}, RepoDigests: []string{"docker.io/library/alpine@sha256:digest1"}, Size: "5.57MB"},
+		{ID: "sha256:fedcba654321", RepoTags: []string{"k8s.gcr.io/pause:3.5"}, RepoDigests: []string{"k8s.gcr.io/pause@sha256:digest2"}, Size: "296kB"},
+	}
+
+	mockConn.EXPECT().Exec(ctx, "crictl images -o json", gomock.Any()).Return([]byte(sampleCrictlImagesJSON), []byte{}, nil).Times(1)
+	images, err := runner.CrictlListImages(ctx, mockConn, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedImages, images)
+
+	// Test Case 2: Empty list (e.g. crictl returns `{"images": []}` or just `[]`)
+	mockConn.EXPECT().Exec(ctx, "crictl images -o json", gomock.Any()).Return([]byte(`{"images": []}`), []byte{}, nil).Times(1)
+	images, err = runner.CrictlListImages(ctx, mockConn, nil)
+	assert.NoError(t, err)
+	assert.Empty(t, images)
+
+	mockConn.EXPECT().Exec(ctx, "crictl images -o json", gomock.Any()).Return([]byte(`[]`), []byte{}, nil).Times(1)
+	images, err = runner.CrictlListImages(ctx, mockConn, nil)
+	assert.NoError(t, err)
+	assert.Empty(t, images)
+
+
+	// Test Case 3: Filters applied (example: filter by image name)
+	filters := map[string]string{"image": "alpine:latest"}
+	expectedCmdWithFilter := "crictl images --image 'alpine:latest' -o json"
+	mockConn.EXPECT().Exec(ctx, expectedCmdWithFilter, gomock.Any()).Return([]byte(sampleCrictlImagesJSON), []byte{}, nil).Times(1) // Assuming filter returns same set for test
+	images, err = runner.CrictlListImages(ctx, mockConn, filters)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedImages, images)
+
+
+	// Test Case 4: crictl command execution error
+	mockConn.EXPECT().Exec(ctx, "crictl images -o json", gomock.Any()).
+		Return(nil, []byte("crictl error"), fmt.Errorf("exec error")).Times(1)
+	images, err = runner.CrictlListImages(ctx, mockConn, nil)
+	assert.Error(t, err)
+	assert.Nil(t, images)
+	assert.Contains(t, err.Error(), "crictl images failed")
+}
+
+func TestDefaultRunner_CrictlPullImage(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	imageName := "docker.io/library/nginx:stable"
+
+	// Test Case 1: Successful pull
+	expectedCmd := fmt.Sprintf("crictl pull %s", shellEscape(imageName))
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).Return([]byte("Image is up to date"), []byte{}, nil).Times(1)
+	err := runner.CrictlPullImage(ctx, mockConn, imageName, "", "")
+	assert.NoError(t, err)
+
+	// Test Case 2: Pull with auth
+	authCreds := "user:pass"
+	expectedCmdWithAuth := fmt.Sprintf("crictl pull --auth %s %s", shellEscape(authCreds), shellEscape(imageName))
+	mockConn.EXPECT().Exec(ctx, expectedCmdWithAuth, gomock.Any()).Return([]byte("Image is up to date"), []byte{}, nil).Times(1)
+	err = runner.CrictlPullImage(ctx, mockConn, imageName, authCreds, "")
+	assert.NoError(t, err)
+
+	// Test Case 3: crictl command execution error
+	mockConn.EXPECT().Exec(ctx, expectedCmd, gomock.Any()).
+		Return(nil, []byte("pull error"), fmt.Errorf("exec pull error")).Times(1)
+	err = runner.CrictlPullImage(ctx, mockConn, imageName, "", "")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "crictl pull image failed")
+}
+
+func TestDefaultRunner_CrictlRemoveImage(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	imageNameOrID := "sha256:abcdef123456"
+
+	// Test Case 1: Successful removal
+	cmd := fmt.Sprintf("crictl rmi %s", shellEscape(imageNameOrID))
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte("Deleted: "+imageNameOrID), []byte{}, nil).Times(1)
+	err := runner.CrictlRemoveImage(ctx, mockConn, imageNameOrID)
+	assert.NoError(t, err)
+
+	// Test Case 2: Image not found (idempotency)
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).
+		Return(nil, []byte("FATA[0000] rpc error: code = NotFound desc = image "+imageNameOrID+" not found"), &connector.CommandError{ExitCode: 1}).Times(1)
+	err = runner.CrictlRemoveImage(ctx, mockConn, imageNameOrID)
+	assert.NoError(t, err)
+
+	// Test Case 3: Other command execution error
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).
+		Return(nil, []byte("some rmi error"), fmt.Errorf("exec rmi error")).Times(1)
+	err = runner.CrictlRemoveImage(ctx, mockConn, imageNameOrID)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "crictl rmi image failed")
+}
+
+// TODO: Add tests for remaining crictl functions once implemented.

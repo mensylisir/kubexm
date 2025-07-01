@@ -754,13 +754,204 @@ func (r *defaultRunner) VolumeExists(ctx context.Context, conn connector.Connect
 }
 
 func (r *defaultRunner) CloneVolume(ctx context.Context, conn connector.Connector, poolName string, origVolName string, newVolName string, newSizeGB uint, format string) error {
-	return errors.New("not implemented: CloneVolume")
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if poolName == "" || origVolName == "" || newVolName == "" {
+		return errors.New("poolName, origVolName, and newVolName are required for CloneVolume")
+	}
+
+	// `virsh vol-clone --pool <poolName> <origVolName> <newVolName>`
+	// Options like --neworiginalformat or --newformat <format> might be needed depending on libvirt version and desired outcome.
+	// Resizing during clone is not directly supported by `vol-clone`. It clones with original capacity.
+	// Resize must happen as a separate step if `newSizeGB > 0` and differs from original.
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "virsh", "vol-clone", "--pool", shellEscape(poolName), shellEscape(origVolName), shellEscape(newVolName))
+
+	// Add format if specified. `vol-clone` itself doesn't always take a format for the *new* volume directly in older versions.
+	// It might inherit or need `vol-create-from` for more control.
+	// For simplicity, if format is provided, we assume it's for a scenario where it's used (e.g. if newVol is defined with it).
+	// Let's assume `vol-clone` creates it with the same format, and `format` param here is more for if we were creating it
+	// from scratch and then cloning *into* it, or for a subsequent redefinition if needed.
+	// A common use of format with clone is if the new volume is pre-created or if using vol-create-from.
+	// `virsh help vol-clone` shows no direct --format for the new volume, but it might take `--originalformat` if source is raw.
+	// We will not add format to the vol-clone command directly as it's not standard.
+
+	cmd := strings.Join(cmdArgs, " ")
+	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 5 * time.Minute}) // Cloning can take time
+	if err != nil {
+		return errors.Wrapf(err, "failed to clone volume %s to %s in pool %s. Stderr: %s", origVolName, newVolName, poolName, string(stderr))
+	}
+
+	// If newSizeGB is specified and is different from the original volume's size, resize the new volume.
+	// This requires getting the new volume's current size first, which is complex without vol-info parsing.
+	// For now, if newSizeGB > 0, we will attempt a resize.
+	if newSizeGB > 0 {
+		// Note: We don't know the original size here easily via CLI to compare.
+		// We just attempt resize if newSizeGB is provided.
+		errResize := r.ResizeVolume(ctx, conn, poolName, newVolName, newSizeGB)
+		if errResize != nil {
+			// If cloning succeeded but resize failed, this is a partial success.
+			// Caller might need to handle this. For now, return the resize error.
+			return errors.Wrapf(errResize, "volume %s cloned successfully, but failed to resize to %dGB", newVolName, newSizeGB)
+		}
+	}
+	return nil
 }
+
 func (r *defaultRunner) ResizeVolume(ctx context.Context, conn connector.Connector, poolName string, volName string, newSizeGB uint) error {
-	return errors.New("not implemented: ResizeVolume")
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if poolName == "" || volName == "" || newSizeGB == 0 {
+		return errors.New("poolName, volName, and a non-zero newSizeGB are required for ResizeVolume")
+	}
+
+	// `virsh vol-resize --pool <poolName> <volName> <capacity_in_bytes_or_human_readable_KiB/MiB/GiB>`
+	// newSizeGB is in Gigabytes. Convert to string like "20G".
+	capacityStr := fmt.Sprintf("%dG", newSizeGB)
+	cmd := fmt.Sprintf("virsh vol-resize --pool %s %s %s", shellEscape(poolName), shellEscape(volName), shellEscape(capacityStr))
+
+	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute})
+	if err != nil {
+		return errors.Wrapf(err, "failed to resize volume %s in pool %s to %s. Stderr: %s", volName, poolName, capacityStr, string(stderr))
+	}
+	return nil
 }
+
 func (r *defaultRunner) DeleteVolume(ctx context.Context, conn connector.Connector, poolName string, volName string) error {
-	return errors.New("not implemented: DeleteVolume")
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if poolName == "" || volName == "" {
+		return errors.New("poolName and volName are required for DeleteVolume")
+	}
+	// `virsh vol-delete --pool <poolName> <volName>`
+	cmd := fmt.Sprintf("virsh vol-delete --pool %s %s", shellEscape(poolName), shellEscape(volName))
+	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
+	if err != nil {
+		// Idempotency: if volume not found, treat as success.
+		// Stderr: "error: Failed to get volume 'volName'" or "error: Storage volume not found"
+		if strings.Contains(string(stderr), "Failed to get volume") || strings.Contains(string(stderr), "Storage volume not found") {
+			return nil
+		}
+		return errors.Wrapf(err, "failed to delete volume %s from pool %s. Stderr: %s", volName, poolName, string(stderr))
+	}
+	return nil
+}
+
+func (r *defaultRunner) CreateVolume(ctx context.Context, conn connector.Connector, poolName string, volName string, sizeGB uint, format string, backingVolName string, backingVolFormat string) error {
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if poolName == "" || volName == "" || sizeGB == 0 {
+		return errors.New("poolName, volName, and a non-zero sizeGB are required for CreateVolume")
+	}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "virsh", "vol-create-as", shellEscape(poolName), shellEscape(volName), fmt.Sprintf("%dG", sizeGB))
+
+	if format != "" {
+		cmdArgs = append(cmdArgs, "--format", shellEscape(format))
+	}
+
+	if backingVolName != "" {
+		cmdArgs = append(cmdArgs, "--backing-vol", shellEscape(backingVolName))
+		if backingVolFormat != "" { // Backing format is required if backing vol is specified
+			cmdArgs = append(cmdArgs, "--backing-vol-format", shellEscape(backingVolFormat))
+		} else {
+			return errors.New("backingVolFormat is required if backingVolName is specified for CreateVolume")
+		}
+	}
+	cmd := strings.Join(cmdArgs, " ")
+	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute})
+	if err != nil {
+		// Idempotency: "error: operation failed: storage volume 'volName' already exists"
+		if strings.Contains(string(stderr), "already exists") {
+			return nil
+		}
+		return errors.Wrapf(err, "failed to create volume %s in pool %s. Stderr: %s", volName, poolName, string(stderr))
+	}
+	return nil
+}
+
+func (r *defaultRunner) CreateCloudInitISO(ctx context.Context, conn connector.Connector, vmName string, isoDestPath string, userData string, metaData string, networkConfig string) error {
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if vmName == "" || isoDestPath == "" || userData == "" || metaData == "" {
+		return errors.New("vmName, isoDestPath, userData, and metaData are required for CreateCloudInitISO")
+	}
+
+	// 1. Create a temporary directory on the remote host
+	// Base temp dir on remote system, e.g., /tmp or /var/tmp
+	remoteBaseTmpDir := "/tmp" // Make this configurable if needed
+	tmpDirName := fmt.Sprintf("cloud-init-tmp-%s-%d", vmName, time.Now().UnixNano())
+	tmpDirPath := filepath.Join(remoteBaseTmpDir, tmpDirName)
+
+	if err := r.Mkdirp(ctx, conn, tmpDirPath, "0700", true); err != nil {
+		return errors.Wrapf(err, "failed to create temporary directory %s on remote host", tmpDirPath)
+	}
+	// Defer cleanup of the temporary directory
+	defer func() {
+		// log.Printf("Cleaning up temporary cloud-init directory: %s", tmpDirPath)
+		if err := r.Remove(ctx, conn, tmpDirPath, true); err != nil { // sudo true for rm -rf
+			// log.Printf("Warning: failed to remove temporary directory %s: %v", tmpDirPath, err)
+		}
+	}()
+
+	// 2. Write user-data, meta-data, and optionally network-config to files in the temp directory
+	userDataPath := filepath.Join(tmpDirPath, "user-data")
+	metaDataPath := filepath.Join(tmpDirPath, "meta-data")
+
+	if err := r.WriteFile(ctx, conn, []byte(userData), userDataPath, "0644", true); err != nil {
+		return errors.Wrapf(err, "failed to write user-data to %s", userDataPath)
+	}
+	if err := r.WriteFile(ctx, conn, []byte(metaData), metaDataPath, "0644", true); err != nil {
+		return errors.Wrapf(err, "failed to write meta-data to %s", metaDataPath)
+	}
+	if networkConfig != "" {
+		networkConfigPath := filepath.Join(tmpDirPath, "network-config")
+		if err := r.WriteFile(ctx, conn, []byte(networkConfig), networkConfigPath, "0644", true); err != nil {
+			return errors.Wrapf(err, "failed to write network-config to %s", networkConfigPath)
+		}
+	}
+
+	// Ensure parent directory for ISO exists
+	isoDir := filepath.Dir(isoDestPath)
+	if err := r.Mkdirp(ctx, conn, isoDir, "0755", true); err != nil {
+		return errors.Wrapf(err, "failed to create directory %s for ISO image", isoDir)
+	}
+
+
+	// 3. Use `genisoimage` or `mkisofs` to create the ISO.
+	// `xorriso` is also an option. `genisoimage` is often a symlink to `mkisofs` or `xorrisofs`.
+	// Command: genisoimage -output <isoDestPath> -volid cidata -joliet -rock <tmpDirPath>
+	// Simpler: genisoimage -o <isoDestPath> -V cidata -r -J <tmpDirPath>
+	// Sudo might be needed if isoDestPath is privileged. Assume true for now.
+	// Also, genisoimage might need to be run as root if reading files written by root, though we used sudo for WriteFile.
+	isoCmd := fmt.Sprintf("genisoimage -o %s -V cidata -r -J %s", shellEscape(isoDestPath), shellEscape(tmpDirPath))
+
+	// Check if genisoimage exists, fallback to mkisofs
+	if _, errLookPath := r.LookPath(ctx, conn, "genisoimage"); errLookPath != nil {
+		if _, errLookPathMkiso := r.LookPath(ctx, conn, "mkisofs"); errLookPathMkiso == nil {
+			isoCmd = fmt.Sprintf("mkisofs -o %s -V cidata -r -J %s", shellEscape(isoDestPath), shellEscape(tmpDirPath))
+		} else {
+			return errors.New("genisoimage or mkisofs command not found on the remote host")
+		}
+	}
+
+	_, stderr, err := conn.Exec(ctx, isoCmd, &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute})
+	if err != nil {
+		return errors.Wrapf(err, "failed to create cloud-init ISO %s. Stderr: %s", isoDestPath, string(stderr))
+	}
+
+	return nil
+}
+
+func (r *defaultRunner) CreateVM(ctx context.Context, conn connector.Connector, vmName string, memoryMB uint, vcpus uint, osVariant string, diskPaths []string, networkInterfaces []VMNetworkInterface, graphicsType string, cloudInitISOPath string, bootOrder []string, extraArgs []string) error {
+	return errors.New("not implemented: CreateVM")
 }
 func (r *defaultRunner) CreateVolume(ctx context.Context, conn connector.Connector, poolName string, volName string, sizeGB uint, format string, backingVolName string, backingVolFormat string) error {
 	return errors.New("not implemented: CreateVolume")

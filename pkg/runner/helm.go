@@ -369,16 +369,189 @@ func (r *defaultRunner) HelmVersion(ctx context.Context, conn connector.Connecto
 }
 
 
-// --- Placeholder implementations for other Helm methods ---
-
+// HelmSearchRepo searches repositories for a keyword.
+// Corresponds to `helm search repo [KEYWORD] [flags]`.
 func (r *defaultRunner) HelmSearchRepo(ctx context.Context, conn connector.Connector, keyword string, opts HelmSearchOptions) ([]HelmChartInfo, error) {
-	return nil, errors.New("not implemented: HelmSearchRepo")
+	if conn == nil {
+		return nil, errors.New("connector cannot be nil")
+	}
+	if keyword == "" {
+		return nil, errors.New("keyword is required for HelmSearchRepo")
+	}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "helm", "search", "repo", shellEscape(keyword))
+
+	if opts.Regexp {
+		cmdArgs = append(cmdArgs, "--regexp")
+	}
+	if opts.Devel {
+		cmdArgs = append(cmdArgs, "--devel")
+	}
+	if opts.Version != "" { // Specific version constraint
+		cmdArgs = append(cmdArgs, "--version", shellEscape(opts.Version))
+	}
+	if opts.Versions { // Show all versions
+		cmdArgs = append(cmdArgs, "--versions")
+	}
+
+	// Always request JSON output for easier parsing
+	cmdArgs = append(cmdArgs, "-o", "json")
+	// Note: opts.OutputFormat is defined in interface but helm search repo -o json is fairly standard.
+	// If table/yaml is needed, the parsing logic here would need to change or return raw string.
+
+	cmd := strings.Join(cmdArgs, " ")
+	execOptions := &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultHelmTimeout}
+
+	stdout, stderr, err := conn.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		return nil, errors.Wrapf(err, "helm search repo for keyword '%s' failed. Stderr: %s", keyword, string(stderr))
+	}
+
+	var charts []HelmChartInfo
+	if err := json.Unmarshal(stdout, &charts); err != nil {
+		// Helm search repo -o json might return empty string or "null" if no results.
+		if strings.TrimSpace(string(stdout)) == "" || strings.TrimSpace(string(stdout)) == "null" || strings.TrimSpace(string(stdout)) == "[]" {
+			return []HelmChartInfo{}, nil // No charts found
+		}
+		return nil, errors.Wrapf(err, "failed to parse helm search repo JSON output. Output: %s", string(stdout))
+	}
+	return charts, nil
 }
 
+// HelmPull downloads a chart from a repository and (optionally) unpacks it in local directory.
+// Corresponds to `helm pull [CHART] [flags]`.
+// Returns the path to the downloaded chart (or directory if untarred). This is usually printed to stdout by Helm.
 func (r *defaultRunner) HelmPull(ctx context.Context, conn connector.Connector, chartPath string, opts HelmPullOptions) (string, error) {
-	return "", errors.New("not implemented: HelmPull")
+	if conn == nil {
+		return "", errors.New("connector cannot be nil")
+	}
+	if chartPath == "" {
+		return "", errors.New("chartPath is required for HelmPull (can be repo/chart_name or URL)")
+	}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "helm", "pull", shellEscape(chartPath))
+
+	if opts.Destination != "" {
+		cmdArgs = append(cmdArgs, "--destination", shellEscape(opts.Destination))
+	}
+	if opts.Prov {
+		cmdArgs = append(cmdArgs, "--prov")
+	}
+	if opts.Untar {
+		cmdArgs = append(cmdArgs, "--untar")
+		if opts.UntarDir != "" { // Only makes sense if --untar is true
+			cmdArgs = append(cmdArgs, "--untardir", shellEscape(opts.UntarDir))
+		}
+	}
+	if opts.Verify {
+		cmdArgs = append(cmdArgs, "--verify")
+		if opts.Keyring != "" { // Only makes sense if --verify is true
+			cmdArgs = append(cmdArgs, "--keyring", shellEscape(opts.Keyring))
+		}
+	}
+	if opts.Version != "" {
+		cmdArgs = append(cmdArgs, "--version", shellEscape(opts.Version))
+	}
+	if opts.CAFile != "" {
+		cmdArgs = append(cmdArgs, "--ca-file", shellEscape(opts.CAFile))
+	}
+	if opts.CertFile != "" {
+		cmdArgs = append(cmdArgs, "--cert-file", shellEscape(opts.CertFile))
+	}
+	if opts.KeyFile != "" {
+		cmdArgs = append(cmdArgs, "--key-file", shellEscape(opts.KeyFile))
+	}
+	if opts.Insecure {
+		cmdArgs = append(cmdArgs, "--insecure-skip-tls-verify")
+	}
+	if opts.Devel {
+		cmdArgs = append(cmdArgs, "--devel")
+	}
+	if opts.PassCredentials {
+		cmdArgs = append(cmdArgs, "--pass-credentials")
+	}
+	if opts.Username != "" {
+		cmdArgs = append(cmdArgs, "--username", shellEscape(opts.Username))
+	}
+	if opts.Password != "" {
+		cmdArgs = append(cmdArgs, "--password", shellEscape(opts.Password))
+	}
+
+
+	cmd := strings.Join(cmdArgs, " ")
+	// Pulling can take time, especially for large charts or slow networks.
+	execOptions := &connector.ExecOptions{Sudo: opts.Sudo, Timeout: 5 * time.Minute}
+
+	stdout, stderr, err := conn.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		return "", errors.Wrapf(err, "helm pull for chart '%s' failed. Stderr: %s", chartPath, string(stderr))
+	}
+
+	// Helm pull usually prints the location of the pulled chart to stdout on success,
+	// e.g., "Successfully downloaded chart to /path/to/chart-0.1.0.tgz" or similar if untarred.
+	// We return this output.
+	return strings.TrimSpace(string(stdout)), nil
 }
 
+// HelmPackage packages a chart directory into a chart archive.
+// Corresponds to `helm package [CHART_PATH] [flags]`.
+// Returns the path to the packaged chart, usually printed to stdout by Helm.
 func (r *defaultRunner) HelmPackage(ctx context.Context, conn connector.Connector, chartPath string, opts HelmPackageOptions) (string, error) {
-	return "", errors.New("not implemented: HelmPackage")
+	if conn == nil {
+		return "", errors.New("connector cannot be nil")
+	}
+	if chartPath == "" {
+		return "", errors.New("chartPath (directory of the chart) is required for HelmPackage")
+	}
+
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "helm", "package", shellEscape(chartPath))
+
+	if opts.Destination != "" {
+		cmdArgs = append(cmdArgs, "--destination", shellEscape(opts.Destination))
+	}
+	if opts.Sign {
+		cmdArgs = append(cmdArgs, "--sign")
+		if opts.Key != "" {
+			cmdArgs = append(cmdArgs, "--key", shellEscape(opts.Key))
+		}
+		if opts.Keyring != "" {
+			cmdArgs = append(cmdArgs, "--keyring", shellEscape(opts.Keyring))
+		}
+		if opts.PassphraseFile != "" {
+			cmdArgs = append(cmdArgs, "--passphrase-file", shellEscape(opts.PassphraseFile))
+		}
+	}
+	if opts.Version != "" {
+		cmdArgs = append(cmdArgs, "--version", shellEscape(opts.Version))
+	}
+	if opts.AppVersion != "" {
+		cmdArgs = append(cmdArgs, "--app-version", shellEscape(opts.AppVersion))
+	}
+	if opts.DependencyUpdate {
+		cmdArgs = append(cmdArgs, "--dependency-update")
+	}
+
+	cmd := strings.Join(cmdArgs, " ")
+	execOptions := &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultHelmTimeout}
+
+	stdout, stderr, err := conn.Exec(ctx, cmd, execOptions)
+	if err != nil {
+		return "", errors.Wrapf(err, "helm package for chart at '%s' failed. Stderr: %s", chartPath, string(stderr))
+	}
+
+	// Helm package prints the path of the created package, e.g., "Successfully packaged chart and saved it to: /path/chart-0.1.0.tgz"
+	// We need to parse this output to get the actual path.
+	// Example line: Successfully packaged chart and saved it to: /path/to/your/chart-0.1.0.tgz
+	outputStr := strings.TrimSpace(string(stdout))
+	prefix := "Successfully packaged chart and saved it to: "
+	if strings.HasPrefix(outputStr, prefix) {
+		return strings.TrimSpace(strings.TrimPrefix(outputStr, prefix)), nil
+	}
+	// If output format is unexpected, return the raw stdout or an error.
+	// For now, returning raw stdout if prefix not found, caller can parse.
+	// A more robust solution would be a regex.
+	return outputStr, nil
 }
