@@ -11,13 +11,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/connector" // Corrected import path
 )
 
-// shellEscape provides basic shell escaping for a string.
-// WARNING: This is a simplified version and may not cover all edge cases.
-// For production use, a more robust library or approach might be needed if paths can be arbitrary.
-func shellEscape(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
-}
-
 // Exists checks if a file or directory exists at the given path.
 func (r *defaultRunner) Exists(ctx context.Context, conn connector.Connector, path string) (bool, error) {
 	if conn == nil {

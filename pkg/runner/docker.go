@@ -79,14 +79,6 @@ func parseDockerSize(sizeStr string) (int64, error) {
 	return int64(value * float64(unit)), nil
 }
 
-// shellEscape ensures that a string is properly quoted for shell execution.
-func shellEscape(s string) string {
-	if s == "" {
-		return "''"
-	}
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
-}
-
 // PullImage pulls a Docker image from a registry.
 func (r *defaultRunner) PullImage(ctx context.Context, c connector.Connector, imageName string) error {
 	if c == nil {
@@ -1762,16 +1754,6 @@ func (r *defaultRunner) DockerLoad(ctx context.Context, c connector.Connector, i
 		return errors.Wrapf(err, "failed to load image(s) from %s. Stderr: %s", inputFilePath, string(stderr))
 	}
 	return nil
-}
-
-// strPtr returns a pointer to the string value s.
-func strPtr(s string) *string {
-	return &s
-}
-
-// boolPtr returns a pointer to the bool value b.
-func boolPtr(b bool) *bool {
-	return &b
 }
 
 // PruneDockerBuildCache prunes the Docker build cache.
