@@ -165,17 +165,74 @@ func TestValidate_ContainerdConfig(t *testing.T) {
 		{"disabledplugins_empty_item", &ContainerdConfig{DisabledPlugins: []string{" "}}, []string{".disabledPlugins[0]: plugin name cannot be empty"}},
 		{"requiredplugins_empty_item", &ContainerdConfig{RequiredPlugins: []string{" "}}, []string{".requiredPlugins[0]: plugin name cannot be empty"}},
 		{"imports_empty_item", &ContainerdConfig{Imports: []string{" "}}, []string{".imports[0]: import path cannot be empty"}},
+		{"version_is_whitespace", &ContainerdConfig{Version: "   "}, []string{".version: cannot be only whitespace if specified"}},
+		{
+			"invalid_mirror_url_scheme",
+			&ContainerdConfig{RegistryMirrors: map[string][]string{"docker.io": {"ftp://badmirror.com"}}},
+			[]string{"invalid URL format for mirror", "must be http or https"},
+		},
+		{
+			"invalid_mirror_url_format",
+			&ContainerdConfig{RegistryMirrors: map[string][]string{"docker.io": {"http://invalid domain/"}}},
+			[]string{"invalid URL format for mirror"},
+		},
+		{
+			"invalid_insecure_registry_format_bad_port",
+			&ContainerdConfig{InsecureRegistries: []string{"myreg:port"}},
+			[]string{"invalid host:port format for insecure registry"},
+		},
+		{
+			"invalid_insecure_registry_format_bad_host",
+			&ContainerdConfig{InsecureRegistries: []string{"invalid_host!"}},
+			[]string{"invalid host:port format for insecure registry"},
+		},
+		{
+			"valid_insecure_registry_ipv6_with_port",
+			&ContainerdConfig{InsecureRegistries: []string{"[::1]:5000"}},
+			nil, // This should be valid
+		},
+		{
+			"valid_insecure_registry_ipv4_with_port",
+			&ContainerdConfig{InsecureRegistries: []string{"127.0.0.1:5000"}},
+			nil, // This should be valid
+		},
+		{
+			"valid_insecure_registry_hostname_with_port",
+			&ContainerdConfig{InsecureRegistries: []string{"my.registry.com:5000"}},
+			nil, // This should be valid
+		},
+		{
+			"valid_insecure_registry_hostname_no_port",
+			&ContainerdConfig{InsecureRegistries: []string{"my.registry.com"}},
+			nil, // This should be valid, expect no error
+		},
+		{
+			"valid_insecure_registry_ipv4_with_port",
+			&ContainerdConfig{InsecureRegistries: []string{"127.0.0.1:5000"}},
+			nil, // This should be valid, expect no error
+		},
+		{
+			"valid_insecure_registry_hostname_with_port",
+			&ContainerdConfig{InsecureRegistries: []string{"my.registry.com:5000"}},
+			nil, // This should be valid, expect no error
+		},
+		{
+			"valid_insecure_registry_hostname_no_port",
+			&ContainerdConfig{InsecureRegistries: []string{"my.registry.com"}},
+			nil, // This should be valid, expect no error
+		},
 	}
 
 	for _, tt := range invalidCases {
 		t.Run("Invalid_"+tt.name, func(t *testing.T) {
-			// Apply defaults, though for these specific validation errors, it might not change the outcome
-			// but it's good practice to validate the state the system would actually see.
 			SetDefaults_ContainerdConfig(tt.input)
 			verrs := &ValidationErrors{}
 			Validate_ContainerdConfig(tt.input, verrs, "spec.containerd")
-			assert.False(t, verrs.IsEmpty(), "Expected validation errors for '%s', but got none", tt.name)
-			if len(tt.errContains) > 0 {
+
+			if tt.errContains == nil { // This case should be valid
+				assert.True(t, verrs.IsEmpty(), "Expected no validation errors for '%s', but got: %s", tt.name, verrs.Error())
+			} else { // This case expects errors
+				assert.False(t, verrs.IsEmpty(), "Expected validation errors for '%s', but got none", tt.name)
 				fullError := verrs.Error()
 				for _, errStr := range tt.errContains {
 					assert.Contains(t, fullError, errStr, "Error message for '%s' does not contain expected substring '%s'. Full error: %s", tt.name, errStr, fullError)

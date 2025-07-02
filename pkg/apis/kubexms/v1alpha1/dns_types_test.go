@@ -154,6 +154,16 @@ func TestValidate_ExternalZone(t *testing.T) {
 			expectErr:   false,
 		},
 		{
+			name:        "valid zone with ip nameserver",
+			input:       &ExternalZone{Zones: []string{"valid.zone"}, Nameservers: []string{"192.168.1.1"}, Cache: 300},
+			expectErr:   false,
+		},
+		{
+			name:        "valid zone with hostname nameserver",
+			input:       &ExternalZone{Zones: []string{"another.valid.zone"}, Nameservers: []string{"ns1.example.com"}, Cache: 300},
+			expectErr:   false,
+		},
+		{
 			name:        "no zones",
 			input:       &ExternalZone{Nameservers: []string{"1.2.3.4"}},
 			expectErr:   true,
@@ -166,6 +176,12 @@ func TestValidate_ExternalZone(t *testing.T) {
 			errContains: []string{".zones[0]: zone name cannot be empty"},
 		},
 		{
+			name:        "invalid zone name format",
+			input:       &ExternalZone{Zones: []string{"-invalid.zone"}, Nameservers: []string{"1.2.3.4"}},
+			expectErr:   true,
+			errContains: []string{".zones[0]: invalid domain name format '-invalid.zone'"},
+		},
+		{
 			name:        "no nameservers",
 			input:       &ExternalZone{Zones: []string{"example.com"}},
 			expectErr:   true,
@@ -176,6 +192,12 @@ func TestValidate_ExternalZone(t *testing.T) {
 			input:       &ExternalZone{Zones: []string{"example.com"}, Nameservers: []string{" "}},
 			expectErr:   true,
 			errContains: []string{".nameservers[0]: nameserver address cannot be empty"},
+		},
+		{
+			name:        "invalid nameserver format",
+			input:       &ExternalZone{Zones: []string{"example.com"}, Nameservers: []string{"not_a_valid_nameserver!"}},
+			expectErr:   true,
+			errContains: []string{".nameservers[0]: invalid nameserver address format 'not_a_valid_nameserver!'"},
 		},
 		{
 			name:        "negative cache",
@@ -236,6 +258,12 @@ func TestValidate_DNS(t *testing.T) {
 			input: &DNS{CoreDNS: CoreDNS{UpstreamDNSServers: []string{" "}}},
 			expectErr:   true,
 			errContains: []string{".coredns.upstreamDNSServers[0]: server address cannot be empty"},
+		},
+		{
+			name: "coredns invalid upstream server format",
+			input: &DNS{CoreDNS: CoreDNS{UpstreamDNSServers: []string{"not_an_ip_or_host!"}}},
+			expectErr:   true,
+			errContains: []string{".coredns.upstreamDNSServers[0]: invalid server address format 'not_an_ip_or_host!'"},
 		},
 		{
 			name: "coredns invalid external zone (no nameservers)",

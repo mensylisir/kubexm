@@ -1,6 +1,12 @@
 package v1alpha1
 
-import "strings"
+import (
+	"net"
+	"net/url"
+	"regexp"
+	"strconv"
+	"strings"
+)
 
 // ContainerdConfig defines specific settings for the Containerd runtime.
 // Corresponds to `kubernetes.containerRuntime.containerd` in YAML.
@@ -74,13 +80,47 @@ func SetDefaults_ContainerdConfig(cfg *ContainerdConfig) {
 	// or explicitly set by user. The installer logic will handle this.
 }
 
+// isValidHostPort validates if a string is a valid hostname or IP[:port].
+// This is a simplified validator. For robust validation, consider a dedicated library.
+func isValidHostPort(hostPort string) bool {
+	if strings.Contains(hostPort, ":") {
+		host, port, err := net.SplitHostPort(hostPort)
+		if err != nil {
+			if net.ParseIP(hostPort) != nil {
+				return true
+			}
+			return false
+		}
+		if host == "" {
+			return false
+		}
+		if portNum, err := strconv.Atoi(port); err != nil || portNum < 1 || portNum > 65535 {
+			return false
+		}
+		if net.ParseIP(host) == nil {
+			if matched, _ := regexp.MatchString(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`, host); !matched {
+				return false
+			}
+		}
+		return true
+	}
+	if net.ParseIP(hostPort) != nil {
+		return true
+	}
+	if matched, _ := regexp.MatchString(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`, hostPort); !matched {
+		return false
+	}
+	return true
+}
+
 // Validate_ContainerdConfig validates ContainerdConfig.
 func Validate_ContainerdConfig(cfg *ContainerdConfig, verrs *ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
-	// Version validation: Can be empty if it's meant to inherit from parent ContainerRuntimeConfig.Version.
-	// If not empty, could validate format (e.g., semantic versioning).
+	if cfg.Version != "" && strings.TrimSpace(cfg.Version) == "" {
+		verrs.Add("%s.version: cannot be only whitespace if specified", pathPrefix)
+	}
 
 	for reg, mirrors := range cfg.RegistryMirrors {
 		if strings.TrimSpace(reg) == "" {
@@ -92,14 +132,19 @@ func Validate_ContainerdConfig(cfg *ContainerdConfig, verrs *ValidationErrors, p
 		for i, mirrorURL := range mirrors {
 			if strings.TrimSpace(mirrorURL) == "" {
 				verrs.Add("%s.registryMirrors[\"%s\"][%d]: mirror URL cannot be empty", pathPrefix, reg, i)
-				// Could add more robust URL validation here.
+			} else {
+				u, err := url.ParseRequestURI(mirrorURL)
+				if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+					verrs.Add("%s.registryMirrors[\"%s\"][%d]: invalid URL format for mirror '%s' (must be http or https)", pathPrefix, reg, i, mirrorURL)
+				}
 			}
 		}
 	}
 	for i, insecureReg := range cfg.InsecureRegistries {
 		if strings.TrimSpace(insecureReg) == "" {
 			verrs.Add("%s.insecureRegistries[%d]: registry host cannot be empty", pathPrefix, i)
-			// Could add validation for valid hostname/IP:port format.
+		} else if !isValidHostPort(insecureReg) {
+			verrs.Add("%s.insecureRegistries[%d]: invalid host:port format for insecure registry '%s'", pathPrefix, i, insecureReg)
 		}
 	}
 	if cfg.ConfigPath != nil && strings.TrimSpace(*cfg.ConfigPath) == "" {

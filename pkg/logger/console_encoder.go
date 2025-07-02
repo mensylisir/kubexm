@@ -301,17 +301,24 @@ func (enc *colorConsoleEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.
 		tempEnc := &tempEncoder{buf: callerBuf, EncoderConfig: enc.EncoderConfig}
 		enc.EncodeCaller(ent.Caller, tempEnc)
 		if callerBuf.Len() > 0 {
-			// No "caller=" prefix for console, just the path.
-			// line.AppendString(enc.CallerKey); line.AppendString("=")
 			line.Write(callerBuf.Bytes())
-			line.AppendString(" ")
+			// Add a colon only if there's a message to follow.
+			// This also implies that if there's no message, there's no trailing colon after caller.
+			if ent.Message != "" {
+				line.AppendString(": ") // Add colon and space
+			} else {
+				line.AppendString(" ") // Just space if no message
+			}
 		}
 		callerBuf.Free()
 	}
 
 	// Message
-	if enc.MessageKey != "" {} // No "msg=" prefix for console usually
-	line.AppendString(ent.Message)
+	// The MessageKey check is usually for structured logging like JSON.
+	// For console, we just append the message if it's not empty.
+	if ent.Message != "" {
+		line.AppendString(ent.Message)
+	}
 
 	// Remaining structured fields
 	for _, f := range remainingFields {
@@ -321,8 +328,11 @@ func (enc *colorConsoleEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.
 		// Simple value formatting for console.
 		switch f.Type {
 		case zapcore.StringType:
-			if strings.Contains(f.String, " ") || f.String == "" { fmt.Fprintf(line, "%q", f.String)
-			} else { line.AppendString(f.String) }
+			if strings.Contains(f.String, " ") || f.String == "" { // Quote if it contains space or is empty
+				fmt.Fprintf(line, "%q", f.String)
+			} else {
+				line.AppendString(f.String)
+			}
 		case zapcore.ErrorType:
 			if f.Interface != nil { fmt.Fprintf(line, "%q", f.Interface.(error).Error())
 			} else { line.AppendString("nil")}

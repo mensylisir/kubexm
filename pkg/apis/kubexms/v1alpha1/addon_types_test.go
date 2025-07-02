@@ -207,6 +207,28 @@ func TestValidate_AddonConfig(t *testing.T) {
 			errContains: []string{".sources.chart.name: chart name must be specified if chart.repo is set"},
 		},
 		{
+			name:        "chart source with invalid repo URL",
+			input:       &AddonConfig{Name: "test", Enabled: boolPtr(true), Sources: AddonSources{Chart: &ChartSource{Name: "good-name", Repo: "http://invalid domain/"}}},
+			expectErr:   true,
+			errContains: []string{".sources.chart.repo: invalid URL format for chart repo"},
+		},
+		{
+			name:        "chart source with valid repo URL",
+			input:       &AddonConfig{Name: "test", Enabled: boolPtr(true), Sources: AddonSources{Chart: &ChartSource{Name: "good-name", Repo: "https://charts.example.com"}}},
+			expectErr:   false,
+		},
+		{
+			name:        "chart source with whitespace version",
+			input:       &AddonConfig{Name: "test", Enabled: boolPtr(true), Sources: AddonSources{Chart: &ChartSource{Name: "good-name", Repo: "https://charts.example.com", Version: "   "}}},
+			expectErr:   true,
+			errContains: []string{".sources.chart.version: chart version cannot be only whitespace if specified"},
+		},
+		{
+			name:        "chart source with valid version",
+			input:       &AddonConfig{Name: "test", Enabled: boolPtr(true), Sources: AddonSources{Chart: &ChartSource{Name: "good-name", Repo: "https://charts.example.com", Version: "1.2.3"}}},
+			expectErr:   false,
+		},
+		{
 			name:        "chart source with neither name nor path",
 			input:       &AddonConfig{Name: "test", Enabled: boolPtr(true), Sources: AddonSources{Chart: &ChartSource{}}},
 			expectErr:   true,
