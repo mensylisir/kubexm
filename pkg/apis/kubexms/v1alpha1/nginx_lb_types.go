@@ -2,8 +2,9 @@ package v1alpha1
 
 import (
 	"fmt"
+	"net" // For IP/port validation
+	"strconv"
 	"strings"
-	// "net" // For IP/port validation if needed for BackendServers
 )
 
 // NginxLBUpstreamServer defines a backend server for Nginx load balancing.
@@ -108,9 +109,14 @@ func Validate_NginxLBConfig(cfg *NginxLBConfig, verrs *ValidationErrors, pathPre
 		return
 	}
 
-	if cfg.ListenAddress != nil && strings.TrimSpace(*cfg.ListenAddress) == "" {
-	   verrs.Add("%s.listenAddress: cannot be empty if specified", pathPrefix)
-	   // Could add IP address validation here
+	if cfg.ListenAddress != nil {
+		if strings.TrimSpace(*cfg.ListenAddress) == "" {
+			verrs.Add("%s.listenAddress: cannot be empty if specified", pathPrefix)
+		} else if net.ParseIP(*cfg.ListenAddress) == nil && *cfg.ListenAddress != "0.0.0.0" && *cfg.ListenAddress != "::" {
+			// Allow "0.0.0.0" and "::" as special bind addresses, otherwise expect a valid IP.
+			// Hostnames are not typically used for Nginx listen directives directly without resolver for listen.
+			verrs.Add("%s.listenAddress: invalid IP address format '%s'", pathPrefix, *cfg.ListenAddress)
+		}
 	}
 
 	// ListenPort is always defaulted, so check its value.
@@ -142,15 +148,25 @@ func Validate_NginxLBConfig(cfg *NginxLBConfig, verrs *ValidationErrors, pathPre
 		if strings.TrimSpace(server.Address) == "" {
 			verrs.Add("%s.address: upstream server address cannot be empty", serverPath)
 		} else {
-			// Validate "host:port" format
-			parts := strings.Split(server.Address, ":")
-			if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
-				verrs.Add("%s.address: upstream server address '%s' must be in 'host:port' format", serverPath, server.Address)
+			host, portStr, err := net.SplitHostPort(server.Address)
+			if err != nil {
+				// net.SplitHostPort fails if there's no port or format is wrong.
+				// For Nginx upstreams, host:port is generally expected unless it's a unix socket.
+				// We are not explicitly supporting unix sockets via this field currently.
+				verrs.Add("%s.address: upstream server address '%s' must be in 'host:port' format or a valid resolvable name if Nginx implies a default port (which this validation doesn't assume)", serverPath, server.Address)
+			} else {
+				if strings.TrimSpace(host) == "" { // Should be caught by SplitHostPort for "host:" cases, but good to be defensive
+					verrs.Add("%s.address: host part of upstream server address '%s' cannot be empty", serverPath, server.Address)
+				} else if !isValidHostOrIP(host) { // Validate the host part
+					verrs.Add("%s.address: host part '%s' of upstream server address '%s' is not a valid host or IP", serverPath, host, server.Address)
+				}
+				if port, errConv := strconv.Atoi(portStr); errConv != nil || port <= 0 || port > 65535 {
+					verrs.Add("%s.address: port part '%s' of upstream server address '%s' is not a valid port number", serverPath, portStr, server.Address)
+				}
 			}
-			// Further validation for host and port parts can be added.
 		}
 		if server.Weight != nil && *server.Weight < 0 {
-		   verrs.Add("%s.weight: cannot be negative, got %d", serverPath, *server.Weight)
+			verrs.Add("%s.weight: cannot be negative, got %d", serverPath, *server.Weight)
 		}
 	}
 	if cfg.ConfigFilePath != nil && strings.TrimSpace(*cfg.ConfigFilePath) == "" {

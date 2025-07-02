@@ -2,8 +2,10 @@ package v1alpha1
 
 import (
 	"fmt"
+	"net/url" // Added for URL parsing
 	"strings"
-	// net/url is not directly needed here, but isValidCIDR uses net.ParseCIDR
+	// Assuming isValidCIDR is available from kubernetes_types.go or similar
+	// Assuming isValidHostPort is available from containerd_types.go or similar (if not, it would need to be defined/imported)
 )
 
 // DockerAddressPool defines a range of IP addresses for Docker networks.
@@ -94,12 +96,22 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *ValidationErrors, pathPrefi
 		return
 	}
 	for i, mirror := range cfg.RegistryMirrors {
-		if strings.TrimSpace(mirror) == "" { verrs.Add("%s.registryMirrors[%d]: mirror URL cannot be empty", pathPrefix, i) }
-		// Basic URL validation could be added using net/url.ParseRequestURI
+		if strings.TrimSpace(mirror) == "" {
+			verrs.Add("%s.registryMirrors[%d]: mirror URL cannot be empty", pathPrefix, i)
+		} else {
+			// Validate mirror URL format
+			u, err := url.ParseRequestURI(mirror)
+			if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+				verrs.Add("%s.registryMirrors[%d]: invalid URL format for mirror '%s' (must be http or https and valid URI)", pathPrefix, i, mirror)
+			}
+		}
 	}
 	for i, insecureReg := range cfg.InsecureRegistries {
-		if strings.TrimSpace(insecureReg) == "" { verrs.Add("%s.insecureRegistries[%d]: registry host cannot be empty", pathPrefix, i) }
-		// Could add host:port validation
+		if strings.TrimSpace(insecureReg) == "" {
+			verrs.Add("%s.insecureRegistries[%d]: registry host cannot be empty", pathPrefix, i)
+		} else if !isValidHostPort(insecureReg) { // Assuming isValidHostPort is available in the package
+			verrs.Add("%s.insecureRegistries[%d]: invalid host:port format for insecure registry '%s'", pathPrefix, i, insecureReg)
+		}
 	}
 	if cfg.DataRoot != nil && strings.TrimSpace(*cfg.DataRoot) == "" {
 		verrs.Add("%s.dataRoot: cannot be empty if specified", pathPrefix)

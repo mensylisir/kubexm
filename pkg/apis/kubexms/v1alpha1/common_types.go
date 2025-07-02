@@ -1,5 +1,7 @@
 package v1alpha1
 
+import "strings"
+
 // ContainerRuntimeType defines the type of container runtime.
 type ContainerRuntimeType string
 
@@ -89,5 +91,14 @@ func Validate_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig, verrs *Validat
 	} else if cfg.Containerd != nil {
 		verrs.Add("%s.containerd: can only be set if type is 'containerd'", pathPrefix)
 	}
-	// Version validation could be added (e.g., not empty if type is set)
+
+	// Validate Version if Type is set
+	if cfg.Type != "" && cfg.Version == "" {
+		// verrs.Add("%s.version: cannot be empty if container runtime type ('%s') is specified", pathPrefix, cfg.Type)
+		// Allowing empty version for now, as it might be defaulted by the installer based on Kubernetes version or other logic.
+		// A warning could be logged by the controller if it's empty and no default can be determined.
+	}
+	if cfg.Version != "" && strings.TrimSpace(cfg.Version) == "" {
+		verrs.Add("%s.version: cannot be only whitespace if specified", pathPrefix)
+	}
 }
