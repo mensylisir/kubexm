@@ -178,8 +178,9 @@ func TestValidate_EtcdConfig(t *testing.T) {
 		{"external_no_config_struct_becomes_no_endpoints_after_defaulting", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeExternal, External: nil} }, []string{".external.endpoints: must contain at least one endpoint"}},
 		{"external_no_endpoints", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{}}} }, []string{".external.endpoints: must contain at least one endpoint"}},
 		{"external_empty_endpoint", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{""}}} }, []string{".external.endpoints[0]: endpoint cannot be empty"}},
-		{"external_mismatched_tls_cert", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{"h"}, CertFile: "cert"}} }, []string{"certFile and keyFile must be specified together"}},
-		{"external_mismatched_tls_key", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{"h"}, KeyFile: "key"}} }, []string{"certFile and keyFile must be specified together"}},
+		{"external_invalid_endpoint_url", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{"http://invalid domain/"}}} }, []string{".external.endpoints[0]: invalid URL format for endpoint"}},
+		{"external_mismatched_tls_cert", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{"http://valid.com"}, CertFile: "cert"}} }, []string{"certFile and keyFile must be specified together"}},
+		{"external_mismatched_tls_key", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{"http://valid.com"}, KeyFile: "key"}} }, []string{"certFile and keyFile must be specified together"}},
 		{"invalid_client_port_low", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, ClientPort: intPtr(0)} }, []string{".clientPort: invalid port 0"}},
 		{"invalid_client_port_high", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, ClientPort: intPtr(70000)} }, []string{".clientPort: invalid port 70000"}},
 		{"invalid_peer_port", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, PeerPort: intPtr(0)} }, []string{".peerPort: invalid port 0"}},
@@ -189,6 +190,20 @@ func TestValidate_EtcdConfig(t *testing.T) {
 		{"negative_keep_backup", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, KeepBackupNumber: intPtr(-1)} }, []string{".keepBackupNumber: cannot be negative"}},
 		{"zero_heartbeat", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, HeartbeatIntervalMillis: intPtr(0)} }, []string{".heartbeatIntervalMillis: must be positive"}},
 		{"zero_election_timeout", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, ElectionTimeoutMillis: intPtr(0)} }, []string{".electionTimeoutMillis: must be positive"}},
+		{
+			"election_timeout_not_greater_than_heartbeat",
+			func() *EtcdConfig {
+				return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, HeartbeatIntervalMillis: intPtr(100), ElectionTimeoutMillis: intPtr(500)}
+			},
+			[]string{"electionTimeoutMillis (500) should be significantly greater than heartbeatIntervalMillis (100)"},
+		},
+		{
+			"election_timeout_equal_to_5x_heartbeat (edge case, should fail)",
+			func() *EtcdConfig {
+				return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, HeartbeatIntervalMillis: intPtr(100), ElectionTimeoutMillis: intPtr(500)}
+			},
+			[]string{"electionTimeoutMillis (500) should be significantly greater than heartbeatIntervalMillis (100)"},
+		},
 		{"negative_autocompaction", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, AutoCompactionRetentionHours: intPtr(-1)} }, []string{".autoCompactionRetentionHours: cannot be negative"}},
 		{"negative_quota", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, QuotaBackendBytes: int64Ptr(-100)} }, []string{".quotaBackendBytes: cannot be negative"}},
 		{"zero_max_request_bytes", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, MaxRequestBytes: uintPtr(0)} }, []string{".maxRequestBytes: must be positive if set"}},

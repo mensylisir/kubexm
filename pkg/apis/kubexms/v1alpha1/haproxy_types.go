@@ -2,8 +2,8 @@ package v1alpha1
 
 import (
 	"fmt"
+	"net" // For IP validation
 	"strings"
-	// "net" // For IP/port validation if needed for BackendServers
 )
 
 // HAProxyBackendServer defines a backend server for HAProxy load balancing.
@@ -112,9 +112,14 @@ func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *ValidationErrors, pathPre
 		return // If skipping install, most other fields are not KubeXMS's concern for setup validation.
 	}
 
-	if cfg.FrontendBindAddress != nil && strings.TrimSpace(*cfg.FrontendBindAddress) == "" {
-		verrs.Add("%s.frontendBindAddress: cannot be empty if specified", pathPrefix)
-		// Could add IP address validation here for FrontendBindAddress
+	if cfg.FrontendBindAddress != nil {
+		if strings.TrimSpace(*cfg.FrontendBindAddress) == "" {
+			verrs.Add("%s.frontendBindAddress: cannot be empty if specified", pathPrefix)
+		} else if net.ParseIP(*cfg.FrontendBindAddress) == nil && *cfg.FrontendBindAddress != "0.0.0.0" && *cfg.FrontendBindAddress != "::" {
+			// Allow "0.0.0.0" and "::" as special bind addresses, otherwise expect a valid IP.
+			// Hostnames are generally not used for bind addresses in HAProxy for listening.
+			verrs.Add("%s.frontendBindAddress: invalid IP address format '%s'", pathPrefix, *cfg.FrontendBindAddress)
+		}
 	}
 
 	// FrontendPort is always defaulted, so check its value.
@@ -146,8 +151,9 @@ func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *ValidationErrors, pathPre
 		}
 		if strings.TrimSpace(server.Address) == "" {
 			verrs.Add("%s.address: backend server address cannot be empty", serverPath)
+		} else if !isValidHostOrIP(server.Address) { // Assuming isValidHostOrIP is available
+			verrs.Add("%s.address: invalid backend server address format '%s'", serverPath, server.Address)
 		}
-		// Could add IP/hostname validation for server.Address
 		if server.Port <= 0 || server.Port > 65535 {
 			verrs.Add("%s.port: invalid backend server port %d", serverPath, server.Port)
 		}

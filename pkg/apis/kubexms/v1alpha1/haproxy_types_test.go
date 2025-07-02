@@ -81,10 +81,13 @@ func TestValidate_HAProxyConfig(t *testing.T) {
 		{"invalid_mode", HAProxyConfig{Mode: stringPtr("udp"), BackendServers: []HAProxyBackendServer{validServer}}, ".mode: invalid mode 'udp'"},
 		{"invalid_algo", HAProxyConfig{BalanceAlgorithm: stringPtr("randomest"), BackendServers: []HAProxyBackendServer{validServer}}, ".balanceAlgorithm: invalid algorithm 'randomest'"},
 		{"no_backend_servers", HAProxyConfig{FrontendPort: intPtr(123), BackendServers: []HAProxyBackendServer{}}, ".backendServers: must specify at least one backend server"},
-		{"backend_empty_name", HAProxyConfig{BackendServers: []HAProxyBackendServer{{Address: "a", Port: 1}}}, ".name: backend server name cannot be empty"},
+		{"backend_empty_name", HAProxyConfig{BackendServers: []HAProxyBackendServer{{Address: "valid-addr", Port: 1}}}, ".name: backend server name cannot be empty"},
 		{"backend_empty_addr", HAProxyConfig{BackendServers: []HAProxyBackendServer{{Name: "n", Port: 1}}}, ".address: backend server address cannot be empty"},
+		{"backend_invalid_addr_format", HAProxyConfig{BackendServers: []HAProxyBackendServer{{Name: "n", Address: "invalid!", Port: 1}}}, ".address: invalid backend server address format 'invalid!'"},
 		{"backend_bad_port", HAProxyConfig{BackendServers: []HAProxyBackendServer{{Name: "n", Address: "a", Port: 0}}}, ".port: invalid backend server port 0"},
 		{"backend_bad_weight", HAProxyConfig{BackendServers: []HAProxyBackendServer{{Name: "n", Address: "a", Port: 1, Weight: intPtr(-1)}}}, ".weight: cannot be negative"},
+		{"frontend_bind_address_empty", HAProxyConfig{FrontendBindAddress: stringPtr(" "), BackendServers: []HAProxyBackendServer{validServer}}, ".frontendBindAddress: cannot be empty if specified"},
+		{"frontend_bind_address_invalid_ip", HAProxyConfig{FrontendBindAddress: stringPtr("not-an-ip"), BackendServers: []HAProxyBackendServer{validServer}}, ".frontendBindAddress: invalid IP address format 'not-an-ip'"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

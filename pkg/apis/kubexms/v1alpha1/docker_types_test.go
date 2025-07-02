@@ -199,7 +199,11 @@ func TestValidate_DockerConfig(t *testing.T) {
 		{"empty_insecure", &DockerConfig{InsecureRegistries: []string{" "}}, []string{".insecureRegistries[0]: registry host cannot be empty"}},
 		{"empty_dataroot", &DockerConfig{DataRoot: stringPtr(" ")}, []string{".dataRoot: cannot be empty if specified"}},
 		{"invalid_logdriver", &DockerConfig{LogDriver: stringPtr("badlog")}, []string{".logDriver: invalid log driver 'badlog'"}},
-		{"invalid_bip", &DockerConfig{BIP: stringPtr("invalid")}, []string{".bip: invalid CIDR format 'invalid'"}}, // Assuming isValidCIDR is from kubernetes_types
+		{"invalid_mirror_url_scheme", &DockerConfig{RegistryMirrors: []string{"ftp://badmirror.com"}}, []string{"invalid URL format for mirror", "must be http or https"}},
+		{"invalid_mirror_url_format", &DockerConfig{RegistryMirrors: []string{"http://invalid domain/"}}, []string{"invalid URL format for mirror"}},
+		{"invalid_insecure_registry_format_bad_port", &DockerConfig{InsecureRegistries: []string{"myreg:port"}}, []string{"invalid host:port format for insecure registry"}},
+		{"invalid_insecure_registry_format_bad_host", &DockerConfig{InsecureRegistries: []string{"invalid_host!"}}, []string{"invalid host:port format for insecure registry"}},
+		{"invalid_bip", &DockerConfig{BIP: stringPtr("invalid")}, []string{".bip: invalid CIDR format 'invalid'"}},
 		{"invalid_fixedcidr", &DockerConfig{FixedCIDR: stringPtr("invalid")}, []string{".fixedCIDR: invalid CIDR format 'invalid'"}},
 		{"addrpool_bad_base", &DockerConfig{DefaultAddressPools: []DockerAddressPool{{Base: "invalid", Size: 24}}}, []string{".defaultAddressPools[0].base: invalid CIDR format 'invalid'"}},
 		{"addrpool_bad_size_low", &DockerConfig{DefaultAddressPools: []DockerAddressPool{{Base: "172.30.0.0/16", Size: 0}}}, []string{".defaultAddressPools[0].size: invalid subnet size 0"}},

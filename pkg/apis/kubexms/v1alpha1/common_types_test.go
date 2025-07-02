@@ -166,6 +166,22 @@ func TestValidate_ContainerRuntimeConfig(t *testing.T) {
 			expectErr: true,
 			errContains: []string{": section cannot be nil"},
 		},
+		{
+			name:        "version is only whitespace",
+			input:       &ContainerRuntimeConfig{Type: ContainerRuntimeDocker, Version: "   "},
+			expectErr:   true,
+			errContains: []string{".version: cannot be only whitespace if specified"},
+		},
+		{
+			name:        "type set, version is empty (currently allowed by code comment)",
+			input:       &ContainerRuntimeConfig{Type: ContainerRuntimeDocker, Version: ""},
+			expectErr:   false, // Based on current code logic allowing empty version
+		},
+		{
+			name:        "type set, version is valid",
+			input:       &ContainerRuntimeConfig{Type: ContainerRuntimeDocker, Version: "1.20.3"},
+			expectErr:   false,
+		},
 	}
 
 	for _, tt := range tests {

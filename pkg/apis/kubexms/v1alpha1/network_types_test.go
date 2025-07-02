@@ -121,6 +121,24 @@ func TestValidate_NetworkConfig_Invalid(t *testing.T) {
 		{"calico_ippool_bad_blocksize_low", &NetworkConfig{Plugin: "calico", KubePodsCIDR: "10.244.0.0/16", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name:"p1",CIDR:"1.1.1.0/24",BlockSize: intPtr(19)}}}}, defaultK8sCfg, ".calico.ipPools[0:p1].blockSize: must be between 20 and 32"},
 		{"calico_ippool_bad_blocksize_high", &NetworkConfig{Plugin: "calico", KubePodsCIDR: "10.244.0.0/16", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name:"p1",CIDR:"1.1.1.0/24",BlockSize: intPtr(33)}}}}, defaultK8sCfg, ".calico.ipPools[0:p1].blockSize: must be between 20 and 32"},
 		{"calico_ippool_bad_encap", &NetworkConfig{Plugin: "calico", KubePodsCIDR: "10.244.0.0/16", Calico: &CalicoConfig{IPPools: []CalicoIPPool{{Name:"p1",CIDR:"1.1.1.0/24",Encapsulation: "bad"}}}}, defaultK8sCfg, ".calico.ipPools[0:p1].encapsulation: invalid: 'bad'"},
+		{
+			"cidrs_overlap_pods_in_service",
+			&NetworkConfig{Plugin: "calico", KubePodsCIDR: "10.96.0.0/16", KubeServiceCIDR: "10.96.0.0/12"},
+			defaultK8sCfg,
+			"kubePodsCIDR (10.96.0.0/16) and kubeServiceCIDR (10.96.0.0/12) overlap",
+		},
+		{
+			"cidrs_overlap_service_in_pods",
+			&NetworkConfig{Plugin: "calico", KubePodsCIDR: "10.244.0.0/12", KubeServiceCIDR: "10.244.1.0/24"},
+			defaultK8sCfg,
+			"kubePodsCIDR (10.244.0.0/12) and kubeServiceCIDR (10.244.1.0/24) overlap",
+		},
+		{
+			"cidrs_valid_no_overlap",
+			&NetworkConfig{Plugin: "calico", KubePodsCIDR: "10.244.0.0/16", KubeServiceCIDR: "10.96.0.0/12"},
+			defaultK8sCfg,
+			"", // Expect no error
+		},
 	}
 
 	for _, tt := range tests {
@@ -133,23 +151,25 @@ func TestValidate_NetworkConfig_Invalid(t *testing.T) {
 
 			verrs := &ValidationErrors{}
 			Validate_NetworkConfig(tt.cfg, verrs, "spec.network", currentK8sCfgToUse)
-			if verrs.IsEmpty() {
-				t.Fatalf("Validate_NetworkConfig expected error for %s, got none", tt.name)
-			}
 
-			found := false
-			if tt.name == "flannel_invalid_backend" && len(verrs.Errors) == 1 {
-				if verrs.Errors[0] == tt.wantErrMsg {
-					found = true
+			if tt.wantErrMsg == "" { // This case expects no error
+				if !verrs.IsEmpty() {
+					t.Errorf("Validate_NetworkConfig for %s expected no error, got %v", tt.name, verrs.Errors)
 				}
-			} else {
-				// Fallback to strings.Contains for other error messages or multiple errors
-				if strings.Contains(verrs.Error(), tt.wantErrMsg) {
-					found = true
+			} else { // This case expects an error
+				if verrs.IsEmpty() {
+					t.Fatalf("Validate_NetworkConfig expected error for %s, got none", tt.name)
 				}
-			}
-			if !found {
-				t.Errorf("Validate_NetworkConfig error for %s. Expected '%s', got %v", tt.name, tt.wantErrMsg, verrs.Errors)
+				found := false
+				for _, errStr := range verrs.Errors {
+					if strings.Contains(errStr, tt.wantErrMsg) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Validate_NetworkConfig error for %s. Expected to contain '%s', got errors: %v", tt.name, tt.wantErrMsg, verrs.Errors)
+				}
 			}
 		})
 	}
