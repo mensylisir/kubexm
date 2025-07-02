@@ -2,7 +2,7 @@ package v1alpha1
 
 import (
 	"fmt" // For path formatting in validation
-	// "net" // Removed as unused locally, assuming isValidCIDR is from elsewhere
+	"net" // For CIDR parsing and overlap checks
 	"strings"
 )
 
@@ -325,8 +325,26 @@ func Validate_NetworkConfig(cfg *NetworkConfig, verrs *ValidationErrors, pathPre
 	// if serviceCIDR == "" && k8sSpec != nil { // k8sSpec no longer provides ServiceSubnet
 	//	serviceCIDR = k8sSpec.ServiceSubnet
 	// }
-	if cfg.KubeServiceCIDR != "" && !isValidCIDR(cfg.KubeServiceCIDR) { // KubeServiceCIDR can be empty (e.g. if using hostNetwork for services or other advanced setups)
+	if cfg.KubeServiceCIDR != "" && !isValidCIDR(cfg.KubeServiceCIDR) { // KubeServiceCIDR can be empty
 		verrs.Add("%s.kubeServiceCIDR: invalid CIDR format '%s'", pathPrefix, cfg.KubeServiceCIDR)
+	}
+
+	// Check for CIDR overlap if both are validly formatted
+	if isValidCIDR(cfg.KubePodsCIDR) && cfg.KubeServiceCIDR != "" && isValidCIDR(cfg.KubeServiceCIDR) {
+		_, podsNet, _ := net.ParseCIDR(cfg.KubePodsCIDR)
+		_, serviceNet, _ := net.ParseCIDR(cfg.KubeServiceCIDR)
+
+		if podsNet.Contains(serviceNet.IP) || serviceNet.Contains(podsNet.IP) {
+			// This check is simplified; a more robust check would compare the networks themselves, not just one IP.
+			// For example, serviceNet.Contains(podsNet.IP) && serviceNet.Mask != nil && podsNet.Mask != nil &&
+			// (serviceNet.Contains(podsNet.IP) || podsNet.Contains(serviceNet.IP))
+			// A common way to check for overlap: (net1.Contains(net2.IP) || net2.Contains(net1.IP))
+			// More accurate: check if the start or end of one range falls within the other.
+			// However, the simple IP containment check catches most common overlaps.
+			if networksOverlap(podsNet, serviceNet) {
+				verrs.Add("%s: kubePodsCIDR (%s) and kubeServiceCIDR (%s) overlap", pathPrefix, cfg.KubePodsCIDR, cfg.KubeServiceCIDR)
+			}
+		}
 	}
 
 	if cfg.Plugin == "calico" {
@@ -486,5 +504,12 @@ func (c *CalicoConfig) GetVethMTU() int {
 }
 
 // isValidCIDR is expected to be available from kubernetes_types.go or a shared util.
-// For self-containment if processed independently:
-// func isValidCIDR(cidr string) bool { _, _, err := net.ParseCIDR(cidr); return err == nil }
+// func isValidCIDR(cidr string) bool { _, _, err := net.ParseCIDR(cidr); return err == nil } // Assumed to be present
+
+// networksOverlap checks if two IP networks overlap.
+func networksOverlap(n1, n2 *net.IPNet) bool {
+	// Check if one network contains the other's network address or broadcast address
+	// This is a common way to check for overlap.
+	// A more precise method might involve comparing start and end IPs of each range.
+	return n1.Contains(n2.IP) || n2.Contains(n1.IP)
+}

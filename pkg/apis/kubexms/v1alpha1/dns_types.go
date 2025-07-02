@@ -2,8 +2,46 @@ package v1alpha1
 
 import (
 	"fmt"
+	"net"
+	"regexp"
 	"strings"
 )
+
+// isValidHostOrIP checks if a string is a valid IP address or a simple valid hostname.
+// For hostnames, this is a simplified check.
+func isValidHostOrIP(hostOrIP string) bool {
+	if net.ParseIP(hostOrIP) != nil {
+		return true // It's a valid IP address
+	}
+	// Regex for basic hostname validation (allows LDH labels: letters, digits, hyphen)
+	// Does not enforce all RFC rules (e.g. length of parts, total length) but good for most cases.
+	if matched, _ := regexp.MatchString(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`, hostOrIP); matched {
+		return true
+	}
+	return false
+}
+
+// isValidDomainName checks if a string is a plausible domain name.
+// This is a simplified check.
+func isValidDomainName(domain string) bool {
+	if domain == "" || len(domain) > 253 {
+		return false
+	}
+	// Regex for basic domain name validation
+	if matched, _ := regexp.MatchString(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`, domain); !matched {
+		return false
+	}
+	// Should not end with a hyphen or dot
+	if strings.HasSuffix(domain, "-") || strings.HasSuffix(domain, ".") {
+		return false
+	}
+	// Should not start with a hyphen
+	if strings.HasPrefix(domain, "-") {
+		return false
+	}
+	return true
+}
+
 
 type DNS struct {
 	DNSEtcHosts  string       `yaml:"dnsEtcHosts" json:"dnsEtcHosts"`
@@ -96,8 +134,9 @@ func Validate_DNS(cfg *DNS, verrs *ValidationErrors, pathPrefix string) {
 		for i, server := range cfg.CoreDNS.UpstreamDNSServers {
 			if strings.TrimSpace(server) == "" {
 				verrs.Add("%s.upstreamDNSServers[%d]: server address cannot be empty", coreDNSPath, i)
+			} else if !isValidHostOrIP(server) {
+				verrs.Add("%s.upstreamDNSServers[%d]: invalid server address format '%s'", coreDNSPath, i, server)
 			}
-			// Basic IP or hostname validation could be added here.
 		}
 	}
 	for i, ez := range cfg.CoreDNS.ExternalZones {
@@ -133,8 +172,9 @@ func Validate_ExternalZone(cfg *ExternalZone, verrs *ValidationErrors, pathPrefi
 	for i, zone := range cfg.Zones {
 		if strings.TrimSpace(zone) == "" {
 			verrs.Add("%s.zones[%d]: zone name cannot be empty", pathPrefix, i)
+		} else if !isValidDomainName(zone) {
+			verrs.Add("%s.zones[%d]: invalid domain name format '%s'", pathPrefix, i, zone)
 		}
-		// Basic domain name validation could be added.
 	}
 
 	if len(cfg.Nameservers) == 0 {
@@ -143,11 +183,12 @@ func Validate_ExternalZone(cfg *ExternalZone, verrs *ValidationErrors, pathPrefi
 	for i, ns := range cfg.Nameservers {
 		if strings.TrimSpace(ns) == "" {
 			verrs.Add("%s.nameservers[%d]: nameserver address cannot be empty", pathPrefix, i)
+		} else if !isValidHostOrIP(ns) {
+			verrs.Add("%s.nameservers[%d]: invalid nameserver address format '%s'", pathPrefix, i, ns)
 		}
-		// Basic IP or hostname validation could be added.
 	}
 
-	if cfg.Cache < 0 { // 0 might mean "use system default" or "no cache", positive values are explicit TTLs.
+	if cfg.Cache < 0 {
 		verrs.Add("%s.cache: cannot be negative, got %d", pathPrefix, cfg.Cache)
 	}
 

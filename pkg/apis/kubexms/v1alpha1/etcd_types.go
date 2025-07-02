@@ -1,7 +1,7 @@
 package v1alpha1
 
 import (
-	// "fmt" // Removed as unused
+	"net/url"
 	"strings"
 )
 
@@ -135,6 +135,12 @@ func Validate_EtcdConfig(cfg *EtcdConfig, verrs *ValidationErrors, pathPrefix st
 			for i, ep := range cfg.External.Endpoints {
 				if strings.TrimSpace(ep) == "" {
 					verrs.Add("%s.external.endpoints[%d]: endpoint cannot be empty", pathPrefix, i)
+				} else {
+					// Validate endpoint URL format
+					_, err := url.ParseRequestURI(ep)
+					if err != nil {
+						verrs.Add("%s.external.endpoints[%d]: invalid URL format for endpoint '%s': %v", pathPrefix, i, ep, err)
+					}
 				}
 			}
 			if (cfg.External.CertFile != "" && cfg.External.KeyFile == "") || (cfg.External.CertFile == "" && cfg.External.KeyFile != "") {
@@ -169,6 +175,13 @@ func Validate_EtcdConfig(cfg *EtcdConfig, verrs *ValidationErrors, pathPrefix st
 	if cfg.ElectionTimeoutMillis != nil && *cfg.ElectionTimeoutMillis <= 0 {
 		verrs.Add("%s.electionTimeoutMillis: must be positive, got %d", pathPrefix, *cfg.ElectionTimeoutMillis)
 	}
+
+	if cfg.HeartbeatIntervalMillis != nil && cfg.ElectionTimeoutMillis != nil &&
+		*cfg.ElectionTimeoutMillis <= (*cfg.HeartbeatIntervalMillis*5) { // Typical recommendation: ElectionTimeout should be at least 5x HeartbeatInterval
+		verrs.Add("%s: electionTimeoutMillis (%d) should be significantly greater than heartbeatIntervalMillis (%d) (e.g., >= 5x)",
+			pathPrefix, *cfg.ElectionTimeoutMillis, *cfg.HeartbeatIntervalMillis)
+	}
+
 	// SnapshotCount is uint64, typically positive or etcd default.
 	if cfg.AutoCompactionRetentionHours != nil && *cfg.AutoCompactionRetentionHours < 0 {
 		verrs.Add("%s.autoCompactionRetentionHours: cannot be negative, got %d", pathPrefix, *cfg.AutoCompactionRetentionHours)

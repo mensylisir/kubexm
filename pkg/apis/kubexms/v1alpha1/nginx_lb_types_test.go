@@ -71,9 +71,14 @@ func TestValidate_NginxLBConfig(t *testing.T) {
 		{"invalid_algo", NginxLBConfig{BalanceAlgorithm: stringPtr("foo"), UpstreamServers: []NginxLBUpstreamServer{validServer}}, ".balanceAlgorithm: invalid algorithm 'foo'"},
 		{"no_upstreams", NginxLBConfig{ListenPort: intPtr(123)}, ".upstreamServers: must specify at least one upstream server"},
 		{"upstream_empty_addr", NginxLBConfig{UpstreamServers: []NginxLBUpstreamServer{{Address: " "}}}, ".address: upstream server address cannot be empty"},
-		{"upstream_bad_addr_format", NginxLBConfig{UpstreamServers: []NginxLBUpstreamServer{{Address: "hostonly"}}}, ".address: upstream server address 'hostonly' must be in 'host:port' format"},
+		{"upstream_bad_addr_format_no_port", NginxLBConfig{UpstreamServers: []NginxLBUpstreamServer{{Address: "hostonly"}}}, "upstream server address 'hostonly' must be in 'host:port' format"},
+		{"upstream_bad_addr_format_bad_host", NginxLBConfig{UpstreamServers: []NginxLBUpstreamServer{{Address: "inva!id:80"}}}, ".address: host part 'inva!id' of upstream server address 'inva!id:80' is not a valid host or IP"},
+		{"upstream_bad_addr_format_bad_port_str", NginxLBConfig{UpstreamServers: []NginxLBUpstreamServer{{Address: "validhost:port"}}}, ".address: port part 'port' of upstream server address 'validhost:port' is not a valid port number"},
+		{"upstream_bad_addr_format_bad_port_num", NginxLBConfig{UpstreamServers: []NginxLBUpstreamServer{{Address: "validhost:70000"}}}, ".address: port part '70000' of upstream server address 'validhost:70000' is not a valid port number"},
 		{"upstream_bad_weight", NginxLBConfig{UpstreamServers: []NginxLBUpstreamServer{{Address: "h:1", Weight: intPtr(-1)}}}, ".weight: cannot be negative"},
 		{"empty_config_path", NginxLBConfig{ConfigFilePath: stringPtr(" "), UpstreamServers: []NginxLBUpstreamServer{validServer}}, ".configFilePath: cannot be empty if specified"},
+		{"listen_address_empty", NginxLBConfig{ListenAddress: stringPtr(" "), UpstreamServers: []NginxLBUpstreamServer{validServer}}, ".listenAddress: cannot be empty if specified"},
+		{"listen_address_invalid_ip", NginxLBConfig{ListenAddress: stringPtr("not-an-ip"), UpstreamServers: []NginxLBUpstreamServer{validServer}}, ".listenAddress: invalid IP address format 'not-an-ip'"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
