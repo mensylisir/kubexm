@@ -2,15 +2,13 @@ package logger
 
 import (
 	"fmt"
-	// "strconv" // Removed as unused
+	"os" // For Fprintf to os.Stderr (debug line)
 	"strings"
-	// "sync" // No longer needed directly in this file
 	"time"
 
-	"go.uber.org/zap" // Added for zap.Xxx constructors
-	"go.uber.org/zap/buffer" // Keep for _bufferPool
+	// "go.uber.org/zap" // Removed as it's not directly used in this file
+	"go.uber.org/zap/buffer"
 	"go.uber.org/zap/zapcore"
-	// "bytes" // Removed as unused
 )
 
 const (
@@ -33,7 +31,7 @@ type colorConsoleEncoder struct {
 	colors        bool
 	loggerOpts    Options
 	levelStrings  map[Level]string
-	contextFields []zapcore.Field // <--- 新增：用于存储 With 字段
+	// contextFields []zapcore.Field // This was the line I confirmed was removed earlier.
 }
 
 // NewColorConsoleEncoder creates a new console encoder that uses colors.
@@ -72,117 +70,47 @@ func cacheLevelStrings(color bool, useColor bool) map[Level]string {
 
 // Clone clones the encoder.
 func (enc *colorConsoleEncoder) Clone() zapcore.Encoder {
-	// 创建一个新的编码器实例
 	clone := &colorConsoleEncoder{
 		EncoderConfig: enc.EncoderConfig,
 		spaced:        enc.spaced,
 		colors:        enc.colors,
 		loggerOpts:    enc.loggerOpts,
 		levelStrings:  enc.levelStrings,
-		// contextFields 将被单独处理
 	}
-
-	// 完整地复制上下文，确保新旧 logger 互不影响
-	if len(enc.contextFields) > 0 {
-		clone.contextFields = make([]zapcore.Field, len(enc.contextFields))
-		copy(clone.contextFields, enc.contextFields)
-	}
-
 	return clone
 }
 
-// --- Methods for zapcore.ObjectEncoder interface ---
-// These methods are called by Zap when structured fields are added to a log statement
-// (e.g., logger.Info("message", zap.String("key", "value"))).
-// For this console encoder, we don't accumulate fields in an internal buffer within these AddXxx methods.
-// Instead, EncodeEntry will iterate over the `fields []zapcore.Field` argument it receives.
-// Thus, most of these AddXxx methods can be minimal or no-op, as their primary role in some encoders
-// (like JSON) is to append to an internal buffer that is then finalized. Here, that finalization
-// happens directly from the `fields` slice in EncodeEntry.
+func (enc *colorConsoleEncoder) OpenNamespace(key string) {}
+func (enc *colorConsoleEncoder) AddArray(key string, arr zapcore.ArrayMarshaler) error     { return nil }
+func (enc *colorConsoleEncoder) AddObject(key string, obj zapcore.ObjectMarshaler) error    { return nil }
+func (enc *colorConsoleEncoder) AddBinary(key string, val []byte)                         {}
+func (enc *colorConsoleEncoder) AddByteString(key string, val []byte)                     {}
+func (enc *colorConsoleEncoder) AddBool(key string, val bool)                             {}
+func (enc *colorConsoleEncoder) AddComplex128(key string, val complex128)                 {}
+func (enc *colorConsoleEncoder) AddComplex64(key string, val complex64)                   {}
+func (enc *colorConsoleEncoder) AddDuration(key string, val time.Duration)                {}
+func (enc *colorConsoleEncoder) AddFloat64(key string, val float64)                       {}
+func (enc *colorConsoleEncoder) AddFloat32(key string, val float32)                       {}
+func (enc *colorConsoleEncoder) AddInt(key string, val int)                               {}
+func (enc *colorConsoleEncoder) AddInt64(key string, val int64)                           {}
+func (enc *colorConsoleEncoder) AddInt32(key string, val int32)                           {}
+func (enc *colorConsoleEncoder) AddInt16(key string, val int16)                           {}
+func (enc *colorConsoleEncoder) AddInt8(key string, val int8)                             {}
+func (enc *colorConsoleEncoder) AddString(key, val string)                                {}
+func (enc *colorConsoleEncoder) AddTime(key string, val time.Time)                        {}
+func (enc *colorConsoleEncoder) AddUint(key string, val uint)                             {}
+func (enc *colorConsoleEncoder) AddUint64(key string, val uint64)                         {}
+func (enc *colorConsoleEncoder) AddUint32(key string, val uint32)                         {}
+func (enc *colorConsoleEncoder) AddUint16(key string, val uint16)                         {}
+func (enc *colorConsoleEncoder) AddUint8(key string, val uint8)                           {}
+func (enc *colorConsoleEncoder) AddUintptr(key string, val uintptr)                       {}
+func (enc *colorConsoleEncoder) AddReflected(key string, obj interface{}) error           { return nil }
 
-func (enc *colorConsoleEncoder) OpenNamespace(key string) {} // Keep this empty for now
-func (enc *colorConsoleEncoder) AddArray(key string, arr zapcore.ArrayMarshaler) error {
-	enc.contextFields = append(enc.contextFields, zap.Array(key, arr))
-	return nil
-}
-func (enc *colorConsoleEncoder) AddObject(key string, obj zapcore.ObjectMarshaler) error {
-	enc.contextFields = append(enc.contextFields, zap.Object(key, obj))
-	return nil
-}
-func (enc *colorConsoleEncoder) AddBinary(key string, val []byte) { // For completeness, can be zap.Binary
-	enc.contextFields = append(enc.contextFields, zap.Binary(key, val))
-}
-func (enc *colorConsoleEncoder) AddByteString(key string, val []byte) { // For completeness, can be zap.ByteString
-	enc.contextFields = append(enc.contextFields, zap.ByteString(key, val))
-}
-func (enc *colorConsoleEncoder) AddBool(key string, val bool) {
-	enc.contextFields = append(enc.contextFields, zap.Bool(key, val))
-}
-func (enc *colorConsoleEncoder) AddComplex128(key string, val complex128) { // For completeness
-	enc.contextFields = append(enc.contextFields, zap.Complex128(key, val))
-}
-func (enc *colorConsoleEncoder) AddComplex64(key string, val complex64) { // For completeness
-	enc.contextFields = append(enc.contextFields, zap.Complex64(key, val))
-}
-func (enc *colorConsoleEncoder) AddDuration(key string, val time.Duration) {
-	enc.contextFields = append(enc.contextFields, zap.Duration(key, val))
-}
-func (enc *colorConsoleEncoder) AddFloat64(key string, val float64) {
-	enc.contextFields = append(enc.contextFields, zap.Float64(key, val))
-}
-func (enc *colorConsoleEncoder) AddFloat32(key string, val float32) {
-	enc.contextFields = append(enc.contextFields, zap.Float32(key, val))
-}
-func (enc *colorConsoleEncoder) AddInt(key string, val int) {
-	enc.contextFields = append(enc.contextFields, zap.Int(key, val))
-}
-func (enc *colorConsoleEncoder) AddInt64(key string, val int64) {
-	enc.contextFields = append(enc.contextFields, zap.Int64(key, val))
-}
-func (enc *colorConsoleEncoder) AddInt32(key string, val int32) {
-	enc.contextFields = append(enc.contextFields, zap.Int32(key, val))
-}
-func (enc *colorConsoleEncoder) AddInt16(key string, val int16) { // For completeness
-	enc.contextFields = append(enc.contextFields, zap.Int16(key, val))
-}
-func (enc *colorConsoleEncoder) AddInt8(key string, val int8) { // For completeness
-	enc.contextFields = append(enc.contextFields, zap.Int8(key, val))
-}
-func (enc *colorConsoleEncoder) AddString(key, val string) {
-	enc.contextFields = append(enc.contextFields, zap.String(key, val))
-}
-func (enc *colorConsoleEncoder) AddTime(key string, val time.Time) {
-	enc.contextFields = append(enc.contextFields, zap.Time(key, val))
-}
-func (enc *colorConsoleEncoder) AddUint(key string, val uint) { // For completeness
-	enc.contextFields = append(enc.contextFields, zap.Uint(key, val))
-}
-func (enc *colorConsoleEncoder) AddUint64(key string, val uint64) { // For completeness
-	enc.contextFields = append(enc.contextFields, zap.Uint64(key, val))
-}
-func (enc *colorConsoleEncoder) AddUint32(key string, val uint32) { // For completeness
-	enc.contextFields = append(enc.contextFields, zap.Uint32(key, val))
-}
-func (enc *colorConsoleEncoder) AddUint16(key string, val uint16) { // For completeness
-	enc.contextFields = append(enc.contextFields, zap.Uint16(key, val))
-}
-func (enc *colorConsoleEncoder) AddUint8(key string, val uint8) { // For completeness
-	enc.contextFields = append(enc.contextFields, zap.Uint8(key, val))
-}
-func (enc *colorConsoleEncoder) AddUintptr(key string, val uintptr) { // For completeness
-	enc.contextFields = append(enc.contextFields, zap.Uintptr(key, val))
-}
-func (enc *colorConsoleEncoder) AddReflected(key string, obj interface{}) error { // For completeness
-	enc.contextFields = append(enc.contextFields, zap.Reflect(key, obj))
-	return nil
-}
-
-// Append methods are for array elements, not used by our simple field formatting in EncodeEntry.
 func (enc *colorConsoleEncoder) AppendArray(zapcore.ArrayMarshaler) error { return nil }
 func (enc *colorConsoleEncoder) AppendObject(zapcore.ObjectMarshaler) error { return nil }
 func (enc *colorConsoleEncoder) AppendBool(bool) {}
 func (enc *colorConsoleEncoder) AppendByteString([]byte) {}
-func (enc *colorConsoleEncoder) AppendBinary([]byte) {} // Zap's console encoder does base64, we can skip or do simple string
+func (enc *colorConsoleEncoder) AppendBinary([]byte) {}
 func (enc *colorConsoleEncoder) AppendComplex128(complex128) {}
 func (enc *colorConsoleEncoder) AppendComplex64(complex64) {}
 func (enc *colorConsoleEncoder) AppendDuration(time.Duration) {}
@@ -202,39 +130,25 @@ func (enc *colorConsoleEncoder) AppendUint16(uint16) {}
 func (enc *colorConsoleEncoder) AppendUint8(uint8) {}
 func (enc *colorConsoleEncoder) AppendUintptr(uintptr) {}
 
-
-// EncodeEntry is the core method that formats the log entry.
 func (enc *colorConsoleEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
-	// <<<--- 新增的合并逻辑 --->>>
-	// 创建一个包含所有字段的新切片
-	// 容量预设为两者之和，避免多次分配内存
-	allFields := make([]zapcore.Field, 0, len(enc.contextFields)+len(fields))
-	allFields = append(allFields, enc.contextFields...) // 首先添加 With 字段
-	allFields = append(allFields, fields...)           // 然后添加调用点的字段
-
-	// <<<--- 从这里开始，您的所有代码都保持不变，但要使用 `allFields` 而不是 `fields` --->>>
+	fmt.Fprintf(os.Stderr, "[DEBUG_ENCODER] EncodeEntry received fields: %+v\n", fields) // DEBUG LINE
 	line := _bufferPool.Get()
 
-	// Timestamp
-	if enc.TimeKey != "" { // TimeKey is usually "ts" in productionEncoderConfig
+	if enc.TimeKey != "" {
 		line.AppendString(ent.Time.Format(enc.loggerOpts.TimestampFormat))
 		line.AppendString(" ")
 	}
 
-	// Contextual Prefix (Pipeline, Module, Task, Step/Hook)
 	var contextPrefix strings.Builder
-	// Define the order of contextual keys for the prefix
 	orderedContextKeys := []string{
 		"pipeline_name", "module_name", "task_name",
 		"hook_event", "step_name", "hook_step_name",
-		"host_name", // host_name is now part of the prefix
+		"host_name",
 	}
 	logContextValues := make(map[string]string)
-	// Use allFields here
-	remainingFields := make([]zapcore.Field, 0, len(allFields))
+	remainingFields := make([]zapcore.Field, 0, len(fields))
 
-	// Use allFields!
-	for _, f := range allFields {
+	for _, f := range fields {
 		isContextField := false
 		for _, ctxKey := range orderedContextKeys {
 			if f.Key == ctxKey {
@@ -250,14 +164,13 @@ func (enc *colorConsoleEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.
 
 	for _, key := range orderedContextKeys {
 		if val, ok := logContextValues[key]; ok && val != "" {
-			// Use short prefixes for context keys
 			shortKey := key
 			switch key {
 			case "pipeline_name": shortKey = "P"
 			case "module_name": shortKey = "M"
 			case "task_name": shortKey = "T"
 			case "step_name": shortKey = "S"
-			case "hook_event": shortKey = "HE" // E.g. PipelinePreRun
+			case "hook_event": shortKey = "HE"
 			case "hook_step_name": shortKey = "HS"
 			case "host_name": shortKey = "H"
 			}
@@ -270,11 +183,8 @@ func (enc *colorConsoleEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.
 		line.AppendString(" ")
 	}
 
-	// Level (custom logic as before)
-	// ...
-    // 特别是处理 Level 的部分，也需要使用 allFields
-    customLevelStr := ""; ourLevel := InfoLevel // Default
-	for _, f := range allFields { // 使用 allFields!
+    customLevelStr := ""; ourLevel := InfoLevel
+	for _, f := range fields {
 		if f.Key == "customlevel" && f.Type == zapcore.StringType {
 			levelStr := f.String
 			switch strings.ToUpper(levelStr) {
@@ -294,41 +204,32 @@ func (enc *colorConsoleEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.
 	line.AppendString(customLevelStr)
 	line.AppendString(" ")
 
-	// Caller (optional)
 	if ent.Caller.Defined && enc.CallerKey != "" && enc.EncodeCaller != nil {
 		callerBuf := _bufferPool.Get()
-		// Use a temporary encoder that writes to callerBuf for EncodeCaller
 		tempEnc := &tempEncoder{buf: callerBuf, EncoderConfig: enc.EncoderConfig}
 		enc.EncodeCaller(ent.Caller, tempEnc)
 		if callerBuf.Len() > 0 {
 			line.Write(callerBuf.Bytes())
-			// Add a colon only if there's a message to follow.
-			// This also implies that if there's no message, there's no trailing colon after caller.
 			if ent.Message != "" {
-				line.AppendString(": ") // Add colon and space
+				line.AppendString(": ")
 			} else {
-				line.AppendString(" ") // Just space if no message
+				line.AppendString(" ")
 			}
 		}
 		callerBuf.Free()
 	}
 
-	// Message
-	// The MessageKey check is usually for structured logging like JSON.
-	// For console, we just append the message if it's not empty.
 	if ent.Message != "" {
 		line.AppendString(ent.Message)
 	}
 
-	// Remaining structured fields
 	for _, f := range remainingFields {
 		line.AppendString(" ")
 		line.AppendString(f.Key)
 		line.AppendString("=")
-		// Simple value formatting for console.
 		switch f.Type {
 		case zapcore.StringType:
-			if strings.Contains(f.String, " ") || f.String == "" { // Quote if it contains space or is empty
+			if strings.Contains(f.String, " ") || f.String == "" {
 				fmt.Fprintf(line, "%q", f.String)
 			} else {
 				line.AppendString(f.String)
@@ -341,13 +242,12 @@ func (enc *colorConsoleEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.
 		case zapcore.Int8Type, zapcore.Int16Type, zapcore.Int32Type, zapcore.Int64Type:
 			line.AppendInt(f.Integer)
 		case zapcore.Uint8Type, zapcore.Uint16Type, zapcore.Uint32Type, zapcore.Uint64Type, zapcore.UintptrType:
-			line.AppendUint(uint64(f.Integer)) // f.Integer holds uint values as well for these types, cast to uint64
+			line.AppendUint(uint64(f.Integer))
 		case zapcore.Float32Type:
-			line.AppendFloat(float64(f.Interface.(float32)), 32) // Use Interface for float
+			line.AppendFloat(float64(f.Interface.(float32)), 32)
 		case zapcore.Float64Type:
-			line.AppendFloat(f.Interface.(float64), 64) // Use Interface for float
+			line.AppendFloat(f.Interface.(float64), 64)
 		default:
-			// For other types, use standard Go formatting.
 			fmt.Fprintf(line, "%v", f.Interface)
 		}
 	}
@@ -356,9 +256,6 @@ func (enc *colorConsoleEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.
 	return line, nil
 }
 
-
-// tempEncoder is a minimal encoder for capturing parts like caller.
-// It's used to pass to Zap's EncodeCaller function.
 type tempEncoder struct {
     buf *buffer.Buffer
     zapcore.EncoderConfig
@@ -366,7 +263,7 @@ type tempEncoder struct {
 func (t *tempEncoder) AddArray(key string, marshaler zapcore.ArrayMarshaler) error { return nil }
 func (t *tempEncoder) AddObject(key string, marshaler zapcore.ObjectMarshaler) error { return nil }
 func (t *tempEncoder) AddBinary(key string, value []byte) {}
-func (t *tempEncoder) AddByteString(key string, value []byte) { t.AppendByteString(value) } // Key is ignored for Append
+func (t *tempEncoder) AddByteString(key string, value []byte) { t.AppendByteString(value) }
 func (t *tempEncoder) AddBool(key string, value bool) { t.AppendBool(value) }
 func (t *tempEncoder) AddComplex128(key string, value complex128) { t.AppendComplex128(value) }
 func (t *tempEncoder) AddComplex64(key string, value complex64) { t.AppendComplex64(value) }
@@ -378,7 +275,7 @@ func (t *tempEncoder) AddInt64(key string, value int64) { t.AppendInt64(value) }
 func (t *tempEncoder) AddInt32(key string, value int32) { t.AppendInt32(value) }
 func (t *tempEncoder) AddInt16(key string, value int16) { t.AppendInt16(value) }
 func (t *tempEncoder) AddInt8(key string, value int8) { t.AppendInt8(value) }
-func (t *tempEncoder) AddString(key, val string) { if key != "" {t.buf.AppendString(key); t.buf.AppendString("=")}; t.buf.AppendString(val)} // Used by EncodeCaller directly
+func (t *tempEncoder) AddString(key, val string) { if key != "" {t.buf.AppendString(key); t.buf.AppendString("=")}; t.buf.AppendString(val)}
 func (t *tempEncoder) AddTime(key string, value time.Time) { t.AppendTime(value) }
 func (t *tempEncoder) AddUint(key string, value uint) { t.AppendUint(value) }
 func (t *tempEncoder) AddUint64(key string, value uint64){ t.AppendUint64(value) }
@@ -388,7 +285,7 @@ func (t *tempEncoder) AddUint8(key string, value uint8){ t.AppendUint8(value) }
 func (t *tempEncoder) AddUintptr(key string, v uintptr){}
 func (t *tempEncoder) AddReflected(k string, i interface{})error{return nil}
 func (t *tempEncoder) OpenNamespace(key string) {}
-func (t *tempEncoder) Clone() zapcore.Encoder { return t } // Simplified
+func (t *tempEncoder) Clone() zapcore.Encoder { return t }
 func (t *tempEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) { return t.buf, nil }
 func (t *tempEncoder) AppendArray(zapcore.ArrayMarshaler) error { return nil }
 func (t *tempEncoder) AppendObject(zapcore.ObjectMarshaler) error { return nil }
@@ -406,7 +303,7 @@ func (t *tempEncoder) AppendInt32(v int32) { t.buf.AppendInt(int64(v)) }
 func (t *tempEncoder) AppendInt16(v int16) { t.buf.AppendInt(int64(v)) }
 func (t *tempEncoder) AppendInt8(v int8) { t.buf.AppendInt(int64(v)) }
 func (t *tempEncoder) AppendString(v string) { t.buf.AppendString(v) }
-func (t *tempEncoder) AppendTime(v time.Time) { t.buf.AppendTime(v, time.RFC3339) } // Use a fixed format like RFC3339
+func (t *tempEncoder) AppendTime(v time.Time) { t.buf.AppendTime(v, time.RFC3339) }
 func (t *tempEncoder) AppendUint(v uint) { t.buf.AppendUint(uint64(v)) }
 func (t *tempEncoder) AppendUint64(v uint64) { t.buf.AppendUint(v) }
 func (t *tempEncoder) AppendUint32(v uint32) { t.buf.AppendUint(uint64(v)) }
@@ -414,12 +311,10 @@ func (t *tempEncoder) AppendUint16(v uint16) { t.buf.AppendUint(uint64(v)) }
 func (t *tempEncoder) AppendUint8(v uint8) { t.buf.AppendUint(uint64(v)) }
 func (t *tempEncoder) AppendUintptr(v uintptr) {}
 
-
-// levelToColor and levelToColorZap (implement actual color logic)
 func levelToColor(level Level, message string) string {
 	switch level {
 	case DebugLevel: return colorMagenta + message + colorReset
-	case InfoLevel: return message // Or colorBlue + message + colorReset
+	case InfoLevel: return message
 	case SuccessLevel: return colorGreen + message + colorReset
 	case WarnLevel: return colorYellow + message + colorReset
 	case ErrorLevel: return colorRed + message + colorReset

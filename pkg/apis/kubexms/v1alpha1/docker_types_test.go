@@ -179,6 +179,18 @@ func TestValidate_DockerConfig(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "valid cri-dockerd version",
+			input: &DockerConfig{
+				CRIDockerdVersion: stringPtr("0.3.1"),
+			},
+		},
+		{
+			name: "valid cri-dockerd version with v prefix",
+			input: &DockerConfig{
+				CRIDockerdVersion: stringPtr("v0.3.1"),
+			},
+		},
 	}
 
 	for _, tt := range validCases {
@@ -214,7 +226,17 @@ func TestValidate_DockerConfig(t *testing.T) {
 		{"mcd_zero", &DockerConfig{MaxConcurrentDownloads: intPtr(0)}, []string{".maxConcurrentDownloads: must be positive if specified"}},
 		{"mcu_zero", &DockerConfig{MaxConcurrentUploads: intPtr(0)}, []string{".maxConcurrentUploads: must be positive if specified"}},
 		{"empty_bridge", &DockerConfig{Bridge: stringPtr(" ")}, []string{".bridge: name cannot be empty"}},
-		{"empty_cridockerd_version", &DockerConfig{CRIDockerdVersion: stringPtr(" ")}, []string{".criDockerdVersion: cannot be empty if specified"}},
+		{"empty_cridockerd_version", &DockerConfig{CRIDockerdVersion: stringPtr(" ")}, []string{".criDockerdVersion: cannot be only whitespace if specified"}}, // Message changed
+		{
+			"invalid_cridockerd_version_format",
+			&DockerConfig{CRIDockerdVersion: stringPtr("0.bad.1")},
+			[]string{".criDockerdVersion: '0.bad.1' is not a recognized version format"},
+		},
+		{
+			"invalid_cridockerd_version_char",
+			&DockerConfig{CRIDockerdVersion: stringPtr("v0.2.3_alpha")},
+			[]string{".criDockerdVersion: 'v0.2.3_alpha' is not a recognized version format"},
+		},
 	}
 
 	for _, tt := range invalidCases {

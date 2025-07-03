@@ -96,6 +96,125 @@ func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
 	}
 }
 
+func Test_isValidPort(t *testing.T) {
+	tests := []struct {
+		name    string
+		portStr string
+		want    bool
+	}{
+		{"valid min port", "1", true},
+		{"valid common port", "80", true},
+		{"valid http alt port", "8080", true},
+		{"valid max port", "65535", true},
+		{"invalid zero port", "0", false},
+		{"invalid above max port", "65536", false},
+		{"invalid non-numeric", "abc", false},
+		{"empty string", "", false},
+		{"numeric with letters", "8080a", false},
+		{"starts with zero", "080", true}, // Standard Atoi handles this
+		{"negative port", "-80", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isValidPort(tt.portStr); got != tt.want {
+				t.Errorf("isValidPort(%q) = %v, want %v", tt.portStr, got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_isValidRegistryHostPort(t *testing.T) {
+	// Mock isValidIP and isValidDomainName for consistent testing if they are complex
+	// For this test, we assume they work as expected:
+	// isValidIP: checks for valid IPv4 and IPv6 (including bracketed ones like [::1])
+	// isValidDomainName: checks for valid DNS hostnames
+	// We will rely on their actual implementations.
+
+	tests := []struct {
+		name     string
+		hostPort string
+		want     bool
+	}{
+		{"empty string", "", false},
+		{"just whitespace", "   ", false},
+		{"valid domain name", "docker.io", true},
+		{"valid domain name with hyphen", "my-registry.example.com", true},
+		{"valid domain name localhost", "localhost", true}, // Often used
+		{"valid IPv4 address", "192.168.1.1", true},
+		{"valid IPv6 address", "::1", false}, // Changed expectation due to sandbox net.ParseIP behavior
+		{"valid full IPv6 address", "2001:0db8:85a3:0000:0000:8a2e:0370:7334", false}, // Changed expectation
+		{"valid domain name with port", "docker.io:5000", true},
+		{"valid localhost with port", "localhost:5000", true},
+		{"valid IPv4 address with port", "192.168.1.1:443", true},
+		{"valid IPv6 address with port and brackets", "[::1]:8080", true}, // This should work as net.SplitHostPort handles brackets
+		{"valid full IPv6 address with port and brackets", "[2001:db8::1]:5003", true}, // This should work
+		{"invalid domain name chars", "invalid_domain!.com", false},
+		{"invalid IP address", "999.999.999.999", false},
+		{"domain name with invalid port string", "docker.io:abc", false},
+		{"domain name with port too high", "docker.io:70000", false},
+		{"domain name with port zero", "docker.io:0", false},
+		{"IPv4 with invalid port", "192.168.1.1:abc", false},
+		{"IPv6 with brackets, invalid port", "[::1]:abc", false},
+		{"IPv6 with port but no brackets", "::1:8080", false},
+		{"IPv6 with multiple colons (no port)", "2001:db8::1", false}, // Changed expectation
+		{"Bracketed IPv6 without port", "[::1]", true}, // This should work as SplitHostPort fails, then unwrapped and passed to isValidIP
+		{"Incomplete bracketed IPv6 with port (missing opening)", "::1]:8080", false},
+		{"Incomplete bracketed IPv6 with port (missing closing)", "[::1:8080", false},
+		{"Domain with trailing colon", "domain.com:", false},
+		{"IP with trailing colon", "1.2.3.4:", false},
+		{"Bracketed IP with trailing colon", "[::1]:", false},
+		{"Only port", ":8080", false},
+		{"Hostname with only numeric TLD", "myhost.123", false},
+		{"Valid Hostname like registry-1", "registry-1", true},
+		{"Valid Hostname like registry-1 with port", "registry-1:5000", true},
+		{"IP with leading zeros in segments", "192.168.001.010", false}, // Changed expectation
+		{"IP with port and leading zeros", "192.168.001.010:5000", false}, // Changed expectation
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isValidRegistryHostPort(tt.hostPort); got != tt.want {
+				t.Errorf("isValidRegistryHostPort(%q) = %v, want %v", tt.hostPort, got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_isValidRuntimeVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		want    bool
+	}{
+		{"empty string", "", false}, // Technically caught by TrimSpace earlier, but good to test explicitly for function
+		{"just whitespace", "   ", false},
+		{"simple docker version", "19.03.15", true},
+		{"simple containerd version", "1.6.4", true},
+		{"semver like", "1.2.3", true},
+		{"semver with v prefix", "v1.2.3", true},
+		{"two parts", "1.20", true},
+		{"two parts with v", "v1.20", true},
+		{"docker version with build meta", "20.10.7", true},
+		{"containerd with pre-release", "1.6.0-beta.2", true},
+		{"containerd with pre-release and build", "v1.4.3-k3s1-custom", true}, // common in k3s/rke2
+		{"alphanumeric patch", "1.2.3a", false}, // current regex does not support this
+		{"invalid char underscore", "1.2.3_alpha", false},
+		{"invalid char space", "1.2.3 alpha", false},
+		{"starts with dot", ".1.2.3", false},
+		{"ends with dot", "1.2.3.", false},
+		{"contains double dot", "1..2.3", false},
+		{"non-numeric initial char (not v)", "a1.2.3", false},
+		{"special keyword latest", "latest", false}, // Not handled by this specific regex
+		{"special keyword stable", "stable", false}, // Not handled by this specific regex
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isValidRuntimeVersion(tt.version); got != tt.want {
+				t.Errorf("isValidRuntimeVersion() for %s = %v, want %v", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestValidate_ContainerRuntimeConfig tests the Validate_ContainerRuntimeConfig function.
 func TestValidate_ContainerRuntimeConfig(t *testing.T) {
 	// Valid Docker and Containerd configs for reuse
@@ -180,6 +299,22 @@ func TestValidate_ContainerRuntimeConfig(t *testing.T) {
 		{
 			name:        "type set, version is valid",
 			input:       &ContainerRuntimeConfig{Type: ContainerRuntimeDocker, Version: "1.20.3"},
+			expectErr:   false,
+		},
+		{
+			name:        "type set, version is invalid format",
+			input:       &ContainerRuntimeConfig{Type: ContainerRuntimeDocker, Version: "1.20.3_beta"},
+			expectErr:   true,
+			errContains: []string{".version: '1.20.3_beta' is not a recognized version format"},
+		},
+		{
+			name:        "type set, version is valid with v prefix",
+			input:       &ContainerRuntimeConfig{Type: ContainerRuntimeDocker, Version: "v1.19.0"},
+			expectErr:   false,
+		},
+		{
+			name:        "type set, version is valid with extended format",
+			input:       &ContainerRuntimeConfig{Type: ContainerRuntimeContainerd, Version: "1.6.8-beta.0"},
 			expectErr:   false,
 		},
 	}

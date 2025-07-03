@@ -70,8 +70,8 @@ func Validate_KeepalivedConfig(cfg *KeepalivedConfig, verrs *ValidationErrors, p
 
 	if cfg.VRID == nil {
 		verrs.Add("%s.vrid: virtual router ID must be specified", pathPrefix)
-	} else if *cfg.VRID < 0 || *cfg.VRID > 255 {
-		verrs.Add("%s.vrid: must be between 0 and 255, got %d", pathPrefix, *cfg.VRID)
+	} else if *cfg.VRID < 1 || *cfg.VRID > 255 { // VRID standard range is 1-255
+		verrs.Add("%s.vrid: must be between 1 and 255, got %d", pathPrefix, *cfg.VRID)
 	}
 
 	if cfg.Priority == nil {

@@ -101,8 +101,10 @@ func SetDefaults_HighAvailabilityConfig(cfg *HighAvailabilityConfig) {
 func SetDefaults_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig) {
 	if cfg == nil { return }
 	if cfg.Enabled == nil {
+		// If a type is specified, assume the user intends for it to be enabled by default.
+		// If they want it configured but disabled, they should explicitly set Enabled: false.
 		enabledVal := false
-		if cfg.Type != "" && (strings.Contains(cfg.Type, "Managed") || cfg.Type == "UserProvided") {
+		if cfg.Type != "" {
 			enabledVal = true
 		}
 		cfg.Enabled = boolPtr(enabledVal)

@@ -73,7 +73,46 @@ func TestSetDefaults_NetworkConfig_Overall(t *testing.T) {
 	defaultPool := cfgCalicoWithPool.Calico.IPPools[0]
 	if defaultPool.CIDR != "192.168.0.0/16" {t.Errorf("Default IPPool CIDR mismatch: %s", defaultPool.CIDR)}
 	if defaultPool.BlockSize == nil || *defaultPool.BlockSize != 26 {t.Errorf("Default IPPool BlockSize mismatch: %v", defaultPool.BlockSize)}
+	if defaultPool.Encapsulation != "IPIP" {t.Errorf("Default IPPool Encapsulation mismatch: got %s, want IPIP (due to default IPIPMode=Always)", defaultPool.Encapsulation)}
 	if cfgCalicoWithPool.Calico.TyphaNodeSelector == nil {t.Error("Calico TyphaNodeSelector should be initialized")}
+
+	// Test Calico Default IPPool encapsulation variations
+	testCases := []struct {
+		name             string
+		ipipMode         string
+		vxlanMode        string
+		expectedEncap    string
+	}{
+		{"ipip_always", "Always", "Never", "IPIP"},
+		{"ipip_crosssubnet", "CrossSubnet", "Never", "IPIP"},
+		{"vxlan_always_ipip_never", "Never", "Always", "VXLAN"},
+		{"vxlan_crosssubnet_ipip_never", "Never", "CrossSubnet", "VXLAN"},
+		{"both_never", "Never", "Never", "None"},
+		{"ipip_always_vxlan_always", "Always", "Always", "IPIP"}, // IPIP takes precedence
+	}
+
+	for _, tc := range testCases {
+		t.Run("DefaultPoolEncap_"+tc.name, func(t *testing.T) {
+			cfg := &NetworkConfig{
+				Plugin:       "calico",
+				KubePodsCIDR: "192.168.1.0/24",
+				Calico: &CalicoConfig{
+					IPIPMode:      tc.ipipMode,
+					VXLANMode:     tc.vxlanMode,
+					DefaultIPPOOL: boolPtr(true),
+					IPPools:       []CalicoIPPool{}, // Ensure it's empty to trigger default pool creation
+				},
+				IPPool: &IPPoolConfig{BlockSize: intPtr(26)}, // Provide global default
+			}
+			SetDefaults_NetworkConfig(cfg)
+			if len(cfg.Calico.IPPools) != 1 {
+				t.Fatalf("Expected 1 default IPPool, got %d for case %s", len(cfg.Calico.IPPools), tc.name)
+			}
+			if cfg.Calico.IPPools[0].Encapsulation != tc.expectedEncap {
+				t.Errorf("Case %s: Default IPPool Encapsulation = %s, want %s", tc.name, cfg.Calico.IPPools[0].Encapsulation, tc.expectedEncap)
+			}
+		})
+	}
 }
 
 // --- Test Validate_NetworkConfig & Sub-configs ---
@@ -359,10 +398,20 @@ func TestValidate_CiliumConfig(t *testing.T) {
 			errorMsg:    "cilium.kubeProxyReplacement: invalid mode 'invalid'",
 		},
 		{
-			name: "HubbleUI true, EnableHubble false",
-			input: &CiliumConfig{HubbleUI: true, EnableHubble: false},
-			expectError: true,
-			errorMsg:    "cilium.hubbleUI: inconsistent state: hubbleUI is true but enableHubble is false. Defaulting should ensure enableHubble is true when hubbleUI is true.",
+			name: "HubbleUI true, EnableHubble false (now valid after defaults)",
+			// This test case is tricky. Validate_CiliumConfig itself no longer flags this
+			// because SetDefaults_CiliumConfig is expected to fix it.
+			// If Validate_CiliumConfig is called on a raw, non-defaulted struct,
+			// it won't find this specific error.
+			// The defaults *will* make EnableHubble true if HubbleUI is true.
+			// So, a defaulted config will pass this.
+			input: func() *CiliumConfig {
+				cfg := &CiliumConfig{HubbleUI: true, EnableHubble: false}
+				SetDefaults_CiliumConfig(cfg) // Apply defaults to see the state validation would see
+				return cfg
+			}(),
+			expectError: false, // Because defaults correct it, and validation doesn't re-check this specific path.
+			errorMsg:    "",
 		},
 		{
 			name: "valid HubbleUI true, EnableHubble true",
