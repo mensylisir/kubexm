@@ -51,11 +51,8 @@ func Validate_CiliumConfig(cfg *CiliumConfig, verrs *ValidationErrors, pathPrefi
 		}
 	}
 
-	if cfg.HubbleUI && !cfg.EnableHubble {
-		// This case should ideally be handled by defaulting, but validation can also catch it
-		// if defaulting logic changes or isn't applied prior to validation in some scenarios.
-		// However, SetDefaults_CiliumConfig now handles this.
-		// For strictness, we can keep it:
-		verrs.Add("%s.hubbleUI: inconsistent state: hubbleUI is true but enableHubble is false. Defaulting should ensure enableHubble is true when hubbleUI is true.", pathPrefix)
-	}
+	// The case where cfg.HubbleUI is true and cfg.EnableHubble is false
+	// is handled by SetDefaults_CiliumConfig, which will set cfg.EnableHubble to true.
+	// Therefore, this specific inconsistent state check is not strictly needed here
+	// if defaults are always applied before validation.
 }

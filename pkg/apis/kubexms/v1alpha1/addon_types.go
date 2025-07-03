@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"net/url"
+	"regexp"
 	"strings"
 )
 
@@ -110,16 +111,19 @@ func Validate_AddonConfig(cfg *AddonConfig, verrs *ValidationErrors, pathPrefix 
 				verrs.Add("%s.repo: invalid URL format for chart repo '%s': %v", csPath, cfg.Sources.Chart.Repo, err)
 			}
 		}
-		// Validate Version format (basic check for non-empty if specified)
-		if cfg.Sources.Chart.Version != "" && strings.TrimSpace(cfg.Sources.Chart.Version) == "" {
-			verrs.Add("%s.version: chart version cannot be only whitespace if specified", csPath)
+		// Validate Version format
+		if cfg.Sources.Chart.Version != "" {
+			if strings.TrimSpace(cfg.Sources.Chart.Version) == "" {
+				verrs.Add("%s.version: chart version cannot be only whitespace if specified", csPath)
+			} else if !isValidChartVersion(cfg.Sources.Chart.Version) {
+				verrs.Add("%s.version: chart version '%s' is not a valid format (e.g., v1.2.3, 1.0.0, latest, stable)", csPath, cfg.Sources.Chart.Version)
+			}
 		}
-		// Example of a more specific version format validation (e.g., semantic versioning)
-		// This is a basic example, a proper semver library might be used for stricter checks.
-		if cfg.Sources.Chart.Version != "" && !isValidVersion(cfg.Sources.Chart.Version) {
-			// verrs.Add("%s.version: chart version '%s' is not a valid semantic version (e.g., v1.2.3, 1.0.0)", csPath, cfg.Sources.Chart.Version)
-			// Allowing non-semantic versions for now as charts can have other versioning schemes.
-			// We'll just ensure it's not just whitespace if set.
+
+		for i, val := range cfg.Sources.Chart.Values {
+			if !strings.Contains(val, "=") {
+				verrs.Add("%s.values[%d]: invalid format '%s', expected key=value", csPath, i, val)
+			}
 		}
 		// ValuesFile path existence is more of a runtime check.
 	}
@@ -133,6 +137,13 @@ func Validate_AddonConfig(cfg *AddonConfig, verrs *ValidationErrors, pathPrefix 
 		for i, p := range cfg.Sources.Yaml.Path {
 			if strings.TrimSpace(p) == "" {
 				verrs.Add("%s.path[%d]: path/URL cannot be empty", ysPath, i)
+			}
+			// Basic check for http/https or local path (does not check existence)
+			if !strings.HasPrefix(p, "http://") && !strings.HasPrefix(p, "https://") && !strings.HasPrefix(p, "/") && !strings.Contains(p, "./") {
+				// This is a very basic check and might not cover all valid local path cases,
+				// especially on Windows or relative paths not starting with "./".
+				// Consider if a more robust path validation is needed or if this is sufficient.
+				// For now, it suggests an intention for URL or absolute/relative local paths.
 			}
 		}
 	}
@@ -152,23 +163,17 @@ func Validate_AddonConfig(cfg *AddonConfig, verrs *ValidationErrors, pathPrefix 
 	}
 }
 
-// isValidVersion is a simple helper to validate common version string patterns.
-// It allows versions like "1.2.3", "v1.2.3", "0.1.0-alpha+001", "latest", "stable".
-// This is not a strict semantic version validator but covers many common chart versions.
-func isValidVersion(version string) bool {
-	if strings.TrimSpace(version) == "" {
-		return false // Empty or whitespace-only is not valid if version field is used
+// isValidChartVersion checks if the version string matches common chart version patterns.
+// Allows "latest", "stable", or versions like "1.2.3", "v1.2.3", "1.0", "v2".
+// Does not aim for strict SemVer compliance but common usage.
+func isValidChartVersion(version string) bool {
+	if version == "latest" || version == "stable" {
+		return true
 	}
-	// Regex to match common version patterns:
-	// - Starts with 'v' or a digit.
-	// - Can include dots, hyphens (for pre-releases), plus (for build metadata).
-	// - Allows "latest", "stable" as special keywords.
-	// This regex is quite permissive.
-	// For strict semver, a dedicated library or more complex regex would be needed.
-	// Example: ^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$
-	// For now, we are only checking if it's not just whitespace if set, so this function is more illustrative.
-	// The actual check `cfg.Sources.Chart.Version != "" && strings.TrimSpace(cfg.Sources.Chart.Version) == ""`
-	// in `Validate_AddonConfig` handles the "not just whitespace" part.
-	// If a more specific validation was enabled (like the commented out semver check), this function would be used.
-	return true // Simplified: actual non-whitespace check is done inline.
+	// Regex for versions like: v1.2.3, 1.2.3, v1.0, 1.0, v1, 1
+	// Allows optional 'v', followed by digits, optionally followed by (.digits)+
+	// Does not match complex pre-release/build metadata for simplicity, as chart versions often don't use them
+	// or they are handled as opaque strings by Helm.
+	matched, _ := regexp.MatchString(`^v?([0-9]+)(\.[0-9]+)*$`, version)
+	return matched
 }

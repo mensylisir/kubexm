@@ -118,8 +118,12 @@ func Validate_ContainerdConfig(cfg *ContainerdConfig, verrs *ValidationErrors, p
 	if cfg == nil {
 		return
 	}
-	if cfg.Version != "" && strings.TrimSpace(cfg.Version) == "" {
-		verrs.Add("%s.version: cannot be only whitespace if specified", pathPrefix)
+	if cfg.Version != "" {
+		if strings.TrimSpace(cfg.Version) == "" {
+			verrs.Add("%s.version: cannot be only whitespace if specified", pathPrefix)
+		} else if !isValidRuntimeVersion(cfg.Version) { // Use the common validator
+			verrs.Add("%s.version: '%s' is not a recognized version format", pathPrefix, cfg.Version)
+		}
 	}
 
 	for reg, mirrors := range cfg.RegistryMirrors {

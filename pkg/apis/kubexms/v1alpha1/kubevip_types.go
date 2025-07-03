@@ -142,6 +142,9 @@ func Validate_KubeVIPConfig(cfg *KubeVIPConfig, verrs *ValidationErrors, pathPre
 		   if cfg.BGPConfig.PeerASN == 0 { verrs.Add("%s.peerASN: peer ASN must be specified for BGP mode", bp)}
 		   if strings.TrimSpace(cfg.BGPConfig.PeerAddress) == "" { verrs.Add("%s.peerAddress: peer address must be specified for BGP mode", bp)
 		   } else if !isValidIP(cfg.BGPConfig.PeerAddress) { verrs.Add("%s.peerAddress: invalid IP '%s'", bp, cfg.BGPConfig.PeerAddress)}
+			if cfg.BGPConfig.SourceAddress != "" && !isValidIP(cfg.BGPConfig.SourceAddress) {
+				verrs.Add("%s.sourceAddress: invalid IP address format '%s'", bp, cfg.BGPConfig.SourceAddress)
+			}
 
 	   }
 	}

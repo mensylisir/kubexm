@@ -52,8 +52,8 @@ func TestValidate_KeepalivedConfig(t *testing.T) {
 		wantErrMsg string
 	}{
 		{"nil_vrid", KeepalivedConfig{Priority: intPtr(100), Interface: stringPtr("eth0")}, ".vrid: virtual router ID must be specified"},
-		{"bad_vrid_low", KeepalivedConfig{VRID: intPtr(-1)}, ".vrid: must be between 0 and 255"},
-		{"bad_vrid_high", KeepalivedConfig{VRID: intPtr(256)}, ".vrid: must be between 0 and 255"},
+		{"bad_vrid_low", KeepalivedConfig{VRID: intPtr(0)}, ".vrid: must be between 1 and 255"},    // Changed from -1 and 0-255
+		{"bad_vrid_high", KeepalivedConfig{VRID: intPtr(256)}, ".vrid: must be between 1 and 255"}, // Changed error message range
 		{"nil_priority", KeepalivedConfig{VRID: intPtr(50), Interface: stringPtr("eth0")}, ".priority: must be specified"},
 		{"bad_priority_low", KeepalivedConfig{Priority: intPtr(0)}, ".priority: must be between 1 and 254"},
 		{"bad_priority_high", KeepalivedConfig{Priority: intPtr(255)}, ".priority: must be between 1 and 254"},

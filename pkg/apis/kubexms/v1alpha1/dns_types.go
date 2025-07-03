@@ -8,37 +8,66 @@ import (
 )
 
 // isValidHostOrIP checks if a string is a valid IP address or a simple valid hostname.
-// For hostnames, this is a simplified check.
+// For hostnames, this relies on isValidDomainName which is now more robust.
 func isValidHostOrIP(hostOrIP string) bool {
+	// Check if it's a valid IP address first.
 	if net.ParseIP(hostOrIP) != nil {
-		return true // It's a valid IP address
-	}
-	// Regex for basic hostname validation (allows LDH labels: letters, digits, hyphen)
-	// Does not enforce all RFC rules (e.g. length of parts, total length) but good for most cases.
-	if matched, _ := regexp.MatchString(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`, hostOrIP); matched {
 		return true
 	}
-	return false
+	// If not an IP, check if it's a valid domain name.
+	// isValidDomainName itself now ensures it's not an IP and checks for other domain validity rules.
+	return isValidDomainName(hostOrIP)
 }
 
 // isValidDomainName checks if a string is a plausible domain name.
-// This is a simplified check.
+// This is a more comprehensive check than the basic regex.
 func isValidDomainName(domain string) bool {
 	if domain == "" || len(domain) > 253 {
 		return false
 	}
-	// Regex for basic domain name validation
-	if matched, _ := regexp.MatchString(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`, domain); !matched {
+	// Domain must not be an IP address
+	if net.ParseIP(domain) != nil {
 		return false
 	}
-	// Should not end with a hyphen or dot
-	if strings.HasSuffix(domain, "-") || strings.HasSuffix(domain, ".") {
+
+	// Regex for basic domain name structure (LDH: letters, digits, hyphen for labels)
+	// Each label: starts and ends with alphanumeric, contains alphanumeric or hyphen, 1-63 chars.
+	// Allows for a trailing dot indicating FQDN root.
+	fqdnRegex := `^([a-zA-Z0-9]{1}[a-zA-Z0-9-]{0,61}[a-zA-Z0-9]{1}|[a-zA-Z0-9]{1})(\.([a-zA-Z0-9]{1}[a-zA-Z0-9-]{0,61}[a-zA-Z0-9]{1}|[a-zA-Z0-9]{1}))*\.?$`
+	if matched, _ := regexp.MatchString(fqdnRegex, domain); !matched {
 		return false
 	}
-	// Should not start with a hyphen
-	if strings.HasPrefix(domain, "-") {
-		return false
+
+	// Check for numeric-only TLD if it's not a single label domain (like "localhost")
+	parts := strings.Split(strings.TrimRight(domain, "."), ".")
+	if len(parts) > 1 {
+		tld := parts[len(parts)-1]
+		isNumericTld := true
+		if tld == "" { // Should be caught by regex, but defensive
+			isNumericTld = false
+		}
+		for _, char := range tld {
+			if char < '0' || char > '9' {
+				isNumericTld = false
+				break
+			}
+		}
+		if isNumericTld {
+			return false // Numeric TLDs are generally invalid for hostnames expected here
+		}
 	}
+
+	// Final check: ensure no part starts or ends with a hyphen (already mostly covered by regex but good for robustness)
+	// And no part is longer than 63 characters (also covered by regex)
+	for _, part := range parts {
+		if strings.HasPrefix(part, "-") || strings.HasSuffix(part, "-") {
+			return false
+		}
+		if len(part) > 63 {
+			return false
+		}
+	}
+
 	return true
 }
 

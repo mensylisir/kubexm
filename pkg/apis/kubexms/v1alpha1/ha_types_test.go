@@ -92,6 +92,20 @@ func TestSetDefaults_HighAvailabilityConfig(t *testing.T) {
 		// if cfgInt.Internal.KubeVIP.Image == "" { t.Error("KubeVIP image default failed") }
 	})
 
+	t.Run("external LB enabled default with any type", func(t *testing.T) {
+		haEnabled := true
+		cfg := &HighAvailabilityConfig{
+			Enabled: &haEnabled,
+			External: &ExternalLoadBalancerConfig{
+				Type: "SomeCustomType", // Not "Managed*" or "UserProvided"
+				// Enabled is nil
+			},
+		}
+		SetDefaults_HighAvailabilityConfig(cfg)
+		if cfg.External == nil || cfg.External.Enabled == nil || !*cfg.External.Enabled {
+			t.Errorf("External.Enabled should default to true if External.Type is set, got %v", cfg.External.Enabled)
+		}
+	})
 }
 
 func TestValidate_HighAvailabilityConfig(t *testing.T) {
