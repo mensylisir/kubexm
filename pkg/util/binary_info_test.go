@@ -9,23 +9,17 @@ import (
 )
 
 func TestGetBinaryInfo(t *testing.T) {
-	// Mock os.Getenv for KXZONE
 	origKXZONE := os.Getenv("KXZONE")
 	defer os.Setenv("KXZONE", origKXZONE)
 
 	baseWorkDir := "/testwork"
 	baseClusterName := "mycluster"
 
-	// Helper to construct expected paths for readability in test cases
-	// Example: makePath(baseWorkDir, baseClusterName, "etcd", "v3.5.9", "amd64", "etcd-v3.5.9-linux-amd64.tar.gz")
-	// For container runtimes: makePath(baseWorkDir, baseClusterName, common.DefaultContainerRuntimeDir, "docker", "20.10.17", "amd64", "docker-20.10.17.tgz")
-	// For tools: makePath(baseWorkDir, baseClusterName, "helm", "helm", "v3.9.0", "amd64", "helm-v3.9.0-linux-amd64.tar.gz")
 	makeExpectedPaths := func(componentType BinaryType, componentNameForDir, version, arch, fileName string) (baseDir, componentDir, filePath string) {
 		kubexmRoot := filepath.Join(baseWorkDir, common.KUBEXM)
 		clusterBase := filepath.Join(kubexmRoot, baseClusterName)
-
 		typeDirName := ""
-		pathParts := []string{} // parts for componentDir relative to typeDirName
+		pathParts := []string{}
 
 		switch componentType {
 		case ETCD:
@@ -36,22 +30,18 @@ func TestGetBinaryInfo(t *testing.T) {
 			pathParts = append(pathParts, version, arch)
 		case CNI, CALICOCTL:
 			typeDirName = filepath.Join(DirNameKubernetes, "cni")
-			pathParts = append(pathParts, componentNameForDir, version, arch) // componentNameForDir here is actual component name
+			pathParts = append(pathParts, componentNameForDir, version, arch)
 		case CONTAINERD, DOCKER, RUNC, CRIDOCKERD, CRICTL:
 			typeDirName = DirNameContainerRuntime
-			pathParts = append(pathParts, componentNameForDir, version, arch) // componentNameForDir is like "docker", "containerd"
-		case HELM, BUILD, REGISTRY: // TOOLS
-			typeDirName = string(componentType) // e.g., "helm", "registry"
-			pathParts = append(pathParts, componentNameForDir, version, arch) // componentNameForDir is actual component name
+			pathParts = append(pathParts, componentNameForDir, version, arch)
+		case HELM, BUILD, REGISTRY:
+			typeDirName = string(componentType)
+			pathParts = append(pathParts, componentNameForDir, version, arch)
 		default:
-			// This case should ideally not be hit if all types are handled
-			// Or, could use componentName directly under clusterBase for unknown/new types
 			typeDirName = "unknown_type"
 			pathParts = append(pathParts, componentNameForDir, version, arch)
 		}
-
 		baseDir = filepath.Join(clusterBase, typeDirName)
-		// componentDir = filepath.Join(baseDir, pathParts...) // Original line causing issues
 		allComponentPathElements := append([]string{baseDir}, pathParts...)
 		componentDir = filepath.Join(allComponentPathElements...)
 		filePath = filepath.Join(componentDir, fileName)
@@ -68,123 +58,119 @@ func TestGetBinaryInfo(t *testing.T) {
 		clusterName           string
 		expectedType          BinaryType
 		expectedOS            string
-		expectedArch          string // Expected resolved arch in BinaryInfo
+		expectedArch          string
 		expectedFileName      string
 		expectedURLContains   string
 		expectedIsArchive     bool
-		expectedBaseDir       string
-		expectedComponentDir  string
-		expectedFilePath      string
+		expectedBaseDir       string // Will be dynamically populated if not error case
+		expectedComponentDir  string // Will be dynamically populated
+		expectedFilePath      string // Will be dynamically populated
+		expectedChecksumVal   string
+		expectedChecksumType  string
 		expectError           bool
 		expectedErrorContains string
 	}{
 		{
-			name:                "etcd_default_zone_amd64",
-			componentName:       ComponentEtcd,
-			version:             "v3.5.9",
-			arch:                "amd64",
-			zone:                "",
-			workDir:             baseWorkDir,
-			clusterName:         baseClusterName,
-			expectedType:        ETCD,
-			expectedOS:          "linux",
-			expectedArch:        "amd64",
-			expectedFileName:    "etcd-v3.5.9-linux-amd64.tar.gz",
-			expectedURLContains: "github.com/coreos/etcd/releases/download/v3.5.9/etcd-v3.5.9-linux-amd64.tar.gz",
-			expectedIsArchive:   true,
-			expectedBaseDir:     filepath.Join(baseWorkDir, common.KUBEXM, baseClusterName, DirNameEtcd),
-			expectedComponentDir: filepath.Join(baseWorkDir, common.KUBEXM, baseClusterName, DirNameEtcd, "v3.5.9", "amd64"),
-			expectedFilePath:    filepath.Join(baseWorkDir, common.KUBEXM, baseClusterName, DirNameEtcd, "v3.5.9", "amd64", "etcd-v3.5.9-linux-amd64.tar.gz"),
+			name:                 "etcd_default_zone_amd64",
+			componentName:        ComponentEtcd,
+			version:              "v3.5.9",
+			arch:                 "amd64",
+			zone:                 "",
+			workDir:              baseWorkDir,
+			clusterName:          baseClusterName,
+			expectedType:         ETCD,
+			expectedOS:           "linux",
+			expectedArch:         "amd64",
+			expectedFileName:     "etcd-v3.5.9-linux-amd64.tar.gz",
+			expectedURLContains:  "github.com/coreos/etcd/releases/download/v3.5.9/etcd-v3.5.9-linux-amd64.tar.gz",
+			expectedIsArchive:    true,
+			expectedChecksumVal:  "dummy-etcd-checksum-val",
+			expectedChecksumType: "sha256",
 		},
 		{
-			name:                "etcd_cn_zone_arm64",
-			componentName:       ComponentEtcd,
-			version:             "v3.5.9",
-			arch:                "arm64",
-			zone:                "cn",
-			workDir:             baseWorkDir,
-			clusterName:         baseClusterName,
-			expectedType:        ETCD,
-			expectedOS:          "linux",
-			expectedArch:        "arm64",
-			expectedFileName:    "etcd-v3.5.9-linux-arm64.tar.gz",
-			expectedURLContains: "kubernetes-release.pek3b.qingstor.com/etcd/release/download/v3.5.9/etcd-v3.5.9-linux-arm64.tar.gz",
-			expectedIsArchive:   true,
-			expectedBaseDir:     filepath.Join(baseWorkDir, common.KUBEXM, baseClusterName, DirNameEtcd),
-			expectedComponentDir: filepath.Join(baseWorkDir, common.KUBEXM, baseClusterName, DirNameEtcd, "v3.5.9", "arm64"),
-			expectedFilePath:    filepath.Join(baseWorkDir, common.KUBEXM, baseClusterName, DirNameEtcd, "v3.5.9", "arm64", "etcd-v3.5.9-linux-arm64.tar.gz"),
+			name:                 "etcd_cn_zone_arm64",
+			componentName:        ComponentEtcd,
+			version:              "v3.5.9",
+			arch:                 "arm64",
+			zone:                 "cn",
+			workDir:              baseWorkDir,
+			clusterName:          baseClusterName,
+			expectedType:         ETCD,
+			expectedOS:           "linux",
+			expectedArch:         "arm64",
+			expectedFileName:     "etcd-v3.5.9-linux-arm64.tar.gz",
+			expectedURLContains:  "kubernetes-release.pek3b.qingstor.com/etcd/release/download/v3.5.9/etcd-v3.5.9-linux-arm64.tar.gz",
+			expectedIsArchive:    true,
+			expectedChecksumVal:  "dummy-etcd-checksum-val",
+			expectedChecksumType: "sha256",
 		},
 		{
-			name:                "kubeadm_default_zone_amd64",
-			componentName:       ComponentKubeadm,
-			version:             "v1.23.5",
-			arch:                "amd64",
-			zone:                "",
-			workDir:             baseWorkDir,
-			clusterName:         baseClusterName,
-			expectedType:        KUBE,
-			expectedOS:          "linux",
-			expectedArch:        "amd64",
-			expectedFileName:    "kubeadm",
-			expectedURLContains: "dl.k8s.io/release/v1.23.5/bin/linux/amd64/kubeadm",
-			expectedIsArchive:   false,
-			expectedBaseDir:     filepath.Join(baseWorkDir, common.KUBEXM, baseClusterName, DirNameKubernetes),
-			expectedComponentDir: filepath.Join(baseWorkDir, common.KUBEXM, baseClusterName, DirNameKubernetes, "v1.23.5", "amd64"),
-			expectedFilePath:    filepath.Join(baseWorkDir, common.KUBEXM, baseClusterName, DirNameKubernetes, "v1.23.5", "amd64", "kubeadm"),
+			name:                 "kubeadm_default_zone_amd64",
+			componentName:        ComponentKubeadm,
+			version:              "v1.23.5",
+			arch:                 "amd64",
+			zone:                 "",
+			workDir:              baseWorkDir,
+			clusterName:          baseClusterName,
+			expectedType:         KUBE,
+			expectedOS:           "linux",
+			expectedArch:         "amd64",
+			expectedFileName:     "kubeadm",
+			expectedURLContains:  "dl.k8s.io/release/v1.23.5/bin/linux/amd64/kubeadm",
+			expectedIsArchive:    false,
+			expectedChecksumVal:  "",
+			expectedChecksumType: "",
 		},
 		{
-			name:                "containerd_cn_zone_arm64",
-			componentName:       ComponentContainerd,
-			version:             "1.7.1", // Version without v for containerd filename/url
-			arch:                "arm64",
-			zone:                "cn",
-			workDir:             baseWorkDir,
-			clusterName:         baseClusterName,
-			expectedType:        CONTAINERD,
-			expectedOS:          "linux",
-			expectedArch:        "arm64",
-			expectedFileName:    "containerd-1.7.1-linux-arm64.tar.gz",
-			expectedURLContains: "kubernetes-release.pek3b.qingstor.com/containerd/containerd/releases/download/v1.7.1/containerd-1.7.1-linux-arm64.tar.gz",
-			expectedIsArchive:   true,
-			expectedBaseDir:     filepath.Join(baseWorkDir, common.KUBEXM, baseClusterName, DirNameContainerRuntime),
-			expectedComponentDir: filepath.Join(baseWorkDir, common.KUBEXM, baseClusterName, DirNameContainerRuntime, "containerd", "1.7.1", "arm64"),
-			expectedFilePath:    filepath.Join(baseWorkDir, common.KUBEXM, baseClusterName, DirNameContainerRuntime, "containerd", "1.7.1", "arm64", "containerd-1.7.1-linux-arm64.tar.gz"),
+			name:                 "containerd_cn_zone_arm64",
+			componentName:        ComponentContainerd,
+			version:              "1.7.1",
+			arch:                 "arm64",
+			zone:                 "cn",
+			workDir:              baseWorkDir,
+			clusterName:          baseClusterName,
+			expectedType:         CONTAINERD,
+			expectedOS:           "linux",
+			expectedArch:         "arm64",
+			expectedFileName:     "containerd-1.7.1-linux-arm64.tar.gz",
+			expectedURLContains:  "kubernetes-release.pek3b.qingstor.com/containerd/containerd/releases/download/v1.7.1/containerd-1.7.1-linux-arm64.tar.gz",
+			expectedIsArchive:    true,
+			expectedChecksumVal:  "",
+			expectedChecksumType: "",
 		},
 		{
-			name:                "docker_default_zone_amd64",
-			componentName:       ComponentDocker,
-			version:             "20.10.17",
-			arch:                "amd64",
-			zone:                "",
-			workDir:             baseWorkDir,
-			clusterName:         baseClusterName,
-			expectedType:        DOCKER,
-			expectedOS:          "linux",
-			expectedArch:        "amd64",
-			expectedFileName:    "docker-20.10.17.tgz",
-			expectedURLContains: "download.docker.com/linux/static/stable/x86_64/docker-20.10.17.tgz",
-			expectedIsArchive:   true,
-			expectedBaseDir:     filepath.Join(baseWorkDir, common.KUBEXM, baseClusterName, DirNameContainerRuntime),
-			expectedComponentDir: filepath.Join(baseWorkDir, common.KUBEXM, baseClusterName, DirNameContainerRuntime, "docker", "20.10.17", "amd64"),
-			expectedFilePath:    filepath.Join(baseWorkDir, common.KUBEXM, baseClusterName, DirNameContainerRuntime, "docker", "20.10.17", "amd64", "docker-20.10.17.tgz"),
+			name:                 "docker_default_zone_amd64",
+			componentName:        ComponentDocker,
+			version:              "20.10.17",
+			arch:                 "amd64",
+			zone:                 "",
+			workDir:              baseWorkDir,
+			clusterName:          baseClusterName,
+			expectedType:         DOCKER,
+			expectedOS:           "linux",
+			expectedArch:         "amd64",
+			expectedFileName:     "docker-20.10.17.tgz",
+			expectedURLContains:  "download.docker.com/linux/static/stable/x86_64/docker-20.10.17.tgz",
+			expectedIsArchive:    true,
+			expectedChecksumVal:  "",
+			expectedChecksumType: "",
 		},
 		{
-			name:                "runc_default_zone_amd64",
-			componentName:       ComponentRunc,
-			version:             "v1.1.12",
-			arch:                "amd64",
-			zone:                "",
-			workDir:             baseWorkDir,
-			clusterName:         baseClusterName,
-			expectedType:        RUNC,
-			expectedOS:          "linux",
-			expectedArch:        "amd64",
-			expectedFileName:    "runc.amd64",
-			expectedURLContains: "github.com/opencontainers/runc/releases/download/v1.1.12/runc.amd64",
-			expectedIsArchive:   false,
-			expectedBaseDir:     filepath.Join(baseWorkDir, common.KUBEXM, baseClusterName, DirNameContainerRuntime),
-			expectedComponentDir: filepath.Join(baseWorkDir, common.KUBEXM, baseClusterName, DirNameContainerRuntime, "runc", "v1.1.12", "amd64"),
-			expectedFilePath:    filepath.Join(baseWorkDir, common.KUBEXM, baseClusterName, DirNameContainerRuntime, "runc", "v1.1.12", "amd64", "runc.amd64"),
+			name:                 "runc_default_zone_amd64",
+			componentName:        ComponentRunc,
+			version:              "v1.1.12",
+			arch:                 "amd64",
+			zone:                 "",
+			workDir:              baseWorkDir,
+			clusterName:          baseClusterName,
+			expectedType:         RUNC,
+			expectedOS:           "linux",
+			expectedArch:         "amd64",
+			expectedFileName:     "runc.amd64",
+			expectedURLContains:  "github.com/opencontainers/runc/releases/download/v1.1.12/runc.amd64",
+			expectedIsArchive:    false,
+			expectedChecksumVal:  "",
+			expectedChecksumType: "",
 		},
 		{
 			name:                  "unknown_component",
@@ -200,7 +186,7 @@ func TestGetBinaryInfo(t *testing.T) {
 		{
 			name:                  "etcd_no_version",
 			componentName:         ComponentEtcd,
-			version:               "", // Empty version
+			version:               "",
 			arch:                  "amd64",
 			zone:                  "",
 			workDir:               baseWorkDir,
@@ -214,7 +200,7 @@ func TestGetBinaryInfo(t *testing.T) {
 			version:               "v3.5.9",
 			arch:                  "amd64",
 			zone:                  "",
-			workDir:               "", // Empty workDir
+			workDir:               "",
 			clusterName:           baseClusterName,
 			expectError:           true,
 			expectedErrorContains: "workDir cannot be empty",
@@ -226,151 +212,141 @@ func TestGetBinaryInfo(t *testing.T) {
 			arch:                  "amd64",
 			zone:                  "",
 			workDir:               baseWorkDir,
-			clusterName:           "", // Empty clusterName
+			clusterName:           "",
 			expectError:           true,
 			expectedErrorContains: "clusterName cannot be empty",
 		},
 		{
-			name:                "k3s_amd64",
-			componentName:       ComponentK3s,
-			version:             "v1.25.4+k3s1",
-			arch:                "amd64",
-			zone:                "",
-			workDir:             baseWorkDir,
-			clusterName:         baseClusterName,
-			expectedType:        K3S,
-			expectedOS:          "linux",
-			expectedArch:        "amd64",
-			expectedFileName:    "k3s",
-			expectedURLContains: "github.com/k3s-io/k3s/releases/download/v1.25.4+k3s1/k3s",
-			expectedIsArchive:   false,
+			name:                 "k3s_amd64",
+			componentName:        ComponentK3s,
+			version:              "v1.25.4+k3s1",
+			arch:                 "amd64",
+			zone:                 "",
+			workDir:              baseWorkDir,
+			clusterName:          baseClusterName,
+			expectedType:         K3S,
+			expectedOS:           "linux",
+			expectedArch:         "amd64",
+			expectedFileName:     "k3s",
+			expectedURLContains:  "github.com/k3s-io/k3s/releases/download/v1.25.4+k3s1/k3s",
+			expectedIsArchive:    false,
+			expectedChecksumVal:  "",
+			expectedChecksumType: "",
 		},
 		{
-			name:                "k3s_arm64",
-			componentName:       ComponentK3s,
-			version:             "v1.25.4+k3s1",
-			arch:                "arm64",
-			zone:                "",
-			workDir:             baseWorkDir,
-			clusterName:         baseClusterName,
-			expectedType:        K3S,
-			expectedOS:          "linux",
-			expectedArch:        "arm64",
-			expectedFileName:    "k3s-arm64",
-			expectedURLContains: "github.com/k3s-io/k3s/releases/download/v1.25.4+k3s1/k3s-arm64",
-			expectedIsArchive:   false,
+			name:                 "k3s_arm64",
+			componentName:        ComponentK3s,
+			version:              "v1.25.4+k3s1",
+			arch:                 "arm64",
+			zone:                 "",
+			workDir:              baseWorkDir,
+			clusterName:          baseClusterName,
+			expectedType:         K3S,
+			expectedOS:           "linux",
+			expectedArch:         "arm64",
+			expectedFileName:     "k3s-arm64",
+			expectedURLContains:  "github.com/k3s-io/k3s/releases/download/v1.25.4+k3s1/k3s-arm64",
+			expectedIsArchive:    false,
+			expectedChecksumVal:  "",
+			expectedChecksumType: "",
 		},
-		// Kubectl example (KUBE type)
 		{
-			name:                "kubectl_cn_zone_amd64",
-			componentName:       ComponentKubectl,
-			version:             "v1.23.5",
-			arch:                "amd64",
-			zone:                "cn",
-			workDir:             baseWorkDir,
-			clusterName:         baseClusterName,
-			expectedType:        KUBE,
-			expectedOS:          "linux",
-			expectedArch:        "amd64",
-			expectedFileName:    "kubectl",
-			expectedURLContains: "kubernetes-release.pek3b.qingstor.com/release/v1.23.5/bin/linux/amd64/kubectl",
-			expectedIsArchive:   false,
+			name:                 "kubectl_cn_zone_amd64",
+			componentName:        ComponentKubectl,
+			version:              "v1.23.5",
+			arch:                 "amd64",
+			zone:                 "cn",
+			workDir:              baseWorkDir,
+			clusterName:          baseClusterName,
+			expectedType:         KUBE,
+			expectedOS:           "linux",
+			expectedArch:         "amd64",
+			expectedFileName:     "kubectl",
+			expectedURLContains:  "kubernetes-release.pek3b.qingstor.com/release/v1.23.5/bin/linux/amd64/kubectl",
+			expectedIsArchive:    false,
+			expectedChecksumVal:  "",
+			expectedChecksumType: "",
 		},
-		// CNI example
 		{
-			name:                "cni_default_zone_amd64",
-			componentName:       ComponentKubeCNI,
-			version:             "v1.2.0",
-			arch:                "amd64",
-			zone:                "",
-			workDir:             baseWorkDir,
-			clusterName:         baseClusterName,
-			expectedType:        CNI,
-			expectedOS:          "linux",
-			expectedArch:        "amd64",
-			expectedFileName:    "cni-plugins-linux-amd64-v1.2.0.tgz",
-			expectedURLContains: "github.com/containernetworking/plugins/releases/download/v1.2.0/cni-plugins-linux-amd64-v1.2.0.tgz",
-			expectedIsArchive:   true,
+			name:                 "cni_default_zone_amd64",
+			componentName:        ComponentKubeCNI,
+			version:              "v1.2.0",
+			arch:                 "amd64",
+			zone:                 "",
+			workDir:              baseWorkDir,
+			clusterName:          baseClusterName,
+			expectedType:         CNI,
+			expectedOS:           "linux",
+			expectedArch:         "amd64",
+			expectedFileName:     "cni-plugins-linux-amd64-v1.2.0.tgz",
+			expectedURLContains:  "github.com/containernetworking/plugins/releases/download/v1.2.0/cni-plugins-linux-amd64-v1.2.0.tgz",
+			expectedIsArchive:    true,
+			expectedChecksumVal:  "",
+			expectedChecksumType: "",
 		},
-		// Helm example
 		{
-			name:                "helm_cn_zone_arm64",
-			componentName:       ComponentHelm,
-			version:             "v3.9.0",
-			arch:                "arm64",
-			zone:                "cn",
-			workDir:             baseWorkDir,
-			clusterName:         baseClusterName,
-			expectedType:        HELM,
-			expectedOS:          "linux",
-			expectedArch:        "arm64",
-			expectedFileName:    "helm-v3.9.0-linux-arm64.tar.gz",
-			expectedURLContains: "kubernetes-helm.pek3b.qingstor.com/linux-arm64/v3.9.0/helm-v3.9.0-linux-arm64.tar.gz",
-			expectedIsArchive:   true,
+			name:                 "helm_cn_zone_arm64",
+			componentName:        ComponentHelm,
+			version:              "v3.9.0",
+			arch:                 "arm64",
+			zone:                 "cn",
+			workDir:              baseWorkDir,
+			clusterName:          baseClusterName,
+			expectedType:         HELM,
+			expectedOS:           "linux",
+			expectedArch:         "arm64",
+			expectedFileName:     "helm-v3.9.0-linux-arm64.tar.gz",
+			expectedURLContains:  "kubernetes-helm.pek3b.qingstor.com/linux-arm64/v3.9.0/helm-v3.9.0-linux-arm64.tar.gz",
+			expectedIsArchive:    true,
+			expectedChecksumVal:  "",
+			expectedChecksumType: "",
 		},
 	}
 
-	// Dynamically populate expected paths for test cases that don't expect errors
-	for i, tt := range tests {
+	for i := range tests {
+		tt := &tests[i] // Use a pointer to allow modification in loop
 		if !tt.expectError {
-			// Get the details for the component to determine its type and componentNameForDir
-			details, ok := knownBinaryDetails[strings.ToLower(tt.componentName)]
+			// Access the new defaultKnownBinaryDetails map
+			details, ok := defaultKnownBinaryDetails[strings.ToLower(tt.componentName)]
 			if !ok {
-				// This should not happen for valid test cases, but as a safeguard
 				t.Fatalf("Test case %s uses an unknown component %s for path generation", tt.name, tt.componentName)
 			}
-			compNameForDir := details.componentNameForDir
+			compNameForDir := details.ComponentNameForDir // Use capitalized field name
 			if compNameForDir == "" {
 				compNameForDir = tt.componentName
 			}
-			// For CNI and CALICOCTL, the componentNameForDir in makeExpectedPaths should be the actual component name
-			if details.binaryType == CNI || details.binaryType == CALICOCTL {
+			if details.BinaryType == CNI || details.BinaryType == CALICOCTL { // Use capitalized field name
 				compNameForDir = tt.componentName
 			}
-
-
-			expectedBase, expectedComp, expectedFP := makeExpectedPaths(details.binaryType, compNameForDir, tt.version, tt.expectedArch, tt.expectedFileName)
-			tests[i].expectedBaseDir = expectedBase
-			tests[i].expectedComponentDir = expectedComp
-			tests[i].expectedFilePath = expectedFP
+			expectedBase, expectedComp, expectedFP := makeExpectedPaths(details.BinaryType, compNameForDir, tt.version, tt.expectedArch, tt.expectedFileName) // Use capitalized field name
+			tt.expectedBaseDir = expectedBase
+			tt.expectedComponentDir = expectedComp
+			tt.expectedFilePath = expectedFP
 		}
 	}
 
-
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.zone == "cn" {
+		tc := tt // capture range variable
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.zone == "cn" {
 				os.Setenv("KXZONE", "cn")
 			} else {
-				os.Setenv("KXZONE", "") // Explicitly set to empty for default zone tests
+				os.Setenv("KXZONE", "")
 			}
 
-			// Use tt.workDir and tt.clusterName if provided, else use base defaults
-			currentWorkDir := tt.workDir
-			if currentWorkDir == "" { // Should only be for specific error tests
-				currentWorkDir = baseWorkDir // Fallback, though error tests might expect this to be specifically empty
-			}
-			currentClusterName := tt.clusterName
-			if currentClusterName == "" {
-				currentClusterName = baseClusterName
-			}
+			currentWorkDir := tc.workDir
+			currentClusterName := tc.clusterName
+			if tc.name == "etcd_no_workdir" { currentWorkDir = "" }
+			if tc.name == "etcd_no_clustername" { currentClusterName = "" }
 
-			// For error test cases where workDir or clusterName is intentionally empty
-			if tt.name == "etcd_no_workdir" {
-				currentWorkDir = ""
-			}
-			if tt.name == "etcd_no_clustername" {
-				currentClusterName = ""
-			}
+			provider := NewBinaryProvider() // Create a provider instance
+			binInfo, err := provider.GetBinaryInfo(tc.componentName, tc.version, tc.arch, GetZone(), currentWorkDir, currentClusterName)
 
-
-			binInfo, err := GetBinaryInfo(tt.componentName, tt.version, tt.arch, GetZone(), currentWorkDir, currentClusterName)
-
-			if tt.expectError {
+			if tc.expectError {
 				if err == nil {
 					t.Errorf("GetBinaryInfo() expected error, got nil")
-				} else if tt.expectedErrorContains != "" && !strings.Contains(err.Error(), tt.expectedErrorContains) {
-					t.Errorf("GetBinaryInfo() expected error containing %q, got %q", tt.expectedErrorContains, err.Error())
+				} else if tc.expectedErrorContains != "" && !strings.Contains(err.Error(), tc.expectedErrorContains) {
+					t.Errorf("GetBinaryInfo() expected error containing %q, got %q", tc.expectedErrorContains, err.Error())
 				}
 				return
 			}
@@ -378,34 +354,38 @@ func TestGetBinaryInfo(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GetBinaryInfo() returned error: %v", err)
 			}
-			if binInfo.Type != tt.expectedType {
-				t.Errorf("Expected Type %s, got %s", tt.expectedType, binInfo.Type)
+			if binInfo.Type != tc.expectedType {
+				t.Errorf("Expected Type %s, got %s", tc.expectedType, binInfo.Type)
 			}
-			if binInfo.OS != tt.expectedOS {
-				t.Errorf("Expected OS %s, got %s", tt.expectedOS, binInfo.OS)
+			if binInfo.OS != tc.expectedOS {
+				t.Errorf("Expected OS %s, got %s", tc.expectedOS, binInfo.OS)
 			}
-			if binInfo.Arch != tt.expectedArch {
-				t.Errorf("Expected Arch %s, got %s", tt.expectedArch, binInfo.Arch)
+			if binInfo.Arch != tc.expectedArch {
+				t.Errorf("Expected Arch %s, got %s", tc.expectedArch, binInfo.Arch)
 			}
-			if binInfo.FileName != tt.expectedFileName {
-				t.Errorf("Expected FileName %s, got %s", tt.expectedFileName, binInfo.FileName)
+			if binInfo.FileName != tc.expectedFileName {
+				t.Errorf("Expected FileName %s, got %s", tc.expectedFileName, binInfo.FileName)
 			}
-			if !strings.Contains(binInfo.URL, tt.expectedURLContains) {
-				t.Errorf("Expected URL to contain %s, got %s", tt.expectedURLContains, binInfo.URL)
+			if !strings.Contains(binInfo.URL, tc.expectedURLContains) {
+				t.Errorf("Expected URL to contain %s, got %s", tc.expectedURLContains, binInfo.URL)
 			}
-			if binInfo.IsArchive != tt.expectedIsArchive {
-				t.Errorf("Expected IsArchive %v, got %v", tt.expectedIsArchive, binInfo.IsArchive)
+			if binInfo.IsArchive != tc.expectedIsArchive {
+				t.Errorf("Expected IsArchive %v, got %v", tc.expectedIsArchive, binInfo.IsArchive)
 			}
-
-			// Normalize paths for comparison, though makeExpectedPaths should already do this.
-			if filepath.Clean(binInfo.BaseDir) != filepath.Clean(tt.expectedBaseDir) {
-				t.Errorf("Expected BaseDir %s, got %s", tt.expectedBaseDir, binInfo.BaseDir)
+			if filepath.Clean(binInfo.BaseDir) != filepath.Clean(tc.expectedBaseDir) {
+				t.Errorf("Expected BaseDir %s, got %s", tc.expectedBaseDir, binInfo.BaseDir)
 			}
-			if filepath.Clean(binInfo.ComponentDir) != filepath.Clean(tt.expectedComponentDir) {
-				t.Errorf("Expected ComponentDir %s, got %s", tt.expectedComponentDir, binInfo.ComponentDir)
+			if filepath.Clean(binInfo.ComponentDir) != filepath.Clean(tc.expectedComponentDir) {
+				t.Errorf("Expected ComponentDir %s, got %s", tc.expectedComponentDir, binInfo.ComponentDir)
 			}
-			if filepath.Clean(binInfo.FilePath) != filepath.Clean(tt.expectedFilePath) {
-				t.Errorf("Expected FilePath %s, got %s", tt.expectedFilePath, binInfo.FilePath)
+			if filepath.Clean(binInfo.FilePath) != filepath.Clean(tc.expectedFilePath) {
+				t.Errorf("Expected FilePath %s, got %s", tc.expectedFilePath, binInfo.FilePath)
+			}
+			if binInfo.ExpectedChecksum != tc.expectedChecksumVal {
+				t.Errorf("Expected ChecksumValue %s, got %s", tc.expectedChecksumVal, binInfo.ExpectedChecksum)
+			}
+			if binInfo.ExpectedChecksumType != tc.expectedChecksumType {
+				t.Errorf("Expected ChecksumType %s, got %s", tc.expectedChecksumType, binInfo.ExpectedChecksumType)
 			}
 		})
 	}
@@ -418,7 +398,7 @@ func TestArchAlias(t *testing.T) {
 	}{
 		{"amd64", "x86_64"},
 		{"arm64", "aarch64"},
-		{"x86_64", "x86_64"}, // Should already be aliased or stay same
+		{"x86_64", "x86_64"},
 		{"aarch64", "aarch64"},
 		{"arm", "arm"},
 		{"", ""},
@@ -445,7 +425,7 @@ func TestGetZone(t *testing.T) {
 		{"cn_uppercase", "CN", "cn"},
 		{"empty", "", ""},
 		{"other_value", "us", ""},
-		{"not_set", " KXZONE_NOT_SET ", ""}, // Special value to signal unsetting
+		{"not_set", " KXZONE_NOT_SET ", ""},
 	}
 
 	for _, tt := range tests {
@@ -468,7 +448,6 @@ func TestGetImageNames(t *testing.T) {
 		t.Error("GetImageNames() returned an empty list, expected some predefined image names")
 	}
 
-	// Spot check a few key images
 	expectedImages := []string{"pause", "kube-apiserver", "coredns"}
 	for _, expectedImage := range expectedImages {
 		found := false

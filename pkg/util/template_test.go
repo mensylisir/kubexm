@@ -39,7 +39,7 @@ func TestRenderTemplate(t *testing.T) {
 			tmplStr:       "file-{{.Version", // Missing closing braces
 			data:          simpleData{Version: "v1.0", Arch: "amd64"},
 			expectError:   true,
-			errorContains: "template: :1: unclosed action",
+			errorContains: "template: utiltemplate:1: unclosed action", // Updated to include template name
 		},
 		{
 			name:          "execution_error_missing_key_is_error_by_default",
@@ -57,11 +57,16 @@ func TestRenderTemplate(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:        "nil_data_renders_no_value",
-			tmplStr:     "Version: {{.Version}}",
-			data:        nil,
-			expectedStr: "Version: <no value>", // Default rendering for missing field on nil
-			expectError: false,
+			name:          "nil_data_causes_error_due_to_missingkey_option",
+			tmplStr:       "Version: {{.Version}}",
+			data:          nil,
+			expectedStr:   "", // Output not relevant
+			expectError:   true,
+			// Error message for nil data with missingkey=error might be like:
+			// "template: <name>:<line>:<col>: executing "<name>" at <.Key>: nil data; no entry for key "<Key>""
+			// or "template: <name>:<line>:<col>: executing "<name>" at <.Key>: <.Key> is undefined"
+			// Let's check for the key parts: "nil data" and "no entry for key \"Version\"" or "Version is undefined"
+			errorContains: `nil data; no entry for key "Version"`,
 		},
 		{
 			name:        "empty_struct_data",

@@ -19,7 +19,7 @@ func DownloadFileWithConnector(
 	url, targetDir, targetName, checksum string,
 ) (string, error) {
 	// Use Infof for structured-like logging if that's the logger's pattern
-	log.Infof("Placeholder: DownloadFileWithConnector called. URL: %s, TargetDir: %s, TargetName: %s", url, targetDir, targetName)
+	log.Infof("Placeholder: DownloadFileWithConnector called. URL: %s, TargetDir: %s, TargetName: %s, Checksum (not verified): %s", url, targetDir, targetName, checksum)
 	// Simulate a successful download for now if tests depend on this path
 	// In a real scenario, this would involve complex logic.
 	// Checksum verification would also happen here.
