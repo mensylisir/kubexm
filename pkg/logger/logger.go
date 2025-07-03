@@ -185,7 +185,7 @@ type Options struct {
 type Logger struct {
 	*zap.SugaredLogger
 	opts Options
-	mu   sync.Mutex
+	// mu   sync.Mutex // Removed as unused
 }
 
 var globalLogger *Logger
@@ -381,9 +381,11 @@ func (l *Logger) logWithCustomLevel(level Level, template string, args ...interf
 	msg := fmt.Sprintf(template, args...)
 	// Pass the original custom level string as a field for the encoder to use.
 	// This field ("customlevel") is specifically looked for by colorConsoleEncoder.
-	customLevelField := zap.String("customlevel", level.CapitalString())
 	// Add a hidden field for the original numeric level for sorting/filtering if needed by encoder later
-	customNumericLevelField := zap.Int8("customlevel_num", int8(level))
+	keyValuePairs := []interface{}{
+		"customlevel", level.CapitalString(),
+		"customlevel_num", int8(level),
+	}
 
 	// Use WithOptions to adjust caller skip for each log call from these wrappers.
 	// AddCallerSkip(1) here means the original call site (e.g., user calling logger.Infof)
@@ -392,28 +394,29 @@ func (l *Logger) logWithCustomLevel(level Level, template string, args ...interf
 
 	switch level {
 	case DebugLevel:
-		loggerWithSkip.Debugw(msg, customLevelField, customNumericLevelField)
+		loggerWithSkip.Debugw(msg, keyValuePairs...)
 	case InfoLevel:
-		loggerWithSkip.Infow(msg, customLevelField, customNumericLevelField)
+		loggerWithSkip.Infow(msg, keyValuePairs...)
 	case SuccessLevel:
 		// SuccessLevel is logged at Zap's InfoLevel, but our custom encoder
 		// will use the "customlevel":"SUCCESS" field to format it distinctively.
-		loggerWithSkip.Infow(msg, customLevelField, customNumericLevelField)
+		loggerWithSkip.Infow(msg, keyValuePairs...)
 	case WarnLevel:
-		loggerWithSkip.Warnw(msg, customLevelField, customNumericLevelField)
+		loggerWithSkip.Warnw(msg, keyValuePairs...)
 	case ErrorLevel:
-		loggerWithSkip.Errorw(msg, customLevelField, customNumericLevelField)
+		loggerWithSkip.Errorw(msg, keyValuePairs...)
 	case FailLevel:
 		// FailLevel is logged at Zap's FatalLevel, causing an os.Exit(1) after logging.
 		// The "customlevel":"FAIL" field allows custom formatting.
-		loggerWithSkip.Fatalw(msg, customLevelField, customNumericLevelField)
+		loggerWithSkip.Fatalw(msg, keyValuePairs...)
 	case PanicLevel:
-		loggerWithSkip.Panicw(msg, customLevelField, customNumericLevelField)
+		loggerWithSkip.Panicw(msg, keyValuePairs...)
 	case FatalLevel:
 		// Direct Zap FatalLevel, also exits.
-		loggerWithSkip.Fatalw(msg, customLevelField, customNumericLevelField)
+		loggerWithSkip.Fatalw(msg, keyValuePairs...)
 	default: // Should not happen with defined levels
-		loggerWithSkip.Infow(msg, customLevelField, customNumericLevelField, zap.String("unknownlevel", level.String()))
+		finalKeyValues := append(keyValuePairs, "unknownlevel", level.String())
+		loggerWithSkip.Infow(msg, finalKeyValues...)
 	}
 }
 
