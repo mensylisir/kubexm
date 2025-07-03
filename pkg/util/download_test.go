@@ -2,7 +2,8 @@ package util
 
 import (
 	"context"
-	"os" // For reading log file
+	"fmt" // Added for Sprintf
+	"os"  // For reading log file
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,7 +26,7 @@ func (m *mockConnectorForUtil) Close() error { return nil }
 func (m *mockConnectorForUtil) IsConnected() bool { return true }
 func (m *mockConnectorForUtil) GetOS(ctx context.Context) (*connector.OS, error) { return &connector.OS{}, nil }
 func (m *mockConnectorForUtil) ReadFile(ctx context.Context, path string) ([]byte, error) { return []byte("test"), nil }
-func (m *mockConnectorForUtil) WriteFile(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error { return nil }
+func (m *mockConnectorForUtil) WriteFile(ctx context.Context, content []byte, destPath string, options *connector.FileTransferOptions) error { return nil }
 func (m *mockConnectorForUtil) Mkdir(ctx context.Context, path string, perm string) error { return nil }
 func (m *mockConnectorForUtil) Remove(ctx context.Context, path string, opts connector.RemoveOptions) error { return nil }
 func (m *mockConnectorForUtil) GetFileChecksum(ctx context.Context, path string, checksumType string) (string, error) { return "", nil }
@@ -75,12 +76,21 @@ func TestDownloadFileWithConnector(t *testing.T) {
 		}
 
 		logString := string(logContent)
-		expectedLogSubstring := "Placeholder: DownloadFileWithConnector called"
-		if !strings.Contains(logString, expectedLogSubstring) {
-			t.Errorf("Log content missing expected substring %q. Log was: %s", expectedLogSubstring, logString)
+		expectedLogSubstringBase := "Placeholder: DownloadFileWithConnector called"
+		if !strings.Contains(logString, expectedLogSubstringBase) {
+			t.Errorf("Log content missing expected substring base %q. Log was: %s", expectedLogSubstringBase, logString)
 		}
-		if !strings.Contains(logString, url) {
-			t.Errorf("Log content missing URL %q. Log was: %s", url, logString)
+		if !strings.Contains(logString, fmt.Sprintf("URL: %s", url)) {
+			t.Errorf("Log content missing URL part. Log was: %s", logString)
+		}
+		if !strings.Contains(logString, fmt.Sprintf("TargetDir: %s", targetDir)) {
+			t.Errorf("Log content missing TargetDir part. Log was: %s", logString)
+		}
+		if !strings.Contains(logString, fmt.Sprintf("TargetName: %s", targetName)) {
+			t.Errorf("Log content missing TargetName part. Log was: %s", logString)
+		}
+		if !strings.Contains(logString, fmt.Sprintf("Checksum (not verified): %s", checksum)) {
+			t.Errorf("Log content missing Checksum part. Log was: %s", logString)
 		}
 	})
 

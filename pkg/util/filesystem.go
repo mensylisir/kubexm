@@ -29,3 +29,19 @@ func CreateDir(path string) error {
 	// os.Stat failed for a reason other than NotExist (e.g. permission error on parent path)
 	return fmt.Errorf("failed to stat path %s: %w", path, err)
 }
+
+// FileExists checks if a file or directory exists at the given path.
+// It returns true if the path exists, and false if it does not exist.
+// An error is returned if os.Stat fails for reasons other than the path not existing
+// (e.g., permission issues on a parent directory).
+func FileExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil // Path exists
+	}
+	if os.IsNotExist(err) {
+		return false, nil // Path does not exist
+	}
+	// Another error occurred (e.g., permission denied to access parent dir)
+	return false, fmt.Errorf("error checking if path '%s' exists: %w", path, err)
+}
