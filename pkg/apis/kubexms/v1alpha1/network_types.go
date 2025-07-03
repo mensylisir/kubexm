@@ -215,13 +215,13 @@ func SetDefaults_CalicoConfig(cfg *CalicoConfig, defaultPoolCIDR string, globalD
 		}
 
 		var defaultPoolEncap string
+		// Prioritize IPIP if it's enabled, then VXLAN, then None.
 		if cfg.IPIPMode == "Always" || cfg.IPIPMode == "CrossSubnet" {
 			defaultPoolEncap = "IPIP"
 		} else if cfg.VXLANMode == "Always" || cfg.VXLANMode == "CrossSubnet" {
-			// This case is unlikely to be hit if IPIPMode defaults to "Always"
 			defaultPoolEncap = "VXLAN"
 		} else {
-			defaultPoolEncap = "None"
+			defaultPoolEncap = "None" // If neither IPIP nor VXLAN is explicitly enabled for inter-node traffic.
 		}
 
 		cfg.IPPools = append(cfg.IPPools, CalicoIPPool{

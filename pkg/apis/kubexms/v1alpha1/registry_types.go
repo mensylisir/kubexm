@@ -79,12 +79,19 @@ func SetDefaults_RegistryConfig(cfg *RegistryConfig) {
 		// Consider if a default private registry FQDN makes sense or should be left empty.
 		// cfg.PrivateRegistry = "dockerhub.kubexm.local" // Example from YAML
 	}
-	if cfg.Type != nil && *cfg.Type != "" { // If a local registry type is specified
-		if cfg.DataRoot == nil || *cfg.DataRoot == "" {
-			cfg.DataRoot = stringPtr("/mnt/registry") // Default from 21-其他说明.md
-		}
-	}
+	// Defaulting of DataRoot based on Type is removed, as validation expects user to provide it if Type is set.
+	// if cfg.Type != nil && *cfg.Type != "" { // If a local registry type is specified
+	//	if cfg.DataRoot == nil || *cfg.DataRoot == "" {
+	//		cfg.DataRoot = stringPtr("/mnt/registry") // Default from 21-其他说明.md
+	//	}
+	// }
 	// No default for Type itself.
+	// Removed defaulting of DataRoot when Type is set, as validation expects user to provide it.
+	// if cfg.Type != nil && *cfg.Type != "" { // If a local registry type is specified
+	// 	if cfg.DataRoot == nil || *cfg.DataRoot == "" {
+	// 		cfg.DataRoot = stringPtr("/mnt/registry")
+	// 	}
+	// }
 	if cfg.NamespaceRewrite == nil {
 		cfg.NamespaceRewrite = &NamespaceRewriteConfig{}
 	}
@@ -117,10 +124,10 @@ func Validate_RegistryConfig(cfg *RegistryConfig, verrs *ValidationErrors, pathP
 	// Validation for RegistryMirrors and InsecureRegistries removed.
 
 	if cfg.PrivateRegistry != "" {
-		// Could validate if it's a valid hostname/domain.
-		// For now, ensure it's not just whitespace if set.
-		if strings.TrimSpace(cfg.PrivateRegistry) == "" && cfg.PrivateRegistry != "" {
+		if strings.TrimSpace(cfg.PrivateRegistry) == "" {
 			verrs.Add("%s.privateRegistry: cannot be only whitespace if specified", pathPrefix)
+		} else if !isValidDomainName(cfg.PrivateRegistry) && !isValidHostOrIP(cfg.PrivateRegistry) { // Allow IP as well for private registry
+			verrs.Add("%s.privateRegistry: invalid hostname/IP format '%s'", pathPrefix, cfg.PrivateRegistry)
 		}
 	}
 
@@ -128,11 +135,12 @@ func Validate_RegistryConfig(cfg *RegistryConfig, verrs *ValidationErrors, pathP
 		verrs.Add("%s.namespaceOverride: cannot be only whitespace if specified", pathPrefix)
 	}
 
-
 	for regAddr, auth := range cfg.Auths {
 		authPathPrefix := fmt.Sprintf("%s.auths[\"%s\"]", pathPrefix, regAddr)
 		if strings.TrimSpace(regAddr) == "" {
 			verrs.Add("%s.auths: registry address key cannot be empty", pathPrefix)
+		} else if !isValidDomainName(regAddr) && !isValidRegistryHostPort(regAddr) { // Allow host:port for registry auth keys
+			verrs.Add("%s.auths: registry address key '%s' is not a valid hostname or host:port", pathPrefix, regAddr)
 		}
 		Validate_RegistryAuth(&auth, verrs, authPathPrefix)
 	}
@@ -163,7 +171,13 @@ func Validate_RegistryConfig(cfg *RegistryConfig, verrs *ValidationErrors, pathP
 				if strings.TrimSpace(rule.NewNamespace) == "" {
 					verrs.Add("%s.newNamespace: cannot be empty", rulePathPrefix)
 				}
-				// Registry field in rule is optional.
+				if rule.Registry != "" {
+					if strings.TrimSpace(rule.Registry) == "" {
+						verrs.Add("%s.registry: cannot be only whitespace if specified", rulePathPrefix)
+					} else if !isValidDomainName(rule.Registry) && !isValidRegistryHostPort(rule.Registry) {
+						verrs.Add("%s.registry: invalid hostname or host:port format '%s'", rulePathPrefix, rule.Registry)
+					}
+				}
 			}
 		}
 	}

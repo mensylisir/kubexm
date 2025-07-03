@@ -95,7 +95,7 @@ func TestValidate_KubeVIPConfig(t *testing.T) {
 			input: &KubeVIPConfig{
 				Mode: stringPtr(KubeVIPModeBGP),
 				VIP:  stringPtr(validVIP),
-				BGPConfig: &KubeVIPBGPConfig{RouterID: "1.1.1.1", PeerAddress: "10.0.0.1", PeerASN: 65001, ASN: 65000},
+				BGPConfig: &KubeVIPBGPConfig{RouterID: "1.1.1.1", PeerAddress: "10.0.0.1", PeerASN: 65001, ASN: 65000, SourceAddress: "10.0.0.2"},
 			},
 			expectErr: false,
 		},
@@ -181,6 +181,12 @@ func TestValidate_KubeVIPConfig(t *testing.T) {
 			input: &KubeVIPConfig{Mode: stringPtr(KubeVIPModeBGP), VIP: stringPtr(validVIP), BGPConfig: &KubeVIPBGPConfig{RouterID: "1.1.1.1", PeerAddress: "invalid-ip", PeerASN: 65001, ASN: 65000}},
 			expectErr:   true,
 			errContains: []string{".bgpConfig.peerAddress: invalid IP 'invalid-ip'"},
+		},
+		{
+			name: "BGP mode invalid SourceAddress",
+			input: &KubeVIPConfig{Mode: stringPtr(KubeVIPModeBGP), VIP: stringPtr(validVIP), BGPConfig: &KubeVIPBGPConfig{RouterID: "1.1.1.1", PeerAddress: "10.0.0.1", PeerASN: 65001, ASN: 65000, SourceAddress: "not-an-ip"}},
+			expectErr:   true,
+			errContains: []string{".bgpConfig.sourceAddress: invalid IP address format 'not-an-ip'"},
 		},
 	}
 

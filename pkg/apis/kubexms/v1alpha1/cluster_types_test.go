@@ -35,6 +35,51 @@ func TestSetDefaults_Cluster_TypeMetaAndGlobal(t *testing.T) {
 	}
 }
 
+func TestValidate_Cluster_HostLocalType(t *testing.T) {
+	cfg := newValidV1alpha1ClusterForTest()
+	cfg.Spec.Hosts[0].Type = "local"
+	cfg.Spec.Hosts[0].Password = "" // SSH details not needed for local
+	cfg.Spec.Hosts[0].PrivateKeyPath = ""
+	cfg.Spec.Hosts[0].PrivateKey = ""
+	// SetDefaults_Cluster is called in newValidV1alpha1ClusterForTest,
+	// but we've mutated after. We rely on Validate_Cluster's logic for host type.
+	err := Validate_Cluster(cfg)
+	if err != nil {
+		t.Errorf("Validate_Cluster() for host type 'local' failed: %v", err)
+	}
+
+	// Now test if a non-local host *without* ssh details fails
+	cfg = newValidV1alpha1ClusterForTest()
+	cfg.Spec.Hosts[0].Type = "ssh" // explicit or default
+	cfg.Spec.Hosts[0].Password = ""
+	cfg.Spec.Global.PrivateKeyPath = "" // Ensure global default is also empty for this test
+	cfg.Spec.Hosts[0].PrivateKeyPath = ""
+	cfg.Spec.Hosts[0].PrivateKey = ""
+	// Re-apply defaults to ensure host.User etc. are set from global, but SSH creds remain empty.
+	// This is tricky because newValidV1alpha1ClusterForTest already sets a global PrivateKeyPath.
+	// We need a more controlled setup for this specific test.
+
+	cfgClean := &Cluster{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-ssh-no-creds"},
+		Spec: ClusterSpec{
+			Global:     &GlobalSpec{User: "test", Port: 22, WorkDir: "/tmp"}, // No SSH creds in global
+			Hosts:      []HostSpec{{Name: "ssh-host", Address: "1.2.3.4", Type: "ssh"}}, // Explicitly ssh, no creds
+			Kubernetes: &KubernetesConfig{Version: "v1.25.0"},
+			Network:    &NetworkConfig{KubePodsCIDR: "10.244.0.0/16"},
+			Etcd:       &EtcdConfig{},
+			ControlPlaneEndpoint: &ControlPlaneEndpointSpec{Address: "1.2.3.4"},
+		},
+	}
+	SetDefaults_Cluster(cfgClean) // Apply defaults to the clean config
+
+	err = Validate_Cluster(cfgClean)
+	if err == nil {
+		t.Error("Validate_Cluster() expected error for non-local host without SSH details, but got nil")
+	} else if !strings.Contains(err.Error(), "no SSH authentication method provided for non-local host") {
+		t.Errorf("Validate_Cluster() error for non-local host without SSH details = %v, want to contain 'no SSH authentication method provided'", err)
+	}
+}
+
 func TestSetDefaults_Cluster_HostInheritanceAndDefaults(t *testing.T) {
 	cfg := &Cluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-host-defaults"},
@@ -107,6 +152,13 @@ func TestSetDefaults_Cluster_ComponentStructsInitialization(t *testing.T) {
 	if cfg.Spec.Addons == nil { t.Error("Spec.Addons should be initialized to empty slice, not nil") }
 	// DNS is a non-pointer field in ClusterSpec, so it's part of the struct.
 	// SetDefaults_DNS(&cfg.Spec.DNS) is called in SetDefaults_Cluster.
+	// Check a DNS default
+	if cfg.Spec.DNS.CoreDNS.UpstreamDNSServers == nil { // Assuming UpstreamDNSServers is defaulted to empty slice
+		t.Error("Spec.DNS.CoreDNS.UpstreamDNSServers should be initialized by SetDefaults_DNS via SetDefaults_Cluster")
+	}
+	if cfg.Spec.System.SysctlParams == nil {
+		t.Error("Spec.System.SysctlParams should be initialized by SetDefaults_SystemSpec via SetDefaults_Cluster")
+	}
 }
 
 // --- Test Validate_Cluster ---
@@ -170,6 +222,10 @@ func TestValidate_Cluster_MissingRequiredFields(t *testing.T) {
 		{"missing k8s section", func(c *Cluster) { c.Spec.Kubernetes = nil }, "spec.kubernetes: section is required"},
 		// Note: If Kubernetes section is nil, Validate_Cluster adds "spec.kubernetes: section is required".
 		// If Kubernetes section is present but version is empty, Validate_KubernetesConfig handles that.
+		{"missing etcd section", func(c *Cluster) { c.Spec.Etcd = nil }, "spec.etcd: section is required"},
+		{"missing network section", func(c *Cluster) { c.Spec.Network = nil }, "spec.network: section is required"},
+		{"invalid DNS config", func(c *Cluster) { c.Spec.DNS.CoreDNS.UpstreamDNSServers = []string{""} }, "spec.dns.coredns.upstreamDNSServers[0]: server address cannot be empty"},
+		{"invalid System config", func(c *Cluster) { c.Spec.System = &SystemSpec{NTPServers: []string{""}} }, "spec.system.ntpServers[0]: NTP server address cannot be empty"},
 	}
 
 	for _, tt := range tests {

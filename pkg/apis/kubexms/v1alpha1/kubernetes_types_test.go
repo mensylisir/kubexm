@@ -145,12 +145,22 @@ func TestValidate_KubernetesConfig_Invalid(t *testing.T) {
 		{"empty_kubeletConfiguration_raw", &KubernetesConfig{Version: "v1.20.0", KubeletConfiguration: &runtime.RawExtension{Raw: []byte("")}}, ".kubeletConfiguration: raw data cannot be empty"},
 		{"empty_kubeProxyConfiguration_raw", &KubernetesConfig{Version: "v1.20.0", KubeProxyConfiguration: &runtime.RawExtension{Raw: []byte("")}}, ".kubeProxyConfiguration: raw data cannot be empty"},
 		// APIServerConfig validation
-		{"apiserver_invalid_port_range", &KubernetesConfig{Version: "v1.20.0", APIServer: &APIServerConfig{ServiceNodePortRange: "invalid"}}, ".apiServer.serviceNodePortRange: invalid format"},
+		{"apiserver_invalid_port_range_format", &KubernetesConfig{Version: "v1.20.0", APIServer: &APIServerConfig{ServiceNodePortRange: "invalid"}}, ".apiServer.serviceNodePortRange: invalid format"},
+		{"apiserver_invalid_port_range_low_min", &KubernetesConfig{Version: "v1.20.0", APIServer: &APIServerConfig{ServiceNodePortRange: "0-30000"}}, ".apiServer.serviceNodePortRange: port numbers must be between 1 and 65535"},
+		{"apiserver_invalid_port_range_high_max", &KubernetesConfig{Version: "v1.20.0", APIServer: &APIServerConfig{ServiceNodePortRange: "30000-70000"}}, ".apiServer.serviceNodePortRange: port numbers must be between 1 and 65535"},
+		{"apiserver_invalid_port_range_min_gte_max", &KubernetesConfig{Version: "v1.20.0", APIServer: &APIServerConfig{ServiceNodePortRange: "30000-30000"}}, ".apiServer.serviceNodePortRange: min port 30000 must be less than max port 30000"},
+		{"apiserver_invalid_port_range_not_numbers", &KubernetesConfig{Version: "v1.20.0", APIServer: &APIServerConfig{ServiceNodePortRange: "abc-def"}}, ".apiServer.serviceNodePortRange: ports must be numbers"},
 		// KubeletConfig validation
 		{"kubelet_invalid_cgroupdriver", &KubernetesConfig{Version: "v1.20.0", Kubelet: &KubeletConfig{CgroupDriver: stringPtr("docker")}}, ".kubelet.cgroupDriver: must be 'cgroupfs' or 'systemd'"},
 		{"kubelet_invalid_hairpin", &KubernetesConfig{Version: "v1.20.0", Kubelet: &KubeletConfig{HairpinMode: stringPtr("bad")}}, ".kubelet.hairpinMode: invalid mode 'bad'"},
 		// KubeProxyConfig validation
 		{"kubeproxy_iptables_bad_masq_bit", &KubernetesConfig{Version: "v1.20.0", ProxyMode: "iptables", KubeProxy: &KubeProxyConfig{IPTables: &KubeProxyIPTablesConfig{MasqueradeBit: int32Ptr(32)}}}, ".kubeProxy.ipTables.masqueradeBit: must be between 0 and 31"},
+		{"kubeproxy_iptables_bad_sync", &KubernetesConfig{Version: "v1.20.0", ProxyMode: "iptables", KubeProxy: &KubeProxyConfig{IPTables: &KubeProxyIPTablesConfig{SyncPeriod: "bad"}}}, ".kubeProxy.ipTables.syncPeriod: invalid duration format"},
+		{"kubeproxy_ipvs_bad_sync", &KubernetesConfig{Version: "v1.20.0", ProxyMode: "ipvs", KubeProxy: &KubeProxyConfig{IPVS: &KubeProxyIPVSConfig{MinSyncPeriod: "bad"}}}, ".kubeProxy.ipvs.minSyncPeriod: invalid duration format"},
+		{"kubeproxy_ipvs_bad_exclude_cidr", &KubernetesConfig{Version: "v1.20.0", ProxyMode: "ipvs", KubeProxy: &KubeProxyConfig{IPVS: &KubeProxyIPVSConfig{ExcludeCIDRs: []string{"invalid"}}}}, ".kubeProxy.ipvs.excludeCIDRs[0]: invalid CIDR format"},
+		{"kubeproxy_mode_mismatch_iptables_has_ipvs", &KubernetesConfig{Version: "v1.20.0", ProxyMode: "iptables", KubeProxy: &KubeProxyConfig{IPVS: &KubeProxyIPVSConfig{}}}, ".kubeProxy.ipvs: should not be set if proxyMode is 'iptables'"},
+		{"kubeproxy_mode_mismatch_ipvs_has_iptables", &KubernetesConfig{Version: "v1.20.0", ProxyMode: "ipvs", KubeProxy: &KubeProxyConfig{IPTables: &KubeProxyIPTablesConfig{}}}, ".kubeProxy.ipTables: should not be set if proxyMode is 'ipvs'"},
+		{"kubernetes_version_invalid_format", &KubernetesConfig{Version: "v1.bad.0"}, ".version: 'v1.bad.0' is not a recognized version format"},
 	}
 
 	for _, tt := range tests {
