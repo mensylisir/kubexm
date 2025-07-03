@@ -7,19 +7,14 @@ import (
 // hostImpl implements the Host interface using v1alpha1.HostSpec.
 type hostImpl struct {
 	spec v1alpha1.HostSpec
-	// Potentially store global defaults here if needed for GetPort/GetUser fallbacks
-	// globalUser string
-	// globalPort int
 }
 
 // NewHostFromSpec creates a new Host object from its specification.
 // It's a constructor for hostImpl.
-// TODO: Consider passing global defaults if spec fields can inherit them.
-func NewHostFromSpec(spec v1alpha1.HostSpec /*, globalUser string, globalPort int */) Host {
+// Assumes the input spec has already had defaults applied by the config/API layer.
+func NewHostFromSpec(spec v1alpha1.HostSpec) Host {
 	return &hostImpl{
 		spec: spec,
-		// globalUser: globalUser,
-		// globalPort: globalPort,
 	}
 }
 
@@ -32,22 +27,14 @@ func (h *hostImpl) GetAddress() string {
 }
 
 func (h *hostImpl) GetPort() int {
-	// If port is not set in spec, it should have been defaulted by now
-	// either by v1alpha1.SetDefaults_HostSpec or by the RuntimeBuilder
-	// based on global config.
-	if h.spec.Port == 0 {
-		// This indicates a potential issue if defaults were not applied before creating Host.
-		// For robustness, could return a common default like 22, but ideally spec is complete.
-		return 22 // Fallback default SSH port
-	}
+	// Assumes h.spec.Port has been defaulted by API layer (e.g., to 22) if it was originally 0.
+	// If it's still 0 here, it implies an intentional configuration or an issue upstream in defaulting.
+	// The connector should use the value as provided in the spec.
 	return h.spec.Port
 }
 
 func (h *hostImpl) GetUser() string {
-	// Similar to GetPort, user should be defaulted if empty in spec.
-	// If h.spec.User == "" && h.globalUser != "" {
-	// 	return h.globalUser
-	// }
+	// Assumes h.spec.User has been defaulted by API layer if it was originally empty.
 	return h.spec.User
 }
 
@@ -76,10 +63,7 @@ func (h *hostImpl) GetArch() string {
 	if arch == "aarch64" {
 		return "arm64"
 	}
-	if arch == "" {
-		// It's better if the spec defaulting sets a common default like "amd64".
-		// Relying on facts is more robust but Host interface is for configured/spec data.
-		return "amd64" // Default if not specified in spec.
-	}
+	// The h.spec.Arch is expected to be defaulted by the API layer if it was initially empty.
+	// If it's still empty here, return it as is; further layers might handle or error.
 	return arch
 }
