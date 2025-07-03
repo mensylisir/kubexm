@@ -2,9 +2,11 @@ package logger
 
 import (
 	"fmt"
+	"os" // For Fprintf to os.Stderr (debug line)
 	"strings"
 	"time"
 
+	// "go.uber.org/zap" // Removed as it's not directly used in this file
 	"go.uber.org/zap/buffer"
 	"go.uber.org/zap/zapcore"
 )
@@ -129,6 +131,7 @@ func (enc *colorConsoleEncoder) AppendUint8(uint8) {}
 func (enc *colorConsoleEncoder) AppendUintptr(uintptr) {}
 
 func (enc *colorConsoleEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
+	fmt.Fprintf(os.Stderr, "[DEBUG_ENCODER] EncodeEntry received fields: %+v\n", fields) // DEBUG LINE
 	line := _bufferPool.Get()
 
 	if enc.TimeKey != "" {
