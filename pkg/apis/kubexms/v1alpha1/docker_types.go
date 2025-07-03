@@ -152,9 +152,12 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *ValidationErrors, pathPrefi
 		verrs.Add("%s.bridge: name cannot be empty if specified", pathPrefix)
 	}
 
-	if cfg.CRIDockerdVersion != nil && strings.TrimSpace(*cfg.CRIDockerdVersion) == "" {
-		verrs.Add("%s.criDockerdVersion: cannot be empty if specified", pathPrefix)
-		// Could add version format validation here if needed, e.g., starts with 'v'
+	if cfg.CRIDockerdVersion != nil {
+		if strings.TrimSpace(*cfg.CRIDockerdVersion) == "" {
+			verrs.Add("%s.criDockerdVersion: cannot be only whitespace if specified", pathPrefix)
+		} else if !isValidRuntimeVersion(*cfg.CRIDockerdVersion) { // Use the common validator
+			verrs.Add("%s.criDockerdVersion: '%s' is not a recognized version format", pathPrefix, *cfg.CRIDockerdVersion)
+		}
 	}
 	// No specific validation for InstallCRIDockerd (boolean pointer) beyond type checking.
 }

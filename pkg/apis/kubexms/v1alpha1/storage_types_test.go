@@ -59,40 +59,86 @@ func TestSetDefaults_OpenEBSConfig(t *testing.T) {
 	assert.NotNil(t, cfgDisabled.Engines.LocalHostPath.Enabled, "LocalHostPath.Enabled should still be present")
 	assert.False(t, *cfgDisabled.Engines.LocalHostPath.Enabled, "LocalHostPath engine should be forced to disabled")
 
+	// Test Version is not defaulted
+	cfgWithVersion := &OpenEBSConfig{Version: stringPtr("1.2.3")}
+	SetDefaults_OpenEBSConfig(cfgWithVersion) // Should enable OpenEBS by default
+	assert.NotNil(t, cfgWithVersion.Enabled)
+	assert.True(t, *cfgWithVersion.Enabled)
+	assert.NotNil(t, cfgWithVersion.Version)
+	assert.Equal(t, "1.2.3", *cfgWithVersion.Version, "Version should not be changed by defaults")
 }
 
 func TestValidate_StorageConfig(t *testing.T) {
-	validCfg := &StorageConfig{
-		OpenEBS:             &OpenEBSConfig{Enabled: boolPtr(true), BasePath: "/data/openebs"},
-		DefaultStorageClass: stringPtr("my-default-sc"),
-	}
-	SetDefaults_StorageConfig(validCfg)
-	verrsValid := &ValidationErrors{}
-	Validate_StorageConfig(validCfg, verrsValid, "spec.storage")
-	assert.True(t, verrsValid.IsEmpty(), "Validate_StorageConfig for valid config failed: %v", verrsValid.Error())
-
 	tests := []struct {
-		name       string
-		cfg        *StorageConfig
-		wantErrMsg string
+		name        string
+		cfg         *StorageConfig
+		expectErr   bool
+		errContains []string
 	}{
-		{"openebs_enabled_empty_basepath",
-			&StorageConfig{OpenEBS: &OpenEBSConfig{Enabled: boolPtr(true), BasePath: " "}},
-			".openebs.basePath: cannot be empty if OpenEBS is enabled"},
-		{"empty_default_storage_class",
-			&StorageConfig{DefaultStorageClass: stringPtr(" ")},
-			".defaultStorageClass: cannot be empty if specified"},
+		{
+			name: "valid full config",
+			cfg: &StorageConfig{
+				OpenEBS:             &OpenEBSConfig{Enabled: boolPtr(true), BasePath: "/data/openebs", Version: stringPtr("1.0.0")},
+				DefaultStorageClass: stringPtr("my-default-sc"),
+			},
+			expectErr: false,
+		},
+		{
+			name: "openebs enabled, empty basepath",
+			cfg:  &StorageConfig{OpenEBS: &OpenEBSConfig{Enabled: boolPtr(true), BasePath: " "}},
+			expectErr:   true,
+			errContains: []string{".openebs.basePath: cannot be empty if OpenEBS is enabled"},
+		},
+		{
+			name: "openebs enabled, version whitespace",
+			cfg:  &StorageConfig{OpenEBS: &OpenEBSConfig{Enabled: boolPtr(true), BasePath: "/var/openebs", Version: stringPtr("   ")}},
+			expectErr:   true,
+			errContains: []string{".openebs.version: cannot be only whitespace if specified"},
+		},
+		{
+			name: "openebs enabled, version invalid format",
+			cfg:  &StorageConfig{OpenEBS: &OpenEBSConfig{Enabled: boolPtr(true), BasePath: "/var/openebs", Version: stringPtr("1.2.3_invalid")}},
+			expectErr:   true,
+			errContains: []string{".openebs.version: '1.2.3_invalid' is not a recognized version format"},
+		},
+		{
+			name: "empty defaultStorageClass",
+			cfg:  &StorageConfig{DefaultStorageClass: stringPtr(" ")},
+			expectErr:   true,
+			errContains: []string{".defaultStorageClass: cannot be empty if specified"},
+		},
+		{
+			name: "openebs disabled, version still validated if present and invalid (though maybe not typical)",
+			cfg:  &StorageConfig{OpenEBS: &OpenEBSConfig{Enabled: boolPtr(false), Version: stringPtr("1.2.3_invalid")}},
+			// Current logic: version is validated only if Enabled=true. So this should NOT error for version.
+			// If it were to error, the errContains would be: []string{".openebs.version: '1.2.3_invalid' is not a recognized version format"}
+			expectErr: false,
+		},
+		{
+			name: "openebs disabled, version whitespace (should not error for version)",
+			cfg:  &StorageConfig{OpenEBS: &OpenEBSConfig{Enabled: boolPtr(false), Version: stringPtr("   ")}},
+			expectErr: false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// For these specific validation tests, defaults on the parent StorageConfig
-			// don't interfere with the specific invalid field being tested.
-			// SetDefaults_StorageConfig(tt.cfg)
+			// Apply defaults because some valid states depend on defaults (like OpenEBS enabled by default)
+			SetDefaults_StorageConfig(tt.cfg)
 			verrs := &ValidationErrors{}
 			Validate_StorageConfig(tt.cfg, verrs, "spec.storage")
-			assert.False(t, verrs.IsEmpty(), "Expected error for %s, got none", tt.name)
-			assert.Contains(t, verrs.Error(), tt.wantErrMsg, "Error for %s = %v, want to contain %q", tt.name, verrs.Error(), tt.wantErrMsg)
+
+			if tt.expectErr {
+				assert.False(t, verrs.IsEmpty(), "Expected validation errors for test: %s, but got none", tt.name)
+				if len(tt.errContains) > 0 {
+					combinedErrors := verrs.Error()
+					for _, errStr := range tt.errContains {
+						assert.Contains(t, combinedErrors, errStr, "Error message for test '%s' does not contain '%s'. Full error: %s", tt.name, errStr, combinedErrors)
+					}
+				}
+			} else {
+				assert.True(t, verrs.IsEmpty(), "Expected no validation errors for test: %s, but got: %s", tt.name, verrs.Error())
+			}
 		})
 	}
 }

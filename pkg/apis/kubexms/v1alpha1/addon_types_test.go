@@ -229,6 +229,38 @@ func TestValidate_AddonConfig(t *testing.T) {
 			expectErr:   false,
 		},
 		{
+			name:        "chart source with 'latest' version",
+			input:       &AddonConfig{Name: "test", Enabled: boolPtr(true), Sources: AddonSources{Chart: &ChartSource{Name: "good-name", Repo: "https://charts.example.com", Version: "latest"}}},
+			expectErr:   false,
+		},
+		{
+			name:        "chart source with 'v1' version",
+			input:       &AddonConfig{Name: "test", Enabled: boolPtr(true), Sources: AddonSources{Chart: &ChartSource{Name: "good-name", Repo: "https://charts.example.com", Version: "v1"}}},
+			expectErr:   false,
+		},
+		{
+			name:        "chart source with '1' version",
+			input:       &AddonConfig{Name: "test", Enabled: boolPtr(true), Sources: AddonSources{Chart: &ChartSource{Name: "good-name", Repo: "https://charts.example.com", Version: "1"}}},
+			expectErr:   false,
+		},
+		{
+			name:        "chart source with invalid char in version",
+			input:       &AddonConfig{Name: "test", Enabled: boolPtr(true), Sources: AddonSources{Chart: &ChartSource{Name: "good-name", Repo: "https://charts.example.com", Version: "1.2.3_invalid"}}},
+			expectErr:   true,
+			errContains: []string{".sources.chart.version: chart version '1.2.3_invalid' is not a valid format"},
+		},
+		{
+			name:        "chart source with invalid values format",
+			input:       &AddonConfig{Name: "test", Enabled: boolPtr(true), Sources: AddonSources{Chart: &ChartSource{Name: "good-name", Repo: "https://charts.example.com", Values: []string{"keyvalue"}}}},
+			expectErr:   true,
+			errContains: []string{".sources.chart.values[0]: invalid format 'keyvalue', expected key=value"},
+		},
+		{
+			name:        "chart source with valid values format",
+			input:       &AddonConfig{Name: "test", Enabled: boolPtr(true), Sources: AddonSources{Chart: &ChartSource{Name: "good-name", Repo: "https://charts.example.com", Values: []string{"key=value", "another.key=another.value"}}}},
+			expectErr:   false,
+		},
+		{
 			name:        "chart source with neither name nor path",
 			input:       &AddonConfig{Name: "test", Enabled: boolPtr(true), Sources: AddonSources{Chart: &ChartSource{}}},
 			expectErr:   true,

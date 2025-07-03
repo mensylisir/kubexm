@@ -166,6 +166,14 @@ func Validate_OpenEBSConfig(cfg *OpenEBSConfig, verrs *ValidationErrors, pathPre
 			verrs.Add("%s.basePath: cannot be empty if OpenEBS is enabled", pathPrefix)
 		}
 		// Could add validation for path format if necessary.
+
+		if cfg.Version != nil {
+			if strings.TrimSpace(*cfg.Version) == "" {
+				verrs.Add("%s.version: cannot be only whitespace if specified", pathPrefix)
+			} else if !isValidRuntimeVersion(*cfg.Version) { // Assuming OpenEBS versions can be validated similarly to runtime versions
+				verrs.Add("%s.version: '%s' is not a recognized version format", pathPrefix, *cfg.Version)
+			}
+		}
 		// No specific validation for Engines sub-fields yet, beyond them being optional.
 	}
 }
