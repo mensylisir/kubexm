@@ -46,9 +46,9 @@ func TestHostImpl(t *testing.T) {
 			spec:            specNoDefaults,
 			expectedName:    "node1",
 			expectedAddr:    "192.168.1.100",
-			expectedPort:    22, // Fallback in GetPort()
-			expectedUser:    "", // No fallback in GetUser()
-			expectedArch:    "amd64", // Fallback in GetArch()
+			expectedPort:    0,  // No fallback in GetPort(); expects spec to be defaulted.
+			expectedUser:    "", // No fallback in GetUser(); expects spec to be defaulted.
+			expectedArch:    "", // No fallback in GetArch(); expects spec to be defaulted. Normalized from empty is empty.
 			expectedRoles:   []string{},
 			expectedRawSpec: specNoDefaults,
 		},
@@ -65,10 +65,10 @@ func TestHostImpl(t *testing.T) {
 		},
 		{
 			name:            "arch_normalization_x86_64",
-			spec:            specX86Arch,
+			spec:            specX86Arch, // Arch: "x86_64", Port: 0, User: ""
 			expectedName:    "node3",
 			expectedAddr:    "1.1.1.3",
-			expectedPort:    22,
+			expectedPort:    0,    // Expect 0 as spec.Port is 0
 			expectedUser:    "",
 			expectedArch:    "amd64", // Normalized
 			expectedRoles:   []string{},
@@ -76,10 +76,10 @@ func TestHostImpl(t *testing.T) {
 		},
 		{
 			name:            "arch_normalization_aarch64",
-			spec:            specAArch64Arch,
+			spec:            specAArch64Arch, // Arch: "aarch64", Port: 0, User: ""
 			expectedName:    "node4",
 			expectedAddr:    "1.1.1.4",
-			expectedPort:    22,
+			expectedPort:    0,    // Expect 0 as spec.Port is 0
 			expectedUser:    "",
 			expectedArch:    "arm64", // Normalized
 			expectedRoles:   []string{},
@@ -87,10 +87,10 @@ func TestHostImpl(t *testing.T) {
 		},
 		{
 			name:            "arch_other_value",
-			spec:            specOtherArch,
+			spec:            specOtherArch, // Arch: "riscv64", Port: 0, User: ""
 			expectedName:    "node5",
 			expectedAddr:    "1.1.1.5",
-			expectedPort:    22,
+			expectedPort:    0,    // Expect 0 as spec.Port is 0
 			expectedUser:    "",
 			expectedArch:    "riscv64", // Unchanged
 			expectedRoles:   []string{},
@@ -98,13 +98,13 @@ func TestHostImpl(t *testing.T) {
 		},
 		{
 			name: "roles_is_nil_in_spec",
-			spec: v1alpha1.HostSpec{Name: "node6", Address: "1.1.1.6", Roles: nil},
+			spec: v1alpha1.HostSpec{Name: "node6", Address: "1.1.1.6", Roles: nil}, // Port:0, User:"", Arch:""
 			expectedName:    "node6",
 			expectedAddr:    "1.1.1.6",
-			expectedPort:    22,
+			expectedPort:    0,    // Expect 0
 			expectedUser:    "",
-			expectedArch:    "amd64",
-			expectedRoles:   []string{}, // Should return empty slice, not nil
+			expectedArch:    "",   // Expect "" as spec.Arch is "", normalization doesn't change empty to amd64
+			expectedRoles:   []string{},
 			expectedRawSpec: v1alpha1.HostSpec{Name: "node6", Address: "1.1.1.6", Roles: nil},
 		},
 	}

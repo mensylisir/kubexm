@@ -55,30 +55,28 @@ func TestColorConsoleEncoder_Clone(t *testing.T) {
 	assert.Equal(t, true, clonedEncoder.colors, "Cloned colors value mismatch")
 }
 
-// TestColorConsoleEncoder_AddFields was removed as its premise (testing contextFields) is no longer valid.
-// Field handling is now tested via TestColorConsoleEncoder_EncodeEntry.
-
 func TestColorConsoleEncoder_EncodeEntry(t *testing.T) {
 	opts := DefaultOptions()
 	opts.TimestampFormat = "2006-01-02 15:04:05"
 	cfg := newTestEncoderConfig(opts)
-	now := time.Date(2023, 1, 1, 12, 0, 0, 0, time.UTC)
-	entry := zapcore.Entry{
-		Time:    now,
-		Message: "Test message",
+	// Define a base entry that will be slightly modified by test cases
+	baseEntry := zapcore.Entry{
+		Time:    time.Date(2023, 1, 1, 12, 0, 0, 0, time.UTC),
+		Message: "Test message", // Default message
 		Caller:  zapcore.EntryCaller{Defined: true, File: "test/file.go", Line: 42},
 	}
 
 	tests := []struct {
-		name           string
-		colors         bool
-		level          Level
-		zapLevel       zapcore.Level
-		withFields     []zapcore.Field
-		logFields      []zapcore.Field
-		expectedPrefix string
-		expectedLevel  string
-		expectedSuffix string
+		name            string
+		colors          bool
+		level           Level // Our custom level (0 if not using custom level field)
+		zapLevel        zapcore.Level // Underlying zap level for the entry
+		withFields      []zapcore.Field
+		logFields       []zapcore.Field
+		messageOverride *string // Pointer to allow nil (no override) vs empty string
+		expectedPrefix  string
+		expectedLevel   string
+		expectedSuffix  string // This should include the leading space if fields are present
 	}{
 		{
 			name:           "Info level with color and context",
@@ -89,13 +87,13 @@ func TestColorConsoleEncoder_EncodeEntry(t *testing.T) {
 			logFields:      []zap.Field{zap.String("data", "payload")},
 			expectedPrefix: "[P:p1][H:h1]",
 			expectedLevel:  "[INFO]",
-			expectedSuffix: ` data=payload`,
+			expectedSuffix: " data=payload",
 		},
 		{
 			name:           "Success level with color",
 			colors:         true,
 			level:          SuccessLevel,
-			zapLevel:       zapcore.InfoLevel,
+			zapLevel:       zapcore.InfoLevel, // Custom levels often map to Info or Error for zap's core
 			logFields:      []zap.Field{zap.Int("count", 5)},
 			expectedPrefix: "",
 			expectedLevel:  colorGreen + "[SUCCESS]" + colorReset,
@@ -112,20 +110,22 @@ func TestColorConsoleEncoder_EncodeEntry(t *testing.T) {
 			expectedSuffix: ` error="test error"`,
 		},
 		{
-			name:           "Fail level with color and multiple context fields",
-			colors:         true,
-			level:          FailLevel,
-			zapLevel:       zapcore.FatalLevel,
+			name:     "Fail level with color and all context fields",
+			colors:   true,
+			level:    FailLevel,
+			zapLevel: zapcore.FatalLevel, // FailLevel implies a more severe outcome
 			withFields: []zap.Field{
 				zap.String("pipeline_name", "deploy"),
 				zap.String("module_name", "kubelet"),
 				zap.String("task_name", "start"),
+				zap.String("hook_event", "pre-start"),
 				zap.String("step_name", "check_status"),
+				zap.String("hook_step_name", "verify_env"),
 				zap.String("host_name", "worker-01"),
 			},
-			expectedPrefix: "[P:deploy][M:kubelet][T:start][S:check_status][H:worker-01]",
+			expectedPrefix: "[P:deploy][M:kubelet][T:start][HE:pre-start][S:check_status][HS:verify_env][H:worker-01]",
 			expectedLevel:  colorRed + "[FAIL]" + colorReset,
-			expectedSuffix: "",
+			expectedSuffix: "", // No additional fields in this case
 		},
 		{
 			name:           "Debug with no color",
@@ -138,27 +138,59 @@ func TestColorConsoleEncoder_EncodeEntry(t *testing.T) {
 			expectedSuffix: ` detail="more info"`,
 		},
 		{
-			name:     "Zap InfoLevel when customlevel not present",
-			colors:   true,
-			zapLevel: zapcore.InfoLevel,
+			name:           "Zap InfoLevel when customlevel not present",
+			colors:         true,
+			zapLevel:       zapcore.InfoLevel, // No custom level, just zap's
 			expectedPrefix: "",
 			expectedLevel:  "[INFO]",
 			expectedSuffix: "",
 		},
 		{
-			name:     "Zap WarnLevel with color",
-			colors:   true,
-			zapLevel: zapcore.WarnLevel,
+			name:           "Zap WarnLevel with color",
+			colors:         true,
+			zapLevel:       zapcore.WarnLevel, // No custom level
 			expectedPrefix: "",
 			expectedLevel:  colorYellow + "[WARN]" + colorReset,
 			expectedSuffix: "",
+		},
+		{
+			name:            "Empty message and specific field types",
+			colors:          false, // Plain text for simplicity
+			level:           InfoLevel,
+			zapLevel:        zapcore.InfoLevel,
+			logFields: []zapcore.Field{
+				zap.String("emptyStr", ""),
+				{Key: "nilErrorField", Type: zapcore.ErrorType, Interface: nil},
+				zap.String("strWithSpace", "hello world"),
+			},
+			messageOverride: stringPtr(""), // Override to empty message
+			expectedPrefix:  "",
+			expectedLevel:   "[INFO]",
+			// Encoder behavior: CALLER + " " + " field1=value1" (double space issue if not careful in assertion)
+			// Encoder: caller + (":" + msg | " ") + fields_with_leading_space
+			// If msg empty: caller + " " + (fields_with_leading_space | "")
+			// fields_with_leading_space is like " field=value"
+			// So: caller + " " + " field=value" -> "caller  field=value"
+			// The expectedSuffix should capture this: " emptyStr=\"\" nilErrorField=nil strWithSpace=\"hello world\"" (single leading space from field loop)
+			// The assertion builder will add the other space.
+			expectedSuffix: ` emptyStr="" nilErrorField=nil strWithSpace="hello world"`,
+		},
+		{
+			name:            "No message, no fields",
+			colors:          false,
+			level:           InfoLevel,
+			zapLevel:        zapcore.InfoLevel,
+			messageOverride: stringPtr(""),
+			expectedPrefix:  "",
+			expectedLevel:   "[INFO]",
+			expectedSuffix:  "", // No fields
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var enc zapcore.Encoder
-			currentOpts := opts
+			currentOpts := opts // Start with base opts
 			currentOpts.ColorConsole = tt.colors
 			if tt.colors {
 				enc = NewColorConsoleEncoder(cfg, currentOpts)
@@ -166,45 +198,82 @@ func TestColorConsoleEncoder_EncodeEntry(t *testing.T) {
 				enc = NewPlainTextConsoleEncoder(cfg, currentOpts)
 			}
 
-			allTestFields := append([]zapcore.Field{}, tt.withFields...)
-			if tt.level != 0 {
+			allTestFields := make([]zapcore.Field, 0, len(tt.withFields)+len(tt.logFields)+1)
+			allTestFields = append(allTestFields, tt.withFields...)
+			if tt.level != 0 { // If a custom level is specified for the test (0 is not a valid custom level here)
 				allTestFields = append(allTestFields, zap.String("customlevel", tt.level.CapitalString()))
 			}
 			allTestFields = append(allTestFields, tt.logFields...)
 
-			currentEntry := entry
+			currentEntry := baseEntry // Make a copy of the base entry for this test run
 			currentEntry.Level = tt.zapLevel
+			if tt.messageOverride != nil {
+				currentEntry.Message = *tt.messageOverride
+			}
+			// else: it keeps the default "Test message" from baseEntry, or whatever was last set.
+			// This is important: ensure baseEntry.Message is used if messageOverride is nil.
 
 			buf, err := enc.EncodeEntry(currentEntry, allTestFields)
-			assert.NoError(t, err)
+			assert.NoError(t, err, "EncodeEntry failed for test: %s", tt.name)
 			if err != nil {
 				return
 			}
 			logOutput := buf.String()
 			buf.Free()
 
-			var parts []string
-			parts = append(parts, now.Format(opts.TimestampFormat))
-			if tt.expectedPrefix != "" {
-				parts = append(parts, tt.expectedPrefix)
-			}
-			parts = append(parts, tt.expectedLevel)
-			parts = append(parts, "test/file.go:42:")
-			parts = append(parts, entry.Message)
+			// Construct the expected string meticulously
+			expected := strings.Builder{}
+			// Timestamp
+			expected.WriteString(baseEntry.Time.Format(currentOpts.TimestampFormat))
+			expected.WriteString(" ")
 
-			var expected strings.Builder
-			for i, p := range parts {
-				expected.WriteString(p)
-				if i < len(parts)-1 {
-					expected.WriteString(" ")
-				}
+			// Context Prefix
+			if tt.expectedPrefix != "" {
+				expected.WriteString(tt.expectedPrefix)
+				expected.WriteString(" ")
 			}
+
+			// Level
+			expected.WriteString(tt.expectedLevel)
+			expected.WriteString(" ")
+
+			// Caller
+			expected.WriteString(baseEntry.Caller.File) // e.g., test/file.go
+			expected.WriteString(":")
+			expected.WriteString(fmt.Sprintf("%d", baseEntry.Caller.Line)) // e.g., 42
+
+			// Message part (including separator)
+			// Encoder logic:
+			// if ent.Message != "" { line.AppendString(": ") } else { line.AppendString(" ") }
+			// if ent.Message != "" { line.AppendString(ent.Message) }
+			if currentEntry.Message != "" {
+				expected.WriteString(": ")
+				expected.WriteString(currentEntry.Message)
+			} else {
+				expected.WriteString(" ") // If message is empty, a single space follows the caller
+			}
+
+			// Suffix (fields)
+			// Encoder logic for fields: for _, f := range remainingFields { line.AppendString(" "); ... }
+			// This means each field part in the output is prefixed by a space.
+			// tt.expectedSuffix should represent this, e.g., " field1=val1 field2=val2"
 			if tt.expectedSuffix != "" {
+				// If message was present, the fields follow directly after the message.
+				// If message was empty, a space was already added after caller.
+				// The tt.expectedSuffix must contain its own leading space.
+				if currentEntry.Message != "" { // If there was a message, and suffix exists
+					if !strings.HasPrefix(tt.expectedSuffix, " ") && len(tt.expectedSuffix) > 0 {
+						expected.WriteString(" ") // Ensure separation if suffix somehow didn't have it
+					}
+				}
+				// If message was empty, the single space after caller is already there.
+				// The suffix (e.g. " field1=val1") will correctly follow.
 				expected.WriteString(tt.expectedSuffix)
 			}
+
 			expected.WriteString(zapcore.DefaultLineEnding)
 
-			assert.Equal(t, expected.String(), logOutput)
+			assert.Equal(t, expected.String(), logOutput, "Log output mismatch for test: %s", tt.name)
 		})
 	}
 }
@@ -218,4 +287,9 @@ func TestTempEncoder(t *testing.T) {
 	enc := &tempEncoder{buf: buf, EncoderConfig: cfg}
 	enc.AddString("", "test/caller.go:123")
 	assert.Equal(t, "test/caller.go:123", buf.String())
+}
+
+// Helper to get a pointer to a string, useful for messageOverride
+func stringPtr(s string) *string {
+	return &s
 }

@@ -7,6 +7,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCreateDir(t *testing.T) {
@@ -139,4 +142,91 @@ func TestCreateDir(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestFileExists(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Case 1: File exists
+	existingFilePath := filepath.Join(tmpDir, "exists.txt")
+	f, err := os.Create(existingFilePath)
+	require.NoError(t, err, "Failed to create test file")
+	f.Close()
+
+	exists, err := FileExists(existingFilePath)
+	assert.NoError(t, err, "FileExists on existing file should not error")
+	assert.True(t, exists, "FileExists should return true for an existing file")
+
+	// Case 2: Directory exists
+	existingDirPath := filepath.Join(tmpDir, "exists_dir")
+	err = os.Mkdir(existingDirPath, 0755)
+	require.NoError(t, err, "Failed to create test directory")
+
+	exists, err = FileExists(existingDirPath)
+	assert.NoError(t, err, "FileExists on existing directory should not error")
+	assert.True(t, exists, "FileExists should return true for an existing directory")
+
+	// Case 3: Path does not exist
+	nonExistentPath := filepath.Join(tmpDir, "not_exists.txt")
+	exists, err = FileExists(nonExistentPath)
+	assert.NoError(t, err, "FileExists on non-existent path should not error")
+	assert.False(t, exists, "FileExists should return false for a non-existent path")
+
+	// Case 4: Empty path string (should be treated as non-existent or error depending on os.Stat)
+	// os.Stat("") typically returns an error like "stat : no such file or directory" on non-Windows
+	// or "GetFileAttributesEx : The system cannot find the file specified." on Windows.
+	// So, it should be treated as os.IsNotExist or a wrapped error.
+	exists, err = FileExists("")
+	if err != nil { // Expecting an error or (false, nil)
+		// If it's an error, it should ideally wrap os.ErrNotExist or similar
+		// For now, let's check if exists is false.
+		// The function FileExists is designed to return (false, nil) for IsNotExist.
+		// An empty path os.Stat("") might return a different error that is *not* IsNotExist.
+		// Let's test current behavior:
+		assert.False(t, exists, "FileExists on empty path should result in exists=false")
+		// We expect an error from os.Stat(""), which FileExists should wrap
+		assert.Error(t, err, "FileExists on empty path should ideally return an error from os.Stat")
+		assert.Contains(t, err.Error(), "error checking if path '' exists", "Error message for empty path mismatch")
+	} else {
+		// This path implies os.Stat("") returned nil error, which is highly unlikely.
+		// Or, it means os.Stat("") returned an IsNotExist error, and FileExists returned (false, nil)
+		assert.False(t, exists, "FileExists on empty path should return false if no error")
+	}
+
+
+	// Case 5: Permission denied on parent (simulated - hard to truly test without changing actual permissions)
+	// This test is more about how FileExists handles generic os.Stat errors other than IsNotExist.
+	// On Unix, if /unreadable_dir exists but is not readable, and we check /unreadable_dir/somefile:
+	// os.Stat("/unreadable_dir/somefile") will return a permission error for "/unreadable_dir/somefile",
+	// and os.IsPermission(err) would be true for that error.
+	// FileExists should return (false, wrappedError).
+	// For simplicity, we'll check that an error is returned if Stat fails unexpectedly.
+	// This is already covered by the function's structure.
+	// A more direct test would involve creating a directory, chmodding it to unreadable,
+	// then trying FileExists on a path inside it.
+	if runtime.GOOS != "windows" { // Permission tests are more reliable on POSIX
+		unreadableParent := filepath.Join(tmpDir, "unreadable_parent_for_exists_test")
+		err = os.Mkdir(unreadableParent, 0755)
+		require.NoError(t, err)
+
+		// Make parent unsearchable (no execute bit for others/group, if user is not owner)
+		// To make it robust, make it unreadable/unsearchable by owner.
+		err = os.Chmod(unreadableParent, 0000) // No permissions for anyone
+		require.NoError(t, err)
+
+		defer func() {
+			// Attempt to restore permissions to allow cleanup by t.TempDir()
+			_ = os.Chmod(unreadableParent, 0755)
+		}()
+
+		pathInUnreadable := filepath.Join(unreadableParent, "file_inside.txt")
+		exists, errCheck := FileExists(pathInUnreadable)
+
+		assert.False(t, exists, "Expected exists=false when parent is unreadable")
+		assert.Error(t, errCheck, "Expected an error when parent directory is unreadable")
+		if errCheck != nil {
+			assert.True(t, os.IsPermission(errors.Unwrap(errCheck)) || os.IsPermission(errCheck) || strings.Contains(errCheck.Error(), "permission denied"),
+				"Expected a permission-related error, got: %v", errCheck)
+		}
+	}
 }

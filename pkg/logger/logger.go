@@ -235,8 +235,11 @@ func NewLogger(opts Options) (*Logger, error) {
 	}
 
 	core := zapcore.NewTee(cores...)
-	// Temporarily use AddCallerSkip(0) for debugging field propagation. Caller info will be wrong.
-	zapLogger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(0), zap.IncreaseLevel(atomicLevel))
+	// AddCallerSkip(2) because our public methods (e.g., logger.Infof or instance.Infof)
+	// involve two levels of calls before reaching the underlying zap SugaredLogger methods (e.g., Infow):
+	// 1. logger.Infof -> Get().logWithCustomLevel -> l.SugaredLogger.Infow
+	// 2. instance.Infof -> instance.logWithCustomLevel -> l.SugaredLogger.Infow
+	zapLogger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(2), zap.IncreaseLevel(atomicLevel))
 
 	return &Logger{SugaredLogger: zapLogger.Sugar(), opts: opts, atomicLevel: atomicLevel}, nil
 }
@@ -255,26 +258,31 @@ func (l *Logger) logWithCustomLevel(level Level, template string, args ...interf
 
 	msg := fmt.Sprintf(template, args...)
 
-	// For this test, call plain methods but add one explicit field.
-	// The l.SugaredLogger is the one that should have context from With()
-	// No AddCallerSkip via WithOptions here, as it's handled in NewLogger.
+	// Prepare keys and values for the *w methods
+	keysAndValues := []interface{}{
+		"customlevel", level.CapitalString(),
+		"customlevel_num", int(level),
+	}
+
+	// No AddCallerSkip via WithOptions here, as it's handled in NewLogger's AddCallerSkip.
 	switch level {
 	case DebugLevel:
-		l.SugaredLogger.Debug(msg, zap.String("logsite_field", "debug_val"))
+		l.SugaredLogger.Debugw(msg, keysAndValues...)
 	case InfoLevel:
-		l.SugaredLogger.Info(msg, zap.String("logsite_field", "info_val"))
-	case SuccessLevel:
-		l.SugaredLogger.Info(msg, zap.String("logsite_field", "success_val"))
+		l.SugaredLogger.Infow(msg, keysAndValues...)
+	case SuccessLevel: // Success maps to Info for zap's core level
+		l.SugaredLogger.Infow(msg, keysAndValues...)
 	case WarnLevel:
-		l.SugaredLogger.Warn(msg, zap.String("logsite_field", "warn_val"))
+		l.SugaredLogger.Warnw(msg, keysAndValues...)
 	case ErrorLevel:
-		l.SugaredLogger.Error(msg, zap.String("logsite_field", "error_val"))
-	case FailLevel, FatalLevel:
-		l.SugaredLogger.Fatal(msg, zap.String("logsite_field", "fatal_val"))
+		l.SugaredLogger.Errorw(msg, keysAndValues...)
+	case FailLevel, FatalLevel: // Fail and Fatal map to Fatal for zap's core level
+		// For FailLevel, we want the os.Exit(1) behavior, which Fatalw provides.
+		l.SugaredLogger.Fatalw(msg, keysAndValues...)
 	case PanicLevel:
-		l.SugaredLogger.Panic(msg, zap.String("logsite_field", "panic_val"))
-	default:
-		l.SugaredLogger.Info(msg, zap.String("logsite_field", "default_val"))
+		l.SugaredLogger.Panicw(msg, keysAndValues...)
+	default: // Should not happen with defined levels
+		l.SugaredLogger.Infow(msg, keysAndValues...)
 	}
 }
 

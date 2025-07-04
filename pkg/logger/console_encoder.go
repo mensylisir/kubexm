@@ -2,7 +2,6 @@ package logger
 
 import (
 	"fmt"
-	"os" // For Fprintf to os.Stderr (debug line)
 	"strings"
 	"time"
 
@@ -41,7 +40,7 @@ func NewColorConsoleEncoder(cfg zapcore.EncoderConfig, opts Options) zapcore.Enc
 		spaced:        true,
 		colors:        true,
 		loggerOpts:    opts,
-		levelStrings:  cacheLevelStrings(true, opts.ColorConsole),
+		levelStrings:  cacheLevelStrings(opts.ColorConsole),
 	}
 }
 
@@ -52,18 +51,22 @@ func NewPlainTextConsoleEncoder(cfg zapcore.EncoderConfig, opts Options) zapcore
 		spaced:        true,
 		colors:        false,
 		loggerOpts:    opts,
-		levelStrings:  cacheLevelStrings(false, false),
+		levelStrings:  cacheLevelStrings(false),
 	}
 }
 
-// cacheLevelStrings (as before)
-func cacheLevelStrings(color bool, useColor bool) map[Level]string {
+// cacheLevelStrings generates a map of log levels to their string representations,
+// optionally applying ANSI color codes.
+func cacheLevelStrings(useColor bool) map[Level]string {
 	m := make(map[Level]string)
 	levels := []Level{DebugLevel, InfoLevel, SuccessLevel, WarnLevel, ErrorLevel, FailLevel, PanicLevel, FatalLevel}
 	for _, l := range levels {
 		str := fmt.Sprintf("[%s]", l.CapitalString())
-		if color && useColor { m[l] = levelToColor(l, str)
-		} else { m[l] = str }
+		if useColor {
+			m[l] = levelToColor(l, str)
+		} else {
+			m[l] = str
+		}
 	}
 	return m
 }
@@ -131,7 +134,6 @@ func (enc *colorConsoleEncoder) AppendUint8(uint8) {}
 func (enc *colorConsoleEncoder) AppendUintptr(uintptr) {}
 
 func (enc *colorConsoleEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
-	fmt.Fprintf(os.Stderr, "[DEBUG_ENCODER] EncodeEntry received fields: %+v\n", fields) // DEBUG LINE
 	line := _bufferPool.Get()
 
 	if enc.TimeKey != "" {
@@ -147,6 +149,8 @@ func (enc *colorConsoleEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.
 	}
 	logContextValues := make(map[string]string)
 	remainingFields := make([]zapcore.Field, 0, len(fields))
+	var parsedCustomLevel Level
+	customLevelFound := false
 
 	for _, f := range fields {
 		isContextField := false
@@ -157,7 +161,43 @@ func (enc *colorConsoleEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.
 				break
 			}
 		}
-		if !isContextField && f.Key != "customlevel" && f.Key != "customlevel_num" {
+
+		if f.Key == "customlevel" && f.Type == zapcore.StringType {
+			levelStr := f.String
+			switch strings.ToUpper(levelStr) {
+			case "DEBUG":
+				parsedCustomLevel = DebugLevel
+			case "INFO":
+				parsedCustomLevel = InfoLevel
+			case "SUCCESS":
+				parsedCustomLevel = SuccessLevel
+			case "WARN":
+				parsedCustomLevel = WarnLevel
+			case "ERROR":
+				parsedCustomLevel = ErrorLevel
+			case "FAIL":
+				parsedCustomLevel = FailLevel
+			case "PANIC":
+				parsedCustomLevel = PanicLevel
+			case "FATAL":
+				parsedCustomLevel = FatalLevel
+			default:
+				// Unknown custom level string, will fallback to zap's level.
+				// Ensure this field isn't added to remainingFields if we 'continue' or handle here.
+				// For now, if it's unknown, customLevelFound remains false.
+				// We must ensure it's not added to remainingFields.
+				if !isContextField && f.Key != "customlevel_num" { // if it was not a context field either
+					// If it's an unknown customlevel, and not a context field,
+					// it might be a regular field named "customlevel".
+					// This case is tricky. Assuming "customlevel" is reserved.
+					// So if key is "customlevel" but value is invalid, we effectively ignore it for level determination
+					// and also don't add it to remainingFields.
+				}
+				continue // Skip to next field
+			}
+			customLevelFound = true
+			// This field is processed for level determination, don't add to remainingFields.
+		} else if !isContextField && f.Key != "customlevel_num" { // Also skip customlevel_num
 			remainingFields = append(remainingFields, f)
 		}
 	}
@@ -166,13 +206,20 @@ func (enc *colorConsoleEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.
 		if val, ok := logContextValues[key]; ok && val != "" {
 			shortKey := key
 			switch key {
-			case "pipeline_name": shortKey = "P"
-			case "module_name": shortKey = "M"
-			case "task_name": shortKey = "T"
-			case "step_name": shortKey = "S"
-			case "hook_event": shortKey = "HE"
-			case "hook_step_name": shortKey = "HS"
-			case "host_name": shortKey = "H"
+			case "pipeline_name":
+				shortKey = "P"
+			case "module_name":
+				shortKey = "M"
+			case "task_name":
+				shortKey = "T"
+			case "step_name":
+				shortKey = "S"
+			case "hook_event":
+				shortKey = "HE"
+			case "hook_step_name":
+				shortKey = "HS"
+			case "host_name":
+				shortKey = "H"
 			}
 			contextPrefix.WriteString(fmt.Sprintf("[%s:%s]", shortKey, val))
 		}
@@ -183,25 +230,19 @@ func (enc *colorConsoleEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.
 		line.AppendString(" ")
 	}
 
-    customLevelStr := ""; ourLevel := InfoLevel
-	for _, f := range fields {
-		if f.Key == "customlevel" && f.Type == zapcore.StringType {
-			levelStr := f.String
-			switch strings.ToUpper(levelStr) {
-			case "DEBUG": ourLevel = DebugLevel; case "INFO": ourLevel = InfoLevel
-			case "SUCCESS": ourLevel = SuccessLevel; case "WARN": ourLevel = WarnLevel
-			case "ERROR": ourLevel = ErrorLevel; case "FAIL": ourLevel = FailLevel
-			case "PANIC": ourLevel = PanicLevel; case "FATAL": ourLevel = FatalLevel
-			}
-			customLevelStr = enc.levelStrings[ourLevel]; break
+	customLevelOutputStr := ""
+	if customLevelFound {
+		customLevelOutputStr = enc.levelStrings[parsedCustomLevel]
+	} else {
+		// Fallback to zap's entry level if customlevel field wasn't found or valid
+		levelText := fmt.Sprintf("[%s]", strings.ToUpper(ent.Level.String()))
+		if enc.colors {
+			customLevelOutputStr = levelToColorZap(ent.Level, levelText)
+		} else {
+			customLevelOutputStr = levelText
 		}
 	}
-	if customLevelStr == "" {
-		levelText := fmt.Sprintf("[%s]", strings.ToUpper(ent.Level.String()))
-		if enc.colors { customLevelStr = levelToColorZap(ent.Level, levelText)
-		} else { customLevelStr = levelText }
-	}
-	line.AppendString(customLevelStr)
+	line.AppendString(customLevelOutputStr)
 	line.AppendString(" ")
 
 	if ent.Caller.Defined && enc.CallerKey != "" && enc.EncodeCaller != nil {

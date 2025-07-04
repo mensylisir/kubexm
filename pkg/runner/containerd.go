@@ -9,9 +9,10 @@ import (
 	"strings"
 	"time"
 
-
 	"github.com/pkg/errors"
+
 	"github.com/mensylisir/kubexm/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/util" // Added import for util
 	// Note: For a production-grade TOML manipulation, a library like "github.com/BurntSushi/toml" would be used.
 	// As it's not available in this environment, TOML handling will be simplified or string-based.
 )
@@ -58,7 +59,7 @@ func (r *defaultRunner) CtrListImages(ctx context.Context, conn connector.Connec
 	if strings.TrimSpace(namespace) == "" {
 		return nil, errors.New("namespace cannot be empty for CtrListImages")
 	}
-	cmd := fmt.Sprintf("ctr -n %s images ls", shellEscape(namespace))
+	cmd := fmt.Sprintf("ctr -n %s images ls", util.ShellEscape(namespace))
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: DefaultCtrTimeout}
 	stdout, stderr, err := conn.Exec(ctx, cmd, execOptions)
 	if err != nil {
@@ -91,10 +92,10 @@ func (r *defaultRunner) CtrPullImage(ctx context.Context, conn connector.Connect
 	if imageName == "" { return errors.New("imageName cannot be empty for CtrPullImage") }
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "ctr", "-n", shellEscape(namespace), "images", "pull")
+	cmdArgs = append(cmdArgs, "ctr", "-n", util.ShellEscape(namespace), "images", "pull")
 	if allPlatforms { cmdArgs = append(cmdArgs, "--all-platforms") }
-	if user != "" { cmdArgs = append(cmdArgs, "--user", shellEscape(user)) }
-	cmdArgs = append(cmdArgs, shellEscape(imageName))
+	if user != "" { cmdArgs = append(cmdArgs, "--user", util.ShellEscape(user)) }
+	cmdArgs = append(cmdArgs, util.ShellEscape(imageName))
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 15 * time.Minute})
 	if err != nil {
@@ -109,7 +110,7 @@ func (r *defaultRunner) CtrRemoveImage(ctx context.Context, conn connector.Conne
 	if namespace == "" { return errors.New("namespace cannot be empty for CtrRemoveImage") }
 	if imageName == "" { return errors.New("imageName cannot be empty for CtrRemoveImage") }
 
-	cmd := fmt.Sprintf("ctr -n %s images rm %s", shellEscape(namespace), shellEscape(imageName))
+	cmd := fmt.Sprintf("ctr -n %s images rm %s", util.ShellEscape(namespace), util.ShellEscape(imageName))
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCtrTimeout})
 	if err != nil {
 		if strings.Contains(string(stderr), "not found") { return nil }
@@ -124,7 +125,7 @@ func (r *defaultRunner) CtrTagImage(ctx context.Context, conn connector.Connecto
 	if namespace == "" || sourceImage == "" || targetImage == "" {
 		return errors.New("namespace, sourceImage, and targetImage are required for CtrTagImage")
 	}
-	cmd := fmt.Sprintf("ctr -n %s images tag %s %s", shellEscape(namespace), shellEscape(sourceImage), shellEscape(targetImage))
+	cmd := fmt.Sprintf("ctr -n %s images tag %s %s", util.ShellEscape(namespace), util.ShellEscape(sourceImage), util.ShellEscape(targetImage))
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCtrTimeout})
 	if err != nil {
 		return errors.Wrapf(err, "failed to tag image %s to %s in namespace %s. Stderr: %s", sourceImage, targetImage, namespace, string(stderr))
@@ -138,9 +139,9 @@ func (r *defaultRunner) CtrImportImage(ctx context.Context, conn connector.Conne
 	if namespace == "" || filePath == "" { return errors.New("namespace and filePath are required") }
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "ctr", "-n", shellEscape(namespace), "images", "import")
+	cmdArgs = append(cmdArgs, "ctr", "-n", util.ShellEscape(namespace), "images", "import")
 	if allPlatforms { cmdArgs = append(cmdArgs, "--all-platforms") }
-	cmdArgs = append(cmdArgs, shellEscape(filePath))
+	cmdArgs = append(cmdArgs, util.ShellEscape(filePath))
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 15 * time.Minute})
 	if err != nil {
@@ -155,9 +156,9 @@ func (r *defaultRunner) CtrExportImage(ctx context.Context, conn connector.Conne
 	if namespace == "" || imageName == "" || outputFilePath == "" { return errors.New("namespace, imageName, and outputFilePath are required") }
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "ctr", "-n", shellEscape(namespace), "images", "export")
+	cmdArgs = append(cmdArgs, "ctr", "-n", util.ShellEscape(namespace), "images", "export")
 	if allPlatforms { cmdArgs = append(cmdArgs, "--all-platforms") }
-	cmdArgs = append(cmdArgs, shellEscape(outputFilePath), shellEscape(imageName))
+	cmdArgs = append(cmdArgs, util.ShellEscape(outputFilePath), util.ShellEscape(imageName))
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 15 * time.Minute})
 	if err != nil {
@@ -171,7 +172,7 @@ func (r *defaultRunner) CtrListContainers(ctx context.Context, conn connector.Co
 	if conn == nil { return nil, errors.New("connector cannot be nil") }
 	if namespace == "" { return nil, errors.New("namespace cannot be empty") }
 
-	cmd := fmt.Sprintf("ctr -n %s containers ls", shellEscape(namespace))
+	cmd := fmt.Sprintf("ctr -n %s containers ls", util.ShellEscape(namespace))
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCtrTimeout})
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to list containers in %s. Stderr: %s", namespace, string(stderr))
@@ -208,22 +209,22 @@ func (r *defaultRunner) CtrRunContainer(ctx context.Context, conn connector.Conn
 	}
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "ctr", "-n", shellEscape(namespace), "run")
-	if opts.Snapshotter != "" { cmdArgs = append(cmdArgs, "--snapshotter", shellEscape(opts.Snapshotter)) }
-	if opts.ConfigPath != "" { cmdArgs = append(cmdArgs, "--config", shellEscape(opts.ConfigPath)) }
-	if opts.Runtime != "" { cmdArgs = append(cmdArgs, "--runtime", shellEscape(opts.Runtime)) }
+	cmdArgs = append(cmdArgs, "ctr", "-n", util.ShellEscape(namespace), "run")
+	if opts.Snapshotter != "" { cmdArgs = append(cmdArgs, "--snapshotter", util.ShellEscape(opts.Snapshotter)) }
+	if opts.ConfigPath != "" { cmdArgs = append(cmdArgs, "--config", util.ShellEscape(opts.ConfigPath)) }
+	if opts.Runtime != "" { cmdArgs = append(cmdArgs, "--runtime", util.ShellEscape(opts.Runtime)) }
 	if opts.NetHost { cmdArgs = append(cmdArgs, "--net-host") }
 	if opts.TTY { cmdArgs = append(cmdArgs, "--tty") }
 	if opts.Privileged { cmdArgs = append(cmdArgs, "--privileged") }
 	if opts.ReadOnlyRootFS { cmdArgs = append(cmdArgs, "--rootfs-readonly") }
-	if opts.User != "" { cmdArgs = append(cmdArgs, "--user", shellEscape(opts.User)) }
-	if opts.Cwd != "" { cmdArgs = append(cmdArgs, "--cwd", shellEscape(opts.Cwd)) }
-	for _, envVar := range opts.Env { cmdArgs = append(cmdArgs, "--env", shellEscape(envVar)) }
-	for _, mount := range opts.Mounts { cmdArgs = append(cmdArgs, "--mount", shellEscape(mount)) }
+	if opts.User != "" { cmdArgs = append(cmdArgs, "--user", util.ShellEscape(opts.User)) }
+	if opts.Cwd != "" { cmdArgs = append(cmdArgs, "--cwd", util.ShellEscape(opts.Cwd)) }
+	for _, envVar := range opts.Env { cmdArgs = append(cmdArgs, "--env", util.ShellEscape(envVar)) }
+	for _, mount := range opts.Mounts { cmdArgs = append(cmdArgs, "--mount", util.ShellEscape(mount)) }
 	if len(opts.Platforms) > 0 { cmdArgs = append(cmdArgs, "--platform", strings.Join(opts.Platforms, ",")) }
-	cmdArgs = append(cmdArgs, "--rm", shellEscape(opts.ImageName), shellEscape(opts.ContainerID))
+	cmdArgs = append(cmdArgs, "--rm", util.ShellEscape(opts.ImageName), util.ShellEscape(opts.ContainerID))
 	if len(opts.Command) > 0 {
-		for _, arg := range opts.Command { cmdArgs = append(cmdArgs, shellEscape(arg)) }
+		for _, arg := range opts.Command { cmdArgs = append(cmdArgs, util.ShellEscape(arg)) }
 	}
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 5 * time.Minute})
@@ -238,7 +239,7 @@ func (r *defaultRunner) CtrStopContainer(ctx context.Context, conn connector.Con
 	if conn == nil { return errors.New("connector cannot be nil") }
 	if namespace == "" || containerID == "" { return errors.New("namespace and containerID are required") }
 
-	killCmdTerm := fmt.Sprintf("ctr -n %s task kill -s SIGTERM %s", shellEscape(namespace), shellEscape(containerID))
+	killCmdTerm := fmt.Sprintf("ctr -n %s task kill -s SIGTERM %s", util.ShellEscape(namespace), util.ShellEscape(containerID))
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: DefaultCtrTimeout}
 	_, stderrTerm, errTerm := conn.Exec(ctx, killCmdTerm, execOptions)
 
@@ -249,7 +250,7 @@ func (r *defaultRunner) CtrStopContainer(ctx context.Context, conn connector.Con
 	}
 	if timeout > 0 { time.Sleep(timeout) }
 
-	killCmdKill := fmt.Sprintf("ctr -n %s task kill -s SIGKILL %s", shellEscape(namespace), shellEscape(containerID))
+	killCmdKill := fmt.Sprintf("ctr -n %s task kill -s SIGKILL %s", util.ShellEscape(namespace), util.ShellEscape(containerID))
 	_, stderrKill, errKill := conn.Exec(ctx, killCmdKill, execOptions)
 	if errKill != nil {
 		if strings.Contains(string(stderrKill), "no such process") || strings.Contains(string(stderrKill), "not found") { return nil }
@@ -264,7 +265,7 @@ func (r *defaultRunner) CtrRemoveContainer(ctx context.Context, conn connector.C
 	if conn == nil { return errors.New("connector cannot be nil") }
 	if namespace == "" || containerID == "" { return errors.New("namespace and containerID are required") }
 
-	cmd := fmt.Sprintf("ctr -n %s containers rm %s", shellEscape(namespace), shellEscape(containerID))
+	cmd := fmt.Sprintf("ctr -n %s containers rm %s", util.ShellEscape(namespace), util.ShellEscape(containerID))
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: DefaultCtrTimeout}
 	_, stderr, err := conn.Exec(ctx, cmd, execOptions)
 	if err != nil {
@@ -292,15 +293,15 @@ func (r *defaultRunner) CtrExecInContainer(ctx context.Context, conn connector.C
 	}
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "ctr", "-n", shellEscape(namespace), "task", "exec")
+	cmdArgs = append(cmdArgs, "ctr", "-n", util.ShellEscape(namespace), "task", "exec")
 	if opts.TTY { cmdArgs = append(cmdArgs, "--tty") }
-	if opts.User != "" { cmdArgs = append(cmdArgs, "--user", shellEscape(opts.User)) }
-	if opts.Cwd != "" { cmdArgs = append(cmdArgs, "--cwd", shellEscape(opts.Cwd)) }
+	if opts.User != "" { cmdArgs = append(cmdArgs, "--user", util.ShellEscape(opts.User)) }
+	if opts.Cwd != "" { cmdArgs = append(cmdArgs, "--cwd", util.ShellEscape(opts.Cwd)) }
 
 	execID := fmt.Sprintf("kubexm-exec-%d", time.Now().UnixNano())
-	cmdArgs = append(cmdArgs, "--exec-id", shellEscape(execID))
-	cmdArgs = append(cmdArgs, shellEscape(containerID))
-	for _, arg := range cmdToExec { cmdArgs = append(cmdArgs, shellEscape(arg)) }
+	cmdArgs = append(cmdArgs, "--exec-id", util.ShellEscape(execID))
+	cmdArgs = append(cmdArgs, util.ShellEscape(containerID))
+	for _, arg := range cmdToExec { cmdArgs = append(cmdArgs, util.ShellEscape(arg)) }
 
 	execTimeout := 5 * time.Minute
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: execTimeout}
@@ -319,7 +320,7 @@ func (r *defaultRunner) CtrContainerInfo(ctx context.Context, conn connector.Con
 	if namespace == "" { return nil, errors.New("namespace is required for CtrContainerInfo") }
 	if containerID == "" { return nil, errors.New("containerID is required for CtrContainerInfo") }
 
-	cmd := fmt.Sprintf("ctr -n %s container info %s", shellEscape(namespace), shellEscape(containerID))
+	cmd := fmt.Sprintf("ctr -n %s container info %s", util.ShellEscape(namespace), util.ShellEscape(containerID))
 	// ctr container info output is not JSON by default, it's a custom format.
 	// We need to parse it. Example:
 	// Image: docker.io/library/alpine:latest
@@ -382,7 +383,7 @@ func (r *defaultRunner) CtrContainerInfo(ctx context.Context, conn connector.Con
 	// It needs to be fetched from `ctr task info` or `ctr task ls`.
 	// For now, status will remain empty or be set by a separate call if needed.
 	// We can attempt a `ctr task ps <containerID>` to see if a task is running.
-	taskPsCmd := fmt.Sprintf("ctr -n %s task ps %s", shellEscape(namespace), shellEscape(containerID))
+	taskPsCmd := fmt.Sprintf("ctr -n %s task ps %s", util.ShellEscape(namespace), util.ShellEscape(containerID))
 	_, _, taskErr := conn.Exec(ctx, taskPsCmd, &connector.ExecOptions{Sudo: true, Timeout: 5 * time.Second}) // Short timeout for status check
 	if taskErr == nil {
 		info.Status = "RUNNING" // If `task ps` succeeds, assume running.
@@ -955,9 +956,9 @@ func (r *defaultRunner) CrictlListImages(ctx context.Context, conn connector.Con
 	if filters != nil {
 		for key, value := range filters {
 			if key == "image" || key == "digest" {
-				cmdArgs = append(cmdArgs, fmt.Sprintf("--%s", key), shellEscape(value))
+				cmdArgs = append(cmdArgs, fmt.Sprintf("--%s",key), util.ShellEscape(value))
 			} else {
-				cmdArgs = append(cmdArgs, "--label", shellEscape(fmt.Sprintf("%s=%s", key, value)))
+				cmdArgs = append(cmdArgs, "--label", util.ShellEscape(fmt.Sprintf("%s=%s", key, value)))
 			}
 		}
 	}
