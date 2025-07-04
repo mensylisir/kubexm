@@ -438,3 +438,81 @@ func TestFactoryFunctions_PanicWithWrongParentType(t *testing.T) {
 		NewStepCache(dt)
 	}, "NewStepCache should panic with wrong parent type")
 }
+
+func TestGenericCache_Keys(t *testing.T) {
+	// Test with a single cache (no parent)
+	cache := NewGenericCache(nil)
+
+	// 1. Test on an empty cache
+	keys := cache.Keys()
+	assert.Empty(t, keys, "Keys() on an empty cache should return an empty slice")
+
+	// 2. Add some keys
+	cache.Set("key1", "value1")
+	cache.Set("key2", "value2")
+	cache.Set(currentStepSpecKey, "specValue") // Special key for StepCache
+
+	keys = cache.Keys()
+	assert.Len(t, keys, 3, "Expected 3 keys after adding")
+	assert.ElementsMatch(t, []string{"key1", "key2", currentStepSpecKey}, keys, "Keys mismatch after adding")
+
+	// 3. Delete a key
+	cache.Delete("key1")
+	keys = cache.Keys()
+	assert.Len(t, keys, 2, "Expected 2 keys after deleting one")
+	assert.ElementsMatch(t, []string{"key2", currentStepSpecKey}, keys, "Keys mismatch after deleting one")
+
+	// 4. Delete another key (special one)
+	cache.Delete(currentStepSpecKey)
+	keys = cache.Keys()
+	assert.Len(t, keys, 1, "Expected 1 key after deleting currentStepSpecKey")
+	assert.ElementsMatch(t, []string{"key2"}, keys, "Keys mismatch after deleting currentStepSpecKey")
+
+	// 5. Delete last key
+	cache.Delete("key2")
+	keys = cache.Keys()
+	assert.Empty(t, keys, "Keys() after deleting all keys should return an empty slice")
+
+	// Test with parent cache to ensure Keys() is local
+	parentCache := NewGenericCache(nil)
+	parentCache.Set("parentKey1", "parentValue1")
+	parentCache.Set("sharedKey", "parentSharedValue")
+
+	childCache := NewGenericCache(parentCache)
+	childCache.Set("childKey1", "childValue1")
+	childCache.Set("sharedKey", "childSharedValue") // Overwrites for Get, but local for Keys
+
+	// Keys from childCache should only include child's local keys
+	childKeys := childCache.Keys()
+	assert.Len(t, childKeys, 2, "Child cache Keys() should return 2 keys")
+	assert.ElementsMatch(t, []string{"childKey1", "sharedKey"}, childKeys, "Child cache Keys() mismatch")
+
+	// Keys from parentCache should only include parent's local keys
+	parentKeys := parentCache.Keys()
+	assert.Len(t, parentKeys, 2, "Parent cache Keys() should return 2 keys")
+	assert.ElementsMatch(t, []string{"parentKey1", "sharedKey"}, parentKeys, "Parent cache Keys() mismatch")
+
+	// Test Keys() via different cache interface types (using factory functions)
+	pipelineC := NewPipelineCache().(*genericCache) // Assert to *genericCache to use Set directly for testing
+	pipelineC.Set("pKey", "val")
+	assert.ElementsMatch(t, []string{"pKey"}, pipelineC.Keys())
+
+	moduleC := NewModuleCache(pipelineC).(*genericCache)
+	moduleC.Set("mKey", "val")
+	assert.ElementsMatch(t, []string{"mKey"}, moduleC.Keys(), "ModuleCache Keys() should be local")
+	// Ensure parent keys are not included
+	allModuleVisibleKeysViaGet := []string{}
+	if _, ok := moduleC.Get("pKey"); ok { allModuleVisibleKeysViaGet = append(allModuleVisibleKeysViaGet, "pKey")}
+	if _, ok := moduleC.Get("mKey"); ok { allModuleVisibleKeysViaGet = append(allModuleVisibleKeysViaGet, "mKey")}
+	assert.Contains(t, allModuleVisibleKeysViaGet, "pKey", "Module should see pKey via Get for this test setup")
+
+
+	taskC := NewTaskCache(moduleC).(*genericCache)
+	taskC.Set("tKey", "val")
+	assert.ElementsMatch(t, []string{"tKey"}, taskC.Keys(), "TaskCache Keys() should be local")
+
+	stepC := NewStepCache(taskC).(*genericCache)
+	stepC.Set("sKey", "val")
+	stepC.SetCurrentStepSpec("step spec")
+	assert.ElementsMatch(t, []string{"sKey", currentStepSpecKey}, stepC.Keys(), "StepCache Keys() should be local and include spec key")
+}

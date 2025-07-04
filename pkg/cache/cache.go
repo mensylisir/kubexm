@@ -10,6 +10,7 @@ type PipelineCache interface {
 	Get(key string) (interface{}, bool)
 	Set(key string, value interface{})
 	Delete(key string)
+	Keys() []string // Returns keys present in this specific cache scope
 }
 
 // ModuleCache stores data scoped to a module's execution.
@@ -17,6 +18,7 @@ type ModuleCache interface {
 	Get(key string) (interface{}, bool)
 	Set(key string, value interface{})
 	Delete(key string)
+	Keys() []string // Returns keys present in this specific cache scope
 }
 
 // TaskCache stores data scoped to a task's execution.
@@ -24,6 +26,7 @@ type TaskCache interface {
 	Get(key string) (interface{}, bool)
 	Set(key string, value interface{})
 	Delete(key string)
+	Keys() []string // Returns keys present in this specific cache scope
 }
 
 // StepCache stores data scoped to a step's execution, including the current step's spec.
@@ -33,6 +36,7 @@ type StepCache interface {
 	Delete(key string)
 	SetCurrentStepSpec(spec interface{}) // spec is of type spec.StepSpec, but use interface{} to avoid cycle
 	GetCurrentStepSpec() (interface{}, bool) // returns spec.StepSpec, but use interface{}
+	Keys() []string // Returns keys present in this specific cache scope
 }
 
 // genericCache provides a thread-safe key-value store with optional parent for fallback reads.
@@ -75,6 +79,21 @@ func (c *genericCache) SetParent(parent *genericCache) {
 // Delete removes a value from the cache.
 func (c *genericCache) Delete(key string) {
 	c.store.Delete(key)
+}
+
+// Keys returns a slice of keys present only in the current cache's local store.
+// The order of keys is not guaranteed.
+func (c *genericCache) Keys() []string {
+	var keys []string
+	c.store.Range(func(key interface{}, value interface{}) bool {
+		if kStr, ok := key.(string); ok {
+			keys = append(keys, kStr)
+		}
+		// else: key is not a string, which shouldn't happen if Set always uses string keys.
+		// Consider logging this case if it's possible and unexpected.
+		return true // continue iteration
+	})
+	return keys
 }
 
 const currentStepSpecKey = "_currentStepSpec"

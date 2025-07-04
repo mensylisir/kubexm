@@ -2,18 +2,18 @@ package util
 
 import (
 	"context"
-	"os" // For reading log file
+	"fmt" // Added for Sprintf
+	"os"  // For reading log file
 	"path/filepath"
 	"strings"
 	"testing"
 	// No longer using custom mock logger, will use real logger with file output
-
-	"github.com/mensylisir/kubexm/pkg/connector"
+	// "github.com/mensylisir/kubexm/pkg/connector" // No longer needed
 	"github.com/mensylisir/kubexm/pkg/logger"
 )
 
-// mockConnectorForUtil provides a stub implementation of connector.Connector.
-// It needs to implement all methods of the connector.Connector interface.
+// mockConnectorForUtil is no longer needed as DownloadFileWithConnector does not take a connector.
+/*
 type mockConnectorForUtil struct{}
 
 func (m *mockConnectorForUtil) Connect(ctx context.Context, cfg connector.ConnectionCfg) error { return nil }
@@ -25,11 +25,11 @@ func (m *mockConnectorForUtil) Close() error { return nil }
 func (m *mockConnectorForUtil) IsConnected() bool { return true }
 func (m *mockConnectorForUtil) GetOS(ctx context.Context) (*connector.OS, error) { return &connector.OS{}, nil }
 func (m *mockConnectorForUtil) ReadFile(ctx context.Context, path string) ([]byte, error) { return []byte("test"), nil }
-func (m *mockConnectorForUtil) WriteFile(ctx context.Context, content []byte, destPath, permissions string, sudo bool) error { return nil }
+func (m *mockConnectorForUtil) WriteFile(ctx context.Context, content []byte, destPath string, options *connector.FileTransferOptions) error { return nil }
 func (m *mockConnectorForUtil) Mkdir(ctx context.Context, path string, perm string) error { return nil }
 func (m *mockConnectorForUtil) Remove(ctx context.Context, path string, opts connector.RemoveOptions) error { return nil }
 func (m *mockConnectorForUtil) GetFileChecksum(ctx context.Context, path string, checksumType string) (string, error) { return "", nil }
-
+*/
 
 func TestDownloadFileWithConnector(t *testing.T) {
 	ctx := context.Background()
@@ -48,17 +48,18 @@ func TestDownloadFileWithConnector(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create test-specific logger: %v", err)
 	}
-	defer testSpecificLogger.Sync() // Important to flush logs
+	defer testSpecificLogger.Sync()
 
-	mockConn := &mockConnectorForUtil{}
+	// mockConn := &mockConnectorForUtil{} // No longer needed
 
 	url := "http://example.com/file.zip"
-	targetDir := "/tmp/downloads" // This directory won't be created by the placeholder
+	targetDir := "/tmp/downloads"
 	targetName := "file.zip"
 	checksum := "somesha256"
 
 	t.Run("successful_simulation", func(t *testing.T) {
-		path, err := DownloadFileWithConnector(ctx, testSpecificLogger, mockConn, url, targetDir, targetName, checksum)
+		// Call without mockConn
+		path, err := DownloadFileWithConnector(ctx, testSpecificLogger, url, targetDir, targetName, checksum)
 		if err != nil {
 			t.Errorf("DownloadFileWithConnector returned error: %v", err)
 		}
@@ -67,35 +68,31 @@ func TestDownloadFileWithConnector(t *testing.T) {
 			t.Errorf("Expected path %s, got %s", expectedPath, path)
 		}
 
-		// Verify log content
-		testSpecificLogger.Sync() // Ensure logs are flushed before reading
+		testSpecificLogger.Sync()
 		logContent, readErr := os.ReadFile(logFilePath)
 		if readErr != nil {
 			t.Fatalf("Failed to read log file %s: %v", logFilePath, readErr)
 		}
 
 		logString := string(logContent)
-		expectedLogSubstring := "Placeholder: DownloadFileWithConnector called"
-		if !strings.Contains(logString, expectedLogSubstring) {
-			t.Errorf("Log content missing expected substring %q. Log was: %s", expectedLogSubstring, logString)
+		expectedLogSubstringBase := "Placeholder: DownloadFileWithConnector called"
+		if !strings.Contains(logString, expectedLogSubstringBase) {
+			t.Errorf("Log content missing expected substring base %q. Log was: %s", expectedLogSubstringBase, logString)
 		}
-		if !strings.Contains(logString, url) {
-			t.Errorf("Log content missing URL %q. Log was: %s", url, logString)
+		if !strings.Contains(logString, fmt.Sprintf("URL: %s", url)) {
+			t.Errorf("Log content missing URL part. Log was: %s", logString)
+		}
+		if !strings.Contains(logString, fmt.Sprintf("TargetDir: %s", targetDir)) {
+			t.Errorf("Log content missing TargetDir part. Log was: %s", logString)
+		}
+		if !strings.Contains(logString, fmt.Sprintf("TargetName: %s", targetName)) {
+			t.Errorf("Log content missing TargetName part. Log was: %s", logString)
+		}
+		if !strings.Contains(logString, fmt.Sprintf("Checksum (not verified): %s", checksum)) {
+			t.Errorf("Log content missing Checksum part. Log was: %s", logString)
 		}
 	})
 
-	t.Run("nil_connector", func(t *testing.T) {
-		// Clear previous log content for this sub-test if necessary, or use different log file
-		// For simplicity, we assume the previous log content doesn't interfere with error check.
-		// Or, create a new logger instance for each sub-test if log content needs to be isolated.
-
-		_, err := DownloadFileWithConnector(ctx, testSpecificLogger, nil, url, targetDir, targetName, checksum)
-		if err == nil {
-			t.Error("DownloadFileWithConnector with nil connector expected error, got nil")
-		} else {
-			if !strings.Contains(err.Error(), "connector is nil") {
-				t.Errorf("Error message %q does not contain 'connector is nil'", err.Error())
-			}
-		}
-	})
+	// The "nil_connector" subtest is no longer relevant as the connector parameter was removed.
+	// t.Run("nil_connector", func(t *testing.T) { ... })
 }
