@@ -272,7 +272,7 @@ type Runner interface {
 	KubectlConfigCurrentContext(ctx context.Context, conn connector.Connector, kubeconfigPath string) (string, error)
 	KubectlTopNodes(ctx context.Context, conn connector.Connector, opts KubectlTopOptions) ([]KubectlMetricsInfo, error)
 	KubectlTopPods(ctx context.Context, conn connector.Connector, opts KubectlTopOptions) ([]KubectlMetricsInfo, error)
-	KubectlPortForward(ctx context.Context, conn connector.Connector, resourceType, resourceName string, ports []string, opts KubectlPortForwardOptions) error
+	KubectlPortForward(ctx context.Context, conn connector.Connector, resourceType, resourceName string, ports []string, opts KubectlPortForwardOptions) error // Placeholder, as true port-forwarding is complex
 	KubectlExplain(ctx context.Context, conn connector.Connector, resourceType string, opts KubectlExplainOptions) (string, error)
 	KubectlDrainNode(ctx context.Context, conn connector.Connector, nodeName string, opts KubectlDrainOptions) error
 	KubectlCordonNode(ctx context.Context, conn connector.Connector, nodeName string, opts KubectlCordonUncordonOptions) error
@@ -1573,6 +1573,48 @@ type KubectlSetOptions struct {
 	Local          bool
 	DryRun         string
 	Sudo           bool
+}
+
+// KubectlRolloutOptions defines options for kubectl rollout commands.
+type KubectlRolloutOptions struct {
+	KubeconfigPath string
+	Namespace      string
+	Watch          bool
+	Timeout        time.Duration
+	Sudo           bool
+	ToRevision     int // For Undo
+	// Add other common rollout flags if needed, e.g. DryRun
+}
+
+// KubectlScaleOptions defines options for kubectl scale commands.
+type KubectlScaleOptions struct {
+	KubeconfigPath  string
+	Namespace       string
+	CurrentReplicas *int32
+	ResourceVersion *string
+	Timeout         time.Duration
+	Sudo            bool
+	// Add other common scale flags if needed
+}
+
+// KubectlConfigViewOptions defines options for kubectl config view.
+type KubectlConfigViewOptions struct {
+	KubeconfigPath string
+	Minify         bool
+	Raw            bool
+	OutputFormat   string // Typically "json" or "yaml" for programmatic use
+	Sudo           bool
+	// Add other common config view flags if needed
+}
+
+// KubectlPortForwardOptions defines options for kubectl port-forward.
+type KubectlPortForwardOptions struct {
+	KubeconfigPath    string
+	Namespace         string
+	Address           []string // Addresses to listen on (e.g., "localhost", "127.0.0.1")
+	PodRunningTimeout time.Duration
+	Sudo              bool
+	// Add other common port-forward flags if needed, e.g. StopChannel, ReadyChannel for more programmatic control
 }
 
 type KubectlAutoscaleOptions struct {
