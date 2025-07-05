@@ -5,7 +5,7 @@ import (
 	"net/url" // Added for URL parsing
 	"strings"
 	// Assuming isValidCIDR is available from kubernetes_types.go or similar
-	// Assuming isValidHostPort is available from containerd_types.go or similar (if not, it would need to be defined/imported)
+	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
 )
 
 // DockerAddressPool defines a range of IP addresses for Docker networks.
@@ -69,23 +69,23 @@ func SetDefaults_DockerConfig(cfg *DockerConfig) {
 	if cfg.DefaultAddressPools == nil { cfg.DefaultAddressPools = []DockerAddressPool{} }
 	if cfg.StorageOpts == nil { cfg.StorageOpts = []string{} }
 	if cfg.Runtimes == nil { cfg.Runtimes = make(map[string]DockerRuntime) }
-	if cfg.MaxConcurrentDownloads == nil { cfg.MaxConcurrentDownloads = intPtr(3) } // Docker default
-	if cfg.MaxConcurrentUploads == nil { cfg.MaxConcurrentUploads = intPtr(5) }   // Docker default
-	if cfg.Bridge == nil { cfg.Bridge = stringPtr("docker0") }
+	if cfg.MaxConcurrentDownloads == nil { cfg.MaxConcurrentDownloads = util.IntPtr(3) } // Docker default
+	if cfg.MaxConcurrentUploads == nil { cfg.MaxConcurrentUploads = util.IntPtr(5) }   // Docker default
+	if cfg.Bridge == nil { cfg.Bridge = util.StrPtr("docker0") }
 	// DefaultRuntime: Docker's default is typically "runc". Let Docker handle if not specified.
 
 	if cfg.InstallCRIDockerd == nil {
-		cfg.InstallCRIDockerd = boolPtr(true) // Default to installing cri-dockerd with Docker for Kubernetes
+		cfg.InstallCRIDockerd = util.BoolPtr(true) // Default to installing cri-dockerd with Docker for Kubernetes
 	}
 	// No default for CRIDockerdVersion, let install logic handle it or require user input if specific version needed.
 
-	if cfg.LogDriver == nil { cfg.LogDriver = stringPtr("json-file") }
+	if cfg.LogDriver == nil { cfg.LogDriver = util.StrPtr("json-file") }
 	// Default DataRoot depends on OS, often /var/lib/docker. Let Docker daemon handle its own default if not set.
-	// if cfg.DataRoot == nil { cfg.DataRoot = stringPtr("/var/lib/docker") } // Example if we wanted to enforce it
+	// if cfg.DataRoot == nil { cfg.DataRoot = util.StrPtr("/var/lib/docker") } // Example if we wanted to enforce it
 
-	if cfg.IPTables == nil { cfg.IPTables = boolPtr(true) } // Docker default is true
-	if cfg.IPMasq == nil { cfg.IPMasq = boolPtr(true) }     // Docker default is true
-	if cfg.Experimental == nil { cfg.Experimental = boolPtr(false) }
+	if cfg.IPTables == nil { cfg.IPTables = util.BoolPtr(true) } // Docker default is true
+	if cfg.IPMasq == nil { cfg.IPMasq = util.BoolPtr(true) }     // Docker default is true
+	if cfg.Experimental == nil { cfg.Experimental = util.BoolPtr(false) }
 }
 
 // Validate_DockerConfig validates DockerConfig.
@@ -109,7 +109,7 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *ValidationErrors, pathPrefi
 	for i, insecureReg := range cfg.InsecureRegistries {
 		if strings.TrimSpace(insecureReg) == "" {
 			verrs.Add("%s.insecureRegistries[%d]: registry host cannot be empty", pathPrefix, i)
-		} else if !isValidHostPort(insecureReg) { // Assuming isValidHostPort is available in the package
+		} else if !util.ValidateHostPortString(insecureReg) { // Use util.ValidateHostPortString
 			verrs.Add("%s.insecureRegistries[%d]: invalid host:port format for insecure registry '%s'", pathPrefix, i, insecureReg)
 		}
 	}
@@ -124,15 +124,15 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *ValidationErrors, pathPrefi
 			verrs.Add("%s.logDriver: invalid log driver '%s'", pathPrefix, *cfg.LogDriver)
 	   }
 	}
-	if cfg.BIP != nil && !isValidCIDR(*cfg.BIP) {
+	if cfg.BIP != nil && !util.IsValidCIDR(*cfg.BIP) { // Use util.IsValidCIDR
 		verrs.Add("%s.bip: invalid CIDR format '%s'", pathPrefix, *cfg.BIP)
 	}
-	if cfg.FixedCIDR != nil && !isValidCIDR(*cfg.FixedCIDR) {
+	if cfg.FixedCIDR != nil && !util.IsValidCIDR(*cfg.FixedCIDR) { // Use util.IsValidCIDR
 		verrs.Add("%s.fixedCIDR: invalid CIDR format '%s'", pathPrefix, *cfg.FixedCIDR)
 	}
 	for i, pool := range cfg.DefaultAddressPools {
 	   poolPath := fmt.Sprintf("%s.defaultAddressPools[%d]", pathPrefix, i)
-	   if !isValidCIDR(pool.Base) { verrs.Add("%s.base: invalid CIDR format '%s'", poolPath, pool.Base) }
+	   if !util.IsValidCIDR(pool.Base) { verrs.Add("%s.base: invalid CIDR format '%s'", poolPath, pool.Base) } // Use util.IsValidCIDR
 	   if pool.Size <= 0 || pool.Size > 32 { verrs.Add("%s.size: invalid subnet size %d, must be > 0 and <= 32", poolPath, pool.Size) }
 	}
 	if cfg.StorageDriver != nil && strings.TrimSpace(*cfg.StorageDriver) == "" {
@@ -155,7 +155,7 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *ValidationErrors, pathPrefi
 	if cfg.CRIDockerdVersion != nil {
 		if strings.TrimSpace(*cfg.CRIDockerdVersion) == "" {
 			verrs.Add("%s.criDockerdVersion: cannot be only whitespace if specified", pathPrefix)
-		} else if !isValidRuntimeVersion(*cfg.CRIDockerdVersion) { // Use the common validator
+		} else if !util.IsValidRuntimeVersion(*cfg.CRIDockerdVersion) { // Use util.IsValidRuntimeVersion
 			verrs.Add("%s.criDockerdVersion: '%s' is not a recognized version format", pathPrefix, *cfg.CRIDockerdVersion)
 		}
 	}
