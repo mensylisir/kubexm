@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
 )
 
 // TestSetDefaults_ContainerRuntimeConfig tests the SetDefaults_ContainerRuntimeConfig function.
@@ -116,20 +117,14 @@ func Test_isValidPort(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isValidPort(tt.portStr); got != tt.want {
-				t.Errorf("isValidPort(%q) = %v, want %v", tt.portStr, got, tt.want)
+			if got := util.IsValidPort(tt.portStr); got != tt.want { // Use util.IsValidPort
+				t.Errorf("util.IsValidPort(%q) = %v, want %v", tt.portStr, got, tt.want)
 			}
 		})
 	}
 }
 
 func Test_isValidRegistryHostPort(t *testing.T) {
-	// Mock isValidIP and isValidDomainName for consistent testing if they are complex
-	// For this test, we assume they work as expected:
-	// isValidIP: checks for valid IPv4 and IPv6 (including bracketed ones like [::1])
-	// isValidDomainName: checks for valid DNS hostnames
-	// We will rely on their actual implementations.
-
 	tests := []struct {
 		name     string
 		hostPort string
@@ -139,15 +134,15 @@ func Test_isValidRegistryHostPort(t *testing.T) {
 		{"just whitespace", "   ", false},
 		{"valid domain name", "docker.io", true},
 		{"valid domain name with hyphen", "my-registry.example.com", true},
-		{"valid domain name localhost", "localhost", true}, // Often used
+		{"valid domain name localhost", "localhost", true},
 		{"valid IPv4 address", "192.168.1.1", true},
-		{"valid IPv6 address", "::1", false}, // Changed expectation due to sandbox net.ParseIP behavior
-		{"valid full IPv6 address", "2001:0db8:85a3:0000:0000:8a2e:0370:7334", false}, // Changed expectation
+		{"valid IPv6 address ::1", "::1", true},
+		{"valid full IPv6 address", "2001:0db8:85a3:0000:0000:8a2e:0370:7334", true},
 		{"valid domain name with port", "docker.io:5000", true},
 		{"valid localhost with port", "localhost:5000", true},
 		{"valid IPv4 address with port", "192.168.1.1:443", true},
-		{"valid IPv6 address with port and brackets", "[::1]:8080", true}, // This should work as net.SplitHostPort handles brackets
-		{"valid full IPv6 address with port and brackets", "[2001:db8::1]:5003", true}, // This should work
+		{"valid IPv6 address with port and brackets", "[::1]:8080", true},
+		{"valid full IPv6 address with port and brackets", "[2001:db8::1]:5003", true},
 		{"invalid domain name chars", "invalid_domain!.com", false},
 		{"invalid IP address", "999.999.999.999", false},
 		{"domain name with invalid port string", "docker.io:abc", false},
@@ -155,9 +150,8 @@ func Test_isValidRegistryHostPort(t *testing.T) {
 		{"domain name with port zero", "docker.io:0", false},
 		{"IPv4 with invalid port", "192.168.1.1:abc", false},
 		{"IPv6 with brackets, invalid port", "[::1]:abc", false},
-		{"IPv6 with port but no brackets", "::1:8080", false},
-		{"IPv6 with multiple colons (no port)", "2001:db8::1", false}, // Changed expectation
-		{"Bracketed IPv6 without port", "[::1]", true}, // This should work as SplitHostPort fails, then unwrapped and passed to isValidIP
+		{"IPv6 with port but no brackets", "::1:8080", true},
+		{"Bracketed IPv6 without port", "[::1]", true},
 		{"Incomplete bracketed IPv6 with port (missing opening)", "::1]:8080", false},
 		{"Incomplete bracketed IPv6 with port (missing closing)", "[::1:8080", false},
 		{"Domain with trailing colon", "domain.com:", false},
@@ -167,13 +161,13 @@ func Test_isValidRegistryHostPort(t *testing.T) {
 		{"Hostname with only numeric TLD", "myhost.123", false},
 		{"Valid Hostname like registry-1", "registry-1", true},
 		{"Valid Hostname like registry-1 with port", "registry-1:5000", true},
-		{"IP with leading zeros in segments", "192.168.001.010", false}, // Changed expectation
-		{"IP with port and leading zeros", "192.168.001.010:5000", false}, // Changed expectation
+		{"IP with leading zeros in segments", "192.168.001.010", false},
+		{"IP with port and leading zeros", "192.168.001.010:5000", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isValidRegistryHostPort(tt.hostPort); got != tt.want {
-				t.Errorf("isValidRegistryHostPort(%q) = %v, want %v", tt.hostPort, got, tt.want)
+			if got := util.ValidateHostPortString(tt.hostPort); got != tt.want { // Use util.ValidateHostPortString
+				t.Errorf("util.ValidateHostPortString(%q) = %v, want %v", tt.hostPort, got, tt.want)
 			}
 		})
 	}
@@ -185,31 +179,53 @@ func Test_isValidRuntimeVersion(t *testing.T) {
 		version string
 		want    bool
 	}{
-		{"empty string", "", false}, // Technically caught by TrimSpace earlier, but good to test explicitly for function
+		{"empty string", "", false},
 		{"just whitespace", "   ", false},
-		{"simple docker version", "19.03.15", true},
-		{"simple containerd version", "1.6.4", true},
-		{"semver like", "1.2.3", true},
-		{"semver with v prefix", "v1.2.3", true},
-		{"two parts", "1.20", true},
-		{"two parts with v", "v1.20", true},
-		{"docker version with build meta", "20.10.7", true},
+		{"empty string", "", false}, // Duplicated test name, but content is same
+		{"just v", "v", false},
+		{"simple main version", "1.2.3", true},
+		{"main version with v", "v1.2.3", true},
+		{"two part main version", "1.2", true},
+		{"one part main version", "1", true},
+		{"main version with pre-release", "1.2.3-alpha.1", true},
+		{"main version with v and pre-release", "v1.2.3-rc.2", true},
+		{"main version with build metadata", "1.2.3+build.100", true},
+		{"main version with v, pre-release, and build metadata", "v1.2.3-beta+exp.sha.5114f85", true},
+		{"pre-release with hyphenated identifiers", "1.0.0-alpha-beta", true},
+		{"pre-release with numeric identifiers that are not 0-padded", "1.0.0-alpha.0", true},
+		{"pre-release with leading zeros in numeric identifiers", "1.0.0-alpha.01", false},
+		{"long pre-release", "1.0.0-alpha.beta.gamma.delta.epsilon.zeta.eta.theta.iota.kappa.lambda.mu", true},
+		{"long build metadata", "1.0.0+build.this.is.a.very.long.build.metadata.string.which.is.allowed", true},
+		{"version with only pre-release (invalid)", "v-alpha", false},
+		{"version with only build (invalid)", "v+build", false},
+		{"main version segments not numeric", "1.a.3", false},
+		{"too many main segments", "1.2.3.4", false},
+		{"empty segment in main", "1..2", false},
+		{"empty segment in pre-release", "1.0.0-alpha..1", false},
+		{"empty segment in build", "1.0.0+build..1", false},
+		{"pre-release contains invalid char", "1.0.0-alpha!", false},
+		{"build metadata contains invalid char", "1.0.0+build!", false},
+		{"no main version before pre-release", "-alpha", false},
+		{"no main version before build", "+build", false},
+		{"just a dot", ".", false},
+		{"just a hyphen", "-", false},
+		{"just a plus", "+", false},
+		{"leading dot", ".1.2.3", false},
+		{"trailing dot on main", "1.2.3.", false},
+		{"trailing dot on pre-release", "1.0.0-alpha.", false},
+		{"trailing dot on build", "1.0.0+build.", false},
+		{"non-numeric segment in main", "1.x.2", false},
+		{"docker style version", "20.10.7", true},
+		{"containerd style version", "1.6.8", true},
 		{"containerd with pre-release", "1.6.0-beta.2", true},
-		{"containerd with pre-release and build", "v1.4.3-k3s1-custom", true}, // common in k3s/rke2
-		{"alphanumeric patch", "1.2.3a", false}, // current regex does not support this
-		{"invalid char underscore", "1.2.3_alpha", false},
-		{"invalid char space", "1.2.3 alpha", false},
-		{"starts with dot", ".1.2.3", false},
-		{"ends with dot", "1.2.3.", false},
-		{"contains double dot", "1..2.3", false},
-		{"non-numeric initial char (not v)", "a1.2.3", false},
-		{"special keyword latest", "latest", false}, // Not handled by this specific regex
-		{"special keyword stable", "stable", false}, // Not handled by this specific regex
+		{"complex k3s/rke2 like", "v1.21.5+k3s1-custom", true},
+		{"another complex", "v1.18.20-eks-1-20-13", true},
+		{"version like in tests", "1.20.3_beta", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isValidRuntimeVersion(tt.version); got != tt.want {
-				t.Errorf("isValidRuntimeVersion() for %s = %v, want %v", tt.version, got, tt.want)
+			if got := util.IsValidRuntimeVersion(tt.version); got != tt.want { // Use util.IsValidRuntimeVersion
+				t.Errorf("util.IsValidRuntimeVersion() for %s = %v, want %v", tt.version, got, tt.want)
 			}
 		})
 	}

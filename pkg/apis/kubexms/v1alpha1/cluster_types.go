@@ -473,7 +473,49 @@ func Validate_Cluster(cfg *Cluster) error {
 	}
 
 	if cfg.Spec.RoleGroups != nil {
+		// Validate RoleGroupsSpec structure first
 		Validate_RoleGroupsSpec(cfg.Spec.RoleGroups, verrs, "spec.roleGroups")
+		// Then, if no structural errors in RoleGroups, validate host names against cfg.Spec.Hosts
+		if verrs.IsEmpty() { // Only proceed if RoleGroupsSpec itself is structurally valid for this check
+			allHostNames := make(map[string]bool)
+			for _, h := range cfg.Spec.Hosts {
+				allHostNames[h.Name] = true
+			}
+
+			validateRoleGroupHostExistence := func(roleHosts []string, rolePath string) {
+				for _, hostName := range roleHosts {
+					if !allHostNames[hostName] {
+						verrs.Add("%s: host '%s' is not defined in spec.hosts", rolePath, hostName)
+					}
+				}
+			}
+
+			rgPath := "spec.roleGroups"
+			if cfg.Spec.RoleGroups.Master.Hosts != nil {
+				validateRoleGroupHostExistence(cfg.Spec.RoleGroups.Master.Hosts, rgPath+".master.hosts")
+			}
+			if cfg.Spec.RoleGroups.Worker.Hosts != nil {
+				validateRoleGroupHostExistence(cfg.Spec.RoleGroups.Worker.Hosts, rgPath+".worker.hosts")
+			}
+			if cfg.Spec.RoleGroups.Etcd.Hosts != nil {
+				validateRoleGroupHostExistence(cfg.Spec.RoleGroups.Etcd.Hosts, rgPath+".etcd.hosts")
+			}
+			if cfg.Spec.RoleGroups.LoadBalancer.Hosts != nil {
+				validateRoleGroupHostExistence(cfg.Spec.RoleGroups.LoadBalancer.Hosts, rgPath+".loadbalancer.hosts")
+			}
+			if cfg.Spec.RoleGroups.Storage.Hosts != nil {
+				validateRoleGroupHostExistence(cfg.Spec.RoleGroups.Storage.Hosts, rgPath+".storage.hosts")
+			}
+			if cfg.Spec.RoleGroups.Registry.Hosts != nil {
+				validateRoleGroupHostExistence(cfg.Spec.RoleGroups.Registry.Hosts, rgPath+".registry.hosts")
+			}
+			for i, customRole := range cfg.Spec.RoleGroups.CustomRoles {
+				if customRole.Hosts != nil {
+					customRolePath := fmt.Sprintf("%s.customRoles[%d:%s].hosts", rgPath, i, customRole.Name)
+					validateRoleGroupHostExistence(customRole.Hosts, customRolePath)
+				}
+			}
+		}
 	}
 	if cfg.Spec.ControlPlaneEndpoint != nil {
 		Validate_ControlPlaneEndpointSpec(cfg.Spec.ControlPlaneEndpoint, verrs, "spec.controlPlaneEndpoint")

@@ -1,11 +1,9 @@
 package v1alpha1
 
 import (
-	"net"
 	"net/url"
-	"regexp"
-	"strconv"
 	"strings"
+	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
 )
 
 // ContainerdConfig defines specific settings for the Containerd runtime.
@@ -80,39 +78,6 @@ func SetDefaults_ContainerdConfig(cfg *ContainerdConfig) {
 	// or explicitly set by user. The installer logic will handle this.
 }
 
-// isValidHostPort validates if a string is a valid hostname or IP[:port].
-// This is a simplified validator. For robust validation, consider a dedicated library.
-func isValidHostPort(hostPort string) bool {
-	if strings.Contains(hostPort, ":") {
-		host, port, err := net.SplitHostPort(hostPort)
-		if err != nil {
-			if net.ParseIP(hostPort) != nil {
-				return true
-			}
-			return false
-		}
-		if host == "" {
-			return false
-		}
-		if portNum, err := strconv.Atoi(port); err != nil || portNum < 1 || portNum > 65535 {
-			return false
-		}
-		if net.ParseIP(host) == nil {
-			if matched, _ := regexp.MatchString(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`, host); !matched {
-				return false
-			}
-		}
-		return true
-	}
-	if net.ParseIP(hostPort) != nil {
-		return true
-	}
-	if matched, _ := regexp.MatchString(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`, hostPort); !matched {
-		return false
-	}
-	return true
-}
-
 // Validate_ContainerdConfig validates ContainerdConfig.
 func Validate_ContainerdConfig(cfg *ContainerdConfig, verrs *ValidationErrors, pathPrefix string) {
 	if cfg == nil {
@@ -147,7 +112,7 @@ func Validate_ContainerdConfig(cfg *ContainerdConfig, verrs *ValidationErrors, p
 	for i, insecureReg := range cfg.InsecureRegistries {
 		if strings.TrimSpace(insecureReg) == "" {
 			verrs.Add("%s.insecureRegistries[%d]: registry host cannot be empty", pathPrefix, i)
-		} else if !isValidHostPort(insecureReg) {
+		} else if !util.ValidateHostPortString(insecureReg) { // Use util.ValidateHostPortString
 			verrs.Add("%s.insecureRegistries[%d]: invalid host:port format for insecure registry '%s'", pathPrefix, i, insecureReg)
 		}
 	}
