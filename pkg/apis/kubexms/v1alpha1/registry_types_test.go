@@ -81,7 +81,7 @@ func TestValidate_RegistryConfig(t *testing.T) {
 			name: "privateRegistry invalid hostname",
 			cfg:  &RegistryConfig{PrivateRegistry: "invalid_host!"},
 			expectErr:   true,
-			errContains: []string{"spec.registry.privateRegistry: invalid hostname/IP format 'invalid_host!'"},
+			errContains: []string{"spec.registry.privateRegistry: invalid hostname/IP or host:port format 'invalid_host!'"},
 		},
 		{
 			name: "namespaceOverride whitespace",

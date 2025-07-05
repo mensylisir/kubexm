@@ -226,6 +226,19 @@ func TestValidate_Cluster_MissingRequiredFields(t *testing.T) {
 		{"missing network section", func(c *Cluster) { c.Spec.Network = nil }, "spec.network: section is required"},
 		{"invalid DNS config", func(c *Cluster) { c.Spec.DNS.CoreDNS.UpstreamDNSServers = []string{""} }, "spec.dns.coredns.upstreamDNSServers[0]: server address cannot be empty"},
 		{"invalid System config", func(c *Cluster) { c.Spec.System = &SystemSpec{NTPServers: []string{""}} }, "spec.system.ntpServers[0]: NTP server address cannot be empty"},
+		{"rolegroup master host not in spec.hosts", func(c *Cluster) {
+			c.Spec.RoleGroups = &RoleGroupsSpec{Master: MasterRoleSpec{Hosts: []string{"unknown-host"}}}
+		}, "spec.roleGroups.master.hosts: host 'unknown-host' is not defined in spec.hosts"},
+		{"rolegroup worker host not in spec.hosts", func(c *Cluster) {
+			c.Spec.RoleGroups = &RoleGroupsSpec{Worker: WorkerRoleSpec{Hosts: []string{"m1", "unknown-host"}}} // m1 is valid
+		}, "spec.roleGroups.worker.hosts: host 'unknown-host' is not defined in spec.hosts"},
+		{"rolegroup custom host not in spec.hosts", func(c *Cluster) {
+			c.Spec.RoleGroups = &RoleGroupsSpec{CustomRoles: []CustomRoleSpec{{Name: "cg", Hosts: []string{"unknown-host"}}}}
+		}, "spec.roleGroups.customRoles[0:cg].hosts: host 'unknown-host' is not defined in spec.hosts"},
+		{"rolegroup valid hosts", func(c *Cluster) { // Ensure valid case doesn't fail due to new checks
+			c.Spec.Hosts = append(c.Spec.Hosts, HostSpec{Name: "worker1", Address: "1.1.1.2", Port: 22, User: "testuser"})
+			c.Spec.RoleGroups = &RoleGroupsSpec{Worker: WorkerRoleSpec{Hosts: []string{"worker1", "m1"}}}
+		}, ""}, // Empty wantErr means no error expected for this specific mutation case related to RoleGroups host validation.
 	}
 
 	for _, tt := range tests {

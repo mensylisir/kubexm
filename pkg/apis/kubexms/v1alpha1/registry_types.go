@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	// "net/url" // For validating registry URLs - Removed as not used
+	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
 )
 
 // RegistryConfig defines configurations related to container image registries.
@@ -126,8 +127,9 @@ func Validate_RegistryConfig(cfg *RegistryConfig, verrs *ValidationErrors, pathP
 	if cfg.PrivateRegistry != "" {
 		if strings.TrimSpace(cfg.PrivateRegistry) == "" {
 			verrs.Add("%s.privateRegistry: cannot be only whitespace if specified", pathPrefix)
-		} else if !isValidDomainName(cfg.PrivateRegistry) && !isValidHostOrIP(cfg.PrivateRegistry) { // Allow IP as well for private registry
-			verrs.Add("%s.privateRegistry: invalid hostname/IP format '%s'", pathPrefix, cfg.PrivateRegistry)
+		} else if !util.IsValidDomainName(cfg.PrivateRegistry) && !util.IsValidIP(cfg.PrivateRegistry) && !util.ValidateHostPortString(cfg.PrivateRegistry) {
+			// A private registry can be a domain, an IP, or host:port
+			verrs.Add("%s.privateRegistry: invalid hostname/IP or host:port format '%s'", pathPrefix, cfg.PrivateRegistry)
 		}
 	}
 
@@ -139,7 +141,7 @@ func Validate_RegistryConfig(cfg *RegistryConfig, verrs *ValidationErrors, pathP
 		authPathPrefix := fmt.Sprintf("%s.auths[\"%s\"]", pathPrefix, regAddr)
 		if strings.TrimSpace(regAddr) == "" {
 			verrs.Add("%s.auths: registry address key cannot be empty", pathPrefix)
-		} else if !isValidDomainName(regAddr) && !isValidRegistryHostPort(regAddr) { // Allow host:port for registry auth keys
+		} else if !util.IsValidDomainName(regAddr) && !util.ValidateHostPortString(regAddr) { // Registry auth keys are typically domain or host:port
 			verrs.Add("%s.auths: registry address key '%s' is not a valid hostname or host:port", pathPrefix, regAddr)
 		}
 		Validate_RegistryAuth(&auth, verrs, authPathPrefix)
@@ -174,7 +176,7 @@ func Validate_RegistryConfig(cfg *RegistryConfig, verrs *ValidationErrors, pathP
 				if rule.Registry != "" {
 					if strings.TrimSpace(rule.Registry) == "" {
 						verrs.Add("%s.registry: cannot be only whitespace if specified", rulePathPrefix)
-					} else if !isValidDomainName(rule.Registry) && !isValidRegistryHostPort(rule.Registry) {
+					} else if !util.IsValidDomainName(rule.Registry) && !util.ValidateHostPortString(rule.Registry) {
 						verrs.Add("%s.registry: invalid hostname or host:port format '%s'", rulePathPrefix, rule.Registry)
 					}
 				}

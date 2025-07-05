@@ -5,6 +5,7 @@ import (
 	"net" // For IP/port validation
 	"strconv"
 	"strings"
+	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
 )
 
 // NginxLBUpstreamServer defines a backend server for Nginx load balancing.
@@ -126,7 +127,7 @@ func Validate_NginxLBConfig(cfg *NginxLBConfig, verrs *ValidationErrors, pathPre
 
 	if cfg.Mode != nil && *cfg.Mode != "" {
 	   validModes := []string{"tcp", "http"}
-	   if !containsString(validModes, *cfg.Mode) {
+	   if !util.ContainsString(validModes, *cfg.Mode) { // Use util.ContainsString
 		   verrs.Add("%s.mode: invalid mode '%s', must be 'tcp' or 'http'", pathPrefix, *cfg.Mode)
 	   }
 	}
@@ -135,7 +136,7 @@ func Validate_NginxLBConfig(cfg *NginxLBConfig, verrs *ValidationErrors, pathPre
 	   // Nginx built-in for stream: round_robin (default), least_conn, hash, random
 	   // Nginx built-in for http: round_robin (default), least_conn, ip_hash, generic_hash, random, least_time
 	   validAlgos := []string{"round_robin", "least_conn", "ip_hash", "hash", "random", "least_time"}
-	   if !containsString(validAlgos, *cfg.BalanceAlgorithm) {
+	   if !util.ContainsString(validAlgos, *cfg.BalanceAlgorithm) { // Use util.ContainsString
 		   verrs.Add("%s.balanceAlgorithm: invalid algorithm '%s'", pathPrefix, *cfg.BalanceAlgorithm)
 	   }
 	}
@@ -148,19 +149,17 @@ func Validate_NginxLBConfig(cfg *NginxLBConfig, verrs *ValidationErrors, pathPre
 		if strings.TrimSpace(server.Address) == "" {
 			verrs.Add("%s.address: upstream server address cannot be empty", serverPath)
 		} else {
+			// Nginx upstream addresses must be host:port
 			host, portStr, err := net.SplitHostPort(server.Address)
 			if err != nil {
-				// net.SplitHostPort fails if there's no port or format is wrong.
-				// For Nginx upstreams, host:port is generally expected unless it's a unix socket.
-				// We are not explicitly supporting unix sockets via this field currently.
-				verrs.Add("%s.address: upstream server address '%s' must be in 'host:port' format or a valid resolvable name if Nginx implies a default port (which this validation doesn't assume)", serverPath, server.Address)
+				verrs.Add("%s.address: upstream server address '%s' must be in 'host:port' format", serverPath, server.Address)
 			} else {
-				if strings.TrimSpace(host) == "" { // Should be caught by SplitHostPort for "host:" cases, but good to be defensive
+				if strings.TrimSpace(host) == "" {
 					verrs.Add("%s.address: host part of upstream server address '%s' cannot be empty", serverPath, server.Address)
-				} else if !isValidHostOrIP(host) { // Validate the host part
+				} else if !util.IsValidIP(host) && !util.IsValidDomainName(host) { // Use util.IsValidIP and util.IsValidDomainName
 					verrs.Add("%s.address: host part '%s' of upstream server address '%s' is not a valid host or IP", serverPath, host, server.Address)
 				}
-				if port, errConv := strconv.Atoi(portStr); errConv != nil || port <= 0 || port > 65535 {
+				if port, errConv := strconv.Atoi(portStr); errConv != nil || port <= 0 || port > 65535 { // This port validation is fine
 					verrs.Add("%s.address: port part '%s' of upstream server address '%s' is not a valid port number", serverPath, portStr, server.Address)
 				}
 			}

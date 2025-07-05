@@ -4,6 +4,7 @@ import (
 	"net" // For isValidIP
 	"regexp" // Added for regexp.MatchString
 	"strings" // For validation
+	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
 )
 
 // ControlPlaneEndpointSpec defines the configuration for the cluster's control plane endpoint.
@@ -69,7 +70,7 @@ func Validate_ControlPlaneEndpointSpec(cfg *ControlPlaneEndpointSpec, verrs *Val
 			verrs.Add("%s.domain: '%s' is not a valid domain name", pathPrefix, cfg.Domain)
 		}
 	}
-	if cfg.Address != "" && !isValidIP(cfg.Address) {
+	if cfg.Address != "" && !util.IsValidIP(cfg.Address) { // Use util.IsValidIP
 		verrs.Add("%s.address: invalid IP address format for '%s'", pathPrefix, cfg.Address)
 	}
 	// cfg.Port is now int. If 0, it's defaulted to 6443. Validation is for user-provided values.
