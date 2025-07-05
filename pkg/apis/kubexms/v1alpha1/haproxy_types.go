@@ -2,9 +2,23 @@ package v1alpha1
 
 import (
 	"fmt"
-	"net" // For IP validation
+	// "net" // For IP validation - will be replaced by util.IsValidIP
 	"strings"
 	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
+)
+
+const (
+	// HAProxyModeTCP is a valid mode for HAProxy.
+	HAProxyModeTCP = "tcp"
+	// HAProxyModeHTTP is a valid mode for HAProxy.
+	HAProxyModeHTTP = "http"
+)
+
+var (
+	// validHAProxyModes lists the supported HAProxy modes.
+	validHAProxyModes = []string{HAProxyModeTCP, HAProxyModeHTTP}
+	// validHAProxyBalanceAlgorithms lists the supported HAProxy balance algorithms.
+	validHAProxyBalanceAlgorithms = []string{"roundrobin", "static-rr", "leastconn", "first", "source", "uri", "url_param", "hdr", "rdp-cookie"}
 )
 
 // HAProxyBackendServer defines a backend server for HAProxy load balancing.
@@ -114,12 +128,12 @@ func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *ValidationErrors, pathPre
 	}
 
 	if cfg.FrontendBindAddress != nil {
-		if strings.TrimSpace(*cfg.FrontendBindAddress) == "" {
+		trimmedAddr := strings.TrimSpace(*cfg.FrontendBindAddress)
+		if trimmedAddr == "" {
 			verrs.Add("%s.frontendBindAddress: cannot be empty if specified", pathPrefix)
-		} else if net.ParseIP(*cfg.FrontendBindAddress) == nil && *cfg.FrontendBindAddress != "0.0.0.0" && *cfg.FrontendBindAddress != "::" {
+		} else if !util.IsValidIP(trimmedAddr) && trimmedAddr != "0.0.0.0" && trimmedAddr != "::" {
 			// Allow "0.0.0.0" and "::" as special bind addresses, otherwise expect a valid IP.
-			// Hostnames are generally not used for bind addresses in HAProxy for listening.
-			verrs.Add("%s.frontendBindAddress: invalid IP address format '%s'", pathPrefix, *cfg.FrontendBindAddress)
+			verrs.Add("%s.frontendBindAddress: invalid IP address format '%s'", pathPrefix, trimmedAddr)
 		}
 	}
 
@@ -129,16 +143,14 @@ func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *ValidationErrors, pathPre
 	}
 
 	if cfg.Mode != nil && *cfg.Mode != "" {
-		validModes := []string{"tcp", "http"}
-		if !util.ContainsString(validModes, *cfg.Mode) { // Use util.ContainsString
-			verrs.Add("%s.mode: invalid mode '%s', must be one of %v or empty for default", pathPrefix, *cfg.Mode, validModes)
+		if !util.ContainsString(validHAProxyModes, *cfg.Mode) { // Use constant
+			verrs.Add("%s.mode: invalid mode '%s', must be one of %v or empty for default", pathPrefix, *cfg.Mode, validHAProxyModes)
 		}
 	}
 
 	if cfg.BalanceAlgorithm != nil && *cfg.BalanceAlgorithm != "" {
-		validAlgos := []string{"roundrobin", "static-rr", "leastconn", "first", "source", "uri", "url_param", "hdr", "rdp-cookie"} // Common algos
-		if !util.ContainsString(validAlgos, *cfg.BalanceAlgorithm) { // Use util.ContainsString
-			verrs.Add("%s.balanceAlgorithm: invalid algorithm '%s'", pathPrefix, *cfg.BalanceAlgorithm)
+		if !util.ContainsString(validHAProxyBalanceAlgorithms, *cfg.BalanceAlgorithm) { // Use constant
+			verrs.Add("%s.balanceAlgorithm: invalid algorithm '%s', must be one of %v", pathPrefix, *cfg.BalanceAlgorithm, validHAProxyBalanceAlgorithms)
 		}
 	}
 

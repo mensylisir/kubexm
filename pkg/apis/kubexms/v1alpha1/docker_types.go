@@ -1,9 +1,11 @@
 package v1alpha1
 
 import (
+	"encoding/base64" // Added for DockerRegistryAuth validation
 	"fmt"
 	"net/url" // Added for URL parsing
 	"strings"
+	"k8s.io/apimachinery/pkg/runtime" // Added for RawExtension
 	// Assuming isValidCIDR is available from kubernetes_types.go or similar
 	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
 )
@@ -49,6 +51,27 @@ type DockerConfig struct {
 	// CRIDockerdVersion specifies the version of cri-dockerd to install.
 	// No direct YAML field, usually determined by installer based on K8s version or a default.
 	CRIDockerdVersion *string `json:"criDockerdVersion,omitempty" yaml:"criDockerdVersion,omitempty"`
+	// ExtraJSONConfig provides a passthrough for any daemon.json settings not
+	// explicitly defined in this struct. It will be merged with the generated
+	// configuration. In case of conflicts, settings from ExtraJSONConfig take precedence.
+	ExtraJSONConfig *runtime.RawExtension `json:"extraJsonConfig,omitempty" yaml:"extraJsonConfig,omitempty"`
+	// Auths provides authentication details for registries, keyed by registry FQDN.
+	// This allows Docker to pull images from private registries.
+	Auths map[string]DockerRegistryAuth `json:"auths,omitempty" yaml:"auths,omitempty"`
+}
+
+// DockerRegistryAuth defines authentication credentials for a specific Docker registry.
+type DockerRegistryAuth struct {
+	// Username for the registry.
+	Username string `json:"username,omitempty" yaml:"username,omitempty"`
+	// Password for the registry.
+	Password string `json:"password,omitempty" yaml:"password,omitempty"`
+	// Auth is a base64 encoded string of "username:password".
+	// This is the format typically stored in .docker/config.json.
+	Auth string `json:"auth,omitempty" yaml:"auth,omitempty"`
+	// ServerAddress is the FQDN of the registry. While map key in DockerConfig.Auths serves this,
+	// having it here can be useful if this struct is used in a list elsewhere. Optional.
+	ServerAddress string `json:"serverAddress,omitempty" yaml:"serverAddress,omitempty"`
 }
 
 // DockerRuntime defines a custom runtime for Docker.
@@ -69,6 +92,7 @@ func SetDefaults_DockerConfig(cfg *DockerConfig) {
 	if cfg.DefaultAddressPools == nil { cfg.DefaultAddressPools = []DockerAddressPool{} }
 	if cfg.StorageOpts == nil { cfg.StorageOpts = []string{} }
 	if cfg.Runtimes == nil { cfg.Runtimes = make(map[string]DockerRuntime) }
+	if cfg.Auths == nil { cfg.Auths = make(map[string]DockerRegistryAuth) }
 	if cfg.MaxConcurrentDownloads == nil { cfg.MaxConcurrentDownloads = util.IntPtr(3) } // Docker default
 	if cfg.MaxConcurrentUploads == nil { cfg.MaxConcurrentUploads = util.IntPtr(5) }   // Docker default
 	if cfg.Bridge == nil { cfg.Bridge = util.StrPtr("docker0") }
@@ -113,8 +137,14 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *ValidationErrors, pathPrefi
 			verrs.Add("%s.insecureRegistries[%d]: invalid host:port format for insecure registry '%s'", pathPrefix, i, insecureReg)
 		}
 	}
-	if cfg.DataRoot != nil && strings.TrimSpace(*cfg.DataRoot) == "" {
-		verrs.Add("%s.dataRoot: cannot be empty if specified", pathPrefix)
+	if cfg.DataRoot != nil {
+		trimmedDataRoot := strings.TrimSpace(*cfg.DataRoot)
+		if trimmedDataRoot == "" {
+			verrs.Add("%s.dataRoot: cannot be empty if specified", pathPrefix)
+		} else if trimmedDataRoot == "/tmp" || trimmedDataRoot == "/var/tmp" {
+			verrs.Add("%s.dataRoot: path '%s' is not recommended for Docker data root", pathPrefix, trimmedDataRoot)
+		}
+		// Further path validation (e.g., absolute path) could be added if needed.
 	}
 	if cfg.LogDriver != nil {
 	   validLogDrivers := []string{"json-file", "journald", "syslog", "fluentd", "none", ""} // Allow empty for Docker default
@@ -160,4 +190,34 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *ValidationErrors, pathPrefi
 		}
 	}
 	// No specific validation for InstallCRIDockerd (boolean pointer) beyond type checking.
+
+	if cfg.ExtraJSONConfig != nil && len(cfg.ExtraJSONConfig.Raw) == 0 {
+		verrs.Add("%s.extraJsonConfig: raw data cannot be empty if section is present", pathPrefix)
+	}
+
+	for regAddr, auth := range cfg.Auths {
+		authPathPrefix := fmt.Sprintf("%s.auths[\"%s\"]", pathPrefix, regAddr)
+		if strings.TrimSpace(regAddr) == "" {
+			verrs.Add("%s.auths: registry address key cannot be empty", pathPrefix) // Use pathPrefix for the map key error itself
+		} else if !util.ValidateHostPortString(regAddr) && !util.IsValidDomainName(regAddr) { // Key should be a valid registry address
+			verrs.Add("%s: registry key '%s' is not a valid hostname or host:port", authPathPrefix, regAddr)
+		}
+
+		hasUserPass := auth.Username != "" && auth.Password != ""
+		hasAuthStr := auth.Auth != ""
+
+		if !hasUserPass && !hasAuthStr {
+			verrs.Add("%s: either username/password or auth string must be provided", authPathPrefix)
+		}
+		if hasAuthStr {
+			decoded, err := base64.StdEncoding.DecodeString(auth.Auth)
+			if err != nil {
+				verrs.Add("%s.auth: failed to decode base64 auth string: %v", authPathPrefix, err)
+			} else if !strings.Contains(string(decoded), ":") {
+				verrs.Add("%s.auth: decoded auth string must be in 'username:password' format", authPathPrefix)
+			}
+		}
+		// ServerAddress in DockerRegistryAuth is optional and for informational purposes if used in a list,
+		// so no specific validation here unless we want to enforce it matches the map key.
+	}
 }

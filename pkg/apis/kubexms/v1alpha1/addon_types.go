@@ -6,6 +6,17 @@ import (
 	"strings"
 )
 
+const (
+	// validChartVersionRegex defines the pattern for common chart version formats.
+	// Allows "latest", "stable", or versions like "1.2.3", "v1.2.3", "1.2", "v1.0", "1", "v2".
+	validChartVersionRegexString = `^v?([0-9]+)(\.[0-9]+){0,2}$`
+)
+
+var (
+	// validChartVersionRegex is the compiled regular expression for chart versions.
+	validChartVersionRegex = regexp.MustCompile(validChartVersionRegexString)
+)
+
 // AddonConfig defines the detailed configuration for a single addon.
 // This struct is typically used when a more fine-grained configuration for addons is needed,
 // potentially managed separately or through a dedicated 'addons' section in the cluster YAML
@@ -182,6 +193,5 @@ func isValidChartVersion(version string) bool {
 	// Allows optional 'v'.
 	// Requires at least one digit.
 	// Allows up to two dot-separated digit sequences after the first (e.g., .x.y, not .x.y.z).
-	matched, _ := regexp.MatchString(`^v?([0-9]+)(\.[0-9]+){0,2}$`, version)
-	return matched
+	return validChartVersionRegex.MatchString(version)
 }

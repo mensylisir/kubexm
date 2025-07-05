@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	"net" // Added for TestNetworksOverlap
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -108,4 +109,71 @@ func TestUint64Ptr(t *testing.T) {
 	ptr := Uint64Ptr(u64)
 	assert.NotNil(t, ptr, "Uint64Ptr should return a non-nil pointer")
 	assert.Equal(t, u64, *ptr, "Value pointed to by Uint64Ptr should match input uint64")
+}
+
+func TestNetworksOverlap(t *testing.T) {
+	tests := []struct {
+		name   string
+		cidr1  string
+		cidr2  string
+		want   bool
+		noerr1 bool // Expect no error parsing cidr1
+		noerr2 bool // Expect no error parsing cidr2
+	}{
+		{"no_overlap_distinct", "192.168.1.0/24", "192.168.2.0/24", false, true, true},
+		{"no_overlap_adjacent", "192.168.1.0/24", "192.168.2.0/24", false, true, true}, // Same as distinct for this simple check
+		{"overlap_subset1", "10.0.0.0/8", "10.1.0.0/16", true, true, true},
+		{"overlap_subset2", "10.1.0.0/16", "10.0.0.0/8", true, true, true},
+		{"overlap_identical", "172.16.0.0/12", "172.16.0.0/12", true, true, true},
+		{"overlap_partial_start", "10.0.0.0/23", "10.0.1.0/24", true, true, true}, // 10.0.0.0-10.0.1.255 overlaps with 10.0.1.0-10.0.1.255
+		{"overlap_partial_end", "10.0.1.0/24", "10.0.0.0/23", true, true, true},
+		{"invalid_cidr1", "invalid", "192.168.1.0/24", false, false, true}, // Exact overlap result doesn't matter if parse fails
+		{"invalid_cidr2", "192.168.1.0/24", "invalid", false, true, false},
+		{"one_contains_another_exact_ip", "192.168.1.1/32", "192.168.1.0/24", true, true, true},
+		{"different_families_ipv4_ipv6", "192.168.1.0/24", "2001:db8::/32", false, true, true}, // Should not overlap
+		{"nil_net1", "", "192.168.1.0/24", false, false, true}, // Test nil case for n1
+		{"nil_net2", "192.168.1.0/24", "", false, true, false}, // Test nil case for n2
+		{"both_nil_nets", "", "", false, false, false},          // Test both nil
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var n1, n2 *net.IPNet
+			var err1, err2 error
+
+			if tt.cidr1 != "" {
+				_, n1, err1 = net.ParseCIDR(tt.cidr1)
+			} else {
+				// Simulate a nil net.IPNet if cidr1 is empty
+				err1 = nil // No parse error for empty input leading to nil net
+			}
+			// Check err1 against noerr1, allowing for "invalid CIDR address: " for empty string when noerr1 is false.
+			if (err1 == nil) != tt.noerr1 {
+				isExpectedEmptyStrErr1 := tt.cidr1 == "" && !tt.noerr1 && err1 != nil && err1.Error() == "invalid CIDR address: "
+				if !isExpectedEmptyStrErr1 {
+					t.Fatalf("For cidr1 '%s', net.ParseCIDR error expectation mismatch: got err %v, want noerr1 %v", tt.cidr1, err1, tt.noerr1)
+				}
+			}
+
+			if tt.cidr2 != "" {
+				_, n2, err2 = net.ParseCIDR(tt.cidr2)
+			} else {
+				// Simulate a nil net.IPNet if cidr2 is empty
+				err2 = nil // No parse error for empty input leading to nil net
+			}
+			// Check err2 against noerr2, allowing for "invalid CIDR address: " for empty string when noerr2 is false.
+			if (err2 == nil) != tt.noerr2 {
+				isExpectedEmptyStrErr2 := tt.cidr2 == "" && !tt.noerr2 && err2 != nil && err2.Error() == "invalid CIDR address: "
+				if !isExpectedEmptyStrErr2 {
+					t.Fatalf("For cidr2 '%s', net.ParseCIDR error expectation mismatch: got err %v, want noerr2 %v", tt.cidr2, err2, tt.noerr2)
+				}
+			}
+
+			// The NetworksOverlap function itself should handle nil inputs.
+			// The checks above are for the test setup's ParseCIDR calls.
+			if got := NetworksOverlap(n1, n2); got != tt.want {
+				t.Errorf("NetworksOverlap(%s, %s) = %v, want %v. n1: %v, n2: %v", tt.cidr1, tt.cidr2, got, tt.want, n1, n2)
+			}
+		})
+	}
 }

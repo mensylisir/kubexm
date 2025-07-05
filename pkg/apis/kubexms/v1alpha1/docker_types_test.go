@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
+	"k8s.io/apimachinery/pkg/runtime"      // Added for RawExtension in tests
 )
 
 // stringPtr, boolPtr, intPtr are expected to be in zz_helpers.go or similar within the package.
@@ -41,6 +42,7 @@ func TestSetDefaults_DockerConfig(t *testing.T) {
 				IPTables:               util.BoolPtr(true),
 				IPMasq:                 util.BoolPtr(true),
 				Experimental:           util.BoolPtr(false),
+				Auths:                  map[string]DockerRegistryAuth{},
 			},
 		},
 		{
@@ -62,6 +64,7 @@ func TestSetDefaults_DockerConfig(t *testing.T) {
 				IPTables:               util.BoolPtr(true),
 				IPMasq:                 util.BoolPtr(true),
 				Experimental:           util.BoolPtr(false),
+				Auths:                  map[string]DockerRegistryAuth{},
 			},
 		},
 		{
@@ -83,6 +86,7 @@ func TestSetDefaults_DockerConfig(t *testing.T) {
 				IPTables:               util.BoolPtr(true),
 				IPMasq:                 util.BoolPtr(true),
 				Experimental:           util.BoolPtr(false),
+				Auths:                  map[string]DockerRegistryAuth{},
 			},
 		},
 		{
@@ -109,6 +113,7 @@ func TestSetDefaults_DockerConfig(t *testing.T) {
 				Bridge:                 util.StrPtr("br-custom"),
 				InstallCRIDockerd:      util.BoolPtr(false),
 				CRIDockerdVersion:      util.StrPtr("v0.2.3"),
+				Auths:                  map[string]DockerRegistryAuth{"test.com": {Auth: "dXNlcjpwYXNz"}},
 			},
 			expected: &DockerConfig{
 				RegistryMirrors:     []string{"mirror.example.com"},
@@ -132,6 +137,7 @@ func TestSetDefaults_DockerConfig(t *testing.T) {
 				Bridge:                 util.StrPtr("br-custom"),
 				InstallCRIDockerd:      util.BoolPtr(false),
 				CRIDockerdVersion:      util.StrPtr("v0.2.3"),
+				Auths:                  map[string]DockerRegistryAuth{"test.com": {Auth: "dXNlcjpwYXNz"}},
 			},
 		},
 	}
@@ -193,6 +199,28 @@ func TestValidate_DockerConfig(t *testing.T) {
 				CRIDockerdVersion: stringPtr("v0.3.1"),
 			},
 		},
+		{
+			name: "valid ExtraJSONConfig",
+			input: &DockerConfig{
+				ExtraJSONConfig: &runtime.RawExtension{Raw: []byte(`{"debug": true}`)},
+			},
+		},
+		{
+			name: "valid Auths with user-pass",
+			input: &DockerConfig{
+				Auths: map[string]DockerRegistryAuth{"docker.io": {Username: "user", Password: "password"}},
+			},
+		},
+		{
+			name: "valid Auths with base64 auth",
+			input: &DockerConfig{
+				Auths: map[string]DockerRegistryAuth{"my.registry.com:5000": {Auth: "dXNlcjpwYXNzd29yZA=="}}, // user:password
+			},
+		},
+		{
+			name: "valid DataRoot",
+			input: &DockerConfig{DataRoot: stringPtr("/mnt/docker_data")},
+		},
 	}
 
 	for _, tt := range validCases {
@@ -239,6 +267,14 @@ func TestValidate_DockerConfig(t *testing.T) {
 			&DockerConfig{CRIDockerdVersion: stringPtr("v0.2.3_alpha")},
 			[]string{".criDockerdVersion: 'v0.2.3_alpha' is not a recognized version format"},
 		},
+		{"extraJsonConfig_empty_raw", &DockerConfig{ExtraJSONConfig: &runtime.RawExtension{Raw: []byte("")}}, []string{".extraJsonConfig: raw data cannot be empty"}},
+		{"auths_empty_key", &DockerConfig{Auths: map[string]DockerRegistryAuth{" ": {Username: "u", Password: "p"}}}, []string{"registry address key cannot be empty"}},
+		{"auths_invalid_key_format", &DockerConfig{Auths: map[string]DockerRegistryAuth{"http//invalid.com": {Username: "u", Password: "p"}}}, []string{"registry key 'http//invalid.com' is not a valid hostname or host:port"}},
+		{"auths_no_auth_method", &DockerConfig{Auths: map[string]DockerRegistryAuth{"docker.io": {}}}, []string{".auths[\"docker.io\"]: either username/password or auth string must be provided"}},
+		{"auths_invalid_base64", &DockerConfig{Auths: map[string]DockerRegistryAuth{"docker.io": {Auth: "invalid-base64!"}}}, []string{".auths[\"docker.io\"].auth: failed to decode base64"}},
+		{"auths_auth_bad_format", &DockerConfig{Auths: map[string]DockerRegistryAuth{"docker.io": {Auth: "dXNlcg=="}}}, []string{".auths[\"docker.io\"].auth: decoded auth string must be in 'username:password' format"}}, // "user"
+		{"dataroot_tmp", &DockerConfig{DataRoot: stringPtr("/tmp")}, []string{".dataRoot: path '/tmp' is not recommended"}},
+		{"dataroot_var_tmp", &DockerConfig{DataRoot: stringPtr("/var/tmp")}, []string{".dataRoot: path '/var/tmp' is not recommended"}},
 	}
 
 	for _, tt := range invalidCases {
