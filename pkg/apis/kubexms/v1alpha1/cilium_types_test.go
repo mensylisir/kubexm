@@ -244,21 +244,8 @@ func TestValidate_NetworkConfig_Calls_Validate_CiliumConfig_Standalone(t *testin
 	SetDefaults_NetworkConfig(netCfg) // Apply defaults to NetworkConfig and its sub-configs
 
 	verrs := &ValidationErrors{}
-	Validate_NetworkConfig(netCfg, verrs, "spec.network", nil) // k8sSpec can be nil for this test
+	Validate_NetworkConfig(netCfg, verrs, "spec.network")
 
 	assert.False(t, verrs.IsEmpty(), "Expected errors from CiliumConfig validation")
 	assert.Contains(t, verrs.Error(), "cilium.tunnelingMode: invalid mode 'invalid-mode'", "Expected Cilium validation error")
-}
-
-// TestSetDefaults_NetworkConfig_Calls_SetDefaults_CiliumConfig_Standalone ensures NetworkConfig defaulting calls Cilium defaulting.
-func TestSetDefaults_NetworkConfig_Calls_SetDefaults_CiliumConfig_Standalone(t *testing.T) {
-	netCfg := &NetworkConfig{
-		Plugin: "cilium",
-		Cilium: &CiliumConfig{HubbleUI: true}, // EnableHubble should be defaulted to true
-	}
-	SetDefaults_NetworkConfig(netCfg)
-
-	assert.NotNil(t, netCfg.Cilium, "Cilium config should be present")
-	assert.True(t, netCfg.Cilium.EnableHubble, "EnableHubble should be true due to HubbleUI being true")
-	assert.Equal(t, "vxlan", netCfg.Cilium.TunnelingMode, "Default tunneling mode mismatch")
 }

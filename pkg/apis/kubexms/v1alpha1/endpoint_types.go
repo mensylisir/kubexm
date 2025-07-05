@@ -1,10 +1,20 @@
 package v1alpha1
 
 import (
-	"net" // For isValidIP
-	"regexp" // Added for regexp.MatchString
+	// "net" // No longer needed directly as util.IsValidIP is used and local isValidIP was removed
+	"regexp" // Still needed for domainValidationRegex
 	"strings" // For validation
 	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
+)
+
+const (
+	// domainValidationRegex is used to validate domain names.
+	// It checks for LDH (letters, digits, hyphen) labels, with length constraints.
+	domainValidationRegexString = `^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`
+)
+
+var (
+	domainValidationRegex = regexp.MustCompile(domainValidationRegexString)
 )
 
 // ControlPlaneEndpointSpec defines the configuration for the cluster's control plane endpoint.
@@ -31,11 +41,11 @@ type ControlPlaneEndpointSpec struct {
 	// Corresponds to `externalLoadBalancer` in YAML.
 	// Examples from YAML: "kubexm" (managed by KubeXMS), "external" (user-provided).
 	// This field helps determine behavior for HA setup.
-	ExternalLoadBalancerType string `json:"externalLoadBalancerType,omitempty" yaml:"externalLoadBalancer,omitempty"`
+	// ExternalLoadBalancerType string `json:"externalLoadBalancerType,omitempty" yaml:"externalLoadBalancer,omitempty"` // This field is being removed. Specific LB type is in HighAvailabilityConfig.
 
 	// InternalLoadBalancerType specifies the type of internal load balancer for intra-cluster communication to the API server.
 	// Examples from YAML: "haproxy", "nginx", "kube-vip".
-	InternalLoadBalancerType string `json:"internalLoadBalancerType,omitempty" yaml:"internalLoadbalancer,omitempty"`
+	// InternalLoadBalancerType string `json:"internalLoadBalancerType,omitempty" yaml:"internalLoadbalancer,omitempty"` // This field is being removed. Specific LB type is in HighAvailabilityConfig.
 }
 
 // SetDefaults_ControlPlaneEndpointSpec sets default values for ControlPlaneEndpointSpec.
@@ -66,7 +76,7 @@ func Validate_ControlPlaneEndpointSpec(cfg *ControlPlaneEndpointSpec, verrs *Val
 		verrs.Add("%s: either domain or address (lb_address in YAML) must be specified", pathPrefix)
 	}
 	if cfg.Domain != "" {
-		if matched, _ := regexp.MatchString(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`, cfg.Domain); !matched {
+		if !domainValidationRegex.MatchString(cfg.Domain) {
 			verrs.Add("%s.domain: '%s' is not a valid domain name", pathPrefix, cfg.Domain)
 		}
 	}
@@ -78,18 +88,8 @@ func Validate_ControlPlaneEndpointSpec(cfg *ControlPlaneEndpointSpec, verrs *Val
 		verrs.Add("%s.port: invalid port %d, must be between 1-65535", pathPrefix, cfg.Port)
 	}
 
-	validExternalTypes := []string{"kubexm", "external", ""}
-	if cfg.ExternalLoadBalancerType != "" && !containsString(validExternalTypes, cfg.ExternalLoadBalancerType) {
-		verrs.Add("%s.externalLoadBalancerType: invalid type '%s', must be one of %v", pathPrefix, cfg.ExternalLoadBalancerType, validExternalTypes)
-	}
-	// Removed duplicate declaration of validExternalTypes and its corresponding if block.
-	validInternalTypes := []string{"haproxy", "nginx", "kube-vip", ""}
-	if cfg.InternalLoadBalancerType != "" && !containsString(validInternalTypes, cfg.InternalLoadBalancerType) {
-		verrs.Add("%s.internalLoadbalancer: invalid type '%s', must be one of %v", pathPrefix, cfg.InternalLoadBalancerType, validInternalTypes)
-	}
+	// Validation for ExternalLoadBalancerType and InternalLoadBalancerType removed as fields are removed.
+	// Specific LB type validation is now handled within HighAvailabilityConfig validation.
 }
 
-// isValidIP helper function
-func isValidIP(ip string) bool {
-	return net.ParseIP(ip) != nil
-}
+// isValidIP helper function was removed as util.IsValidIP is used.

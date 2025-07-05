@@ -7,29 +7,72 @@ import (
 	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
 )
 
+// DNS defines the overall DNS configuration for the cluster.
+// It includes settings for host-level DNS overrides, CoreDNS, and NodeLocalDNS.
 type DNS struct {
-	DNSEtcHosts  string       `yaml:"dnsEtcHosts" json:"dnsEtcHosts"`
-	NodeEtcHosts string       `yaml:"nodeEtcHosts" json:"nodeEtcHosts,omitempty"`
-	CoreDNS      CoreDNS      `yaml:"coredns" json:"coredns"`
+	// DNSEtcHosts allows specifying custom entries to be added to /etc/hosts for Pods.
+	// Format is a multi-line string, with each line being a standard /etc/hosts entry (e.g., "1.2.3.4 myhost.example.com myhost").
+	DNSEtcHosts string `yaml:"dnsEtcHosts" json:"dnsEtcHosts"`
+	// NodeEtcHosts allows specifying custom entries to be added to /etc/hosts on the nodes themselves.
+	// Format is the same as DNSEtcHosts. Optional.
+	NodeEtcHosts string `yaml:"nodeEtcHosts" json:"nodeEtcHosts,omitempty"`
+	// CoreDNS holds the configuration for the CoreDNS addon.
+	CoreDNS CoreDNS `yaml:"coredns" json:"coredns"`
+	// NodeLocalDNS holds the configuration for the NodeLocal DNSCache addon.
 	NodeLocalDNS NodeLocalDNS `yaml:"nodelocaldns" json:"nodelocaldns"`
 }
 
+// CoreDNS defines the configuration for the CoreDNS addon.
 type CoreDNS struct {
-	AdditionalConfigs  string         `yaml:"additionalConfigs" json:"additionalConfigs"`
-	ExternalZones      []ExternalZone `yaml:"externalZones" json:"externalZones"`
-	RewriteBlock       string         `yaml:"rewriteBlock" json:"rewriteBlock"`
-	UpstreamDNSServers []string       `yaml:"upstreamDNSServers" json:"upstreamDNSServers"`
+	// AdditionalConfigs allows injecting raw CoreDNS Corefile snippets into the main configuration.
+	// This can be used for advanced configurations not directly exposed by other fields.
+	AdditionalConfigs string `yaml:"additionalConfigs" json:"additionalConfigs"`
+	// ExternalZones defines custom upstream DNS servers for specific external domains.
+	ExternalZones []ExternalZone `yaml:"externalZones" json:"externalZones"`
+	// RewriteBlock allows injecting raw CoreDNS rewrite rules.
+	// Example: "rewrite name foo.example.com bar.example.com"
+	RewriteBlock string `yaml:"rewriteBlock" json:"rewriteBlock"`
+	// UpstreamDNSServers is a list of upstream DNS servers that CoreDNS will forward queries to.
+	// These are used for domains not covered by ExternalZones or other specific configurations.
+	// Example: ["8.8.8.8", "1.1.1.1"]
+	UpstreamDNSServers []string `yaml:"upstreamDNSServers" json:"upstreamDNSServers"`
 }
 
+// NodeLocalDNS defines the configuration for the NodeLocal DNSCache addon.
+// NodeLocal DNSCache improves cluster DNS performance by running a dns caching agent on cluster nodes.
 type NodeLocalDNS struct {
+	// ExternalZones defines custom upstream DNS servers for specific external domains for the NodeLocal DNSCache.
+	// This allows NodeLocal DNSCache to forward queries for these zones to designated resolvers.
 	ExternalZones []ExternalZone `yaml:"externalZones" json:"externalZones"`
 }
 
+// ExternalZone defines a custom DNS forwarding rule for a set of specified domain zones.
 type ExternalZone struct {
-	Zones       []string `yaml:"zones" json:"zones"`
+	// Zones is a list of domain names (or suffixes) for which this external zone rule applies.
+	// Example: ["example.com", "internal.net"]
+	Zones []string `yaml:"zones" json:"zones"`
+	// Nameservers is a list of IP addresses of upstream DNS servers to forward queries for the specified Zones.
+	// Example: ["10.0.0.1", "10.0.0.2"]
 	Nameservers []string `yaml:"nameservers" json:"nameservers"`
-	Cache       int      `yaml:"cache" json:"cache"`
-	Rewrite     []string `yaml:"rewrite" json:"rewrite"`
+	// Cache specifies the DNS caching time (in seconds) for records resolved through this external zone.
+	// Defaults to 300 seconds if not set or set to 0 by SetDefaults_ExternalZone.
+	Cache int `yaml:"cache" json:"cache"`
+	// Rewrite defines a list of rewrite rules to be applied for queries matching this external zone.
+	// Example: {"fromPattern": "(.*)\\.example\\.com", "toTemplate": "{1}.my-internal-domain.com"}
+	Rewrite []RewriteRule `yaml:"rewrite" json:"rewrite,omitempty"`
+}
+
+// RewriteRule defines a DNS rewrite rule.
+// It specifies a pattern to match DNS query names and a template to rewrite them.
+type RewriteRule struct {
+	// FromPattern is a regular expression used to match the DNS query name.
+	// Capture groups (e.g., (.*)) can be used here and referenced in ToTemplate.
+	// Example: "(.*)\\.partner\\.example\\.com"
+	FromPattern string `json:"fromPattern" yaml:"fromPattern"`
+	// ToTemplate is the template string for the rewritten DNS query name.
+	// It can use capture groups from FromPattern, denoted as {N} where N is the capture group index (e.g., {1}, {2}).
+	// Example: "{1}.internal.example.local"
+	ToTemplate string `json:"toTemplate" yaml:"toTemplate"`
 }
 
 // SetDefaults_DNS sets default values for DNS configuration.
@@ -76,7 +119,7 @@ func SetDefaults_ExternalZone(cfg *ExternalZone) {
 		cfg.Cache = 300
 	}
 	if cfg.Rewrite == nil {
-		cfg.Rewrite = []string{}
+		cfg.Rewrite = []RewriteRule{}
 	}
 }
 
@@ -158,10 +201,15 @@ func Validate_ExternalZone(cfg *ExternalZone, verrs *ValidationErrors, pathPrefi
 		verrs.Add("%s.cache: cannot be negative, got %d", pathPrefix, cfg.Cache)
 	}
 
-	for i, rw := range cfg.Rewrite {
-		if strings.TrimSpace(rw) == "" {
-			verrs.Add("%s.rewrite[%d]: rewrite rule cannot be empty", pathPrefix, i)
+	for i, rule := range cfg.Rewrite {
+		rulePath := fmt.Sprintf("%s.rewrite[%d]", pathPrefix, i)
+		if strings.TrimSpace(rule.FromPattern) == "" {
+			verrs.Add("%s.fromPattern: cannot be empty", rulePath)
 		}
-		// More complex validation for rewrite rule syntax could be added if known.
+		if strings.TrimSpace(rule.ToTemplate) == "" {
+			verrs.Add("%s.toTemplate: cannot be empty", rulePath)
+		}
+		// Further regex validation for FromPattern could be added if necessary,
+		// but that might be too complex for this level of validation.
 	}
 }

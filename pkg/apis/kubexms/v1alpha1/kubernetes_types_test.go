@@ -141,7 +141,7 @@ func TestValidate_KubernetesConfig_Invalid(t *testing.T) {
 		{"invalid_proxymode", &KubernetesConfig{Version: "v1.20.0", ProxyMode: "foo"}, ".proxyMode: invalid mode 'foo'"},
 		// {"invalid_podsubnet", &KubernetesConfig{Version: "v1.20.0", PodSubnet: "invalid"}, ".podSubnet: invalid CIDR format"}, // Moved to NetworkConfig validation
 		// {"invalid_servicesubnet", &KubernetesConfig{Version: "v1.20.0", ServiceSubnet: "invalid"}, ".serviceSubnet: invalid CIDR format"}, // Moved to NetworkConfig validation
-		{"invalid_containerManager", &KubernetesConfig{Version: "v1.20.0", ContainerManager: "rkt"}, ".containerManager: must be 'cgroupfs' or 'systemd'"},
+		{"invalid_containerManager", &KubernetesConfig{Version: "v1.20.0", ContainerManager: "rkt"}, ".containerManager: must be one of [systemd cgroupfs]"},
 		{"empty_kubeletConfiguration_raw", &KubernetesConfig{Version: "v1.20.0", KubeletConfiguration: &runtime.RawExtension{Raw: []byte("")}}, ".kubeletConfiguration: raw data cannot be empty"},
 		{"empty_kubeProxyConfiguration_raw", &KubernetesConfig{Version: "v1.20.0", KubeProxyConfiguration: &runtime.RawExtension{Raw: []byte("")}}, ".kubeProxyConfiguration: raw data cannot be empty"},
 		// APIServerConfig validation
@@ -150,8 +150,9 @@ func TestValidate_KubernetesConfig_Invalid(t *testing.T) {
 		{"apiserver_invalid_port_range_high_max", &KubernetesConfig{Version: "v1.20.0", APIServer: &APIServerConfig{ServiceNodePortRange: "30000-70000"}}, ".apiServer.serviceNodePortRange: port numbers must be between 1 and 65535"},
 		{"apiserver_invalid_port_range_min_gte_max", &KubernetesConfig{Version: "v1.20.0", APIServer: &APIServerConfig{ServiceNodePortRange: "30000-30000"}}, ".apiServer.serviceNodePortRange: min port 30000 must be less than max port 30000"},
 		{"apiserver_invalid_port_range_not_numbers", &KubernetesConfig{Version: "v1.20.0", APIServer: &APIServerConfig{ServiceNodePortRange: "abc-def"}}, ".apiServer.serviceNodePortRange: ports must be numbers"},
+		{"apiserver_empty_admission_plugin", &KubernetesConfig{Version: "v1.20.0", APIServer: &APIServerConfig{AdmissionPlugins: []string{"ValidPlugin", " "}}}, ".apiServer.admissionPlugins[1]: admission plugin name cannot be empty"},
 		// KubeletConfig validation
-		{"kubelet_invalid_cgroupdriver", &KubernetesConfig{Version: "v1.20.0", Kubelet: &KubeletConfig{CgroupDriver: stringPtr("docker")}}, ".kubelet.cgroupDriver: must be 'cgroupfs' or 'systemd'"},
+		{"kubelet_invalid_cgroupdriver", &KubernetesConfig{Version: "v1.20.0", Kubelet: &KubeletConfig{CgroupDriver: stringPtr("docker")}}, ".kubelet.cgroupDriver: must be one of [systemd cgroupfs] if specified"},
 		{"kubelet_invalid_hairpin", &KubernetesConfig{Version: "v1.20.0", Kubelet: &KubeletConfig{HairpinMode: stringPtr("bad")}}, ".kubelet.hairpinMode: invalid mode 'bad'"},
 		// KubeProxyConfig validation
 		{"kubeproxy_iptables_bad_masq_bit", &KubernetesConfig{Version: "v1.20.0", ProxyMode: "iptables", KubeProxy: &KubeProxyConfig{IPTables: &KubeProxyIPTablesConfig{MasqueradeBit: int32Ptr(32)}}}, ".kubeProxy.ipTables.masqueradeBit: must be between 0 and 31"},
