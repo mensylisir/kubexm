@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net" // For IP validation
 	"strings"
+	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
 )
 
 // HAProxyBackendServer defines a backend server for HAProxy load balancing.
@@ -129,14 +130,14 @@ func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *ValidationErrors, pathPre
 
 	if cfg.Mode != nil && *cfg.Mode != "" {
 		validModes := []string{"tcp", "http"}
-		if !containsString(validModes, *cfg.Mode) {
+		if !util.ContainsString(validModes, *cfg.Mode) { // Use util.ContainsString
 			verrs.Add("%s.mode: invalid mode '%s', must be one of %v or empty for default", pathPrefix, *cfg.Mode, validModes)
 		}
 	}
 
 	if cfg.BalanceAlgorithm != nil && *cfg.BalanceAlgorithm != "" {
 		validAlgos := []string{"roundrobin", "static-rr", "leastconn", "first", "source", "uri", "url_param", "hdr", "rdp-cookie"} // Common algos
-		if !containsString(validAlgos, *cfg.BalanceAlgorithm) {
+		if !util.ContainsString(validAlgos, *cfg.BalanceAlgorithm) { // Use util.ContainsString
 			verrs.Add("%s.balanceAlgorithm: invalid algorithm '%s'", pathPrefix, *cfg.BalanceAlgorithm)
 		}
 	}
@@ -151,7 +152,7 @@ func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *ValidationErrors, pathPre
 		}
 		if strings.TrimSpace(server.Address) == "" {
 			verrs.Add("%s.address: backend server address cannot be empty", serverPath)
-		} else if !isValidHostOrIP(server.Address) { // Assuming isValidHostOrIP is available
+		} else if !util.ValidateHostPortString(server.Address) && !util.IsValidIP(server.Address) && !util.IsValidDomainName(server.Address) { // Use util functions
 			verrs.Add("%s.address: invalid backend server address format '%s'", serverPath, server.Address)
 		}
 		if server.Port <= 0 || server.Port > 65535 {

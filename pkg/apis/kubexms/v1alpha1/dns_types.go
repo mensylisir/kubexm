@@ -2,75 +2,10 @@ package v1alpha1
 
 import (
 	"fmt"
-	"net"
-	"regexp"
 	"strings"
+
+	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
 )
-
-// isValidHostOrIP checks if a string is a valid IP address or a simple valid hostname.
-// For hostnames, this relies on isValidDomainName which is now more robust.
-func isValidHostOrIP(hostOrIP string) bool {
-	// Check if it's a valid IP address first.
-	if net.ParseIP(hostOrIP) != nil {
-		return true
-	}
-	// If not an IP, check if it's a valid domain name.
-	// isValidDomainName itself now ensures it's not an IP and checks for other domain validity rules.
-	return isValidDomainName(hostOrIP)
-}
-
-// isValidDomainName checks if a string is a plausible domain name.
-// This is a more comprehensive check than the basic regex.
-func isValidDomainName(domain string) bool {
-	if domain == "" || len(domain) > 253 {
-		return false
-	}
-	// Domain must not be an IP address
-	if net.ParseIP(domain) != nil {
-		return false
-	}
-
-	// Regex for basic domain name structure (LDH: letters, digits, hyphen for labels)
-	// Each label: starts and ends with alphanumeric, contains alphanumeric or hyphen, 1-63 chars.
-	// Allows for a trailing dot indicating FQDN root.
-	fqdnRegex := `^([a-zA-Z0-9]{1}[a-zA-Z0-9-]{0,61}[a-zA-Z0-9]{1}|[a-zA-Z0-9]{1})(\.([a-zA-Z0-9]{1}[a-zA-Z0-9-]{0,61}[a-zA-Z0-9]{1}|[a-zA-Z0-9]{1}))*\.?$`
-	if matched, _ := regexp.MatchString(fqdnRegex, domain); !matched {
-		return false
-	}
-
-	// Check for numeric-only TLD if it's not a single label domain (like "localhost")
-	parts := strings.Split(strings.TrimRight(domain, "."), ".")
-	if len(parts) > 1 {
-		tld := parts[len(parts)-1]
-		isNumericTld := true
-		if tld == "" { // Should be caught by regex, but defensive
-			isNumericTld = false
-		}
-		for _, char := range tld {
-			if char < '0' || char > '9' {
-				isNumericTld = false
-				break
-			}
-		}
-		if isNumericTld {
-			return false // Numeric TLDs are generally invalid for hostnames expected here
-		}
-	}
-
-	// Final check: ensure no part starts or ends with a hyphen (already mostly covered by regex but good for robustness)
-	// And no part is longer than 63 characters (also covered by regex)
-	for _, part := range parts {
-		if strings.HasPrefix(part, "-") || strings.HasSuffix(part, "-") {
-			return false
-		}
-		if len(part) > 63 {
-			return false
-		}
-	}
-
-	return true
-}
-
 
 type DNS struct {
 	DNSEtcHosts  string       `yaml:"dnsEtcHosts" json:"dnsEtcHosts"`
@@ -163,7 +98,8 @@ func Validate_DNS(cfg *DNS, verrs *ValidationErrors, pathPrefix string) {
 		for i, server := range cfg.CoreDNS.UpstreamDNSServers {
 			if strings.TrimSpace(server) == "" {
 				verrs.Add("%s.upstreamDNSServers[%d]: server address cannot be empty", coreDNSPath, i)
-			} else if !isValidHostOrIP(server) {
+			} else if !util.ValidateHostPortString(server) && !util.IsValidIP(server) && !util.IsValidDomainName(server) {
+				// Try ValidateHostPortString first, if that fails, it might be a simple IP or Domain without port
 				verrs.Add("%s.upstreamDNSServers[%d]: invalid server address format '%s'", coreDNSPath, i, server)
 			}
 		}
@@ -201,7 +137,7 @@ func Validate_ExternalZone(cfg *ExternalZone, verrs *ValidationErrors, pathPrefi
 	for i, zone := range cfg.Zones {
 		if strings.TrimSpace(zone) == "" {
 			verrs.Add("%s.zones[%d]: zone name cannot be empty", pathPrefix, i)
-		} else if !isValidDomainName(zone) {
+		} else if !util.IsValidDomainName(zone) { // Use util.IsValidDomainName
 			verrs.Add("%s.zones[%d]: invalid domain name format '%s'", pathPrefix, i, zone)
 		}
 	}
@@ -212,7 +148,8 @@ func Validate_ExternalZone(cfg *ExternalZone, verrs *ValidationErrors, pathPrefi
 	for i, ns := range cfg.Nameservers {
 		if strings.TrimSpace(ns) == "" {
 			verrs.Add("%s.nameservers[%d]: nameserver address cannot be empty", pathPrefix, i)
-		} else if !isValidHostOrIP(ns) {
+		} else if !util.ValidateHostPortString(ns) && !util.IsValidIP(ns) && !util.IsValidDomainName(ns) {
+			// Try ValidateHostPortString first, if that fails, it might be a simple IP or Domain without port
 			verrs.Add("%s.nameservers[%d]: invalid nameserver address format '%s'", pathPrefix, i, ns)
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	versionutil "k8s.io/apimachinery/pkg/util/version"
 	"strconv"
 	"time"
+	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
 )
 
 // KubernetesConfig defines the configuration for Kubernetes components.
@@ -281,7 +282,7 @@ func Validate_KubeProxyIPVSConfig(cfg *KubeProxyIPVSConfig, verrs *ValidationErr
 	if cfg == nil { return }
 	// Add validation for IPVS Scheduler if needed (e.g. list of known good values)
 	for i, cidr := range cfg.ExcludeCIDRs {
-		if !isValidCIDR(cidr) {
+		if !util.IsValidCIDR(cidr) { // Use util.IsValidCIDR
 			verrs.Add("%s.excludeCIDRs[%d]: invalid CIDR format '%s'", pathPrefix, i, cidr)
 		}
 	}
@@ -319,7 +320,12 @@ func Validate_KubeProxyConfig(cfg *KubeProxyConfig, verrs *ValidationErrors, pat
 	}
 }
 
-func isValidCIDR(cidr string) bool { _, _, err := net.ParseCIDR(cidr); return err == nil }
+// isValidCIDR has been moved to pkg/util/utils.go as IsValidCIDR
+	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
+)
+
+// isValidCIDR has been moved to pkg/util/utils.go as IsValidCIDR
+// func isValidCIDR(cidr string) bool { _, _, err := net.ParseCIDR(cidr); return err == nil }
 
 func (k *KubernetesConfig) IsKubeProxyDisabled() bool {
 	if k != nil && k.DisableKubeProxy != nil { return *k.DisableKubeProxy }

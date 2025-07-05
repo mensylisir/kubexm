@@ -57,8 +57,10 @@ func SetDefaults_AddonConfig(cfg *AddonConfig) {
 	if cfg.Enabled == nil {
 		cfg.Enabled = boolPtr(true) // Default most addons to enabled unless specified
 	}
-	// Default namespace could be addon name, or a global addons namespace.
-	// For now, leave empty; specific addons might default this if cfg.Namespace == ""
+
+	if cfg.Namespace == "" && strings.TrimSpace(cfg.Name) != "" {
+		cfg.Namespace = "addon-" + strings.ToLower(strings.ReplaceAll(strings.TrimSpace(cfg.Name), " ", "-"))
+	}
 
 	if cfg.Retries == nil {
 		cfg.Retries = int32Ptr(0) // Default to 0 retries (1 attempt)
@@ -93,70 +95,76 @@ func Validate_AddonConfig(cfg *AddonConfig, verrs *ValidationErrors, pathPrefix 
 		verrs.Add("%s.name: addon name cannot be empty", pathPrefix)
 	}
 
-	hasSource := false
-	if cfg.Sources.Chart != nil {
-		hasSource = true
+	hasChartSource := cfg.Sources.Chart != nil
+	hasYamlSource := cfg.Sources.Yaml != nil
+
+	if hasChartSource {
 		csPath := pathPrefix + ".sources.chart"
-		// Chart name is usually required if repo is specified, or path if local.
-		if strings.TrimSpace(cfg.Sources.Chart.Name) == "" && strings.TrimSpace(cfg.Sources.Chart.Path) == "" {
-			verrs.Add("%s: either chart.name (with repo) or chart.path (for local chart) must be specified", csPath)
+		chart := cfg.Sources.Chart
+
+		hasChartPath := strings.TrimSpace(chart.Path) != ""
+		hasChartName := strings.TrimSpace(chart.Name) != ""
+		hasChartRepo := strings.TrimSpace(chart.Repo) != ""
+
+		if hasChartPath && (hasChartName || hasChartRepo) {
+			verrs.Add("%s: chart.path ('%s') cannot be set if chart.name ('%s') or chart.repo ('%s') is also set", csPath, chart.Path, chart.Name, chart.Repo)
 		}
-		if strings.TrimSpace(cfg.Sources.Chart.Repo) != "" {
-			if strings.TrimSpace(cfg.Sources.Chart.Name) == "" {
-				verrs.Add("%s.name: chart name must be specified if chart.repo is set", csPath)
-			}
-			// Validate Repo URL format
-			_, err := url.ParseRequestURI(cfg.Sources.Chart.Repo)
+		if !hasChartPath && !hasChartName {
+			verrs.Add("%s: either chart.name (with chart.repo) or chart.path must be specified", csPath)
+		}
+		if hasChartRepo && !hasChartName {
+			verrs.Add("%s.name: chart.name must be specified if chart.repo ('%s') is set", csPath, chart.Repo)
+		}
+		if hasChartName && !hasChartRepo && !hasChartPath { // Name without repo implies local path, but path field is preferred for clarity
+			verrs.Add("%s.repo: chart.repo must be specified if chart.name ('%s') is set and chart.path is not set", csPath, chart.Name)
+		}
+
+		if hasChartRepo {
+			_, err := url.ParseRequestURI(chart.Repo)
 			if err != nil {
-				verrs.Add("%s.repo: invalid URL format for chart repo '%s': %v", csPath, cfg.Sources.Chart.Repo, err)
-			}
-		}
-		// Validate Version format
-		if cfg.Sources.Chart.Version != "" {
-			if strings.TrimSpace(cfg.Sources.Chart.Version) == "" {
-				verrs.Add("%s.version: chart version cannot be only whitespace if specified", csPath)
-			} else if !isValidChartVersion(cfg.Sources.Chart.Version) {
-				verrs.Add("%s.version: chart version '%s' is not a valid format (e.g., v1.2.3, 1.0.0, latest, stable)", csPath, cfg.Sources.Chart.Version)
+				verrs.Add("%s.repo: invalid URL format for chart repo '%s': %v", csPath, chart.Repo, err)
 			}
 		}
 
-		for i, val := range cfg.Sources.Chart.Values {
+		if chart.Version != "" {
+			if strings.TrimSpace(chart.Version) == "" {
+				verrs.Add("%s.version: chart version cannot be only whitespace if specified", csPath)
+			} else if !isValidChartVersion(chart.Version) {
+				verrs.Add("%s.version: chart version '%s' is not a valid format (e.g., v1.2.3, 1.0.0, latest, stable)", csPath, chart.Version)
+			}
+		}
+
+		for i, val := range chart.Values {
 			if !strings.Contains(val, "=") {
 				verrs.Add("%s.values[%d]: invalid format '%s', expected key=value", csPath, i, val)
 			}
 		}
-		// ValuesFile path existence is more of a runtime check.
 	}
 
-	if cfg.Sources.Yaml != nil {
-		hasSource = true
+	if hasYamlSource {
 		ysPath := pathPrefix + ".sources.yaml"
-		if len(cfg.Sources.Yaml.Path) == 0 {
+		yamlSource := cfg.Sources.Yaml
+		if len(yamlSource.Path) == 0 {
 			verrs.Add("%s.path: must contain at least one YAML path or URL", ysPath)
 		}
-		for i, p := range cfg.Sources.Yaml.Path {
+		for i, p := range yamlSource.Path {
 			if strings.TrimSpace(p) == "" {
 				verrs.Add("%s.path[%d]: path/URL cannot be empty", ysPath, i)
 			}
 			// Basic check for http/https or local path (does not check existence)
-			if !strings.HasPrefix(p, "http://") && !strings.HasPrefix(p, "https://") && !strings.HasPrefix(p, "/") && !strings.Contains(p, "./") {
-				// This is a very basic check and might not cover all valid local path cases,
-				// especially on Windows or relative paths not starting with "./".
-				// Consider if a more robust path validation is needed or if this is sufficient.
-				// For now, it suggests an intention for URL or absolute/relative local paths.
+			// This check is indicative and not exhaustive.
+			if !strings.HasPrefix(p, "http://") && !strings.HasPrefix(p, "https://") && !strings.HasPrefix(p, "/") && !strings.HasPrefix(p, "./") && !strings.HasPrefix(p, "../") {
+				// verrs.Add("%s.path[%d]: path '%s' does not appear to be a valid URL or recognizable local path pattern", ysPath, i, p)
 			}
 		}
 	}
 
-	if cfg.Enabled != nil && *cfg.Enabled && !hasSource {
-		// This validation can be tricky. Some "addons" might just be flags that enable features,
-		// not necessarily deploying manifests. For now, we'll comment it out.
-		// It might be better to validate sources only if a type (chart/yaml) is explicitly chosen.
-		// verrs.Add("%s: addon '%s' is enabled but has no chart or yaml sources defined", pathPrefix, cfg.Name)
+	if cfg.Enabled != nil && *cfg.Enabled && !hasChartSource && !hasYamlSource {
+		verrs.Add("%s: addon '%s' is enabled but has no chart or yaml sources defined", pathPrefix, cfg.Name)
 	}
 
 	if cfg.Retries != nil && *cfg.Retries < 0 {
-	   verrs.Add("%s.retries: cannot be negative, got %d", pathPrefix, *cfg.Retries)
+		verrs.Add("%s.retries: cannot be negative, got %d", pathPrefix, *cfg.Retries)
 	}
 	if cfg.Delay != nil && *cfg.Delay < 0 {
 		verrs.Add("%s.delay: cannot be negative, got %d", pathPrefix, *cfg.Delay)
@@ -164,16 +172,16 @@ func Validate_AddonConfig(cfg *AddonConfig, verrs *ValidationErrors, pathPrefix 
 }
 
 // isValidChartVersion checks if the version string matches common chart version patterns.
-// Allows "latest", "stable", or versions like "1.2.3", "v1.2.3", "1.0", "v2".
-// Does not aim for strict SemVer compliance but common usage.
+// Allows "latest", "stable", or versions like "1.2.3", "v1.2.3", "1.2", "v1.0", "1", "v2".
+// It aims to be flexible but avoid overly long or clearly incorrect versions.
 func isValidChartVersion(version string) bool {
 	if version == "latest" || version == "stable" {
 		return true
 	}
-	// Regex for versions like: v1.2.3, 1.2.3, v1.0, 1.0, v1, 1
-	// Allows optional 'v', followed by digits, optionally followed by (.digits)+
-	// Does not match complex pre-release/build metadata for simplicity, as chart versions often don't use them
-	// or they are handled as opaque strings by Helm.
-	matched, _ := regexp.MatchString(`^v?([0-9]+)(\.[0-9]+)*$`, version)
+	// Regex for versions like: v1.2.3, 1.2.3, v1.2, 1.2, v1, 1
+	// Allows optional 'v'.
+	// Requires at least one digit.
+	// Allows up to two dot-separated digit sequences after the first (e.g., .x.y, not .x.y.z).
+	matched, _ := regexp.MatchString(`^v?([0-9]+)(\.[0-9]+){0,2}$`, version)
 	return matched
 }

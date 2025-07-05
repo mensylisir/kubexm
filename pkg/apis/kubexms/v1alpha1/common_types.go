@@ -1,11 +1,10 @@
 package v1alpha1
 
 import (
-	"net"
-	// "regexp" // No longer needed for isValidRuntimeVersion
 	"strconv"
 	"strings"
 	"unicode"
+	// "net" // No longer used directly in this file after moving helpers
 )
 
 // ContainerRuntimeType defines the type of container runtime.
@@ -116,55 +115,44 @@ func isNumericSegment(s string) bool {
 	return true
 }
 
-// isValidRegistryHostPort checks if the string is a valid hostname, IP, or host:port / ip:port combination.
-// It also handles IPv6 addresses correctly, including those with ports.
-func isValidRegistryHostPort(hp string) bool {
-	hp = strings.TrimSpace(hp)
-	if hp == "" {
-		return false
-	}
+// isValidHostPort has been moved to pkg/util/utils.go as ValidateHostPortString
+// func isValidHostPort(hp string) bool {
+// 	return isValidRegistryHostPort(hp)
+// }
 
-	host, port, err := net.SplitHostPort(hp)
-	if err == nil {
-		// Successfully split, means it's host:port or [ipv6]:port
-		// Validate host part (can be domain, IPv4, or unwrapped IPv6 from brackets)
-		// net.SplitHostPort already unwraps IPv6 from brackets.
-		if ! (isValidIP(host) || isValidDomainName(host)) {
-			return false
-		}
-		// Validate port part
-		return isValidPort(port)
-	} else {
-		// net.SplitHostPort failed. This means input string is not in host:port form.
-		// So, the entire string must be a valid IP address or a valid domain name.
-		// It also handles bracketed IPv6 without port, e.g. "[::1]", if isValidIP handles it post-unwrapping.
-		if strings.HasPrefix(hp, "[") && strings.HasSuffix(hp, "]") {
-			unwrappedHost := hp[1 : len(hp)-1]
-			return isValidIP(unwrappedHost)
-		}
-		// For "::1:8080" (unbracketed IPv6 that looks like it has a port)
-		// net.ParseIP might be lenient. We want to ensure this is false if it's not a simple IP/domain.
-		// If it has multiple colons (is IPv6-like) and the part after the last colon is a valid port,
-		// and it's not bracketed, we consider it invalid for this function's purpose.
-		if strings.Count(hp, ":") > 1 && !strings.HasPrefix(hp, "[") {
-			lastColon := strings.LastIndex(hp, ":")
-			// Check if the segment after the last colon looks like a port.
-			// This is a heuristic. If net.ParseIP considers "ipv6part:portpart" as a single valid IP,
-			// then this specific check is to override that for our host/port context.
-			if lastColon > 0 && lastColon < len(hp)-1 { // Ensure colon is not at start/end
-				if isValidPort(hp[lastColon+1:]) {
-					// It looks like an unbracketed IPv6 with a port.
-					// We rely on the fact that net.SplitHostPort would have parsed this if it were
-					// a simple hostname:port or ipv4:port. Since SplitHostPort failed, and it looks like
-					// unbracketed ipv6:port, we deem it invalid.
-					return false
-				}
-			}
-		}
+// isValidRegistryHostPort has been moved to pkg/util/utils.go as ValidateHostPortString
+// func isValidRegistryHostPort(hp string) bool {
+// 	hp = strings.TrimSpace(hp)
+// 	if hp == "" {
+// 		return false
+// 	}
+// 	host, port, err := net.SplitHostPort(hp)
+// 	if err == nil {
+// 		// Successfully split, means it's host:port or [ipv6]:port
+// 		if !(isValidIP(host) || isValidDomainName(host)) { // isValidIP and isValidDomainName are now expected from pkg/util
+// 			return false
+// 		}
+// 		return isValidPort(port)
+// 	} else {
+// 		// net.SplitHostPort failed.
+// 		if strings.HasPrefix(hp, "[") && strings.HasSuffix(hp, "]") {
+// 			unwrappedHost := hp[1 : len(hp)-1]
+// 			return isValidIP(unwrappedHost) // Expected from pkg/util
+// 		}
+// 		// Simplified: if not split, it's either a valid IP or a valid domain.
+// 		// Complex unbracketed IPv6:port cases are tricky and rely on robust isValidIP/isValidDomainName.
+// 		return isValidIP(hp) || isValidDomainName(hp) // Expected from pkg/util
+// 	}
+// }
 
-		return isValidIP(hp) || isValidDomainName(hp)
-	}
-}
+// isValidIP has been moved to pkg/util/utils.go as IsValidIP
+// func isValidIP(ipStr string) bool {
+// 	return net.ParseIP(ipStr) != nil
+// }
+
+// isValidDomainName has been moved to pkg/util/utils.go as IsValidDomainName
+// func isValidDomainName(domain string) bool { ... }
+
 
 // isValidPort checks if a string is a valid port number (1-65535)
 func isValidPort(portStr string) bool {
@@ -205,90 +193,101 @@ func isAlphanumericHyphenSegment(s string) bool {
 	return true
 }
 
+
+// isValidRuntimeVersion validates a runtime version string.
+// It expects formats like "1.2.3", "v1.2.3", "1.2", "v1.2.3-alpha.1", "1.2.3+build.456".
+// It does not strictly enforce SemVer for all parts but aims for common patterns.
 func isValidRuntimeVersion(version string) bool {
-	if len(version) == 0 {
+	if strings.TrimSpace(version) == "" {
 		return false
 	}
 
 	v := strings.TrimPrefix(version, "v")
-	if len(v) == 0 && strings.HasPrefix(version, "v") { // only "v"
+	if v == "" && strings.HasPrefix(version, "v") { // Original was just "v"
 		return false
 	}
-	if len(v) == 0 { // empty string after removing optional "v"
+	if v == "" { // Original was empty or just "v"
 		return false
 	}
-
 
 	mainPart := v
-	var extensionPart string
+	var preReleasePart, buildMetaPart string
 
-	if strings.Contains(v, "-") {
-		parts := strings.SplitN(v, "-", 2)
-		mainPart = parts[0]
-		if len(parts) > 1 {
-			extensionPart = parts[1]
-		}
-	} else if strings.Contains(v, "+") { // some versions might use + for build metadata like semver
+	// Split build metadata first
+	if strings.Contains(v, "+") {
 		parts := strings.SplitN(v, "+", 2)
 		mainPart = parts[0]
 		if len(parts) > 1 {
-			extensionPart = parts[1] // treat build metadata similar to pre-release for this validation
+			buildMetaPart = parts[1]
+		}
+	} else { // If no '+', then the whole string (after 'v') is mainPart or mainPart-preRelease
+		mainPart = v
+	}
+
+	// Split pre-release from mainPart (if no '+' was found or '+' was after '-')
+	if strings.Contains(mainPart, "-") {
+		parts := strings.SplitN(mainPart, "-", 2)
+		mainPart = parts[0] // This is now purely X.Y.Z
+		if len(parts) > 1 {
+			preReleasePart = parts[1]
 		}
 	}
 
-
-	if mainPart == "" && extensionPart == "" { // e.g. if original was just "-"
+	if mainPart == "" { // e.g. version was "v-alpha" or "v+build"
 		return false
 	}
 
-	// Validate main version part (X.Y.Z...)
+	// Validate main version part (X.Y.Z)
 	segments := strings.Split(mainPart, ".")
-	if len(segments) == 0 || (len(segments)==1 && segments[0]=="") { // empty or just "."
+	if len(segments) > 3 || len(segments) == 0 { // Allow X, X.Y, X.Y.Z
 		return false
 	}
+	for _, seg := range segments {
+		if !isNumericSegment(seg) { // Main version segments must be numeric
+			return false
+		}
+	}
 
-	for i, seg := range segments {
-		if seg == "" { return false } // e.g. "1..2" or "1.2."
-
-		// Check for "1.2.3a" type invalidity only on the last segment of the main part
-		if i == len(segments)-1 {
-			hasTrailingLetter := false
-			numPrefix := ""
-			for j, r := range seg {
-				if unicode.IsDigit(r) {
-					if hasTrailingLetter { return false } // Digit after letter in same segment: "1a2"
-					numPrefix += string(r)
-				} else if unicode.IsLetter(r) {
-					if numPrefix == "" && j > 0 { return false } // e.g. ".a" if seg was ".a" (not possible with split)
-					hasTrailingLetter = true
-				} else {
-					return false // Invalid char in numeric segment
-				}
-			}
-			if hasTrailingLetter && numPrefix == "" { return false } // Segment is all letters e.g. "alpha"
-			if hasTrailingLetter { return false } //This makes "1.2.3a" invalid
-			if !isNumericSegment(seg) { return false } // Fallback, should be caught by above
-		} else { // For earlier segments, they must be purely numeric
-			if !isNumericSegment(seg) {
+	// Validate pre-release part (e.g., "alpha.1", "rc-1")
+	if preReleasePart != "" {
+		if buildMetaPart != "" && strings.Contains(preReleasePart, "+") { // Pre-release part should not contain build meta if already split by '+'
+			return false
+		}
+		if strings.HasSuffix(preReleasePart, ".") || strings.HasPrefix(preReleasePart, ".") || strings.Contains(preReleasePart, "..") {
+			return false // Disallow leading/trailing/double dots
+		}
+		extSegments := strings.Split(preReleasePart, ".") // SemVer pre-release identifiers are dot-separated
+		if len(extSegments) == 0 && len(preReleasePart) > 0 {
+			return false
+		}
+		for _, extSeg := range extSegments {
+			if extSeg == "" { return false } // Should be caught by above checks, but good for safety
+			if isNumericSegment(extSeg) {
+				if len(extSeg) > 1 && extSeg[0] == '0' { return false } // No leading zeros for numeric identifiers
+			} else if !isAlphanumericHyphenSegment(extSeg) {
 				return false
 			}
 		}
 	}
 
-	// Validate extension part (e.g. "alpha.1", "build.123", "rc1-custom")
-	if extensionPart != "" {
-		extSegments := strings.FieldsFunc(extensionPart, func(r rune) bool { return r == '.' || r == '-' })
-		if len(extSegments) == 0 && len(extensionPart) > 0 { // e.g. if extensionPart was only "." or "-"
+	// Validate build metadata part (e.g., "build.123", "001", "alpha-build.test")
+	if buildMetaPart != "" {
+		if strings.HasSuffix(buildMetaPart, ".") || strings.HasPrefix(buildMetaPart, ".") || strings.Contains(buildMetaPart, "..") {
+			return false // Disallow leading/trailing/double dots
+		}
+		extSegments := strings.Split(buildMetaPart, ".") // SemVer build identifiers are dot-separated
+		if len(extSegments) == 0 && len(buildMetaPart) > 0 {
 			return false
 		}
 		for _, extSeg := range extSegments {
-			if extSeg == "" { return false} // e.g. "alpha..1" or "rc1--custom"
-			// Extension segments can be numeric or alphanumeric with hyphens
-			// isAlphanumericHyphenSegment already checks for leading/trailing hyphens.
+			if extSeg == "" { return false } // Should be caught by above checks
+			// Build metadata segments can be numeric or alphanumeric with hyphens.
+			// Leading zeros are allowed in numeric build metadata.
 			if !isAlphanumericHyphenSegment(extSeg) && !isNumericSegment(extSeg) {
 				return false
 			}
 		}
 	}
+
 	return true
 }
