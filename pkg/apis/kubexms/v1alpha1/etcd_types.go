@@ -137,9 +137,11 @@ func Validate_EtcdConfig(cfg *EtcdConfig, verrs *ValidationErrors, pathPrefix st
 					verrs.Add("%s.external.endpoints[%d]: endpoint cannot be empty", pathPrefix, i)
 				} else {
 					// Validate endpoint URL format
-					_, err := url.ParseRequestURI(ep)
+				u, err := url.ParseRequestURI(ep)
 					if err != nil {
 						verrs.Add("%s.external.endpoints[%d]: invalid URL format for endpoint '%s': %v", pathPrefix, i, ep, err)
+				} else if u.Scheme != "http" && u.Scheme != "https" {
+					verrs.Add("%s.external.endpoints[%d]: URL scheme for endpoint '%s' must be http or https, got '%s'", pathPrefix, i, ep, u.Scheme)
 					}
 				}
 			}

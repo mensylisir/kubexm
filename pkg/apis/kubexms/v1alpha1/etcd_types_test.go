@@ -179,6 +179,13 @@ func TestValidate_EtcdConfig(t *testing.T) {
 		{"external_no_endpoints", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{}}} }, []string{".external.endpoints: must contain at least one endpoint"}},
 		{"external_empty_endpoint", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{""}}} }, []string{".external.endpoints[0]: endpoint cannot be empty"}},
 		{"external_invalid_endpoint_url", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{"http://invalid domain/"}}} }, []string{".external.endpoints[0]: invalid URL format for endpoint"}},
+		{
+			"external_invalid_endpoint_scheme",
+			func() *EtcdConfig {
+				return &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{"ftp://etcd.example.com:2379"}}}
+			},
+			[]string{".external.endpoints[0]: URL scheme for endpoint 'ftp://etcd.example.com:2379' must be http or https"},
+		},
 		{"external_mismatched_tls_cert", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{"http://valid.com"}, CertFile: "cert"}} }, []string{"certFile and keyFile must be specified together"}},
 		{"external_mismatched_tls_key", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{"http://valid.com"}, KeyFile: "key"}} }, []string{"certFile and keyFile must be specified together"}},
 		{"invalid_client_port_low", func() *EtcdConfig { return &EtcdConfig{Type: EtcdTypeKubeXMSInternal, ClientPort: intPtr(0)} }, []string{".clientPort: invalid port 0"}},

@@ -29,7 +29,7 @@ func TestSetDefaults_ExternalZone(t *testing.T) {
 				Zones:       []string{},
 				Nameservers: []string{},
 				Cache:       300,
-				Rewrite:     []string{},
+				Rewrite:     []RewriteRule{}, // Updated type
 			},
 		},
 		{
@@ -39,17 +39,17 @@ func TestSetDefaults_ExternalZone(t *testing.T) {
 				Zones:       []string{},
 				Nameservers: []string{},
 				Cache:       600, // Should not be overridden
-				Rewrite:     []string{},
+				Rewrite:     []RewriteRule{}, // Updated type
 			},
 		},
 		{
 			name:  "all fields set",
-			input: &ExternalZone{Zones: []string{"example.com"}, Nameservers: []string{"1.1.1.1"}, Cache: 150, Rewrite: []string{"rule1"}},
+			input: &ExternalZone{Zones: []string{"example.com"}, Nameservers: []string{"1.1.1.1"}, Cache: 150, Rewrite: []RewriteRule{{FromPattern: "a", ToTemplate: "b"}}},
 			expected: &ExternalZone{
 				Zones:       []string{"example.com"},
 				Nameservers: []string{"1.1.1.1"},
 				Cache:       150,
-				Rewrite:     []string{"rule1"},
+				Rewrite:     []RewriteRule{{FromPattern: "a", ToTemplate: "b"}}, // Updated type
 			},
 		},
 	}
@@ -105,7 +105,7 @@ func TestSetDefaults_DNS(t *testing.T) {
 				CoreDNS: CoreDNS{
 					UpstreamDNSServers: []string{"8.8.8.8", "1.1.1.1"},
 					ExternalZones: []ExternalZone{
-						{Zones: []string{}, Nameservers: []string{}, Cache: 300, Rewrite: []string{}},
+						{Zones: []string{}, Nameservers: []string{}, Cache: 300, Rewrite: []RewriteRule{}}, // Updated type
 					},
 				},
 				NodeLocalDNS: NodeLocalDNS{
@@ -123,7 +123,7 @@ func TestSetDefaults_DNS(t *testing.T) {
 				},
 				NodeLocalDNS: NodeLocalDNS{
 					ExternalZones: []ExternalZone{
-						{Zones: []string{}, Nameservers: []string{}, Cache: 500, Rewrite: []string{}},
+						{Zones: []string{}, Nameservers: []string{}, Cache: 500, Rewrite: []RewriteRule{}}, // Updated type
 					},
 				},
 			},
@@ -206,10 +206,21 @@ func TestValidate_ExternalZone(t *testing.T) {
 			errContains: []string{".cache: cannot be negative"},
 		},
 		{
-			name:        "empty rewrite rule if rewrite array is present",
-			input:       &ExternalZone{Zones: []string{"example.com"}, Nameservers: []string{"1.2.3.4"}, Rewrite: []string{" "}},
+			name:        "rewrite rule with empty FromPattern",
+			input:       &ExternalZone{Zones: []string{"example.com"}, Nameservers: []string{"1.2.3.4"}, Rewrite: []RewriteRule{{FromPattern: " ", ToTemplate: "b"}}},
 			expectErr:   true,
-			errContains: []string{".rewrite[0]: rewrite rule cannot be empty"},
+			errContains: []string{".rewrite[0].fromPattern: cannot be empty"},
+		},
+		{
+			name:        "rewrite rule with empty ToTemplate",
+			input:       &ExternalZone{Zones: []string{"example.com"}, Nameservers: []string{"1.2.3.4"}, Rewrite: []RewriteRule{{FromPattern: "a", ToTemplate: " "}}},
+			expectErr:   true,
+			errContains: []string{".rewrite[0].toTemplate: cannot be empty"},
+		},
+		{
+			name:        "valid rewrite rule",
+			input:       &ExternalZone{Zones: []string{"example.com"}, Nameservers: []string{"1.2.3.4"}, Rewrite: []RewriteRule{{FromPattern: "a", ToTemplate: "b"}}},
+			expectErr:   false,
 		},
 	}
 	for _, tt := range tests {

@@ -36,8 +36,8 @@ func TestSetDefaults_ControlPlaneEndpointSpec(t *testing.T) {
 		},
 		{
 			name:  "all fields set",
-			input: &ControlPlaneEndpointSpec{Domain: "k8s.example.com", Address: "192.168.1.100", Port: 6443, ExternalDNS: true, ExternalLoadBalancerType: "external", InternalLoadBalancerType: "haproxy"},
-			expected: &ControlPlaneEndpointSpec{Domain: "k8s.example.com", Address: "192.168.1.100", Port: 6443, ExternalDNS: true, ExternalLoadBalancerType: "external", InternalLoadBalancerType: "haproxy"},
+			input: &ControlPlaneEndpointSpec{Domain: "k8s.example.com", Address: "192.168.1.100", Port: 6443, ExternalDNS: true /*, ExternalLoadBalancerType: "external", InternalLoadBalancerType: "haproxy"*/}, // Types removed
+			expected: &ControlPlaneEndpointSpec{Domain: "k8s.example.com", Address: "192.168.1.100", Port: 6443, ExternalDNS: true /*, ExternalLoadBalancerType: "external", InternalLoadBalancerType: "haproxy"*/}, // Types removed
 		},
 	}
 
@@ -112,33 +112,7 @@ func TestValidate_ControlPlaneEndpointSpec(t *testing.T) {
 			expectErr:   true,
 			errContains: []string{".port: invalid port 70000"},
 		},
-		{
-			name:        "valid external LB type",
-			input:       &ControlPlaneEndpointSpec{Domain: validDomain, Port: 6443, ExternalLoadBalancerType: "kubexm"},
-			expectErr:   false,
-		},
-		{
-			name:        "invalid external LB type",
-			input:       &ControlPlaneEndpointSpec{Domain: validDomain, Port: 6443, ExternalLoadBalancerType: "invalid"},
-			expectErr:   true,
-			errContains: []string{".externalLoadBalancerType: invalid type 'invalid'"},
-		},
-		{
-			name:        "valid internal LB type",
-			input:       &ControlPlaneEndpointSpec{Domain: validDomain, Port: 6443, InternalLoadBalancerType: "kube-vip"},
-			expectErr:   false,
-		},
-		{
-			name:        "invalid internal LB type",
-			input:       &ControlPlaneEndpointSpec{Domain: validDomain, Port: 6443, InternalLoadBalancerType: "invalid"},
-			expectErr:   true,
-			errContains: []string{".internalLoadbalancer: invalid type 'invalid'"},
-		},
-		{
-			name:        "empty external LB type (valid)",
-			input:       &ControlPlaneEndpointSpec{Domain: validDomain, Port: 6443, ExternalLoadBalancerType: ""},
-			expectErr:   false,
-		},
+		// Tests for ExternalLoadBalancerType and InternalLoadBalancerType are removed as fields are removed.
 	}
 
 	for _, tt := range tests {

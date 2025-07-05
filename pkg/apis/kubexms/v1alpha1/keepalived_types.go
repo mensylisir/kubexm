@@ -2,6 +2,18 @@ package v1alpha1
 
 import "strings"
 
+const (
+	// KeepalivedAuthTypePass represents the PASS authentication type for Keepalived.
+	KeepalivedAuthTypePass = "PASS"
+	// KeepalivedAuthTypeAH represents the AH (Authentication Header) type for Keepalived.
+	KeepalivedAuthTypeAH = "AH"
+)
+
+var (
+	// validKeepalivedAuthTypes lists the supported authentication types for Keepalived.
+	validKeepalivedAuthTypes = []string{KeepalivedAuthTypePass, KeepalivedAuthTypeAH}
+)
+
 // KeepalivedConfig defines settings for Keepalived service used for HA.
 type KeepalivedConfig struct {
 	// VRID is the Virtual Router ID, must be unique in the network segment.
@@ -85,12 +97,11 @@ func Validate_KeepalivedConfig(cfg *KeepalivedConfig, verrs *ValidationErrors, p
 	}
 
 	// AuthType is defaulted to "PASS", so cfg.AuthType will not be nil if defaults were applied.
-	validAuthTypes := []string{"PASS", "AH"}
-	if !containsString(validAuthTypes, *cfg.AuthType) {
-		verrs.Add("%s.authType: invalid value '%s', must be one of %v", pathPrefix, *cfg.AuthType, validAuthTypes)
+	if !containsString(validKeepalivedAuthTypes, *cfg.AuthType) { // Use constant
+		verrs.Add("%s.authType: invalid value '%s', must be one of %v", pathPrefix, *cfg.AuthType, validKeepalivedAuthTypes)
 	}
 
-	if *cfg.AuthType == "PASS" {
+	if *cfg.AuthType == KeepalivedAuthTypePass { // Use constant
 		if cfg.AuthPass == nil || strings.TrimSpace(*cfg.AuthPass) == "" {
 			verrs.Add("%s.authPass: must be specified if authType is 'PASS'", pathPrefix)
 		} else if len(*cfg.AuthPass) > 8 {
