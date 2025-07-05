@@ -1,6 +1,9 @@
 package v1alpha1
 
-import "strings"
+import (
+	"strings"
+	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
+)
 
 // StorageConfig defines the storage configurations for the cluster.
 // For now, it primarily includes OpenEBS settings based on KubeKey examples.
@@ -170,7 +173,7 @@ func Validate_OpenEBSConfig(cfg *OpenEBSConfig, verrs *ValidationErrors, pathPre
 		if cfg.Version != nil {
 			if strings.TrimSpace(*cfg.Version) == "" {
 				verrs.Add("%s.version: cannot be only whitespace if specified", pathPrefix)
-			} else if !isValidRuntimeVersion(*cfg.Version) { // Assuming OpenEBS versions can be validated similarly to runtime versions
+			} else if !util.IsValidRuntimeVersion(*cfg.Version) { // Use util.IsValidRuntimeVersion
 				verrs.Add("%s.version: '%s' is not a recognized version format", pathPrefix, *cfg.Version)
 			}
 		}

@@ -307,3 +307,28 @@ func Uint32Ptr(u uint32) *uint32 {
 func Uint64Ptr(u uint64) *uint64 {
 	return &u
 }
+
+// Int32Ptr returns a pointer to the int32 value i.
+func Int32Ptr(i int32) *int32 {
+	return &i
+}
+
+// NetworksOverlap checks if two IP networks overlap.
+// TODO: Consider enhancing this for more precise overlap detection,
+// e.g., by comparing start and end IPs of each range.
+// The current method (n1.Contains(n2.IP) || n2.Contains(n1.IP))
+// correctly identifies if one network's starting IP is within the other,
+// which covers most common overlap scenarios between a network and a subnetwork,
+// or identical networks. It might not catch all complex partial overlaps
+// between arbitrary, distinct CIDRs that don't fully contain each other's starting IPs
+// but still share some address space. However, for typical pod/service CIDR validation,
+// this level of check is often sufficient.
+func NetworksOverlap(n1, n2 *net.IPNet) bool {
+	if n1 == nil || n2 == nil {
+		return false // Cannot overlap if one is nil
+	}
+	// Check if one network contains the other's network address.
+	// Also check if the network masks are valid because IPNet an represent a single IP address (/32 for IPv4 or /128 for IPv6)
+	// or a network. The IP field is the network address.
+	return (n1.Contains(n2.IP) && n2.Mask != nil) || (n2.Contains(n1.IP) && n1.Mask != nil)
+}

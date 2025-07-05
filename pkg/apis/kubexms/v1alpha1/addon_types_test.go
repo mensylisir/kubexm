@@ -203,6 +203,40 @@ func TestSetDefaults_AddonConfig(t *testing.T) {
 	}
 }
 
+func TestIsValidChartVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		want    bool
+	}{
+		{"valid full semver", "1.2.3", true},
+		{"valid full semver with v", "v1.2.3", true},
+		{"valid minor version", "1.2", true},
+		{"valid minor version with v", "v1.2", true},
+		{"valid major version", "1", true},
+		{"valid major version with v", "v1", true},
+		{"valid latest", "latest", true},
+		{"valid stable", "stable", true},
+		{"invalid too many parts", "1.2.3.4", false},
+		{"invalid chars", "1.2-alpha", false},
+		{"invalid leading dot", ".1.2.3", false},
+		{"invalid trailing dot", "1.2.3.", false},
+		{"empty string", "", false},
+		{"only v", "v", false},
+		{"v with letters", "v1a", false},
+		{"letters", "abc", false},
+		{"version with space", "1.2.3 ", false},
+		{"version with leading space", " 1.2.3", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isValidChartVersion(tt.version); got != tt.want {
+				t.Errorf("isValidChartVersion() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidate_AddonConfig(t *testing.T) {
 	validBaseChartSource := AddonSources{Chart: &ChartSource{Name: "metrics-server", Repo: "https://charts.bitnami.com/bitnami"}}
 	validBaseYamlSource := AddonSources{Yaml: &YamlSource{Path: []string{"manifest.yaml"}}}

@@ -86,7 +86,7 @@ func Validate_ContainerdConfig(cfg *ContainerdConfig, verrs *ValidationErrors, p
 	if cfg.Version != "" {
 		if strings.TrimSpace(cfg.Version) == "" {
 			verrs.Add("%s.version: cannot be only whitespace if specified", pathPrefix)
-		} else if !isValidRuntimeVersion(cfg.Version) { // Use the common validator
+		} else if !util.IsValidRuntimeVersion(cfg.Version) { // Use util.IsValidRuntimeVersion
 			verrs.Add("%s.version: '%s' is not a recognized version format", pathPrefix, cfg.Version)
 		}
 	}

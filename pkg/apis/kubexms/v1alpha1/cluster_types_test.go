@@ -6,6 +6,7 @@ import (
 	"time"
 	// "reflect" // For DeepEqual if needed for complex structs, not used in these initial tests
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"github.com/stretchr/testify/assert" // Added import for testify/assert
 )
 
 // --- Test SetDefaults_Cluster ---
@@ -32,6 +33,195 @@ func TestSetDefaults_Cluster_TypeMetaAndGlobal(t *testing.T) {
 	}
 	if cfg.Spec.Global.WorkDir != "/tmp/kubexms_work" { // As per current SetDefaults_Cluster
 		t.Errorf("Global.WorkDir default = %s, want /tmp/kubexms_work", cfg.Spec.Global.WorkDir)
+	}
+}
+
+func TestSetDefaults_SystemSpec(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    *SystemSpec
+		expected *SystemSpec
+	}{
+		{
+			name:     "nil input",
+			input:    nil,
+			expected: nil,
+		},
+		{
+			name:  "empty struct",
+			input: &SystemSpec{},
+			expected: &SystemSpec{
+				NTPServers:         []string{},
+				RPMs:               []string{},
+				Debs:               []string{},
+				PreInstallScripts:  []string{},
+				PostInstallScripts: []string{},
+				Modules:            []string{},
+				SysctlParams:       make(map[string]string),
+				// Timezone and PackageManager have no specific defaults other than their zero values
+				// SkipConfigureOS defaults to false (zero value)
+			},
+		},
+		{
+			name: "partial fields set",
+			input: &SystemSpec{
+				NTPServers: []string{"ntp.example.com"},
+				Timezone:   "Asia/Shanghai",
+				SysctlParams: map[string]string{
+					"net.ipv4.ip_forward": "1",
+				},
+			},
+			expected: &SystemSpec{
+				NTPServers:         []string{"ntp.example.com"},
+				Timezone:           "Asia/Shanghai",
+				RPMs:               []string{},
+				Debs:               []string{},
+				PreInstallScripts:  []string{},
+				PostInstallScripts: []string{},
+				Modules:            []string{},
+				SysctlParams: map[string]string{
+					"net.ipv4.ip_forward": "1",
+				},
+			},
+		},
+		{
+			name: "all slice/map fields initially nil",
+			input: &SystemSpec{
+				NTPServers:         nil,
+				RPMs:               nil,
+				Debs:               nil,
+				PreInstallScripts:  nil,
+				PostInstallScripts: nil,
+				Modules:            nil,
+				SysctlParams:       nil,
+			},
+			expected: &SystemSpec{
+				NTPServers:         []string{},
+				RPMs:               []string{},
+				Debs:               []string{},
+				PreInstallScripts:  []string{},
+				PostInstallScripts: []string{},
+				Modules:            []string{},
+				SysctlParams:       make(map[string]string),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			SetDefaults_SystemSpec(tt.input)
+			assert.Equal(t, tt.expected, tt.input)
+		})
+	}
+}
+
+func TestValidate_SystemSpec(t *testing.T) {
+	validSysctl := map[string]string{"net.ipv4.ip_forward": "1"}
+	tests := []struct {
+		name        string
+		input       *SystemSpec
+		expectErr   bool
+		errContains []string
+	}{
+		{
+			name:      "valid empty spec (after defaults)",
+			input:     &SystemSpec{}, // Defaults will make it valid
+			expectErr: false,
+		},
+		{
+			name: "valid full spec",
+			input: &SystemSpec{
+				NTPServers:         []string{"0.pool.ntp.org"},
+				Timezone:           "UTC",
+				RPMs:               []string{"my-rpm"},
+				Debs:               []string{"my-deb"},
+				PackageManager:     "yum",
+				PreInstallScripts:  []string{"echo pre"},
+				PostInstallScripts: []string{"echo post"},
+				SkipConfigureOS:    true,
+				Modules:            []string{"br_netfilter"},
+				SysctlParams:       validSysctl,
+			},
+			expectErr: false,
+		},
+		{
+			name:        "NTP server empty string",
+			input:       &SystemSpec{NTPServers: []string{""}},
+			expectErr:   true,
+			errContains: []string{"system.ntpServers[0]: NTP server address cannot be empty"},
+		},
+		{
+			name:        "Timezone is only whitespace",
+			input:       &SystemSpec{Timezone: "   "},
+			expectErr:   true,
+			errContains: []string{"system.timezone: cannot be only whitespace if specified"},
+		},
+		{
+			name:        "RPM empty string",
+			input:       &SystemSpec{RPMs: []string{"pkg1", " "}},
+			expectErr:   true,
+			errContains: []string{"system.rpms[1]: RPM package name cannot be empty"},
+		},
+		{
+			name:        "DEB empty string",
+			input:       &SystemSpec{Debs: []string{" "}},
+			expectErr:   true,
+			errContains: []string{"system.debs[0]: DEB package name cannot be empty"},
+		},
+		{
+			name:        "PackageManager is only whitespace",
+			input:       &SystemSpec{PackageManager: "  "},
+			expectErr:   true,
+			errContains: []string{"system.packageManager: cannot be only whitespace if specified"},
+		},
+		{
+			name:        "PreInstallScript empty string",
+			input:       &SystemSpec{PreInstallScripts: []string{" "}},
+			expectErr:   true,
+			errContains: []string{"system.preInstallScripts[0]: script cannot be empty"},
+		},
+		{
+			name:        "PostInstallScript empty string",
+			input:       &SystemSpec{PostInstallScripts: []string{"echo ok", " "}},
+			expectErr:   true,
+			errContains: []string{"system.postInstallScripts[1]: script cannot be empty"},
+		},
+		{
+			name:        "Module empty string",
+			input:       &SystemSpec{Modules: []string{" "}},
+			expectErr:   true,
+			errContains: []string{"system.modules[0]: module name cannot be empty"},
+		},
+		{
+			name:        "Sysctl key empty string",
+			input:       &SystemSpec{SysctlParams: map[string]string{" ": "1"}},
+			expectErr:   true,
+			errContains: []string{"system.sysctlParams: sysctl key cannot be empty"},
+		},
+		// Note: Sysctl value empty string is currently allowed by Validate_SystemSpec.
+		// If it should be an error, a test case would be added here.
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Apply defaults first, as validation happens after defaults
+			if tt.input != nil { // Do not default nil input
+				SetDefaults_SystemSpec(tt.input)
+			}
+			verrs := &ValidationErrors{}
+			Validate_SystemSpec(tt.input, verrs, "spec.system")
+			if tt.expectErr {
+				assert.False(t, verrs.IsEmpty(), "Expected validation errors for %s, but got none", tt.name)
+				if len(tt.errContains) > 0 {
+					fullErrorMsg := verrs.Error()
+					for _, partialMsg := range tt.errContains {
+						assert.Contains(t, fullErrorMsg, partialMsg, "Error for %s did not contain expected substring '%s'", tt.name, partialMsg)
+					}
+				}
+			} else {
+				assert.True(t, verrs.IsEmpty(), "Expected no validation errors for %s, but got: %v", tt.name, verrs.Error())
+			}
+		})
 	}
 }
 
