@@ -40,7 +40,7 @@ func SetDefaults_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig) {
 		return
 	}
 	if cfg.Type == "" {
-		cfg.Type = ContainerRuntimeDocker // Default to Docker
+		cfg.Type = ContainerRuntimeContainerd // Default to Containerd
 	}
 
 	if cfg.Type == ContainerRuntimeDocker {

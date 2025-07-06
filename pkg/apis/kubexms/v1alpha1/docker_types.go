@@ -89,7 +89,12 @@ func SetDefaults_DockerConfig(cfg *DockerConfig) {
 	if cfg.RegistryMirrors == nil { cfg.RegistryMirrors = []string{} }
 	if cfg.InsecureRegistries == nil { cfg.InsecureRegistries = []string{} }
 	if cfg.ExecOpts == nil { cfg.ExecOpts = []string{} }
-	if cfg.LogOpts == nil { cfg.LogOpts = make(map[string]string) }
+	if cfg.LogOpts == nil {
+		cfg.LogOpts = map[string]string{
+			"max-size": "100m",
+			"max-file": "3",
+		}
+	}
 	if cfg.DefaultAddressPools == nil { cfg.DefaultAddressPools = []DockerAddressPool{} }
 	if cfg.StorageOpts == nil { cfg.StorageOpts = []string{} }
 	if cfg.Runtimes == nil { cfg.Runtimes = make(map[string]DockerRuntime) }

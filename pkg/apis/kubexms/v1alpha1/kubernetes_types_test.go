@@ -54,22 +54,29 @@ func TestSetDefaults_KubernetesConfig(t *testing.T) {
 
 	if assert.NotNil(t, cfg.APIServer) {
 		assert.NotNil(t, cfg.APIServer.ExtraArgs, "APIServer.ExtraArgs should be initialized")
-		assert.NotNil(t, cfg.APIServer.AdmissionPlugins, "APIServer.AdmissionPlugins should be initialized")
+		assert.Contains(t, cfg.APIServer.ExtraArgs, "--profiling=false")
+		assert.Contains(t, cfg.APIServer.ExtraArgs, "--anonymous-auth=false")
 		assert.Equal(t, "30000-32767", cfg.APIServer.ServiceNodePortRange, "APIServer.ServiceNodePortRange default mismatch")
 	}
 
 	assert.NotNil(t, cfg.ControllerManager, "ControllerManager should be initialized")
 	if cfg.ControllerManager != nil {
 		assert.NotNil(t, cfg.ControllerManager.ExtraArgs, "ControllerManager.ExtraArgs should be initialized")
+		assert.Contains(t, cfg.ControllerManager.ExtraArgs, "--profiling=false")
+		assert.Contains(t, cfg.ControllerManager.ExtraArgs, "--bind-address=127.0.0.1")
 	}
 
 	assert.NotNil(t, cfg.Scheduler, "Scheduler should be initialized")
 	if cfg.Scheduler != nil {
 		assert.NotNil(t, cfg.Scheduler.ExtraArgs, "Scheduler.ExtraArgs should be initialized")
+		assert.Contains(t, cfg.Scheduler.ExtraArgs, "--profiling=false")
+		assert.Contains(t, cfg.Scheduler.ExtraArgs, "--bind-address=127.0.0.1")
 	}
 
 	if assert.NotNil(t, cfg.Kubelet) {
 		assert.NotNil(t, cfg.Kubelet.ExtraArgs, "Kubelet.ExtraArgs should be initialized")
+		assert.Contains(t, cfg.Kubelet.ExtraArgs, "--anonymous-auth=false")
+		assert.Contains(t, cfg.Kubelet.ExtraArgs, "--read-only-port=0")
 		assert.NotNil(t, cfg.Kubelet.EvictionHard, "Kubelet.EvictionHard map should be initialized")
 		expectedEvictionHard := map[string]string{
 			"memory.available":  "100Mi",

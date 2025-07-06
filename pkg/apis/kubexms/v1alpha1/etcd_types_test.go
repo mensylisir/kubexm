@@ -31,7 +31,7 @@ func TestSetDefaults_EtcdConfig(t *testing.T) {
 				DataDir:                      stringPtr("/var/lib/etcd"),
 				ClusterToken:                 "kubexm-etcd-default-token",
 				External:                     nil,
-				ExtraArgs:                    []string{},
+				ExtraArgs:                    []string{"--logger=zap", "--log-outputs=stderr", "--auto-compaction-mode=periodic", "--client-cert-auth=true", "--peer-client-cert-auth=true", "--peer-auto-tls=false", "--auto-tls=false"}, // Expected default ExtraArgs for internal etcd
 				BackupDir:                    stringPtr("/var/backups/etcd"),
 				BackupPeriodHours:            intPtr(24),
 				KeepBackupNumber:             intPtr(7),
@@ -48,16 +48,16 @@ func TestSetDefaults_EtcdConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "type external, external config initialized",
-			input: &EtcdConfig{Type: EtcdTypeExternal},
+			name: "type external, no TLS in external",
+			input: &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{"http://localhost:2379"}}},
 			expected: &EtcdConfig{
 				Type:                         EtcdTypeExternal,
 				ClientPort:                   intPtr(2379),
 				PeerPort:                     intPtr(2380),
 				DataDir:                      stringPtr("/var/lib/etcd"),
 				ClusterToken:                 "kubexm-etcd-default-token",
-				External:                     &ExternalEtcdConfig{Endpoints: []string{}},
-				ExtraArgs:                    []string{},
+				External:                     &ExternalEtcdConfig{Endpoints: []string{"http://localhost:2379"}},
+				ExtraArgs:                    []string{"--logger=zap", "--log-outputs=stderr", "--auto-compaction-mode=periodic"}, // No TLS args
 				BackupDir:                    stringPtr("/var/backups/etcd"),
 				BackupPeriodHours:            intPtr(24),
 				KeepBackupNumber:             intPtr(7),
@@ -74,20 +74,50 @@ func TestSetDefaults_EtcdConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "some fields pre-set",
+			name: "type external with TLS",
+			input: &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{
+				Endpoints: []string{"https://etcd.local:2379"},
+				CAFile:    "ca.crt", CertFile: "cert.crt", KeyFile: "key.pem",
+			}},
+			expected: &EtcdConfig{
+				Type:                         EtcdTypeExternal,
+				ClientPort:                   intPtr(2379),
+				PeerPort:                     intPtr(2380),
+				DataDir:                      stringPtr("/var/lib/etcd"),
+				ClusterToken:                 "kubexm-etcd-default-token",
+				External:                     &ExternalEtcdConfig{Endpoints: []string{"https://etcd.local:2379"}, CAFile: "ca.crt", CertFile: "cert.crt", KeyFile: "key.pem"},
+				ExtraArgs:                    []string{"--logger=zap", "--log-outputs=stderr", "--auto-compaction-mode=periodic", "--client-cert-auth=true"}, // External TLS only sets client-cert-auth
+				BackupDir:                    stringPtr("/var/backups/etcd"),
+				BackupPeriodHours:            intPtr(24),
+				KeepBackupNumber:             intPtr(7),
+				HeartbeatIntervalMillis:      intPtr(250),
+				ElectionTimeoutMillis:        intPtr(5000),
+				SnapshotCount:                uint64Ptr(10000),
+				AutoCompactionRetentionHours: intPtr(8),
+				QuotaBackendBytes:            int64Ptr(2147483648),
+				MaxRequestBytes:              uintPtr(1572864),
+				Metrics:                      stringPtr("basic"),
+				LogLevel:                     stringPtr("info"),
+				MaxSnapshotsToKeep:           uintPtr(5),
+				MaxWALsToKeep:                uintPtr(5),
+			},
+		},
+		{
+			name: "some fields pre-set with custom ExtraArgs",
 			input: &EtcdConfig{
 				ClientPort: intPtr(3379),
 				DataDir:    stringPtr("/mnt/myetcd"),
 				LogLevel:   stringPtr("debug"),
+				ExtraArgs:  []string{"--logger=json", "--initial-cluster-token=my-custom-token"},
 			},
 			expected: &EtcdConfig{
 				Type:                         EtcdTypeKubeXMSInternal,
 				ClientPort:                   intPtr(3379),
 				PeerPort:                     intPtr(2380),
 				DataDir:                      stringPtr("/mnt/myetcd"),
-				ClusterToken:                 "kubexm-etcd-default-token",
+				ClusterToken:                 "kubexm-etcd-default-token", // Default token is still applied if not in ExtraArgs
 				External:                     nil,
-				ExtraArgs:                    []string{},
+				ExtraArgs:                    []string{"--logger=json", "--initial-cluster-token=my-custom-token", "--log-outputs=stderr", "--auto-compaction-mode=periodic", "--client-cert-auth=true", "--peer-client-cert-auth=true", "--peer-auto-tls=false", "--auto-tls=false"}, // User's logger overrides default, others are appended
 				BackupDir:                    stringPtr("/var/backups/etcd"),
 				BackupPeriodHours:            intPtr(24),
 				KeepBackupNumber:             intPtr(7),
@@ -108,8 +138,36 @@ func TestSetDefaults_EtcdConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			SetDefaults_EtcdConfig(tt.input)
-			if !reflect.DeepEqual(tt.input, tt.expected) {
-				assert.Equal(t, tt.expected, tt.input)
+			// Custom comparison for ExtraArgs due to order indeterminacy
+			if tt.input != nil && tt.expected != nil {
+				// Compare ExtraArgs separately
+				actualArgs := tt.input.ExtraArgs
+				expectedArgsMap := make(map[string]bool)
+				for _, arg := range tt.expected.ExtraArgs {
+					expectedArgsMap[arg] = true
+				}
+
+				for _, arg := range actualArgs {
+					assert.True(t, expectedArgsMap[arg], "Unexpected arg %s in actual ExtraArgs for test %s. Expected: %v, Got: %v", arg, tt.name, tt.expected.ExtraArgs, actualArgs)
+					delete(expectedArgsMap, arg) // Mark as found
+				}
+				assert.Empty(t, expectedArgsMap, "Not all expected args found in actual ExtraArgs for test %s. Missing: %v. Expected: %v, Got: %v", tt.name, expectedArgsMap, tt.expected.ExtraArgs, actualArgs)
+
+				// Nil out ExtraArgs for DeepEqual comparison of the rest of the struct
+				tempInputExtraArgs := tt.input.ExtraArgs
+				tempExpectedExtraArgs := tt.expected.ExtraArgs
+				tt.input.ExtraArgs = nil
+				tt.expected.ExtraArgs = nil
+
+				if !reflect.DeepEqual(tt.input, tt.expected) {
+					assert.Equal(t, tt.expected, tt.input, "Struct mismatch (excluding ExtraArgs) for test %s", tt.name)
+				}
+				// Restore ExtraArgs
+				tt.input.ExtraArgs = tempInputExtraArgs
+				tt.expected.ExtraArgs = tempExpectedExtraArgs
+
+			} else { // Handle nil cases for input/expected directly
+				assert.Equal(t, tt.expected, tt.input, "Nil comparison failed for test %s", tt.name)
 			}
 		})
 	}

@@ -152,18 +152,54 @@ func SetDefaults_KubernetesConfig(cfg *KubernetesConfig, clusterMetaName string)
 		for k, v := range defaultFGs { cfg.FeatureGates[k] = v }
 	}
 	if cfg.APIServer == nil { cfg.APIServer = &APIServerConfig{} }
+	// Ensure ExtraArgs is initialized before merging
 	if cfg.APIServer.ExtraArgs == nil { cfg.APIServer.ExtraArgs = []string{} }
-	if cfg.APIServer.AdmissionPlugins == nil { cfg.APIServer.AdmissionPlugins = []string{} } // Keeping this empty as per plan, unless user confirms a default list.
+	defaultAPIServerArgs := map[string]string{
+		"--profiling":                     "--profiling=false",
+		"--anonymous-auth":                "--anonymous-auth=false",
+		"--service-account-lookup":        "--service-account-lookup=true",
+		"--audit-log-path":                "--audit-log-path=/var/log/kubernetes/apiserver-audit.log",
+		"--audit-log-maxage":              "--audit-log-maxage=30",
+		"--audit-log-maxbackup":           "--audit-log-maxbackup=10",
+		"--audit-log-maxsize":             "--audit-log-maxsize=100",
+		"--authorization-mode":            "--authorization-mode=Node,RBAC", // Will be merged smartly by EnsureExtraArgs if Node or RBAC already present
+		"--tls-cipher-suites":             "--tls-cipher-suites=TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+		"--request-timeout":               "--request-timeout=3m0s",
+		// --kubelet-client-certificate, --kubelet-client-key, --service-account-signing-key-file, --service-account-issuer, --encryption-provider-config
+		// are highly dependent on runtime generation and paths, so not defaulted here.
+	}
+	cfg.APIServer.ExtraArgs = util.EnsureExtraArgs(cfg.APIServer.ExtraArgs, defaultAPIServerArgs)
+
+	if cfg.APIServer.AdmissionPlugins == nil { cfg.APIServer.AdmissionPlugins = []string{} }
 	if cfg.APIServer.ServiceNodePortRange == "" { cfg.APIServer.ServiceNodePortRange = "30000-32767" }
+
 	if cfg.ControllerManager == nil { cfg.ControllerManager = &ControllerManagerConfig{} }
 	if cfg.ControllerManager.ExtraArgs == nil { cfg.ControllerManager.ExtraArgs = []string{} }
+	defaultControllerManagerArgs := map[string]string{
+		"--profiling":                       "--profiling=false",
+		"--terminated-pod-gc-threshold":   "--terminated-pod-gc-threshold=12500",
+		"--leader-elect":                  "--leader-elect=true",
+		"--use-service-account-credentials": "--use-service-account-credentials=true",
+		"--bind-address":                  "--bind-address=127.0.0.1",
+		// --service-account-private-key-file and --root-ca-file are runtime-dependent
+	}
+	cfg.ControllerManager.ExtraArgs = util.EnsureExtraArgs(cfg.ControllerManager.ExtraArgs, defaultControllerManagerArgs)
+
 	if cfg.Scheduler == nil { cfg.Scheduler = &SchedulerConfig{} }
 	if cfg.Scheduler.ExtraArgs == nil { cfg.Scheduler.ExtraArgs = []string{} }
+	defaultSchedulerArgs := map[string]string{
+		"--profiling":    "--profiling=false",
+		"--leader-elect": "--leader-elect=true",
+		"--bind-address": "--bind-address=127.0.0.1",
+	}
+	cfg.Scheduler.ExtraArgs = util.EnsureExtraArgs(cfg.Scheduler.ExtraArgs, defaultSchedulerArgs)
+
 	if cfg.Kubelet == nil { cfg.Kubelet = &KubeletConfig{} }
-	SetDefaults_KubeletConfig(cfg.Kubelet, cfg.ContainerManager)
+	SetDefaults_KubeletConfig(cfg.Kubelet, cfg.ContainerManager) // This will handle Kubelet.ExtraArgs
+
 	if cfg.KubeProxy == nil { cfg.KubeProxy = &KubeProxyConfig{} }
 	if cfg.KubeProxy.ExtraArgs == nil { cfg.KubeProxy.ExtraArgs = []string{} }
-	if cfg.ProxyMode == common.KubeProxyModeIPTables { // Use common constant
+	if cfg.ProxyMode == common.KubeProxyModeIPTables {
 		if cfg.KubeProxy.IPTables == nil { cfg.KubeProxy.IPTables = &KubeProxyIPTablesConfig{} }
 		SetDefaults_KubeProxyIPTablesConfig(cfg.KubeProxy.IPTables)
 	}
@@ -192,6 +228,20 @@ func SetDefaults_KubeProxyIPVSConfig(cfg *KubeProxyIPVSConfig) {
 func SetDefaults_KubeletConfig(cfg *KubeletConfig, containerManager string) {
 	if cfg == nil { return }
 	if cfg.ExtraArgs == nil { cfg.ExtraArgs = []string{} }
+	defaultKubeletArgs := map[string]string{
+		"--anonymous-auth":                  "--anonymous-auth=false",
+		"--authorization-mode":              "--authorization-mode=Webhook",
+		"--read-only-port":                  "--read-only-port=0",
+		"--streaming-connection-idle-timeout": "--streaming-connection-idle-timeout=4h0m0s",
+		"--protect-kernel-defaults":         "--protect-kernel-defaults=true",
+		"--event-qps":                       "--event-qps=0",
+		"--authentication-token-webhook":    "--authentication-token-webhook=true",
+		"--feature-gates":                   "--feature-gates=RotateKubeletServerCertificate=true", // Note: this will merge if user also has feature-gates
+		"--rotate-certificates":             "--rotate-certificates",
+		// --client-ca-file, --kubeconfig are runtime-dependent
+	}
+	cfg.ExtraArgs = util.EnsureExtraArgs(cfg.ExtraArgs, defaultKubeletArgs)
+
 	if cfg.EvictionHard == nil {
 		cfg.EvictionHard = map[string]string{
 			"memory.available":  "100Mi",
