@@ -17,98 +17,109 @@ func TestSetDefaults_KubernetesConfig(t *testing.T) {
 	cfg := &KubernetesConfig{}
 	SetDefaults_KubernetesConfig(cfg, "test-cluster-name")
 
-	if cfg.ClusterName != "test-cluster-name" {
-		t.Errorf("Default ClusterName = %s, want test-cluster-name", cfg.ClusterName)
+	assert.Equal(t, "test-cluster-name", cfg.ClusterName, "Default ClusterName mismatch")
+	assert.Equal(t, "cluster.local", cfg.DNSDomain, "Default DNSDomain mismatch")
+	assert.Equal(t, "ipvs", cfg.ProxyMode, "Default ProxyMode mismatch")
+	if assert.NotNil(t, cfg.AutoRenewCerts) {
+		assert.True(t, *cfg.AutoRenewCerts, "Default AutoRenewCerts mismatch")
 	}
-	if cfg.DNSDomain != "cluster.local" {
-		t.Errorf("Default DNSDomain = %s, want cluster.local", cfg.DNSDomain)
+	if assert.NotNil(t, cfg.DisableKubeProxy) {
+		assert.False(t, *cfg.DisableKubeProxy, "Default DisableKubeProxy mismatch")
 	}
-	if cfg.ProxyMode != "ipvs" {
-		t.Errorf("Default ProxyMode = %s, want ipvs", cfg.ProxyMode)
+	if assert.NotNil(t, cfg.MasqueradeAll) {
+		assert.False(t, *cfg.MasqueradeAll, "Default MasqueradeAll mismatch")
 	}
-	if cfg.AutoRenewCerts == nil || *cfg.AutoRenewCerts != true {
-		t.Errorf("Default AutoRenewCerts = %v, want true", cfg.AutoRenewCerts)
+	assert.Equal(t, "systemd", cfg.ContainerManager, "Default ContainerManager mismatch")
+	if assert.NotNil(t, cfg.MaxPods) {
+		assert.Equal(t, int32(110), *cfg.MaxPods, "Default MaxPods mismatch")
 	}
-	if cfg.DisableKubeProxy == nil || *cfg.DisableKubeProxy != false {
-		t.Errorf("Default DisableKubeProxy = %v, want false", cfg.DisableKubeProxy)
-	}
-	if cfg.MasqueradeAll == nil || *cfg.MasqueradeAll != false {
-		t.Errorf("Default MasqueradeAll = %v, want false", cfg.MasqueradeAll)
-	}
-	if cfg.ContainerManager != "systemd" {
-		t.Errorf("Default ContainerManager = %s, want systemd", cfg.ContainerManager)
-	}
-	if cfg.MaxPods == nil || *cfg.MaxPods != 110 {
-		t.Errorf("Default MaxPods = %v, want 110", cfg.MaxPods)
-	}
-	if cfg.NodeCidrMaskSize == nil || *cfg.NodeCidrMaskSize != 24 {
-		t.Errorf("Default NodeCidrMaskSize = %v, want 24", cfg.NodeCidrMaskSize)
+	if assert.NotNil(t, cfg.NodeCidrMaskSize) {
+		assert.Equal(t, int32(24), *cfg.NodeCidrMaskSize, "Default NodeCidrMaskSize mismatch")
 	}
 
-	if cfg.Nodelocaldns == nil || cfg.Nodelocaldns.Enabled == nil || *cfg.Nodelocaldns.Enabled != true {
-		t.Errorf("Nodelocaldns default = %v, want enabled=true", cfg.Nodelocaldns)
+	if assert.NotNil(t, cfg.Nodelocaldns) && assert.NotNil(t, cfg.Nodelocaldns.Enabled) {
+		assert.True(t, *cfg.Nodelocaldns.Enabled, "Nodelocaldns default mismatch")
 	}
-	if cfg.Audit == nil || cfg.Audit.Enabled == nil || *cfg.Audit.Enabled != false {
-		t.Errorf("Audit default = %v, want enabled=false", cfg.Audit)
+	if assert.NotNil(t, cfg.Audit) && assert.NotNil(t, cfg.Audit.Enabled) {
+		assert.False(t, *cfg.Audit.Enabled, "Audit default mismatch")
 	}
-	if cfg.Kata == nil || cfg.Kata.Enabled == nil || *cfg.Kata.Enabled != false {
-		t.Errorf("Kata default = %v, want enabled=false", cfg.Kata)
+	if assert.NotNil(t, cfg.Kata) && assert.NotNil(t, cfg.Kata.Enabled) {
+		assert.False(t, *cfg.Kata.Enabled, "Kata default mismatch")
 	}
-	if cfg.NodeFeatureDiscovery == nil || cfg.NodeFeatureDiscovery.Enabled == nil || *cfg.NodeFeatureDiscovery.Enabled != false {
-		t.Errorf("NodeFeatureDiscovery default = %v, want enabled=false", cfg.NodeFeatureDiscovery)
+	if assert.NotNil(t, cfg.NodeFeatureDiscovery) && assert.NotNil(t, cfg.NodeFeatureDiscovery.Enabled) {
+		assert.False(t, *cfg.NodeFeatureDiscovery.Enabled, "NodeFeatureDiscovery default mismatch")
 	}
 
-	if cfg.FeatureGates == nil { t.Error("FeatureGates map should be initialized") }
+	assert.NotNil(t, cfg.FeatureGates, "FeatureGates map should be initialized")
 
-	if cfg.APIServer == nil || cfg.APIServer.ExtraArgs == nil {
-		t.Error("APIServer.ExtraArgs should be initialized (non-nil empty slice)")
+	if assert.NotNil(t, cfg.APIServer) {
+		assert.NotNil(t, cfg.APIServer.ExtraArgs, "APIServer.ExtraArgs should be initialized")
+		assert.NotNil(t, cfg.APIServer.AdmissionPlugins, "APIServer.AdmissionPlugins should be initialized")
+		assert.Equal(t, "30000-32767", cfg.APIServer.ServiceNodePortRange, "APIServer.ServiceNodePortRange default mismatch")
 	}
-	if cfg.APIServer.AdmissionPlugins == nil {
-		t.Error("APIServer.AdmissionPlugins should be initialized (non-nil empty slice)")
-	}
-	if cfg.ControllerManager == nil || cfg.ControllerManager.ExtraArgs == nil {
-		t.Error("ControllerManager.ExtraArgs should be initialized (non-nil empty slice)")
-	}
-	if cfg.Scheduler == nil || cfg.Scheduler.ExtraArgs == nil {
-		t.Error("Scheduler.ExtraArgs should be initialized (non-nil empty slice)")
-	}
-	if cfg.Kubelet == nil || cfg.Kubelet.ExtraArgs == nil {
-		t.Error("Kubelet.ExtraArgs should be initialized (non-nil empty slice)")
-	}
-	if cfg.Kubelet.EvictionHard == nil {t.Error("Kubelet.EvictionHard map should be initialized")}
 
-	if cfg.Kubelet.CgroupDriver == nil || *cfg.Kubelet.CgroupDriver != "systemd" {
-		t.Errorf("Kubelet.CgroupDriver default failed, got %v", cfg.Kubelet.CgroupDriver)
+	assert.NotNil(t, cfg.ControllerManager, "ControllerManager should be initialized")
+	if cfg.ControllerManager != nil {
+		assert.NotNil(t, cfg.ControllerManager.ExtraArgs, "ControllerManager.ExtraArgs should be initialized")
 	}
+
+	assert.NotNil(t, cfg.Scheduler, "Scheduler should be initialized")
+	if cfg.Scheduler != nil {
+		assert.NotNil(t, cfg.Scheduler.ExtraArgs, "Scheduler.ExtraArgs should be initialized")
+	}
+
+	if assert.NotNil(t, cfg.Kubelet) {
+		assert.NotNil(t, cfg.Kubelet.ExtraArgs, "Kubelet.ExtraArgs should be initialized")
+		assert.NotNil(t, cfg.Kubelet.EvictionHard, "Kubelet.EvictionHard map should be initialized")
+		expectedEvictionHard := map[string]string{
+			"memory.available":  "100Mi",
+			"nodefs.available":  "10%",
+			"imagefs.available": "15%",
+			"nodefs.inodesFree": "5%",
+		}
+		assert.Equal(t, expectedEvictionHard, cfg.Kubelet.EvictionHard, "Kubelet.EvictionHard defaults mismatch")
+		if assert.NotNil(t, cfg.Kubelet.CgroupDriver) {
+			assert.Equal(t, "systemd", *cfg.Kubelet.CgroupDriver, "Kubelet.CgroupDriver default mismatch")
+		}
+	}
+
 	cfgWithManager := &KubernetesConfig{ContainerManager: "cgroupfs"}
 	SetDefaults_KubernetesConfig(cfgWithManager, "test")
-	if cfgWithManager.Kubelet.CgroupDriver == nil || *cfgWithManager.Kubelet.CgroupDriver != "cgroupfs" {
-		t.Errorf("Kubelet.CgroupDriver should default from ContainerManager if set, got %v", cfgWithManager.Kubelet.CgroupDriver)
+	if assert.NotNil(t, cfgWithManager.Kubelet) && assert.NotNil(t, cfgWithManager.Kubelet.CgroupDriver) {
+		assert.Equal(t, "cgroupfs", *cfgWithManager.Kubelet.CgroupDriver, "Kubelet.CgroupDriver should default from ContainerManager")
 	}
 
-	if cfg.KubeProxy == nil || cfg.KubeProxy.ExtraArgs == nil {
-		t.Error("KubeProxy.ExtraArgs should be initialized (non-nil empty slice)")
+	if assert.NotNil(t, cfg.KubeProxy) {
+		assert.NotNil(t, cfg.KubeProxy.ExtraArgs, "KubeProxy.ExtraArgs should be initialized")
 	}
+
 	cfgProxyIptables := &KubernetesConfig{ProxyMode: "iptables"}
 	SetDefaults_KubernetesConfig(cfgProxyIptables, "iptables-test")
-	if cfgProxyIptables.KubeProxy.IPTables == nil { t.Error("KubeProxy.IPTables should be initialized for iptables mode") }
-	if cfgProxyIptables.KubeProxy.IPTables.MasqueradeAll == nil || !*cfgProxyIptables.KubeProxy.IPTables.MasqueradeAll {
-		t.Error("KubeProxy.IPTables.MasqueradeAll default failed")
-	}
-	if cfgProxyIptables.KubeProxy.IPTables.MasqueradeBit == nil || *cfgProxyIptables.KubeProxy.IPTables.MasqueradeBit != 14 {
-		t.Error("KubeProxy.IPTables.MasqueradeBit default failed")
+	if assert.NotNil(t, cfgProxyIptables.KubeProxy) && assert.NotNil(t, cfgProxyIptables.KubeProxy.IPTables) {
+		iptablesCfg := cfgProxyIptables.KubeProxy.IPTables
+		if assert.NotNil(t, iptablesCfg.MasqueradeAll) {
+			assert.False(t, *iptablesCfg.MasqueradeAll, "KubeProxy.IPTables.MasqueradeAll default failed")
+		}
+		if assert.NotNil(t, iptablesCfg.MasqueradeBit) {
+			assert.Equal(t, int32(14), *iptablesCfg.MasqueradeBit, "KubeProxy.IPTables.MasqueradeBit default failed")
+		}
+		assert.Equal(t, "30s", iptablesCfg.SyncPeriod, "KubeProxy.IPTables.SyncPeriod default failed")
+		assert.Equal(t, "15s", iptablesCfg.MinSyncPeriod, "KubeProxy.IPTables.MinSyncPeriod default failed")
 	}
 
 	cfgProxyIpvs := &KubernetesConfig{ProxyMode: "ipvs"}
 	SetDefaults_KubernetesConfig(cfgProxyIpvs, "ipvs-test")
-	assert.NotNil(t, cfgProxyIpvs.KubeProxy.IPVS, "KubeProxy.IPVS should be initialized for ipvs mode")
-	if cfgProxyIpvs.KubeProxy.IPVS != nil {
-		assert.Equal(t, "rr", cfgProxyIpvs.KubeProxy.IPVS.Scheduler, "KubeProxy.IPVS.Scheduler default failed")
-		assert.NotNil(t, cfgProxyIpvs.KubeProxy.IPVS.ExcludeCIDRs, "KubeProxy.IPVS.ExcludeCIDRs should be initialized")
-		assert.Len(t, cfgProxyIpvs.KubeProxy.IPVS.ExcludeCIDRs, 0, "KubeProxy.IPVS.ExcludeCIDRs should be empty by default")
+	if assert.NotNil(t, cfgProxyIpvs.KubeProxy) && assert.NotNil(t, cfgProxyIpvs.KubeProxy.IPVS) {
+		ipvsCfg := cfgProxyIpvs.KubeProxy.IPVS
+		assert.Equal(t, "rr", ipvsCfg.Scheduler, "KubeProxy.IPVS.Scheduler default failed")
+		assert.NotNil(t, ipvsCfg.ExcludeCIDRs, "KubeProxy.IPVS.ExcludeCIDRs should be initialized")
+		assert.Len(t, ipvsCfg.ExcludeCIDRs, 0, "KubeProxy.IPVS.ExcludeCIDRs should be empty by default")
+		assert.Equal(t, "30s", ipvsCfg.SyncPeriod, "KubeProxy.IPVS.SyncPeriod default failed")
+		assert.Equal(t, "15s", ipvsCfg.MinSyncPeriod, "KubeProxy.IPVS.MinSyncPeriod default failed")
 	}
 }
 
+// --- Test Validate_KubernetesConfig ---
 func TestValidate_KubernetesConfig_Valid(t *testing.T) {
 	cfg := &KubernetesConfig{
 		Version:     "v1.25.0",
@@ -117,8 +128,8 @@ func TestValidate_KubernetesConfig_Valid(t *testing.T) {
 	SetDefaults_KubernetesConfig(cfg, "valid-k8s-cluster")
 	verrs := &validation.ValidationErrors{}
 	Validate_KubernetesConfig(cfg, verrs, "spec.kubernetes")
-	if verrs.HasErrors() { // Updated
-		t.Errorf("Validate_KubernetesConfig for valid config failed: %v", verrs.Error()) // Updated
+	if verrs.HasErrors() {
+		t.Errorf("Validate_KubernetesConfig for valid config failed: %v", verrs.Error())
 	}
 }
 
@@ -158,11 +169,11 @@ func TestValidate_KubernetesConfig_Invalid(t *testing.T) {
 			}
 			verrs := &validation.ValidationErrors{}
 			Validate_KubernetesConfig(tt.cfg, verrs, "spec.kubernetes")
-			if !verrs.HasErrors() { // Updated
+			if !verrs.HasErrors() {
 				t.Fatalf("Validate_KubernetesConfig expected error for %s, got none", tt.name)
 			}
-			if !strings.Contains(verrs.Error(), tt.wantErrMsg) { // Updated
-				t.Errorf("Validate_KubernetesConfig error for %s = %v, want to contain %q", tt.name, verrs.Error(), tt.wantErrMsg) // Updated
+			if !strings.Contains(verrs.Error(), tt.wantErrMsg) {
+				t.Errorf("Validate_KubernetesConfig error for %s = %v, want to contain %q", tt.name, verrs.Error(), tt.wantErrMsg)
 			}
 		})
 	}
@@ -225,15 +236,15 @@ func TestValidate_ControllerManagerConfig(t *testing.T) {
 			verrs := &validation.ValidationErrors{}
 			Validate_ControllerManagerConfig(tt.cfg, verrs, "spec.kubernetes.controllerManager")
 			if tt.wantErrMsg == "" {
-				if verrs.HasErrors() { // Updated
-					t.Errorf("Validate_ControllerManagerConfig expected no error for %s, got %v", tt.name, verrs.Error()) // Updated
+				if verrs.HasErrors() {
+					t.Errorf("Validate_ControllerManagerConfig expected no error for %s, got %v", tt.name, verrs.Error())
 				}
 			} else {
-				if !verrs.HasErrors() { // Updated
+				if !verrs.HasErrors() {
 					t.Fatalf("Validate_ControllerManagerConfig expected error for %s, got none", tt.name)
 				}
-				if !strings.Contains(verrs.Error(), tt.wantErrMsg) { // Updated
-					t.Errorf("Validate_ControllerManagerConfig error for %s = %v, want to contain %q", tt.name, verrs.Error(), tt.wantErrMsg) // Updated
+				if !strings.Contains(verrs.Error(), tt.wantErrMsg) {
+					t.Errorf("Validate_ControllerManagerConfig error for %s = %v, want to contain %q", tt.name, verrs.Error(), tt.wantErrMsg)
 				}
 			}
 		})
@@ -257,15 +268,15 @@ func TestValidate_SchedulerConfig(t *testing.T) {
 			verrs := &validation.ValidationErrors{}
 			Validate_SchedulerConfig(tt.cfg, verrs, "spec.kubernetes.scheduler")
 			if tt.wantErrMsg == "" {
-				if verrs.HasErrors() { // Updated
-					t.Errorf("Validate_SchedulerConfig expected no error for %s, got %v", tt.name, verrs.Error()) // Updated
+				if verrs.HasErrors() {
+					t.Errorf("Validate_SchedulerConfig expected no error for %s, got %v", tt.name, verrs.Error())
 				}
 			} else {
-				if !verrs.HasErrors() { // Updated
+				if !verrs.HasErrors() {
 					t.Fatalf("Validate_SchedulerConfig expected error for %s, got none", tt.name)
 				}
-				if !strings.Contains(verrs.Error(), tt.wantErrMsg) { // Updated
-					t.Errorf("Validate_SchedulerConfig error for %s = %v, want to contain %q", tt.name, verrs.Error(), tt.wantErrMsg) // Updated
+				if !strings.Contains(verrs.Error(), tt.wantErrMsg) {
+					t.Errorf("Validate_SchedulerConfig error for %s = %v, want to contain %q", tt.name, verrs.Error(), tt.wantErrMsg)
 				}
 			}
 		})
