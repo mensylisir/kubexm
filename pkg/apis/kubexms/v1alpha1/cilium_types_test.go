@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/mensylisir/kubexm/pkg/util/validation" // Import validation
 )
 
 // TestSetDefaults_CiliumConfig_Standalone tests the SetDefaults_CiliumConfig function directly.
@@ -215,11 +216,11 @@ func TestValidate_CiliumConfig_Standalone(t *testing.T) {
 			// then the "HubbleUI true, EnableHubble false" case in validation might be redundant
 			// as defaults would fix it. But for robustness, testing the validation rule itself is fine.
 
-			verrs := &ValidationErrors{Errors: []string{}}
+			verrs := &validation.ValidationErrors{}
 			Validate_CiliumConfig(inputConfig, verrs, "spec.network.cilium")
 
 			if tt.expectErr {
-				assert.False(t, verrs.IsEmpty(), "Expected validation errors for test: %s, but got none", tt.name)
+				assert.True(t, verrs.HasErrors(), "Expected validation errors for test: %s, but got none", tt.name)
 				if len(tt.errContains) > 0 {
 					combinedErrors := verrs.Error()
 					for _, errStr := range tt.errContains {
@@ -227,7 +228,7 @@ func TestValidate_CiliumConfig_Standalone(t *testing.T) {
 					}
 				}
 			} else {
-				assert.True(t, verrs.IsEmpty(), "Expected no validation errors for test: %s, but got: %s", tt.name, verrs.Error())
+				assert.False(t, verrs.HasErrors(), "Expected no validation errors for test: %s, but got: %s", tt.name, verrs.Error())
 			}
 		})
 	}
@@ -240,12 +241,20 @@ func TestValidate_NetworkConfig_Calls_Validate_CiliumConfig_Standalone(t *testin
 		Cilium: &CiliumConfig{
 			TunnelingMode: "invalid-mode", // This should be caught by Validate_CiliumConfig
 		},
+		// KubePodsCIDR and KubeServiceCIDR are added to make NetworkConfig minimally valid for its own checks
+		KubePodsCIDR:    "10.244.0.0/16",
+		KubeServiceCIDR: "10.96.0.0/12",
 	}
+	// Initialize KubernetesConfig as it's now required by Validate_NetworkConfig
+	k8sConfig := &KubernetesConfig{Version: "v1.25.0"} // Add any other necessary fields for k8sConfig if its validation is triggered
+	SetDefaults_KubernetesConfig(k8sConfig, "test-cluster")
+
+
 	SetDefaults_NetworkConfig(netCfg) // Apply defaults to NetworkConfig and its sub-configs
 
-	verrs := &ValidationErrors{}
-	Validate_NetworkConfig(netCfg, verrs, "spec.network")
+	verrs := &validation.ValidationErrors{}
+	Validate_NetworkConfig(netCfg, verrs, "spec.network", k8sConfig) // Pass k8sConfig
 
-	assert.False(t, verrs.IsEmpty(), "Expected errors from CiliumConfig validation")
+	assert.True(t, verrs.HasErrors(), "Expected errors from CiliumConfig validation")
 	assert.Contains(t, verrs.Error(), "cilium.tunnelingMode: invalid mode 'invalid-mode'", "Expected Cilium validation error")
 }

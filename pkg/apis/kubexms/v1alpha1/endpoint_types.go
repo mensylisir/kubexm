@@ -2,19 +2,16 @@ package v1alpha1
 
 import (
 	// "net" // No longer needed directly as util.IsValidIP is used and local isValidIP was removed
-	"regexp" // Still needed for domainValidationRegex
-	"strings" // For validation
-	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
-)
-
-const (
-	// domainValidationRegex is used to validate domain names.
-	// It checks for LDH (letters, digits, hyphen) labels, with length constraints.
-	domainValidationRegexString = `^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`
+	"fmt"
+	"regexp"
+	"strings"
+	"github.com/mensylisir/kubexm/pkg/util"
+	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 var (
-	domainValidationRegex = regexp.MustCompile(domainValidationRegexString)
+	domainValidationRegex = regexp.MustCompile(common.DomainValidationRegexString)
 )
 
 // ControlPlaneEndpointSpec defines the configuration for the cluster's control plane endpoint.
@@ -68,24 +65,24 @@ func SetDefaults_ControlPlaneEndpointSpec(cfg *ControlPlaneEndpointSpec) {
 
 
 // Validate_ControlPlaneEndpointSpec validates ControlPlaneEndpointSpec.
-func Validate_ControlPlaneEndpointSpec(cfg *ControlPlaneEndpointSpec, verrs *ValidationErrors, pathPrefix string) {
+func Validate_ControlPlaneEndpointSpec(cfg *ControlPlaneEndpointSpec, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
 	if strings.TrimSpace(cfg.Domain) == "" && strings.TrimSpace(cfg.Address) == "" {
-		verrs.Add("%s: either domain or address (lb_address in YAML) must be specified", pathPrefix)
+		verrs.Add(pathPrefix, "either domain or address (lb_address in YAML) must be specified")
 	}
 	if cfg.Domain != "" {
 		if !domainValidationRegex.MatchString(cfg.Domain) {
-			verrs.Add("%s.domain: '%s' is not a valid domain name", pathPrefix, cfg.Domain)
+			verrs.Add(pathPrefix+".domain", fmt.Sprintf("'%s' is not a valid domain name", cfg.Domain))
 		}
 	}
 	if cfg.Address != "" && !util.IsValidIP(cfg.Address) { // Use util.IsValidIP
-		verrs.Add("%s.address: invalid IP address format for '%s'", pathPrefix, cfg.Address)
+		verrs.Add(pathPrefix+".address", fmt.Sprintf("invalid IP address format for '%s'", cfg.Address))
 	}
 	// cfg.Port is now int. If 0, it's defaulted to 6443. Validation is for user-provided values.
 	if cfg.Port != 0 && (cfg.Port <= 0 || cfg.Port > 65535) {
-		verrs.Add("%s.port: invalid port %d, must be between 1-65535", pathPrefix, cfg.Port)
+		verrs.Add(pathPrefix+".port", fmt.Sprintf("invalid port %d, must be between 1-65535", cfg.Port))
 	}
 
 	// Validation for ExternalLoadBalancerType and InternalLoadBalancerType removed as fields are removed.

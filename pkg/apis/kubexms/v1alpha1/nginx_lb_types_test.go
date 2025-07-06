@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // Local helpers removed, using global ones from zz_helpers.go
@@ -50,16 +51,14 @@ func TestValidate_NginxLBConfig(t *testing.T) {
 		ConfigFilePath: stringPtr("/etc/nginx/nginx.conf"),
 		SkipInstall:   boolPtr(false),
 	}
-	// SetDefaults_NginxLBConfig(&validCfg) // Values are set to defaults or test values
-	verrs := &ValidationErrors{}
+	verrs := &validation.ValidationErrors{}
 	Validate_NginxLBConfig(&validCfg, verrs, "nginxLB")
-	assert.True(t, verrs.IsEmpty(), "Validation failed for valid config: %v", verrs.Error())
+	assert.False(t, verrs.HasErrors(), "Validation failed for valid config: %v", verrs.Error())
 
 	skipInstallCfg := NginxLBConfig{SkipInstall: boolPtr(true)}
-	// SetDefaults_NginxLBConfig(&skipInstallCfg) // SkipInstall short-circuits validation
-	verrsSkip := &ValidationErrors{}
+	verrsSkip := &validation.ValidationErrors{}
 	Validate_NginxLBConfig(&skipInstallCfg, verrsSkip, "nginxLB")
-	assert.True(t, verrsSkip.IsEmpty(), "Validation should pass if SkipInstall is true: %v", verrsSkip.Error())
+	assert.False(t, verrsSkip.HasErrors(), "Validation should pass if SkipInstall is true: %v", verrsSkip.Error())
 
 	tests := []struct {
 		name       string
@@ -82,9 +81,8 @@ func TestValidate_NginxLBConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Ensure necessary fields that are not part of the specific test case logic are valid or defaulted
 			if tt.cfg.ListenPort == nil && !strings.Contains(tt.wantErrMsg, ".listenPort") {
-				tt.cfg.ListenPort = intPtr(6443) // Default valid port
+				tt.cfg.ListenPort = intPtr(6443)
 			}
 			if len(tt.cfg.UpstreamServers) == 0 && !strings.Contains(tt.wantErrMsg, ".upstreamServers") && !strings.Contains(tt.wantErrMsg, "server address") && !strings.Contains(tt.wantErrMsg, ".weight") {
 				tt.cfg.UpstreamServers = []NginxLBUpstreamServer{validServer}
@@ -96,12 +94,11 @@ func TestValidate_NginxLBConfig(t *testing.T) {
 				tt.cfg.Mode = stringPtr("tcp")
 			}
 
-
 			SetDefaults_NginxLBConfig(&tt.cfg)
-			verrs := &ValidationErrors{}
+			verrs := &validation.ValidationErrors{}
 			Validate_NginxLBConfig(&tt.cfg, verrs, "nginxLB")
 
-			assert.False(t, verrs.IsEmpty(), "Expected error for %s, got none", tt.name)
+			assert.True(t, verrs.HasErrors(), "Expected error for %s, got none", tt.name)
 			assert.Contains(t, verrs.Error(), tt.wantErrMsg, "Error for %s = %v, want to contain %q", tt.name, verrs.Error(), tt.wantErrMsg)
 		})
 	}

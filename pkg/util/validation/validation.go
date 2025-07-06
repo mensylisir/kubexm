@@ -3,7 +3,10 @@ package validation
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
+
+	"github.com/mensylisir/kubexm/pkg/common" // Import common package
 )
 
 // ValidationErrors is a collection of validation errors.
@@ -35,3 +38,16 @@ func IsValidURL(u string) bool {
 	return err == nil
 }
 
+// validChartVersionRegex is the compiled regular expression for chart versions.
+// It's kept private as it's only used by IsValidChartVersion.
+var validChartVersionRegex = regexp.MustCompile(common.ValidChartVersionRegexString)
+
+// IsValidChartVersion checks if the version string matches common chart version patterns.
+// Allows "latest", "stable", or versions like "1.2.3", "v1.2.3", "1.2", "v1.0", "1", "v2"
+// as defined by common.ValidChartVersionRegexString.
+func IsValidChartVersion(version string) bool {
+	if version == "latest" || version == "stable" {
+		return true
+	}
+	return validChartVersionRegex.MatchString(version)
+}

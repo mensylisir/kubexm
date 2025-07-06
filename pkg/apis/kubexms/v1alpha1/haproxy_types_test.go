@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // Helper for HAProxy tests are replaced by global helpers from zz_helpers.go
@@ -47,29 +48,26 @@ func TestSetDefaults_HAProxyConfig(t *testing.T) {
 }
 
 func TestValidate_HAProxyConfig(t *testing.T) {
-	validServer := HAProxyBackendServer{Name: "s1", Address: "1.1.1.1", Port: 8080, Weight: intPtr(1)} // Defaulted weight
+	validServer := HAProxyBackendServer{Name: "s1", Address: "1.1.1.1", Port: 8080, Weight: intPtr(1)}
 	validCfg := HAProxyConfig{
-		FrontendBindAddress: stringPtr("0.0.0.0"), // Defaulted
+		FrontendBindAddress: stringPtr("0.0.0.0"),
 		FrontendPort:        intPtr(8443),
-		Mode:                stringPtr("tcp"), // Defaulted
-		BalanceAlgorithm:    stringPtr("roundrobin"), // Defaulted
+		Mode:                stringPtr("tcp"),
+		BalanceAlgorithm:    stringPtr("roundrobin"),
 		BackendServers:      []HAProxyBackendServer{validServer},
-		SkipInstall:         boolPtr(false), // Defaulted
+		SkipInstall:         boolPtr(false),
 	}
-	// SetDefaults_HAProxyConfig(&validCfg) // Not strictly needed here as fields are explicitly set to expected defaults or test values
-	verrs := &ValidationErrors{}
+	verrs := &validation.ValidationErrors{}
 	Validate_HAProxyConfig(&validCfg, verrs, "haproxy")
-	if !verrs.IsEmpty() {
-		t.Errorf("Validation failed for valid config: %v", verrs)
+	if verrs.HasErrors() { // Corrected: Should be HasErrors() and expect NO error for validCfg
+		t.Errorf("Validation failed for valid config: %v", verrs.Error())
 	}
 
-	// Test SkipInstall
 	skipInstallCfg := HAProxyConfig{SkipInstall: boolPtr(true)}
-	// SetDefaults_HAProxyConfig(&skipInstallCfg) // Defaults would set other fields, but SkipInstall=true short-circuits validation
-	verrsSkip := &ValidationErrors{}
+	verrsSkip := &validation.ValidationErrors{}
 	Validate_HAProxyConfig(&skipInstallCfg, verrsSkip, "haproxy")
-	if !verrsSkip.IsEmpty() {
-		t.Errorf("Validation should pass (mostly skipped) if SkipInstall is true: %v", verrsSkip)
+	if verrsSkip.HasErrors() { // Updated to use HasErrors()
+		t.Errorf("Validation should pass (mostly skipped) if SkipInstall is true: %v", verrsSkip.Error()) // Updated to use Error()
 	}
 
 	tests := []struct {
@@ -91,21 +89,19 @@ func TestValidate_HAProxyConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Ensure necessary fields that are not part of the specific test case logic are valid or defaulted
-			// This makes individual test cases cleaner as they only need to specify the invalid part.
 			if tt.cfg.FrontendPort == nil && !strings.Contains(tt.wantErrMsg, ".frontendPort") {
-				tt.cfg.FrontendPort = intPtr(6443) // Default valid port
+				tt.cfg.FrontendPort = intPtr(6443)
 			}
 			if len(tt.cfg.BackendServers) == 0 && !strings.Contains(tt.wantErrMsg, ".backendServers") && !strings.Contains(tt.wantErrMsg, ".name") && !strings.Contains(tt.wantErrMsg, ".address") && !strings.Contains(tt.wantErrMsg, ".port") && !strings.Contains(tt.wantErrMsg, ".weight") {
-				tt.cfg.BackendServers = []HAProxyBackendServer{validServer} // Default valid backend
+				tt.cfg.BackendServers = []HAProxyBackendServer{validServer}
 			}
 
 			SetDefaults_HAProxyConfig(&tt.cfg)
-			verrs := &ValidationErrors{}
+			verrs := &validation.ValidationErrors{}
 			Validate_HAProxyConfig(&tt.cfg, verrs, "haproxy")
 
-			assert.False(t, verrs.IsEmpty(), "Expected error for %s, got none", tt.name)
-			assert.Contains(t, verrs.Error(), tt.wantErrMsg, "Error for %s = %v, want to contain %q", tt.name, verrs.Error(), tt.wantErrMsg)
+			assert.True(t, verrs.HasErrors(), "Expected error for %s, got none", tt.name) // Updated
+			assert.Contains(t, verrs.Error(), tt.wantErrMsg, "Error for %s = %v, want to contain %q", tt.name, verrs.Error(), tt.wantErrMsg) // Updated
 		})
 	}
 }

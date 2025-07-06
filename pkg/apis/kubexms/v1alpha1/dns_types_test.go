@@ -1,14 +1,13 @@
 package v1alpha1
 
 import (
-	// "fmt" // Potentially needed for more complex validation error prefixing if used directly
 	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
-// Assuming ValidationErrors is defined in cluster_types.go and available.
 // Assuming boolPtr, int32Ptr etc are in zz_helpers.go and available.
 
 func TestSetDefaults_ExternalZone(t *testing.T) {
@@ -29,7 +28,7 @@ func TestSetDefaults_ExternalZone(t *testing.T) {
 				Zones:       []string{},
 				Nameservers: []string{},
 				Cache:       300,
-				Rewrite:     []RewriteRule{}, // Updated type
+				Rewrite:     []RewriteRule{},
 			},
 		},
 		{
@@ -38,8 +37,8 @@ func TestSetDefaults_ExternalZone(t *testing.T) {
 			expected: &ExternalZone{
 				Zones:       []string{},
 				Nameservers: []string{},
-				Cache:       600, // Should not be overridden
-				Rewrite:     []RewriteRule{}, // Updated type
+				Cache:       600,
+				Rewrite:     []RewriteRule{},
 			},
 		},
 		{
@@ -49,7 +48,7 @@ func TestSetDefaults_ExternalZone(t *testing.T) {
 				Zones:       []string{"example.com"},
 				Nameservers: []string{"1.1.1.1"},
 				Cache:       150,
-				Rewrite:     []RewriteRule{{FromPattern: "a", ToTemplate: "b"}}, // Updated type
+				Rewrite:     []RewriteRule{{FromPattern: "a", ToTemplate: "b"}},
 			},
 		},
 	}
@@ -90,7 +89,7 @@ func TestSetDefaults_DNS(t *testing.T) {
 			input: &DNS{CoreDNS: CoreDNS{UpstreamDNSServers: []string{"9.9.9.9"}}},
 			expected: &DNS{
 				CoreDNS: CoreDNS{
-					UpstreamDNSServers: []string{"9.9.9.9"}, // Not overridden
+					UpstreamDNSServers: []string{"9.9.9.9"},
 					ExternalZones:      []ExternalZone{},
 				},
 				NodeLocalDNS: NodeLocalDNS{
@@ -105,7 +104,7 @@ func TestSetDefaults_DNS(t *testing.T) {
 				CoreDNS: CoreDNS{
 					UpstreamDNSServers: []string{"8.8.8.8", "1.1.1.1"},
 					ExternalZones: []ExternalZone{
-						{Zones: []string{}, Nameservers: []string{}, Cache: 300, Rewrite: []RewriteRule{}}, // Updated type
+						{Zones: []string{}, Nameservers: []string{}, Cache: 300, Rewrite: []RewriteRule{}},
 					},
 				},
 				NodeLocalDNS: NodeLocalDNS{
@@ -123,7 +122,7 @@ func TestSetDefaults_DNS(t *testing.T) {
 				},
 				NodeLocalDNS: NodeLocalDNS{
 					ExternalZones: []ExternalZone{
-						{Zones: []string{}, Nameservers: []string{}, Cache: 500, Rewrite: []RewriteRule{}}, // Updated type
+						{Zones: []string{}, Nameservers: []string{}, Cache: 500, Rewrite: []RewriteRule{}},
 					},
 				},
 			},
@@ -134,7 +133,6 @@ func TestSetDefaults_DNS(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			SetDefaults_DNS(tt.input)
 			if !reflect.DeepEqual(tt.input, tt.expected) {
-				// Use assert for better diff output
 				assert.Equal(t, tt.expected, tt.input, "SetDefaults_DNS() mismatch")
 			}
 		})
@@ -225,16 +223,16 @@ func TestValidate_ExternalZone(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			SetDefaults_ExternalZone(tt.input) // Apply defaults first
-			verrs := &ValidationErrors{}
+			SetDefaults_ExternalZone(tt.input)
+			verrs := &validation.ValidationErrors{}
 			Validate_ExternalZone(tt.input, verrs, "test.zone")
 			if tt.expectErr {
-				assert.False(t, verrs.IsEmpty(), "Expected error for %s but got none", tt.name)
+				assert.True(t, verrs.HasErrors(), "Expected error for %s but got none", tt.name)
 				for _, c := range tt.errContains {
 					assert.Contains(t, verrs.Error(), c, "Error for %s did not contain %s", tt.name, c)
 				}
 			} else {
-				assert.True(t, verrs.IsEmpty(), "Expected no error for %s but got: %s", tt.name, verrs.Error())
+				assert.False(t, verrs.HasErrors(), "Expected no error for %s but got: %s", tt.name, verrs.Error())
 			}
 		})
 	}
@@ -249,7 +247,7 @@ func TestValidate_DNS(t *testing.T) {
 	}{
 		{
 			name:        "valid empty DNS (after defaults)",
-			input:       &DNS{}, // Will be filled by SetDefaults_DNS
+			input:       &DNS{},
 			expectErr:   false,
 		},
 		{
@@ -304,17 +302,17 @@ func TestValidate_DNS(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			SetDefaults_DNS(tt.input) // Apply defaults first
-			verrs := &ValidationErrors{}
+			SetDefaults_DNS(tt.input)
+			verrs := &validation.ValidationErrors{}
 			Validate_DNS(tt.input, verrs, "spec.dns")
 
 			if tt.expectErr {
-				assert.False(t, verrs.IsEmpty(), "Expected error for %s but got none", tt.name)
+				assert.True(t, verrs.HasErrors(), "Expected error for %s but got none", tt.name)
 				for _, c := range tt.errContains {
 					assert.Contains(t, verrs.Error(), c, "Error for %s did not contain %s", tt.name, c)
 				}
 			} else {
-				assert.True(t, verrs.IsEmpty(), "Expected no error for %s but got: %s", tt.name, verrs.Error())
+				assert.False(t, verrs.HasErrors(), "Expected no error for %s but got: %s", tt.name, verrs.Error())
 			}
 		})
 	}

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // Local helper pstrRegistryTest removed, using global stringPtr from zz_helpers.go
@@ -15,21 +16,16 @@ func TestSetDefaults_RegistryConfig(t *testing.T) {
 	assert.NotNil(t, cfg.Auths, "Auths should be initialized to empty map")
 	assert.Empty(t, cfg.Auths, "Auths should be empty by default")
 
-	// Test DataRoot is NOT defaulted by SetDefaults_RegistryConfig even if Type is set
-	// (user must provide it, as per validation logic)
 	cfgWithType := &RegistryConfig{Type: stringPtr("harbor")}
 	SetDefaults_RegistryConfig(cfgWithType)
 	assert.Nil(t, cfgWithType.DataRoot, "DataRoot should NOT be defaulted by SetDefaults_RegistryConfig even if Type is set")
 
-	// Test DataRoot is not defaulted if Type is not set (remains consistent)
 	cfgNoType := &RegistryConfig{}
 	SetDefaults_RegistryConfig(cfgNoType)
 	assert.Nil(t, cfgNoType.DataRoot, "DataRoot should remain nil if Type is not set")
 
-
-	// Test NamespaceRewrite initialization
 	assert.NotNil(t, cfg.NamespaceRewrite, "NamespaceRewrite should be initialized")
-	if cfg.NamespaceRewrite != nil { // Guard for assert
+	if cfg.NamespaceRewrite != nil {
 		assert.NotNil(t, cfg.NamespaceRewrite.Rules, "NamespaceRewrite.Rules should be initialized")
 		assert.Len(t, cfg.NamespaceRewrite.Rules, 0, "NamespaceRewrite.Rules should be empty by default")
 	}
@@ -38,7 +34,7 @@ func TestSetDefaults_RegistryConfig(t *testing.T) {
 func TestValidate_RegistryConfig(t *testing.T) {
 	validAuth := make(map[string]RegistryAuth)
 	validAuth["docker.io"] = RegistryAuth{Username: "user", Password: "password"}
-	validAuth["myregistry.local:5000"] = RegistryAuth{Auth: "dXNlcjpwYXNzd29yZA=="} // user:password
+	validAuth["myregistry.local:5000"] = RegistryAuth{Auth: "dXNlcjpwYXNzd29yZA=="}
 
 	tests := []struct {
 		name        string
@@ -99,9 +95,9 @@ func TestValidate_RegistryConfig(t *testing.T) {
 			name: "auths invalid key hostname",
 			cfg:  &RegistryConfig{Auths: map[string]RegistryAuth{"bad_host!": {Username: "u", Password: "p"}}},
 			expectErr:   true,
-			errContains: []string{"spec.registry.auths: registry address key 'bad_host!' is not a valid hostname or host:port"},
+			// Corrected error message to match the actual output format
+			errContains: []string{"spec.registry.auths[\"bad_host!\"]: registry address key 'bad_host!' is not a valid hostname or host:port"},
 		},
-		// Delegate RegistryAuth validation tests to TestValidate_RegistryAuth
 		{
 			name: "type whitespace",
 			cfg:  &RegistryConfig{Type: stringPtr("   ")},
@@ -116,13 +112,13 @@ func TestValidate_RegistryConfig(t *testing.T) {
 		},
 		{
 			name: "type set, dataRoot missing",
-			cfg:  &RegistryConfig{Type: stringPtr("registry")}, // DataRoot will be nil
+			cfg:  &RegistryConfig{Type: stringPtr("registry")},
 			expectErr:   true,
 			errContains: []string{"spec.registry.registryDataDir (dataRoot): must be specified if registry type is set for local deployment"},
 		},
 		{
 			name: "dataRoot set, type missing",
-			cfg:  &RegistryConfig{DataRoot: stringPtr("/data/myreg")}, // Type will be nil
+			cfg:  &RegistryConfig{DataRoot: stringPtr("/data/myreg")},
 			expectErr:   true,
 			errContains: []string{"spec.registry.type: must be specified if registryDataDir (dataRoot) is set for local deployment"},
 		},
@@ -160,12 +156,12 @@ func TestValidate_RegistryConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			SetDefaults_RegistryConfig(tt.cfg) // Apply defaults before validation
-			verrs := &ValidationErrors{}
+			SetDefaults_RegistryConfig(tt.cfg)
+			verrs := &validation.ValidationErrors{}
 			Validate_RegistryConfig(tt.cfg, verrs, "spec.registry")
 
 			if tt.expectErr {
-				assert.False(t, verrs.IsEmpty(), "Expected validation errors for test: %s, but got none", tt.name)
+				assert.True(t, verrs.HasErrors(), "Expected validation errors for test: %s, but got none", tt.name)
 				if len(tt.errContains) > 0 {
 					combinedErrors := verrs.Error()
 					for _, errStr := range tt.errContains {
@@ -173,7 +169,7 @@ func TestValidate_RegistryConfig(t *testing.T) {
 					}
 				}
 			} else {
-				assert.True(t, verrs.IsEmpty(), "Expected no validation errors for test: %s, but got: %s", tt.name, verrs.Error())
+				assert.False(t, verrs.HasErrors(), "Expected no validation errors for test: %s, but got: %s", tt.name, verrs.Error())
 			}
 		})
 	}
@@ -208,24 +204,22 @@ func TestValidate_RegistryAuth(t *testing.T) {
 	}{
 		{"nil input", nil, false, nil},
 		{"valid username/password", &RegistryAuth{Username: "user", Password: "password"}, false, nil},
-		{"valid auth string", &RegistryAuth{Auth: "dXNlcjpwYXNzd29yZA=="}, false, nil}, // user:password
+		{"valid auth string", &RegistryAuth{Auth: "dXNlcjpwYXNzd29yZA=="}, false, nil},
 		{"both username/password and auth string (allowed)", &RegistryAuth{Username: "user", Password: "password", Auth: "dXNlcjpwYXNzd29yZA=="}, false, nil},
 		{"missing username/password and auth", &RegistryAuth{}, true, []string{": either username/password or auth string must be provided"}},
 		{"invalid base64 auth", &RegistryAuth{Auth: "!!!"}, true, []string{".auth: failed to decode base64 auth string"}},
-		{"invalid auth format (no colon)", &RegistryAuth{Auth: "dXNlcnBhc3N3b3Jk"}, true, []string{".auth: decoded auth string must be in 'username:password' format"}}, // "userpassword"
+		{"invalid auth format (no colon)", &RegistryAuth{Auth: "dXNlcnBhc3N3b3Jk"}, true, []string{".auth: decoded auth string must be in 'username:password' format"}},
 		{"certsPath whitespace", &RegistryAuth{Username: "u", Password: "p", CertsPath: "   "}, true, []string{".certsPath: cannot be only whitespace if specified"}},
 		{"valid certsPath", &RegistryAuth{Username: "u", Password: "p", CertsPath: "/opt/certs"}, false, nil},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			verrs := &ValidationErrors{}
-			// Defaults are applied by SetDefaults_RegistryConfig, so we don't call SetDefaults_RegistryAuth directly here
-			// unless we want to test it in isolation, which is done in TestSetDefaults_RegistryAuth
+			verrs := &validation.ValidationErrors{}
 			Validate_RegistryAuth(tt.auth, verrs, "spec.registry.auths[test.com]")
 
 			if tt.expectErr {
-				assert.False(t, verrs.IsEmpty(), "Expected validation errors for test: %s, but got none", tt.name)
+				assert.True(t, verrs.HasErrors(), "Expected validation errors for test: %s, but got none", tt.name)
 				if len(tt.errContains) > 0 {
 					combinedErrors := verrs.Error()
 					for _, errStr := range tt.errContains {
@@ -233,7 +227,7 @@ func TestValidate_RegistryAuth(t *testing.T) {
 					}
 				}
 			} else {
-				assert.True(t, verrs.IsEmpty(), "Expected no validation errors for test: %s, but got: %s", tt.name, verrs.Error())
+				assert.False(t, verrs.HasErrors(), "Expected no validation errors for test: %s, but got: %s", tt.name, verrs.Error())
 			}
 		})
 	}

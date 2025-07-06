@@ -1,7 +1,9 @@
 package v1alpha1
 
 import (
+	"fmt"
 	"strings"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // ExternalLoadBalancerConfig defines settings for an external load balancing solution.
@@ -113,36 +115,30 @@ func SetDefaults_InternalLoadBalancerConfig(cfg *InternalLoadBalancerConfig) {
 	}
 }
 
-func Validate_HighAvailabilityConfig(cfg *HighAvailabilityConfig, verrs *ValidationErrors, pathPrefix string) {
+func Validate_HighAvailabilityConfig(cfg *HighAvailabilityConfig, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
 
 	if cfg.Enabled != nil && *cfg.Enabled {
-		// If HA is enabled, at least one of External or Internal should be configured if HA is truly desired.
-		// However, an empty HA block (External=nil, Internal=nil) with Enabled=true is not strictly invalid by itself,
-		// it just means no specific HA LBs are being set up by this config.
-		// The actual requirement for an LB might come from ControlPlaneEndpoint settings.
-
 		if cfg.External != nil {
 			Validate_ExternalLoadBalancerConfig(cfg.External, verrs, pathPrefix+".external")
 		}
 		if cfg.Internal != nil {
 			Validate_InternalLoadBalancerConfig(cfg.Internal, verrs, pathPrefix+".internal")
 		}
-	} else { // HA is explicitly disabled (Enabled is *false) or not set (defaults to false)
-		// If HA is disabled, then External and Internal LB configurations should not be present or should be empty.
+	} else {
 		if cfg.External != nil && cfg.External.Type != "" {
-			verrs.Add("%s.external: cannot be configured if global HA is disabled", pathPrefix)
+			verrs.Add(pathPrefix+".external", "cannot be configured if global HA is disabled")
 		}
 		if cfg.Internal != nil && cfg.Internal.Type != "" {
-			verrs.Add("%s.internal: cannot be configured if global HA is disabled", pathPrefix)
+			verrs.Add(pathPrefix+".internal", "cannot be configured if global HA is disabled")
 		}
 	}
 }
 
-func Validate_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig, verrs *ValidationErrors, pathPrefix string) {
-	if cfg == nil || cfg.Type == "" { // If no type is specified, it's considered not configured.
+func Validate_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig, verrs *validation.ValidationErrors, pathPrefix string) {
+	if cfg == nil || cfg.Type == "" {
 		return
 	}
 
@@ -157,62 +153,62 @@ func Validate_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig, verrs 
 
 	if cfg.Type == "UserProvided" {
 		if cfg.Keepalived != nil {
-			verrs.Add("%s.keepalived: should not be set for UserProvided external LB type", pathPrefix)
+			verrs.Add(pathPrefix+".keepalived", "should not be set for UserProvided external LB type")
 		}
 		if cfg.HAProxy != nil {
-			verrs.Add("%s.haproxy: should not be set for UserProvided external LB type", pathPrefix)
+			verrs.Add(pathPrefix+".haproxy", "should not be set for UserProvided external LB type")
 		}
 		if cfg.NginxLB != nil {
-			verrs.Add("%s.nginxLB: should not be set for UserProvided external LB type", pathPrefix)
+			verrs.Add(pathPrefix+".nginxLB", "should not be set for UserProvided external LB type")
 		}
 	} else if isManagedType {
 		if strings.Contains(cfg.Type, "Keepalived") {
 			if cfg.Keepalived == nil {
-				verrs.Add("%s.keepalived: section must be present if type includes 'Keepalived'", pathPrefix)
+				verrs.Add(pathPrefix+".keepalived", "section must be present if type includes 'Keepalived'")
 			} else {
 				Validate_KeepalivedConfig(cfg.Keepalived, verrs, pathPrefix+".keepalived")
 			}
 		}
-		if strings.Contains(cfg.Type, "HAProxy") { // Specifically for ManagedKeepalivedHAProxy
+		if strings.Contains(cfg.Type, "HAProxy") {
 			if cfg.HAProxy == nil {
-				verrs.Add("%s.haproxy: section must be present if type includes 'HAProxy'", pathPrefix)
+				verrs.Add(pathPrefix+".haproxy", "section must be present if type includes 'HAProxy'")
 			} else {
 				Validate_HAProxyConfig(cfg.HAProxy, verrs, pathPrefix+".haproxy")
 			}
 		}
-		if strings.Contains(cfg.Type, "NginxLB") { // Specifically for ManagedKeepalivedNginxLB
+		if strings.Contains(cfg.Type, "NginxLB") {
 			if cfg.NginxLB == nil {
-				verrs.Add("%s.nginxLB: section must be present if type includes 'NginxLB'", pathPrefix)
+				verrs.Add(pathPrefix+".nginxLB", "section must be present if type includes 'NginxLB'")
 			} else {
 				Validate_NginxLBConfig(cfg.NginxLB, verrs, pathPrefix+".nginxLB")
 			}
 		}
 		if cfg.LoadBalancerHostGroupName != nil && strings.TrimSpace(*cfg.LoadBalancerHostGroupName) == "" {
-			verrs.Add("%s.loadBalancerHostGroupName: cannot be empty if specified for managed external LB", pathPrefix)
+			verrs.Add(pathPrefix+".loadBalancerHostGroupName", "cannot be empty if specified for managed external LB")
 		}
-	} else { // Type is set but not "UserProvided" or a known managed type
-		verrs.Add("%s.type: unknown external LB type '%s'", pathPrefix, cfg.Type)
+	} else {
+		verrs.Add(pathPrefix+".type", fmt.Sprintf("unknown external LB type '%s'", cfg.Type))
 	}
 }
 
-func Validate_InternalLoadBalancerConfig(cfg *InternalLoadBalancerConfig, verrs *ValidationErrors, pathPrefix string) {
-	if cfg == nil || cfg.Type == "" { // If no type is specified, it's considered not configured.
+func Validate_InternalLoadBalancerConfig(cfg *InternalLoadBalancerConfig, verrs *validation.ValidationErrors, pathPrefix string) {
+	if cfg == nil || cfg.Type == "" {
 		return
 	}
 
 	if cfg.Type == "KubeVIP" {
 		if cfg.KubeVIP == nil {
-			verrs.Add("%s.kubevip: section must be present if type is 'KubeVIP'", pathPrefix)
+			verrs.Add(pathPrefix+".kubevip", "section must be present if type is 'KubeVIP'")
 		} else {
 			Validate_KubeVIPConfig(cfg.KubeVIP, verrs, pathPrefix+".kubevip")
 		}
 	} else if cfg.Type == "WorkerNodeHAProxy" {
 		if cfg.WorkerNodeHAProxy == nil {
-			verrs.Add("%s.workerNodeHAProxy: section must be present if type is 'WorkerNodeHAProxy'", pathPrefix)
+			verrs.Add(pathPrefix+".workerNodeHAProxy", "section must be present if type is 'WorkerNodeHAProxy'")
 		} else {
 			Validate_HAProxyConfig(cfg.WorkerNodeHAProxy, verrs, pathPrefix+".workerNodeHAProxy")
 		}
 	} else {
-		verrs.Add("%s.type: unknown internal LB type '%s'", pathPrefix, cfg.Type)
+		verrs.Add(pathPrefix+".type", fmt.Sprintf("unknown internal LB type '%s'", cfg.Type))
 	}
 }
