@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
+	"github.com/mensylisir/kubexm/pkg/util"
 	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
@@ -60,6 +60,11 @@ func SetDefaults_RegistryConfig(cfg *RegistryConfig) {
 	if cfg.NamespaceRewrite.Rules == nil {
 		cfg.NamespaceRewrite.Rules = []NamespaceRewriteRule{}
 	}
+	// If a local registry type is specified and DataRoot is not, set a default DataRoot.
+	if cfg.Type != nil && *cfg.Type != "" && (cfg.DataRoot == nil || strings.TrimSpace(*cfg.DataRoot) == "") {
+		defaultDataRoot := "/var/lib/registry" // Default path for local registry data
+		cfg.DataRoot = stringPtr(defaultDataRoot)
+	}
 }
 
 // SetDefaults_RegistryAuth sets default values for RegistryAuth.
@@ -107,15 +112,19 @@ func Validate_RegistryConfig(cfg *RegistryConfig, verrs *validation.ValidationEr
 	if cfg.Type != nil && strings.TrimSpace(*cfg.Type) == "" {
 		verrs.Add(pathPrefix+".type", "cannot be empty if specified")
 	}
-	if cfg.DataRoot != nil && strings.TrimSpace(*cfg.DataRoot) == "" {
-		verrs.Add(pathPrefix+".registryDataDir (dataRoot)", "cannot be empty if specified")
+	// DataRoot validation: if Type is set, DataRoot must now be set (either by user or by new default).
+	// If DataRoot is set (e.g. by user explicitly), Type must also be set.
+	if cfg.Type != nil && *cfg.Type != "" {
+		if cfg.DataRoot == nil || strings.TrimSpace(*cfg.DataRoot) == "" {
+			// This case should ideally not happen if defaults are applied correctly.
+			// However, validation should still catch it if defaults were bypassed or user provided empty string.
+			verrs.Add(pathPrefix+".registryDataDir (dataRoot)", "must be specified if registry type is set for local deployment and not defaulted")
+		}
 	}
-	if (cfg.Type != nil && *cfg.Type != "") && (cfg.DataRoot == nil || strings.TrimSpace(*cfg.DataRoot) == "") {
-		verrs.Add(pathPrefix+".registryDataDir (dataRoot)", "must be specified if registry type is set for local deployment")
-	}
-	if (cfg.DataRoot != nil && *cfg.DataRoot != "") && (cfg.Type == nil || strings.TrimSpace(*cfg.Type) == "") {
+	if (cfg.DataRoot != nil && strings.TrimSpace(*cfg.DataRoot) != "") && (cfg.Type == nil || strings.TrimSpace(*cfg.Type) == "") {
 		verrs.Add(pathPrefix+".type", "must be specified if registryDataDir (dataRoot) is set for local deployment")
 	}
+
 
 	if cfg.NamespaceRewrite != nil {
 		if cfg.NamespaceRewrite.Enabled {

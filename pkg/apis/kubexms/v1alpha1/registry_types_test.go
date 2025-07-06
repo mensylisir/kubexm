@@ -16,13 +16,19 @@ func TestSetDefaults_RegistryConfig(t *testing.T) {
 	assert.NotNil(t, cfg.Auths, "Auths should be initialized to empty map")
 	assert.Empty(t, cfg.Auths, "Auths should be empty by default")
 
+	// Test DataRoot IS defaulted if Type is set
 	cfgWithType := &RegistryConfig{Type: stringPtr("harbor")}
 	SetDefaults_RegistryConfig(cfgWithType)
-	assert.Nil(t, cfgWithType.DataRoot, "DataRoot should NOT be defaulted by SetDefaults_RegistryConfig even if Type is set")
+	assert.NotNil(t, cfgWithType.DataRoot, "DataRoot should be defaulted by SetDefaults_RegistryConfig if Type is set")
+	if cfgWithType.DataRoot != nil {
+		assert.Equal(t, "/var/lib/registry", *cfgWithType.DataRoot, "Default DataRoot mismatch")
+	}
 
+	// Test DataRoot is not defaulted if Type is not set
 	cfgNoType := &RegistryConfig{}
 	SetDefaults_RegistryConfig(cfgNoType)
 	assert.Nil(t, cfgNoType.DataRoot, "DataRoot should remain nil if Type is not set")
+
 
 	assert.NotNil(t, cfg.NamespaceRewrite, "NamespaceRewrite should be initialized")
 	if cfg.NamespaceRewrite != nil {
@@ -49,7 +55,7 @@ func TestValidate_RegistryConfig(t *testing.T) {
 				NamespaceOverride: "myorg",
 				Auths:             validAuth,
 				Type:              stringPtr("harbor"),
-				DataRoot:          stringPtr("/data/harbor_reg"),
+				DataRoot:          stringPtr("/data/harbor_reg"), // User explicitly sets DataRoot
 				NamespaceRewrite: &NamespaceRewriteConfig{
 					Enabled: true,
 					Rules: []NamespaceRewriteRule{
@@ -59,6 +65,14 @@ func TestValidate_RegistryConfig(t *testing.T) {
 				},
 			},
 			expectErr: false,
+		},
+		{
+			name: "valid config with type set, DataRoot will be defaulted",
+			cfg: &RegistryConfig{
+				Type: stringPtr("registry"),
+				// DataRoot is nil, will be defaulted
+			},
+			expectErr: false, // Should be valid after defaulting
 		},
 		{
 			name: "valid minimal config (only auth)",
@@ -95,7 +109,6 @@ func TestValidate_RegistryConfig(t *testing.T) {
 			name: "auths invalid key hostname",
 			cfg:  &RegistryConfig{Auths: map[string]RegistryAuth{"bad_host!": {Username: "u", Password: "p"}}},
 			expectErr:   true,
-			// Corrected error message to match the actual output format
 			errContains: []string{"spec.registry.auths[\"bad_host!\"]: registry address key 'bad_host!' is not a valid hostname or host:port"},
 		},
 		{
@@ -105,16 +118,14 @@ func TestValidate_RegistryConfig(t *testing.T) {
 			errContains: []string{"spec.registry.type: cannot be empty if specified"},
 		},
 		{
-			name: "dataRoot whitespace",
-			cfg:  &RegistryConfig{DataRoot: stringPtr("   ")},
-			expectErr:   true,
-			errContains: []string{"spec.registry.registryDataDir (dataRoot): cannot be empty if specified"},
+			name: "dataRoot whitespace (when type is also set)", // If type is set, data root (even if whitespace) will be defaulted, so this might pass
+			cfg:  &RegistryConfig{Type: stringPtr("registry"), DataRoot: stringPtr("   ")}, // DataRoot will be defaulted to /var/lib/registry
+			expectErr:   false, // This should now pass as DataRoot gets a non-whitespace default
 		},
 		{
-			name: "type set, dataRoot missing",
-			cfg:  &RegistryConfig{Type: stringPtr("registry")},
-			expectErr:   true,
-			errContains: []string{"spec.registry.registryDataDir (dataRoot): must be specified if registry type is set for local deployment"},
+			name: "type set, dataRoot explicitly empty string (will be defaulted)",
+			cfg:  &RegistryConfig{Type: stringPtr("registry"), DataRoot: stringPtr("")},
+			expectErr:   false, // DataRoot will be defaulted
 		},
 		{
 			name: "dataRoot set, type missing",
@@ -161,7 +172,7 @@ func TestValidate_RegistryConfig(t *testing.T) {
 			Validate_RegistryConfig(tt.cfg, verrs, "spec.registry")
 
 			if tt.expectErr {
-				assert.True(t, verrs.HasErrors(), "Expected validation errors for test: %s, but got none", tt.name)
+				assert.True(t, verrs.HasErrors(), "Expected validation errors for test: %s, but got none. Errors: %v", tt.name, verrs.Error())
 				if len(tt.errContains) > 0 {
 					combinedErrors := verrs.Error()
 					for _, errStr := range tt.errContains {

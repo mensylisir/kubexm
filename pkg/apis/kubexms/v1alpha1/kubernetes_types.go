@@ -153,7 +153,8 @@ func SetDefaults_KubernetesConfig(cfg *KubernetesConfig, clusterMetaName string)
 	}
 	if cfg.APIServer == nil { cfg.APIServer = &APIServerConfig{} }
 	if cfg.APIServer.ExtraArgs == nil { cfg.APIServer.ExtraArgs = []string{} }
-	if cfg.APIServer.AdmissionPlugins == nil { cfg.APIServer.AdmissionPlugins = []string{} }
+	if cfg.APIServer.AdmissionPlugins == nil { cfg.APIServer.AdmissionPlugins = []string{} } // Keeping this empty as per plan, unless user confirms a default list.
+	if cfg.APIServer.ServiceNodePortRange == "" { cfg.APIServer.ServiceNodePortRange = "30000-32767" }
 	if cfg.ControllerManager == nil { cfg.ControllerManager = &ControllerManagerConfig{} }
 	if cfg.ControllerManager.ExtraArgs == nil { cfg.ControllerManager.ExtraArgs = []string{} }
 	if cfg.Scheduler == nil { cfg.Scheduler = &SchedulerConfig{} }
@@ -174,20 +175,31 @@ func SetDefaults_KubernetesConfig(cfg *KubernetesConfig, clusterMetaName string)
 
 func SetDefaults_KubeProxyIPTablesConfig(cfg *KubeProxyIPTablesConfig) {
 	if cfg == nil { return }
-	if cfg.MasqueradeAll == nil { cfg.MasqueradeAll = util.BoolPtr(true) }
+	if cfg.MasqueradeAll == nil { cfg.MasqueradeAll = util.BoolPtr(false) } // Changed default to false
 	if cfg.MasqueradeBit == nil { cfg.MasqueradeBit = util.Int32Ptr(14) }
+	if cfg.SyncPeriod == "" { cfg.SyncPeriod = "30s" }
+	if cfg.MinSyncPeriod == "" { cfg.MinSyncPeriod = "15s" }
 }
 
 func SetDefaults_KubeProxyIPVSConfig(cfg *KubeProxyIPVSConfig) {
 	if cfg == nil { return }
 	if cfg.Scheduler == "" { cfg.Scheduler = "rr" }
 	if cfg.ExcludeCIDRs == nil { cfg.ExcludeCIDRs = []string{} }
+	if cfg.SyncPeriod == "" { cfg.SyncPeriod = "30s" }
+	if cfg.MinSyncPeriod == "" { cfg.MinSyncPeriod = "15s" }
 }
 
 func SetDefaults_KubeletConfig(cfg *KubeletConfig, containerManager string) {
 	if cfg == nil { return }
 	if cfg.ExtraArgs == nil { cfg.ExtraArgs = []string{} }
-	if cfg.EvictionHard == nil { cfg.EvictionHard = make(map[string]string) }
+	if cfg.EvictionHard == nil {
+		cfg.EvictionHard = map[string]string{
+			"memory.available":  "100Mi",
+			"nodefs.available":  "10%",
+			"imagefs.available": "15%",
+			"nodefs.inodesFree": "5%",
+		}
+	}
 	if cfg.PodPidsLimit == nil { cfg.PodPidsLimit = util.Int64Ptr(10000) }
 	if cfg.CgroupDriver == nil {
 		if containerManager != "" { cfg.CgroupDriver = util.StrPtr(containerManager)
