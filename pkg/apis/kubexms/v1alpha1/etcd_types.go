@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 	"github.com/mensylisir/kubexm/pkg/util/validation"
+	"github.com/mensylisir/kubexm/pkg/util" // Import util package
 )
 
 const (
@@ -88,6 +89,32 @@ func SetDefaults_EtcdConfig(cfg *EtcdConfig) {
 		cfg.External.Endpoints = []string{}
 	}
 	if cfg.ExtraArgs == nil { cfg.ExtraArgs = []string{} }
+	defaultEtcdArgs := map[string]string{
+		"--logger":                       "--logger=zap",
+		"--log-outputs":                  "--log-outputs=stderr",
+		"--auto-compaction-mode":         "--auto-compaction-mode=periodic",
+		// --auto-compaction-retention is handled by AutoCompactionRetentionHours field
+		// TLS related args (--client-cert-auth, --peer-client-cert-auth, --peer-auto-tls, --auto-tls)
+		// are typically set based on whether TLS is enabled and certs are provided,
+		// so not setting hard defaults for them here without more context on TLS setup.
+		// For now, assuming they are true if TLS is on, but that logic is outside pure SetDefaults.
+		// We will add them if TLS is configured.
+	}
+	// Add client-cert-auth and peer-client-cert-auth if External TLS files are present OR if it's not an external setup (implying internal TLS)
+	// This logic might be better placed in the controller that sets up etcd,
+	// but for a basic default, we can assume if certs are specified for external, these should be true.
+	// For internal etcd, these are generally true.
+	if (cfg.Type == EtcdTypeExternal && cfg.External != nil && cfg.External.CertFile != "" && cfg.External.KeyFile != "" && cfg.External.CAFile != "") || (cfg.Type != EtcdTypeExternal) {
+		defaultEtcdArgs["--client-cert-auth"] = "--client-cert-auth=true"
+		// For internal (kubexm or kubeadm managed), peer communication is also typically via TLS.
+		if cfg.Type != EtcdTypeExternal {
+			defaultEtcdArgs["--peer-client-cert-auth"] = "--peer-client-cert-auth=true"
+			defaultEtcdArgs["--peer-auto-tls"] = "--peer-auto-tls=false" // Assuming manually managed peer certs for internal
+			defaultEtcdArgs["--auto-tls"] = "--auto-tls=false" // Assuming manually managed client certs for internal
+		}
+	}
+	cfg.ExtraArgs = util.EnsureExtraArgs(cfg.ExtraArgs, defaultEtcdArgs)
+
 
 	// Default backup settings (can be adjusted)
 	if cfg.BackupDir == nil { cfg.BackupDir = stringPtr("/var/backups/etcd") }

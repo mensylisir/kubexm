@@ -332,3 +332,29 @@ func NetworksOverlap(n1, n2 *net.IPNet) bool {
 	// or a network. The IP field is the network address.
 	return (n1.Contains(n2.IP) && n2.Mask != nil) || (n2.Contains(n1.IP) && n1.Mask != nil)
 }
+
+// EnsureExtraArgs ensures that a list of default arguments are present in the current arguments,
+// unless an argument with the same prefix (e.g., "--audit-log-path=") already exists.
+// defaultArgs should be a map where keys are the full default argument strings (e.g., "--profiling=false").
+func EnsureExtraArgs(currentArgs []string, defaultArgs map[string]string) []string {
+	if currentArgs == nil {
+		currentArgs = []string{}
+	}
+
+	existingArgPrefixes := make(map[string]bool)
+	for _, arg := range currentArgs {
+		parts := strings.SplitN(arg, "=", 2)
+		existingArgPrefixes[parts[0]] = true
+	}
+
+	finalArgs := make([]string, len(currentArgs))
+	copy(finalArgs, currentArgs)
+
+	for defaultArgKey, defaultArgValue := range defaultArgs { // defaultArgKey is the prefix, defaultArgValue is the full string like "--prefix=value"
+		prefix := defaultArgKey
+		if _, exists := existingArgPrefixes[prefix]; !exists {
+			finalArgs = append(finalArgs, defaultArgValue)
+		}
+	}
+	return finalArgs
+}

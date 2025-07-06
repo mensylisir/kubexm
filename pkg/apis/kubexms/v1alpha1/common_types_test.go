@@ -31,12 +31,12 @@ func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
 			name: "empty config",
 			input: &ContainerRuntimeConfig{},
 			expected: &ContainerRuntimeConfig{
-				Type:   ContainerRuntimeDocker,
-				Docker: emptyDockerCfg,
+				Type:       ContainerRuntimeContainerd, // Changed expected default
+				Containerd: emptyContainerdCfg,     // Expect ContainerdConfig to be initialized
 			},
 		},
 		{
-			name: "type specified as containerd",
+			name: "type specified as containerd", // This test remains valid
 			input: &ContainerRuntimeConfig{Type: ContainerRuntimeContainerd},
 			expected: &ContainerRuntimeConfig{
 				Type:       ContainerRuntimeContainerd,
@@ -44,7 +44,7 @@ func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "type specified as docker with existing empty docker config",
+			name: "type specified as docker with existing empty docker config", // This test remains valid
 			input: &ContainerRuntimeConfig{Type: ContainerRuntimeDocker, Docker: &DockerConfig{}},
 			expected: &ContainerRuntimeConfig{
 				Type:   ContainerRuntimeDocker,
@@ -52,7 +52,7 @@ func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "type specified as containerd with existing empty containerd config",
+			name: "type specified as containerd with existing empty containerd config", // This test remains valid
 			input: &ContainerRuntimeConfig{Type: ContainerRuntimeContainerd, Containerd: &ContainerdConfig{}},
 			expected: &ContainerRuntimeConfig{
 				Type:       ContainerRuntimeContainerd,
@@ -60,12 +60,12 @@ func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "version specified",
+			name: "version specified, type defaults to containerd",
 			input: &ContainerRuntimeConfig{Version: "1.2.3"},
 			expected: &ContainerRuntimeConfig{
-				Type:    ContainerRuntimeDocker,
-				Version: "1.2.3",
-				Docker:  emptyDockerCfg,
+				Type:       ContainerRuntimeContainerd, // Changed expected default
+				Version:    "1.2.3",
+				Containerd: emptyContainerdCfg,     // Expect ContainerdConfig
 			},
 		},
 		{
@@ -222,12 +222,13 @@ func TestValidate_ContainerRuntimeConfig(t *testing.T) {
 			expectErr:   false,
 		},
 		{
-			name:        "empty type (defaults to docker, valid if docker struct is present or nil)",
-			input:       &ContainerRuntimeConfig{Type: "", Docker: validDockerConfig},
-			expectErr:   false,
+			name:        "empty type (now defaults to containerd), docker config erroneously set",
+			input:       &ContainerRuntimeConfig{Type: "", Docker: validDockerConfig}, // Type defaults to containerd, but Docker field is set
+			expectErr:   true, // This should now cause an error
+			errContains: []string{".docker: can only be set if type is 'docker'"},
 		},
 		{
-			name:        "empty type (defaults to docker, valid with nil docker struct as it gets defaulted)",
+			name:        "empty type (defaults to containerd, valid with nil docker struct and containerd gets defaulted)",
 			input:       &ContainerRuntimeConfig{Type: ""},
 			expectErr:   false,
 		},
