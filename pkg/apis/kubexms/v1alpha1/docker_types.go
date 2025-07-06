@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime" // Added for RawExtension
 	// Assuming isValidCIDR is available from kubernetes_types.go or similar
 	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // DockerAddressPool defines a range of IP addresses for Docker networks.
@@ -113,111 +114,109 @@ func SetDefaults_DockerConfig(cfg *DockerConfig) {
 }
 
 // Validate_DockerConfig validates DockerConfig.
-// Note: ValidationErrors type is expected to be defined in cluster_types.go or a common errors file.
-// isValidCIDR is expected to be defined in kubernetes_types.go (in the same package).
-func Validate_DockerConfig(cfg *DockerConfig, verrs *ValidationErrors, pathPrefix string) {
+func Validate_DockerConfig(cfg *DockerConfig, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
 	for i, mirror := range cfg.RegistryMirrors {
+		mirrorPath := fmt.Sprintf("%s.registryMirrors[%d]", pathPrefix, i)
 		if strings.TrimSpace(mirror) == "" {
-			verrs.Add("%s.registryMirrors[%d]: mirror URL cannot be empty", pathPrefix, i)
+			verrs.Add(mirrorPath, "mirror URL cannot be empty")
 		} else {
-			// Validate mirror URL format
 			u, err := url.ParseRequestURI(mirror)
 			if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-				verrs.Add("%s.registryMirrors[%d]: invalid URL format for mirror '%s' (must be http or https and valid URI)", pathPrefix, i, mirror)
+				verrs.Add(mirrorPath, fmt.Sprintf("invalid URL format for mirror '%s' (must be http or https and valid URI)", mirror))
 			}
 		}
 	}
 	for i, insecureReg := range cfg.InsecureRegistries {
+		regPath := fmt.Sprintf("%s.insecureRegistries[%d]", pathPrefix, i)
 		if strings.TrimSpace(insecureReg) == "" {
-			verrs.Add("%s.insecureRegistries[%d]: registry host cannot be empty", pathPrefix, i)
+			verrs.Add(regPath, "registry host cannot be empty")
 		} else if !util.ValidateHostPortString(insecureReg) { // Use util.ValidateHostPortString
-			verrs.Add("%s.insecureRegistries[%d]: invalid host:port format for insecure registry '%s'", pathPrefix, i, insecureReg)
+			verrs.Add(regPath, fmt.Sprintf("invalid host:port format for insecure registry '%s'", insecureReg))
 		}
 	}
 	if cfg.DataRoot != nil {
 		trimmedDataRoot := strings.TrimSpace(*cfg.DataRoot)
 		if trimmedDataRoot == "" {
-			verrs.Add("%s.dataRoot: cannot be empty if specified", pathPrefix)
+			verrs.Add(pathPrefix+".dataRoot", "cannot be empty if specified")
 		} else if trimmedDataRoot == "/tmp" || trimmedDataRoot == "/var/tmp" {
-			verrs.Add("%s.dataRoot: path '%s' is not recommended for Docker data root", pathPrefix, trimmedDataRoot)
+			verrs.Add(pathPrefix+".dataRoot", fmt.Sprintf("path '%s' is not recommended for Docker data root", trimmedDataRoot))
 		}
-		// Further path validation (e.g., absolute path) could be added if needed.
 	}
 	if cfg.LogDriver != nil {
-	   validLogDrivers := []string{"json-file", "journald", "syslog", "fluentd", "none", ""} // Allow empty for Docker default
+	   validLogDrivers := []string{"json-file", "journald", "syslog", "fluentd", "none", ""}
 	   isValid := false
 	   for _, v := range validLogDrivers { if *cfg.LogDriver == v { isValid = true; break } }
 	   if !isValid {
-			verrs.Add("%s.logDriver: invalid log driver '%s'", pathPrefix, *cfg.LogDriver)
+			verrs.Add(pathPrefix+".logDriver", fmt.Sprintf("invalid log driver '%s'", *cfg.LogDriver))
 	   }
 	}
-	if cfg.BIP != nil && !util.IsValidCIDR(*cfg.BIP) { // Use util.IsValidCIDR
-		verrs.Add("%s.bip: invalid CIDR format '%s'", pathPrefix, *cfg.BIP)
+	if cfg.BIP != nil && !util.IsValidCIDR(*cfg.BIP) {
+		verrs.Add(pathPrefix+".bip", fmt.Sprintf("invalid CIDR format '%s'", *cfg.BIP))
 	}
-	if cfg.FixedCIDR != nil && !util.IsValidCIDR(*cfg.FixedCIDR) { // Use util.IsValidCIDR
-		verrs.Add("%s.fixedCIDR: invalid CIDR format '%s'", pathPrefix, *cfg.FixedCIDR)
+	if cfg.FixedCIDR != nil && !util.IsValidCIDR(*cfg.FixedCIDR) {
+		verrs.Add(pathPrefix+".fixedCIDR", fmt.Sprintf("invalid CIDR format '%s'", *cfg.FixedCIDR))
 	}
 	for i, pool := range cfg.DefaultAddressPools {
 	   poolPath := fmt.Sprintf("%s.defaultAddressPools[%d]", pathPrefix, i)
-	   if !util.IsValidCIDR(pool.Base) { verrs.Add("%s.base: invalid CIDR format '%s'", poolPath, pool.Base) } // Use util.IsValidCIDR
-	   if pool.Size <= 0 || pool.Size > 32 { verrs.Add("%s.size: invalid subnet size %d, must be > 0 and <= 32", poolPath, pool.Size) }
+	   if !util.IsValidCIDR(pool.Base) { verrs.Add(poolPath+".base", fmt.Sprintf("invalid CIDR format '%s'", pool.Base)) }
+	   if pool.Size <= 0 || pool.Size > 32 { verrs.Add(poolPath+".size", fmt.Sprintf("invalid subnet size %d, must be > 0 and <= 32", pool.Size)) }
 	}
 	if cfg.StorageDriver != nil && strings.TrimSpace(*cfg.StorageDriver) == "" {
-		verrs.Add("%s.storageDriver: cannot be empty if specified", pathPrefix)
+		verrs.Add(pathPrefix+".storageDriver", "cannot be empty if specified")
 	}
 	if cfg.MaxConcurrentDownloads != nil && *cfg.MaxConcurrentDownloads <= 0 {
-		verrs.Add("%s.maxConcurrentDownloads: must be positive if specified", pathPrefix)
+		verrs.Add(pathPrefix+".maxConcurrentDownloads", "must be positive if specified")
 	}
 	if cfg.MaxConcurrentUploads != nil && *cfg.MaxConcurrentUploads <= 0 {
-		verrs.Add("%s.maxConcurrentUploads: must be positive if specified", pathPrefix)
+		verrs.Add(pathPrefix+".maxConcurrentUploads", "must be positive if specified")
 	}
 	for name, rt := range cfg.Runtimes {
-		if strings.TrimSpace(name) == "" { verrs.Add("%s.runtimes: runtime name key cannot be empty", pathPrefix)}
-		if strings.TrimSpace(rt.Path) == "" { verrs.Add("%s.runtimes['%s'].path: path cannot be empty", pathPrefix, name)}
+		runtimePath := pathPrefix + ".runtimes['" + name + "']"
+		if strings.TrimSpace(name) == "" { verrs.Add(pathPrefix+".runtimes", "runtime name key cannot be empty")}
+		if strings.TrimSpace(rt.Path) == "" { verrs.Add(runtimePath+".path", "path cannot be empty")}
 	}
 	if cfg.Bridge != nil && strings.TrimSpace(*cfg.Bridge) == "" {
-		verrs.Add("%s.bridge: name cannot be empty if specified", pathPrefix)
+		verrs.Add(pathPrefix+".bridge", "name cannot be empty if specified")
 	}
 
 	if cfg.CRIDockerdVersion != nil {
+		versionPath := pathPrefix + ".criDockerdVersion"
 		if strings.TrimSpace(*cfg.CRIDockerdVersion) == "" {
-			verrs.Add("%s.criDockerdVersion: cannot be only whitespace if specified", pathPrefix)
-		} else if !util.IsValidRuntimeVersion(*cfg.CRIDockerdVersion) { // Use util.IsValidRuntimeVersion
-			verrs.Add("%s.criDockerdVersion: '%s' is not a recognized version format", pathPrefix, *cfg.CRIDockerdVersion)
+			verrs.Add(versionPath, "cannot be only whitespace if specified")
+		} else if !util.IsValidRuntimeVersion(*cfg.CRIDockerdVersion) {
+			verrs.Add(versionPath, fmt.Sprintf("'%s' is not a recognized version format", *cfg.CRIDockerdVersion))
 		}
 	}
-	// No specific validation for InstallCRIDockerd (boolean pointer) beyond type checking.
 
 	if cfg.ExtraJSONConfig != nil && len(cfg.ExtraJSONConfig.Raw) == 0 {
-		verrs.Add("%s.extraJsonConfig: raw data cannot be empty if section is present", pathPrefix)
+		verrs.Add(pathPrefix+".extraJsonConfig", "raw data cannot be empty if section is present")
 	}
 
 	for regAddr, auth := range cfg.Auths {
-		authPathPrefix := fmt.Sprintf("%s.auths[\"%s\"]", pathPrefix, regAddr)
+		authMapPath := pathPrefix + ".auths"
+		authEntryPath := fmt.Sprintf("%s[\"%s\"]", authMapPath, regAddr)
 		if strings.TrimSpace(regAddr) == "" {
-			verrs.Add("%s.auths: registry address key cannot be empty", pathPrefix) // Use pathPrefix for the map key error itself
-		} else if !util.ValidateHostPortString(regAddr) && !util.IsValidDomainName(regAddr) { // Key should be a valid registry address
-			verrs.Add("%s: registry key '%s' is not a valid hostname or host:port", authPathPrefix, regAddr)
+			verrs.Add(authMapPath, "registry address key cannot be empty")
+		} else if !util.ValidateHostPortString(regAddr) && !util.IsValidDomainName(regAddr) {
+			verrs.Add(authEntryPath, fmt.Sprintf("registry key '%s' is not a valid hostname or host:port", regAddr))
 		}
 
 		hasUserPass := auth.Username != "" && auth.Password != ""
 		hasAuthStr := auth.Auth != ""
 
 		if !hasUserPass && !hasAuthStr {
-			verrs.Add("%s: either username/password or auth string must be provided", authPathPrefix)
+			verrs.Add(authEntryPath, "either username/password or auth string must be provided")
 		}
 		if hasAuthStr {
 			decoded, err := base64.StdEncoding.DecodeString(auth.Auth)
 			if err != nil {
-				verrs.Add("%s.auth: failed to decode base64 auth string: %v", authPathPrefix, err)
+				verrs.Add(authEntryPath+".auth", fmt.Sprintf("failed to decode base64 auth string: %v", err))
 			} else if !strings.Contains(string(decoded), ":") {
-				verrs.Add("%s.auth: decoded auth string must be in 'username:password' format", authPathPrefix)
+				verrs.Add(authEntryPath+".auth", "decoded auth string must be in 'username:password' format")
 			}
 		}
-		// ServerAddress in DockerRegistryAuth is optional and for informational purposes if used in a list,
-		// so no specific validation here unless we want to enforce it matches the map key.
 	}
 }

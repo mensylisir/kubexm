@@ -1,5 +1,10 @@
 package v1alpha1
 
+import (
+	"fmt" // Import fmt
+	"github.com/mensylisir/kubexm/pkg/util/validation"
+)
+
 // SetDefaults_CiliumConfig provides default values for CiliumConfig.
 // The CiliumConfig struct itself is defined in network_types.go.
 func SetDefaults_CiliumConfig(cfg *CiliumConfig) {
@@ -25,7 +30,7 @@ func SetDefaults_CiliumConfig(cfg *CiliumConfig) {
 
 // Validate_CiliumConfig validates CiliumConfig.
 // The CiliumConfig struct itself is defined in network_types.go.
-func Validate_CiliumConfig(cfg *CiliumConfig, verrs *ValidationErrors, pathPrefix string) {
+func Validate_CiliumConfig(cfg *CiliumConfig, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
@@ -33,21 +38,21 @@ func Validate_CiliumConfig(cfg *CiliumConfig, verrs *ValidationErrors, pathPrefi
 	if cfg.TunnelingMode != "" {
 		validTunnelModes := []string{"vxlan", "geneve", "disabled"}
 		if !containsString(validTunnelModes, cfg.TunnelingMode) {
-			verrs.Add("%s.tunnelingMode: invalid mode '%s', must be one of %v", pathPrefix, cfg.TunnelingMode, validTunnelModes)
+			verrs.Add(pathPrefix+".tunnelingMode", fmt.Sprintf("invalid mode '%s', must be one of %v", cfg.TunnelingMode, validTunnelModes))
 		}
 	}
 
 	if cfg.KubeProxyReplacement != "" {
 		validKPRModes := []string{"probe", "strict", "disabled"}
 		if !containsString(validKPRModes, cfg.KubeProxyReplacement) {
-			verrs.Add("%s.kubeProxyReplacement: invalid mode '%s', must be one of %v", pathPrefix, cfg.KubeProxyReplacement, validKPRModes)
+			verrs.Add(pathPrefix+".kubeProxyReplacement", fmt.Sprintf("invalid mode '%s', must be one of %v", cfg.KubeProxyReplacement, validKPRModes))
 		}
 	}
 
 	if cfg.IdentityAllocationMode != "" {
 		validIdentModes := []string{"crd", "kvstore"}
 		if !containsString(validIdentModes, cfg.IdentityAllocationMode) {
-			verrs.Add("%s.identityAllocationMode: invalid mode '%s', must be one of %v", pathPrefix, cfg.IdentityAllocationMode, validIdentModes)
+			verrs.Add(pathPrefix+".identityAllocationMode", fmt.Sprintf("invalid mode '%s', must be one of %v", cfg.IdentityAllocationMode, validIdentModes))
 		}
 	}
 

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 func TestSetDefaults_PreflightConfig(t *testing.T) {
@@ -28,10 +29,10 @@ func TestSetDefaults_PreflightConfig(t *testing.T) {
 
 func TestValidate_PreflightConfig(t *testing.T) {
 	validCfg := &PreflightConfig{MinCPUCores: int32Ptr(2), MinMemoryMB: uint64Ptr(2048), DisableSwap: boolPtr(true)}
-	SetDefaults_PreflightConfig(validCfg) // Ensure defaults are applied if any could affect validation (like DisableSwap)
-	verrsValid := &ValidationErrors{}
+	SetDefaults_PreflightConfig(validCfg)
+	verrsValid := &validation.ValidationErrors{}
 	Validate_PreflightConfig(validCfg, verrsValid, "spec.preflight")
-	assert.True(t, verrsValid.IsEmpty(), "Validate_PreflightConfig for valid config failed: %v", verrsValid.Error())
+	assert.False(t, verrsValid.HasErrors(), "Validate_PreflightConfig for valid config failed: %v", verrsValid.Error())
 
 	tests := []struct {
 		name        string
@@ -53,14 +54,14 @@ func TestValidate_PreflightConfig(t *testing.T) {
 				SetDefaults_PreflightConfig(tt.cfg)
 			}
 
-			verrs := &ValidationErrors{}
+			verrs := &validation.ValidationErrors{}
 			Validate_PreflightConfig(tt.cfg, verrs, "spec.preflight")
 
 			if tt.expectErr {
-				assert.False(t, verrs.IsEmpty(), "Expected error for %s, got none", tt.name)
+				assert.True(t, verrs.HasErrors(), "Expected error for %s, got none", tt.name)
 				assert.Contains(t, verrs.Error(), tt.wantErrMsg, "Error for %s = %v, want to contain %q", tt.name, verrs.Error(), tt.wantErrMsg)
 			} else {
-				assert.True(t, verrs.IsEmpty(), "Expected no error for %s, got: %v", tt.name, verrs.Error())
+				assert.False(t, verrs.HasErrors(), "Expected no error for %s, got: %v", tt.name, verrs.Error())
 			}
 		})
 	}

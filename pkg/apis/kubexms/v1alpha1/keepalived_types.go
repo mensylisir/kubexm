@@ -1,6 +1,10 @@
 package v1alpha1
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
+)
 
 const (
 	// KeepalivedAuthTypePass represents the PASS authentication type for Keepalived.
@@ -71,52 +75,48 @@ func SetDefaults_KeepalivedConfig(cfg *KeepalivedConfig) {
 // --- Validation Functions ---
 
 // Validate_KeepalivedConfig validates KeepalivedConfig.
-// Note: ValidationErrors type is expected to be defined in cluster_types.go or a common errors file.
-func Validate_KeepalivedConfig(cfg *KeepalivedConfig, verrs *ValidationErrors, pathPrefix string) {
+func Validate_KeepalivedConfig(cfg *KeepalivedConfig, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
-		return // Nothing to validate if the config section is absent
+		return
 	}
 	if cfg.SkipInstall != nil && *cfg.SkipInstall {
-		return // If skipping install, most other fields are not KubeXMS's concern to validate for setup.
+		return
 	}
 
 	if cfg.VRID == nil {
-		verrs.Add("%s.vrid: virtual router ID must be specified", pathPrefix)
-	} else if *cfg.VRID < 1 || *cfg.VRID > 255 { // VRID standard range is 1-255
-		verrs.Add("%s.vrid: must be between 1 and 255, got %d", pathPrefix, *cfg.VRID)
+		verrs.Add(pathPrefix+".vrid", "virtual router ID must be specified")
+	} else if *cfg.VRID < 1 || *cfg.VRID > 255 {
+		verrs.Add(pathPrefix+".vrid", fmt.Sprintf("must be between 1 and 255, got %d", *cfg.VRID))
 	}
 
 	if cfg.Priority == nil {
-		verrs.Add("%s.priority: must be specified for master/backup election", pathPrefix)
-	} else if *cfg.Priority < 1 || *cfg.Priority > 254 { // 0 and 255 are reserved by VRRP spec for master with VIP owner and preemption disable
-		verrs.Add("%s.priority: must be between 1 and 254, got %d", pathPrefix, *cfg.Priority)
+		verrs.Add(pathPrefix+".priority", "must be specified for master/backup election")
+	} else if *cfg.Priority < 1 || *cfg.Priority > 254 {
+		verrs.Add(pathPrefix+".priority", fmt.Sprintf("must be between 1 and 254, got %d", *cfg.Priority))
 	}
 
 	if cfg.Interface == nil || strings.TrimSpace(*cfg.Interface) == "" {
-		verrs.Add("%s.interface: network interface must be specified", pathPrefix)
+		verrs.Add(pathPrefix+".interface", "network interface must be specified")
 	}
 
-	// AuthType is defaulted to "PASS", so cfg.AuthType will not be nil if defaults were applied.
-	if !containsString(validKeepalivedAuthTypes, *cfg.AuthType) { // Use constant
-		verrs.Add("%s.authType: invalid value '%s', must be one of %v", pathPrefix, *cfg.AuthType, validKeepalivedAuthTypes)
+	if !containsString(validKeepalivedAuthTypes, *cfg.AuthType) {
+		verrs.Add(pathPrefix+".authType", fmt.Sprintf("invalid value '%s', must be one of %v", *cfg.AuthType, validKeepalivedAuthTypes))
 	}
 
-	if *cfg.AuthType == KeepalivedAuthTypePass { // Use constant
+	if *cfg.AuthType == KeepalivedAuthTypePass {
 		if cfg.AuthPass == nil || strings.TrimSpace(*cfg.AuthPass) == "" {
-			verrs.Add("%s.authPass: must be specified if authType is 'PASS'", pathPrefix)
+			verrs.Add(pathPrefix+".authPass", "must be specified if authType is 'PASS'")
 		} else if len(*cfg.AuthPass) > 8 {
-			// Older Keepalived versions have an 8-character limit for password.
-			// Newer versions might support longer. This is a conservative check.
-			verrs.Add("%s.authPass: password too long, ensure compatibility (max 8 chars for some versions)", pathPrefix)
+			verrs.Add(pathPrefix+".authPass", "password too long, ensure compatibility (max 8 chars for some versions)")
 		}
 	}
-	if cfg.AuthType != nil && *cfg.AuthType == "AH" && cfg.AuthPass != nil && *cfg.AuthPass != "" {
-		verrs.Add("%s.authPass: should not be specified if authType is 'AH'", pathPrefix)
+	if cfg.AuthType != nil && *cfg.AuthType == KeepalivedAuthTypeAH && cfg.AuthPass != nil && *cfg.AuthPass != "" { // Use constant
+		verrs.Add(pathPrefix+".authPass", "should not be specified if authType is 'AH'")
 	}
 
 	for i, line := range cfg.ExtraConfig {
-	   if strings.TrimSpace(line) == "" { // Disallow empty lines if they could break config
-		   verrs.Add("%s.extraConfig[%d]: extra config line cannot be empty", pathPrefix, i)
+	   if strings.TrimSpace(line) == "" {
+		   verrs.Add(fmt.Sprintf("%s.extraConfig[%d]", pathPrefix, i), "extra config line cannot be empty")
 	   }
 	}
 }

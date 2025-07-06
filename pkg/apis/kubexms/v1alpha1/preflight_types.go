@@ -1,5 +1,10 @@
 package v1alpha1
 
+import (
+	"fmt"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
+)
+
 // PreflightConfig holds configuration for preflight checks.
 type PreflightConfig struct {
 	MinCPUCores   *int32  `json:"minCPUCores,omitempty"`   // Pointer for optionality
@@ -22,14 +27,14 @@ func SetDefaults_PreflightConfig(cfg *PreflightConfig) {
 }
 
 // Validate_PreflightConfig validates PreflightConfig.
-func Validate_PreflightConfig(cfg *PreflightConfig, verrs *ValidationErrors, pathPrefix string) {
+func Validate_PreflightConfig(cfg *PreflightConfig, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
 	if cfg.MinCPUCores != nil && *cfg.MinCPUCores <= 0 {
-		verrs.Add("%s.minCPUCores: must be positive if specified, got %d", pathPrefix, *cfg.MinCPUCores)
+		verrs.Add(pathPrefix+".minCPUCores", fmt.Sprintf("must be positive if specified, got %d", *cfg.MinCPUCores))
 	}
 	if cfg.MinMemoryMB != nil && *cfg.MinMemoryMB <= 0 { // Memory should be positive
-		verrs.Add("%s.minMemoryMB: must be positive if specified, got %d", pathPrefix, *cfg.MinMemoryMB)
+		verrs.Add(pathPrefix+".minMemoryMB", fmt.Sprintf("must be positive if specified, got %d", *cfg.MinMemoryMB))
 	}
 }

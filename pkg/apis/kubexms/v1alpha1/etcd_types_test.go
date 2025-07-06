@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // Helper functions (intPtr, stringPtr, etc.) are expected to be in zz_helpers.go
@@ -29,7 +30,7 @@ func TestSetDefaults_EtcdConfig(t *testing.T) {
 				PeerPort:                     intPtr(2380),
 				DataDir:                      stringPtr("/var/lib/etcd"),
 				ClusterToken:                 "kubexm-etcd-default-token",
-				External:                     nil, // Not EtcdTypeExternal
+				External:                     nil,
 				ExtraArgs:                    []string{},
 				BackupDir:                    stringPtr("/var/backups/etcd"),
 				BackupPeriodHours:            intPtr(24),
@@ -55,7 +56,7 @@ func TestSetDefaults_EtcdConfig(t *testing.T) {
 				PeerPort:                     intPtr(2380),
 				DataDir:                      stringPtr("/var/lib/etcd"),
 				ClusterToken:                 "kubexm-etcd-default-token",
-				External:                     &ExternalEtcdConfig{Endpoints: []string{}}, // Initialized
+				External:                     &ExternalEtcdConfig{Endpoints: []string{}},
 				ExtraArgs:                    []string{},
 				BackupDir:                    stringPtr("/var/backups/etcd"),
 				BackupPeriodHours:            intPtr(24),
@@ -81,9 +82,9 @@ func TestSetDefaults_EtcdConfig(t *testing.T) {
 			},
 			expected: &EtcdConfig{
 				Type:                         EtcdTypeKubeXMSInternal,
-				ClientPort:                   intPtr(3379), // Not overridden
+				ClientPort:                   intPtr(3379),
 				PeerPort:                     intPtr(2380),
-				DataDir:                      stringPtr("/mnt/myetcd"), // Not overridden
+				DataDir:                      stringPtr("/mnt/myetcd"),
 				ClusterToken:                 "kubexm-etcd-default-token",
 				External:                     nil,
 				ExtraArgs:                    []string{},
@@ -97,7 +98,7 @@ func TestSetDefaults_EtcdConfig(t *testing.T) {
 				QuotaBackendBytes:            int64Ptr(2147483648),
 				MaxRequestBytes:              uintPtr(1572864),
 				Metrics:                      stringPtr("basic"),
-				LogLevel:                     stringPtr("debug"), // Not overridden
+				LogLevel:                     stringPtr("debug"),
 				MaxSnapshotsToKeep:           uintPtr(5),
 				MaxWALsToKeep:                uintPtr(5),
 			},
@@ -128,7 +129,7 @@ func TestValidate_EtcdConfig(t *testing.T) {
 			input: &EtcdConfig{
 				Type:         EtcdTypeExternal,
 				External:     &ExternalEtcdConfig{Endpoints: []string{"http://etcd1:2379", "http://etcd2:2379"}},
-				ClusterToken: "some-token", // Required even for external if not defaulted
+				ClusterToken: "some-token",
 			},
 		},
 		{
@@ -150,8 +151,8 @@ func TestValidate_EtcdConfig(t *testing.T) {
 				ElectionTimeoutMillis:        intPtr(1000),
 				SnapshotCount:                uint64Ptr(5000),
 				AutoCompactionRetentionHours: intPtr(1),
-				QuotaBackendBytes:            int64Ptr(4 * 1024 * 1024 * 1024), // 4GB
-				MaxRequestBytes:              uintPtr(2 * 1024 * 1024),       // 2MB
+				QuotaBackendBytes:            int64Ptr(4 * 1024 * 1024 * 1024),
+				MaxRequestBytes:              uintPtr(2 * 1024 * 1024),
 				Metrics:                      stringPtr("extensive"),
 				LogLevel:                     stringPtr("debug"),
 				MaxSnapshotsToKeep:           uintPtr(10),
@@ -162,16 +163,16 @@ func TestValidate_EtcdConfig(t *testing.T) {
 
 	for _, tt := range validCases {
 		t.Run("Valid_"+tt.name, func(t *testing.T) {
-			SetDefaults_EtcdConfig(tt.input) // Apply defaults
-			verrs := &ValidationErrors{}
+			SetDefaults_EtcdConfig(tt.input)
+			verrs := &validation.ValidationErrors{}
 			Validate_EtcdConfig(tt.input, verrs, "spec.etcd")
-			assert.True(t, verrs.IsEmpty(), "Expected no validation errors for '%s', but got: %s", tt.name, verrs.Error())
+			assert.False(t, verrs.HasErrors(), "Expected no validation errors for '%s', but got: %s", tt.name, verrs.Error())
 		})
 	}
 
 	invalidCases := []struct {
 		name        string
-		cfgBuilder  func() *EtcdConfig // Use a builder to avoid modifying shared input
+		cfgBuilder  func() *EtcdConfig
 		errContains []string
 	}{
 		{"invalid type", func() *EtcdConfig { return &EtcdConfig{Type: "invalid-type"} }, []string{"invalid type 'invalid-type'"}},
@@ -221,10 +222,10 @@ func TestValidate_EtcdConfig(t *testing.T) {
 	for _, tt := range invalidCases {
 		t.Run("Invalid_"+tt.name, func(t *testing.T) {
 			cfg := tt.cfgBuilder()
-			SetDefaults_EtcdConfig(cfg) // Apply defaults before validation
-			verrs := &ValidationErrors{}
+			SetDefaults_EtcdConfig(cfg)
+			verrs := &validation.ValidationErrors{}
 			Validate_EtcdConfig(cfg, verrs, "spec.etcd")
-			assert.False(t, verrs.IsEmpty(), "Expected validation errors for '%s', but got none", tt.name)
+			assert.True(t, verrs.HasErrors(), "Expected validation errors for '%s', but got none", tt.name)
 			if len(tt.errContains) > 0 {
 				fullError := verrs.Error()
 				for _, errStr := range tt.errContains {
@@ -260,8 +261,6 @@ func TestEtcdConfig_GetPortsAndDataDir(t *testing.T) {
 			PeerPort:   intPtr(customPeerPort),
 			DataDir:    stringPtr(customDataDir),
 		}
-		// Note: Getters should work correctly even if defaults haven't been run on the whole struct,
-		// as long as the specific fields they check are set or nil.
 		assert.Equal(t, customClientPort, specifiedCfg.GetClientPort())
 		assert.Equal(t, customPeerPort, specifiedCfg.GetPeerPort())
 		assert.Equal(t, customDataDir, specifiedCfg.GetDataDir())
@@ -269,13 +268,12 @@ func TestEtcdConfig_GetPortsAndDataDir(t *testing.T) {
 
 	t.Run("config with some nil fields (should use getter defaults)", func(t *testing.T) {
 		partialCfg := &EtcdConfig{
-			ClientPort: nil, // Explicitly nil
+			ClientPort: nil,
 			PeerPort: intPtr(12345),
 			DataDir: nil,
 		}
 		assert.Equal(t, 2379, partialCfg.GetClientPort(), "Client port should fallback to getter's default")
 		assert.Equal(t, 12345, partialCfg.GetPeerPort())
 		assert.Equal(t, "/var/lib/etcd", partialCfg.GetDataDir(), "DataDir should fallback to getter's default")
-
 	})
 }
