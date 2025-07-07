@@ -6,8 +6,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"strings"
 	"time"
-	"github.com/mensylisir/kubexm/pkg/util" // Ensure util is imported
-	"github.com/mensylisir/kubexm/pkg/util/validation" // Import validation package
+	"github.com/mensylisir/kubexm/pkg/util"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
+	"github.com/mensylisir/kubexm/pkg/common" // Import common package
 )
 
 const (
@@ -466,6 +467,30 @@ func Validate_Cluster(cfg *Cluster) error {
 
 	if cfg.Spec.HighAvailability != nil {
 		Validate_HighAvailabilityConfig(cfg.Spec.HighAvailability, verrs, "spec.highAvailability")
+		// Enhanced HA validation related to Roles and ControlPlaneEndpoint
+		if cfg.Spec.HighAvailability.Enabled != nil && *cfg.Spec.HighAvailability.Enabled &&
+			cfg.Spec.HighAvailability.External != nil &&
+			(cfg.Spec.HighAvailability.External.Type == common.ExternalLBTypeKubexmKH || cfg.Spec.HighAvailability.External.Type == common.ExternalLBTypeKubexmKN) {
+
+			foundLBRole := false
+			if cfg.Spec.RoleGroups != nil && cfg.Spec.RoleGroups.LoadBalancer.Hosts != nil && len(cfg.Spec.RoleGroups.LoadBalancer.Hosts) > 0 {
+				foundLBRole = true
+			} else {
+				for _, host := range cfg.Spec.Hosts {
+					if util.ContainsString(host.Roles, common.RoleLoadBalancer) {
+						foundLBRole = true
+						break
+					}
+				}
+			}
+			if !foundLBRole {
+				verrs.Add("spec.highAvailability.external", fmt.Sprintf("type '%s' requires at least one host with role '%s' or hosts defined in roleGroups.loadbalancer", cfg.Spec.HighAvailability.External.Type, common.RoleLoadBalancer))
+			}
+
+			if cfg.Spec.ControlPlaneEndpoint == nil || strings.TrimSpace(cfg.Spec.ControlPlaneEndpoint.Address) == "" {
+				verrs.Add("spec.controlPlaneEndpoint.address", fmt.Sprintf("must be set to the VIP address when HA type is '%s'", cfg.Spec.HighAvailability.External.Type))
+			}
+		}
 	}
 	if cfg.Spec.Preflight != nil {
 		Validate_PreflightConfig(cfg.Spec.Preflight, verrs, "spec.preflight")

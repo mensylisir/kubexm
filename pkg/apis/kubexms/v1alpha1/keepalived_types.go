@@ -99,19 +99,26 @@ func Validate_KeepalivedConfig(cfg *KeepalivedConfig, verrs *validation.Validati
 		verrs.Add(pathPrefix+".interface", "network interface must be specified")
 	}
 
-	if !containsString(validKeepalivedAuthTypes, *cfg.AuthType) {
-		verrs.Add(pathPrefix+".authType", fmt.Sprintf("invalid value '%s', must be one of %v", *cfg.AuthType, validKeepalivedAuthTypes))
-	}
-
-	if *cfg.AuthType == KeepalivedAuthTypePass {
-		if cfg.AuthPass == nil || strings.TrimSpace(*cfg.AuthPass) == "" {
-			verrs.Add(pathPrefix+".authPass", "must be specified if authType is 'PASS'")
-		} else if len(*cfg.AuthPass) > 8 {
-			verrs.Add(pathPrefix+".authPass", "password too long, ensure compatibility (max 8 chars for some versions)")
+	// AuthType validation
+	if cfg.AuthType == nil { // defensive check, though SetDefaults should prevent this
+		verrs.Add(pathPrefix+".authType", "is required and should have a default value 'PASS'")
+	} else { // AuthType is not nil, proceed with validation
+		if !containsString(validKeepalivedAuthTypes, *cfg.AuthType) {
+			verrs.Add(pathPrefix+".authType", fmt.Sprintf("invalid value '%s', must be one of %v", *cfg.AuthType, validKeepalivedAuthTypes))
 		}
-	}
-	if cfg.AuthType != nil && *cfg.AuthType == KeepalivedAuthTypeAH && cfg.AuthPass != nil && *cfg.AuthPass != "" { // Use constant
-		verrs.Add(pathPrefix+".authPass", "should not be specified if authType is 'AH'")
+
+		// AuthPass validation based on AuthType
+		if *cfg.AuthType == KeepalivedAuthTypePass {
+			if cfg.AuthPass == nil || strings.TrimSpace(*cfg.AuthPass) == "" {
+				verrs.Add(pathPrefix+".authPass", "must be specified if authType is 'PASS'")
+			} else if len(*cfg.AuthPass) > 8 {
+				verrs.Add(pathPrefix+".authPass", "password too long, ensure compatibility (max 8 chars for some versions)")
+			}
+		} else if *cfg.AuthType == KeepalivedAuthTypeAH { // AuthType is known to be non-nil here
+			if cfg.AuthPass != nil && *cfg.AuthPass != "" {
+				verrs.Add(pathPrefix+".authPass", "should not be specified if authType is 'AH'")
+			}
+		}
 	}
 
 	for i, line := range cfg.ExtraConfig {

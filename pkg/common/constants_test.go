@@ -163,3 +163,28 @@ func TestCacheKeyConstants(t *testing.T) { // Added test for cache keys
 		t.Errorf("CacheKeyClusterCAKey constant is incorrect: got %s", CacheKeyClusterCAKey)
 	}
 }
+
+func TestLoadBalancerTypeConstants(t *testing.T) {
+	t.Run("InternalLBTypes", func(t *testing.T) {
+		if InternalLBTypeHAProxy != "haproxy" {
+			t.Errorf("InternalLBTypeHAProxy is incorrect")
+		}
+		if InternalLBTypeNginx != "nginx" {
+			t.Errorf("InternalLBTypeNginx is incorrect")
+		}
+		if InternalLBTypeKubeVIP != "kube-vip" {
+			t.Errorf("InternalLBTypeKubeVIP is incorrect")
+		}
+	})
+	t.Run("ExternalLBTypes", func(t *testing.T) {
+		if ExternalLBTypeKubexmKH != "kubexm-kh" {
+			t.Errorf("ExternalLBTypeKubexmKH is incorrect")
+		}
+		if ExternalLBTypeKubexmKN != "kubexm-kn" {
+			t.Errorf("ExternalLBTypeKubexmKN is incorrect")
+		}
+		if ExternalLBTypeExternal != "external" {
+			t.Errorf("ExternalLBTypeExternal is incorrect")
+		}
+	})
+}

@@ -207,6 +207,7 @@ spec:
     enabled: true
     external:
       type: ManagedKeepalivedHAProxy
+      loadBalancerHostGroupName: "test-lb-group" # Added for validation
       keepalived:
         interface: "eth1"
         vrid: 101

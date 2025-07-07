@@ -136,20 +136,22 @@ func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *validation.ValidationErro
 		}
 	}
 
-	if *cfg.FrontendPort <= 0 || *cfg.FrontendPort > 65535 {
+	if cfg.FrontendPort == nil {
+		verrs.Add(pathPrefix+".frontendPort", "is required and should have a default value")
+	} else if *cfg.FrontendPort <= 0 || *cfg.FrontendPort > 65535 {
 		verrs.Add(pathPrefix+".frontendPort", fmt.Sprintf("invalid port %d", *cfg.FrontendPort))
 	}
 
-	if cfg.Mode != nil && *cfg.Mode != "" {
-		if !util.ContainsString(validHAProxyModes, *cfg.Mode) {
-			verrs.Add(pathPrefix+".mode", fmt.Sprintf("invalid mode '%s', must be one of %v or empty for default", *cfg.Mode, validHAProxyModes))
-		}
+	if cfg.Mode == nil {
+		verrs.Add(pathPrefix+".mode", "is required and should have a default value 'tcp'")
+	} else if *cfg.Mode != "" && !util.ContainsString(validHAProxyModes, *cfg.Mode) {
+		verrs.Add(pathPrefix+".mode", fmt.Sprintf("invalid mode '%s', must be one of %v or empty for default", *cfg.Mode, validHAProxyModes))
 	}
 
-	if cfg.BalanceAlgorithm != nil && *cfg.BalanceAlgorithm != "" {
-		if !util.ContainsString(validHAProxyBalanceAlgorithms, *cfg.BalanceAlgorithm) {
-			verrs.Add(pathPrefix+".balanceAlgorithm", fmt.Sprintf("invalid algorithm '%s', must be one of %v", *cfg.BalanceAlgorithm, validHAProxyBalanceAlgorithms))
-		}
+	if cfg.BalanceAlgorithm == nil {
+		verrs.Add(pathPrefix+".balanceAlgorithm", "is required and should have a default value 'roundrobin'")
+	} else if *cfg.BalanceAlgorithm != "" && !util.ContainsString(validHAProxyBalanceAlgorithms, *cfg.BalanceAlgorithm) {
+		verrs.Add(pathPrefix+".balanceAlgorithm", fmt.Sprintf("invalid algorithm '%s', must be one of %v", *cfg.BalanceAlgorithm, validHAProxyBalanceAlgorithms))
 	}
 
 	if len(cfg.BackendServers) == 0 {

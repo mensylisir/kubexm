@@ -1,7 +1,7 @@
-package module
+package kubernetes
 
 import (
-	// "fmt"
+	"github.com/mensylisir/kubexm/pkg/module"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
 	// containerdtask "github.com/mensylisir/kubexm/pkg/task/containerd"
@@ -13,13 +13,13 @@ import (
 // CoreComponentsModule groups tasks for installing essential cluster components
 // like container runtime, etcd, Kubernetes binaries, and pulling core images.
 type CoreComponentsModule struct {
-	BaseModule
+	module.BaseModule
 }
 
 // NewCoreComponentsModule creates a new CoreComponentsModule.
-func NewCoreComponentsModule() Module {
+func NewCoreComponentsModule() module.Module {
 	return &CoreComponentsModule{
-		BaseModule: NewBaseModule(
+		BaseModule: module.NewBaseModule(
 			"CoreComponentsInstallation",
 			[]task.Task{
 				// Tasks will be instantiated here based on config (e.g., Containerd or Docker)
@@ -51,4 +51,4 @@ func (m *CoreComponentsModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionF
 	return task.NewEmptyFragment(), nil // Placeholder
 }
 
-var _ Module = (*CoreComponentsModule)(nil)
+var _ module.Module = (*CoreComponentsModule)(nil)

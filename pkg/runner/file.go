@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mensylisir/kubexm/pkg/connector" // Corrected import path
+	"github.com/mensylisir/kubexm/pkg/util"
 )
 
 // Exists checks if a file or directory exists at the given path.
@@ -120,7 +121,7 @@ func (r *defaultRunner) TouchFile(ctx context.Context, conn connector.Connector,
 		}
 	}
 
-	cmd := fmt.Sprintf("touch %s", shellEscape(path))
+	cmd := fmt.Sprintf("touch %s", util.ShellEscape(path))
 	_, stderr, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: sudo})
 	if err != nil {
 		return fmt.Errorf("failed to touch file %s: %w (stderr: %s)", path, err, string(stderr))
@@ -140,7 +141,7 @@ func (r *defaultRunner) GetDiskUsage(ctx context.Context, conn connector.Connect
 		return
 	}
 
-	cmd := fmt.Sprintf("df -BM -P %s", shellEscape(path))
+	cmd := fmt.Sprintf("df -BM -P %s", util.ShellEscape(path))
 	stdoutBytes, stderrBytes, execErr := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: false})
 
 	if execErr != nil {
@@ -335,8 +336,8 @@ func (r *defaultRunner) EnsureMount(ctx context.Context, conn connector.Connecto
 			mountCmdParts = append(mountCmdParts, "-o", strings.Join(options, ","))
 		}
 		mountCmdParts = append(mountCmdParts, "-t", fsType)
-		mountCmdParts = append(mountCmdParts, shellEscape(device))
-		mountCmdParts = append(mountCmdParts, shellEscape(mountPoint))
+		mountCmdParts = append(mountCmdParts, util.ShellEscape(device))
+		mountCmdParts = append(mountCmdParts, util.ShellEscape(mountPoint))
 		mountCmd := strings.Join(mountCmdParts, " ")
 
 		_, stderr, mountErr := r.RunWithOptions(ctx, conn, mountCmd, &connector.ExecOptions{Sudo: true})
@@ -359,13 +360,13 @@ func (r *defaultRunner) EnsureMount(ctx context.Context, conn connector.Connecto
 		// A more robust check would parse /etc/fstab properly.
 		// This simple grep checks if an entry for the mountPoint exists.
 		// It doesn't verify if the existing entry is correct (device, fsType, options).
-		checkFstabCmd := fmt.Sprintf("grep -qE '^[[:space:]]*[^#]+[[:space:]]+%s[[:space:]]' /etc/fstab", shellEscape(mountPoint))
+		checkFstabCmd := fmt.Sprintf("grep -qE '^[[:space:]]*[^#]+[[:space:]]+%s[[:space:]]' /etc/fstab", util.ShellEscape(mountPoint))
 		entryExistsInFstab, _ := r.Check(ctx, conn, checkFstabCmd, false) // Ignore error, if grep fails, assume not found.
 
 		if !entryExistsInFstab {
 			// Append the new entry. Use shell redirection with sudo via sh -c.
 			// Ensure the entryLine is properly quoted for the shell command.
-			escapedFstabEntry := shellEscape(fstabEntry) // Escape for the 'echo' command
+			escapedFstabEntry := util.ShellEscape(fstabEntry) // Escape for the 'echo' command
 			appendCmd := fmt.Sprintf("sh -c 'echo %s >> /etc/fstab'", escapedFstabEntry)
 
 			_, stderr, appendErr := r.RunWithOptions(ctx, conn, appendCmd, &connector.ExecOptions{Sudo: true})
@@ -400,7 +401,7 @@ func (r *defaultRunner) Unmount(ctx context.Context, conn connector.Connector, m
 	if force {
 		cmdParts = append(cmdParts, "-f") // Force unmount
 	}
-	cmdParts = append(cmdParts, shellEscape(mountPoint))
+	cmdParts = append(cmdParts, util.ShellEscape(mountPoint))
 	cmd := strings.Join(cmdParts, " ")
 
 	_, stderr, execErr := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: sudo})
@@ -448,7 +449,7 @@ func (r *defaultRunner) IsMounted(ctx context.Context, conn connector.Connector,
 
 	// First, check if `mountpoint` command exists.
 	if _, err := r.LookPath(ctx, conn, "mountpoint"); err == nil {
-		cmd := fmt.Sprintf("mountpoint -q %s", shellEscape(path)) // Path is used directly
+		cmd := fmt.Sprintf("mountpoint -q %s", util.ShellEscape(path)) // Path is used directly
 		// No sudo needed for `mountpoint -q`
 		return r.Check(ctx, conn, cmd, false)
 	}
@@ -531,7 +532,7 @@ func (r *defaultRunner) MakeFilesystem(ctx context.Context, conn connector.Conne
 		// For this implementation, we'll use a common one and note the caveat.
 		cmdParts = append(cmdParts, "-f") // General force flag
 	}
-	cmdParts = append(cmdParts, shellEscape(device))
+	cmdParts = append(cmdParts, util.ShellEscape(device))
 	cmd := strings.Join(cmdParts, " ")
 
 	_, stderr, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true})
@@ -574,7 +575,7 @@ func (r *defaultRunner) CreateSymlink(ctx context.Context, conn connector.Connec
 	// If more precise control over directory symlinking is needed, -T or -n flags with `ln` could be used,
 	// potentially requiring a check if target is a directory.
 
-	cmd := fmt.Sprintf("ln -sf %s %s", shellEscape(target), shellEscape(linkPath))
+	cmd := fmt.Sprintf("ln -sf %s %s", util.ShellEscape(target), util.ShellEscape(linkPath))
 	_, stderr, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: sudo})
 	if err != nil {
 		return fmt.Errorf("failed to create symlink from %s to %s: %w (stderr: %s)", target, linkPath, err, string(stderr))

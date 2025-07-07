@@ -32,7 +32,7 @@ func pkiPathForCluster(clusterName string) (string, error) {
 		return "", fmt.Errorf("failed to get user home directory: %w", err)
 	}
 	// $HOME/.kubexm/clusters/<cluster_name>/pki
-	return filepath.Join(homeDir, common.DefaultKubeXMRootDir, common.DefaultClustersDir, clusterName, common.DefaultPKIDir), nil
+	return filepath.Join(homeDir, common.KubexmRootDirName, "clusters", clusterName, "pki"), nil
 }
 
 // Define a list of well-known certificate relative paths within the PKI directory.

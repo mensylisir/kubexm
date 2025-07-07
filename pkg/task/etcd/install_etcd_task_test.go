@@ -21,7 +21,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step/common" as commonsteps // Alias to avoid clash with package 'common'
 	stepetcd "github.com/mensylisir/kubexm/pkg/step/etcd"
 	"github.com/mensylisir/kubexm/pkg/task"
-	taskmocks "github.com/mensylisir/kubexm/pkg/task/mocks" // For task.MockTaskContext
+	taskmocks "github.com/mensylisir/kubexm/pkg/task/mocks"
 )
 
 // TestInstallETCDTask_Plan_BinaryInstall_SingleNode tests the Plan method for a single Etcd node, binary install.

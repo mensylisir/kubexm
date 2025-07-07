@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+
 	"github.com/mensylisir/kubexm/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/util"
 )
 
 const (
@@ -21,19 +23,19 @@ func (r *defaultRunner) HelmInstall(ctx context.Context, conn connector.Connecto
 	if releaseName == "" || chartPath == "" { return errors.New("releaseName and chartPath are required") }
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "helm", "install", shellEscape(releaseName), shellEscape(chartPath))
-	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace)) }
-	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath)) }
+	cmdArgs = append(cmdArgs, "helm", "install", util.ShellEscape(releaseName), util.ShellEscape(chartPath))
+	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace)) }
+	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath)) }
 	if opts.CreateNamespace { cmdArgs = append(cmdArgs, "--create-namespace") }
-	if opts.Version != "" { cmdArgs = append(cmdArgs, "--version", shellEscape(opts.Version)) }
-	for _, vf := range opts.ValuesFiles { cmdArgs = append(cmdArgs, "--values", shellEscape(vf)) }
-	for _, sv := range opts.SetValues { cmdArgs = append(cmdArgs, "--set", shellEscape(sv)) }
+	if opts.Version != "" { cmdArgs = append(cmdArgs, "--version", util.ShellEscape(opts.Version)) }
+	for _, vf := range opts.ValuesFiles { cmdArgs = append(cmdArgs, "--values", util.ShellEscape(vf)) }
+	for _, sv := range opts.SetValues { cmdArgs = append(cmdArgs, "--set", util.ShellEscape(sv)) }
 	if opts.Wait { cmdArgs = append(cmdArgs, "--wait") }
 	if opts.Timeout > 0 { cmdArgs = append(cmdArgs, "--timeout", opts.Timeout.String()) }
 	if opts.Atomic { cmdArgs = append(cmdArgs, "--atomic") }
 	if opts.DryRun { cmdArgs = append(cmdArgs, "--dry-run") }
 	if opts.Devel { cmdArgs = append(cmdArgs, "--devel") }
-	if opts.Description != "" { cmdArgs = append(cmdArgs, "--description", shellEscape(opts.Description)) }
+	if opts.Description != "" { cmdArgs = append(cmdArgs, "--description", util.ShellEscape(opts.Description)) }
 
 	cmd := strings.Join(cmdArgs, " ")
 	execTimeout := DefaultHelmTimeout; if opts.Timeout > 0 { execTimeout = opts.Timeout + (1 * time.Minute) }
@@ -51,9 +53,9 @@ func (r *defaultRunner) HelmUninstall(ctx context.Context, conn connector.Connec
 	if releaseName == "" { return errors.New("releaseName is required") }
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "helm", "uninstall", shellEscape(releaseName))
-	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace)) }
-	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath)) }
+	cmdArgs = append(cmdArgs, "helm", "uninstall", util.ShellEscape(releaseName))
+	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace)) }
+	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath)) }
 	if opts.KeepHistory { cmdArgs = append(cmdArgs, "--keep-history") }
 	if opts.Timeout > 0 { cmdArgs = append(cmdArgs, "--timeout", opts.Timeout.String()) }
 	if opts.DryRun { cmdArgs = append(cmdArgs, "--dry-run") }
@@ -73,11 +75,11 @@ func (r *defaultRunner) HelmList(ctx context.Context, conn connector.Connector, 
 	if conn == nil { return nil, errors.New("connector cannot be nil") }
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "helm", "list", "-o", "json")
-	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace)) }
-	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath)) }
+	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace)) }
+	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath)) }
 	if opts.AllNamespaces { cmdArgs = append(cmdArgs, "--all-namespaces") }
-	if opts.Filter != "" { cmdArgs = append(cmdArgs, "--filter", shellEscape(opts.Filter)) }
-	if opts.Selector != "" { cmdArgs = append(cmdArgs, "--selector", shellEscape(opts.Selector)) }
+	if opts.Filter != "" { cmdArgs = append(cmdArgs, "--filter", util.ShellEscape(opts.Filter)) }
+	if opts.Selector != "" { cmdArgs = append(cmdArgs, "--selector", util.ShellEscape(opts.Selector)) }
 	if opts.Max > 0 { cmdArgs = append(cmdArgs, "--max", fmt.Sprintf("%d", opts.Max)) }
 	if opts.Offset > 0 { cmdArgs = append(cmdArgs, "--offset", fmt.Sprintf("%d", opts.Offset)) }
 	if opts.ByDate { cmdArgs = append(cmdArgs, "--date") }
@@ -103,9 +105,9 @@ func (r *defaultRunner) HelmStatus(ctx context.Context, conn connector.Connector
 	if conn == nil { return nil, errors.New("connector cannot be nil") }
 	if releaseName == "" { return nil, errors.New("releaseName is required") }
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "helm", "status", shellEscape(releaseName), "-o", "json")
-	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace)) }
-	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath)) }
+	cmdArgs = append(cmdArgs, "helm", "status", util.ShellEscape(releaseName), "-o", "json")
+	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace)) }
+	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath)) }
 	if opts.Revision > 0 { cmdArgs = append(cmdArgs, "--revision", fmt.Sprintf("%d", opts.Revision)) }
 
 	stdout, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultHelmTimeout})
@@ -125,12 +127,12 @@ func (r *defaultRunner) HelmRepoAdd(ctx context.Context, conn connector.Connecto
 	if conn == nil { return errors.New("connector cannot be nil") }
 	if name == "" || url == "" { return errors.New("name and url are required") }
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "helm", "repo", "add", shellEscape(name), shellEscape(url))
-	if opts.Username != "" { cmdArgs = append(cmdArgs, "--username", shellEscape(opts.Username)) }
-	if opts.Password != "" { cmdArgs = append(cmdArgs, "--password", shellEscape(opts.Password)) }
-	if opts.CAFile != "" { cmdArgs = append(cmdArgs, "--ca-file", shellEscape(opts.CAFile)) }
-	if opts.CertFile != "" { cmdArgs = append(cmdArgs, "--cert-file", shellEscape(opts.CertFile)) }
-	if opts.KeyFile != "" { cmdArgs = append(cmdArgs, "--key-file", shellEscape(opts.KeyFile)) }
+	cmdArgs = append(cmdArgs, "helm", "repo", "add", util.ShellEscape(name), util.ShellEscape(url))
+	if opts.Username != "" { cmdArgs = append(cmdArgs, "--username", util.ShellEscape(opts.Username)) }
+	if opts.Password != "" { cmdArgs = append(cmdArgs, "--password", util.ShellEscape(opts.Password)) }
+	if opts.CAFile != "" { cmdArgs = append(cmdArgs, "--ca-file", util.ShellEscape(opts.CAFile)) }
+	if opts.CertFile != "" { cmdArgs = append(cmdArgs, "--cert-file", util.ShellEscape(opts.CertFile)) }
+	if opts.KeyFile != "" { cmdArgs = append(cmdArgs, "--key-file", util.ShellEscape(opts.KeyFile)) }
 	if opts.Insecure { cmdArgs = append(cmdArgs, "--insecure-skip-tls-verify") }
 	if opts.ForceUpdate { cmdArgs = append(cmdArgs, "--force-update") }
 	if opts.PassCredentials { cmdArgs = append(cmdArgs, "--pass-credentials") }
@@ -140,8 +142,6 @@ func (r *defaultRunner) HelmRepoAdd(ctx context.Context, conn connector.Connecto
 		if strings.Contains(string(stderr), "already exists") && !opts.ForceUpdate {
 			return errors.Wrapf(err, "helm repo add '%s' failed: already exists and --force-update not used. Stderr: %s", name, string(stderr))
 		}
-		// If --force-update is true and it "already exists", helm usually updates it silently or with a success message.
-		// If it still errors with "already exists" even with force, that's an unexpected Helm behavior or error.
 		return errors.Wrapf(err, "helm repo add '%s' failed. Stderr: %s", name, string(stderr))
 	}
 	return nil
@@ -152,7 +152,7 @@ func (r *defaultRunner) HelmRepoUpdate(ctx context.Context, conn connector.Conne
 	if conn == nil { return errors.New("connector cannot be nil") }
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "helm", "repo", "update")
-	for _, name := range repoNames { cmdArgs = append(cmdArgs, shellEscape(name)) }
+	for _, name := range repoNames { cmdArgs = append(cmdArgs, util.ShellEscape(name)) }
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: false, Timeout: 5 * time.Minute})
 	if err != nil { return errors.Wrapf(err, "helm repo update failed. Stderr: %s", string(stderr)) }
 	return nil
@@ -175,10 +175,10 @@ func (r *defaultRunner) HelmSearchRepo(ctx context.Context, conn connector.Conne
 	if conn == nil { return nil, errors.New("connector cannot be nil") }
 	if keyword == "" { return nil, errors.New("keyword is required") }
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "helm", "search", "repo", shellEscape(keyword), "-o", "json")
+	cmdArgs = append(cmdArgs, "helm", "search", "repo", util.ShellEscape(keyword), "-o", "json")
 	if opts.Regexp { cmdArgs = append(cmdArgs, "--regexp") }
 	if opts.Devel { cmdArgs = append(cmdArgs, "--devel") }
-	if opts.Version != "" { cmdArgs = append(cmdArgs, "--version", shellEscape(opts.Version)) }
+	if opts.Version != "" { cmdArgs = append(cmdArgs, "--version", util.ShellEscape(opts.Version)) }
 	if opts.Versions { cmdArgs = append(cmdArgs, "--versions") }
 
 	stdout, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultHelmTimeout})
@@ -196,26 +196,26 @@ func (r *defaultRunner) HelmPull(ctx context.Context, conn connector.Connector, 
 	if conn == nil { return "", errors.New("connector cannot be nil") }
 	if chartPath == "" { return "", errors.New("chartPath is required") }
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "helm", "pull", shellEscape(chartPath))
-	if opts.Destination != "" { cmdArgs = append(cmdArgs, "--destination", shellEscape(opts.Destination)) }
+	cmdArgs = append(cmdArgs, "helm", "pull", util.ShellEscape(chartPath))
+	if opts.Destination != "" { cmdArgs = append(cmdArgs, "--destination", util.ShellEscape(opts.Destination)) }
 	if opts.Prov { cmdArgs = append(cmdArgs, "--prov") }
 	if opts.Untar {
 		cmdArgs = append(cmdArgs, "--untar")
-		if opts.UntarDir != "" { cmdArgs = append(cmdArgs, "--untardir", shellEscape(opts.UntarDir)) }
+		if opts.UntarDir != "" { cmdArgs = append(cmdArgs, "--untardir", util.ShellEscape(opts.UntarDir)) }
 	}
 	if opts.Verify {
 		cmdArgs = append(cmdArgs, "--verify")
-		if opts.Keyring != "" { cmdArgs = append(cmdArgs, "--keyring", shellEscape(opts.Keyring)) }
+		if opts.Keyring != "" { cmdArgs = append(cmdArgs, "--keyring", util.ShellEscape(opts.Keyring)) }
 	}
-	if opts.Version != "" { cmdArgs = append(cmdArgs, "--version", shellEscape(opts.Version)) }
-	if opts.CAFile != "" { cmdArgs = append(cmdArgs, "--ca-file", shellEscape(opts.CAFile)) }
-	if opts.CertFile != "" { cmdArgs = append(cmdArgs, "--cert-file", shellEscape(opts.CertFile)) }
-	if opts.KeyFile != "" { cmdArgs = append(cmdArgs, "--key-file", shellEscape(opts.KeyFile)) }
+	if opts.Version != "" { cmdArgs = append(cmdArgs, "--version", util.ShellEscape(opts.Version)) }
+	if opts.CAFile != "" { cmdArgs = append(cmdArgs, "--ca-file", util.ShellEscape(opts.CAFile)) }
+	if opts.CertFile != "" { cmdArgs = append(cmdArgs, "--cert-file", util.ShellEscape(opts.CertFile)) }
+	if opts.KeyFile != "" { cmdArgs = append(cmdArgs, "--key-file", util.ShellEscape(opts.KeyFile)) }
 	if opts.Insecure { cmdArgs = append(cmdArgs, "--insecure-skip-tls-verify") }
 	if opts.Devel { cmdArgs = append(cmdArgs, "--devel") }
 	if opts.PassCredentials { cmdArgs = append(cmdArgs, "--pass-credentials") }
-	if opts.Username != "" { cmdArgs = append(cmdArgs, "--username", shellEscape(opts.Username)) }
-	if opts.Password != "" { cmdArgs = append(cmdArgs, "--password", shellEscape(opts.Password)) }
+	if opts.Username != "" { cmdArgs = append(cmdArgs, "--username", util.ShellEscape(opts.Username)) }
+	if opts.Password != "" { cmdArgs = append(cmdArgs, "--password", util.ShellEscape(opts.Password)) }
 
 	stdout, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: 5 * time.Minute})
 	if err != nil { return "", errors.Wrapf(err, "helm pull for '%s' failed. Stderr: %s", chartPath, string(stderr)) }
@@ -227,16 +227,16 @@ func (r *defaultRunner) HelmPackage(ctx context.Context, conn connector.Connecto
 	if conn == nil { return "", errors.New("connector cannot be nil") }
 	if chartPath == "" { return "", errors.New("chartPath is required") }
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "helm", "package", shellEscape(chartPath))
-	if opts.Destination != "" { cmdArgs = append(cmdArgs, "--destination", shellEscape(opts.Destination)) }
+	cmdArgs = append(cmdArgs, "helm", "package", util.ShellEscape(chartPath))
+	if opts.Destination != "" { cmdArgs = append(cmdArgs, "--destination", util.ShellEscape(opts.Destination)) }
 	if opts.Sign {
 		cmdArgs = append(cmdArgs, "--sign")
-		if opts.Key != "" { cmdArgs = append(cmdArgs, "--key", shellEscape(opts.Key)) }
-		if opts.Keyring != "" { cmdArgs = append(cmdArgs, "--keyring", shellEscape(opts.Keyring)) }
-		if opts.PassphraseFile != "" { cmdArgs = append(cmdArgs, "--passphrase-file", shellEscape(opts.PassphraseFile)) }
+		if opts.Key != "" { cmdArgs = append(cmdArgs, "--key", util.ShellEscape(opts.Key)) }
+		if opts.Keyring != "" { cmdArgs = append(cmdArgs, "--keyring", util.ShellEscape(opts.Keyring)) }
+		if opts.PassphraseFile != "" { cmdArgs = append(cmdArgs, "--passphrase-file", util.ShellEscape(opts.PassphraseFile)) }
 	}
-	if opts.Version != "" { cmdArgs = append(cmdArgs, "--version", shellEscape(opts.Version)) }
-	if opts.AppVersion != "" { cmdArgs = append(cmdArgs, "--app-version", shellEscape(opts.AppVersion)) }
+	if opts.Version != "" { cmdArgs = append(cmdArgs, "--version", util.ShellEscape(opts.Version)) }
+	if opts.AppVersion != "" { cmdArgs = append(cmdArgs, "--app-version", util.ShellEscape(opts.AppVersion)) }
 	if opts.DependencyUpdate { cmdArgs = append(cmdArgs, "--dependency-update") }
 
 	stdout, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultHelmTimeout})
@@ -252,13 +252,13 @@ func (r *defaultRunner) HelmUpgrade(ctx context.Context, conn connector.Connecto
 	if conn == nil { return errors.New("connector cannot be nil") }
 	if releaseName == "" || chartPath == "" { return errors.New("releaseName and chartPath are required") }
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "helm", "upgrade", shellEscape(releaseName), shellEscape(chartPath))
+	cmdArgs = append(cmdArgs, "helm", "upgrade", util.ShellEscape(releaseName), util.ShellEscape(chartPath))
 	if opts.Install { cmdArgs = append(cmdArgs, "--install") }
-	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace)) }
-	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath)) }
-	if opts.Version != "" { cmdArgs = append(cmdArgs, "--version", shellEscape(opts.Version)) }
-	for _, vf := range opts.ValuesFiles { cmdArgs = append(cmdArgs, "--values", shellEscape(vf)) }
-	for _, sv := range opts.SetValues { cmdArgs = append(cmdArgs, "--set", shellEscape(sv)) }
+	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace)) }
+	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath)) }
+	if opts.Version != "" { cmdArgs = append(cmdArgs, "--version", util.ShellEscape(opts.Version)) }
+	for _, vf := range opts.ValuesFiles { cmdArgs = append(cmdArgs, "--values", util.ShellEscape(vf)) }
+	for _, sv := range opts.SetValues { cmdArgs = append(cmdArgs, "--set", util.ShellEscape(sv)) }
 	if opts.Wait { cmdArgs = append(cmdArgs, "--wait") }
 	if opts.Timeout > 0 { cmdArgs = append(cmdArgs, "--timeout", opts.Timeout.String()) }
 	if opts.Atomic { cmdArgs = append(cmdArgs, "--atomic") }
@@ -281,9 +281,9 @@ func (r *defaultRunner) HelmRollback(ctx context.Context, conn connector.Connect
 	if releaseName == "" { return errors.New("releaseName is required") }
 	// revision 0 means rollback to previous version
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "helm", "rollback", shellEscape(releaseName), fmt.Sprintf("%d", revision))
-	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace)) }
-	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath)) }
+	cmdArgs = append(cmdArgs, "helm", "rollback", util.ShellEscape(releaseName), fmt.Sprintf("%d", revision))
+	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace)) }
+	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath)) }
 	if opts.Timeout > 0 { cmdArgs = append(cmdArgs, "--timeout", opts.Timeout.String()) }
 	if opts.Wait { cmdArgs = append(cmdArgs, "--wait") }
 	if opts.CleanupOnFail { cmdArgs = append(cmdArgs, "--cleanup-on-fail") }
@@ -302,9 +302,9 @@ func (r *defaultRunner) HelmHistory(ctx context.Context, conn connector.Connecto
 	if conn == nil { return nil, errors.New("connector cannot be nil") }
 	if releaseName == "" { return nil, errors.New("releaseName is required") }
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "helm", "history", shellEscape(releaseName), "-o", "json")
-	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace)) }
-	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath)) }
+	cmdArgs = append(cmdArgs, "helm", "history", util.ShellEscape(releaseName), "-o", "json")
+	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace)) }
+	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath)) }
 	if opts.Max > 0 { cmdArgs = append(cmdArgs, "--max", fmt.Sprintf("%d", opts.Max))}
 
 	stdout, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultHelmTimeout})
@@ -322,9 +322,9 @@ func (r *defaultRunner) HelmGetValues(ctx context.Context, conn connector.Connec
 	if conn == nil { return "", errors.New("connector cannot be nil") }
 	if releaseName == "" { return "", errors.New("releaseName is required") }
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "helm", "get", "values", shellEscape(releaseName))
-	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace)) }
-	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath)) }
+	cmdArgs = append(cmdArgs, "helm", "get", "values", util.ShellEscape(releaseName))
+	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace)) }
+	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath)) }
 	if opts.Revision > 0 { cmdArgs = append(cmdArgs, "--revision", fmt.Sprintf("%d", opts.Revision)) }
 	if opts.AllValues { cmdArgs = append(cmdArgs, "--all") } // -a or --all
 	cmdArgs = append(cmdArgs, "-o", "yaml") // Typically users want YAML for values
@@ -339,9 +339,9 @@ func (r *defaultRunner) HelmGetManifest(ctx context.Context, conn connector.Conn
 	if conn == nil { return "", errors.New("connector cannot be nil") }
 	if releaseName == "" { return "", errors.New("releaseName is required") }
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "helm", "get", "manifest", shellEscape(releaseName))
-	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace)) }
-	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath)) }
+	cmdArgs = append(cmdArgs, "helm", "get", "manifest", util.ShellEscape(releaseName))
+	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace)) }
+	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath)) }
 	if opts.Revision > 0 { cmdArgs = append(cmdArgs, "--revision", fmt.Sprintf("%d", opts.Revision)) }
 
 	stdout, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultHelmTimeout})
@@ -354,9 +354,9 @@ func (r *defaultRunner) HelmGetHooks(ctx context.Context, conn connector.Connect
 	if conn == nil { return "", errors.New("connector cannot be nil") }
 	if releaseName == "" { return "", errors.New("releaseName is required") }
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "helm", "get", "hooks", shellEscape(releaseName))
-	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace)) }
-	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath)) }
+	cmdArgs = append(cmdArgs, "helm", "get", "hooks", util.ShellEscape(releaseName))
+	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace)) }
+	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath)) }
 	if opts.Revision > 0 { cmdArgs = append(cmdArgs, "--revision", fmt.Sprintf("%d", opts.Revision)) }
 
 	stdout, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultHelmTimeout})
@@ -370,19 +370,19 @@ func (r *defaultRunner) HelmTemplate(ctx context.Context, conn connector.Connect
 	if chartPath == "" { return "", errors.New("chartPath is required") }
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "helm", "template")
-	if releaseName != "" { cmdArgs = append(cmdArgs, shellEscape(releaseName)) }
-	cmdArgs = append(cmdArgs, shellEscape(chartPath))
+	if releaseName != "" { cmdArgs = append(cmdArgs, util.ShellEscape(releaseName)) }
+	cmdArgs = append(cmdArgs, util.ShellEscape(chartPath))
 
-	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace)) }
-	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath)) }
-	for _, vf := range opts.ValuesFiles { cmdArgs = append(cmdArgs, "--values", shellEscape(vf)) }
-	for _, sv := range opts.SetValues { cmdArgs = append(cmdArgs, "--set", shellEscape(sv)) }
+	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace)) }
+	if opts.KubeconfigPath != "" { cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath)) }
+	for _, vf := range opts.ValuesFiles { cmdArgs = append(cmdArgs, "--values", util.ShellEscape(vf)) }
+	for _, sv := range opts.SetValues { cmdArgs = append(cmdArgs, "--set", util.ShellEscape(sv)) }
 	if opts.CreateNamespace { cmdArgs = append(cmdArgs, "--create-namespace") } // May not be applicable to template, but included for consistency
 	if opts.SkipCrds { cmdArgs = append(cmdArgs, "--skip-crds") }
 	if opts.Validate { cmdArgs = append(cmdArgs, "--validate") }
 	if opts.IncludeCrds { cmdArgs = append(cmdArgs, "--include-crds") }
 	if opts.IsUpgrade { cmdArgs = append(cmdArgs, "--is-upgrade") }
-	for _, so := range opts.ShowOnly { cmdArgs = append(cmdArgs, "--show-only", shellEscape(so)) }
+	for _, so := range opts.ShowOnly { cmdArgs = append(cmdArgs, "--show-only", util.ShellEscape(so)) }
 
 	stdout, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultHelmTimeout})
 	if err != nil { return "", errors.Wrapf(err, "helm template for '%s' failed. Stderr: %s", chartPath, string(stderr)) }
@@ -394,8 +394,8 @@ func (r *defaultRunner) HelmDependencyUpdate(ctx context.Context, conn connector
 	if conn == nil { return errors.New("connector cannot be nil") }
 	if chartPath == "" { return errors.New("chartPath is required") }
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "helm", "dependency", "update", shellEscape(chartPath))
-	if opts.Keyring != "" { cmdArgs = append(cmdArgs, "--keyring", shellEscape(opts.Keyring)) }
+	cmdArgs = append(cmdArgs, "helm", "dependency", "update", util.ShellEscape(chartPath))
+	if opts.Keyring != "" { cmdArgs = append(cmdArgs, "--keyring", util.ShellEscape(opts.Keyring)) }
 	if opts.SkipRefresh { cmdArgs = append(cmdArgs, "--skip-refresh") }
 	if opts.Verify { cmdArgs = append(cmdArgs, "--verify") }
 
@@ -409,13 +409,13 @@ func (r *defaultRunner) HelmLint(ctx context.Context, conn connector.Connector, 
 	if conn == nil { return "", errors.New("connector cannot be nil") }
 	if chartPath == "" { return "", errors.New("chartPath is required") }
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "helm", "lint", shellEscape(chartPath))
+	cmdArgs = append(cmdArgs, "helm", "lint", util.ShellEscape(chartPath))
 	if opts.Strict { cmdArgs = append(cmdArgs, "--strict") }
-	for _, vf := range opts.ValuesFiles { cmdArgs = append(cmdArgs, "--values", shellEscape(vf)) }
-	for _, sv := range opts.SetValues { cmdArgs = append(cmdArgs, "--set", shellEscape(sv)) }
+	for _, vf := range opts.ValuesFiles { cmdArgs = append(cmdArgs, "--values", util.ShellEscape(vf)) }
+	for _, sv := range opts.SetValues { cmdArgs = append(cmdArgs, "--set", util.ShellEscape(sv)) }
 	if opts.Quiet { cmdArgs = append(cmdArgs, "--quiet") }
 	if opts.WithSubcharts { cmdArgs = append(cmdArgs, "--with-subcharts") }
-	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace)) }
+	if opts.Namespace != "" { cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace)) }
 	// Helm lint -o json is not standard, output is usually text.
 	// We will return the raw output.
 

@@ -201,6 +201,22 @@ func IsValidDomainName(domain string) bool {
 	if len(parts) == 1 && domain == "localhost" { // "localhost" is a common valid case
 		return true
 	}
+	// New check for single numeric label that is not localhost
+	if len(parts) == 1 && domain != "localhost" {
+		isNumericOnly := true
+		if domain == "" { // Should have been caught by earlier check, but defensive
+			isNumericOnly = false
+		}
+		for _, char := range domain { // Check the original domain string for this single part
+			if char < '0' || char > '9' {
+				isNumericOnly = false
+				break
+			}
+		}
+		if isNumericOnly {
+			return false // Purely numeric single label (not localhost) is invalid
+		}
+	}
 
 	if len(parts) > 1 {
 		tld := parts[len(parts)-1]
