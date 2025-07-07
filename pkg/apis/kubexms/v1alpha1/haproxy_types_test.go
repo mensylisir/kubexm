@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/mensylisir/kubexm/pkg/util/validation"
+	"github.com/mensylisir/kubexm/pkg/util" // Added import
 )
 
 // Helper for HAProxy tests are replaced by global helpers from zz_helpers.go
@@ -48,14 +49,14 @@ func TestSetDefaults_HAProxyConfig(t *testing.T) {
 }
 
 func TestValidate_HAProxyConfig(t *testing.T) {
-	validServer := HAProxyBackendServer{Name: "s1", Address: "1.1.1.1", Port: 8080, Weight: intPtr(1)}
+	validServer := HAProxyBackendServer{Name: "s1", Address: "1.1.1.1", Port: 8080, Weight: util.IntPtr(1)}
 	validCfg := HAProxyConfig{
-		FrontendBindAddress: stringPtr("0.0.0.0"),
-		FrontendPort:        intPtr(8443),
-		Mode:                stringPtr("tcp"),
-		BalanceAlgorithm:    stringPtr("roundrobin"),
+		FrontendBindAddress: util.StrPtr("0.0.0.0"),
+		FrontendPort:        util.IntPtr(8443),
+		Mode:                util.StrPtr("tcp"),
+		BalanceAlgorithm:    util.StrPtr("roundrobin"),
 		BackendServers:      []HAProxyBackendServer{validServer},
-		SkipInstall:         boolPtr(false),
+		SkipInstall:         util.BoolPtr(false),
 	}
 	verrs := &validation.ValidationErrors{}
 	Validate_HAProxyConfig(&validCfg, verrs, "haproxy")
@@ -63,7 +64,7 @@ func TestValidate_HAProxyConfig(t *testing.T) {
 		t.Errorf("Validation failed for valid config: %v", verrs.Error())
 	}
 
-	skipInstallCfg := HAProxyConfig{SkipInstall: boolPtr(true)}
+	skipInstallCfg := HAProxyConfig{SkipInstall: util.BoolPtr(true)}
 	verrsSkip := &validation.ValidationErrors{}
 	Validate_HAProxyConfig(&skipInstallCfg, verrsSkip, "haproxy")
 	if verrsSkip.HasErrors() { // Updated to use HasErrors()
@@ -75,22 +76,22 @@ func TestValidate_HAProxyConfig(t *testing.T) {
 		cfg        HAProxyConfig
 		wantErrMsg string
 	}{
-		{"bad_frontend_port", HAProxyConfig{FrontendPort: intPtr(0), BackendServers: []HAProxyBackendServer{validServer}}, ".frontendPort: invalid port 0"},
-		{"invalid_mode", HAProxyConfig{Mode: stringPtr("udp"), BackendServers: []HAProxyBackendServer{validServer}}, ".mode: invalid mode 'udp'"},
-		{"invalid_algo", HAProxyConfig{BalanceAlgorithm: stringPtr("randomest"), BackendServers: []HAProxyBackendServer{validServer}}, ".balanceAlgorithm: invalid algorithm 'randomest'"},
-		{"no_backend_servers", HAProxyConfig{FrontendPort: intPtr(123), BackendServers: []HAProxyBackendServer{}}, ".backendServers: must specify at least one backend server"},
+		{"bad_frontend_port", HAProxyConfig{FrontendPort: util.IntPtr(0), BackendServers: []HAProxyBackendServer{validServer}}, ".frontendPort: invalid port 0"},
+		{"invalid_mode", HAProxyConfig{Mode: util.StrPtr("udp"), BackendServers: []HAProxyBackendServer{validServer}}, ".mode: invalid mode 'udp'"},
+		{"invalid_algo", HAProxyConfig{BalanceAlgorithm: util.StrPtr("randomest"), BackendServers: []HAProxyBackendServer{validServer}}, ".balanceAlgorithm: invalid algorithm 'randomest'"},
+		{"no_backend_servers", HAProxyConfig{FrontendPort: util.IntPtr(123), BackendServers: []HAProxyBackendServer{}}, ".backendServers: must specify at least one backend server"},
 		{"backend_empty_name", HAProxyConfig{BackendServers: []HAProxyBackendServer{{Address: "valid-addr", Port: 1}}}, ".name: backend server name cannot be empty"},
 		{"backend_empty_addr", HAProxyConfig{BackendServers: []HAProxyBackendServer{{Name: "n", Port: 1}}}, ".address: backend server address cannot be empty"},
 		{"backend_invalid_addr_format", HAProxyConfig{BackendServers: []HAProxyBackendServer{{Name: "n", Address: "invalid!", Port: 1}}}, ".address: invalid backend server address format 'invalid!'"},
 		{"backend_bad_port", HAProxyConfig{BackendServers: []HAProxyBackendServer{{Name: "n", Address: "a", Port: 0}}}, ".port: invalid backend server port 0"},
-		{"backend_bad_weight", HAProxyConfig{BackendServers: []HAProxyBackendServer{{Name: "n", Address: "a", Port: 1, Weight: intPtr(-1)}}}, ".weight: cannot be negative"},
-		{"frontend_bind_address_empty", HAProxyConfig{FrontendBindAddress: stringPtr(" "), BackendServers: []HAProxyBackendServer{validServer}}, ".frontendBindAddress: cannot be empty if specified"},
-		{"frontend_bind_address_invalid_ip", HAProxyConfig{FrontendBindAddress: stringPtr("not-an-ip"), BackendServers: []HAProxyBackendServer{validServer}}, ".frontendBindAddress: invalid IP address format 'not-an-ip'"},
+		{"backend_bad_weight", HAProxyConfig{BackendServers: []HAProxyBackendServer{{Name: "n", Address: "a", Port: 1, Weight: util.IntPtr(-1)}}}, ".weight: cannot be negative"},
+		{"frontend_bind_address_empty", HAProxyConfig{FrontendBindAddress: util.StrPtr(" "), BackendServers: []HAProxyBackendServer{validServer}}, ".frontendBindAddress: cannot be empty if specified"},
+		{"frontend_bind_address_invalid_ip", HAProxyConfig{FrontendBindAddress: util.StrPtr("not-an-ip"), BackendServers: []HAProxyBackendServer{validServer}}, ".frontendBindAddress: invalid IP address format 'not-an-ip'"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.cfg.FrontendPort == nil && !strings.Contains(tt.wantErrMsg, ".frontendPort") {
-				tt.cfg.FrontendPort = intPtr(6443)
+				tt.cfg.FrontendPort = util.IntPtr(6443)
 			}
 			if len(tt.cfg.BackendServers) == 0 && !strings.Contains(tt.wantErrMsg, ".backendServers") && !strings.Contains(tt.wantErrMsg, ".name") && !strings.Contains(tt.wantErrMsg, ".address") && !strings.Contains(tt.wantErrMsg, ".port") && !strings.Contains(tt.wantErrMsg, ".weight") {
 				tt.cfg.BackendServers = []HAProxyBackendServer{validServer}

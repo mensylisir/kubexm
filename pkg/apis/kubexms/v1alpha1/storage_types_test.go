@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/mensylisir/kubexm/pkg/util/validation"
+	"github.com/mensylisir/kubexm/pkg/util" // Added import
 )
 
 func TestSetDefaults_StorageConfig(t *testing.T) {
@@ -30,7 +31,7 @@ func TestSetDefaults_OpenEBSConfig(t *testing.T) {
 	assert.Equal(t, "/var/openebs/local", cfg.BasePath, "Default OpenEBS BasePath mismatch when enabled by default")
 
 	// Test when Enabled is true (explicitly)
-	cfgEnabled := &OpenEBSConfig{Enabled: boolPtr(true)}
+	cfgEnabled := &OpenEBSConfig{Enabled: util.BoolPtr(true)}
 	SetDefaults_OpenEBSConfig(cfgEnabled)
 	assert.Equal(t, "/var/openebs/local", cfgEnabled.BasePath, "Default OpenEBS BasePath for explicitly enabled")
 
@@ -54,14 +55,14 @@ func TestSetDefaults_OpenEBSConfig(t *testing.T) {
 	assert.Nil(t, cfgEnabled.Version, "OpenEBS Version should be nil by default")
 
 	// Test when Enabled is explicitly false
-	cfgDisabled := &OpenEBSConfig{Enabled: boolPtr(false), BasePath: "custom/path", Engines: &OpenEBSEngineConfig{LocalHostPath: &OpenEBSEngineLocalHostPathConfig{Enabled: boolPtr(true)}}}
+	cfgDisabled := &OpenEBSConfig{Enabled: util.BoolPtr(false), BasePath: "custom/path", Engines: &OpenEBSEngineConfig{LocalHostPath: &OpenEBSEngineLocalHostPathConfig{Enabled: util.BoolPtr(true)}}}
 	SetDefaults_OpenEBSConfig(cfgDisabled)
 	assert.Equal(t, "custom/path", cfgDisabled.BasePath, "BasePath should not be overridden when OpenEBS is disabled")
 	assert.NotNil(t, cfgDisabled.Engines.LocalHostPath.Enabled, "LocalHostPath.Enabled should still be present")
 	assert.False(t, *cfgDisabled.Engines.LocalHostPath.Enabled, "LocalHostPath engine should be forced to disabled")
 
 	// Test Version is not defaulted
-	cfgWithVersion := &OpenEBSConfig{Version: stringPtr("1.2.3")}
+	cfgWithVersion := &OpenEBSConfig{Version: util.StrPtr("1.2.3")}
 	SetDefaults_OpenEBSConfig(cfgWithVersion) // Should enable OpenEBS by default
 	assert.NotNil(t, cfgWithVersion.Enabled)
 	assert.True(t, *cfgWithVersion.Enabled)
@@ -79,45 +80,45 @@ func TestValidate_StorageConfig(t *testing.T) {
 		{
 			name: "valid full config",
 			cfg: &StorageConfig{
-				OpenEBS:             &OpenEBSConfig{Enabled: boolPtr(true), BasePath: "/data/openebs", Version: stringPtr("1.0.0")},
-				DefaultStorageClass: stringPtr("my-default-sc"),
+				OpenEBS:             &OpenEBSConfig{Enabled: util.BoolPtr(true), BasePath: "/data/openebs", Version: util.StrPtr("1.0.0")},
+				DefaultStorageClass: util.StrPtr("my-default-sc"),
 			},
 			expectErr: false,
 		},
 		{
 			name: "openebs enabled, empty basepath",
-			cfg:  &StorageConfig{OpenEBS: &OpenEBSConfig{Enabled: boolPtr(true), BasePath: " "}},
+			cfg:  &StorageConfig{OpenEBS: &OpenEBSConfig{Enabled: util.BoolPtr(true), BasePath: " "}},
 			expectErr:   true,
 			errContains: []string{".openebs.basePath: cannot be empty if OpenEBS is enabled"},
 		},
 		{
 			name: "openebs enabled, version whitespace",
-			cfg:  &StorageConfig{OpenEBS: &OpenEBSConfig{Enabled: boolPtr(true), BasePath: "/var/openebs", Version: stringPtr("   ")}},
+			cfg:  &StorageConfig{OpenEBS: &OpenEBSConfig{Enabled: util.BoolPtr(true), BasePath: "/var/openebs", Version: util.StrPtr("   ")}},
 			expectErr:   true,
 			errContains: []string{".openebs.version: cannot be only whitespace if specified"},
 		},
 		{
 			name: "openebs enabled, version invalid format",
-			cfg:  &StorageConfig{OpenEBS: &OpenEBSConfig{Enabled: boolPtr(true), BasePath: "/var/openebs", Version: stringPtr("1.2.3_invalid")}},
+			cfg:  &StorageConfig{OpenEBS: &OpenEBSConfig{Enabled: util.BoolPtr(true), BasePath: "/var/openebs", Version: util.StrPtr("1.2.3_invalid")}},
 			expectErr:   true,
 			errContains: []string{".openebs.version: '1.2.3_invalid' is not a recognized version format"},
 		},
 		{
 			name: "empty defaultStorageClass",
-			cfg:  &StorageConfig{DefaultStorageClass: stringPtr(" ")},
+			cfg:  &StorageConfig{DefaultStorageClass: util.StrPtr(" ")},
 			expectErr:   true,
 			errContains: []string{".defaultStorageClass: cannot be empty if specified"},
 		},
 		{
 			name: "openebs disabled, version still validated if present and invalid (though maybe not typical)",
-			cfg:  &StorageConfig{OpenEBS: &OpenEBSConfig{Enabled: boolPtr(false), Version: stringPtr("1.2.3_invalid")}},
+			cfg:  &StorageConfig{OpenEBS: &OpenEBSConfig{Enabled: util.BoolPtr(false), Version: util.StrPtr("1.2.3_invalid")}},
 			// Current logic: version is validated only if Enabled=true. So this should NOT error for version.
 			// If it were to error, the errContains would be: []string{".openebs.version: '1.2.3_invalid' is not a recognized version format"}
 			expectErr: false,
 		},
 		{
 			name: "openebs disabled, version whitespace (should not error for version)",
-			cfg:  &StorageConfig{OpenEBS: &OpenEBSConfig{Enabled: boolPtr(false), Version: stringPtr("   ")}},
+			cfg:  &StorageConfig{OpenEBS: &OpenEBSConfig{Enabled: util.BoolPtr(false), Version: util.StrPtr("   ")}},
 			expectErr: false,
 		},
 	}

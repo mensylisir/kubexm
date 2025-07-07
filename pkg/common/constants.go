@@ -168,4 +168,10 @@ const (
 
 	// --- Kubelet Defaults ---
 	DefaultKubeletHairpinMode = "promiscuous-bridge"
+
+	// --- Kubernetes API Server Defaults ---
+	DefaultKubernetesAPIServerPort = 6443
+
+	// --- Registry Defaults ---
+	DefaultLocalRegistryDataDir = "/var/lib/registry"
 )

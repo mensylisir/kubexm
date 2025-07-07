@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/mensylisir/kubexm/pkg/util/validation" // Import validation
+	"github.com/mensylisir/kubexm/pkg/util"           // Import util
 )
 
 // TestSetDefaults_CiliumConfig_Standalone tests the SetDefaults_CiliumConfig function directly.
@@ -29,7 +30,7 @@ func TestSetDefaults_CiliumConfig_Standalone(t *testing.T) {
 				IdentityAllocationMode: "crd",
 				EnableHubble:           false,
 				HubbleUI:               false,
-				EnableBPFMasquerade:    boolPtr(true),
+				EnableBPFMasquerade:    util.BoolPtr(true),
 			},
 		},
 		{
@@ -41,7 +42,7 @@ func TestSetDefaults_CiliumConfig_Standalone(t *testing.T) {
 				IdentityAllocationMode: "crd",
 				EnableHubble:           true,
 				HubbleUI:               true,
-				EnableBPFMasquerade:    boolPtr(true),
+				EnableBPFMasquerade:    util.BoolPtr(true),
 			},
 		},
 		{
@@ -53,7 +54,7 @@ func TestSetDefaults_CiliumConfig_Standalone(t *testing.T) {
 				IdentityAllocationMode: "crd",
 				EnableHubble:           true,
 				HubbleUI:               true,
-				EnableBPFMasquerade:    boolPtr(true),
+				EnableBPFMasquerade:    util.BoolPtr(true),
 			},
 		},
 		{
@@ -65,7 +66,7 @@ func TestSetDefaults_CiliumConfig_Standalone(t *testing.T) {
 				IdentityAllocationMode: "crd",
 				EnableHubble:           false,
 				HubbleUI:               false,
-				EnableBPFMasquerade:    boolPtr(true),
+				EnableBPFMasquerade:    util.BoolPtr(true),
 			},
 		},
 		{
@@ -75,7 +76,7 @@ func TestSetDefaults_CiliumConfig_Standalone(t *testing.T) {
 				KubeProxyReplacement:   "probe",
 				EnableHubble:           true,
 				HubbleUI:               true,
-				EnableBPFMasquerade:    boolPtr(true),
+				EnableBPFMasquerade:    util.BoolPtr(true),
 				IdentityAllocationMode: "kvstore",
 			},
 			expected: &CiliumConfig{
@@ -83,7 +84,7 @@ func TestSetDefaults_CiliumConfig_Standalone(t *testing.T) {
 				KubeProxyReplacement:   "probe",
 				EnableHubble:           true,
 				HubbleUI:               true,
-				EnableBPFMasquerade:    boolPtr(true),
+				EnableBPFMasquerade:    util.BoolPtr(true),
 				IdentityAllocationMode: "kvstore",
 			},
 		},
@@ -94,7 +95,7 @@ func TestSetDefaults_CiliumConfig_Standalone(t *testing.T) {
 				KubeProxyReplacement:   "probe",
 				EnableHubble:           true,
 				HubbleUI:               true,
-				EnableBPFMasquerade:    boolPtr(false),
+				EnableBPFMasquerade:    util.BoolPtr(false),
 				IdentityAllocationMode: "kvstore",
 			},
 			expected: &CiliumConfig{
@@ -102,7 +103,7 @@ func TestSetDefaults_CiliumConfig_Standalone(t *testing.T) {
 				KubeProxyReplacement:   "probe",
 				EnableHubble:           true,
 				HubbleUI:               true,
-				EnableBPFMasquerade:    boolPtr(false),
+				EnableBPFMasquerade:    util.BoolPtr(false),
 				IdentityAllocationMode: "kvstore",
 			},
 		},
@@ -207,7 +208,7 @@ func TestValidate_CiliumConfig_Standalone(t *testing.T) {
 				cfg.KubeProxyReplacement = "probe"
 				cfg.EnableHubble = true
 				cfg.HubbleUI = true
-				cfg.EnableBPFMasquerade = boolPtr(true)
+				cfg.EnableBPFMasquerade = util.BoolPtr(true)
 				cfg.IdentityAllocationMode = "kvstore"
 				return cfg
 			},
@@ -221,7 +222,7 @@ func TestValidate_CiliumConfig_Standalone(t *testing.T) {
 				cfg.KubeProxyReplacement = "probe"
 				cfg.EnableHubble = true
 				cfg.HubbleUI = true
-				cfg.EnableBPFMasquerade = boolPtr(false)
+				cfg.EnableBPFMasquerade = util.BoolPtr(false)
 				cfg.IdentityAllocationMode = "kvstore"
 				return cfg
 			},

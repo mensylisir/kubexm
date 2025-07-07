@@ -5,9 +5,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/mensylisir/kubexm/pkg/util/validation"
+	"github.com/mensylisir/kubexm/pkg/util" // Added import
 )
 
-// Local helper pstrRegistryTest removed, using global stringPtr from zz_helpers.go
+// Local helper pstrRegistryTest removed, using global stringPtr from util package
 
 func TestSetDefaults_RegistryConfig(t *testing.T) {
 	cfg := &RegistryConfig{}
@@ -17,7 +18,7 @@ func TestSetDefaults_RegistryConfig(t *testing.T) {
 	assert.Empty(t, cfg.Auths, "Auths should be empty by default")
 
 	// Test DataRoot IS defaulted if Type is set
-	cfgWithType := &RegistryConfig{Type: stringPtr("harbor")}
+	cfgWithType := &RegistryConfig{Type: util.StrPtr("harbor")}
 	SetDefaults_RegistryConfig(cfgWithType)
 	assert.NotNil(t, cfgWithType.DataRoot, "DataRoot should be defaulted by SetDefaults_RegistryConfig if Type is set")
 	if cfgWithType.DataRoot != nil {
@@ -54,8 +55,8 @@ func TestValidate_RegistryConfig(t *testing.T) {
 				PrivateRegistry:   "myprivatereg.com",
 				NamespaceOverride: "myorg",
 				Auths:             validAuth,
-				Type:              stringPtr("harbor"),
-				DataRoot:          stringPtr("/data/harbor_reg"), // User explicitly sets DataRoot
+				Type:              util.StrPtr("harbor"),
+				DataRoot:          util.StrPtr("/data/harbor_reg"), // User explicitly sets DataRoot
 				NamespaceRewrite: &NamespaceRewriteConfig{
 					Enabled: true,
 					Rules: []NamespaceRewriteRule{
@@ -69,7 +70,7 @@ func TestValidate_RegistryConfig(t *testing.T) {
 		{
 			name: "valid config with type set, DataRoot will be defaulted",
 			cfg: &RegistryConfig{
-				Type: stringPtr("registry"),
+				Type: util.StrPtr("registry"),
 				// DataRoot is nil, will be defaulted
 			},
 			expectErr: false, // Should be valid after defaulting
@@ -113,23 +114,23 @@ func TestValidate_RegistryConfig(t *testing.T) {
 		},
 		{
 			name: "type whitespace",
-			cfg:  &RegistryConfig{Type: stringPtr("   ")},
+			cfg:  &RegistryConfig{Type: util.StrPtr("   ")},
 			expectErr:   true,
 			errContains: []string{"spec.registry.type: cannot be empty if specified"},
 		},
 		{
 			name: "dataRoot whitespace (when type is also set)", // If type is set, data root (even if whitespace) will be defaulted, so this might pass
-			cfg:  &RegistryConfig{Type: stringPtr("registry"), DataRoot: stringPtr("   ")}, // DataRoot will be defaulted to /var/lib/registry
+			cfg:  &RegistryConfig{Type: util.StrPtr("registry"), DataRoot: util.StrPtr("   ")}, // DataRoot will be defaulted to /var/lib/registry
 			expectErr:   false, // This should now pass as DataRoot gets a non-whitespace default
 		},
 		{
 			name: "type set, dataRoot explicitly empty string (will be defaulted)",
-			cfg:  &RegistryConfig{Type: stringPtr("registry"), DataRoot: stringPtr("")},
+			cfg:  &RegistryConfig{Type: util.StrPtr("registry"), DataRoot: util.StrPtr("")},
 			expectErr:   false, // DataRoot will be defaulted
 		},
 		{
 			name: "dataRoot set, type missing",
-			cfg:  &RegistryConfig{DataRoot: stringPtr("/data/myreg")},
+			cfg:  &RegistryConfig{DataRoot: util.StrPtr("/data/myreg")},
 			expectErr:   true,
 			errContains: []string{"spec.registry.type: must be specified if registryDataDir (dataRoot) is set for local deployment"},
 		},
@@ -193,10 +194,10 @@ func TestSetDefaults_RegistryAuth(t *testing.T) {
 		expected *RegistryAuth
 	}{
 		{"nil input", nil, nil},
-		{"empty struct", &RegistryAuth{}, &RegistryAuth{SkipTLSVerify: boolPtr(false), PlainHTTP: boolPtr(false)}},
-		{"SkipTLSVerify true", &RegistryAuth{SkipTLSVerify: boolPtr(true)}, &RegistryAuth{SkipTLSVerify: boolPtr(true), PlainHTTP: boolPtr(false)}},
-		{"PlainHTTP true", &RegistryAuth{PlainHTTP: boolPtr(true)}, &RegistryAuth{SkipTLSVerify: boolPtr(false), PlainHTTP: boolPtr(true)}},
-		{"both true", &RegistryAuth{SkipTLSVerify: boolPtr(true), PlainHTTP: boolPtr(true)}, &RegistryAuth{SkipTLSVerify: boolPtr(true), PlainHTTP: boolPtr(true)}},
+		{"empty struct", &RegistryAuth{}, &RegistryAuth{SkipTLSVerify: util.BoolPtr(false), PlainHTTP: util.BoolPtr(false)}},
+		{"SkipTLSVerify true", &RegistryAuth{SkipTLSVerify: util.BoolPtr(true)}, &RegistryAuth{SkipTLSVerify: util.BoolPtr(true), PlainHTTP: util.BoolPtr(false)}},
+		{"PlainHTTP true", &RegistryAuth{PlainHTTP: util.BoolPtr(true)}, &RegistryAuth{SkipTLSVerify: util.BoolPtr(false), PlainHTTP: util.BoolPtr(true)}},
+		{"both true", &RegistryAuth{SkipTLSVerify: util.BoolPtr(true), PlainHTTP: util.BoolPtr(true)}, &RegistryAuth{SkipTLSVerify: util.BoolPtr(true), PlainHTTP: util.BoolPtr(true)}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

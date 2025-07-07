@@ -1,16 +1,15 @@
 package v1alpha1
 
 import (
+	"strings" // Keep for now, might be used by specific error checks later
 	"testing"
 	"time"
-	// "reflect" // Not used
-	// "strings" // Not used in the final version of these tests
-	// "strings" // Keep for now, might be used by specific error checks later
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"github.com/stretchr/testify/assert"
 	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/util" // Added import
 	"github.com/mensylisir/kubexm/pkg/util/validation"
+	"github.com/stretchr/testify/assert"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // --- Test SetDefaults_Cluster ---
@@ -268,11 +267,11 @@ func TestValidate_Cluster_HAValidations(t *testing.T) {
 		}
 		c.Spec.ControlPlaneEndpoint = &ControlPlaneEndpointSpec{Address: "10.0.0.100", Port: 6443}
 		c.Spec.HighAvailability = &HighAvailabilityConfig{
-			Enabled: boolPtr(true),
+			Enabled: util.BoolPtr(true),
 			External: &ExternalLoadBalancerConfig{
 				Type:                      common.ExternalLBTypeKubexmKH,
-				LoadBalancerHostGroupName: stringPtr("lb-group"),
-				Keepalived:                &KeepalivedConfig{VRID: intPtr(1), Priority: intPtr(100), Interface: stringPtr("eth0"), AuthPass: stringPtr("pass")}, // AuthType will be defaulted
+				LoadBalancerHostGroupName: util.StrPtr("lb-group"),
+				Keepalived:                &KeepalivedConfig{VRID: util.IntPtr(1), Priority: util.IntPtr(100), Interface: util.StrPtr("eth0"), AuthPass: util.StrPtr("pass")}, // AuthType will be defaulted
 				HAProxy:                   &HAProxyConfig{BackendServers: []HAProxyBackendServer{{Name: "s1", Address: "1.2.3.4:6443", Port: 6443}}}, // Mode, FrontendPort etc will be defaulted
 			},
 		}
