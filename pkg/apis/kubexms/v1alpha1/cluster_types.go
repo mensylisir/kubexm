@@ -47,7 +47,7 @@ type ClusterSpec struct {
 	System               *SystemSpec               `json:"system,omitempty" yaml:"system,omitempty"`
 	Kubernetes           *KubernetesConfig         `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"`
 	Etcd                 *EtcdConfig               `json:"etcd,omitempty" yaml:"etcd,omitempty"`
-	DNS                  DNS                       `yaml:"dns" json:"dns,omitempty"`
+	DNS                  DNS                       `json:"dns,omitempty" yaml:"dns,omitempty"`
 	ContainerRuntime     *ContainerRuntimeConfig   `json:"containerRuntime,omitempty" yaml:"containerRuntime,omitempty"`
 	Network              *NetworkConfig            `json:"network,omitempty" yaml:"network,omitempty"`
 	ControlPlaneEndpoint *ControlPlaneEndpointSpec `json:"controlPlaneEndpoint,omitempty" yaml:"controlPlaneEndpoint,omitempty"`
@@ -554,7 +554,7 @@ func (in *Cluster) DeepCopyInto(out *Cluster) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
-	// in.Spec.DeepCopyInto(&out.Spec) // Assuming ClusterSpec has DeepCopyInto // TODO: Temporarily commented out
+	in.Spec.DeepCopyInto(&out.Spec)
 }
 
 // DeepCopy is a deepcopy function, copying the receiver, creating a new Cluster.
@@ -592,58 +592,49 @@ func (in *ClusterSpec) DeepCopyInto(out *ClusterSpec) {
 		*outSystem = new(SystemSpec)
 		(*inSystem).DeepCopyInto(*outSystem)
 	}
-	// TODO: Temporarily comment out DeepCopyInto calls for fields whose types do not have this method
-	// if in.Kubernetes != nil {
-	// 	inKubernetes, outKubernetes := &in.Kubernetes, &out.Kubernetes
-	// 	*outKubernetes = new(KubernetesConfig)
-	// 	(*inKubernetes).DeepCopyInto(*outKubernetes)
-	// }
-	// if in.Etcd != nil {
-	// 	inEtcd, outEtcd := &in.Etcd, &out.Etcd
-	// 	*outEtcd = new(EtcdConfig)
-	// 	(*inEtcd).DeepCopyInto(*outEtcd)
-	// }
-	// in.DNS.DeepCopyInto(&out.DNS)
-
-	// if in.ContainerRuntime != nil {
-	// 	inContainerRuntime, outContainerRuntime := &in.ContainerRuntime, &out.ContainerRuntime
-	// 	*outContainerRuntime = new(ContainerRuntimeConfig)
-	// 	(*inContainerRuntime).DeepCopyInto(*outContainerRuntime)
-	// }
-	// if in.Network != nil {
-	// 	inNetwork, outNetwork := &in.Network, &out.Network
-	// 	*outNetwork = new(NetworkConfig)
-	// 	(*inNetwork).DeepCopyInto(*outNetwork)
-	// }
-	if in.ControlPlaneEndpoint != nil {
-		inControlPlaneEndpoint, outControlPlaneEndpoint := &in.ControlPlaneEndpoint, &out.ControlPlaneEndpoint
-		*outControlPlaneEndpoint = new(ControlPlaneEndpointSpec)
-		**outControlPlaneEndpoint = **inControlPlaneEndpoint
+	if in.Kubernetes != nil {
+		out.Kubernetes = new(KubernetesConfig)
+		in.Kubernetes.DeepCopyInto(out.Kubernetes)
 	}
-	// if in.HighAvailability != nil {
-	// 	inHighAvailability, outHighAvailability := &in.HighAvailability, &out.HighAvailability
-	// 	*outHighAvailability = new(HighAvailabilityConfig)
-	// 	(*inHighAvailability).DeepCopyInto(*outHighAvailability)
-	// }
-	// if in.Storage != nil {
-	// 	inStorage, outStorage := &in.Storage, &out.Storage
-	// 	*outStorage = new(StorageConfig)
-	// 	(*inStorage).DeepCopyInto(*outStorage)
-	// }
-	// if in.Registry != nil {
-	// 	inRegistry, outRegistry := &in.Registry, &out.Registry
-	// 	*outRegistry = new(RegistryConfig)
-	// 	(*inRegistry).DeepCopyInto(*outRegistry)
-	// }
+	if in.Etcd != nil {
+		out.Etcd = new(EtcdConfig)
+		in.Etcd.DeepCopyInto(out.Etcd)
+	}
+	in.DNS.DeepCopyInto(&out.DNS) // DNS is a value type in ClusterSpec
+
+	if in.ContainerRuntime != nil {
+		out.ContainerRuntime = new(ContainerRuntimeConfig)
+		in.ContainerRuntime.DeepCopyInto(out.ContainerRuntime)
+	}
+	if in.Network != nil {
+		out.Network = new(NetworkConfig)
+		in.Network.DeepCopyInto(out.Network)
+	}
+	if in.ControlPlaneEndpoint != nil {
+		out.ControlPlaneEndpoint = new(ControlPlaneEndpointSpec)
+		// ControlPlaneEndpointSpec is a simple struct with value types, direct assignment is fine after new.
+		*out.ControlPlaneEndpoint = *in.ControlPlaneEndpoint
+	}
+	if in.HighAvailability != nil {
+		out.HighAvailability = new(HighAvailabilityConfig)
+		in.HighAvailability.DeepCopyInto(out.HighAvailability)
+	}
+	if in.Storage != nil {
+		out.Storage = new(StorageConfig)
+		in.Storage.DeepCopyInto(out.Storage)
+	}
+	if in.Registry != nil {
+		out.Registry = new(RegistryConfig)
+		in.Registry.DeepCopyInto(out.Registry)
+	}
 	if in.Addons != nil {
-		in, out := &in.Addons, &out.Addons
-		*out = make([]string, len(*in))
-		copy(*out, *in)
+		inAddons, outAddons := &in.Addons, &out.Addons
+		*outAddons = make([]string, len(*inAddons))
+		copy(*outAddons, *inAddons)
 	}
 	if in.Preflight != nil {
-		in, out := &in.Preflight, &out.Preflight
-		*out = new(PreflightConfig)
-		**out = **in
+		out.Preflight = new(PreflightConfig)
+		in.Preflight.DeepCopyInto(out.Preflight)
 	}
 }
 
