@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"fmt" // Import fmt
+	"github.com/mensylisir/kubexm/pkg/util" // Added import for util
 	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
@@ -27,7 +28,7 @@ func SetDefaults_CiliumConfig(cfg *CiliumConfig) {
 
 	// EnableBPFMasquerade is now *bool in CiliumConfig (network_types.go)
 	if cfg.EnableBPFMasquerade == nil {
-		cfg.EnableBPFMasquerade = boolPtr(true) // Default to true if not specified
+		cfg.EnableBPFMasquerade = util.BoolPtr(true) // Default to true if not specified
 	}
 	// EnableHubble (bool type) defaults to false unless HubbleUI is true (already handled above)
 }
@@ -40,23 +41,23 @@ func Validate_CiliumConfig(cfg *CiliumConfig, verrs *validation.ValidationErrors
 	}
 
 	if cfg.TunnelingMode != "" {
-		validTunnelModes := []string{"vxlan", "geneve", "disabled"}
-		if !containsString(validTunnelModes, cfg.TunnelingMode) {
-			verrs.Add(pathPrefix+".tunnelingMode", fmt.Sprintf("invalid mode '%s', must be one of %v", cfg.TunnelingMode, validTunnelModes))
+		// Use package-level variable from network_types.go
+		if !util.ContainsString(validCiliumTunnelModes, cfg.TunnelingMode) {
+			verrs.Add(pathPrefix+".tunnelingMode", fmt.Sprintf("invalid mode '%s', must be one of %v", cfg.TunnelingMode, validCiliumTunnelModes))
 		}
 	}
 
 	if cfg.KubeProxyReplacement != "" {
-		validKPRModes := []string{"probe", "strict", "disabled"}
-		if !containsString(validKPRModes, cfg.KubeProxyReplacement) {
-			verrs.Add(pathPrefix+".kubeProxyReplacement", fmt.Sprintf("invalid mode '%s', must be one of %v", cfg.KubeProxyReplacement, validKPRModes))
+		// Use package-level variable from network_types.go
+		if !util.ContainsString(validCiliumKPRModes, cfg.KubeProxyReplacement) {
+			verrs.Add(pathPrefix+".kubeProxyReplacement", fmt.Sprintf("invalid mode '%s', must be one of %v", cfg.KubeProxyReplacement, validCiliumKPRModes))
 		}
 	}
 
 	if cfg.IdentityAllocationMode != "" {
-		validIdentModes := []string{"crd", "kvstore"}
-		if !containsString(validIdentModes, cfg.IdentityAllocationMode) {
-			verrs.Add(pathPrefix+".identityAllocationMode", fmt.Sprintf("invalid mode '%s', must be one of %v", cfg.IdentityAllocationMode, validIdentModes))
+		// Use package-level variable from network_types.go
+		if !util.ContainsString(validCiliumIdentModes, cfg.IdentityAllocationMode) {
+			verrs.Add(pathPrefix+".identityAllocationMode", fmt.Sprintf("invalid mode '%s', must be one of %v", cfg.IdentityAllocationMode, validCiliumIdentModes))
 		}
 	}
 

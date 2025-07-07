@@ -10,54 +10,35 @@ import (
 	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
-// isValidDNSServerAddress checks if the address is a valid IP, a FQDN (contains a dot),
-// or a host:port / [ipv6]:port where host is IP/FQDN and port is valid.
-func isValidDNSServerAddress(addr string) bool {
-	host, port, err := net.SplitHostPort(addr)
-	if err == nil {
-		// host:port or [ipv6]:port
-		if !util.IsValidPort(port) {
-			return false
-		}
-		// host part must be IP or FQDN (contains a dot)
-		// IsValidDomainName already checks it's not an IP.
-		return util.IsValidIP(host) || (util.IsValidDomainName(host) && strings.Contains(host, "."))
-	}
-
-	// Not host:port, so the whole string must be IP or FQDN (contains a dot)
-	// IsValidDomainName already checks it's not an IP.
-	return util.IsValidIP(addr) || (util.IsValidDomainName(addr) && strings.Contains(addr, "."))
-}
-
 // DNS defines the overall DNS configuration for the cluster.
 // It includes settings for host-level DNS overrides, CoreDNS, and NodeLocalDNS.
 type DNS struct {
 	// DNSEtcHosts allows specifying custom entries to be added to /etc/hosts for Pods.
 	// Format is a multi-line string, with each line being a standard /etc/hosts entry (e.g., "1.2.3.4 myhost.example.com myhost").
-	DNSEtcHosts string `yaml:"dnsEtcHosts" json:"dnsEtcHosts"`
+	DNSEtcHosts string `json:"dnsEtcHosts,omitempty" yaml:"dnsEtcHosts,omitempty"`
 	// NodeEtcHosts allows specifying custom entries to be added to /etc/hosts on the nodes themselves.
 	// Format is the same as DNSEtcHosts. Optional.
-	NodeEtcHosts string `yaml:"nodeEtcHosts" json:"nodeEtcHosts,omitempty"`
+	NodeEtcHosts string `json:"nodeEtcHosts,omitempty" yaml:"nodeEtcHosts,omitempty"`
 	// CoreDNS holds the configuration for the CoreDNS addon.
-	CoreDNS CoreDNS `yaml:"coredns" json:"coredns"`
+	CoreDNS CoreDNS `json:"coredns,omitempty" yaml:"coredns,omitempty"`
 	// NodeLocalDNS holds the configuration for the NodeLocal DNSCache addon.
-	NodeLocalDNS NodeLocalDNS `yaml:"nodelocaldns" json:"nodelocaldns"`
+	NodeLocalDNS NodeLocalDNS `json:"nodelocaldns,omitempty" yaml:"nodelocaldns,omitempty"`
 }
 
 // CoreDNS defines the configuration for the CoreDNS addon.
 type CoreDNS struct {
 	// AdditionalConfigs allows injecting raw CoreDNS Corefile snippets into the main configuration.
 	// This can be used for advanced configurations not directly exposed by other fields.
-	AdditionalConfigs string `yaml:"additionalConfigs" json:"additionalConfigs"`
+	AdditionalConfigs string `json:"additionalConfigs,omitempty" yaml:"additionalConfigs,omitempty"`
 	// ExternalZones defines custom upstream DNS servers for specific external domains.
-	ExternalZones []ExternalZone `yaml:"externalZones" json:"externalZones"`
+	ExternalZones []ExternalZone `json:"externalZones,omitempty" yaml:"externalZones,omitempty"`
 	// RewriteBlock allows injecting raw CoreDNS rewrite rules.
 	// Example: "rewrite name foo.example.com bar.example.com"
-	RewriteBlock string `yaml:"rewriteBlock" json:"rewriteBlock"`
+	RewriteBlock string `json:"rewriteBlock,omitempty" yaml:"rewriteBlock,omitempty"`
 	// UpstreamDNSServers is a list of upstream DNS servers that CoreDNS will forward queries to.
 	// These are used for domains not covered by ExternalZones or other specific configurations.
 	// Example: ["8.8.8.8", "1.1.1.1"]
-	UpstreamDNSServers []string `yaml:"upstreamDNSServers" json:"upstreamDNSServers"`
+	UpstreamDNSServers []string `json:"upstreamDNSServers,omitempty" yaml:"upstreamDNSServers,omitempty"`
 }
 
 // NodeLocalDNS defines the configuration for the NodeLocal DNSCache addon.
@@ -65,23 +46,23 @@ type CoreDNS struct {
 type NodeLocalDNS struct {
 	// ExternalZones defines custom upstream DNS servers for specific external domains for the NodeLocal DNSCache.
 	// This allows NodeLocal DNSCache to forward queries for these zones to designated resolvers.
-	ExternalZones []ExternalZone `yaml:"externalZones" json:"externalZones"`
+	ExternalZones []ExternalZone `json:"externalZones,omitempty" yaml:"externalZones,omitempty"`
 }
 
 // ExternalZone defines a custom DNS forwarding rule for a set of specified domain zones.
 type ExternalZone struct {
 	// Zones is a list of domain names (or suffixes) for which this external zone rule applies.
 	// Example: ["example.com", "internal.net"]
-	Zones []string `yaml:"zones" json:"zones"`
+	Zones []string `json:"zones,omitempty" yaml:"zones,omitempty"`
 	// Nameservers is a list of IP addresses of upstream DNS servers to forward queries for the specified Zones.
 	// Example: ["10.0.0.1", "10.0.0.2"]
-	Nameservers []string `yaml:"nameservers" json:"nameservers"`
+	Nameservers []string `json:"nameservers,omitempty" yaml:"nameservers,omitempty"`
 	// Cache specifies the DNS caching time (in seconds) for records resolved through this external zone.
 	// Defaults to 300 seconds if not set or set to 0 by SetDefaults_ExternalZone.
-	Cache int `yaml:"cache" json:"cache"`
+	Cache int `json:"cache,omitempty" yaml:"cache,omitempty"`
 	// Rewrite defines a list of rewrite rules to be applied for queries matching this external zone.
 	// Example: {"fromPattern": "(.*)\\.example\\.com", "toTemplate": "{1}.my-internal-domain.com"}
-	Rewrite []RewriteRule `yaml:"rewrite" json:"rewrite,omitempty"`
+	Rewrite []RewriteRule `json:"rewrite,omitempty" yaml:"rewrite,omitempty"`
 }
 
 // RewriteRule defines a DNS rewrite rule.
@@ -95,6 +76,21 @@ type RewriteRule struct {
 	// It can use capture groups from FromPattern, denoted as {N} where N is the capture group index (e.g., {1}, {2}).
 	// Example: "{1}.internal.example.local"
 	ToTemplate string `json:"toTemplate" yaml:"toTemplate"`
+}
+
+// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+func (in *RewriteRule) DeepCopyInto(out *RewriteRule) {
+	*out = *in
+}
+
+// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new RewriteRule.
+func (in *RewriteRule) DeepCopy() *RewriteRule {
+	if in == nil {
+		return nil
+	}
+	out := new(RewriteRule)
+	in.DeepCopyInto(out)
+	return out
 }
 
 // SetDefaults_DNS sets default values for DNS configuration.
@@ -119,6 +115,72 @@ func SetDefaults_DNS(cfg *DNS) {
 	}
 }
 
+// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+func (in *DNS) DeepCopyInto(out *DNS) {
+	*out = *in
+	in.CoreDNS.DeepCopyInto(&out.CoreDNS)
+	in.NodeLocalDNS.DeepCopyInto(&out.NodeLocalDNS)
+}
+
+// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new DNS.
+func (in *DNS) DeepCopy() *DNS {
+	if in == nil {
+		return nil
+	}
+	out := new(DNS)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+func (in *CoreDNS) DeepCopyInto(out *CoreDNS) {
+	*out = *in
+	if in.ExternalZones != nil {
+		in, out := &in.ExternalZones, &out.ExternalZones
+		*out = make([]ExternalZone, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.UpstreamDNSServers != nil {
+		in, out := &in.UpstreamDNSServers, &out.UpstreamDNSServers
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new CoreDNS.
+func (in *CoreDNS) DeepCopy() *CoreDNS {
+	if in == nil {
+		return nil
+	}
+	out := new(CoreDNS)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+func (in *NodeLocalDNS) DeepCopyInto(out *NodeLocalDNS) {
+	*out = *in
+	if in.ExternalZones != nil {
+		in, out := &in.ExternalZones, &out.ExternalZones
+		*out = make([]ExternalZone, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new NodeLocalDNS.
+func (in *NodeLocalDNS) DeepCopy() *NodeLocalDNS {
+	if in == nil {
+		return nil
+	}
+	out := new(NodeLocalDNS)
+	in.DeepCopyInto(out)
+	return out
+}
+
 // SetDefaults_ExternalZone sets default values for an ExternalZone.
 func SetDefaults_ExternalZone(cfg *ExternalZone) {
 	if cfg == nil {
@@ -138,6 +200,38 @@ func SetDefaults_ExternalZone(cfg *ExternalZone) {
 	}
 }
 
+// DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
+func (in *ExternalZone) DeepCopyInto(out *ExternalZone) {
+	*out = *in
+	if in.Zones != nil {
+		in, out := &in.Zones, &out.Zones
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Nameservers != nil {
+		in, out := &in.Nameservers, &out.Nameservers
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Rewrite != nil {
+		in, out := &in.Rewrite, &out.Rewrite
+		*out = make([]RewriteRule, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopy is an autogenerated deepcopy function, copying the receiver, creating a new ExternalZone.
+func (in *ExternalZone) DeepCopy() *ExternalZone {
+	if in == nil {
+		return nil
+	}
+	out := new(ExternalZone)
+	in.DeepCopyInto(out)
+	return out
+}
+
 // Validate_DNS validates the DNS configuration.
 func Validate_DNS(cfg *DNS, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
@@ -149,8 +243,11 @@ func Validate_DNS(cfg *DNS, verrs *validation.ValidationErrors, pathPrefix strin
 		for i, server := range cfg.CoreDNS.UpstreamDNSServers {
 			if strings.TrimSpace(server) == "" {
 				verrs.Add(fmt.Sprintf("%s.upstreamDNSServers[%d]", coreDNSPath, i), "server address cannot be empty")
-			} else if !isValidDNSServerAddress(server) {
-				verrs.Add(fmt.Sprintf("%s.upstreamDNSServers[%d]", coreDNSPath, i), fmt.Sprintf("invalid server address format '%s', must be an IP, a FQDN (containing '.'), or valid host:port with IP/FQDN", server))
+			} else if !util.ValidateHostPortString(server) && !util.IsValidIP(server) && !(util.IsValidDomainName(server) && strings.Contains(server, ".")) {
+				// Combined check: util.ValidateHostPortString for host:port
+				// util.IsValidIP for plain IP
+				// util.IsValidDomainName AND contains "." for FQDN without port
+				verrs.Add(fmt.Sprintf("%s.upstreamDNSServers[%d]", coreDNSPath, i), fmt.Sprintf("invalid server address format '%s'", server))
 			}
 		}
 	}
@@ -194,8 +291,11 @@ func Validate_ExternalZone(cfg *ExternalZone, verrs *validation.ValidationErrors
 	for i, ns := range cfg.Nameservers {
 		if strings.TrimSpace(ns) == "" {
 			verrs.Add(fmt.Sprintf("%s.nameservers[%d]", pathPrefix, i), "nameserver address cannot be empty")
-		} else if !isValidDNSServerAddress(ns) {
-			verrs.Add(fmt.Sprintf("%s.nameservers[%d]", pathPrefix, i), fmt.Sprintf("invalid nameserver address format '%s', must be an IP, a FQDN (containing '.'), or valid host:port with IP/FQDN", ns))
+		} else if !util.ValidateHostPortString(ns) && !util.IsValidIP(ns) && !(util.IsValidDomainName(ns) && strings.Contains(ns, ".")) {
+			// Combined check: util.ValidateHostPortString for host:port
+			// util.IsValidIP for plain IP
+			// util.IsValidDomainName AND contains "." for FQDN without port
+			verrs.Add(fmt.Sprintf("%s.nameservers[%d]", pathPrefix, i), fmt.Sprintf("invalid nameserver address format '%s'", ns))
 		}
 	}
 

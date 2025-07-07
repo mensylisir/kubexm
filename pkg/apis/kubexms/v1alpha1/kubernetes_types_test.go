@@ -6,11 +6,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/mensylisir/kubexm/pkg/util/validation"
+	"github.com/mensylisir/kubexm/pkg/util" // Added import
 )
 
 // Helper function to get pointers for basic types in tests, if not in a shared util yet
-// For bool - using global boolPtr from zz_helpers.go
-// For int32 - using global int32Ptr from zz_helpers.go
+// For bool - using global util.BoolPtr from util package
+// For int32 - using global util.Int32Ptr from util package
 
 // --- Test SetDefaults_KubernetesConfig ---
 func TestSetDefaults_KubernetesConfig(t *testing.T) {
@@ -180,18 +181,18 @@ func TestValidate_KubeletConfig(t *testing.T) {
 		{"nil_config", nil, ""}, // nil config should be handled by caller
 		{"valid_empty", &KubeletConfig{}, ""}, // Defaults will be applied before validation typically
 		{"valid_full", &KubeletConfig{
-			CgroupDriver: stringPtr("systemd"),
-			HairpinMode:  stringPtr("promiscuous-bridge"),
-			PodPidsLimit: int64Ptr(20000),
+			CgroupDriver: util.StrPtr("systemd"),
+			HairpinMode:  util.StrPtr("promiscuous-bridge"),
+			PodPidsLimit: util.Int64Ptr(20000),
 			EvictionHard: map[string]string{"memory.available": "50Mi"},
 		}, ""},
-		{"invalid_cgroupdriver", &KubeletConfig{CgroupDriver: stringPtr("docker")}, ".cgroupDriver: must be one of [systemd cgroupfs] if specified"},
-		{"valid_cgroupdriver_empty_for_default", &KubeletConfig{CgroupDriver: stringPtr("")}, ""}, // Empty string is not in validKubeletCgroupDrivers, but if default is applied it would be fine
-		{"invalid_hairpin", &KubeletConfig{HairpinMode: stringPtr("bad-mode")}, ".hairpinMode: invalid mode 'bad-mode'"},
-		{"valid_hairpin_empty_for_default", &KubeletConfig{HairpinMode: stringPtr("")}, ""}, // Empty string is allowed for default by validKubeletHairpinModes
-		{"invalid_podPidsLimit_zero", &KubeletConfig{PodPidsLimit: int64Ptr(0)}, ".podPidsLimit: must be positive or -1 (unlimited)"},
-		{"invalid_podPidsLimit_negative_not_-1", &KubeletConfig{PodPidsLimit: int64Ptr(-10)}, ".podPidsLimit: must be positive or -1 (unlimited)"},
-		{"valid_podPidsLimit_-1", &KubeletConfig{PodPidsLimit: int64Ptr(-1)}, ""},
+		{"invalid_cgroupdriver", &KubeletConfig{CgroupDriver: util.StrPtr("docker")}, ".cgroupDriver: must be one of [systemd cgroupfs] if specified"},
+		{"valid_cgroupdriver_empty_for_default", &KubeletConfig{CgroupDriver: util.StrPtr("")}, ""}, // Empty string is not in validKubeletCgroupDrivers, but if default is applied it would be fine
+		{"invalid_hairpin", &KubeletConfig{HairpinMode: util.StrPtr("bad-mode")}, ".hairpinMode: invalid mode 'bad-mode'"},
+		{"valid_hairpin_empty_for_default", &KubeletConfig{HairpinMode: util.StrPtr("")}, ""}, // Empty string is allowed for default by validKubeletHairpinModes
+		{"invalid_podPidsLimit_zero", &KubeletConfig{PodPidsLimit: util.Int64Ptr(0)}, ".podPidsLimit: must be positive or -1 (unlimited)"},
+		{"invalid_podPidsLimit_negative_not_-1", &KubeletConfig{PodPidsLimit: util.Int64Ptr(-10)}, ".podPidsLimit: must be positive or -1 (unlimited)"},
+		{"valid_podPidsLimit_-1", &KubeletConfig{PodPidsLimit: util.Int64Ptr(-1)}, ""},
 	}
 
 	for _, tt := range tests {
@@ -258,7 +259,7 @@ func TestValidate_KubernetesConfig_Invalid(t *testing.T) {
 		{"empty_kubeProxyConfiguration_raw", &KubernetesConfig{Version: "v1.20.0", KubeProxyConfiguration: &runtime.RawExtension{Raw: []byte("")}}, ".kubeProxyConfiguration: raw data cannot be empty"},
 		// APIServer specific errors are now in TestValidate_APIServerConfig
 		// Kubelet specific errors are now in TestValidate_KubeletConfig
-		{"kubeproxy_iptables_bad_masq_bit", &KubernetesConfig{Version: "v1.20.0", ProxyMode: "iptables", KubeProxy: &KubeProxyConfig{IPTables: &KubeProxyIPTablesConfig{MasqueradeBit: int32Ptr(32)}}}, ".kubeProxy.ipTables.masqueradeBit: must be between 0 and 31"},
+		{"kubeproxy_iptables_bad_masq_bit", &KubernetesConfig{Version: "v1.20.0", ProxyMode: "iptables", KubeProxy: &KubeProxyConfig{IPTables: &KubeProxyIPTablesConfig{MasqueradeBit: util.Int32Ptr(32)}}}, ".kubeProxy.ipTables.masqueradeBit: must be between 0 and 31"},
 		{"kubeproxy_iptables_bad_sync", &KubernetesConfig{Version: "v1.20.0", ProxyMode: "iptables", KubeProxy: &KubeProxyConfig{IPTables: &KubeProxyIPTablesConfig{SyncPeriod: "bad"}}}, ".kubeProxy.ipTables.syncPeriod: invalid duration format"},
 		{"kubeproxy_ipvs_bad_sync", &KubernetesConfig{Version: "v1.20.0", ProxyMode: "ipvs", KubeProxy: &KubeProxyConfig{IPVS: &KubeProxyIPVSConfig{MinSyncPeriod: "bad"}}}, ".kubeProxy.ipvs.minSyncPeriod: invalid duration format"},
 		{"kubeproxy_ipvs_bad_exclude_cidr", &KubernetesConfig{Version: "v1.20.0", ProxyMode: "ipvs", KubeProxy: &KubeProxyConfig{IPVS: &KubeProxyIPVSConfig{ExcludeCIDRs: []string{"invalid"}}}}, ".kubeProxy.ipvs.excludeCIDRs[0]: invalid CIDR format"},
@@ -336,31 +337,31 @@ func TestKubernetesConfig_Helpers(t *testing.T) {
 	SetDefaults_KubernetesConfig(cfg, "test")
 
 	if cfg.IsKubeProxyDisabled() != false { t.Error("IsKubeProxyDisabled default failed") }
-	cfg.DisableKubeProxy = boolPtr(true)
+	cfg.DisableKubeProxy = util.BoolPtr(true)
 	if cfg.IsKubeProxyDisabled() != true { t.Error("IsKubeProxyDisabled true failed") }
 
 	if cfg.IsNodelocaldnsEnabled() != true { t.Error("IsNodelocaldnsEnabled default failed") }
-	cfg.Nodelocaldns.Enabled = boolPtr(false)
+	cfg.Nodelocaldns.Enabled = util.BoolPtr(false)
 	if cfg.IsNodelocaldnsEnabled() != false { t.Error("IsNodelocaldnsEnabled false failed") }
 
 	if cfg.IsAuditEnabled() != false {t.Error("IsAuditEnabled default failed")}
-	cfg.Audit.Enabled = boolPtr(true)
+	cfg.Audit.Enabled = util.BoolPtr(true)
 	if !cfg.IsAuditEnabled() {t.Error("IsAuditEnabled true failed")}
 
 	if cfg.IsKataEnabled() != false {t.Error("IsKataEnabled default failed")}
-	cfg.Kata.Enabled = boolPtr(true)
+	cfg.Kata.Enabled = util.BoolPtr(true)
 	if !cfg.IsKataEnabled() {t.Error("IsKataEnabled true failed")}
 
 	if cfg.IsNodeFeatureDiscoveryEnabled() != false {t.Error("IsNodeFeatureDiscoveryEnabled default failed")}
-	cfg.NodeFeatureDiscovery.Enabled = boolPtr(true)
+	cfg.NodeFeatureDiscovery.Enabled = util.BoolPtr(true)
 	if !cfg.IsNodeFeatureDiscoveryEnabled() {t.Error("IsNodeFeatureDiscoveryEnabled true failed")}
 
 	if cfg.IsAutoRenewCertsEnabled() != true {t.Error("IsAutoRenewCertsEnabled default failed, expected true")}
-	cfg.AutoRenewCerts = boolPtr(false)
+	cfg.AutoRenewCerts = util.BoolPtr(false)
 	if cfg.IsAutoRenewCertsEnabled() != false {t.Error("IsAutoRenewCertsEnabled set to false failed")}
 
 	if cfg.GetMaxPods() != 110 { t.Errorf("GetMaxPods default failed, got %d", cfg.GetMaxPods()) }
-	cfg.MaxPods = int32Ptr(200)
+	cfg.MaxPods = util.Int32Ptr(200)
 	if cfg.GetMaxPods() != 200 { t.Errorf("GetMaxPods custom failed, got %d", cfg.GetMaxPods()) }
 
 	if !cfg.IsAtLeastVersion("v1.24.0") { t.Error("IsAtLeastVersion('v1.24.0') failed for v1.24.5") }
@@ -379,9 +380,9 @@ func TestValidate_KubeProxyIPTablesConfig(t *testing.T) {
 	}{
 		{"nil_config", nil, ""},
 		{"valid_empty", &KubeProxyIPTablesConfig{}, ""}, // Defaults are applied before validation
-		{"valid_full", &KubeProxyIPTablesConfig{MasqueradeAll: boolPtr(true), MasqueradeBit: int32Ptr(16), SyncPeriod: "60s", MinSyncPeriod: "30s"}, ""},
-		{"invalid_masqueradeBit_low", &KubeProxyIPTablesConfig{MasqueradeBit: int32Ptr(-1)}, ".masqueradeBit: must be between 0 and 31"},
-		{"invalid_masqueradeBit_high", &KubeProxyIPTablesConfig{MasqueradeBit: int32Ptr(32)}, ".masqueradeBit: must be between 0 and 31"},
+		{"valid_full", &KubeProxyIPTablesConfig{MasqueradeAll: util.BoolPtr(true), MasqueradeBit: util.Int32Ptr(16), SyncPeriod: "60s", MinSyncPeriod: "30s"}, ""},
+		{"invalid_masqueradeBit_low", &KubeProxyIPTablesConfig{MasqueradeBit: util.Int32Ptr(-1)}, ".masqueradeBit: must be between 0 and 31"},
+		{"invalid_masqueradeBit_high", &KubeProxyIPTablesConfig{MasqueradeBit: util.Int32Ptr(32)}, ".masqueradeBit: must be between 0 and 31"},
 		{"invalid_syncPeriod", &KubeProxyIPTablesConfig{SyncPeriod: "bad-duration"}, ".syncPeriod: invalid duration format"},
 		{"invalid_minSyncPeriod", &KubeProxyIPTablesConfig{MinSyncPeriod: "1minute"}, ".minSyncPeriod: invalid duration format"}, // Example of a valid unit but not parsed by time.ParseDuration without number
 	}
@@ -540,3 +541,5 @@ func TestValidate_SchedulerConfig(t *testing.T) {
 		})
 	}
 }
+
+[end of pkg/apis/kubexms/v1alpha1/kubernetes_types_test.go]
