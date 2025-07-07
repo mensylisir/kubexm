@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mensylisir/kubexm/pkg/common" // Import common package
 	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
 	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
@@ -82,7 +83,7 @@ func SetDefaults_DNS(cfg *DNS) {
 		return
 	}
 	if cfg.CoreDNS.UpstreamDNSServers == nil {
-		cfg.CoreDNS.UpstreamDNSServers = []string{"8.8.8.8", "1.1.1.1"}
+		cfg.CoreDNS.UpstreamDNSServers = []string{common.DefaultCoreDNSUpstreamGoogle, common.DefaultCoreDNSUpstreamCloudflare}
 	}
 	if cfg.CoreDNS.ExternalZones == nil {
 		cfg.CoreDNS.ExternalZones = []ExternalZone{}
@@ -110,7 +111,7 @@ func SetDefaults_ExternalZone(cfg *ExternalZone) {
 		cfg.Nameservers = []string{}
 	}
 	if cfg.Cache == 0 {
-		cfg.Cache = 300
+		cfg.Cache = common.DefaultExternalZoneCacheSeconds
 	}
 	if cfg.Rewrite == nil {
 		cfg.Rewrite = []RewriteRule{}

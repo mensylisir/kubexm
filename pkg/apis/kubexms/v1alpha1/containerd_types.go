@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"github.com/mensylisir/kubexm/pkg/common" // Import common package
 	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
 	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
@@ -64,14 +65,14 @@ func SetDefaults_ContainerdConfig(cfg *ContainerdConfig) {
 		cfg.UseSystemdCgroup = boolPtr(true)
 	}
 	if cfg.ConfigPath == nil {
-		cfg.ConfigPath = stringPtr("/etc/containerd/config.toml")
+		cfg.ConfigPath = stringPtr(common.ContainerdDefaultConfigFile)
 	}
 	if cfg.DisabledPlugins == nil {
 		cfg.DisabledPlugins = []string{}
 	}
 	if cfg.RequiredPlugins == nil {
 		// CRI plugin is essential for Kubernetes integration.
-		cfg.RequiredPlugins = []string{"io.containerd.grpc.v1.cri"}
+		cfg.RequiredPlugins = []string{common.ContainerdPluginCRI}
 	}
 	if cfg.Imports == nil {
 		cfg.Imports = []string{}

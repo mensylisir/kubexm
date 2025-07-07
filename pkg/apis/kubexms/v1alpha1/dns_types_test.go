@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/mensylisir/kubexm/pkg/common" // Import common package
 	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
@@ -27,7 +28,7 @@ func TestSetDefaults_ExternalZone(t *testing.T) {
 			expected: &ExternalZone{
 				Zones:       []string{},
 				Nameservers: []string{},
-				Cache:       300,
+				Cache:       common.DefaultExternalZoneCacheSeconds,
 				Rewrite:     []RewriteRule{},
 			},
 		},
@@ -76,7 +77,7 @@ func TestSetDefaults_DNS(t *testing.T) {
 			input: &DNS{},
 			expected: &DNS{
 				CoreDNS: CoreDNS{
-					UpstreamDNSServers: []string{"8.8.8.8", "1.1.1.1"},
+					UpstreamDNSServers: []string{common.DefaultCoreDNSUpstreamGoogle, common.DefaultCoreDNSUpstreamCloudflare},
 					ExternalZones:      []ExternalZone{},
 				},
 				NodeLocalDNS: NodeLocalDNS{
@@ -102,9 +103,9 @@ func TestSetDefaults_DNS(t *testing.T) {
 			input: &DNS{CoreDNS: CoreDNS{ExternalZones: []ExternalZone{{}}}},
 			expected: &DNS{
 				CoreDNS: CoreDNS{
-					UpstreamDNSServers: []string{"8.8.8.8", "1.1.1.1"},
+					UpstreamDNSServers: []string{common.DefaultCoreDNSUpstreamGoogle, common.DefaultCoreDNSUpstreamCloudflare},
 					ExternalZones: []ExternalZone{
-						{Zones: []string{}, Nameservers: []string{}, Cache: 300, Rewrite: []RewriteRule{}},
+						{Zones: []string{}, Nameservers: []string{}, Cache: common.DefaultExternalZoneCacheSeconds, Rewrite: []RewriteRule{}},
 					},
 				},
 				NodeLocalDNS: NodeLocalDNS{
@@ -117,7 +118,7 @@ func TestSetDefaults_DNS(t *testing.T) {
 			input: &DNS{NodeLocalDNS: NodeLocalDNS{ExternalZones: []ExternalZone{{Cache: 500}}}},
 			expected: &DNS{
 				CoreDNS: CoreDNS{
-					UpstreamDNSServers: []string{"8.8.8.8", "1.1.1.1"},
+					UpstreamDNSServers: []string{common.DefaultCoreDNSUpstreamGoogle, common.DefaultCoreDNSUpstreamCloudflare},
 					ExternalZones:      []ExternalZone{},
 				},
 				NodeLocalDNS: NodeLocalDNS{
