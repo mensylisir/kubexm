@@ -115,4 +115,36 @@ const (
 	DockerLogDriverSyslog               = "syslog"
 	DockerLogDriverFluentd              = "fluentd"
 	DockerLogDriverNone                 = "none"
+
+	// --- Keepalived Defaults ---
+	DefaultKeepalivedVRID            = 51
+	DefaultKeepalivedPriorityMaster  = 101
+	DefaultKeepalivedPriorityBackup  = 100
+	KeepalivedAuthTypePASS           = "PASS" // Already in keepalived_types.go, ensure consistency or remove from one place
+	KeepalivedAuthTypeAH             = "AH"   // Already in keepalived_types.go, ensure consistency or remove from one place
+	DefaultKeepalivedAuthPass        = "kxm_pass" // Changed to be 8 chars or less
+	DefaultKeepalivedPreempt         = true
+	DefaultKeepalivedCheckScript     = "/etc/keepalived/check_apiserver.sh" // Example, might need adjustment
+	DefaultKeepalivedInterval        = 5    // Health check interval in seconds
+	DefaultKeepalivedRise            = 2    // Number of successful checks to transition to MASTER
+	DefaultKeepalivedFall            = 2    // Number of failed checks to transition to BACKUP/FAULT
+	DefaultKeepalivedAdvertInt       = 1    // VRRP advertisement interval in seconds
+	DefaultKeepalivedLVScheduler     = "rr" // Default LVS scheduler (round-robin)
+
+	// --- HAProxy Defaults ---
+	DefaultHAProxyMode      = "tcp"
+	DefaultHAProxyAlgorithm = "roundrobin"
+
+	// --- NginxLB Defaults ---
+	DefaultNginxListenPort   = 6443 // Or a common LB port like 8443
+	DefaultNginxConfigFilePath = "/etc/nginx/nginx.conf"
+	DefaultNginxMode      = "tcp"
+	DefaultNginxAlgorithm = "round_robin" // Nginx uses 'round_robin' not 'roundrobin'
+
+	// --- KubeVIP Defaults ---
+	DefaultKubeVIPMode  = "ARP" // or "BGP", ensure case matches KubeVIPModeARP in kubevip_types.go
+	DefaultKubeVIPImage = "ghcr.io/kube-vip/kube-vip:v0.8.0" // Example version
+
+	// --- Kubelet Defaults ---
+	DefaultKubeletHairpinMode = "promiscuous-bridge"
 )

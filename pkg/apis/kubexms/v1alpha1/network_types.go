@@ -380,9 +380,10 @@ func SetDefaults_CalicoConfig(cfg *CalicoConfig, defaultPoolCIDR string, globalD
 	for i := range cfg.IPPools {
 		pool := &cfg.IPPools[i]
 		if pool.Encapsulation == "" {
-			if cfg.IPIPMode == "Always" {
+			// Consistent logic with default pool creation: prioritize IPIP, then VXLAN
+			if cfg.IPIPMode == "Always" || cfg.IPIPMode == "CrossSubnet" {
 				pool.Encapsulation = "IPIP"
-			} else if cfg.VXLANMode == "Always" {
+			} else if cfg.VXLANMode == "Always" || cfg.VXLANMode == "CrossSubnet" {
 				pool.Encapsulation = "VXLAN"
 			} else {
 				pool.Encapsulation = "None"

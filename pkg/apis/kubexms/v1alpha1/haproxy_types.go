@@ -5,6 +5,7 @@ import (
 	// "net" // For IP validation - will be replaced by util.IsValidIP
 	"strings"
 	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
+	"github.com/mensylisir/kubexm/pkg/common" // Import the common package
 	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
@@ -77,16 +78,16 @@ func SetDefaults_HAProxyConfig(cfg *HAProxyConfig) {
 		return
 	}
 	if cfg.FrontendBindAddress == nil {
-		cfg.FrontendBindAddress = stringPtr("0.0.0.0")
+		cfg.FrontendBindAddress = util.StrPtr("0.0.0.0")
 	}
 	if cfg.FrontendPort == nil {
-		cfg.FrontendPort = intPtr(6443) // Default Kube API server port
+		cfg.FrontendPort = util.IntPtr(common.HAProxyDefaultFrontendPort)
 	}
 	if cfg.Mode == nil {
-		cfg.Mode = stringPtr("tcp")
+		cfg.Mode = util.StrPtr(common.DefaultHAProxyMode)
 	}
 	if cfg.BalanceAlgorithm == nil {
-		cfg.BalanceAlgorithm = stringPtr("roundrobin")
+		cfg.BalanceAlgorithm = util.StrPtr(common.DefaultHAProxyAlgorithm)
 	}
 	if cfg.BackendServers == nil {
 		cfg.BackendServers = []HAProxyBackendServer{}
@@ -94,7 +95,7 @@ func SetDefaults_HAProxyConfig(cfg *HAProxyConfig) {
 	for i := range cfg.BackendServers {
 		server := &cfg.BackendServers[i]
 		if server.Weight == nil {
-			server.Weight = intPtr(1) // Default weight
+			server.Weight = util.IntPtr(1) // Default weight
 		}
 	}
 
@@ -112,7 +113,7 @@ func SetDefaults_HAProxyConfig(cfg *HAProxyConfig) {
 	}
 
 	if cfg.SkipInstall == nil {
-		cfg.SkipInstall = boolPtr(false) // Default to managing HAProxy installation
+		cfg.SkipInstall = util.BoolPtr(false) // Default to managing HAProxy installation
 	}
 }
 

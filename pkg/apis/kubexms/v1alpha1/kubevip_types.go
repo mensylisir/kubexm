@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"github.com/mensylisir/kubexm/pkg/util" // Ensured util is imported
+	"github.com/mensylisir/kubexm/pkg/common" // Import common
 	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
@@ -72,6 +73,9 @@ func SetDefaults_KubeVIPConfig(cfg *KubeVIPConfig) {
 	}
 	if cfg.EnableServicesLB == nil {
 		cfg.EnableServicesLB = util.BoolPtr(false)
+	}
+	if cfg.Image == nil || *cfg.Image == "" { // Set default image if not specified or empty
+		cfg.Image = util.StrPtr(common.DefaultKubeVIPImage)
 	}
 	if cfg.ExtraArgs == nil {
 		cfg.ExtraArgs = []string{}
