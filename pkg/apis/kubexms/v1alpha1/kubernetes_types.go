@@ -170,7 +170,29 @@ func SetDefaults_KubernetesConfig(cfg *KubernetesConfig, clusterMetaName string)
 	}
 	cfg.APIServer.ExtraArgs = util.EnsureExtraArgs(cfg.APIServer.ExtraArgs, defaultAPIServerArgs)
 
-	if cfg.APIServer.AdmissionPlugins == nil { cfg.APIServer.AdmissionPlugins = []string{} }
+	if cfg.APIServer.AdmissionPlugins == nil {
+		cfg.APIServer.AdmissionPlugins = []string{} // Initialize if nil
+	}
+	// Default admission plugins - ensure core plugins are present without overriding user's complete custom list if provided non-empty
+	defaultAdmissionPlugins := []string{
+		"NodeRestriction", "NamespaceLifecycle", "LimitRanger", "ServiceAccount",
+		"DefaultStorageClass", "DefaultTolerationSeconds", "MutatingAdmissionWebhook",
+		"ValidatingAdmissionWebhook", "ResourceQuota",
+	}
+	if len(cfg.APIServer.AdmissionPlugins) == 0 { // If user provided an empty list, fill with defaults
+		cfg.APIServer.AdmissionPlugins = append(cfg.APIServer.AdmissionPlugins, defaultAdmissionPlugins...)
+	} else { // If user provided some, ensure defaults are there if not already present by user
+		currentPluginsMap := make(map[string]bool)
+		for _, plugin := range cfg.APIServer.AdmissionPlugins {
+			currentPluginsMap[plugin] = true
+		}
+		for _, defaultPlugin := range defaultAdmissionPlugins {
+			if !currentPluginsMap[defaultPlugin] {
+				cfg.APIServer.AdmissionPlugins = append(cfg.APIServer.AdmissionPlugins, defaultPlugin)
+			}
+		}
+	}
+
 	if cfg.APIServer.ServiceNodePortRange == "" { cfg.APIServer.ServiceNodePortRange = "30000-32767" }
 
 	if cfg.ControllerManager == nil { cfg.ControllerManager = &ControllerManagerConfig{} }
@@ -255,6 +277,9 @@ func SetDefaults_KubeletConfig(cfg *KubeletConfig, containerManager string) {
 		if containerManager != "" { cfg.CgroupDriver = util.StrPtr(containerManager)
 		} else { cfg.CgroupDriver = util.StrPtr(common.CgroupDriverSystemd) } // Use common constant
 	}
+	if cfg.HairpinMode == nil {
+		cfg.HairpinMode = util.StrPtr(common.DefaultKubeletHairpinMode)
+	}
 }
 
 func Validate_KubernetesConfig(cfg *KubernetesConfig, verrs *validation.ValidationErrors, pathPrefix string) {
@@ -287,10 +312,36 @@ func Validate_KubernetesConfig(cfg *KubernetesConfig, verrs *validation.Validati
 	if cfg.KubeProxyConfiguration != nil && len(cfg.KubeProxyConfiguration.Raw) == 0 {
 		verrs.Add(pathPrefix+".kubeProxyConfiguration", "raw data cannot be empty if section is present")
 	}
+
+	// Validate ApiserverCertExtraSans
+	for i, san := range cfg.ApiserverCertExtraSans {
+		trimmedSan := strings.TrimSpace(san)
+		if trimmedSan == "" {
+			verrs.Add(fmt.Sprintf("%s.apiserverCertExtraSans[%d]", pathPrefix, i), "SAN entry cannot be empty")
+		} else if !util.IsValidIP(trimmedSan) && !util.IsValidDomainName(trimmedSan) {
+			verrs.Add(fmt.Sprintf("%s.apiserverCertExtraSans[%d]", pathPrefix, i), fmt.Sprintf("invalid SAN entry '%s', must be a valid IP address or DNS name", san))
+		}
+	}
 }
 
 func Validate_APIServerConfig(cfg *APIServerConfig, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil { return }
+	for i, san := range cfg.EtcdServers { // Assuming EtcdServers might contain FQDNs or IPs
+		if strings.TrimSpace(san) == "" {
+			verrs.Add(fmt.Sprintf("%s.etcdServers[%d]", pathPrefix, i), "etcd server entry cannot be empty")
+		}
+		// Add more specific validation if needed, e.g. URL format, but often these are just host:port or URLs
+	}
+	if cfg.EtcdCAFile != "" && strings.TrimSpace(cfg.EtcdCAFile) == "" {
+		verrs.Add(pathPrefix+".etcdCAFile", "cannot be only whitespace if specified")
+	}
+	if cfg.EtcdCertFile != "" && strings.TrimSpace(cfg.EtcdCertFile) == "" {
+		verrs.Add(pathPrefix+".etcdCertFile", "cannot be only whitespace if specified")
+	}
+	if cfg.EtcdKeyFile != "" && strings.TrimSpace(cfg.EtcdKeyFile) == "" {
+		verrs.Add(pathPrefix+".etcdKeyFile", "cannot be only whitespace if specified")
+	}
+
 	if cfg.ServiceNodePortRange != "" {
 		parts := strings.Split(cfg.ServiceNodePortRange, "-")
 		if len(parts) != 2 {
@@ -317,6 +368,9 @@ func Validate_APIServerConfig(cfg *APIServerConfig, verrs *validation.Validation
 			}
 		}
 	}
+	// Validate ApiserverCertExtraSans
+	// This field is part of KubernetesConfig, not APIServerConfig directly in the struct,
+	// but it's validated conceptually with APIServer settings. Let's adjust Validate_KubernetesConfig for it.
 }
 
 func Validate_ControllerManagerConfig(cfg *ControllerManagerConfig, verrs *validation.ValidationErrors, pathPrefix string) {

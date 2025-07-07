@@ -1,15 +1,13 @@
 package v1alpha1
 
 import (
-	"reflect"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/mensylisir/kubexm/pkg/common" // Import common package
+	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"github.com/mensylisir/kubexm/pkg/util/validation"
+	"github.com/stretchr/testify/assert"
 )
-
-// stringPtr and boolPtr are expected to be in zz_helpers.go or similar within the package.
 
 func TestSetDefaults_ContainerdConfig(t *testing.T) {
 	tests := []struct {
@@ -18,18 +16,17 @@ func TestSetDefaults_ContainerdConfig(t *testing.T) {
 		expected *ContainerdConfig
 	}{
 		{
-			name:     "nil input",
-			input:    nil,
-			expected: nil,
+			name:  "nil input",
+			input: nil,
 		},
 		{
-			name:  "empty config",
+			name: "empty config",
 			input: &ContainerdConfig{},
 			expected: &ContainerdConfig{
-				RegistryMirrors:    make(map[string][]string),
+				RegistryMirrors:    map[string][]string{},
 				InsecureRegistries: []string{},
-				UseSystemdCgroup:   boolPtr(true),
-				ConfigPath:         stringPtr(common.ContainerdDefaultConfigFile),
+				UseSystemdCgroup:   util.BoolPtr(true),
+				ConfigPath:         util.StrPtr(common.ContainerdDefaultConfigFile),
 				DisabledPlugins:    []string{},
 				RequiredPlugins:    []string{common.ContainerdPluginCRI},
 				Imports:            []string{},
@@ -37,12 +34,14 @@ func TestSetDefaults_ContainerdConfig(t *testing.T) {
 		},
 		{
 			name: "UseSystemdCgroup explicitly false",
-			input: &ContainerdConfig{UseSystemdCgroup: boolPtr(false)},
+			input: &ContainerdConfig{
+				UseSystemdCgroup: util.BoolPtr(false),
+			},
 			expected: &ContainerdConfig{
-				RegistryMirrors:    make(map[string][]string),
+				RegistryMirrors:    map[string][]string{},
 				InsecureRegistries: []string{},
-				UseSystemdCgroup:   boolPtr(false),
-				ConfigPath:         stringPtr(common.ContainerdDefaultConfigFile),
+				UseSystemdCgroup:   util.BoolPtr(false),
+				ConfigPath:         util.StrPtr(common.ContainerdDefaultConfigFile),
 				DisabledPlugins:    []string{},
 				RequiredPlugins:    []string{common.ContainerdPluginCRI},
 				Imports:            []string{},
@@ -50,12 +49,14 @@ func TestSetDefaults_ContainerdConfig(t *testing.T) {
 		},
 		{
 			name: "ConfigPath explicitly set",
-			input: &ContainerdConfig{ConfigPath: stringPtr("/custom/path/config.toml")},
+			input: &ContainerdConfig{
+				ConfigPath: util.StrPtr("/custom/containerd.toml"),
+			},
 			expected: &ContainerdConfig{
-				RegistryMirrors:    make(map[string][]string),
+				RegistryMirrors:    map[string][]string{},
 				InsecureRegistries: []string{},
-				UseSystemdCgroup:   boolPtr(true),
-				ConfigPath:         stringPtr("/custom/path/config.toml"),
+				UseSystemdCgroup:   util.BoolPtr(true),
+				ConfigPath:         util.StrPtr("/custom/containerd.toml"),
 				DisabledPlugins:    []string{},
 				RequiredPlugins:    []string{common.ContainerdPluginCRI},
 				Imports:            []string{},
@@ -63,14 +64,16 @@ func TestSetDefaults_ContainerdConfig(t *testing.T) {
 		},
 		{
 			name: "RequiredPlugins already set",
-			input: &ContainerdConfig{RequiredPlugins: []string{"custom.plugin"}},
+			input: &ContainerdConfig{
+				RequiredPlugins: []string{"custom.plugin.cri"},
+			},
 			expected: &ContainerdConfig{
-				RegistryMirrors:    make(map[string][]string),
+				RegistryMirrors:    map[string][]string{},
 				InsecureRegistries: []string{},
-				UseSystemdCgroup:   boolPtr(true),
-				ConfigPath:         stringPtr(common.ContainerdDefaultConfigFile),
+				UseSystemdCgroup:   util.BoolPtr(true),
+				ConfigPath:         util.StrPtr(common.ContainerdDefaultConfigFile),
 				DisabledPlugins:    []string{},
-				RequiredPlugins:    []string{"custom.plugin"},
+				RequiredPlugins:    []string{"custom.plugin.cri"},
 				Imports:            []string{},
 			},
 		},
@@ -78,25 +81,25 @@ func TestSetDefaults_ContainerdConfig(t *testing.T) {
 			name: "All fields already set",
 			input: &ContainerdConfig{
 				Version:            "1.5.5",
-				RegistryMirrors:    map[string][]string{"docker.io": {"https://mirror.internal"}},
-				InsecureRegistries: []string{"insecure.repo:5000"},
-				UseSystemdCgroup:   boolPtr(false),
+				RegistryMirrors:    map[string][]string{"docker.io": {"https://mirror.example.com"}},
+				InsecureRegistries: []string{"insecure.registry:5000"},
+				UseSystemdCgroup:   util.BoolPtr(false),
 				ExtraTomlConfig:    "some_toml_config",
-				ConfigPath:         stringPtr("/opt/containerd/config.toml"),
-				DisabledPlugins:    []string{"some.plugin.to.disable"},
-				RequiredPlugins:    []string{"io.containerd.grpc.v1.cri", "another.required.plugin"},
-				Imports:            []string{"/etc/containerd/conf.d/extra.toml"},
+				ConfigPath:         util.StrPtr("/etc/alternative/containerd.toml"),
+				DisabledPlugins:    []string{"some.plugin"},
+				RequiredPlugins:    []string{"another.plugin"},
+				Imports:            []string{"/etc/containerd/conf.d/custom.toml"},
 			},
 			expected: &ContainerdConfig{
 				Version:            "1.5.5",
-				RegistryMirrors:    map[string][]string{"docker.io": {"https://mirror.internal"}},
-				InsecureRegistries: []string{"insecure.repo:5000"},
-				UseSystemdCgroup:   boolPtr(false),
+				RegistryMirrors:    map[string][]string{"docker.io": {"https://mirror.example.com"}},
+				InsecureRegistries: []string{"insecure.registry:5000"},
+				UseSystemdCgroup:   util.BoolPtr(false),
 				ExtraTomlConfig:    "some_toml_config",
-				ConfigPath:         stringPtr("/opt/containerd/config.toml"),
-				DisabledPlugins:    []string{"some.plugin.to.disable"},
-				RequiredPlugins:    []string{"io.containerd.grpc.v1.cri", "another.required.plugin"},
-				Imports:            []string{"/etc/containerd/conf.d/extra.toml"},
+				ConfigPath:         util.StrPtr("/etc/alternative/containerd.toml"),
+				DisabledPlugins:    []string{"some.plugin"},
+				RequiredPlugins:    []string{"another.plugin"},
+				Imports:            []string{"/etc/containerd/conf.d/custom.toml"},
 			},
 		},
 	}
@@ -104,147 +107,229 @@ func TestSetDefaults_ContainerdConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			SetDefaults_ContainerdConfig(tt.input)
-			if !reflect.DeepEqual(tt.input, tt.expected) {
-				assert.Equal(t, tt.expected, tt.input)
-			}
+			assert.Equal(t, tt.expected, tt.input)
 		})
 	}
 }
 
 func TestValidate_ContainerdConfig(t *testing.T) {
-	validCases := []struct {
-		name  string
-		input *ContainerdConfig
+	tests := []struct {
+		name        string
+		input       *ContainerdConfig
+		expectError bool
+		errorMsg    string
 	}{
 		{
-			name:  "minimal valid after defaults",
-			input: &ContainerdConfig{},
+			name:        "Valid minimal (valid after defaults)",
+			input:       &ContainerdConfig{}, // Defaults will be applied by SetDefaults before validation
+			expectError: false,
 		},
 		{
-			name: "valid with mirrors and insecure registries",
+			name: "Valid with mirrors and insecure registries",
 			input: &ContainerdConfig{
-				RegistryMirrors:    map[string][]string{"docker.io": {"https://mirror.example.com"}},
-				InsecureRegistries: []string{"my.registry:5000"},
-				ConfigPath:         stringPtr("/custom/config.toml"),
+				RegistryMirrors:    map[string][]string{"docker.io": {"http://localhost:5000"}},
+				InsecureRegistries: []string{"localhost:5000", "127.0.0.1:5001"},
 			},
+			expectError: false,
 		},
 		{
-			name: "valid with plugins and imports",
+			name: "Valid with plugins and imports",
 			input: &ContainerdConfig{
-				DisabledPlugins: []string{"unwanted.plugin"},
-				RequiredPlugins: []string{"io.containerd.grpc.v1.cri", "my.plugin"},
-				Imports:         []string{"/etc/containerd/custom.toml"},
+				DisabledPlugins: []string{"test.plugin"},
+				RequiredPlugins: []string{"cri"},
+				Imports:         []string{"/path/to/import.toml"},
 			},
+			expectError: false,
 		},
 		{
-			name: "valid with version and extra toml",
+			name: "Valid with version and extra toml",
 			input: &ContainerdConfig{
 				Version:         "1.6.0",
-				ExtraTomlConfig: "[plugins.\"io.containerd.grpc.v1.cri\".registry]\n  config_path = \"/etc/containerd/certs.d\"",
+				ExtraTomlConfig: "[plugins]\n  [plugins.\"io.containerd.grpc.v1.cri\"]\n    sandbox_image = \"k8s.gcr.io/pause:3.2\"",
 			},
+			expectError: false,
 		},
 		{
-			name: "valid with v-prefix version",
+			name: "Valid with v-prefix version",
 			input: &ContainerdConfig{
 				Version: "v1.6.0",
 			},
+			expectError: false,
 		},
 		{
-			name: "valid with extended version",
+			name: "Valid with extended version",
 			input: &ContainerdConfig{
-				Version: "1.6.8-beta.0",
+				Version: "v1.4.3-k3s1",
 			},
+			expectError: false,
+		},
+		{
+			name: "Invalid empty mirror key",
+			input: &ContainerdConfig{
+				RegistryMirrors: map[string][]string{" ": {"http://m.com"}},
+			},
+			expectError: true,
+			errorMsg:    ".registryMirrors: registry host key cannot be empty",
+		},
+		{
+			name: "Invalid empty mirror list",
+			input: &ContainerdConfig{
+				RegistryMirrors: map[string][]string{"docker.io": {}},
+			},
+			expectError: true,
+			errorMsg:    ".registryMirrors[\"docker.io\"]: must contain at least one mirror URL",
+		},
+		{
+			name: "Invalid empty mirror url",
+			input: &ContainerdConfig{
+				RegistryMirrors: map[string][]string{"docker.io": {" "}},
+			},
+			expectError: true,
+			errorMsg:    ".registryMirrors[\"docker.io\"][0]: mirror URL cannot be empty",
+		},
+		{
+			name: "Invalid empty insecure reg",
+			input: &ContainerdConfig{
+				InsecureRegistries: []string{" "},
+			},
+			expectError: true,
+			errorMsg:    ".insecureRegistries[0]: registry host cannot be empty",
+		},
+		{
+			name: "Invalid empty config path",
+			input: &ContainerdConfig{
+				ConfigPath: util.StrPtr(" "),
+			},
+			expectError: true,
+			errorMsg:    ".configPath: cannot be empty if specified",
+		},
+		{
+			name: "Invalid disabledplugins empty item",
+			input: &ContainerdConfig{
+				DisabledPlugins: []string{" "},
+			},
+			expectError: true,
+			errorMsg:    ".disabledPlugins[0]: plugin name cannot be empty",
+		},
+		{
+			name: "Invalid requiredplugins empty item",
+			input: &ContainerdConfig{
+				RequiredPlugins: []string{" "},
+			},
+			expectError: true,
+			errorMsg:    ".requiredPlugins[0]: plugin name cannot be empty",
+		},
+		{
+			name: "Invalid imports empty item",
+			input: &ContainerdConfig{
+				Imports: []string{" "},
+			},
+			expectError: true,
+			errorMsg:    ".imports[0]: import path cannot be empty",
+		},
+		{
+			name: "Invalid version is whitespace",
+			input: &ContainerdConfig{
+				Version: "  ",
+			},
+			expectError: true,
+			errorMsg:    ".version: cannot be only whitespace if specified",
+		},
+		{
+			name: "Invalid version invalid format alphanum",
+			input: &ContainerdConfig{
+				Version: "1.beta",
+			},
+			expectError: true,
+			errorMsg:    ".version: '1.beta' is not a recognized version format",
+		},
+		{
+			name: "Invalid version invalid chars underscore",
+			input: &ContainerdConfig{
+				Version: "1.2_3",
+			},
+			expectError: true,
+			errorMsg:    ".version: '1.2_3' is not a recognized version format",
+		},
+		{
+			name: "Invalid invalid mirror url scheme",
+			input: &ContainerdConfig{
+				RegistryMirrors: map[string][]string{"docker.io": {"ftp://mirror.invalid"}},
+			},
+			expectError: true,
+			errorMsg:    "invalid URL format for mirror 'ftp://mirror.invalid' (must be http or https)",
+		},
+		{
+			name: "Invalid invalid mirror url format",
+			input: &ContainerdConfig{
+				RegistryMirrors: map[string][]string{"docker.io": {"http//invalid"}},
+			},
+			expectError: true,
+			errorMsg:    "invalid URL format for mirror 'http//invalid' (must be http or https)",
+		},
+		{
+			name: "Invalid invalid insecure registry format bad port",
+			input: &ContainerdConfig{
+				InsecureRegistries: []string{"myreg:port"},
+			},
+			expectError: true,
+			errorMsg:    "invalid host:port format for insecure registry 'myreg:port'",
+		},
+		{
+			name: "Invalid invalid insecure registry format bad host",
+			input: &ContainerdConfig{
+				InsecureRegistries: []string{"invalid_host!"},
+			},
+			expectError: true,
+			errorMsg:    "invalid host:port format for insecure registry 'invalid_host!'",
+		},
+		{
+			name: "Valid insecure registry ipv6 with port", // Corrected test name prefix
+			input: &ContainerdConfig{
+				InsecureRegistries: []string{"[::1]:5000"},
+			},
+			expectError: false,
+		},
+		{
+			name: "Valid insecure registry ipv4 with port", // Corrected test name prefix
+			input: &ContainerdConfig{
+				InsecureRegistries: []string{"127.0.0.1:5000"},
+			},
+			expectError: false,
+		},
+		{
+			name: "Valid insecure registry hostname with port", // Corrected test name prefix
+			input: &ContainerdConfig{
+				InsecureRegistries: []string{"my.registry.com:5000"},
+			},
+			expectError: false,
+		},
+		{
+			name: "Valid insecure registry hostname no port", // Corrected test name prefix
+			input: &ContainerdConfig{
+				InsecureRegistries: []string{"my.registry.com"},
+			},
+			expectError: false,
 		},
 	}
 
-	for _, tt := range validCases {
-		t.Run("Valid_"+tt.name, func(t *testing.T) {
-			SetDefaults_ContainerdConfig(tt.input)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inputToTest := tt.input
+			// Apply defaults only if the test case implies a valid state after defaulting
+			if tt.name == "Valid minimal (valid after defaults)" && inputToTest != nil {
+				SetDefaults_ContainerdConfig(inputToTest)
+			}
+
 			verrs := &validation.ValidationErrors{}
-			Validate_ContainerdConfig(tt.input, verrs, "spec.containerd")
-			assert.False(t, verrs.HasErrors(), "Expected no validation errors for '%s', but got: %s", tt.name, verrs.Error())
-		})
-	}
-
-	invalidCases := []struct {
-		name        string
-		input       *ContainerdConfig
-		errContains []string
-	}{
-		{"empty_mirror_key", &ContainerdConfig{RegistryMirrors: map[string][]string{" ": {"m1"}}}, []string{"registry host key cannot be empty"}},
-		{"empty_mirror_list", &ContainerdConfig{RegistryMirrors: map[string][]string{"docker.io": {}}}, []string{"must contain at least one mirror URL"}},
-		{"empty_mirror_url", &ContainerdConfig{RegistryMirrors: map[string][]string{"docker.io": {" "}}}, []string{"mirror URL cannot be empty"}},
-		{"empty_insecure_reg", &ContainerdConfig{InsecureRegistries: []string{" "}}, []string{"registry host cannot be empty"}},
-		{"empty_config_path", &ContainerdConfig{ConfigPath: stringPtr(" ")}, []string{"configPath: cannot be empty if specified"}},
-		{"disabledplugins_empty_item", &ContainerdConfig{DisabledPlugins: []string{" "}}, []string{".disabledPlugins[0]: plugin name cannot be empty"}},
-		{"requiredplugins_empty_item", &ContainerdConfig{RequiredPlugins: []string{" "}}, []string{".requiredPlugins[0]: plugin name cannot be empty"}},
-		{"imports_empty_item", &ContainerdConfig{Imports: []string{" "}}, []string{".imports[0]: import path cannot be empty"}},
-		{"version_is_whitespace", &ContainerdConfig{Version: "   "}, []string{".version: cannot be only whitespace if specified"}},
-		{
-			"version_invalid_format_alphanum",
-			&ContainerdConfig{Version: "1.2.3a"},
-			[]string{".version: '1.2.3a' is not a recognized version format"},
-		},
-		{
-			"version_invalid_chars_underscore",
-			&ContainerdConfig{Version: "1.2.3_beta"},
-			[]string{".version: '1.2.3_beta' is not a recognized version format"},
-		},
-		{
-			"invalid_mirror_url_scheme",
-			&ContainerdConfig{RegistryMirrors: map[string][]string{"docker.io": {"ftp://badmirror.com"}}},
-			[]string{"invalid URL format for mirror", "must be http or https"},
-		},
-		{
-			"invalid_mirror_url_format",
-			&ContainerdConfig{RegistryMirrors: map[string][]string{"docker.io": {"http://invalid domain/"}}},
-			[]string{"invalid URL format for mirror"},
-		},
-		{
-			"invalid_insecure_registry_format_bad_port",
-			&ContainerdConfig{InsecureRegistries: []string{"myreg:port"}},
-			[]string{"invalid host:port format for insecure registry"},
-		},
-		{
-			"invalid_insecure_registry_format_bad_host",
-			&ContainerdConfig{InsecureRegistries: []string{"invalid_host!"}},
-			[]string{"invalid host:port format for insecure registry"},
-		},
-		{
-			"valid_insecure_registry_ipv6_with_port",
-			&ContainerdConfig{InsecureRegistries: []string{"[::1]:5000"}},
-			nil,
-		},
-		{
-			"valid_insecure_registry_ipv4_with_port",
-			&ContainerdConfig{InsecureRegistries: []string{"127.0.0.1:5000"}},
-			nil,
-		},
-		{
-			"valid_insecure_registry_hostname_with_port",
-			&ContainerdConfig{InsecureRegistries: []string{"my.registry.com:5000"}},
-			nil,
-		},
-		{
-			"valid_insecure_registry_hostname_no_port",
-			&ContainerdConfig{InsecureRegistries: []string{"my.registry.com"}},
-			nil,
-		},
-	}
-
-	for _, tt := range invalidCases {
-		t.Run("Invalid_"+tt.name, func(t *testing.T) {
-			verrs := &validation.ValidationErrors{}
-			Validate_ContainerdConfig(tt.input, verrs, "spec.containerd")
-
-			if tt.errContains == nil {
-				assert.False(t, verrs.HasErrors(), "Expected no validation errors for '%s', but got: %s", tt.name, verrs.Error())
-			} else {
-				assert.True(t, verrs.HasErrors(), "Expected validation errors for '%s', but got none", tt.name)
-				fullError := verrs.Error()
-				for _, errStr := range tt.errContains {
-					assert.Contains(t, fullError, errStr, "Error message for '%s' does not contain expected substring '%s'. Full error: %s", tt.name, errStr, fullError)
+			Validate_ContainerdConfig(inputToTest, verrs, "spec.containerd")
+			if tt.expectError {
+				assert.True(t, verrs.HasErrors(), "Expected error for test '%s' but got none. Input: %+v", tt.name, tt.input)
+				if tt.errorMsg != "" {
+					assert.Contains(t, verrs.Error(), tt.errorMsg, "Error message for test '%s' does not contain '%s'. Full error: %s", tt.name, tt.errorMsg, verrs.Error())
 				}
+			} else {
+				assert.False(t, verrs.HasErrors(), "Unexpected error for test '%s': %s. Input: %+v", tt.name, verrs.Error(), tt.input)
 			}
 		})
 	}

@@ -62,10 +62,10 @@ func SetDefaults_ContainerdConfig(cfg *ContainerdConfig) {
 		cfg.InsecureRegistries = []string{}
 	}
 	if cfg.UseSystemdCgroup == nil {
-		cfg.UseSystemdCgroup = boolPtr(true)
+		cfg.UseSystemdCgroup = util.BoolPtr(true)
 	}
 	if cfg.ConfigPath == nil {
-		cfg.ConfigPath = stringPtr(common.ContainerdDefaultConfigFile)
+		cfg.ConfigPath = util.StrPtr(common.ContainerdDefaultConfigFile)
 	}
 	if cfg.DisabledPlugins == nil {
 		cfg.DisabledPlugins = []string{}

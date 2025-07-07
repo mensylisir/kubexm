@@ -7,6 +7,7 @@ import (
 	"strings"
 	"github.com/mensylisir/kubexm/pkg/util"
 	"github.com/mensylisir/kubexm/pkg/util/validation"
+	"github.com/mensylisir/kubexm/pkg/common"
 )
 
 // NginxLBUpstreamServer defines a backend server for Nginx load balancing.
@@ -39,16 +40,16 @@ func SetDefaults_NginxLBConfig(cfg *NginxLBConfig) {
 		return
 	}
 	if cfg.ListenAddress == nil {
-		cfg.ListenAddress = stringPtr("0.0.0.0")
+		cfg.ListenAddress = util.StrPtr("0.0.0.0")
 	}
 	if cfg.ListenPort == nil {
-		cfg.ListenPort = intPtr(6443)
+		cfg.ListenPort = util.IntPtr(common.DefaultNginxListenPort) // Assuming 6443 or a specific const
 	}
 	if cfg.Mode == nil {
-		cfg.Mode = stringPtr("tcp")
+		cfg.Mode = util.StrPtr(common.DefaultNginxMode)
 	}
 	if cfg.BalanceAlgorithm == nil {
-		cfg.BalanceAlgorithm = stringPtr("round_robin") // Nginx default is round-robin
+		cfg.BalanceAlgorithm = util.StrPtr(common.DefaultNginxAlgorithm)
 	}
 	if cfg.UpstreamServers == nil {
 		cfg.UpstreamServers = []NginxLBUpstreamServer{}
@@ -56,17 +57,17 @@ func SetDefaults_NginxLBConfig(cfg *NginxLBConfig) {
 	for i := range cfg.UpstreamServers {
 		server := &cfg.UpstreamServers[i]
 		if server.Weight == nil {
-			server.Weight = intPtr(1)
+			server.Weight = util.IntPtr(1)
 		}
 	}
 	if cfg.ExtraHTTPConfig == nil { cfg.ExtraHTTPConfig = []string{} }
 	if cfg.ExtraStreamConfig == nil { cfg.ExtraStreamConfig = []string{} }
 	if cfg.ExtraServerConfig == nil { cfg.ExtraServerConfig = []string{} }
 	if cfg.ConfigFilePath == nil {
-		cfg.ConfigFilePath = stringPtr("/etc/nginx/nginx.conf")
+		cfg.ConfigFilePath = util.StrPtr(common.DefaultNginxConfigFilePath) // Assuming "/etc/nginx/nginx.conf"
 	}
 	if cfg.SkipInstall == nil {
-		cfg.SkipInstall = boolPtr(false)
+		cfg.SkipInstall = util.BoolPtr(false)
 	}
 }
 

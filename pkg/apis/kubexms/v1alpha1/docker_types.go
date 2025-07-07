@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"net/url" // Added for URL parsing
 	"strings"
+
 	"k8s.io/apimachinery/pkg/runtime" // Added for RawExtension
 	// Assuming isValidCIDR is available from kubernetes_types.go or similar
-	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
+	"github.com/mensylisir/kubexm/pkg/common" // Import the common package
+	"github.com/mensylisir/kubexm/pkg/util"   // Import the util package
 	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 

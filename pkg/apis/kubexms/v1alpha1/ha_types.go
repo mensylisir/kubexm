@@ -5,6 +5,7 @@ import (
 	"strings"
 	"github.com/mensylisir/kubexm/pkg/util/validation"
 	"github.com/mensylisir/kubexm/pkg/common" // Import common
+	"github.com/mensylisir/kubexm/pkg/util"   // Import util
 )
 
 // ExternalLoadBalancerConfig defines settings for an external load balancing solution.
@@ -35,7 +36,7 @@ func SetDefaults_HighAvailabilityConfig(cfg *HighAvailabilityConfig) {
 		return
 	}
 	if cfg.Enabled == nil {
-		cfg.Enabled = boolPtr(false)
+		cfg.Enabled = util.BoolPtr(false)
 	}
 
 	if !*cfg.Enabled {
@@ -200,7 +201,10 @@ func Validate_InternalLoadBalancerConfig(cfg *InternalLoadBalancerConfig, verrs 
 
 	if isKubeVIP {
 		if cfg.KubeVIP == nil {
+			// This case should ideally be caught by SetDefaults ensuring KubeVIP is initialized if type is KubeVIP.
+			// However, direct validation without prior defaulting should also be robust.
 			verrs.Add(pathPrefix+".kubevip", "section must be present if type is '"+cfg.Type+"'")
+			// No further validation on cfg.KubeVIP if it's nil.
 		} else {
 			Validate_KubeVIPConfig(cfg.KubeVIP, verrs, pathPrefix+".kubevip")
 		}
@@ -210,7 +214,8 @@ func Validate_InternalLoadBalancerConfig(cfg *InternalLoadBalancerConfig, verrs 
 		} else {
 			Validate_HAProxyConfig(cfg.WorkerNodeHAProxy, verrs, pathPrefix+".workerNodeHAProxy")
 		}
-	} else {
+	} else if cfg.Type != "" { // Only error if type is non-empty and not recognized
 		verrs.Add(pathPrefix+".type", fmt.Sprintf("unknown internal LB type '%s'", cfg.Type))
 	}
+	// If cfg.Type is empty, it's considered valid (no internal LB explicitly chosen).
 }

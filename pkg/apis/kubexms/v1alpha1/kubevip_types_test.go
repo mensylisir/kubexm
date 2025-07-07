@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/mensylisir/kubexm/pkg/common" // Import common
+	"github.com/mensylisir/kubexm/pkg/util"   // Import util
 	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
@@ -24,42 +26,45 @@ func TestSetDefaults_KubeVIPConfig(t *testing.T) {
 			name:  "empty config",
 			input: &KubeVIPConfig{},
 			expected: &KubeVIPConfig{
-				Mode:                 stringPtr(KubeVIPModeARP),
-				EnableControlPlaneLB: boolPtr(true),
-				EnableServicesLB:     boolPtr(false),
+				Mode:                 util.StrPtr(KubeVIPModeARP),
+				EnableControlPlaneLB: util.BoolPtr(true),
+				EnableServicesLB:     util.BoolPtr(false),
+				Image:                util.StrPtr(common.DefaultKubeVIPImage), // Added default image
 				ExtraArgs:            []string{},
 			},
 		},
 		{
 			name:  "mode BGP, BGPConfig nil",
-			input: &KubeVIPConfig{Mode: stringPtr(KubeVIPModeBGP)},
+			input: &KubeVIPConfig{Mode: util.StrPtr(KubeVIPModeBGP)},
 			expected: &KubeVIPConfig{
-				Mode:                 stringPtr(KubeVIPModeBGP),
-				EnableControlPlaneLB: boolPtr(true),
-				EnableServicesLB:     boolPtr(false),
+				Mode:                 util.StrPtr(KubeVIPModeBGP),
+				EnableControlPlaneLB: util.BoolPtr(true),
+				EnableServicesLB:     util.BoolPtr(false),
+				Image:                util.StrPtr(common.DefaultKubeVIPImage), // Added default image
 				ExtraArgs:            []string{},
 				BGPConfig:            &KubeVIPBGPConfig{},
 			},
 		},
 		{
 			name:  "mode BGP, BGPConfig present",
-			input: &KubeVIPConfig{Mode: stringPtr(KubeVIPModeBGP), BGPConfig: &KubeVIPBGPConfig{RouterID: "1.1.1.1"}},
+			input: &KubeVIPConfig{Mode: util.StrPtr(KubeVIPModeBGP), BGPConfig: &KubeVIPBGPConfig{RouterID: "1.1.1.1"}},
 			expected: &KubeVIPConfig{
-				Mode:                 stringPtr(KubeVIPModeBGP),
-				EnableControlPlaneLB: boolPtr(true),
-				EnableServicesLB:     boolPtr(false),
+				Mode:                 util.StrPtr(KubeVIPModeBGP),
+				EnableControlPlaneLB: util.BoolPtr(true),
+				EnableServicesLB:     util.BoolPtr(false),
+				Image:                util.StrPtr(common.DefaultKubeVIPImage), // Added default image
 				ExtraArgs:            []string{},
 				BGPConfig:            &KubeVIPBGPConfig{RouterID: "1.1.1.1"},
 			},
 		},
 		{
 			name:  "custom settings",
-			input: &KubeVIPConfig{EnableControlPlaneLB: boolPtr(false), EnableServicesLB: boolPtr(true), Image: stringPtr("myimage")},
+			input: &KubeVIPConfig{EnableControlPlaneLB: util.BoolPtr(false), EnableServicesLB: util.BoolPtr(true), Image: util.StrPtr("myimage")},
 			expected: &KubeVIPConfig{
-				Mode:                 stringPtr(KubeVIPModeARP),
-				EnableControlPlaneLB: boolPtr(false),
-				EnableServicesLB:     boolPtr(true),
-				Image:                stringPtr("myimage"),
+				Mode:                 util.StrPtr(KubeVIPModeARP),
+				EnableControlPlaneLB: util.BoolPtr(false),
+				EnableServicesLB:     util.BoolPtr(true),
+				Image:                util.StrPtr("myimage"), // User specified image preserved
 				ExtraArgs:            []string{},
 			},
 		},
