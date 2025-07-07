@@ -52,14 +52,15 @@ func TestSetDefaults_HighAvailabilityConfig(t *testing.T) {
 		cfgInt := &HighAvailabilityConfig{
 			Enabled: &haEnabled,
 			Internal: &InternalLoadBalancerConfig{
-				Type: "KubeVIP",
+				Type: common.InternalLBTypeKubeVIP, // Use constant
 			},
 		}
 		SetDefaults_HighAvailabilityConfig(cfgInt)
 		assert.NotNil(t, cfgInt.Internal, "Internal config should be initialized")
-		assert.NotNil(t, cfgInt.Internal.KubeVIP, "Internal.KubeVIP config should be initialized for Type KubeVIP")
-		assert.NotNil(t, cfgInt.Internal.KubeVIP.Mode, "KubeVIP.Mode should have a default")
-		assert.Equal(t, KubeVIPModeARP, *cfgInt.Internal.KubeVIP.Mode, "KubeVIP.Mode default mismatch")
+		if assert.NotNil(t, cfgInt.Internal.KubeVIP, "Internal.KubeVIP config should be initialized for Type KubeVIP") {
+			assert.NotNil(t, cfgInt.Internal.KubeVIP.Mode, "KubeVIP.Mode should have a default")
+			assert.Equal(t, KubeVIPModeARP, *cfgInt.Internal.KubeVIP.Mode, "KubeVIP.Mode default mismatch")
+		}
 	})
 }
 
@@ -74,7 +75,8 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 		name: "valid external ManagedKeepalivedHAProxy with endpoint IP (VIP removed, CPE moved)",
 		cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
 			External: &ExternalLoadBalancerConfig{
-				Type: "ManagedKeepalivedHAProxy",
+				Type: "ManagedKeepalivedHAProxy", // This type implies managed, so LoadBalancerHostGroupName is needed
+				LoadBalancerHostGroupName: stringPtr("lb-group"), // Added
 				Keepalived: &KeepalivedConfig{
 					VRID:      intPtr(1),
 					Priority:  intPtr(101),
@@ -83,7 +85,8 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 				},
 				HAProxy: &HAProxyConfig{
 					FrontendPort:   intPtr(6443),
-					BackendServers: []HAProxyBackendServer{{Name: "cp1", Address: "192.168.0.10", Port: 6443}},
+					// Ensure Port is explicitly set if Address doesn't solely define it for validation logic
+					BackendServers: []HAProxyBackendServer{{Name: "cp1", Address: "192.168.0.10:6443", Port: 6443}},
 				},
 			}},
 		expectErr: false,
@@ -115,7 +118,7 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 			name: "keepalived_config_present_external_type_mismatch",
 			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
 				External: &ExternalLoadBalancerConfig{Type: "UserProvided", Keepalived: &KeepalivedConfig{VRID: intPtr(1)}}},
-			wantErrMsg: ".external.keepalived: should not be set for UserProvided external LB type",
+			wantErrMsg: "spec.highAvailability.external.keepalived: should not be set for 'UserProvided' external LB type", // Corrected path
 			expectErr:  true,
 		},
 		{
@@ -180,7 +183,7 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 					Type:                      common.ExternalLBTypeKubexmKH,
 					LoadBalancerHostGroupName: stringPtr("lb-group"),
 					Keepalived:                &KeepalivedConfig{VRID: intPtr(1), Priority: intPtr(100), Interface: stringPtr("eth0"), AuthPass: stringPtr("pass")},
-					HAProxy:                   &HAProxyConfig{BackendServers: []HAProxyBackendServer{{Name: "s1", Address: "1.2.3.4:6443"}}},
+					HAProxy:                   &HAProxyConfig{BackendServers: []HAProxyBackendServer{{Name: "s1", Address: "1.2.3.4:6443", Port: 6443}}}, // Explicitly set Port
 				}},
 			expectErr: false,
 		},

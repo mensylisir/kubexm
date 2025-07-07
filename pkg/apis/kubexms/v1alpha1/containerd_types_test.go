@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/mensylisir/kubexm/pkg/common" // Import common package
 	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
@@ -28,9 +29,9 @@ func TestSetDefaults_ContainerdConfig(t *testing.T) {
 				RegistryMirrors:    make(map[string][]string),
 				InsecureRegistries: []string{},
 				UseSystemdCgroup:   boolPtr(true),
-				ConfigPath:         stringPtr("/etc/containerd/config.toml"),
+				ConfigPath:         stringPtr(common.ContainerdDefaultConfigFile),
 				DisabledPlugins:    []string{},
-				RequiredPlugins:    []string{"io.containerd.grpc.v1.cri"},
+				RequiredPlugins:    []string{common.ContainerdPluginCRI},
 				Imports:            []string{},
 			},
 		},
@@ -41,9 +42,9 @@ func TestSetDefaults_ContainerdConfig(t *testing.T) {
 				RegistryMirrors:    make(map[string][]string),
 				InsecureRegistries: []string{},
 				UseSystemdCgroup:   boolPtr(false),
-				ConfigPath:         stringPtr("/etc/containerd/config.toml"),
+				ConfigPath:         stringPtr(common.ContainerdDefaultConfigFile),
 				DisabledPlugins:    []string{},
-				RequiredPlugins:    []string{"io.containerd.grpc.v1.cri"},
+				RequiredPlugins:    []string{common.ContainerdPluginCRI},
 				Imports:            []string{},
 			},
 		},
@@ -56,7 +57,7 @@ func TestSetDefaults_ContainerdConfig(t *testing.T) {
 				UseSystemdCgroup:   boolPtr(true),
 				ConfigPath:         stringPtr("/custom/path/config.toml"),
 				DisabledPlugins:    []string{},
-				RequiredPlugins:    []string{"io.containerd.grpc.v1.cri"},
+				RequiredPlugins:    []string{common.ContainerdPluginCRI},
 				Imports:            []string{},
 			},
 		},
@@ -67,7 +68,7 @@ func TestSetDefaults_ContainerdConfig(t *testing.T) {
 				RegistryMirrors:    make(map[string][]string),
 				InsecureRegistries: []string{},
 				UseSystemdCgroup:   boolPtr(true),
-				ConfigPath:         stringPtr("/etc/containerd/config.toml"),
+				ConfigPath:         stringPtr(common.ContainerdDefaultConfigFile),
 				DisabledPlugins:    []string{},
 				RequiredPlugins:    []string{"custom.plugin"},
 				Imports:            []string{},
