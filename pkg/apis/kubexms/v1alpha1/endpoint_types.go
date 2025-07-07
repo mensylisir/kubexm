@@ -34,15 +34,6 @@ type ControlPlaneEndpointSpec struct {
 	// This field might influence how the endpoint is resolved or advertised.
 	ExternalDNS bool `json:"externalDNS,omitempty" yaml:"externalDNS,omitempty"`
 
-	// ExternalLoadBalancerType specifies the type of external load balancer used or to be deployed by KubeXMS.
-	// Corresponds to `externalLoadBalancer` in YAML.
-	// Examples from YAML: "kubexm" (managed by KubeXMS), "external" (user-provided).
-	// This field helps determine behavior for HA setup.
-	// ExternalLoadBalancerType string `json:"externalLoadBalancerType,omitempty" yaml:"externalLoadBalancer,omitempty"` // This field is being removed. Specific LB type is in HighAvailabilityConfig.
-
-	// InternalLoadBalancerType specifies the type of internal load balancer for intra-cluster communication to the API server.
-	// Examples from YAML: "haproxy", "nginx", "kube-vip".
-	// InternalLoadBalancerType string `json:"internalLoadBalancerType,omitempty" yaml:"internalLoadbalancer,omitempty"` // This field is being removed. Specific LB type is in HighAvailabilityConfig.
 }
 
 // SetDefaults_ControlPlaneEndpointSpec sets default values for ControlPlaneEndpointSpec.
@@ -80,8 +71,9 @@ func Validate_ControlPlaneEndpointSpec(cfg *ControlPlaneEndpointSpec, verrs *val
 	if cfg.Address != "" && !util.IsValidIP(cfg.Address) { // Use util.IsValidIP
 		verrs.Add(pathPrefix+".address", fmt.Sprintf("invalid IP address format for '%s'", cfg.Address))
 	}
-	// cfg.Port is now int. If 0, it's defaulted to 6443. Validation is for user-provided values.
-	if cfg.Port != 0 && (cfg.Port <= 0 || cfg.Port > 65535) {
+	// cfg.Port is now int. If 0, it's defaulted to 6443 by SetDefaults_ControlPlaneEndpointSpec.
+	// Validation should catch any value outside the valid port range 1-65535.
+	if cfg.Port <= 0 || cfg.Port > 65535 {
 		verrs.Add(pathPrefix+".port", fmt.Sprintf("invalid port %d, must be between 1-65535", cfg.Port))
 	}
 

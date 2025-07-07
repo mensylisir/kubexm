@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mensylisir/kubexm/pkg/util" // Import util package
 	"github.com/mensylisir/kubexm/pkg/util/validation" // Import validation package
 )
 
@@ -56,23 +57,27 @@ func SetDefaults_AddonConfig(cfg *AddonConfig) {
 		return
 	}
 	if cfg.Enabled == nil {
-		cfg.Enabled = boolPtr(true) // Default most addons to enabled unless specified
+		cfg.Enabled = util.BoolPtr(true) // Default most addons to enabled unless specified
 	}
 
-	if cfg.Namespace == "" && strings.TrimSpace(cfg.Name) != "" {
-		cfg.Namespace = "addon-" + strings.ToLower(strings.ReplaceAll(strings.TrimSpace(cfg.Name), " ", "-"))
+	if cfg.Namespace == "" {
+		if strings.TrimSpace(cfg.Name) != "" {
+			cfg.Namespace = "addon-" + strings.ToLower(strings.ReplaceAll(strings.TrimSpace(cfg.Name), " ", "-"))
+		} else {
+			cfg.Namespace = "addon-" // Default namespace prefix even if name is empty
+		}
 	}
 
 	if cfg.Retries == nil {
-		cfg.Retries = int32Ptr(0) // Default to 0 retries (1 attempt)
+		cfg.Retries = util.Int32Ptr(0) // Default to 0 retries (1 attempt)
 	}
 	if cfg.Delay == nil {
-		cfg.Delay = int32Ptr(5) // Default delay 5s
+		cfg.Delay = util.Int32Ptr(5) // Default delay 5s
 	}
 
 	if cfg.Sources.Chart != nil {
 		if cfg.Sources.Chart.Wait == nil {
-			cfg.Sources.Chart.Wait = boolPtr(true) // Default wait to true for charts
+			cfg.Sources.Chart.Wait = util.BoolPtr(true) // Default wait to true for charts
 		}
 		if cfg.Sources.Chart.Values == nil {
 			cfg.Sources.Chart.Values = []string{}

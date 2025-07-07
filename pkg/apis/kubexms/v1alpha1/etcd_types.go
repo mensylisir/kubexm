@@ -70,13 +70,13 @@ func SetDefaults_EtcdConfig(cfg *EtcdConfig) {
 		cfg.Type = EtcdTypeKubeXMSInternal // Default to KubeXM deploying etcd as binaries
 	}
 	if cfg.ClientPort == nil {
-		cfg.ClientPort = intPtr(2379)
+		cfg.ClientPort = util.IntPtr(2379)
 	}
 	if cfg.PeerPort == nil {
-		cfg.PeerPort = intPtr(2380)
+		cfg.PeerPort = util.IntPtr(2380)
 	}
 	if cfg.DataDir == nil {
-		cfg.DataDir = stringPtr("/var/lib/etcd") // This is the base directory for etcd data.
+		cfg.DataDir = util.StrPtr("/var/lib/etcd") // This is the base directory for etcd data.
 	}
 	// Arch defaults handled by HostSpec or runtime fact gathering.
 	if cfg.ClusterToken == "" {
@@ -117,25 +117,25 @@ func SetDefaults_EtcdConfig(cfg *EtcdConfig) {
 
 
 	// Default backup settings (can be adjusted)
-	if cfg.BackupDir == nil { cfg.BackupDir = stringPtr("/var/backups/etcd") }
-	if cfg.BackupPeriodHours == nil { cfg.BackupPeriodHours = intPtr(24) } // e.g., daily
-	if cfg.KeepBackupNumber == nil { cfg.KeepBackupNumber = intPtr(7) }
+	if cfg.BackupDir == nil { cfg.BackupDir = util.StrPtr("/var/backups/etcd") }
+	if cfg.BackupPeriodHours == nil { cfg.BackupPeriodHours = util.IntPtr(24) } // e.g., daily
+	if cfg.KeepBackupNumber == nil { cfg.KeepBackupNumber = util.IntPtr(7) }
 
 	// Default performance/tuning (values from etcd defaults or common practice)
-	if cfg.HeartbeatIntervalMillis == nil { cfg.HeartbeatIntervalMillis = intPtr(250) } // YAML: heartbeatInterval: 250
-	if cfg.ElectionTimeoutMillis == nil { cfg.ElectionTimeoutMillis = intPtr(5000) } // YAML: electionTimeout: 5000
-	if cfg.SnapshotCount == nil { cfg.SnapshotCount = uint64Ptr(10000) } // YAML: snapshotCount: 10000
-	if cfg.AutoCompactionRetentionHours == nil { cfg.AutoCompactionRetentionHours = intPtr(8) } // YAML: autoCompactionRetention: 8
+	if cfg.HeartbeatIntervalMillis == nil { cfg.HeartbeatIntervalMillis = util.IntPtr(250) } // YAML: heartbeatInterval: 250
+	if cfg.ElectionTimeoutMillis == nil { cfg.ElectionTimeoutMillis = util.IntPtr(5000) } // YAML: electionTimeout: 5000
+	if cfg.SnapshotCount == nil { cfg.SnapshotCount = util.Uint64Ptr(10000) } // YAML: snapshotCount: 10000
+	if cfg.AutoCompactionRetentionHours == nil { cfg.AutoCompactionRetentionHours = util.IntPtr(8) } // YAML: autoCompactionRetention: 8
 
 	// Resource management defaults
-	if cfg.QuotaBackendBytes == nil { cfg.QuotaBackendBytes = int64Ptr(2147483648) } // YAML: quotaBackendBytes: 2147483648 (2GB)
-	if cfg.MaxRequestBytes == nil { cfg.MaxRequestBytes = uintPtr(1572864) } // YAML: maxRequestBytes: 1572864 (1.5MB)
+	if cfg.QuotaBackendBytes == nil { cfg.QuotaBackendBytes = util.Int64Ptr(2147483648) } // YAML: quotaBackendBytes: 2147483648 (2GB)
+	if cfg.MaxRequestBytes == nil { cfg.MaxRequestBytes = util.UintPtr(1572864) } // YAML: maxRequestBytes: 1572864 (1.5MB)
 
 	// Operational defaults
-	if cfg.Metrics == nil { cfg.Metrics = stringPtr("basic") } // YAML: metrics: basic
-	if cfg.LogLevel == nil { cfg.LogLevel = stringPtr("info") }
-	if cfg.MaxSnapshotsToKeep == nil { cfg.MaxSnapshotsToKeep = uintPtr(5) } // etcd default
-	if cfg.MaxWALsToKeep == nil { cfg.MaxWALsToKeep = uintPtr(5) }          // etcd default
+	if cfg.Metrics == nil { cfg.Metrics = util.StrPtr("basic") } // YAML: metrics: basic
+	if cfg.LogLevel == nil { cfg.LogLevel = util.StrPtr("info") }
+	if cfg.MaxSnapshotsToKeep == nil { cfg.MaxSnapshotsToKeep = util.UintPtr(5) } // etcd default
+	if cfg.MaxWALsToKeep == nil { cfg.MaxWALsToKeep = util.UintPtr(5) }          // etcd default
 }
 
 // Validate_EtcdConfig validates EtcdConfig.
@@ -223,13 +223,13 @@ func Validate_EtcdConfig(cfg *EtcdConfig, verrs *validation.ValidationErrors, pa
 
 	if cfg.Metrics != nil && *cfg.Metrics != "" {
 		validMetrics := []string{"basic", "extensive"}
-		if !containsString(validMetrics, *cfg.Metrics) {
+		if !util.ContainsString(validMetrics, *cfg.Metrics) { // Use util.ContainsString
 			verrs.Add(pathPrefix+".metrics", fmt.Sprintf("invalid value '%s', must be 'basic' or 'extensive'", *cfg.Metrics))
 		}
 	}
 	if cfg.LogLevel != nil && *cfg.LogLevel != "" {
 		validLogLevels := []string{"debug", "info", "warn", "error", "panic", "fatal"}
-		if !containsString(validLogLevels, *cfg.LogLevel) {
+		if !util.ContainsString(validLogLevels, *cfg.LogLevel) { // Use util.ContainsString
 			verrs.Add(pathPrefix+".logLevel", fmt.Sprintf("invalid value '%s'", *cfg.LogLevel))
 		}
 	}
