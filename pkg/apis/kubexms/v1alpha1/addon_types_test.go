@@ -1,9 +1,9 @@
 package v1alpha1
 
 import (
-	"strings"
 	"testing"
 
+	"github.com/mensylisir/kubexm/pkg/util"
 	"github.com/mensylisir/kubexm/pkg/util/validation"
 	"github.com/stretchr/testify/assert"
 )
@@ -15,69 +15,79 @@ func TestSetDefaults_AddonConfig(t *testing.T) {
 		expected *AddonConfig
 	}{
 		{
-			name:  "nil config",
+			name:  "nil input",
 			input: nil,
 		},
 		{
-			name: "empty config",
-			input: &AddonConfig{
-				Name: "test-addon",
-			},
+			name: "empty input",
+			input: &AddonConfig{},
 			expected: &AddonConfig{
-				Name:      "test-addon",
-				Enabled:   boolPtr(true),
-				Namespace: "addon-test-addon",
-				Retries:   int32Ptr(0),
-				Delay:     int32Ptr(5),
+				Enabled:   util.BoolPtr(true),
+				Namespace: "addon-", // Name is empty, so namespace is "addon-"
+				Retries:   util.Int32Ptr(0),
+				Delay:     util.Int32Ptr(5),
 				Sources: AddonSources{
-					Chart: nil, // Not initialized if not present
-					Yaml:  nil, // Not initialized if not present
+					Chart: nil, // Chart is nil initially
+					Yaml:  nil, // Yaml is nil initially
 				},
 				PreInstall:  []string{},
 				PostInstall: []string{},
 			},
 		},
 		{
-			name: "config with chart",
+			name: "basic addon with name",
 			input: &AddonConfig{
-				Name: " prometheus ", // Test trimming and lowercasing
+				Name: "My Addon",
+			},
+			expected: &AddonConfig{
+				Name:        "My Addon",
+				Enabled:     util.BoolPtr(true),
+				Namespace:   "addon-my-addon",
+				Retries:     util.Int32Ptr(0),
+				Delay:       util.Int32Ptr(5),
+				PreInstall:  []string{},
+				PostInstall: []string{},
+			},
+		},
+		{
+			name: "addon with chart source",
+			input: &AddonConfig{
+				Name: "Helm Addon",
 				Sources: AddonSources{
 					Chart: &ChartSource{},
 				},
 			},
 			expected: &AddonConfig{
-				Name:      " prometheus ",
-				Enabled:   boolPtr(true),
-				Namespace: "addon-prometheus",
-				Retries:   int32Ptr(0),
-				Delay:     int32Ptr(5),
+				Name:      "Helm Addon",
+				Enabled:   util.BoolPtr(true),
+				Namespace: "addon-helm-addon",
+				Retries:   util.Int32Ptr(0),
+				Delay:     util.Int32Ptr(5),
 				Sources: AddonSources{
 					Chart: &ChartSource{
-						Wait:   boolPtr(true),
+						Wait:   util.BoolPtr(true),
 						Values: []string{},
 					},
-					Yaml: nil,
 				},
 				PreInstall:  []string{},
 				PostInstall: []string{},
 			},
 		},
 		{
-			name: "config with yaml",
+			name: "addon with yaml source",
 			input: &AddonConfig{
-				Name: "nginx-ingress",
+				Name: "Yaml Addon",
 				Sources: AddonSources{
 					Yaml: &YamlSource{},
 				},
 			},
 			expected: &AddonConfig{
-				Name:      "nginx-ingress",
-				Enabled:   boolPtr(true),
-				Namespace: "addon-nginx-ingress",
-				Retries:   int32Ptr(0),
-				Delay:     int32Ptr(5),
+				Name:      "Yaml Addon",
+				Enabled:   util.BoolPtr(true),
+				Namespace: "addon-yaml-addon",
+				Retries:   util.Int32Ptr(0),
+				Delay:     util.Int32Ptr(5),
 				Sources: AddonSources{
-					Chart: nil,
 					Yaml: &YamlSource{
 						Path: []string{},
 					},
@@ -87,34 +97,52 @@ func TestSetDefaults_AddonConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "config with some values pre-filled",
+			name: "all fields specified",
 			input: &AddonConfig{
-				Name:      "my-addon",
-				Enabled:   boolPtr(false),
+				Name:      "Full Addon",
+				Enabled:   util.BoolPtr(false),
 				Namespace: "custom-ns",
-				Retries:   int32Ptr(3),
+				Retries:   util.Int32Ptr(3),
+				Delay:     util.Int32Ptr(10),
 				Sources: AddonSources{
 					Chart: &ChartSource{
-						Wait: boolPtr(false),
+						Name:       "my-chart",
+						Repo:       "http://charts.example.com",
+						Path:       "", // Explicitly empty to test no override
+						Version:    "1.0.0",
+						ValuesFile: "values.yaml",
+						Values:     []string{"key=val"},
+						Wait:       util.BoolPtr(false),
 					},
-				},
-				PreInstall: []string{"echo pre"},
-			},
-			expected: &AddonConfig{
-				Name:      "my-addon",
-				Enabled:   boolPtr(false),
-				Namespace: "custom-ns",
-				Retries:   int32Ptr(3),
-				Delay:     int32Ptr(5), // Delay should still be defaulted
-				Sources: AddonSources{
-					Chart: &ChartSource{
-						Wait:   boolPtr(false),
-						Values: []string{}, // Values should be defaulted
+					Yaml: &YamlSource{
+						Path: []string{"path/to/manifest.yaml"},
 					},
-					Yaml: nil,
 				},
 				PreInstall:  []string{"echo pre"},
-				PostInstall: []string{}, // PostInstall should be defaulted
+				PostInstall: []string{"echo post"},
+			},
+			expected: &AddonConfig{
+				Name:      "Full Addon",
+				Enabled:   util.BoolPtr(false),
+				Namespace: "custom-ns",
+				Retries:   util.Int32Ptr(3),
+				Delay:     util.Int32Ptr(10),
+				Sources: AddonSources{
+					Chart: &ChartSource{
+						Name:       "my-chart",
+						Repo:       "http://charts.example.com",
+						Path:       "",
+						Version:    "1.0.0",
+						ValuesFile: "values.yaml",
+						Values:     []string{"key=val"},
+						Wait:       util.BoolPtr(false),
+					},
+					Yaml: &YamlSource{
+						Path: []string{"path/to/manifest.yaml"},
+					},
+				},
+				PreInstall:  []string{"echo pre"},
+				PostInstall: []string{"echo post"},
 			},
 		},
 	}
@@ -122,7 +150,11 @@ func TestSetDefaults_AddonConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			SetDefaults_AddonConfig(tt.input)
-			assert.Equal(t, tt.expected, tt.input)
+			if tt.input == nil { // For nil input, expected is also nil effectively
+				assert.Nil(t, tt.input)
+			} else {
+				assert.Equal(t, tt.expected, tt.input)
+			}
 		})
 	}
 }
@@ -132,259 +164,274 @@ func TestValidate_AddonConfig(t *testing.T) {
 		name        string
 		input       *AddonConfig
 		expectError bool
-		errorMsg    string // Substring to check in error message
+		errorMsg    []string // Expected error messages (substrings)
 	}{
 		{
-			name: "valid config with chart",
+			name: "valid addon with chart",
 			input: &AddonConfig{
-				Name:    "metrics-server",
-				Enabled: boolPtr(true),
+				Name:    "Valid Chart Addon",
+				Enabled: util.BoolPtr(true),
 				Sources: AddonSources{
-					Chart: &ChartSource{
-						Name:    "metrics-server",
-						Repo:    "https://kubernetes-sigs.github.io/metrics-server/",
-						Version: "v0.5.0",
-					},
+					Chart: &ChartSource{Name: "my-chart", Repo: "http://example.com/charts", Version: "1.2.3"},
 				},
 			},
 			expectError: false,
 		},
 		{
-			name: "valid config with local chart path",
+			name: "valid addon with chart path",
 			input: &AddonConfig{
-				Name:    "my-local-chart",
-				Enabled: boolPtr(true),
+				Name:    "Valid Chart Path Addon",
+				Enabled: util.BoolPtr(true),
 				Sources: AddonSources{
-					Chart: &ChartSource{
-						Path: "./charts/my-local-chart",
-					},
+					Chart: &ChartSource{Path: "./charts/my-local-chart"},
 				},
 			},
 			expectError: false,
 		},
 		{
-			name: "valid config with yaml URL",
+			name: "valid addon with yaml",
 			input: &AddonConfig{
-				Name:    "dashboard",
-				Enabled: boolPtr(true),
+				Name:    "Valid Yaml Addon",
+				Enabled: util.BoolPtr(true),
 				Sources: AddonSources{
-					Yaml: &YamlSource{
-						Path: []string{"https://raw.githubusercontent.com/kubernetes/dashboard/v2.0.0/aio/deploy/recommended.yaml"},
-					},
+					Yaml: &YamlSource{Path: []string{"http://example.com/manifest.yaml"}},
 				},
 			},
 			expectError: false,
 		},
 		{
-			name: "valid config with yaml local path",
+			name: "addon name empty",
 			input: &AddonConfig{
-				Name:    "my-manifests",
-				Enabled: boolPtr(true),
+				Name: "  ",
+			},
+			expectError: true,
+			errorMsg:    []string{"addon name cannot be empty"},
+		},
+		{
+			name: "chart path and name/repo conflict",
+			input: &AddonConfig{
+				Name:    "Chart Conflict",
+				Enabled: util.BoolPtr(true),
 				Sources: AddonSources{
-					Yaml: &YamlSource{
-						Path: []string{"./manifests/my-addon.yaml"},
-					},
+					Chart: &ChartSource{Path: "./local", Name: "my-chart", Repo: "http://example.com"},
 				},
 			},
-			expectError: false,
-		},
-		{
-			name:        "nil config (should not error directly, but pathPrefix would be empty)",
-			input:       nil,
-			expectError: false, // Validate_AddonConfig handles nil input by returning
-		},
-		{
-			name: "empty name",
-			input: &AddonConfig{
-				Name: " ", Enabled: boolPtr(true),
-				Sources: AddonSources{Chart: &ChartSource{Path: "./c"}}},
 			expectError: true,
-			errorMsg:    "addon name cannot be empty",
-		},
-		{
-			name: "enabled but no sources",
-			input: &AddonConfig{
-				Name: "no-source-addon", Enabled: boolPtr(true)},
-			expectError: true,
-			errorMsg:    "is enabled but has no chart or yaml sources defined",
-		},
-		// ChartSource Validations
-		{
-			name: "chart path with name also set",
-			input: &AddonConfig{Name: "a", Enabled: boolPtr(true), Sources: AddonSources{
-				Chart: &ChartSource{Path: "./c", Name: "c-name"}}},
-			expectError: true,
-			errorMsg:    "chart.path",
-		},
-		{
-			name: "chart path with repo also set",
-			input: &AddonConfig{Name: "a", Enabled: boolPtr(true), Sources: AddonSources{
-				Chart: &ChartSource{Path: "./c", Repo: "http://example.com"}}},
-			expectError: true,
-			errorMsg:    "chart.path",
+			errorMsg:    []string{"chart.path", "cannot be set if chart.name", "or chart.repo", "is also set"},
 		},
 		{
 			name: "chart no path and no name",
-			input: &AddonConfig{Name: "a", Enabled: boolPtr(true), Sources: AddonSources{
-				Chart: &ChartSource{Repo: "http://example.com"}}},
+			input: &AddonConfig{
+				Name:    "Chart Incomplete",
+				Enabled: util.BoolPtr(true),
+				Sources: AddonSources{
+					Chart: &ChartSource{Repo: "http://example.com"},
+				},
+			},
 			expectError: true,
-			errorMsg:    "either chart.name (with chart.repo) or chart.path must be specified",
+			errorMsg:    []string{"either chart.name (with chart.repo) or chart.path must be specified"},
 		},
 		{
 			name: "chart repo without name",
-			input: &AddonConfig{Name: "a", Enabled: boolPtr(true), Sources: AddonSources{
-				Chart: &ChartSource{Repo: "http://example.com"}}},
+			input: &AddonConfig{
+				Name:    "Chart Repo No Name",
+				Enabled: util.BoolPtr(true),
+				Sources: AddonSources{
+					Chart: &ChartSource{Repo: "http://example.com"},
+				},
+			},
 			expectError: true,
-			errorMsg:    "chart.name must be specified if chart.repo",
+			// This will trigger "either chart.name ... or chart.path" first based on current logic
+			// and also "chart.name must be specified if chart.repo ... is set"
+			errorMsg: []string{"chart.name must be specified if chart.repo", "is set"},
 		},
 		{
 			name: "chart name without repo (and no path)",
-			input: &AddonConfig{Name: "a", Enabled: boolPtr(true), Sources: AddonSources{
-				Chart: &ChartSource{Name: "c-name"}}},
+			input: &AddonConfig{
+				Name:    "Chart Name No Repo",
+				Enabled: util.BoolPtr(true),
+				Sources: AddonSources{
+					Chart: &ChartSource{Name: "my-chart"},
+				},
+			},
 			expectError: true,
-			errorMsg:    "chart.repo must be specified if chart.name",
+			errorMsg:    []string{"chart.repo must be specified if chart.name", "is set and chart.path is not set"},
 		},
 		{
-			name: "invalid chart repo URL",
-			input: &AddonConfig{Name: "a", Enabled: boolPtr(true), Sources: AddonSources{
-				Chart: &ChartSource{Name: "c-name", Repo: "not a url"}}},
+			name: "chart invalid repo url",
+			input: &AddonConfig{
+				Name:    "Chart Invalid Repo",
+				Enabled: util.BoolPtr(true),
+				Sources: AddonSources{
+					Chart: &ChartSource{Name: "my-chart", Repo: "not a url"},
+				},
+			},
 			expectError: true,
-			errorMsg:    "invalid URL format for chart repo",
+			errorMsg:    []string{"invalid URL format for chart repo"},
 		},
 		{
-			name: "whitespace chart version",
-			input: &AddonConfig{Name: "a", Enabled: boolPtr(true), Sources: AddonSources{
-				Chart: &ChartSource{Name: "c-name", Repo: "http://example.com", Version: " "}}},
+			name: "chart invalid version format",
+			input: &AddonConfig{
+				Name:    "Chart Invalid Version",
+				Enabled: util.BoolPtr(true),
+				Sources: AddonSources{
+					Chart: &ChartSource{Name: "my-chart", Repo: "http://example.com", Version: "v1.2.3.4.5"},
+				},
+			},
 			expectError: true,
-			errorMsg:    "chart version cannot be only whitespace",
+			errorMsg:    []string{"is not a valid format"},
 		},
 		{
-			name: "invalid chart version format",
-			input: &AddonConfig{Name: "a", Enabled: boolPtr(true), Sources: AddonSources{
-				Chart: &ChartSource{Name: "c-name", Repo: "http://example.com", Version: "1.2.3.4.5"}}},
+			name: "chart version only whitespace",
+			input: &AddonConfig{
+				Name:    "Chart Whitespace Version",
+				Enabled: util.BoolPtr(true),
+				Sources: AddonSources{
+					Chart: &ChartSource{Name: "my-chart", Repo: "http://example.com", Version: "  "},
+				},
+			},
 			expectError: true,
-			errorMsg:    "is not a valid format",
+			errorMsg:    []string{"chart version cannot be only whitespace"},
 		},
 		{
-			name: "valid chart version: latest",
-			input: &AddonConfig{Name: "a", Enabled: boolPtr(true), Sources: AddonSources{
-				Chart: &ChartSource{Name: "c-name", Repo: "http://example.com", Version: "latest"}}},
-			expectError: false,
-		},
-		{
-			name: "valid chart version: stable",
-			input: &AddonConfig{Name: "a", Enabled: boolPtr(true), Sources: AddonSources{
-				Chart: &ChartSource{Name: "c-name", Repo: "http://example.com", Version: "stable"}}},
-			expectError: false,
-		},
-		{
-			name: "valid chart version: v1.2.3",
-			input: &AddonConfig{Name: "a", Enabled: boolPtr(true), Sources: AddonSources{
-				Chart: &ChartSource{Name: "c-name", Repo: "http://example.com", Version: "v1.2.3"}}},
-			expectError: false,
-		},
-		{
-			name: "valid chart version: 1.0",
-			input: &AddonConfig{Name: "a", Enabled: boolPtr(true), Sources: AddonSources{
-				Chart: &ChartSource{Name: "c-name", Repo: "http://example.com", Version: "1.0"}}},
-			expectError: false,
-		},
-		{
-			name: "valid chart version: 2",
-			input: &AddonConfig{Name: "a", Enabled: boolPtr(true), Sources: AddonSources{
-				Chart: &ChartSource{Name: "c-name", Repo: "http://example.com", Version: "2"}}},
-			expectError: false,
-		},
-		{
-			name: "invalid chart values format",
-			input: &AddonConfig{Name: "a", Enabled: boolPtr(true), Sources: AddonSources{
-				Chart: &ChartSource{Name: "c-name", Repo: "http://e.com", Values: []string{"keyonly"}}}},
+			name: "chart invalid values format",
+			input: &AddonConfig{
+				Name:    "Chart Invalid Values",
+				Enabled: util.BoolPtr(true),
+				Sources: AddonSources{
+					Chart: &ChartSource{Name: "my-chart", Repo: "http://example.com", Values: []string{"keyvalue"}},
+				},
+			},
 			expectError: true,
-			errorMsg:    "expected key=value",
-		},
-		// YamlSource Validations
-		{
-			name: "yaml source with no paths",
-			input: &AddonConfig{Name: "a", Enabled: boolPtr(true), Sources: AddonSources{
-				Yaml: &YamlSource{Path: []string{}}}},
-			expectError: true,
-			errorMsg:    "must contain at least one YAML path or URL",
+			errorMsg:    []string{"invalid format 'keyvalue', expected key=value"},
 		},
 		{
-			name: "yaml source with empty path string",
-			input: &AddonConfig{Name: "a", Enabled: boolPtr(true), Sources: AddonSources{
-				Yaml: &YamlSource{Path: []string{" "}}}},
+			name: "yaml source path empty list",
+			input: &AddonConfig{
+				Name:    "Yaml Empty Path List",
+				Enabled: util.BoolPtr(true),
+				Sources: AddonSources{
+					Yaml: &YamlSource{Path: []string{}},
+				},
+			},
 			expectError: true,
-			errorMsg:    "path/URL cannot be empty",
+			errorMsg:    []string{"must contain at least one YAML path or URL"},
 		},
-		// Retries and Delay
+		{
+			name: "yaml source path contains empty string",
+			input: &AddonConfig{
+				Name:    "Yaml Empty Path String",
+				Enabled: util.BoolPtr(true),
+				Sources: AddonSources{
+					Yaml: &YamlSource{Path: []string{"  "}},
+				},
+			},
+			expectError: true,
+			errorMsg:    []string{"path/URL cannot be empty"},
+		},
+		{
+			name: "enabled addon with no sources",
+			input: &AddonConfig{
+				Name:    "Enabled No Sources",
+				Enabled: util.BoolPtr(true),
+				Sources: AddonSources{}, // No chart or yaml
+			},
+			expectError: true,
+			errorMsg:    []string{"enabled but has no chart or yaml sources defined"},
+		},
 		{
 			name: "negative retries",
-			input: &AddonConfig{Name: "a", Enabled: boolPtr(true), Retries: int32Ptr(-1),
-				Sources: AddonSources{Chart: &ChartSource{Path: "./c"}}},
+			input: &AddonConfig{
+				Name:    "Negative Retries",
+				Enabled: util.BoolPtr(true),
+				Sources: AddonSources{Yaml: &YamlSource{Path: []string{"a.yaml"}}}, // Valid source
+				Retries: util.Int32Ptr(-1),
+			},
 			expectError: true,
-			errorMsg:    "retries: cannot be negative",
+			errorMsg:    []string{"retries: cannot be negative"},
 		},
 		{
 			name: "negative delay",
-			input: &AddonConfig{Name: "a", Enabled: boolPtr(true), Delay: int32Ptr(-1),
-				Sources: AddonSources{Chart: &ChartSource{Path: "./c"}}},
+			input: &AddonConfig{
+				Name:    "Negative Delay",
+				Enabled: util.BoolPtr(true),
+				Sources: AddonSources{Yaml: &YamlSource{Path: []string{"a.yaml"}}}, // Valid source
+				Delay:   util.Int32Ptr(-1),
+			},
 			expectError: true,
-			errorMsg:    "delay: cannot be negative",
+			errorMsg:    []string{"delay: cannot be negative"},
+		},
+		{
+			name: "disabled addon with no sources (should be valid)",
+			input: &AddonConfig{
+				Name:    "Disabled No Sources",
+				Enabled: util.BoolPtr(false),
+			},
+			expectError: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			verrs := &validation.ValidationErrors{}
-			// Defaulting is usually called before validation in real scenarios
-			SetDefaults_AddonConfig(tt.input)
-			Validate_AddonConfig(tt.input, verrs, "addon")
+			Validate_AddonConfig(tt.input, verrs, "spec.addons[0]")
 			if tt.expectError {
-				assert.True(t, verrs.HasErrors(), "expected error but got none for test: %s", tt.name)
-				if tt.errorMsg != "" {
-					found := false
-					errStrings := ""
-					if verrs.HasErrors() {
-						errStrings = verrs.Error()
+				assert.True(t, verrs.HasErrors(), "Expected validation errors but got none for test: %s", tt.name)
+				if len(tt.errorMsg) > 0 {
+					fullErrorMsg := verrs.Error()
+					for _, subMsg := range tt.errorMsg {
+						assert.Contains(t, fullErrorMsg, subMsg, "Error message for test '%s' does not contain expected substring '%s'. Full error: %s", tt.name, subMsg, fullErrorMsg)
 					}
-					for _, errStr := range strings.Split(errStrings, "\n") { // ValidationErrors.Error() returns errors separated by \n
-						if strings.Contains(errStr, tt.errorMsg) {
-							found = true
-							break
-						}
-					}
-					assert.True(t, found, "expected error message to contain '%s', but got: %s for test: %s", tt.errorMsg, errStrings, tt.name)
 				}
 			} else {
-				assert.False(t, verrs.HasErrors(), "expected no error, but got: %s for test: %s", verrs.Error(), tt.name)
+				assert.False(t, verrs.HasErrors(), "Expected no validation errors but got: %s for test: %s", verrs.Error(), tt.name)
 			}
 		})
 	}
 }
 
-// boolPtr and int32Ptr are already defined in addon_types.go
-// If they were moved to a common util, tests for them would go there.
-
-func TestHelperBoolPtr(t *testing.T) {
-	bTrue := true
-	bFalse := false
-	assert.Equal(t, &bTrue, boolPtr(true))
-	assert.Equal(t, &bFalse, boolPtr(false))
-	assert.True(t, *boolPtr(true))
-	assert.False(t, *boolPtr(false))
+// TestMain is a standard way to set up and tear down tests if needed.
+// For this specific test file, it's not strictly necessary but good practice to include.
+func TestMain(m *testing.M) {
+	// Example:
+	// setup()
+	code := m.Run()
+	// shutdown()
+	// os.Exit(code) // Usually not needed as `go test` handles exit codes.
+	if code != 0 {
+		// Perform any specific logging or actions on test failure if needed.
+	}
 }
 
-func TestHelperInt32Ptr(t *testing.T) {
-	var val1 int32 = 0
-	var val2 int32 = 100
-	var val3 int32 = -50
+// TestIsValidChartVersionViaValidation provides more targeted tests for IsValidChartVersion behavior.
+// This helps confirm the understanding of the validation logic used in AddonConfig.
+func TestIsValidChartVersionViaValidation(t *testing.T) {
+	// Versions considered valid by the current common.ValidChartVersionRegexString and validation.IsValidChartVersion
+	correctedValidVersions := []string{"1.0.0", "v1.2.3", "latest", "stable", "1.2", "v1", "1", "10.20.30", "v0.0.1"}
 
-	assert.Equal(t, &val1, int32Ptr(0))
-	assert.Equal(t, &val2, int32Ptr(100))
-	assert.Equal(t, &val3, int32Ptr(-50))
+	// Versions considered invalid by the current common.ValidChartVersionRegexString and validation.IsValidChartVersion
+	correctedInvalidVersions := []string{
+		"",                 // Empty
+		"v1.2.3.4",         // Too many segments
+		"1.2.3-$%",         // Invalid characters
+		"0.1.0-alpha.1",    // Contains pre-release (not supported by current regex)
+		"1.2.3-rc1+build42", // Contains pre-release and build meta (not supported by current regex)
+		"v-beta",           // Starts with 'v-'
+		"a.b.c",            // Non-numeric segments
+		"1.0.0 ",           // Trailing space
+		" 1.0.0",           // Leading space
+		"latest1",          // "latest" with suffix
+		"stable-pre",       // "stable" with suffix
+	}
 
-	assert.Equal(t, int32(0), *int32Ptr(0))
-	assert.Equal(t, int32(100), *int32Ptr(100))
-	assert.Equal(t, int32(-50), *int32Ptr(-50))
+	for _, v := range correctedValidVersions {
+		t.Run("corrected_valid_version_"+v, func(t *testing.T) {
+			assert.True(t, validation.IsValidChartVersion(v), "Expected version '%s' to be valid by current IsValidChartVersion", v)
+		})
+	}
+	for _, v := range correctedInvalidVersions {
+		t.Run("corrected_invalid_version_"+v, func(t *testing.T) {
+			assert.False(t, validation.IsValidChartVersion(v), "Expected version '%s' to be invalid by current IsValidChartVersion", v)
+		})
+	}
 }

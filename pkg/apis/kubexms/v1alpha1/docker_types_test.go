@@ -5,8 +5,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
-	"k8s.io/apimachinery/pkg/runtime"      // Added for RawExtension in tests
+	"github.com/mensylisir/kubexm/pkg/common" // Import the common package
+	"github.com/mensylisir/kubexm/pkg/util"   // Import the util package
+	"k8s.io/apimachinery/pkg/runtime"        // Added for RawExtension in tests
 	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 

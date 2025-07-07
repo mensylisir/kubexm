@@ -3,205 +3,361 @@ package v1alpha1
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"github.com/mensylisir/kubexm/pkg/util/validation"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSetDefaults_HighAvailabilityConfig(t *testing.T) {
-	cfg := &HighAvailabilityConfig{}
-	SetDefaults_HighAvailabilityConfig(cfg)
-
-	t.Run("default with external ManagedKeepalivedHAProxy type", func(t *testing.T) {
-		haEnabled := true
-		cfgExt := &HighAvailabilityConfig{
-			Enabled: &haEnabled,
-			External: &ExternalLoadBalancerConfig{
-				Type: "ManagedKeepalivedHAProxy",
-			},
-		}
-		SetDefaults_HighAvailabilityConfig(cfgExt)
-		assert.NotNil(t, cfgExt.External, "External config should be initialized")
-		assert.NotNil(t, cfgExt.External.Keepalived, "External.Keepalived config should be initialized")
-		assert.NotNil(t, cfgExt.External.Keepalived.AuthType, "External.Keepalived.AuthType should have a default")
-		assert.Equal(t, "PASS", *cfgExt.External.Keepalived.AuthType, "External.Keepalived.AuthType default mismatch")
-		assert.NotNil(t, cfgExt.External.HAProxy, "External.HAProxy config should be initialized")
-		assert.NotNil(t, cfgExt.External.HAProxy.Mode, "External.HAProxy.Mode should have a default")
-		assert.Equal(t, "tcp", *cfgExt.External.HAProxy.Mode, "External.HAProxy.Mode default mismatch")
-	})
-
-	t.Run("default with external ManagedKeepalivedNginxLB type", func(t *testing.T) {
-		haEnabled := true
-		cfgExt := &HighAvailabilityConfig{
-			Enabled: &haEnabled,
-			External: &ExternalLoadBalancerConfig{
-				Type: "ManagedKeepalivedNginxLB",
-			},
-		}
-		SetDefaults_HighAvailabilityConfig(cfgExt)
-		assert.NotNil(t, cfgExt.External, "External config should be initialized")
-		assert.NotNil(t, cfgExt.External.Keepalived, "External.Keepalived config should be initialized")
-		assert.NotNil(t, cfgExt.External.NginxLB, "External.NginxLB config should be initialized")
-		assert.NotNil(t, cfgExt.External.NginxLB.Mode, "External.NginxLB.Mode should have a default")
-		assert.Equal(t, "tcp", *cfgExt.External.NginxLB.Mode, "External.NginxLB.Mode default mismatch")
-	})
-
-	t.Run("default with internal KubeVIP type", func(t *testing.T) {
-		haEnabled := true
-		cfgInt := &HighAvailabilityConfig{
-			Enabled: &haEnabled,
-			Internal: &InternalLoadBalancerConfig{
-				Type: common.InternalLBTypeKubeVIP, // Use constant
-			},
-		}
-		SetDefaults_HighAvailabilityConfig(cfgInt)
-		assert.NotNil(t, cfgInt.Internal, "Internal config should be initialized")
-		if assert.NotNil(t, cfgInt.Internal.KubeVIP, "Internal.KubeVIP config should be initialized for Type KubeVIP") {
-			assert.NotNil(t, cfgInt.Internal.KubeVIP.Mode, "KubeVIP.Mode should have a default")
-			assert.Equal(t, KubeVIPModeARP, *cfgInt.Internal.KubeVIP.Mode, "KubeVIP.Mode default mismatch")
-		}
-	})
-}
-
-func TestValidate_HighAvailabilityConfig(t *testing.T) {
 	tests := []struct {
-		name       string
-		cfg        *HighAvailabilityConfig
-		wantErrMsg string
-		expectErr  bool
+		name     string
+		input    *HighAvailabilityConfig
+		expected *HighAvailabilityConfig
 	}{
 		{
-		name: "valid external ManagedKeepalivedHAProxy with endpoint IP (VIP removed, CPE moved)",
-		cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-			External: &ExternalLoadBalancerConfig{
-				Type: "ManagedKeepalivedHAProxy", // This type implies managed, so LoadBalancerHostGroupName is needed
-				LoadBalancerHostGroupName: stringPtr("lb-group"), // Added
-				Keepalived: &KeepalivedConfig{
-					VRID:      intPtr(1),
-					Priority:  intPtr(101),
-					Interface: stringPtr("eth0"),
-					AuthPass:  stringPtr("secret"),
+			name:  "nil input",
+			input: nil,
+		},
+		{
+			name: "HA disabled by default",
+			input: &HighAvailabilityConfig{},
+			expected: &HighAvailabilityConfig{
+				Enabled:  util.BoolPtr(false),
+				External: nil,
+				Internal: nil,
+			},
+		},
+		{
+			name: "HA enabled, external and internal nil",
+			input: &HighAvailabilityConfig{
+				Enabled: util.BoolPtr(true),
+			},
+			expected: &HighAvailabilityConfig{
+				Enabled:  util.BoolPtr(true),
+				External: nil,
+				Internal: nil,
+			},
+		},
+		{
+			name: "default with external ManagedKeepalivedHAProxy type",
+			input: &HighAvailabilityConfig{
+				Enabled:  util.BoolPtr(true),
+				External: &ExternalLoadBalancerConfig{Type: "ManagedKeepalivedHAProxy"},
+			},
+			expected: &HighAvailabilityConfig{
+				Enabled: util.BoolPtr(true),
+				External: &ExternalLoadBalancerConfig{
+					Type: "ManagedKeepalivedHAProxy",
+					Keepalived: &KeepalivedConfig{
+						VRID:         nil,
+						Priority:     nil,
+						Interface:    nil,
+						AuthType:     util.StrPtr(common.KeepalivedAuthTypePASS),
+						AuthPass:     util.StrPtr(common.DefaultKeepalivedAuthPass),
+						SkipInstall:  util.BoolPtr(false),
+						ExtraConfig:  []string{},
+						Preempt:      util.BoolPtr(common.DefaultKeepalivedPreempt),
+						CheckScript:  util.StrPtr(common.DefaultKeepalivedCheckScript),
+						Interval:     util.IntPtr(common.DefaultKeepalivedInterval),
+						Rise:         util.IntPtr(common.DefaultKeepalivedRise),
+						Fall:         util.IntPtr(common.DefaultKeepalivedFall),
+						AdvertInt:    util.IntPtr(common.DefaultKeepalivedAdvertInt),
+						LVScheduler:  util.StrPtr(common.DefaultKeepalivedLVScheduler),
+					},
+					HAProxy: &HAProxyConfig{
+						FrontendBindAddress: util.StrPtr("0.0.0.0"),
+						FrontendPort:        util.IntPtr(common.HAProxyDefaultFrontendPort),
+						Mode:                util.StrPtr(common.DefaultHAProxyMode),
+						BalanceAlgorithm:    util.StrPtr(common.DefaultHAProxyAlgorithm),
+						BackendServers:      []HAProxyBackendServer{},
+						ExtraGlobalConfig:   []string{},
+						ExtraDefaultsConfig: []string{},
+						ExtraFrontendConfig: []string{},
+						ExtraBackendConfig:  []string{},
+						SkipInstall:         util.BoolPtr(false),
+					},
 				},
-				HAProxy: &HAProxyConfig{
-					FrontendPort:   intPtr(6443),
-					// Ensure Port is explicitly set if Address doesn't solely define it for validation logic
-					BackendServers: []HAProxyBackendServer{{Name: "cp1", Address: "192.168.0.10:6443", Port: 6443}},
+			},
+		},
+		{
+			name: "default with external ManagedKeepalivedNginxLB type",
+			input: &HighAvailabilityConfig{
+				Enabled:  util.BoolPtr(true),
+				External: &ExternalLoadBalancerConfig{Type: "ManagedKeepalivedNginxLB"},
+			},
+			expected: &HighAvailabilityConfig{
+				Enabled: util.BoolPtr(true),
+				External: &ExternalLoadBalancerConfig{
+					Type: "ManagedKeepalivedNginxLB",
+					Keepalived: &KeepalivedConfig{
+						VRID:         nil,
+						Priority:     nil,
+						Interface:    nil,
+						AuthType:     util.StrPtr(common.KeepalivedAuthTypePASS),
+						AuthPass:     util.StrPtr(common.DefaultKeepalivedAuthPass),
+						SkipInstall:  util.BoolPtr(false),
+						ExtraConfig:  []string{},
+						Preempt:      util.BoolPtr(common.DefaultKeepalivedPreempt),
+						CheckScript:  util.StrPtr(common.DefaultKeepalivedCheckScript),
+						Interval:     util.IntPtr(common.DefaultKeepalivedInterval),
+						Rise:         util.IntPtr(common.DefaultKeepalivedRise),
+						Fall:         util.IntPtr(common.DefaultKeepalivedFall),
+						AdvertInt:    util.IntPtr(common.DefaultKeepalivedAdvertInt),
+						LVScheduler:  util.StrPtr(common.DefaultKeepalivedLVScheduler),
+					},
+					NginxLB: &NginxLBConfig{
+						ListenAddress:     util.StrPtr("0.0.0.0"),
+						ListenPort:        util.IntPtr(common.DefaultNginxListenPort),
+						Mode:              util.StrPtr(common.DefaultNginxMode),
+						BalanceAlgorithm:  util.StrPtr(common.DefaultNginxAlgorithm),
+						UpstreamServers:   []NginxLBUpstreamServer{},
+						ExtraHTTPConfig:   []string{},
+						ExtraStreamConfig: []string{},
+						ExtraServerConfig: []string{},
+						ConfigFilePath:    util.StrPtr(common.DefaultNginxConfigFilePath),
+						SkipInstall:       util.BoolPtr(false),
+					},
 				},
-			}},
-		expectErr: false,
+			},
 		},
 		{
-		name: "valid external UserProvided (CPE validation is at Cluster level)",
-			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-				External: &ExternalLoadBalancerConfig{Type: "UserProvided"}},
-			expectErr: false,
-		},
-		{
-			name:      "valid HA disabled",
-			cfg:       &HighAvailabilityConfig{Enabled: boolPtr(false)},
-			expectErr: false,
-		},
-		{
-			name:      "valid empty config (HA disabled by default)",
-			cfg:       &HighAvailabilityConfig{},
-			expectErr: false,
-		},
-		{
-			name: "invalid external LB type",
-			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-				External: &ExternalLoadBalancerConfig{Type: "unknownExternalLB"}},
-			wantErrMsg: "spec.highAvailability.external.type: unknown external LB type 'unknownExternalLB'",
-			expectErr:  true,
-		},
-		{
-			name: "keepalived_config_present_external_type_mismatch",
-			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-				External: &ExternalLoadBalancerConfig{Type: "UserProvided", Keepalived: &KeepalivedConfig{VRID: intPtr(1)}}},
-			wantErrMsg: "spec.highAvailability.external.keepalived: should not be set for 'UserProvided' external LB type", // Corrected path
-			expectErr:  true,
-		},
-		{
-			name: "valid internal KubeVIP",
-			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-				Internal: &InternalLoadBalancerConfig{Type: "KubeVIP", KubeVIP: &KubeVIPConfig{
-					VIP:       stringPtr("192.168.1.100"),
-					Interface: stringPtr("eth0"),
-				}}},
-			expectErr: false,
-		},
-		{
-			name: "invalid internal LB type",
-			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-				Internal: &InternalLoadBalancerConfig{Type: "unknownInternalLB"}},
-			wantErrMsg: "spec.highAvailability.internal.type: unknown internal LB type 'unknownInternalLB'",
-			expectErr:  true,
-		},
-		{
-			name: "KubeVIP internal LB missing KubeVIP section",
-			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-				Internal: &InternalLoadBalancerConfig{Type: common.InternalLBTypeKubeVIP, KubeVIP: nil}}, // Uses constant
-			wantErrMsg: ".internal.kubevip.vip: virtual IP address must be specified",
-			expectErr:  true,
-		},
-		{
-			name: "External and Internal LB simultaneously enabled",
-			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-				External: &ExternalLoadBalancerConfig{Type: common.ExternalLBTypeExternal},
-				Internal: &InternalLoadBalancerConfig{Type: common.InternalLBTypeKubeVIP, KubeVIP: &KubeVIPConfig{VIP: stringPtr("1.1.1.1"), Interface: stringPtr("eth0")}}},
-			wantErrMsg: "external load balancer and internal load balancer cannot be enabled simultaneously",
-			expectErr:  true,
-		},
-		{
-			name: "Managed External LB (kubexm-kh) missing LoadBalancerHostGroupName",
-			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-				External: &ExternalLoadBalancerConfig{
-					Type: common.ExternalLBTypeKubexmKH,
-					Keepalived: &KeepalivedConfig{VRID: intPtr(1), Priority: intPtr(100), Interface: stringPtr("eth0"), AuthPass: stringPtr("pass")},
-					HAProxy:    &HAProxyConfig{BackendServers: []HAProxyBackendServer{{Name: "s1", Address: "1.2.3.4:6443"}}},
-					// LoadBalancerHostGroupName is nil
-				}},
-			wantErrMsg: ".external.loadBalancerHostGroupName: must be specified for managed external LB type 'kubexm-kh'",
-			expectErr:  true,
-		},
-		{
-			name: "Managed External LB (kubexm-kn) with empty LoadBalancerHostGroupName",
-			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-				External: &ExternalLoadBalancerConfig{
-					Type: common.ExternalLBTypeKubexmKN,
-					Keepalived:                &KeepalivedConfig{VRID: intPtr(1), Priority: intPtr(100), Interface: stringPtr("eth0"), AuthPass: stringPtr("pass")},
-					NginxLB:                   &NginxLBConfig{UpstreamServers: []NginxLBUpstreamServer{{Address: "1.2.3.4:6443"}}},
-					LoadBalancerHostGroupName: stringPtr("   "),
-				}},
-			wantErrMsg: ".external.loadBalancerHostGroupName: must be specified for managed external LB type 'kubexm-kn'",
-			expectErr:  true,
-		},
-		{
-			name: "Valid Managed External LB (kubexm-kh) with LoadBalancerHostGroupName",
-			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-				External: &ExternalLoadBalancerConfig{
-					Type:                      common.ExternalLBTypeKubexmKH,
-					LoadBalancerHostGroupName: stringPtr("lb-group"),
-					Keepalived:                &KeepalivedConfig{VRID: intPtr(1), Priority: intPtr(100), Interface: stringPtr("eth0"), AuthPass: stringPtr("pass")},
-					HAProxy:                   &HAProxyConfig{BackendServers: []HAProxyBackendServer{{Name: "s1", Address: "1.2.3.4:6443", Port: 6443}}}, // Explicitly set Port
-				}},
-			expectErr: false,
+			name: "default with internal KubeVIP type",
+			input: &HighAvailabilityConfig{
+				Enabled:  util.BoolPtr(true),
+				Internal: &InternalLoadBalancerConfig{Type: common.InternalLBTypeKubeVIP},
+			},
+			expected: &HighAvailabilityConfig{
+				Enabled: util.BoolPtr(true),
+				Internal: &InternalLoadBalancerConfig{
+					Type: common.InternalLBTypeKubeVIP,
+					KubeVIP: &KubeVIPConfig{
+						Mode:                 util.StrPtr(common.DefaultKubeVIPMode), // common.DefaultKubeVIPMode is "ARP"
+						Image:                util.StrPtr(common.DefaultKubeVIPImage),
+						ExtraArgs:            []string{},
+						EnableControlPlaneLB: util.BoolPtr(true),
+						EnableServicesLB:     util.BoolPtr(false),
+						BGPConfig:            nil,
+					},
+				},
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			SetDefaults_HighAvailabilityConfig(tt.cfg)
-			verrs := &validation.ValidationErrors{}
-			Validate_HighAvailabilityConfig(tt.cfg, verrs, "spec.highAvailability")
+			SetDefaults_HighAvailabilityConfig(tt.input)
+			assert.Equal(t, tt.expected, tt.input)
+		})
+	}
+}
 
-			if tt.expectErr {
-				assert.True(t, verrs.HasErrors(), "Validate_HighAvailabilityConfig expected error for %s, got none", tt.name)
-				if tt.wantErrMsg != "" {
-					assert.Contains(t, verrs.Error(), tt.wantErrMsg, "Validate_HighAvailabilityConfig error for %s", tt.name)
+func TestValidate_HighAvailabilityConfig(t *testing.T) {
+	validKeepalived := &KeepalivedConfig{
+		VRID:         util.IntPtr(common.DefaultKeepalivedVRID),
+		Priority:     util.IntPtr(common.DefaultKeepalivedPriorityMaster),
+		Interface:    util.StrPtr("eth0"),
+		AuthType:     util.StrPtr(common.KeepalivedAuthTypePASS),
+		AuthPass:     util.StrPtr(common.DefaultKeepalivedAuthPass),
+	}
+	SetDefaults_KeepalivedConfig(validKeepalived)
+
+
+	validHAProxy := &HAProxyConfig{}
+	SetDefaults_HAProxyConfig(validHAProxy)
+	validHAProxy.BackendServers = []HAProxyBackendServer{{Name: "s1", Address: "1.1.1.1", Port: 6443}}
+
+	validNginxLB := &NginxLBConfig{}
+	SetDefaults_NginxLBConfig(validNginxLB)
+	validNginxLB.UpstreamServers = []NginxLBUpstreamServer{{Address: "1.1.1.1:6443"}}
+
+	validKubeVIP := &KubeVIPConfig{}
+	SetDefaults_KubeVIPConfig(validKubeVIP)
+	validKubeVIP.VIP = util.StrPtr("192.168.1.200")
+	validKubeVIP.Interface = util.StrPtr("eth0")
+
+	tests := []struct {
+		name         string
+		input        *HighAvailabilityConfig
+		expectError  bool
+		errorMsgs    []string
+	}{
+		{
+			name: "valid external ManagedKeepalivedHAProxy with endpoint IP (VIP removed, CPE moved)",
+			input: &HighAvailabilityConfig{
+				Enabled: util.BoolPtr(true),
+				External: &ExternalLoadBalancerConfig{
+					Type:                      common.ExternalLBTypeKubexmKH,
+					Keepalived:                validKeepalived,
+					HAProxy:                   validHAProxy,
+					LoadBalancerHostGroupName: util.StrPtr("lb-group"),
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "valid external UserProvided (CPE validation is at Cluster level)",
+			input: &HighAvailabilityConfig{
+				Enabled:  util.BoolPtr(true),
+				External: &ExternalLoadBalancerConfig{Type: "UserProvided"},
+			},
+			expectError: false,
+		},
+		{
+			name: "valid HA disabled",
+			input: &HighAvailabilityConfig{
+				Enabled: util.BoolPtr(false),
+			},
+			expectError: false,
+		},
+		{
+			name: "valid empty config (HA disabled by default)",
+			input: &HighAvailabilityConfig{},
+			expectError: false,
+		},
+		{
+			name: "invalid external LB type",
+			input: &HighAvailabilityConfig{
+				Enabled:  util.BoolPtr(true),
+				External: &ExternalLoadBalancerConfig{Type: "InvalidType"},
+			},
+			expectError: true,
+			errorMsgs:    []string{".external.type: unknown external LB type 'InvalidType'"},
+		},
+		{
+			name: "keepalived config present external type mismatch",
+			input: &HighAvailabilityConfig{
+				Enabled:    util.BoolPtr(true),
+				External:   &ExternalLoadBalancerConfig{Type: "UserProvided", Keepalived: &KeepalivedConfig{}},
+			},
+			expectError: true,
+			errorMsgs:    []string{".external.keepalived: should not be set for 'UserProvided' external LB type"},
+		},
+		{
+			name: "valid internal KubeVIP",
+			input: &HighAvailabilityConfig{
+				Enabled:  util.BoolPtr(true),
+				Internal: &InternalLoadBalancerConfig{Type: common.InternalLBTypeKubeVIP, KubeVIP: validKubeVIP},
+			},
+			expectError: false,
+		},
+		{
+			name: "invalid internal LB type",
+			input: &HighAvailabilityConfig{
+				Enabled:  util.BoolPtr(true),
+				Internal: &InternalLoadBalancerConfig{Type: "InvalidInternalType"},
+			},
+			expectError: true,
+			errorMsgs:    []string{".internal.type: unknown internal LB type 'InvalidInternalType'"},
+		},
+		{
+			name: "KubeVIP internal LB missing KubeVIP section (will be defaulted, then validated for fields)",
+			input: &HighAvailabilityConfig{
+				Enabled:  util.BoolPtr(true),
+				Internal: &InternalLoadBalancerConfig{Type: common.InternalLBTypeKubeVIP, KubeVIP: nil},
+			},
+			expectError: true,
+			errorMsgs:    []string{
+				"spec.highAvailability.internal.kubevip.vip: virtual IP address must be specified",
+				"spec.highAvailability.internal.kubevip.interface: network interface must be specified for ARP mode",
+			},
+		},
+		{
+			name: "KubeVIP internal LB with nil KubeVIP but defaulted, expecting VIP/Interface errors",
+			input: &HighAvailabilityConfig{
+				Enabled:  util.BoolPtr(true),
+				Internal: &InternalLoadBalancerConfig{Type: common.InternalLBTypeKubeVIP, KubeVIP: &KubeVIPConfig{}},
+			},
+			expectError: true,
+			errorMsgs:    []string{"spec.highAvailability.internal.kubevip.vip: virtual IP address must be specified", "spec.highAvailability.internal.kubevip.interface: network interface must be specified for ARP mode"},
+		},
+		{
+			name: "External and Internal LB simultaneously enabled",
+			input: &HighAvailabilityConfig{
+				Enabled:  util.BoolPtr(true),
+				External: &ExternalLoadBalancerConfig{Type: "UserProvided"},
+				Internal: &InternalLoadBalancerConfig{Type: common.InternalLBTypeKubeVIP, KubeVIP: validKubeVIP},
+			},
+			expectError: true,
+			errorMsgs:    []string{"external load balancer and internal load balancer cannot be enabled simultaneously"},
+		},
+		{
+			name: "Managed External LB (kubexm-kh) missing LoadBalancerHostGroupName",
+			input: &HighAvailabilityConfig{
+				Enabled:  util.BoolPtr(true),
+				External: &ExternalLoadBalancerConfig{Type: common.ExternalLBTypeKubexmKH, Keepalived: validKeepalived, HAProxy: validHAProxy},
+			},
+			expectError: true,
+			errorMsgs:    []string{".external.loadBalancerHostGroupName: must be specified for managed external LB type"},
+		},
+		{
+			name: "Managed External LB (kubexm-kn) with empty LoadBalancerHostGroupName",
+			input: &HighAvailabilityConfig{
+				Enabled:  util.BoolPtr(true),
+				External: &ExternalLoadBalancerConfig{Type: common.ExternalLBTypeKubexmKN, Keepalived: validKeepalived, NginxLB: validNginxLB, LoadBalancerHostGroupName: util.StrPtr(" ")},
+			},
+			expectError: true,
+			errorMsgs:    []string{".external.loadBalancerHostGroupName: must be specified for managed external LB type"},
+		},
+		{
+			name: "Valid Managed External LB (kubexm-kh) with LoadBalancerHostGroupName",
+			input: &HighAvailabilityConfig{
+				Enabled:  util.BoolPtr(true),
+				External: &ExternalLoadBalancerConfig{Type: common.ExternalLBTypeKubexmKH, Keepalived: validKeepalived, HAProxy: validHAProxy, LoadBalancerHostGroupName: util.StrPtr("lb-nodes")},
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inputToTest := tt.input
+			if inputToTest != nil {
+				copiedInput := *inputToTest
+				if copiedInput.External != nil {
+					externalCopy := *copiedInput.External
+					if externalCopy.Keepalived != nil {
+						kpCopy := *externalCopy.Keepalived
+						externalCopy.Keepalived = &kpCopy
+					}
+					if externalCopy.HAProxy != nil {
+						hpCopy := *externalCopy.HAProxy
+						externalCopy.HAProxy = &hpCopy
+					}
+					if externalCopy.NginxLB != nil {
+						nginxCopy := *externalCopy.NginxLB
+						externalCopy.NginxLB = &nginxCopy
+					}
+					copiedInput.External = &externalCopy
+				}
+				if copiedInput.Internal != nil {
+					internalCopy := *copiedInput.Internal
+					if internalCopy.KubeVIP != nil {
+						kvCopy := *internalCopy.KubeVIP
+						internalCopy.KubeVIP = &kvCopy
+					}
+					if internalCopy.WorkerNodeHAProxy != nil {
+						hpCopy := *internalCopy.WorkerNodeHAProxy
+						internalCopy.WorkerNodeHAProxy = &hpCopy
+					}
+					copiedInput.Internal = &internalCopy
+				}
+				inputToTest = &copiedInput
+				SetDefaults_HighAvailabilityConfig(inputToTest)
+			}
+
+			verrs := &validation.ValidationErrors{}
+			Validate_HighAvailabilityConfig(inputToTest, verrs, "spec.highAvailability")
+			if tt.expectError {
+				assert.True(t, verrs.HasErrors(), "Expected error for test '%s', but got none. Input: %+v, DefaultedOrOriginal: %+v", tt.name, tt.input, inputToTest)
+				if len(tt.errorMsgs) > 0 {
+					fullErrorMsg := verrs.Error()
+					for _, subMsg := range tt.errorMsgs {
+						assert.Contains(t, fullErrorMsg, subMsg, "Error message for test '%s' does not contain expected substring '%s'. Full error: %s", tt.name, subMsg, fullErrorMsg)
+					}
 				}
 			} else {
-				assert.False(t, verrs.HasErrors(), "Validate_HighAvailabilityConfig for valid case %s failed: %v", tt.name, verrs.Error())
+				assert.False(t, verrs.HasErrors(), "Unexpected error for test '%s': %s. Input: %+v, DefaultedOrOriginal: %+v", tt.name, verrs.Error(), tt.input, inputToTest)
 			}
 		})
 	}

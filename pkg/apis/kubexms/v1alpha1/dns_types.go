@@ -2,12 +2,32 @@ package v1alpha1
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/mensylisir/kubexm/pkg/common" // Import common package
 	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
 	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
+
+// isValidDNSServerAddress checks if the address is a valid IP, a FQDN (contains a dot),
+// or a host:port / [ipv6]:port where host is IP/FQDN and port is valid.
+func isValidDNSServerAddress(addr string) bool {
+	host, port, err := net.SplitHostPort(addr)
+	if err == nil {
+		// host:port or [ipv6]:port
+		if !util.IsValidPort(port) {
+			return false
+		}
+		// host part must be IP or FQDN (contains a dot)
+		// IsValidDomainName already checks it's not an IP.
+		return util.IsValidIP(host) || (util.IsValidDomainName(host) && strings.Contains(host, "."))
+	}
+
+	// Not host:port, so the whole string must be IP or FQDN (contains a dot)
+	// IsValidDomainName already checks it's not an IP.
+	return util.IsValidIP(addr) || (util.IsValidDomainName(addr) && strings.Contains(addr, "."))
+}
 
 // DNS defines the overall DNS configuration for the cluster.
 // It includes settings for host-level DNS overrides, CoreDNS, and NodeLocalDNS.
@@ -129,8 +149,8 @@ func Validate_DNS(cfg *DNS, verrs *validation.ValidationErrors, pathPrefix strin
 		for i, server := range cfg.CoreDNS.UpstreamDNSServers {
 			if strings.TrimSpace(server) == "" {
 				verrs.Add(fmt.Sprintf("%s.upstreamDNSServers[%d]", coreDNSPath, i), "server address cannot be empty")
-			} else if !util.ValidateHostPortString(server) && !util.IsValidIP(server) && !util.IsValidDomainName(server) {
-				verrs.Add(fmt.Sprintf("%s.upstreamDNSServers[%d]", coreDNSPath, i), fmt.Sprintf("invalid server address format '%s'", server))
+			} else if !isValidDNSServerAddress(server) {
+				verrs.Add(fmt.Sprintf("%s.upstreamDNSServers[%d]", coreDNSPath, i), fmt.Sprintf("invalid server address format '%s', must be an IP, a FQDN (containing '.'), or valid host:port with IP/FQDN", server))
 			}
 		}
 	}
@@ -174,8 +194,8 @@ func Validate_ExternalZone(cfg *ExternalZone, verrs *validation.ValidationErrors
 	for i, ns := range cfg.Nameservers {
 		if strings.TrimSpace(ns) == "" {
 			verrs.Add(fmt.Sprintf("%s.nameservers[%d]", pathPrefix, i), "nameserver address cannot be empty")
-		} else if !util.ValidateHostPortString(ns) && !util.IsValidIP(ns) && !util.IsValidDomainName(ns) {
-			verrs.Add(fmt.Sprintf("%s.nameservers[%d]", pathPrefix, i), fmt.Sprintf("invalid nameserver address format '%s'", ns))
+		} else if !isValidDNSServerAddress(ns) {
+			verrs.Add(fmt.Sprintf("%s.nameservers[%d]", pathPrefix, i), fmt.Sprintf("invalid nameserver address format '%s', must be an IP, a FQDN (containing '.'), or valid host:port with IP/FQDN", ns))
 		}
 	}
 
