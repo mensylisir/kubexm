@@ -17,7 +17,7 @@ import (
 
 var (
 	// validK8sTypes lists the supported Kubernetes deployment types by this configuration.
-	validK8sTypes = []string{ClusterTypeKubeXM, ClusterTypeKubeadm, ""} // Empty string allows for default
+	validK8sTypes = []string{common.ClusterTypeKubeXM, common.ClusterTypeKubeadm, ""} // Empty string allows for default
 	// validProxyModes lists the supported KubeProxy modes.
 	// Using constants from pkg/common
 	validProxyModes = []string{common.KubeProxyModeIPTables, common.KubeProxyModeIPVS, ""} // Empty string allows for default
@@ -123,7 +123,7 @@ type NodeFeatureDiscoveryConfig struct {
 
 func SetDefaults_KubernetesConfig(cfg *KubernetesConfig, clusterMetaName string) {
 	if cfg == nil { return }
-	if cfg.Type == "" { cfg.Type = ClusterTypeKubeXM }
+	if cfg.Type == "" { cfg.Type = common.ClusterTypeKubeXM }
 	if cfg.ContainerRuntime == nil { cfg.ContainerRuntime = &ContainerRuntimeConfig{} }
 	SetDefaults_ContainerRuntimeConfig(cfg.ContainerRuntime)
 	if cfg.ClusterName == "" && clusterMetaName != "" { cfg.ClusterName = clusterMetaName }

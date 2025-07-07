@@ -15,8 +15,8 @@ import (
 
 // DockerAddressPool defines a range of IP addresses for Docker networks.
 type DockerAddressPool struct {
-   Base string `json:"base"` // Base IP address for the pool (e.g., "172.30.0.0/16")
-   Size int    `json:"size"` // Size of the subnets to allocate from the base pool (e.g., 24 for /24 subnets)
+   Base string `json:"base" yaml:"base"` // Base IP address for the pool (e.g., "172.30.0.0/16")
+   Size int    `json:"size" yaml:"size"` // Size of the subnets to allocate from the base pool (e.g., 24 for /24 subnets)
 }
 
 // DockerConfig defines specific settings for the Docker runtime.
@@ -79,8 +79,8 @@ type DockerRegistryAuth struct {
 
 // DockerRuntime defines a custom runtime for Docker.
 type DockerRuntime struct {
-	Path string `json:"path"`
-	RuntimeArgs []string `json:"runtimeArgs,omitempty"`
+	Path string `json:"path" yaml:"path"`
+	RuntimeArgs []string `json:"runtimeArgs,omitempty" yaml:"runtimeArgs,omitempty"`
 }
 
 // SetDefaults_DockerConfig sets default values for DockerConfig.
