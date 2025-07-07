@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
 	"k8s.io/apimachinery/pkg/runtime"      // Added for RawExtension in tests
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // stringPtr, boolPtr, intPtr are expected to be in zz_helpers.go or similar within the package.
@@ -30,7 +31,29 @@ func TestSetDefaults_DockerConfig(t *testing.T) {
 				RegistryMirrors:        []string{},
 				InsecureRegistries:     []string{},
 				ExecOpts:               []string{},
-				LogOpts:                make(map[string]string),
+				LogOpts:                map[string]string{"max-size": "100m", "max-file": "3"},
+				DefaultAddressPools:    []DockerAddressPool{},
+				StorageOpts:            []string{},
+				Runtimes:               make(map[string]DockerRuntime),
+				MaxConcurrentDownloads: util.IntPtr(3),
+				MaxConcurrentUploads:   util.IntPtr(5),
+				Bridge:                 util.StrPtr("docker0"),
+				InstallCRIDockerd:      util.BoolPtr(true),
+				LogDriver:              util.StrPtr("json-file"),
+				IPTables:               util.BoolPtr(true),
+				IPMasq:                 util.BoolPtr(true),
+				Experimental:           util.BoolPtr(false),
+				Auths:                  map[string]DockerRegistryAuth{},
+			},
+		},
+		{
+			name: "LogOpts already set - should not be overwritten by defaults for map itself, but individual keys could be if logic was different",
+			input: &DockerConfig{LogOpts: map[string]string{"custom": "value"}},
+			expected: &DockerConfig{
+				RegistryMirrors:        []string{},
+				InsecureRegistries:     []string{},
+				ExecOpts:               []string{},
+				LogOpts:                map[string]string{"custom": "value"}, // User's value preserved, default map is not merged for LogOpts
 				DefaultAddressPools:    []DockerAddressPool{},
 				StorageOpts:            []string{},
 				Runtimes:               make(map[string]DockerRuntime),
@@ -52,14 +75,14 @@ func TestSetDefaults_DockerConfig(t *testing.T) {
 				RegistryMirrors:        []string{},
 				InsecureRegistries:     []string{},
 				ExecOpts:               []string{},
-				LogOpts:                make(map[string]string),
+				LogOpts:                map[string]string{"max-size": "100m", "max-file": "3"}, // Default LogOpts applied
 				DefaultAddressPools:    []DockerAddressPool{},
 				StorageOpts:            []string{},
 				Runtimes:               make(map[string]DockerRuntime),
 				MaxConcurrentDownloads: util.IntPtr(3),
 				MaxConcurrentUploads:   util.IntPtr(5),
 				Bridge:                 util.StrPtr("docker0"),
-				InstallCRIDockerd:      util.BoolPtr(false), // Not overridden
+				InstallCRIDockerd:      util.BoolPtr(false),
 				LogDriver:              util.StrPtr("json-file"),
 				IPTables:               util.BoolPtr(true),
 				IPMasq:                 util.BoolPtr(true),
@@ -74,7 +97,7 @@ func TestSetDefaults_DockerConfig(t *testing.T) {
 				RegistryMirrors:        []string{},
 				InsecureRegistries:     []string{},
 				ExecOpts:               []string{},
-				LogOpts:                make(map[string]string),
+				LogOpts:                map[string]string{"max-size": "100m", "max-file": "3"}, // Expect default LogOpts
 				DefaultAddressPools:    []DockerAddressPool{},
 				StorageOpts:            []string{},
 				Runtimes:               make(map[string]DockerRuntime),
@@ -82,7 +105,7 @@ func TestSetDefaults_DockerConfig(t *testing.T) {
 				MaxConcurrentUploads:   util.IntPtr(5),
 				Bridge:                 util.StrPtr("docker0"),
 				InstallCRIDockerd:      util.BoolPtr(true),
-				LogDriver:              util.StrPtr("journald"), // Not overridden
+				LogDriver:              util.StrPtr("journald"),
 				IPTables:               util.BoolPtr(true),
 				IPMasq:                 util.BoolPtr(true),
 				Experimental:           util.BoolPtr(false),
@@ -159,14 +182,14 @@ func TestValidate_DockerConfig(t *testing.T) {
 	}{
 		{
 			name:  "minimal valid after defaults",
-			input: &DockerConfig{}, // Defaults will make it valid for basic fields
+			input: &DockerConfig{},
 		},
 		{
 			name: "valid with specific log driver and data root",
 			input: &DockerConfig{
 				LogDriver: stringPtr("journald"),
 				DataRoot:  stringPtr("/var/lib/docker-custom"),
-				BIP:       stringPtr("172.20.0.1/16"), // isValidCIDR is from kubernetes_types
+				BIP:       stringPtr("172.20.0.1/16"),
 			},
 		},
 		{
@@ -214,7 +237,7 @@ func TestValidate_DockerConfig(t *testing.T) {
 		{
 			name: "valid Auths with base64 auth",
 			input: &DockerConfig{
-				Auths: map[string]DockerRegistryAuth{"my.registry.com:5000": {Auth: "dXNlcjpwYXNzd29yZA=="}}, // user:password
+				Auths: map[string]DockerRegistryAuth{"my.registry.com:5000": {Auth: "dXNlcjpwYXNzd29yZA=="}},
 			},
 		},
 		{
@@ -225,10 +248,10 @@ func TestValidate_DockerConfig(t *testing.T) {
 
 	for _, tt := range validCases {
 		t.Run("Valid_"+tt.name, func(t *testing.T) {
-			SetDefaults_DockerConfig(tt.input) // Apply defaults
-			verrs := &ValidationErrors{}
+			SetDefaults_DockerConfig(tt.input)
+			verrs := &validation.ValidationErrors{}
 			Validate_DockerConfig(tt.input, verrs, "spec.containerRuntime.docker")
-			assert.True(t, verrs.IsEmpty(), "Expected no validation errors for '%s', but got: %s", tt.name, verrs.Error())
+			assert.False(t, verrs.HasErrors(), "Expected no validation errors for '%s', but got: %s", tt.name, verrs.Error())
 		})
 	}
 
@@ -256,7 +279,7 @@ func TestValidate_DockerConfig(t *testing.T) {
 		{"mcd_zero", &DockerConfig{MaxConcurrentDownloads: intPtr(0)}, []string{".maxConcurrentDownloads: must be positive if specified"}},
 		{"mcu_zero", &DockerConfig{MaxConcurrentUploads: intPtr(0)}, []string{".maxConcurrentUploads: must be positive if specified"}},
 		{"empty_bridge", &DockerConfig{Bridge: stringPtr(" ")}, []string{".bridge: name cannot be empty"}},
-		{"empty_cridockerd_version", &DockerConfig{CRIDockerdVersion: stringPtr(" ")}, []string{".criDockerdVersion: cannot be only whitespace if specified"}}, // Message changed
+		{"empty_cridockerd_version", &DockerConfig{CRIDockerdVersion: stringPtr(" ")}, []string{".criDockerdVersion: cannot be only whitespace if specified"}},
 		{
 			"invalid_cridockerd_version_format",
 			&DockerConfig{CRIDockerdVersion: stringPtr("0.bad.1")},
@@ -272,19 +295,17 @@ func TestValidate_DockerConfig(t *testing.T) {
 		{"auths_invalid_key_format", &DockerConfig{Auths: map[string]DockerRegistryAuth{"http//invalid.com": {Username: "u", Password: "p"}}}, []string{"registry key 'http//invalid.com' is not a valid hostname or host:port"}},
 		{"auths_no_auth_method", &DockerConfig{Auths: map[string]DockerRegistryAuth{"docker.io": {}}}, []string{".auths[\"docker.io\"]: either username/password or auth string must be provided"}},
 		{"auths_invalid_base64", &DockerConfig{Auths: map[string]DockerRegistryAuth{"docker.io": {Auth: "invalid-base64!"}}}, []string{".auths[\"docker.io\"].auth: failed to decode base64"}},
-		{"auths_auth_bad_format", &DockerConfig{Auths: map[string]DockerRegistryAuth{"docker.io": {Auth: "dXNlcg=="}}}, []string{".auths[\"docker.io\"].auth: decoded auth string must be in 'username:password' format"}}, // "user"
+		{"auths_auth_bad_format", &DockerConfig{Auths: map[string]DockerRegistryAuth{"docker.io": {Auth: "dXNlcg=="}}}, []string{".auths[\"docker.io\"].auth: decoded auth string must be in 'username:password' format"}},
 		{"dataroot_tmp", &DockerConfig{DataRoot: stringPtr("/tmp")}, []string{".dataRoot: path '/tmp' is not recommended"}},
 		{"dataroot_var_tmp", &DockerConfig{DataRoot: stringPtr("/var/tmp")}, []string{".dataRoot: path '/var/tmp' is not recommended"}},
 	}
 
 	for _, tt := range invalidCases {
 		t.Run("Invalid_"+tt.name, func(t *testing.T) {
-			// It's important to apply defaults before validation as validation logic might depend on it.
-			// For example, if a field is nil and validation doesn't check for nil but expects a value after defaulting.
 			SetDefaults_DockerConfig(tt.cfg)
-			verrs := &ValidationErrors{}
+			verrs := &validation.ValidationErrors{}
 			Validate_DockerConfig(tt.cfg, verrs, "spec.containerRuntime.docker")
-			assert.False(t, verrs.IsEmpty(), "Expected validation errors for '%s', but got none", tt.name)
+			assert.True(t, verrs.HasErrors(), "Expected validation errors for '%s', but got none", tt.name)
 			if len(tt.errContains) > 0 {
 				fullError := verrs.Error()
 				for _, errStr := range tt.errContains {
@@ -294,9 +315,3 @@ func TestValidate_DockerConfig(t *testing.T) {
 		})
 	}
 }
-
-// Note: isValidCIDR is expected to be defined in kubernetes_types.go or a shared file in the package.
-// If not, the tests relying on it (BIP, FixedCIDR, DefaultAddressPools.Base) might not compile or might behave unexpectedly.
-// For the purpose of this test suite, we assume its availability and correct functioning.
-// The actual `isValidCIDR` is in `kubernetes_types.go` and uses `net.ParseCIDR`.
-// The error messages for CIDR validation in the tests above reflect that.

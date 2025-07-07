@@ -1,38 +1,30 @@
 package v1alpha1
 
 import (
-	"strings"
 	"testing"
 	"time"
-	// "reflect" // For DeepEqual if needed for complex structs, not used in these initial tests
+	// "reflect" // Not used
+	// "strings" // Not used in the final version of these tests
+	"strings" // Keep for now, might be used by specific error checks later
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"github.com/stretchr/testify/assert" // Added import for testify/assert
+	"github.com/stretchr/testify/assert"
+	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // --- Test SetDefaults_Cluster ---
 
 func TestSetDefaults_Cluster_TypeMetaAndGlobal(t *testing.T) {
-	cfg := &Cluster{ObjectMeta: metav1.ObjectMeta{Name: "test"}} // Basic cfg
+	cfg := &Cluster{ObjectMeta: metav1.ObjectMeta{Name: "test"}}
 	SetDefaults_Cluster(cfg)
 
-	if cfg.APIVersion != SchemeGroupVersion.Group+"/"+SchemeGroupVersion.Version {
-		t.Errorf("Default APIVersion not set correctly, got %s, want %s", cfg.APIVersion, SchemeGroupVersion.String())
-	}
-	if cfg.Kind != "Cluster" {
-		t.Errorf("Default Kind not set correctly, got %s, want Cluster", cfg.Kind)
-	}
-	// ClusterSpec.Type was removed. Defaulting is now handled by KubernetesConfig.Type.
-	if cfg.Spec.Global == nil {
-		t.Fatal("Spec.Global should be initialized by SetDefaults_Cluster")
-	}
-	if cfg.Spec.Global.Port != 22 {
-		t.Errorf("Global.Port default = %d, want 22", cfg.Spec.Global.Port)
-	}
-	if cfg.Spec.Global.ConnectionTimeout != 30*time.Second {
-		t.Errorf("Global.ConnectionTimeout default = %v, want 30s", cfg.Spec.Global.ConnectionTimeout)
-	}
-	if cfg.Spec.Global.WorkDir != "/tmp/kubexms_work" { // As per current SetDefaults_Cluster
-		t.Errorf("Global.WorkDir default = %s, want /tmp/kubexms_work", cfg.Spec.Global.WorkDir)
+	assert.Equal(t, SchemeGroupVersion.Group+"/"+SchemeGroupVersion.Version, cfg.APIVersion, "Default APIVersion mismatch")
+	assert.Equal(t, "Cluster", cfg.Kind, "Default Kind mismatch")
+	if assert.NotNil(t, cfg.Spec.Global, "Spec.Global should be initialized") {
+		assert.Equal(t, 22, cfg.Spec.Global.Port, "Global.Port default mismatch")
+		assert.Equal(t, 30*time.Second, cfg.Spec.Global.ConnectionTimeout, "Global.ConnectionTimeout default mismatch")
+		assert.Equal(t, "/tmp/kubexms_work", cfg.Spec.Global.WorkDir, "Global.WorkDir default mismatch")
 	}
 }
 
@@ -42,71 +34,20 @@ func TestSetDefaults_SystemSpec(t *testing.T) {
 		input    *SystemSpec
 		expected *SystemSpec
 	}{
-		{
-			name:     "nil input",
-			input:    nil,
-			expected: nil,
+		{"nil input", nil, nil},
+		{"empty struct", &SystemSpec{}, &SystemSpec{
+			NTPServers:         []string{}, RPMs: []string{}, Debs: []string{},
+			PreInstallScripts:  []string{}, PostInstallScripts: []string{},
+			Modules:            []string{}, SysctlParams:       make(map[string]string),
+		}},
+		{"partial fields set",
+			&SystemSpec{NTPServers: []string{"ntp.example.com"}, Timezone: "Asia/Shanghai", SysctlParams: map[string]string{"net.ipv4.ip_forward": "1"}},
+			&SystemSpec{NTPServers: []string{"ntp.example.com"}, Timezone: "Asia/Shanghai", RPMs: []string{}, Debs: []string{}, PreInstallScripts: []string{}, PostInstallScripts: []string{}, Modules: []string{}, SysctlParams: map[string]string{"net.ipv4.ip_forward": "1"}},
 		},
-		{
-			name:  "empty struct",
-			input: &SystemSpec{},
-			expected: &SystemSpec{
-				NTPServers:         []string{},
-				RPMs:               []string{},
-				Debs:               []string{},
-				PreInstallScripts:  []string{},
-				PostInstallScripts: []string{},
-				Modules:            []string{},
-				SysctlParams:       make(map[string]string),
-				// Timezone and PackageManager have no specific defaults other than their zero values
-				// SkipConfigureOS defaults to false (zero value)
-			},
-		},
-		{
-			name: "partial fields set",
-			input: &SystemSpec{
-				NTPServers: []string{"ntp.example.com"},
-				Timezone:   "Asia/Shanghai",
-				SysctlParams: map[string]string{
-					"net.ipv4.ip_forward": "1",
-				},
-			},
-			expected: &SystemSpec{
-				NTPServers:         []string{"ntp.example.com"},
-				Timezone:           "Asia/Shanghai",
-				RPMs:               []string{},
-				Debs:               []string{},
-				PreInstallScripts:  []string{},
-				PostInstallScripts: []string{},
-				Modules:            []string{},
-				SysctlParams: map[string]string{
-					"net.ipv4.ip_forward": "1",
-				},
-			},
-		},
-		{
-			name: "all slice/map fields initially nil",
-			input: &SystemSpec{
-				NTPServers:         nil,
-				RPMs:               nil,
-				Debs:               nil,
-				PreInstallScripts:  nil,
-				PostInstallScripts: nil,
-				Modules:            nil,
-				SysctlParams:       nil,
-			},
-			expected: &SystemSpec{
-				NTPServers:         []string{},
-				RPMs:               []string{},
-				Debs:               []string{},
-				PreInstallScripts:  []string{},
-				PostInstallScripts: []string{},
-				Modules:            []string{},
-				SysctlParams:       make(map[string]string),
-			},
-		},
+		{"all slice/map fields initially nil", &SystemSpec{}, &SystemSpec{
+			NTPServers:[]string{}, RPMs:[]string{}, Debs:[]string{}, PreInstallScripts:[]string{}, PostInstallScripts:[]string{}, Modules:[]string{}, SysctlParams: make(map[string]string),
+		}},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			SetDefaults_SystemSpec(tt.input)
@@ -123,95 +64,26 @@ func TestValidate_SystemSpec(t *testing.T) {
 		expectErr   bool
 		errContains []string
 	}{
-		{
-			name:      "valid empty spec (after defaults)",
-			input:     &SystemSpec{}, // Defaults will make it valid
-			expectErr: false,
-		},
-		{
-			name: "valid full spec",
-			input: &SystemSpec{
-				NTPServers:         []string{"0.pool.ntp.org"},
-				Timezone:           "UTC",
-				RPMs:               []string{"my-rpm"},
-				Debs:               []string{"my-deb"},
-				PackageManager:     "yum",
-				PreInstallScripts:  []string{"echo pre"},
-				PostInstallScripts: []string{"echo post"},
-				SkipConfigureOS:    true,
-				Modules:            []string{"br_netfilter"},
-				SysctlParams:       validSysctl,
-			},
-			expectErr: false,
-		},
-		{
-			name:        "NTP server empty string",
-			input:       &SystemSpec{NTPServers: []string{""}},
-			expectErr:   true,
-			errContains: []string{"system.ntpServers[0]: NTP server address cannot be empty"},
-		},
-		{
-			name:        "Timezone is only whitespace",
-			input:       &SystemSpec{Timezone: "   "},
-			expectErr:   true,
-			errContains: []string{"system.timezone: cannot be only whitespace if specified"},
-		},
-		{
-			name:        "RPM empty string",
-			input:       &SystemSpec{RPMs: []string{"pkg1", " "}},
-			expectErr:   true,
-			errContains: []string{"system.rpms[1]: RPM package name cannot be empty"},
-		},
-		{
-			name:        "DEB empty string",
-			input:       &SystemSpec{Debs: []string{" "}},
-			expectErr:   true,
-			errContains: []string{"system.debs[0]: DEB package name cannot be empty"},
-		},
-		{
-			name:        "PackageManager is only whitespace",
-			input:       &SystemSpec{PackageManager: "  "},
-			expectErr:   true,
-			errContains: []string{"system.packageManager: cannot be only whitespace if specified"},
-		},
-		{
-			name:        "PreInstallScript empty string",
-			input:       &SystemSpec{PreInstallScripts: []string{" "}},
-			expectErr:   true,
-			errContains: []string{"system.preInstallScripts[0]: script cannot be empty"},
-		},
-		{
-			name:        "PostInstallScript empty string",
-			input:       &SystemSpec{PostInstallScripts: []string{"echo ok", " "}},
-			expectErr:   true,
-			errContains: []string{"system.postInstallScripts[1]: script cannot be empty"},
-		},
-		{
-			name:        "Module empty string",
-			input:       &SystemSpec{Modules: []string{" "}},
-			expectErr:   true,
-			errContains: []string{"system.modules[0]: module name cannot be empty"},
-		},
-		{
-			name:        "Sysctl key empty string",
-			input:       &SystemSpec{SysctlParams: map[string]string{" ": "1"}},
-			expectErr:   true,
-			errContains: []string{"system.sysctlParams: sysctl key cannot be empty"},
-		},
-		// Note: Sysctl value empty string is currently allowed by Validate_SystemSpec.
-		// If it should be an error, a test case would be added here.
+		{"valid empty spec (after defaults)", &SystemSpec{}, false, nil},
+		{"valid full spec", &SystemSpec{NTPServers:[]string{"0.pool.ntp.org"}, Timezone:"UTC", RPMs:[]string{"my-rpm"}, Debs:[]string{"my-deb"}, PackageManager:"yum", PreInstallScripts:[]string{"echo pre"}, PostInstallScripts:[]string{"echo post"}, SkipConfigureOS:true, Modules:[]string{"br_netfilter"}, SysctlParams:validSysctl}, false, nil},
+		{"NTP server empty string", &SystemSpec{NTPServers: []string{""}}, true, []string{"spec.system.ntpServers[0]: NTP server address cannot be empty"}},
+		{"Timezone is only whitespace", &SystemSpec{Timezone: "   "}, true, []string{"spec.system.timezone: cannot be only whitespace if specified"}},
+		{"RPM empty string", &SystemSpec{RPMs: []string{"pkg1", " "}}, true, []string{"spec.system.rpms[1]: RPM package name cannot be empty"}},
+		{"DEB empty string", &SystemSpec{Debs: []string{" "}}, true, []string{"spec.system.debs[0]: DEB package name cannot be empty"}},
+		{"PackageManager is only whitespace", &SystemSpec{PackageManager: "  "}, true, []string{"spec.system.packageManager: cannot be only whitespace if specified"}},
+		{"PreInstallScript empty string", &SystemSpec{PreInstallScripts: []string{" "}}, true, []string{"spec.system.preInstallScripts[0]: script cannot be empty"}},
+		{"PostInstallScript empty string", &SystemSpec{PostInstallScripts: []string{"echo ok", " "}}, true, []string{"spec.system.postInstallScripts[1]: script cannot be empty"}},
+		{"Module empty string", &SystemSpec{Modules: []string{" "}}, true, []string{"spec.system.modules[0]: module name cannot be empty"}},
+		{"Sysctl key empty string", &SystemSpec{SysctlParams: map[string]string{" ": "1"}}, true, []string{"spec.system.sysctlParams: sysctl key cannot be empty"}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Apply defaults first, as validation happens after defaults
-			if tt.input != nil { // Do not default nil input
-				SetDefaults_SystemSpec(tt.input)
-			}
-			verrs := &ValidationErrors{}
+			if tt.input != nil { SetDefaults_SystemSpec(tt.input) }
+			verrs := &validation.ValidationErrors{}
 			Validate_SystemSpec(tt.input, verrs, "spec.system")
 			if tt.expectErr {
-				assert.False(t, verrs.IsEmpty(), "Expected validation errors for %s, but got none", tt.name)
+				assert.True(t, verrs.HasErrors(), "Expected validation errors for %s, but got none", tt.name)
 				if len(tt.errContains) > 0 {
 					fullErrorMsg := verrs.Error()
 					for _, partialMsg := range tt.errContains {
@@ -219,7 +91,7 @@ func TestValidate_SystemSpec(t *testing.T) {
 					}
 				}
 			} else {
-				assert.True(t, verrs.IsEmpty(), "Expected no validation errors for %s, but got: %v", tt.name, verrs.Error())
+				assert.False(t, verrs.HasErrors(), "Expected no validation errors for %s, but got: %v", tt.name, verrs.Error())
 			}
 		})
 	}
@@ -228,45 +100,27 @@ func TestValidate_SystemSpec(t *testing.T) {
 func TestValidate_Cluster_HostLocalType(t *testing.T) {
 	cfg := newValidV1alpha1ClusterForTest()
 	cfg.Spec.Hosts[0].Type = "local"
-	cfg.Spec.Hosts[0].Password = "" // SSH details not needed for local
-	cfg.Spec.Hosts[0].PrivateKeyPath = ""
-	cfg.Spec.Hosts[0].PrivateKey = ""
-	// SetDefaults_Cluster is called in newValidV1alpha1ClusterForTest,
-	// but we've mutated after. We rely on Validate_Cluster's logic for host type.
+	cfg.Spec.Hosts[0].Password = ""; cfg.Spec.Hosts[0].PrivateKeyPath = ""; cfg.Spec.Hosts[0].PrivateKey = ""
+	SetDefaults_Cluster(cfg) // Apply defaults after setting Type to local
 	err := Validate_Cluster(cfg)
-	if err != nil {
-		t.Errorf("Validate_Cluster() for host type 'local' failed: %v", err)
-	}
-
-	// Now test if a non-local host *without* ssh details fails
-	cfg = newValidV1alpha1ClusterForTest()
-	cfg.Spec.Hosts[0].Type = "ssh" // explicit or default
-	cfg.Spec.Hosts[0].Password = ""
-	cfg.Spec.Global.PrivateKeyPath = "" // Ensure global default is also empty for this test
-	cfg.Spec.Hosts[0].PrivateKeyPath = ""
-	cfg.Spec.Hosts[0].PrivateKey = ""
-	// Re-apply defaults to ensure host.User etc. are set from global, but SSH creds remain empty.
-	// This is tricky because newValidV1alpha1ClusterForTest already sets a global PrivateKeyPath.
-	// We need a more controlled setup for this specific test.
+	assert.NoError(t, err, "Validate_Cluster() for host type 'local' should not fail on SSH details")
 
 	cfgClean := &Cluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-ssh-no-creds"},
 		Spec: ClusterSpec{
-			Global:     &GlobalSpec{User: "test", Port: 22, WorkDir: "/tmp"}, // No SSH creds in global
-			Hosts:      []HostSpec{{Name: "ssh-host", Address: "1.2.3.4", Type: "ssh"}}, // Explicitly ssh, no creds
-			Kubernetes: &KubernetesConfig{Version: "v1.25.0"},
-			Network:    &NetworkConfig{KubePodsCIDR: "10.244.0.0/16"},
-			Etcd:       &EtcdConfig{},
-			ControlPlaneEndpoint: &ControlPlaneEndpointSpec{Address: "1.2.3.4"},
+			Global:     &GlobalSpec{User: "test", Port: 22, WorkDir: "/tmp"},
+			Hosts:      []HostSpec{{Name: "ssh-host", Address: "1.2.3.4", Type: "ssh"}},
+			Kubernetes: &KubernetesConfig{Version: "v1.25.0"}, Network:    &NetworkConfig{KubePodsCIDR: "10.244.0.0/16"},
+			Etcd:       &EtcdConfig{}, ControlPlaneEndpoint: &ControlPlaneEndpointSpec{Address: "1.2.3.4"},
 		},
 	}
-	SetDefaults_Cluster(cfgClean) // Apply defaults to the clean config
-
+	SetDefaults_Cluster(cfgClean)
 	err = Validate_Cluster(cfgClean)
-	if err == nil {
-		t.Error("Validate_Cluster() expected error for non-local host without SSH details, but got nil")
-	} else if !strings.Contains(err.Error(), "no SSH authentication method provided for non-local host") {
-		t.Errorf("Validate_Cluster() error for non-local host without SSH details = %v, want to contain 'no SSH authentication method provided'", err)
+	if assert.Error(t, err, "Validate_Cluster() expected error for non-local host without SSH details") {
+		validationErrs, ok := err.(*validation.ValidationErrors)
+		if assert.True(t, ok, "Error is not *validation.ValidationErrors") {
+			assert.Contains(t, validationErrs.Error(), "no SSH authentication method provided for non-local host ssh-host")
+		}
 	}
 }
 
@@ -274,251 +128,210 @@ func TestSetDefaults_Cluster_HostInheritanceAndDefaults(t *testing.T) {
 	cfg := &Cluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-host-defaults"},
 		Spec: ClusterSpec{
-			Global: &GlobalSpec{ // Global must be non-nil for host inheritance tests
-				User:           "global_user",
-				Port:           2222,
-				PrivateKeyPath: "/global/.ssh/id_rsa",
-				WorkDir:        "/global_work",
-			},
-			Hosts: []HostSpec{
-				{Name: "host1"}, // Should inherit all from global
-				{Name: "host2", User: "host2_user", Port: 23}, // Overrides some
-				{Name: "host3", PrivateKeyPath: "/host3/.ssh/id_rsa"},
-			},
+			Global: &GlobalSpec{ User: "global_user", Port: 2222, PrivateKeyPath: "/global/.ssh/id_rsa", WorkDir: "/global_work"},
+			Hosts: []HostSpec{ {Name: "host1"}, {Name: "host2", User: "host2_user", Port: 23}, {Name: "host3", PrivateKeyPath: "/host3/.ssh/id_rsa"}},
 		},
 	}
-	SetDefaults_Cluster(cfg) // This will also call SetDefaults for sub-components if they exist
-
-	// Host1 checks
-	host1 := cfg.Spec.Hosts[0]
-	if host1.User != "global_user" { t.Errorf("Host1.User = '%s', want 'global_user'", host1.User) }
-	if host1.Port != 2222 { t.Errorf("Host1.Port = %d, want 2222", host1.Port) }
-	if host1.PrivateKeyPath != "/global/.ssh/id_rsa" { t.Errorf("Host1.PrivateKeyPath = '%s'", host1.PrivateKeyPath) }
-	if host1.Type != "ssh" { t.Errorf("Host1.Type = '%s', want 'ssh'", host1.Type) }
-	if host1.Labels == nil {t.Error("Host1.Labels should be initialized")}
-	if host1.Roles == nil {t.Error("Host1.Roles should be initialized")}
-	if host1.Taints == nil {t.Error("Host1.Taints should be initialized")}
-
-
-	// Host2 checks
-	host2 := cfg.Spec.Hosts[1]
-	if host2.User != "host2_user" { t.Errorf("Host2.User = '%s', want 'host2_user'", host2.User) }
-	if host2.Port != 23 { t.Errorf("Host2.Port = %d, want 23", host2.Port) }
-	if host2.PrivateKeyPath != "/global/.ssh/id_rsa" {t.Errorf("Host2.PrivateKeyPath = '%s'", host2.PrivateKeyPath)}
-
-
-	// Test host defaulting when GlobalSpec is nil (should use hardcoded defaults for host fields)
-	cfgNoGlobal := &Cluster{
-	   ObjectMeta: metav1.ObjectMeta{Name: "no-global"},
-	   Spec: ClusterSpec{
-		   Global: nil, // Explicitly nil Global
-		   Hosts: []HostSpec{{Name: "hostOnly"}},
-	   },
-	}
+	SetDefaults_Cluster(cfg)
+	h1 := cfg.Spec.Hosts[0]; assert.Equal(t, "global_user", h1.User); assert.Equal(t, 2222, h1.Port); assert.Equal(t, "/global/.ssh/id_rsa", h1.PrivateKeyPath); assert.Equal(t, "ssh", h1.Type)
+	h2 := cfg.Spec.Hosts[1]; assert.Equal(t, "host2_user", h2.User); assert.Equal(t, 23, h2.Port); assert.Equal(t, "/global/.ssh/id_rsa", h2.PrivateKeyPath)
+	cfgNoGlobal := &Cluster{ObjectMeta: metav1.ObjectMeta{Name: "no-global"}, Spec: ClusterSpec{Hosts: []HostSpec{{Name: "hostOnly"}}}}
 	SetDefaults_Cluster(cfgNoGlobal)
-	hostOnly := cfgNoGlobal.Spec.Hosts[0]
-	if hostOnly.Port != 22 { // Port defaults to 22 if Global is nil, then host inherits (which is also 22)
-	   // This needs to be more carefully checked against SetDefaults_Cluster logic.
-	   // SetDefaults_Cluster initializes cfg.Spec.Global if nil.
-	   // So hostOnly.Port will be inherited from the defaulted Global.Port (22).
-	   t.Errorf("hostOnly.Port = %d, want 22 (from defaulted global)", hostOnly.Port)
-	}
-	if hostOnly.Type != "ssh" {t.Errorf("hostOnly.Type = %s, want ssh", hostOnly.Type)}
-
+	hO := cfgNoGlobal.Spec.Hosts[0]; assert.Equal(t, 22, hO.Port); assert.Equal(t, "ssh", hO.Type)
 }
 
 func TestSetDefaults_Cluster_ComponentStructsInitialization(t *testing.T) {
 	cfg := &Cluster{ObjectMeta: metav1.ObjectMeta{Name: "test-components"}}
-	// Spec fields are initially nil pointers
 	SetDefaults_Cluster(cfg)
-
-	if cfg.Spec.ContainerRuntime == nil { t.Error("Spec.ContainerRuntime is nil after SetDefaults_Cluster") }
-	if cfg.Spec.Etcd == nil { t.Error("Spec.Etcd is nil after SetDefaults_Cluster") }
-	if cfg.Spec.Kubernetes == nil { t.Error("Spec.Kubernetes is nil after SetDefaults_Cluster") }
-	if cfg.Spec.Network == nil { t.Error("Spec.Network is nil after SetDefaults_Cluster") }
-	if cfg.Spec.HighAvailability == nil { t.Error("Spec.HighAvailability is nil after SetDefaults_Cluster") }
-	if cfg.Spec.Preflight == nil { t.Error("Spec.Preflight is nil after SetDefaults_Cluster") }
-	if cfg.Spec.System == nil { t.Error("Spec.System (which includes former Kernel) is nil after SetDefaults_Cluster") }
-	if cfg.Spec.Addons == nil { t.Error("Spec.Addons should be initialized to empty slice, not nil") }
-	// DNS is a non-pointer field in ClusterSpec, so it's part of the struct.
-	// SetDefaults_DNS(&cfg.Spec.DNS) is called in SetDefaults_Cluster.
-	// Check a DNS default
-	if cfg.Spec.DNS.CoreDNS.UpstreamDNSServers == nil { // Assuming UpstreamDNSServers is defaulted to empty slice
-		t.Error("Spec.DNS.CoreDNS.UpstreamDNSServers should be initialized by SetDefaults_DNS via SetDefaults_Cluster")
-	}
-	if cfg.Spec.System.SysctlParams == nil {
-		t.Error("Spec.System.SysctlParams should be initialized by SetDefaults_SystemSpec via SetDefaults_Cluster")
-	}
+	assert.NotNil(t, cfg.Spec.ContainerRuntime); assert.NotNil(t, cfg.Spec.Etcd); assert.NotNil(t, cfg.Spec.Kubernetes)
+	assert.NotNil(t, cfg.Spec.Network); assert.NotNil(t, cfg.Spec.HighAvailability); assert.NotNil(t, cfg.Spec.Preflight)
+	assert.NotNil(t, cfg.Spec.System); assert.NotNil(t, cfg.Spec.Addons)
+	assert.NotNil(t, cfg.Spec.DNS.CoreDNS.UpstreamDNSServers); assert.NotNil(t, cfg.Spec.System.SysctlParams)
 }
 
-// --- Test Validate_Cluster ---
-
-// Helper to create a minimally valid Cluster config for validation tests
 func newValidV1alpha1ClusterForTest() *Cluster {
 	cfg := &Cluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "valid-cluster"},
 		Spec: ClusterSpec{
-			Global: &GlobalSpec{User: "testuser", Port: 22, PrivateKeyPath: "/dev/null", WorkDir: "/tmp", ConnectionTimeout: 5 * time.Second}, // Added PrivateKeyPath to Global for host inheritance
-			Hosts:  []HostSpec{{Name: "m1", Address: "1.1.1.1", Port: 22, User: "testuser", Roles: []string{"master"}}}, // Will inherit PrivateKeyPath
-			Kubernetes: &KubernetesConfig{Version: "v1.25.0"}, // PodSubnet removed
-			Network:    &NetworkConfig{KubePodsCIDR: "10.244.0.0/16"}, // PodSubnet equivalent moved here
-			Etcd:       &EtcdConfig{},    // Etcd section is required by Validate_Cluster
-			ControlPlaneEndpoint: &ControlPlaneEndpointSpec{Address: "1.2.3.4"}, // Ensure CPE is valid by default
-			// DNS is value type, will be zero-value initialized. SetDefaults_DNS will be called.
-			// Other components can be nil if their sections are optional and their Validate_* funcs handle nil
+			Global: &GlobalSpec{User: "testuser", Port: 22, PrivateKeyPath: "/dev/null", WorkDir: "/tmp", ConnectionTimeout: 5 * time.Second},
+			Hosts:  []HostSpec{{Name: "m1", Address: "1.1.1.1", Port: 22, User: "testuser", Roles: []string{"master"}, PrivateKeyPath: "/dev/null"}},
+			Kubernetes: &KubernetesConfig{Version: "v1.25.0"}, Network:    &NetworkConfig{KubePodsCIDR: "10.244.0.0/16"},
+			Etcd:       &EtcdConfig{}, ControlPlaneEndpoint: &ControlPlaneEndpointSpec{Address: "1.2.3.4"},
 		},
 	}
-	// Apply full defaults before validation, as Validate_Cluster expects this.
 	SetDefaults_Cluster(cfg)
 	return cfg
 }
 
 func TestValidate_Cluster_ValidMinimal(t *testing.T) {
 	cfg := newValidV1alpha1ClusterForTest()
-	// SetDefaults_Cluster is called in newValidV1alpha1ClusterForTest
 	err := Validate_Cluster(cfg)
-	if err != nil {
-		t.Errorf("Validate_Cluster() with a minimal valid config failed: %v", err)
-	}
+	assert.NoError(t, err, "Validate_Cluster() with a minimal valid config failed")
 }
 
 func TestValidate_Cluster_TypeMeta(t *testing.T) {
    cfg := newValidV1alpha1ClusterForTest()
-   cfg.APIVersion = "wrong.group/v1beta1"
-   cfg.Kind = "NotCluster"
+   cfg.APIVersion = "wrong.group/v1beta1"; cfg.Kind = "NotCluster"
    err := Validate_Cluster(cfg)
-   if err == nil { t.Fatal("Expected validation error for TypeMeta, got nil") }
-   verrs := err.(*ValidationErrors)
-   if !strings.Contains(verrs.Error(), "apiVersion: must be") {t.Errorf("Missing APIVersion error: %v", verrs)}
-   if !strings.Contains(verrs.Error(), "kind: must be Cluster") {t.Errorf("Missing Kind error: %v", verrs)}
+   if assert.Error(t, err, "Expected validation error for TypeMeta, got nil") {
+	   verrs, ok := err.(*validation.ValidationErrors)
+	   assert.True(t, ok, "Error is not of type *validation.ValidationErrors")
+	   assert.Contains(t, verrs.Error(), "apiVersion: must be"); assert.Contains(t, verrs.Error(), "kind: must be Cluster")
+   }
 }
 
-
 func TestValidate_Cluster_MissingRequiredFields(t *testing.T) {
-	tests := []struct {
-		name    string
-		mutator func(c *Cluster) // Function to make the config invalid
-		wantErr string
-	}{
+	tests := []struct{ name string; mutator func(c *Cluster); wantErr string }{
 		{"missing metadata.name", func(c *Cluster) { c.ObjectMeta.Name = "" }, "metadata.name: cannot be empty"},
 		{"missing hosts", func(c *Cluster) { c.Spec.Hosts = []HostSpec{} }, "spec.hosts: must contain at least one host"},
-		// ClusterSpec.Type related test removed.
 		{"missing host.name", func(c *Cluster) { c.Spec.Hosts[0].Name = "" }, "spec.hosts[0].name: cannot be empty"},
 		{"missing host.address", func(c *Cluster) { c.Spec.Hosts[0].Address = "" }, "spec.hosts[0:m1].address: cannot be empty"},
-		{"missing host.user (after global also empty)", func(c *Cluster) {
-			c.Spec.Global.User = "" // Ensure global user is empty
-			c.Spec.Hosts[0].User = "" // Host user relies on global default
-		}, "spec.hosts[0:m1].user: cannot be empty (after defaults)"},
+		{"missing host.user (after global also empty)", func(c *Cluster) { c.Spec.Global.User = ""; c.Spec.Hosts[0].User = "" }, "spec.hosts[0:m1].user: cannot be empty (after defaults)"},
 		{"missing k8s section", func(c *Cluster) { c.Spec.Kubernetes = nil }, "spec.kubernetes: section is required"},
-		// Note: If Kubernetes section is nil, Validate_Cluster adds "spec.kubernetes: section is required".
-		// If Kubernetes section is present but version is empty, Validate_KubernetesConfig handles that.
 		{"missing etcd section", func(c *Cluster) { c.Spec.Etcd = nil }, "spec.etcd: section is required"},
 		{"missing network section", func(c *Cluster) { c.Spec.Network = nil }, "spec.network: section is required"},
 		{"invalid DNS config", func(c *Cluster) { c.Spec.DNS.CoreDNS.UpstreamDNSServers = []string{""} }, "spec.dns.coredns.upstreamDNSServers[0]: server address cannot be empty"},
 		{"invalid System config", func(c *Cluster) { c.Spec.System = &SystemSpec{NTPServers: []string{""}} }, "spec.system.ntpServers[0]: NTP server address cannot be empty"},
-		{"rolegroup master host not in spec.hosts", func(c *Cluster) {
-			c.Spec.RoleGroups = &RoleGroupsSpec{Master: MasterRoleSpec{Hosts: []string{"unknown-host"}}}
-		}, "spec.roleGroups.master.hosts: host 'unknown-host' is not defined in spec.hosts"},
-		{"rolegroup worker host not in spec.hosts", func(c *Cluster) {
-			c.Spec.RoleGroups = &RoleGroupsSpec{Worker: WorkerRoleSpec{Hosts: []string{"m1", "unknown-host"}}} // m1 is valid
-		}, "spec.roleGroups.worker.hosts: host 'unknown-host' is not defined in spec.hosts"},
-		{"rolegroup custom host not in spec.hosts", func(c *Cluster) {
-			c.Spec.RoleGroups = &RoleGroupsSpec{CustomRoles: []CustomRoleSpec{{Name: "cg", Hosts: []string{"unknown-host"}}}}
-		}, "spec.roleGroups.customRoles[0:cg].hosts: host 'unknown-host' is not defined in spec.hosts"},
-		{"rolegroup valid hosts", func(c *Cluster) { // Ensure valid case doesn't fail due to new checks
-			c.Spec.Hosts = append(c.Spec.Hosts, HostSpec{Name: "worker1", Address: "1.1.1.2", Port: 22, User: "testuser"})
-			c.Spec.RoleGroups = &RoleGroupsSpec{Worker: WorkerRoleSpec{Hosts: []string{"worker1", "m1"}}}
-		}, ""}, // Empty wantErr means no error expected for this specific mutation case related to RoleGroups host validation.
+		{"rolegroup master host not in spec.hosts", func(c *Cluster) { c.Spec.RoleGroups = &RoleGroupsSpec{Master: MasterRoleSpec{Hosts: []string{"unknown-host"}}} }, "spec.roleGroups.master.hosts: host 'unknown-host' is not defined in spec.hosts"},
+		{"rolegroup worker host not in spec.hosts", func(c *Cluster) { c.Spec.RoleGroups = &RoleGroupsSpec{Worker: WorkerRoleSpec{Hosts: []string{"m1", "unknown-host"}}} }, "spec.roleGroups.worker.hosts: host 'unknown-host' is not defined in spec.hosts"},
+		{"rolegroup custom host not in spec.hosts", func(c *Cluster) { c.Spec.RoleGroups = &RoleGroupsSpec{CustomRoles: []CustomRoleSpec{{Name: "cg", Hosts: []string{"unknown-host"}}}} }, "spec.roleGroups.customRoles[0:cg].hosts: host 'unknown-host' is not defined in spec.hosts"},
+		{"rolegroup valid hosts", func(c *Cluster) { c.Spec.Hosts = append(c.Spec.Hosts, HostSpec{Name:"worker1",Address:"1.1.1.2",Port:22,User:"testuser",PrivateKeyPath:"/dev/null"}); c.Spec.RoleGroups=&RoleGroupsSpec{Worker:WorkerRoleSpec{Hosts:[]string{"worker1","m1"}}}}, ""},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := newValidV1alpha1ClusterForTest()
-			tt.mutator(cfg)
-			// SetDefaults_Cluster is called in newValidV1alpha1ClusterForTest.
-			// After mutation, we call Validate_Cluster directly.
-			// If a default would fix the mutation, the test might pass unexpectedly if SetDefaults_Cluster is called again.
-			// The goal here is to test if Validate_Cluster catches issues in a (potentially post-defaulted then mutated) state.
+			cfg := newValidV1alpha1ClusterForTest(); tt.mutator(cfg); SetDefaults_Cluster(cfg) // Apply defaults after mutation
 			err := Validate_Cluster(cfg)
-			if err == nil {
-				t.Fatalf("Validate_Cluster() expected error for %s, got nil", tt.name)
-			}
-			validationErrs, ok := err.(*ValidationErrors)
-			if !ok {
-				t.Fatalf("Validate_Cluster() error for %s is not *ValidationErrors type: %T", tt.name, err)
-			}
-			found := false
-			for _, eStr := range validationErrs.Errors {
-				if strings.Contains(eStr, tt.wantErr) {
-					found = true
-					break
+			if tt.wantErr == "" { assert.NoError(t, err, "Validate_Cluster() for %s expected no error", tt.name)
+			} else {
+				if assert.Error(t, err, "Validate_Cluster() expected error for %s, got nil", tt.name) {
+					validationErrs, ok := err.(*validation.ValidationErrors);
+					if assert.True(t, ok, "Error is not *validation.ValidationErrors") {
+						assert.Contains(t, validationErrs.Error(), tt.wantErr, "Error for %s mismatch", tt.name)
+					}
 				}
-			}
-			if !found {
-				t.Errorf("Validate_Cluster() error for %s = %v, want to contain %q", tt.name, validationErrs, tt.wantErr)
 			}
 		})
 	}
 }
 
-// Minimal KubernetesConfig for compiling TestValidate_NetworkConfig_Calls_Validate_CiliumConfig
-// This can be removed if a shared test utility or simplified KubernetesConfig is available for tests.
-/*
-type KubernetesConfig struct {
-	// Dummy fields if needed by other validation calls within NetworkConfig validation chain
-}
-*/
-
 func TestValidate_Cluster_InvalidHostValues(t *testing.T) {
-	cfg := newValidV1alpha1ClusterForTest()
-	cfg.Spec.Hosts[0].Port = 70000 // Invalid port
-	SetDefaults_Cluster(cfg) // Port might get defaulted if it was 0. Here it's explicitly set.
+	cfg := newValidV1alpha1ClusterForTest(); cfg.Spec.Hosts[0].Port = 70000; SetDefaults_Cluster(cfg)
 	err := Validate_Cluster(cfg)
-	if err == nil || !strings.Contains(err.Error(), "spec.hosts[0:m1].port: 70000 is invalid") {
-		t.Errorf("Expected port validation error, got: %v", err)
-	}
-
-	cfg = newValidV1alpha1ClusterForTest()
-	cfg.Spec.Hosts[0].Address = "not an ip or host!!"
-	SetDefaults_Cluster(cfg)
+	if assert.Error(t, err) { assert.Contains(t, err.Error(), "spec.hosts[0:m1].port: 70000 is invalid") }
+	cfg = newValidV1alpha1ClusterForTest(); cfg.Spec.Hosts[0].Address = "not an ip or host!!"; SetDefaults_Cluster(cfg)
 	err = Validate_Cluster(cfg)
-	if err == nil || !strings.Contains(err.Error(), "is not a valid IP address or hostname") {
-		t.Errorf("Expected host address validation error for '!!', got: %v", err)
-	}
+	if assert.Error(t, err) { assert.Contains(t, err.Error(), "is not a valid IP address or hostname") }
 }
 
 func TestValidate_Cluster_DuplicateHostNames(t *testing.T) {
 	cfg := newValidV1alpha1ClusterForTest()
-	cfg.Spec.Hosts = append(cfg.Spec.Hosts, HostSpec{Name: "m1", Address: "1.1.1.2", Port:22, User:"u"})
-	SetDefaults_Cluster(cfg)
+	cfg.Spec.Hosts = append(cfg.Spec.Hosts, HostSpec{Name: "m1", Address: "1.1.1.2", Port:22, User:"u", PrivateKeyPath: "/dev/null"})
+	SetDefaults_Cluster(cfg) // Important to call after modification
 	err := Validate_Cluster(cfg)
-	if err == nil || !strings.Contains(err.Error(), ".name: 'm1' is duplicated") {
-		t.Errorf("Expected duplicate hostname error, got: %v", err)
+	if assert.Error(t, err) { assert.Contains(t, err.Error(), ".name: 'm1' is duplicated") }
+}
+
+func TestValidate_Cluster_HAValidations(t *testing.T) {
+	baseCfg := func() *Cluster {
+		c := newValidV1alpha1ClusterForTest()
+		c.Spec.Hosts = []HostSpec{
+			{Name: "master1", Address: "10.0.0.1", Port: 22, User: "test", PrivateKeyPath: "/id", Roles: []string{common.RoleMaster, common.RoleEtcd}},
+			{Name: "lb1", Address: "10.0.0.10", Port: 22, User: "test", PrivateKeyPath: "/id", Roles: []string{common.RoleLoadBalancer}},
+			{Name: "lb2", Address: "10.0.0.11", Port: 22, User: "test", PrivateKeyPath: "/id", Roles: []string{common.RoleLoadBalancer}},
+		}
+		c.Spec.ControlPlaneEndpoint = &ControlPlaneEndpointSpec{Address: "10.0.0.100", Port: 6443}
+		c.Spec.HighAvailability = &HighAvailabilityConfig{
+			Enabled: boolPtr(true),
+			External: &ExternalLoadBalancerConfig{
+				Type:                      common.ExternalLBTypeKubexmKH,
+				LoadBalancerHostGroupName: stringPtr("lb-group"),
+				Keepalived:                &KeepalivedConfig{VRID: intPtr(1), Priority: intPtr(100), Interface: stringPtr("eth0"), AuthPass: stringPtr("pass")}, // AuthType will be defaulted
+				HAProxy:                   &HAProxyConfig{BackendServers: []HAProxyBackendServer{{Name: "s1", Address: "1.2.3.4:6443", Port: 6443}}}, // Mode, FrontendPort etc will be defaulted
+			},
+		}
+		// SetDefaults_Cluster(c); // Initial defaults are applied in newValidV1alpha1ClusterForTest.
+		// Specific HA defaults will be applied again in the test loop after mutations.
+		return c
+	}
+
+	tests := []struct {
+		name        string
+		mutator     func(c *Cluster)
+		expectErr   bool
+		errContains string
+	}{
+		{
+			name:        "Valid KubexmKH HA config",
+			mutator:     func(c *Cluster) {
+				// No specific mutation, test the baseCfg after full defaults.
+				// Ensure HAProxy port in test data is non-zero if it's not meant to be defaulted by HAProxy's own defaults.
+				// The HAProxyConfig.BackendServers[0].Port was 0 in previous error, ensure it's set.
+				// Already set to 6443 in baseCfg.
+			},
+			expectErr:   false,
+		},
+		{
+			name: "KubexmKH HA no LB hosts in spec.Hosts",
+			mutator: func(c *Cluster) {
+				c.Spec.Hosts = []HostSpec{
+					{Name: "master1", Address: "10.0.0.1", Port: 22, User: "test", PrivateKeyPath: "/id", Roles: []string{common.RoleMaster, common.RoleEtcd}},
+				}
+				// Clear LoadBalancer role group if it was set by defaults from Roles
+				if c.Spec.RoleGroups != nil { c.Spec.RoleGroups.LoadBalancer = LoadBalancerRoleSpec{}
+				} else { c.Spec.RoleGroups = &RoleGroupsSpec{LoadBalancer: LoadBalancerRoleSpec{}}}
+				// Ensure no host has the loadbalancer role directly
+				for i := range c.Spec.Hosts {
+					var newRoles []string
+					for _, role := range c.Spec.Hosts[i].Roles { if role != common.RoleLoadBalancer { newRoles = append(newRoles, role) } }
+					c.Spec.Hosts[i].Roles = newRoles
+				}
+			},
+			expectErr:   true,
+			errContains: "requires at least one host with role 'loadbalancer'",
+		},
+		{
+			name: "KubexmKH HA with LB hosts in RoleGroups.LoadBalancer",
+			mutator: func(c *Cluster) {
+				for i := range c.Spec.Hosts {
+					c.Spec.Hosts[i].Roles = []string{}
+					if c.Spec.Hosts[i].Name == "master1" { c.Spec.Hosts[i].Roles = []string{common.RoleMaster, common.RoleEtcd} }
+				}
+				if c.Spec.RoleGroups == nil { c.Spec.RoleGroups = &RoleGroupsSpec{} }
+				c.Spec.RoleGroups.LoadBalancer = LoadBalancerRoleSpec{Hosts: []string{"lb1", "lb2"}}
+			},
+			expectErr:   false,
+		},
+		{
+			name: "KubexmKH HA missing ControlPlaneEndpoint Address (VIP)",
+			mutator: func(c *Cluster) {
+				if c.Spec.ControlPlaneEndpoint != nil { c.Spec.ControlPlaneEndpoint.Address = ""
+				} else { c.Spec.ControlPlaneEndpoint = &ControlPlaneEndpointSpec{Address: "", Port: 6443} }
+			},
+			expectErr:   true,
+			errContains: "must be set to the VIP address when HA type is 'kubexm-kh'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := baseCfg() // Gets a cluster with defaults applied once (via newValid...)
+			tt.mutator(cfg)  // Mutate it
+
+			SetDefaults_Cluster(cfg) // Apply defaults again to the mutated config before validation
+
+			err := Validate_Cluster(cfg)
+			if tt.expectErr {
+				assert.Error(t, err, "Expected error for %s but got none. Config: %+v", tt.name, cfg.Spec.HighAvailability.External)
+				if err != nil {
+					assert.Contains(t, err.Error(), tt.errContains, "Error message for %s mismatch. Full error: %v", tt.name, err)
+				}
+			} else {
+				assert.NoError(t, err, "Expected no error for %s, got %v. Config: %+v", tt.name, err, cfg.Spec.HighAvailability.External)
+			}
+		})
 	}
 }
 
-// Test for ValidationErrors methods (assuming it's still in cluster_types.go)
-func TestValidationErrors_Methods_V1alpha1(t *testing.T) {
-	ve := &ValidationErrors{} // Assuming ValidationErrors is defined in this package
-	if ve.Error() != "no validation errors" {
-		t.Errorf("Empty ValidationErrors.Error() incorrect: %s", ve.Error())
-	}
-	if !ve.IsEmpty() {t.Error("IsEmpty should be true for new ValidationErrors")}
-
-	ve.Add("error 1: %s", "detail")
-	if ve.Error() != "error 1: detail" { // Simplified Error() for single error
-		t.Errorf("Single error string incorrect: %s", ve.Error())
-	}
-	if ve.IsEmpty() {t.Error("IsEmpty should be false after Add")}
-
-	ve.Add("error 2")
-	// The Error() method in cluster_types.go joins with "; ".
-	// The old one from validate_test.go had a multi-line format. Adjusting expectation.
-	expected := "error 1: detail; error 2"
-	if ve.Error() != expected {
-		t.Errorf("Multiple errors string incorrect. Got:\n'%s'\nWant:\n'%s'", ve.Error(), expected)
-	}
-}
 
 func TestValidate_RoleGroupsSpec(t *testing.T) {
 	tests := []struct {
@@ -526,68 +339,38 @@ func TestValidate_RoleGroupsSpec(t *testing.T) {
 		cfg        *RoleGroupsSpec
 		wantErrMsg string
 	}{
-		{"nil_config", nil, ""}, // nil is acceptable
+		{"nil_config", nil, ""},
 		{"empty_config", &RoleGroupsSpec{}, ""},
-		{
-			"master_host_empty",
-			&RoleGroupsSpec{Master: MasterRoleSpec{Hosts: []string{"host1", ""}}},
-			"master.hosts[1]: hostname cannot be empty",
-		},
-		{
-			"worker_host_empty",
-			&RoleGroupsSpec{Worker: WorkerRoleSpec{Hosts: []string{""}}},
-			"worker.hosts[0]: hostname cannot be empty",
-		},
-		{
-			"custom_role_empty_name",
-			&RoleGroupsSpec{CustomRoles: []CustomRoleSpec{{Name: "  ", Hosts: []string{"host1"}}}},
-			"customRoles[0].name: custom role name cannot be empty",
-		},
-		{
-			"custom_role_duplicate_name",
-			&RoleGroupsSpec{CustomRoles: []CustomRoleSpec{
-				{Name: "metrics", Hosts: []string{"host1"}},
-				{Name: "metrics", Hosts: []string{"host2"}},
-			}},
-			"customRoles[1].name: custom role name 'metrics' is duplicated",
-		},
-		{
-			"custom_role_host_empty",
-			&RoleGroupsSpec{CustomRoles: []CustomRoleSpec{{Name: "db", Hosts: []string{"host1", " "}}}},
-			"customRoles[0].db.hosts[1]: hostname cannot be empty",
-		},
-		{
-			"valid_custom_role",
-			&RoleGroupsSpec{CustomRoles: []CustomRoleSpec{{Name: "monitoring", Hosts: []string{"mon1", "mon2"}}}},
-			"",
-		},
-		{
-			"valid_multiple_roles",
-			&RoleGroupsSpec{
-				Master:      MasterRoleSpec{Hosts: []string{"master1"}},
-				Worker:      WorkerRoleSpec{Hosts: []string{"worker1", "worker2"}},
-				CustomRoles: []CustomRoleSpec{{Name: "gpu-nodes", Hosts: []string{"gpu1"}}},
-			},
-			"",
-		},
+		{"master_host_empty", &RoleGroupsSpec{Master: MasterRoleSpec{Hosts: []string{"host1", ""}}}, "spec.roleGroups.master.hosts[1]: hostname cannot be empty"},
+		{"worker_host_empty", &RoleGroupsSpec{Worker: WorkerRoleSpec{Hosts: []string{""}}}, "spec.roleGroups.worker.hosts[0]: hostname cannot be empty"},
+		{"custom_role_empty_name", &RoleGroupsSpec{CustomRoles: []CustomRoleSpec{{Name: "  ", Hosts: []string{"host1"}}}}, "spec.roleGroups.customRoles[0].name: custom role name cannot be empty"},
+		{"custom_role_duplicate_name", &RoleGroupsSpec{CustomRoles: []CustomRoleSpec{{Name: "metrics", Hosts:[]string{"h1"}}, {Name:"metrics", Hosts:[]string{"h2"}}}}, "spec.roleGroups.customRoles[1:metrics].name: custom role name 'metrics' is duplicated"},
+		{"custom_role_host_empty", &RoleGroupsSpec{CustomRoles: []CustomRoleSpec{{Name: "db", Hosts: []string{"host1", " "}}}}, "spec.roleGroups.customRoles[0:db].hosts[1]: hostname cannot be empty"},
+		{"valid_custom_role", &RoleGroupsSpec{CustomRoles: []CustomRoleSpec{{Name: "monitoring", Hosts: []string{"mon1", "mon2"}}}}, ""},
+		{"valid_multiple_roles", &RoleGroupsSpec{Master:MasterRoleSpec{Hosts:[]string{"master1"}}, Worker:WorkerRoleSpec{Hosts:[]string{"worker1","worker2"}}, CustomRoles:[]CustomRoleSpec{{Name:"gpu-nodes",Hosts:[]string{"gpu1"}}}}, ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			verrs := &ValidationErrors{}
+			verrs := &validation.ValidationErrors{}
 			Validate_RoleGroupsSpec(tt.cfg, verrs, "spec.roleGroups")
 			if tt.wantErrMsg == "" {
-				if !verrs.IsEmpty() {
-					t.Errorf("Validate_RoleGroupsSpec expected no error for %s, got %v", tt.name, verrs)
-				}
+				assert.False(t, verrs.HasErrors(), "Validate_RoleGroupsSpec for %s expected no error, got %v", tt.name, verrs.Error())
 			} else {
-				if verrs.IsEmpty() {
-					t.Fatalf("Validate_RoleGroupsSpec expected error for %s, got none", tt.name)
-				}
-				if !strings.Contains(verrs.Error(), tt.wantErrMsg) {
-					t.Errorf("Validate_RoleGroupsSpec error for %s = %v, want to contain %q", tt.name, verrs, tt.wantErrMsg)
+				if assert.True(t, verrs.HasErrors(), "Validate_RoleGroupsSpec for %s expected error, got none", tt.name) {
+					assert.Contains(t, verrs.Error(), tt.wantErrMsg, "Validate_RoleGroupsSpec error for %s", tt.name)
 				}
 			}
 		})
 	}
+}
+
+// Helper function to get a pointer to a string.
+func stringPtr(s string) *string {
+	return &s
+}
+
+// Helper function to get a pointer to an int.
+func intPtr(i int) *int {
+	return &i
 }

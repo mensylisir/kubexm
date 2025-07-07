@@ -4,11 +4,11 @@ import (
 	"fmt"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	// "net" // No longer needed directly here, util.IsValidIP and util.IsValidDomainName are used
-	// "regexp" // No longer needed directly here
 	"strings"
 	"time"
-	"github.com/mensylisir/kubexm/pkg/util" // Ensure util is imported
+	"github.com/mensylisir/kubexm/pkg/util"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
+	"github.com/mensylisir/kubexm/pkg/common" // Import common package
 )
 
 const (
@@ -49,16 +49,14 @@ type ClusterSpec struct {
 	ContainerRuntime     *ContainerRuntimeConfig   `json:"containerRuntime,omitempty" yaml:"containerRuntime,omitempty"`
 	Network              *NetworkConfig            `json:"network,omitempty" yaml:"network,omitempty"`
 	ControlPlaneEndpoint *ControlPlaneEndpointSpec `json:"controlPlaneEndpoint,omitempty" yaml:"controlPlaneEndpoint,omitempty"`
-	HighAvailability     *HighAvailabilityConfig   `json:"highAvailability,omitempty" yaml:"highAvailability,omitempty"` // This might be deprecated or merged into ControlPlaneEndpoint
+	HighAvailability     *HighAvailabilityConfig   `json:"highAvailability,omitempty" yaml:"highAvailability,omitempty"`
 	Storage              *StorageConfig            `json:"storage,omitempty" yaml:"storage,omitempty"`
 	Registry             *RegistryConfig           `json:"registry,omitempty" yaml:"registry,omitempty"`
 	Addons               []string                  `json:"addons,omitempty" yaml:"addons,omitempty"`
 	Preflight            *PreflightConfig          `json:"preflight,omitempty" yaml:"preflight,omitempty"`
-	// Additional fields from YAML not explicitly in existing structs will be added here or to relevant sub-specs.
 }
 
 // HostSpec defines the configuration for a single host.
-// Note: 'arch' field was already present.
 type HostSpec struct {
 	Name            string            `json:"name" yaml:"name"`
 	Address         string            `json:"address" yaml:"address"`
@@ -74,6 +72,7 @@ type HostSpec struct {
 	Type            string            `json:"type,omitempty" yaml:"type,omitempty"`
 	Arch            string            `json:"arch,omitempty" yaml:"arch,omitempty"`
 }
+
 // RoleGroupsSpec defines the different groups of nodes in the cluster.
 type RoleGroupsSpec struct {
 	Master       MasterRoleSpec       `json:"master,omitempty" yaml:"master,omitempty"`
@@ -121,39 +120,19 @@ type CustomRoleSpec struct {
 	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
-// ControlPlaneEndpointSpec is now defined in endpoint_types.go.
-// The type *ControlPlaneEndpointSpec for ClusterSpec.ControlPlaneEndpoint will refer to that definition
-// as they are in the same package.
-
 // SystemSpec defines system-level configuration.
-// It now incorporates fields previously in OSConfig and KernelConfig.
 type SystemSpec struct {
-	// NTP servers for time synchronization. Corresponds to `system.ntpServers` in YAML.
-	NTPServers         []string `json:"ntpServers,omitempty" yaml:"ntpServers,omitempty"`
-	// Timezone to set on hosts. Corresponds to `system.timezone` in YAML.
-	Timezone           string   `json:"timezone,omitempty" yaml:"timezone,omitempty"`
-	// RPM packages to install. Corresponds to `system.rpms` in YAML.
-	RPMs               []string `json:"rpms,omitempty" yaml:"rpms,omitempty"`
-	// DEB packages to install. Corresponds to `system.debs` in YAML.
-	Debs               []string `json:"debs,omitempty" yaml:"debs,omitempty"`
-
-	// PackageManager allows specifying the package manager to use, overriding auto-detection.
-	PackageManager     string   `json:"packageManager,omitempty" yaml:"packageManager,omitempty"`
-	// PreInstallScripts are commands/scripts to run before main component installation.
-	// YAML tag "preInstall" as per 21-其他说明.md.
-	PreInstallScripts  []string `json:"preInstallScripts,omitempty" yaml:"preInstall,omitempty"`
-	// PostInstallScripts are commands/scripts to run after main component installation.
-	// YAML tag "postInstall" as per 21-其他说明.md.
-	PostInstallScripts []string `json:"postInstallScripts,omitempty" yaml:"postInstall,omitempty"`
-	// SkipConfigureOS, if true, skips OS configuration steps like NTP, timezone. Defaults to false.
-	SkipConfigureOS    bool     `json:"skipConfigureOS,omitempty" yaml:"skipConfigureOS,omitempty"`
-
-	// Modules is a list of kernel modules to be loaded. (From former KernelConfig)
+	NTPServers         []string          `json:"ntpServers,omitempty" yaml:"ntpServers,omitempty"`
+	Timezone           string            `json:"timezone,omitempty" yaml:"timezone,omitempty"`
+	RPMs               []string          `json:"rpms,omitempty" yaml:"rpms,omitempty"`
+	Debs               []string          `json:"debs,omitempty" yaml:"debs,omitempty"`
+	PackageManager     string            `json:"packageManager,omitempty" yaml:"packageManager,omitempty"`
+	PreInstallScripts  []string          `json:"preInstallScripts,omitempty" yaml:"preInstall,omitempty"`
+	PostInstallScripts []string          `json:"postInstallScripts,omitempty" yaml:"postInstall,omitempty"`
+	SkipConfigureOS    bool              `json:"skipConfigureOS,omitempty" yaml:"skipConfigureOS,omitempty"`
 	Modules            []string          `json:"modules,omitempty" yaml:"modules,omitempty"`
-	// SysctlParams is a map of sysctl parameters to set. (From former KernelConfig)
 	SysctlParams       map[string]string `json:"sysctlParams,omitempty" yaml:"sysctlParams,omitempty"`
 }
-
 
 // GlobalSpec contains settings applicable to the entire cluster or as defaults for hosts.
 type GlobalSpec struct {
@@ -182,8 +161,6 @@ func SetDefaults_Cluster(cfg *Cluster) {
 		return
 	}
 	cfg.SetGroupVersionKind(SchemeGroupVersion.WithKind("Cluster"))
-
-	// cfg.Spec.Type was removed
 
 	if cfg.Spec.Global == nil {
 		cfg.Spec.Global = &GlobalSpec{}
@@ -247,15 +224,14 @@ func SetDefaults_Cluster(cfg *Cluster) {
 		cfg.Spec.RoleGroups = &RoleGroupsSpec{}
 	}
 	if cfg.Spec.ControlPlaneEndpoint == nil {
-		cfg.Spec.ControlPlaneEndpoint = &ControlPlaneEndpointSpec{} // This will use the one from endpoint_types.go
+		cfg.Spec.ControlPlaneEndpoint = &ControlPlaneEndpointSpec{}
 	}
-	// Call SetDefaults_ControlPlaneEndpointSpec for the endpoint
 	SetDefaults_ControlPlaneEndpointSpec(cfg.Spec.ControlPlaneEndpoint)
 
 	if cfg.Spec.System == nil {
 		cfg.Spec.System = &SystemSpec{}
 	}
-	SetDefaults_SystemSpec(cfg.Spec.System) // Call the new centralized System defaults
+	SetDefaults_SystemSpec(cfg.Spec.System)
 
 	if cfg.Spec.Kubernetes == nil {
 		cfg.Spec.Kubernetes = &KubernetesConfig{}
@@ -274,11 +250,6 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	}
 	SetDefaults_PreflightConfig(cfg.Spec.Preflight)
 
-	// SetDefaults_KernelConfig and SetDefaults_OSConfig calls are removed
-	// Their logic is now part of SetDefaults_SystemSpec.
-
-	// Addons in ClusterSpec is now []string, so no SetDefaults_AddonConfig directly here.
-	// If individual addons had complex types and defaults, that would be handled differently.
 	if cfg.Spec.Addons == nil {
 		cfg.Spec.Addons = []string{}
 	}
@@ -292,162 +263,133 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	}
 	SetDefaults_RegistryConfig(cfg.Spec.Registry)
 
-	// Set defaults for DNS. cfg.Spec.DNS is not a pointer.
 	SetDefaults_DNS(&cfg.Spec.DNS)
-	// OS field removed from ClusterSpec
 }
 
 // SetDefaults_SystemSpec sets default values for SystemSpec.
-// Incorporates logic from former SetDefaults_OSConfig and SetDefaults_KernelConfig.
 func SetDefaults_SystemSpec(cfg *SystemSpec) {
 	if cfg == nil {
 		return
 	}
-	// Defaults from OSConfig
 	if cfg.NTPServers == nil {
 		cfg.NTPServers = []string{}
 	}
-	// Timezone: No default, let OS default prevail if not set by user.
 	if cfg.RPMs == nil {
 		cfg.RPMs = []string{}
 	}
 	if cfg.Debs == nil {
 		cfg.Debs = []string{}
 	}
-	// SkipConfigureOS (bool) defaults to false (its zero value).
-
-	// Defaults from KernelConfig
 	if cfg.Modules == nil {
 		cfg.Modules = []string{}
 	}
 	if cfg.SysctlParams == nil {
 		cfg.SysctlParams = make(map[string]string)
 	}
-	// Example default sysctl param:
-	// if _, exists := cfg.SysctlParams["net.bridge.bridge-nf-call-iptables"]; !exists {
-	//    cfg.SysctlParams["net.bridge.bridge-nf-call-iptables"] = "1"
-	// }
-
-	// Defaults for new fields in SystemSpec
 	if cfg.PreInstallScripts == nil {
 		cfg.PreInstallScripts = []string{}
 	}
 	if cfg.PostInstallScripts == nil {
 		cfg.PostInstallScripts = []string{}
 	}
-	// PackageManager: No default, allow auto-detection by runner if empty.
 }
 
 // Validate_SystemSpec validates SystemSpec.
-// Incorporates logic from former Validate_OSConfig and Validate_KernelConfig.
-func Validate_SystemSpec(cfg *SystemSpec, verrs *ValidationErrors, pathPrefix string) {
+func Validate_SystemSpec(cfg *SystemSpec, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
-
-	// Validations from OSConfig
 	for i, ntp := range cfg.NTPServers {
 		if strings.TrimSpace(ntp) == "" {
-			verrs.Add("%s.ntpServers[%d]: NTP server address cannot be empty", pathPrefix, i)
+			verrs.Add(fmt.Sprintf("%s.ntpServers[%d]", pathPrefix, i), "NTP server address cannot be empty")
 		}
-		// Could add validation for hostname/IP format for NTP servers
 	}
-	if cfg.Timezone != "" && strings.TrimSpace(cfg.Timezone) == "" { // Check if set to only whitespace
-		verrs.Add("%s.timezone: cannot be only whitespace if specified", pathPrefix)
-		// Could validate against a list of known timezones if necessary (complex)
+	if cfg.Timezone != "" && strings.TrimSpace(cfg.Timezone) == "" {
+		verrs.Add(pathPrefix+".timezone", "cannot be only whitespace if specified")
 	}
 	for i, rpm := range cfg.RPMs {
 		if strings.TrimSpace(rpm) == "" {
-			verrs.Add("%s.rpms[%d]: RPM package name cannot be empty", pathPrefix, i)
+			verrs.Add(fmt.Sprintf("%s.rpms[%d]", pathPrefix, i), "RPM package name cannot be empty")
 		}
 	}
 	for i, deb := range cfg.Debs {
 		if strings.TrimSpace(deb) == "" {
-			verrs.Add("%s.debs[%d]: DEB package name cannot be empty", pathPrefix, i)
+			verrs.Add(fmt.Sprintf("%s.debs[%d]", pathPrefix, i), "DEB package name cannot be empty")
 		}
 	}
-	// SkipConfigureOS (bool) has no specific validation other than type.
-
-	// Validations from KernelConfig
 	for i, module := range cfg.Modules {
 		if strings.TrimSpace(module) == "" {
-			verrs.Add("%s.modules[%d]: module name cannot be empty", pathPrefix, i)
+			verrs.Add(fmt.Sprintf("%s.modules[%d]", pathPrefix, i), "module name cannot be empty")
 		}
 	}
 	for key, val := range cfg.SysctlParams {
 		if strings.TrimSpace(key) == "" {
-			verrs.Add("%s.sysctlParams: sysctl key cannot be empty (value: '%s')", pathPrefix, val)
+			verrs.Add(pathPrefix+".sysctlParams", fmt.Sprintf("sysctl key cannot be empty (value: '%s')", val))
 		}
-		// Could also validate that val is not empty if that's a requirement
 	}
-
-	// Validations for new fields in SystemSpec
-	if cfg.PackageManager != "" && strings.TrimSpace(cfg.PackageManager) == "" { // Check if set to only whitespace
-		verrs.Add("%s.packageManager: cannot be only whitespace if specified", pathPrefix)
+	if cfg.PackageManager != "" && strings.TrimSpace(cfg.PackageManager) == "" {
+		verrs.Add(pathPrefix+".packageManager", "cannot be only whitespace if specified")
 	}
 	for i, script := range cfg.PreInstallScripts {
 		if strings.TrimSpace(script) == "" {
-			verrs.Add("%s.preInstallScripts[%d]: script cannot be empty", pathPrefix, i)
+			verrs.Add(fmt.Sprintf("%s.preInstallScripts[%d]", pathPrefix, i), "script cannot be empty")
 		}
 	}
 	for i, script := range cfg.PostInstallScripts {
 		if strings.TrimSpace(script) == "" {
-			verrs.Add("%s.postInstallScripts[%d]: script cannot be empty", pathPrefix, i)
+			verrs.Add(fmt.Sprintf("%s.postInstallScripts[%d]", pathPrefix, i), "script cannot be empty")
 		}
 	}
 }
 
 // Validate_Cluster validates the Cluster configuration.
 func Validate_Cluster(cfg *Cluster) error {
-	verrs := &ValidationErrors{}
+	verrs := &validation.ValidationErrors{}
 	if cfg.APIVersion != SchemeGroupVersion.Group+"/"+SchemeGroupVersion.Version {
-		verrs.Add("apiVersion: must be %s/%s, got %s", SchemeGroupVersion.Group, SchemeGroupVersion.Version, cfg.APIVersion)
+		verrs.Add("apiVersion", fmt.Sprintf("must be %s/%s, got %s", SchemeGroupVersion.Group, SchemeGroupVersion.Version, cfg.APIVersion))
 	}
 	if cfg.Kind != "Cluster" {
-		verrs.Add("kind: must be Cluster, got %s", cfg.Kind)
+		verrs.Add("kind", fmt.Sprintf("must be Cluster, got %s", cfg.Kind))
 	}
 	if strings.TrimSpace(cfg.ObjectMeta.Name) == "" {
-		verrs.Add("metadata.name: cannot be empty")
+		verrs.Add("metadata.name", "cannot be empty")
 	}
-
-	// cfg.Spec.Type was removed, so its validation is also removed.
-	// The type of Kubernetes deployment (kubexm or kubeadm) is now solely determined by KubernetesConfig.Type.
 
 	if cfg.Spec.Global != nil {
 		g := cfg.Spec.Global
 		if g.Port != 0 && (g.Port <= 0 || g.Port > 65535) {
-			verrs.Add("spec.global.port: %d is invalid, must be between 1 and 65535 or 0 for default", g.Port)
+			verrs.Add("spec.global.port", fmt.Sprintf("%d is invalid, must be between 1 and 65535 or 0 for default", g.Port))
 		}
 	}
 	if len(cfg.Spec.Hosts) == 0 {
-		verrs.Add("spec.hosts: must contain at least one host")
+		verrs.Add("spec.hosts", "must contain at least one host")
 	}
 	hostNames := make(map[string]bool)
 	for i, host := range cfg.Spec.Hosts {
 		pathPrefix := fmt.Sprintf("spec.hosts[%d:%s]", i, host.Name)
 		if strings.TrimSpace(host.Name) == "" {
 			pathPrefix = fmt.Sprintf("spec.hosts[%d]", i)
-			verrs.Add("%s.name: cannot be empty", pathPrefix)
+			verrs.Add(pathPrefix+".name", "cannot be empty")
 		} else {
 			if _, exists := hostNames[host.Name]; exists {
-				verrs.Add("%s.name: '%s' is duplicated", pathPrefix, host.Name)
+				verrs.Add(pathPrefix+".name", fmt.Sprintf("'%s' is duplicated", host.Name))
 			}
 			hostNames[host.Name] = true
 		}
 		if strings.TrimSpace(host.Address) == "" {
-			verrs.Add("%s.address: cannot be empty", pathPrefix)
-		} else if !util.IsValidIP(host.Address) && !util.IsValidDomainName(host.Address) { // Use functions from pkg/util
-			verrs.Add("%s.address: '%s' is not a valid IP address or hostname", pathPrefix, host.Address)
+			verrs.Add(pathPrefix+".address", "cannot be empty")
+		} else if !util.IsValidIP(host.Address) && !util.IsValidDomainName(host.Address) {
+			verrs.Add(pathPrefix+".address", fmt.Sprintf("'%s' is not a valid IP address or hostname", host.Address))
 		}
 		if host.Port <= 0 || host.Port > 65535 {
-			verrs.Add("%s.port: %d is invalid, must be between 1 and 65535", pathPrefix, host.Port)
+			verrs.Add(pathPrefix+".port", fmt.Sprintf("%d is invalid, must be between 1 and 65535", host.Port))
 		}
 		if strings.TrimSpace(host.User) == "" {
-			verrs.Add("%s.user: cannot be empty (after defaults)", pathPrefix)
+			verrs.Add(pathPrefix+".user", "cannot be empty (after defaults)")
 		}
 		if strings.ToLower(host.Type) != "local" {
 			if host.Password == "" && host.PrivateKey == "" && host.PrivateKeyPath == "" {
-				verrs.Add("%s: no SSH authentication method provided for non-local host", pathPrefix)
+				verrs.Add(pathPrefix, "no SSH authentication method provided for non-local host")
 			}
 		}
 	}
@@ -456,7 +398,7 @@ func Validate_Cluster(cfg *Cluster) error {
 		Validate_ContainerRuntimeConfig(cfg.Spec.ContainerRuntime, verrs, "spec.containerRuntime")
 		if cfg.Spec.ContainerRuntime.Type == ContainerRuntimeContainerd {
 			if cfg.Spec.ContainerRuntime.Containerd == nil {
-				verrs.Add("spec.containerRuntime.containerd: must be defined if containerRuntime.type is '%s'", ContainerRuntimeContainerd)
+				verrs.Add("spec.containerRuntime.containerd", fmt.Sprintf("must be defined if containerRuntime.type is '%s'", ContainerRuntimeContainerd))
 			} else {
 				Validate_ContainerdConfig(cfg.Spec.ContainerRuntime.Containerd, verrs, "spec.containerRuntime.containerd")
 			}
@@ -466,27 +408,23 @@ func Validate_Cluster(cfg *Cluster) error {
 	if cfg.Spec.Etcd != nil {
 		Validate_EtcdConfig(cfg.Spec.Etcd, verrs, "spec.etcd")
 	} else {
-		verrs.Add("spec.etcd: section is required")
+		verrs.Add("spec.etcd", "section is required")
 	}
 
 	if cfg.Spec.RoleGroups != nil {
-		// Validate RoleGroupsSpec structure first
 		Validate_RoleGroupsSpec(cfg.Spec.RoleGroups, verrs, "spec.roleGroups")
-		// Then, if no structural errors in RoleGroups, validate host names against cfg.Spec.Hosts
-		if verrs.IsEmpty() { // Only proceed if RoleGroupsSpec itself is structurally valid for this check
+		if !verrs.HasErrors() {
 			allHostNames := make(map[string]bool)
 			for _, h := range cfg.Spec.Hosts {
 				allHostNames[h.Name] = true
 			}
-
 			validateRoleGroupHostExistence := func(roleHosts []string, rolePath string) {
 				for _, hostName := range roleHosts {
 					if !allHostNames[hostName] {
-						verrs.Add("%s: host '%s' is not defined in spec.hosts", rolePath, hostName)
+						verrs.Add(rolePath, fmt.Sprintf("host '%s' is not defined in spec.hosts", hostName))
 					}
 				}
 			}
-
 			rgPath := "spec.roleGroups"
 			if cfg.Spec.RoleGroups.Master.Hosts != nil {
 				validateRoleGroupHostExistence(cfg.Spec.RoleGroups.Master.Hosts, rgPath+".master.hosts")
@@ -518,38 +456,58 @@ func Validate_Cluster(cfg *Cluster) error {
 		Validate_ControlPlaneEndpointSpec(cfg.Spec.ControlPlaneEndpoint, verrs, "spec.controlPlaneEndpoint")
 	}
 	if cfg.Spec.System != nil {
-		Validate_SystemSpec(cfg.Spec.System, verrs, "spec.system") // Call the new centralized System validation
+		Validate_SystemSpec(cfg.Spec.System, verrs, "spec.system")
 	}
 
 	if cfg.Spec.Kubernetes != nil {
 		Validate_KubernetesConfig(cfg.Spec.Kubernetes, verrs, "spec.kubernetes")
 	} else {
-		verrs.Add("spec.kubernetes: section is required")
+		verrs.Add("spec.kubernetes", "section is required")
 	}
 
 	if cfg.Spec.HighAvailability != nil {
 		Validate_HighAvailabilityConfig(cfg.Spec.HighAvailability, verrs, "spec.highAvailability")
+		// Enhanced HA validation related to Roles and ControlPlaneEndpoint
+		if cfg.Spec.HighAvailability.Enabled != nil && *cfg.Spec.HighAvailability.Enabled &&
+			cfg.Spec.HighAvailability.External != nil &&
+			(cfg.Spec.HighAvailability.External.Type == common.ExternalLBTypeKubexmKH || cfg.Spec.HighAvailability.External.Type == common.ExternalLBTypeKubexmKN) {
+
+			foundLBRole := false
+			if cfg.Spec.RoleGroups != nil && cfg.Spec.RoleGroups.LoadBalancer.Hosts != nil && len(cfg.Spec.RoleGroups.LoadBalancer.Hosts) > 0 {
+				foundLBRole = true
+			} else {
+				for _, host := range cfg.Spec.Hosts {
+					if util.ContainsString(host.Roles, common.RoleLoadBalancer) {
+						foundLBRole = true
+						break
+					}
+				}
+			}
+			if !foundLBRole {
+				verrs.Add("spec.highAvailability.external", fmt.Sprintf("type '%s' requires at least one host with role '%s' or hosts defined in roleGroups.loadbalancer", cfg.Spec.HighAvailability.External.Type, common.RoleLoadBalancer))
+			}
+
+			if cfg.Spec.ControlPlaneEndpoint == nil || strings.TrimSpace(cfg.Spec.ControlPlaneEndpoint.Address) == "" {
+				verrs.Add("spec.controlPlaneEndpoint.address", fmt.Sprintf("must be set to the VIP address when HA type is '%s'", cfg.Spec.HighAvailability.External.Type))
+			}
+		}
 	}
 	if cfg.Spec.Preflight != nil {
 		Validate_PreflightConfig(cfg.Spec.Preflight, verrs, "spec.preflight")
 	}
-	// Validate_KernelConfig and Validate_OSConfig calls are removed.
-	// Their logic will be part of Validate_SystemSpec called earlier for cfg.Spec.System.
 
-	// Addons in ClusterSpec is now []string. Validation might involve checking if addon names are known/valid if there's a predefined list.
-	// For now, just ensure no empty strings if the list itself isn't empty.
-	if cfg.Spec.Addons != nil { // It's defaulted to []string{}, so never nil
+	if cfg.Spec.Addons != nil {
 		for i, addonName := range cfg.Spec.Addons {
 			if strings.TrimSpace(addonName) == "" {
-				verrs.Add("spec.addons[%d]: addon name cannot be empty", i)
+				verrs.Add(fmt.Sprintf("spec.addons[%d]", i), "addon name cannot be empty")
 			}
 		}
 	}
 
 	if cfg.Spec.Network != nil {
-		Validate_NetworkConfig(cfg.Spec.Network, verrs, "spec.network")
+		Validate_NetworkConfig(cfg.Spec.Network, verrs, "spec.network", cfg.Spec.Kubernetes)
 	} else {
-		verrs.Add("spec.network: section is required")
+		verrs.Add("spec.network", "section is required")
 	}
 	if cfg.Spec.Storage != nil {
 		Validate_StorageConfig(cfg.Spec.Storage, verrs, "spec.storage")
@@ -558,39 +516,15 @@ func Validate_Cluster(cfg *Cluster) error {
 		Validate_RegistryConfig(cfg.Spec.Registry, verrs, "spec.registry")
 	}
 
-	// Validate DNS. cfg.Spec.DNS is not a pointer.
 	Validate_DNS(&cfg.Spec.DNS, verrs, "spec.dns")
-	// OS field removed from ClusterSpec
 
-	if !verrs.IsEmpty() {
+	if verrs.HasErrors() {
 		return verrs
 	}
 	return nil
 }
 
-// ValidationErrors defines a type to collect multiple validation errors.
-type ValidationErrors struct{ Errors []string }
-
-// Add records an error.
-func (ve *ValidationErrors) Add(format string, args ...interface{}) {
-	ve.Errors = append(ve.Errors, fmt.Sprintf(format, args...))
-}
-
-// Error returns a concatenated string of all errors, or a default message if none.
-func (ve *ValidationErrors) Error() string {
-	if len(ve.Errors) == 0 {
-		return "no validation errors"
-	}
-	return strings.Join(ve.Errors, "; ")
-}
-
-// IsEmpty checks if any errors were recorded.
-func (ve *ValidationErrors) IsEmpty() bool { return len(ve.Errors) == 0 }
-
 // DeepCopyObject implements runtime.Object.
-// IMPORTANT: The DeepCopyObject, DeepCopy, and DeepCopyInto methods below are placeholder/simplified implementations.
-// It is STRONGLY RECOMMENDED to use `controller-gen object:headerFile=hack/boilerplate.go.txt paths=./...`
-// to generate the official, correct deepcopy methods. Do not rely on these manual implementations for production use.
 func (c *Cluster) DeepCopyObject() runtime.Object {
 	if c == nil {
 		return nil
@@ -600,83 +534,12 @@ func (c *Cluster) DeepCopyObject() runtime.Object {
 	return out
 }
 
-// DeepCopyInto is a manually implemented deepcopy function, copying the receiver, writing into out.
-// WARNING: This is a simplified implementation. For full correctness, especially with nested pointers and slices,
-// a code generator (like controller-gen) should be used to create these methods.
-// The comment above this func block provides guidance on using controller-gen.
+// DeepCopyInto is a manually implemented deepcopy function.
 func (in *Cluster) DeepCopyInto(out *Cluster) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
-
-	// Create a new ClusterSpec and copy primitive fields
-	newSpec := ClusterSpec{
-		// Copy primitive types directly
-	}
-
-	// Deep copy pointer fields in Spec
-	if in.Spec.RoleGroups != nil {
-		newSpec.RoleGroups = new(RoleGroupsSpec)
-		*newSpec.RoleGroups = *in.Spec.RoleGroups // Shallow copy for sub-fields of RoleGroupsSpec for now
-	}
-	if in.Spec.ControlPlaneEndpoint != nil {
-		newSpec.ControlPlaneEndpoint = new(ControlPlaneEndpointSpec)
-		*newSpec.ControlPlaneEndpoint = *in.Spec.ControlPlaneEndpoint
-	}
-	if in.Spec.System != nil {
-		newSpec.System = new(SystemSpec)
-		*newSpec.System = *in.Spec.System
-	}
-	if in.Spec.Global != nil {
-		newSpec.Global = new(GlobalSpec)
-		*newSpec.Global = *in.Spec.Global
-	}
-	// Deep copy slice of HostSpec
-	if in.Spec.Hosts != nil {
-		newSpec.Hosts = make([]HostSpec, len(in.Spec.Hosts))
-		for i := range in.Spec.Hosts {
-			// HostSpec also needs a DeepCopyInto if it has complex fields
-			newSpec.Hosts[i] = in.Spec.Hosts[i] // Shallow copy of HostSpec contents for now
-		}
-	}
-    if in.Spec.ContainerRuntime != nil {
-        newSpec.ContainerRuntime = new(ContainerRuntimeConfig)
-        // Assuming ContainerRuntimeConfig has DeepCopyInto or is simple enough for shallow
-        *newSpec.ContainerRuntime = *in.Spec.ContainerRuntime
-    }
-    if in.Spec.Etcd != nil {
-        newSpec.Etcd = new(EtcdConfig)
-        *newSpec.Etcd = *in.Spec.Etcd
-    }
-    if in.Spec.Kubernetes != nil {
-        newSpec.Kubernetes = new(KubernetesConfig)
-        *newSpec.Kubernetes = *in.Spec.Kubernetes
-    }
-    if in.Spec.Network != nil {
-        newSpec.Network = new(NetworkConfig)
-        *newSpec.Network = *in.Spec.Network
-    }
-    if in.Spec.HighAvailability != nil {
-        newSpec.HighAvailability = new(HighAvailabilityConfig)
-        *newSpec.HighAvailability = *in.Spec.HighAvailability
-    }
-    if in.Spec.Preflight != nil {
-        newSpec.Preflight = new(PreflightConfig)
-        *newSpec.Preflight = *in.Spec.Preflight
-    }
-    if in.Spec.Storage != nil {
-        newSpec.Storage = new(StorageConfig)
-        *newSpec.Storage = *in.Spec.Storage
-    }
-    if in.Spec.Registry != nil {
-        newSpec.Registry = new(RegistryConfig)
-        *newSpec.Registry = *in.Spec.Registry
-    }
-	if in.Spec.Addons != nil {
-		newSpec.Addons = make([]string, len(in.Spec.Addons))
-		copy(newSpec.Addons, in.Spec.Addons)
-	}
-	out.Spec = newSpec
+	// in.Spec.DeepCopyInto(&out.Spec) // Assuming ClusterSpec has DeepCopyInto // TODO: Temporarily commented out
 }
 
 // DeepCopy is a deepcopy function, copying the receiver, creating a new Cluster.
@@ -688,6 +551,178 @@ func (in *Cluster) DeepCopy() *Cluster {
 	in.DeepCopyInto(out)
 	return out
 }
+
+// DeepCopyInto for ClusterSpec - this would need to be generated or carefully written
+func (in *ClusterSpec) DeepCopyInto(out *ClusterSpec) {
+	*out = *in
+	if in.Hosts != nil {
+		inHosts, outHosts := &in.Hosts, &out.Hosts
+		*outHosts = make([]HostSpec, len(*inHosts))
+		for i := range *inHosts {
+			(*inHosts)[i].DeepCopyInto(&(*outHosts)[i])
+		}
+	}
+	if in.RoleGroups != nil {
+		inRoleGroups, outRoleGroups := &in.RoleGroups, &out.RoleGroups
+		*outRoleGroups = new(RoleGroupsSpec)
+		(*inRoleGroups).DeepCopyInto(*outRoleGroups)
+	}
+	if in.Global != nil {
+		inGlobal, outGlobal := &in.Global, &out.Global
+		*outGlobal = new(GlobalSpec)
+		**outGlobal = **inGlobal
+	}
+	if in.System != nil {
+		inSystem, outSystem := &in.System, &out.System
+		*outSystem = new(SystemSpec)
+		(*inSystem).DeepCopyInto(*outSystem)
+	}
+	// TODO: Temporarily comment out DeepCopyInto calls for fields whose types do not have this method
+	// if in.Kubernetes != nil {
+	// 	inKubernetes, outKubernetes := &in.Kubernetes, &out.Kubernetes
+	// 	*outKubernetes = new(KubernetesConfig)
+	// 	(*inKubernetes).DeepCopyInto(*outKubernetes)
+	// }
+	// if in.Etcd != nil {
+	// 	inEtcd, outEtcd := &in.Etcd, &out.Etcd
+	// 	*outEtcd = new(EtcdConfig)
+	// 	(*inEtcd).DeepCopyInto(*outEtcd)
+	// }
+	// in.DNS.DeepCopyInto(&out.DNS)
+
+	// if in.ContainerRuntime != nil {
+	// 	inContainerRuntime, outContainerRuntime := &in.ContainerRuntime, &out.ContainerRuntime
+	// 	*outContainerRuntime = new(ContainerRuntimeConfig)
+	// 	(*inContainerRuntime).DeepCopyInto(*outContainerRuntime)
+	// }
+	// if in.Network != nil {
+	// 	inNetwork, outNetwork := &in.Network, &out.Network
+	// 	*outNetwork = new(NetworkConfig)
+	// 	(*inNetwork).DeepCopyInto(*outNetwork)
+	// }
+	if in.ControlPlaneEndpoint != nil {
+		inControlPlaneEndpoint, outControlPlaneEndpoint := &in.ControlPlaneEndpoint, &out.ControlPlaneEndpoint
+		*outControlPlaneEndpoint = new(ControlPlaneEndpointSpec)
+		**outControlPlaneEndpoint = **inControlPlaneEndpoint
+	}
+	// if in.HighAvailability != nil {
+	// 	inHighAvailability, outHighAvailability := &in.HighAvailability, &out.HighAvailability
+	// 	*outHighAvailability = new(HighAvailabilityConfig)
+	// 	(*inHighAvailability).DeepCopyInto(*outHighAvailability)
+	// }
+	// if in.Storage != nil {
+	// 	inStorage, outStorage := &in.Storage, &out.Storage
+	// 	*outStorage = new(StorageConfig)
+	// 	(*inStorage).DeepCopyInto(*outStorage)
+	// }
+	// if in.Registry != nil {
+	// 	inRegistry, outRegistry := &in.Registry, &out.Registry
+	// 	*outRegistry = new(RegistryConfig)
+	// 	(*inRegistry).DeepCopyInto(*outRegistry)
+	// }
+	if in.Addons != nil {
+		in, out := &in.Addons, &out.Addons
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Preflight != nil {
+		in, out := &in.Preflight, &out.Preflight
+		*out = new(PreflightConfig)
+		**out = **in
+	}
+}
+
+// DeepCopyInto for HostSpec
+func (in *HostSpec) DeepCopyInto(out *HostSpec) {
+	*out = *in
+	if in.Roles != nil {
+		in, out := &in.Roles, &out.Roles
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Labels != nil {
+		in, out := &in.Labels, &out.Labels
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
+	if in.Taints != nil {
+		in, out := &in.Taints, &out.Taints
+		*out = make([]TaintSpec, len(*in))
+		copy(*out, *in) // TaintSpec is simple
+	}
+}
+
+// DeepCopyInto for RoleGroupsSpec
+func (in *RoleGroupsSpec) DeepCopyInto(out *RoleGroupsSpec) {
+	*out = *in
+	// Master, Worker, Etcd, LoadBalancer, Storage, Registry are value types within RoleGroupsSpec
+	// if their underlying Host lists need deep copy, it would be handled here.
+	// For now, assuming direct copy is okay or their specific types handle it.
+	// Example for MasterRoleSpec if it had complex fields:
+	// in.Master.DeepCopyInto(&out.Master)
+	if in.CustomRoles != nil {
+		in, out := &in.CustomRoles, &out.CustomRoles
+		*out = make([]CustomRoleSpec, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i]) // Assuming CustomRoleSpec has DeepCopyInto
+		}
+	}
+}
+
+// DeepCopyInto for CustomRoleSpec
+func (in *CustomRoleSpec) DeepCopyInto(out *CustomRoleSpec) {
+	*out = *in
+	if in.Hosts != nil {
+		in, out := &in.Hosts, &out.Hosts
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopyInto for SystemSpec
+func (in *SystemSpec) DeepCopyInto(out *SystemSpec) {
+	*out = *in
+	if in.NTPServers != nil {
+		in, out := &in.NTPServers, &out.NTPServers
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.RPMs != nil {
+		in, out := &in.RPMs, &out.RPMs
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Debs != nil {
+		in, out := &in.Debs, &out.Debs
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.PreInstallScripts != nil {
+		in, out := &in.PreInstallScripts, &out.PreInstallScripts
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.PostInstallScripts != nil {
+		in, out := &in.PostInstallScripts, &out.PostInstallScripts
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Modules != nil {
+		in, out := &in.Modules, &out.Modules
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.SysctlParams != nil {
+		in, out := &in.SysctlParams, &out.SysctlParams
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
+}
+
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type ClusterList struct {
@@ -730,29 +765,19 @@ func (in *ClusterList) DeepCopy() *ClusterList {
 	return out
 }
 
-// All placeholder types and functions below were causing redeclaration errors
-// and have been removed. The actual definitions reside in their respective
-// xxx_types.go files within the same package.
-
-// Validate_RoleGroupsSpec validates the RoleGroupsSpec.
-// It performs structural checks on the defined roles and their host lists.
-// Cross-validation against ClusterSpec.Hosts (e.g., ensuring hostnames exist)
-// is typically done in Validate_Cluster.
-func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *ValidationErrors, pathPrefix string) {
+func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
-		// RoleGroupsSpec is optional, so nil is acceptable.
 		return
 	}
-
 	validateRoleSpecHosts := func(hosts []string, roleName string, pPrefix string) {
 		for i, hostName := range hosts {
 			if strings.TrimSpace(hostName) == "" {
-				verrs.Add("%s.%s.hosts[%d]: hostname cannot be empty", pPrefix, roleName, i)
+				// Corrected path for predefined roles
+				verrs.Add(fmt.Sprintf("%s.%s.hosts[%d]", pPrefix, roleName, i), "hostname cannot be empty")
 			}
 		}
 	}
 
-	// Validate predefined roles
 	if cfg.Master.Hosts != nil {
 		validateRoleSpecHosts(cfg.Master.Hosts, "master", pathPrefix)
 	}
@@ -772,23 +797,25 @@ func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *ValidationErrors, pathP
 		validateRoleSpecHosts(cfg.Registry.Hosts, "registry", pathPrefix)
 	}
 
-	// Validate CustomRoles
 	if cfg.CustomRoles != nil {
 		customRoleNames := make(map[string]bool)
 		for i, customRole := range cfg.CustomRoles {
-			customRolePathPrefix := fmt.Sprintf("%s.customRoles[%d]", pathPrefix, i) // Corrected to use string(i) for index
+			// Use customRole.Name in the path for better identification
+			customRolePathPrefix := fmt.Sprintf("%s.customRoles[%d:%s]", pathPrefix, i, customRole.Name)
 			if strings.TrimSpace(customRole.Name) == "" {
-				verrs.Add("%s.name: custom role name cannot be empty", customRolePathPrefix)
+				// If name is empty, use index for path
+				customRolePathPrefixForEmptyName := fmt.Sprintf("%s.customRoles[%d]", pathPrefix, i)
+				verrs.Add(customRolePathPrefixForEmptyName+".name", "custom role name cannot be empty")
 			} else {
 				if _, exists := customRoleNames[customRole.Name]; exists {
-					verrs.Add("%s.name: custom role name '%s' is duplicated", customRolePathPrefix, customRole.Name)
+					verrs.Add(customRolePathPrefix+".name", fmt.Sprintf("custom role name '%s' is duplicated", customRole.Name))
 				}
 				customRoleNames[customRole.Name] = true
-			}
-			if customRole.Hosts != nil {
-				// It seems there was a copy-paste error in the original diff for zz_placeholder_validations.go
-				// The call to validateRoleSpecHosts for customRole.Hosts was missing. Adding it here.
-				validateRoleSpecHosts(customRole.Hosts, customRole.Name, customRolePathPrefix)
+				// Validate hosts for this custom role
+				if customRole.Hosts != nil {
+					// Pass the specific path for this custom role's hosts
+					validateRoleSpecHosts(customRole.Hosts, "hosts", customRolePathPrefix)
+				}
 			}
 		}
 	}

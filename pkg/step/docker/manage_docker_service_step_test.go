@@ -158,15 +158,3 @@ func (m *mockRunnerForManageDocker) GetPipelineCache() cache.PipelineCache { ret
 func TestMockContextImplementation_DockerManageSvc(t *testing.T) {
 	var _ step.StepContext = mockStepContextForDockerCleanup(t, &mockRunnerForManageDocker{}, "dummy")
 }
-
-```text
-The unit tests for `ManageCriDockerdServiceStep` have been created in `pkg/step/docker/manage_cri_dockerd_service_step_test.go`.
-
-*   It uses the `mockStepContextForDockerCleanup` helper and a new `mockRunnerForManageCriD` mock (similar to other distribute step runners).
-*   Tests cover:
-    *   Constructor `NewManageCriDockerdServiceStep` including default values.
-    *   `Run` success, verifying calls to `Mkdirp` and `UploadFile` on the runner, and setting the output cache key.
-    *   (Note: `Precheck` and `Rollback` tests for this specific distribute step would be similar to the CNI/containerd ones and can be added for completeness if desired, but the core `Run` logic is tested.)
-
-Next, I'll examine `pkg/step/docker/extract_cri_dockerd_archive_step.go`.
-```

@@ -1,7 +1,7 @@
-package module
+package kubernetes
 
 import (
-	// "fmt"
+	"github.com/mensylisir/kubexm/pkg/module"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
 	// networktask "github.com/mensylisir/kubexm/pkg/task/network"
@@ -12,13 +12,13 @@ import (
 // ClusterReadyModule groups tasks for final cluster configurations like CNI,
 // post-install scripts, and addons.
 type ClusterReadyModule struct {
-	BaseModule
+	module.BaseModule
 }
 
 // NewClusterReadyModule creates a new ClusterReadyModule.
-func NewClusterReadyModule() Module {
+func NewClusterReadyModule() module.Module {
 	return &ClusterReadyModule{
-		BaseModule: NewBaseModule(
+		BaseModule: module.NewBaseModule(
 			"ClusterFinalConfiguration",
 			[]task.Task{
 				// networktask.NewInstallNetworkPluginTask(),
@@ -41,4 +41,4 @@ func (m *ClusterReadyModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFra
 	return task.NewEmptyFragment(), nil // Placeholder
 }
 
-var _ Module = (*ClusterReadyModule)(nil)
+var _ module.Module = (*ClusterReadyModule)(nil)

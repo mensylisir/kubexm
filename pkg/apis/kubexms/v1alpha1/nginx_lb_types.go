@@ -2,10 +2,11 @@ package v1alpha1
 
 import (
 	"fmt"
-	"net" // For IP/port validation
+	"net"
 	"strconv"
 	"strings"
-	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
+	"github.com/mensylisir/kubexm/pkg/util"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // NginxLBUpstreamServer defines a backend server for Nginx load balancing.
@@ -15,49 +16,22 @@ type NginxLBUpstreamServer struct {
 	Address string `json:"address"`
 	// Weight for weighted load balancing algorithms (optional).
 	Weight *int `json:"weight,omitempty"`
-	// TODO: Add other server options like 'max_fails', 'fail_timeout' if needed.
 }
 
 // NginxLBConfig defines settings for using Nginx as a TCP/HTTP load balancer,
 // typically for services like the Kubernetes API server.
 type NginxLBConfig struct {
-	// ListenAddress is the address Nginx should bind its server block to.
-	// Defaults to "0.0.0.0" (all interfaces).
 	ListenAddress *string `json:"listenAddress,omitempty"`
-
-	// ListenPort is the port Nginx listens on for the load-balanced service.
-	// Defaults to 6443 or a common load balancer port like 443 for HTTPS.
 	ListenPort *int `json:"listenPort,omitempty"`
-
-	// Mode indicates the type of load balancing.
-	// "tcp" (for stream block, e.g. Kube API) or "http" (for http block).
-	// Defaults to "tcp".
 	Mode *string `json:"mode,omitempty"`
-
-	// BalanceAlgorithm for upstream server selection (used in 'upstream' block).
-	// e.g., "round_robin" (implicit default if none specified), "least_conn", "ip_hash".
-	// If empty, Nginx defaults to round-robin.
 	BalanceAlgorithm *string `json:"balanceAlgorithm,omitempty"`
-
-	// UpstreamServers is a list of backend servers to load balance.
 	UpstreamServers []NginxLBUpstreamServer `json:"upstreamServers,omitempty"`
-
-	// ExtraHTTPConfig allows adding raw lines to the 'http' block of nginx.conf.
 	ExtraHTTPConfig []string `json:"extraHttpConfig,omitempty"`
-	// ExtraStreamConfig allows adding raw lines to the 'stream' block of nginx.conf (for TCP LB).
 	ExtraStreamConfig []string `json:"extraStreamConfig,omitempty"`
-	// ExtraServerConfig allows adding raw lines to the specific 'server' block being configured.
 	ExtraServerConfig []string `json:"extraServerConfig,omitempty"`
-
-	// ConfigFilePath is the path to the main nginx.conf file.
-	// Defaults to a system path like "/etc/nginx/nginx.conf".
 	ConfigFilePath *string `json:"configFilePath,omitempty"`
-
-	// SkipInstall, if true, assumes Nginx is already installed and configured externally.
 	SkipInstall *bool `json:"skipInstall,omitempty"`
 }
-
-// --- Defaulting Functions ---
 
 // SetDefaults_NginxLBConfig sets default values for NginxLBConfig.
 func SetDefaults_NginxLBConfig(cfg *NginxLBConfig) {
@@ -68,41 +42,36 @@ func SetDefaults_NginxLBConfig(cfg *NginxLBConfig) {
 		cfg.ListenAddress = stringPtr("0.0.0.0")
 	}
 	if cfg.ListenPort == nil {
-		cfg.ListenPort = intPtr(6443) // Default for Kube API, or 443 if mode is HTTP for general LB
+		cfg.ListenPort = intPtr(6443)
 	}
 	if cfg.Mode == nil {
-		cfg.Mode = stringPtr("tcp") // Default to TCP load balancing for API server like use-cases
+		cfg.Mode = stringPtr("tcp")
 	}
-	// No default for BalanceAlgorithm, Nginx uses round-robin by default.
-
+	if cfg.BalanceAlgorithm == nil {
+		cfg.BalanceAlgorithm = stringPtr("round_robin") // Nginx default is round-robin
+	}
 	if cfg.UpstreamServers == nil {
 		cfg.UpstreamServers = []NginxLBUpstreamServer{}
 	}
 	for i := range cfg.UpstreamServers {
 		server := &cfg.UpstreamServers[i]
 		if server.Weight == nil {
-			server.Weight = intPtr(1) // Default weight
+			server.Weight = intPtr(1)
 		}
 	}
-
 	if cfg.ExtraHTTPConfig == nil { cfg.ExtraHTTPConfig = []string{} }
 	if cfg.ExtraStreamConfig == nil { cfg.ExtraStreamConfig = []string{} }
 	if cfg.ExtraServerConfig == nil { cfg.ExtraServerConfig = []string{} }
-
 	if cfg.ConfigFilePath == nil {
-		cfg.ConfigFilePath = stringPtr("/etc/nginx/nginx.conf") // Common default path
+		cfg.ConfigFilePath = stringPtr("/etc/nginx/nginx.conf")
 	}
-
 	if cfg.SkipInstall == nil {
-		cfg.SkipInstall = boolPtr(false) // Default to managing Nginx installation
+		cfg.SkipInstall = boolPtr(false)
 	}
 }
 
-// --- Validation Functions ---
-
 // Validate_NginxLBConfig validates NginxLBConfig.
-// Note: ValidationErrors type is expected to be defined in cluster_types.go or a common errors file.
-func Validate_NginxLBConfig(cfg *NginxLBConfig, verrs *ValidationErrors, pathPrefix string) {
+func Validate_NginxLBConfig(cfg *NginxLBConfig, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
@@ -112,63 +81,66 @@ func Validate_NginxLBConfig(cfg *NginxLBConfig, verrs *ValidationErrors, pathPre
 
 	if cfg.ListenAddress != nil {
 		if strings.TrimSpace(*cfg.ListenAddress) == "" {
-			verrs.Add("%s.listenAddress: cannot be empty if specified", pathPrefix)
+			verrs.Add(pathPrefix+".listenAddress", "cannot be empty if specified")
 		} else if net.ParseIP(*cfg.ListenAddress) == nil && *cfg.ListenAddress != "0.0.0.0" && *cfg.ListenAddress != "::" {
-			// Allow "0.0.0.0" and "::" as special bind addresses, otherwise expect a valid IP.
-			// Hostnames are not typically used for Nginx listen directives directly without resolver for listen.
-			verrs.Add("%s.listenAddress: invalid IP address format '%s'", pathPrefix, *cfg.ListenAddress)
+			verrs.Add(pathPrefix+".listenAddress", fmt.Sprintf("invalid IP address format '%s'", *cfg.ListenAddress))
+		}
+	}
+	// ListenAddress can be nil, allowing Nginx to use its own default binding.
+
+	if cfg.ListenPort == nil { // Should be set by defaults
+		verrs.Add(pathPrefix+".listenPort", "is required and should have a default value")
+	} else if *cfg.ListenPort <= 0 || *cfg.ListenPort > 65535 {
+		verrs.Add(pathPrefix+".listenPort", fmt.Sprintf("invalid port %d", *cfg.ListenPort))
+	}
+
+	if cfg.Mode == nil { // Should be set by defaults
+		verrs.Add(pathPrefix+".mode", "is required and should have a default value 'tcp'")
+	} else if *cfg.Mode != "" { // Validate only if user provided a non-empty value
+	   validModes := []string{"tcp", "http"} // These could be constants
+	   if !util.ContainsString(validModes, *cfg.Mode) {
+		   verrs.Add(pathPrefix+".mode", fmt.Sprintf("invalid mode '%s', must be one of %v", *cfg.Mode, validModes))
+	   }
+	}
+
+	if cfg.BalanceAlgorithm == nil { // Should be set by defaults
+		verrs.Add(pathPrefix+".balanceAlgorithm", "is required and should have a default value 'round_robin'")
+	} else if *cfg.BalanceAlgorithm != "" { // Validate only if user provided a non-empty value
+		// Nginx's default is round_robin for stream, and various for http depending on context.
+		// For simplicity, we list common ones. If empty, Nginx will use its internal default.
+		validAlgos := []string{"round_robin", "least_conn", "ip_hash", "hash", "random", "least_time"} // These could be constants
+		if !util.ContainsString(validAlgos, *cfg.BalanceAlgorithm) {
+			verrs.Add(pathPrefix+".balanceAlgorithm", fmt.Sprintf("invalid algorithm '%s', must be one of %v or empty for Nginx default", *cfg.BalanceAlgorithm, validAlgos))
 		}
 	}
 
-	// ListenPort is always defaulted, so check its value.
-	if *cfg.ListenPort <= 0 || *cfg.ListenPort > 65535 {
-		verrs.Add("%s.listenPort: invalid port %d", pathPrefix, *cfg.ListenPort)
-	}
-
-	if cfg.Mode != nil && *cfg.Mode != "" {
-	   validModes := []string{"tcp", "http"}
-	   if !util.ContainsString(validModes, *cfg.Mode) { // Use util.ContainsString
-		   verrs.Add("%s.mode: invalid mode '%s', must be 'tcp' or 'http'", pathPrefix, *cfg.Mode)
-	   }
-	}
-
-	if cfg.BalanceAlgorithm != nil && *cfg.BalanceAlgorithm != "" {
-	   // Nginx built-in for stream: round_robin (default), least_conn, hash, random
-	   // Nginx built-in for http: round_robin (default), least_conn, ip_hash, generic_hash, random, least_time
-	   validAlgos := []string{"round_robin", "least_conn", "ip_hash", "hash", "random", "least_time"}
-	   if !util.ContainsString(validAlgos, *cfg.BalanceAlgorithm) { // Use util.ContainsString
-		   verrs.Add("%s.balanceAlgorithm: invalid algorithm '%s'", pathPrefix, *cfg.BalanceAlgorithm)
-	   }
-	}
-
 	if len(cfg.UpstreamServers) == 0 {
-		verrs.Add("%s.upstreamServers: must specify at least one upstream server", pathPrefix)
+		verrs.Add(pathPrefix+".upstreamServers", "must specify at least one upstream server")
 	}
 	for i, server := range cfg.UpstreamServers {
 		serverPath := fmt.Sprintf("%s.upstreamServers[%d]", pathPrefix, i)
 		if strings.TrimSpace(server.Address) == "" {
-			verrs.Add("%s.address: upstream server address cannot be empty", serverPath)
+			verrs.Add(serverPath+".address", "upstream server address cannot be empty")
 		} else {
-			// Nginx upstream addresses must be host:port
 			host, portStr, err := net.SplitHostPort(server.Address)
 			if err != nil {
-				verrs.Add("%s.address: upstream server address '%s' must be in 'host:port' format", serverPath, server.Address)
+				verrs.Add(serverPath+".address", fmt.Sprintf("upstream server address '%s' must be in 'host:port' format", server.Address))
 			} else {
 				if strings.TrimSpace(host) == "" {
-					verrs.Add("%s.address: host part of upstream server address '%s' cannot be empty", serverPath, server.Address)
-				} else if !util.IsValidIP(host) && !util.IsValidDomainName(host) { // Use util.IsValidIP and util.IsValidDomainName
-					verrs.Add("%s.address: host part '%s' of upstream server address '%s' is not a valid host or IP", serverPath, host, server.Address)
+					verrs.Add(serverPath+".address", fmt.Sprintf("host part of upstream server address '%s' cannot be empty", server.Address))
+				} else if !util.IsValidIP(host) && !util.IsValidDomainName(host) {
+					verrs.Add(serverPath+".address", fmt.Sprintf("host part '%s' of upstream server address '%s' is not a valid host or IP", host, server.Address))
 				}
-				if port, errConv := strconv.Atoi(portStr); errConv != nil || port <= 0 || port > 65535 { // This port validation is fine
-					verrs.Add("%s.address: port part '%s' of upstream server address '%s' is not a valid port number", serverPath, portStr, server.Address)
+				if port, errConv := strconv.Atoi(portStr); errConv != nil || port <= 0 || port > 65535 {
+					verrs.Add(serverPath+".address", fmt.Sprintf("port part '%s' of upstream server address '%s' is not a valid port number", portStr, server.Address))
 				}
 			}
 		}
 		if server.Weight != nil && *server.Weight < 0 {
-			verrs.Add("%s.weight: cannot be negative, got %d", serverPath, *server.Weight)
+			verrs.Add(serverPath+".weight", fmt.Sprintf("cannot be negative, got %d", *server.Weight))
 		}
 	}
 	if cfg.ConfigFilePath != nil && strings.TrimSpace(*cfg.ConfigFilePath) == "" {
-	   verrs.Add("%s.configFilePath: cannot be empty if specified", pathPrefix)
+	   verrs.Add(pathPrefix+".configFilePath", "cannot be empty if specified")
 	}
 }

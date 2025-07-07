@@ -1,20 +1,10 @@
 package v1alpha1
 
 import (
-	"net/url"
-	"regexp"
+	"fmt"
 	"strings"
-)
 
-const (
-	// validChartVersionRegex defines the pattern for common chart version formats.
-	// Allows "latest", "stable", or versions like "1.2.3", "v1.2.3", "1.2", "v1.0", "1", "v2".
-	validChartVersionRegexString = `^v?([0-9]+)(\.[0-9]+){0,2}$`
-)
-
-var (
-	// validChartVersionRegex is the compiled regular expression for chart versions.
-	validChartVersionRegex = regexp.MustCompile(validChartVersionRegexString)
+	"github.com/mensylisir/kubexm/pkg/util/validation" // Import validation package
 )
 
 // AddonConfig defines the detailed configuration for a single addon.
@@ -97,13 +87,12 @@ func SetDefaults_AddonConfig(cfg *AddonConfig) {
 }
 
 // Validate_AddonConfig validates AddonConfig.
-// Note: ValidationErrors type is expected to be defined in cluster_types.go or a common errors file.
-func Validate_AddonConfig(cfg *AddonConfig, verrs *ValidationErrors, pathPrefix string) {
+func Validate_AddonConfig(cfg *AddonConfig, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return // Should not happen if called from a loop over an initialized slice
 	}
 	if strings.TrimSpace(cfg.Name) == "" {
-		verrs.Add("%s.name: addon name cannot be empty", pathPrefix)
+		verrs.Add(pathPrefix+".name", "addon name cannot be empty")
 	}
 
 	hasChartSource := cfg.Sources.Chart != nil
@@ -118,36 +107,35 @@ func Validate_AddonConfig(cfg *AddonConfig, verrs *ValidationErrors, pathPrefix 
 		hasChartRepo := strings.TrimSpace(chart.Repo) != ""
 
 		if hasChartPath && (hasChartName || hasChartRepo) {
-			verrs.Add("%s: chart.path ('%s') cannot be set if chart.name ('%s') or chart.repo ('%s') is also set", csPath, chart.Path, chart.Name, chart.Repo)
+			verrs.Add(csPath, "chart.path ('"+chart.Path+"') cannot be set if chart.name ('"+chart.Name+"') or chart.repo ('"+chart.Repo+"') is also set")
 		}
 		if !hasChartPath && !hasChartName {
-			verrs.Add("%s: either chart.name (with chart.repo) or chart.path must be specified", csPath)
+			verrs.Add(csPath, "either chart.name (with chart.repo) or chart.path must be specified")
 		}
 		if hasChartRepo && !hasChartName {
-			verrs.Add("%s.name: chart.name must be specified if chart.repo ('%s') is set", csPath, chart.Repo)
+			verrs.Add(csPath+".name", "chart.name must be specified if chart.repo ('"+chart.Repo+"') is set")
 		}
 		if hasChartName && !hasChartRepo && !hasChartPath { // Name without repo implies local path, but path field is preferred for clarity
-			verrs.Add("%s.repo: chart.repo must be specified if chart.name ('%s') is set and chart.path is not set", csPath, chart.Name)
+			verrs.Add(csPath+".repo", "chart.repo must be specified if chart.name ('"+chart.Name+"') is set and chart.path is not set")
 		}
 
 		if hasChartRepo {
-			_, err := url.ParseRequestURI(chart.Repo)
-			if err != nil {
-				verrs.Add("%s.repo: invalid URL format for chart repo '%s': %v", csPath, chart.Repo, err)
+			if !validation.IsValidURL(chart.Repo) {
+				verrs.Add(csPath+".repo", "invalid URL format for chart repo '"+chart.Repo+"'")
 			}
 		}
 
 		if chart.Version != "" {
 			if strings.TrimSpace(chart.Version) == "" {
-				verrs.Add("%s.version: chart version cannot be only whitespace if specified", csPath)
-			} else if !isValidChartVersion(chart.Version) {
-				verrs.Add("%s.version: chart version '%s' is not a valid format (e.g., v1.2.3, 1.0.0, latest, stable)", csPath, chart.Version)
+				verrs.Add(csPath+".version", "chart version cannot be only whitespace if specified")
+			} else if !validation.IsValidChartVersion(chart.Version) {
+				verrs.Add(csPath+".version", "chart version '"+chart.Version+"' is not a valid format (e.g., v1.2.3, 1.0.0, latest, stable)")
 			}
 		}
 
 		for i, val := range chart.Values {
 			if !strings.Contains(val, "=") {
-				verrs.Add("%s.values[%d]: invalid format '%s', expected key=value", csPath, i, val)
+				verrs.Add(fmt.Sprintf("%s.values[%d]", csPath, i), fmt.Sprintf("invalid format '%s', expected key=value", val))
 			}
 		}
 	}
@@ -156,42 +144,29 @@ func Validate_AddonConfig(cfg *AddonConfig, verrs *ValidationErrors, pathPrefix 
 		ysPath := pathPrefix + ".sources.yaml"
 		yamlSource := cfg.Sources.Yaml
 		if len(yamlSource.Path) == 0 {
-			verrs.Add("%s.path: must contain at least one YAML path or URL", ysPath)
+			verrs.Add(ysPath+".path", "must contain at least one YAML path or URL")
 		}
 		for i, p := range yamlSource.Path {
 			if strings.TrimSpace(p) == "" {
-				verrs.Add("%s.path[%d]: path/URL cannot be empty", ysPath, i)
+				verrs.Add(fmt.Sprintf("%s.path[%d]", ysPath, i), "path/URL cannot be empty")
 			}
 			// Basic check for http/https or local path (does not check existence)
 			// This check is indicative and not exhaustive.
-			if !strings.HasPrefix(p, "http://") && !strings.HasPrefix(p, "https://") && !strings.HasPrefix(p, "/") && !strings.HasPrefix(p, "./") && !strings.HasPrefix(p, "../") {
-				// verrs.Add("%s.path[%d]: path '%s' does not appear to be a valid URL or recognizable local path pattern", ysPath, i, p)
-			}
+			// Consider using validation.IsValidURL for URL parts if strictness is needed.
+			// if !strings.HasPrefix(p, "http://") && !strings.HasPrefix(p, "https://") && !strings.HasPrefix(p, "/") && !strings.HasPrefix(p, "./") && !strings.HasPrefix(p, "../") {
+			// verrs.Add(ysPath+".path["+string(i)+"]", "path '"+p+"' does not appear to be a valid URL or recognizable local path pattern")
+			// }
 		}
 	}
 
 	if cfg.Enabled != nil && *cfg.Enabled && !hasChartSource && !hasYamlSource {
-		verrs.Add("%s: addon '%s' is enabled but has no chart or yaml sources defined", pathPrefix, cfg.Name)
+		verrs.Add(pathPrefix, "addon '"+cfg.Name+"' is enabled but has no chart or yaml sources defined")
 	}
 
 	if cfg.Retries != nil && *cfg.Retries < 0 {
-		verrs.Add("%s.retries: cannot be negative, got %d", pathPrefix, *cfg.Retries)
+		verrs.Add(pathPrefix+".retries", fmt.Sprintf("cannot be negative, got %d", *cfg.Retries))
 	}
 	if cfg.Delay != nil && *cfg.Delay < 0 {
-		verrs.Add("%s.delay: cannot be negative, got %d", pathPrefix, *cfg.Delay)
+		verrs.Add(pathPrefix+".delay", fmt.Sprintf("cannot be negative, got %d", *cfg.Delay))
 	}
-}
-
-// isValidChartVersion checks if the version string matches common chart version patterns.
-// Allows "latest", "stable", or versions like "1.2.3", "v1.2.3", "1.2", "v1.0", "1", "v2".
-// It aims to be flexible but avoid overly long or clearly incorrect versions.
-func isValidChartVersion(version string) bool {
-	if version == "latest" || version == "stable" {
-		return true
-	}
-	// Regex for versions like: v1.2.3, 1.2.3, v1.2, 1.2, v1, 1
-	// Allows optional 'v'.
-	// Requires at least one digit.
-	// Allows up to two dot-separated digit sequences after the first (e.g., .x.y, not .x.y.z).
-	return validChartVersionRegex.MatchString(version)
 }

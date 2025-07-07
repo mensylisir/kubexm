@@ -88,7 +88,7 @@ func (r *defaultRunner) PullImage(ctx context.Context, c connector.Connector, im
 		return errors.New("imageName cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker pull %s", shellEscape(imageName))
+	cmd := fmt.Sprintf("docker pull %s", util.ShellEscape(imageName))
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
 		Timeout: DefaultDockerPullTimeout,
@@ -230,7 +230,7 @@ func (r *defaultRunner) EnsureDefaultDockerConfig(ctx context.Context, conn conn
 
 		defaultOpts := DockerDaemonOptions{
 			ExecOpts:      &execOptsSlice,
-			LogDriver:     strPtr("json-file"),
+			LogDriver:     util.StrPtr("json-file"),
 			LogOpts:       &logOptsMap,
 			StorageDriver: &storageDriverVal,
 		}
@@ -264,7 +264,7 @@ func (r *defaultRunner) ImageExists(ctx context.Context, c connector.Connector, 
 		return false, errors.New("imageName cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker image inspect %s > /dev/null 2>&1", shellEscape(imageName))
+	cmd := fmt.Sprintf("docker image inspect %s > /dev/null 2>&1", util.ShellEscape(imageName))
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
 		Timeout: DefaultDockerInspectTimeout,
@@ -370,7 +370,7 @@ func (r *defaultRunner) RemoveImage(ctx context.Context, c connector.Connector, 
 	if force {
 		cmd += " -f"
 	}
-	cmd += " " + shellEscape(imageName)
+	cmd += " " + util.ShellEscape(imageName)
 
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
@@ -399,21 +399,21 @@ func (r *defaultRunner) BuildImage(ctx context.Context, c connector.Connector, d
 	cmdArgs = append(cmdArgs, "docker", "build")
 
 	if strings.TrimSpace(dockerfilePath) != "" {
-		cmdArgs = append(cmdArgs, "-f", shellEscape(dockerfilePath))
+		cmdArgs = append(cmdArgs, "-f", util.ShellEscape(dockerfilePath))
 	}
 
-	cmdArgs = append(cmdArgs, "-t", shellEscape(imageNameAndTag))
+	cmdArgs = append(cmdArgs, "-t", util.ShellEscape(imageNameAndTag))
 
 	if buildArgs != nil {
 		for key, value := range buildArgs {
 			if strings.TrimSpace(key) == "" {
 				return errors.New("buildArg key cannot be empty")
 			}
-			cmdArgs = append(cmdArgs, "--build-arg", shellEscape(fmt.Sprintf("%s=%s", key, value)))
+			cmdArgs = append(cmdArgs, "--build-arg", util.ShellEscape(fmt.Sprintf("%s=%s", key, value)))
 		}
 	}
 
-	cmdArgs = append(cmdArgs, shellEscape(contextPath))
+	cmdArgs = append(cmdArgs, util.ShellEscape(contextPath))
 	cmd := strings.Join(cmdArgs, " ")
 
 	execOptions := &connector.ExecOptions{
@@ -441,7 +441,7 @@ func (r *defaultRunner) CreateContainer(ctx context.Context, c connector.Connect
 	cmdArgs = append(cmdArgs, "docker", "create")
 
 	if strings.TrimSpace(options.ContainerName) != "" {
-		cmdArgs = append(cmdArgs, "--name", shellEscape(options.ContainerName))
+		cmdArgs = append(cmdArgs, "--name", util.ShellEscape(options.ContainerName))
 	}
 
 	for _, portMapping := range options.Ports {
@@ -456,7 +456,7 @@ func (r *defaultRunner) CreateContainer(ctx context.Context, c connector.Connect
 		if strings.TrimSpace(portMapping.Protocol) != "" {
 			p += "/" + portMapping.Protocol
 		}
-		cmdArgs = append(cmdArgs, "-p", shellEscape(p))
+		cmdArgs = append(cmdArgs, "-p", util.ShellEscape(p))
 	}
 
 	for _, volumeMount := range options.Volumes {
@@ -468,21 +468,21 @@ func (r *defaultRunner) CreateContainer(ctx context.Context, c connector.Connect
 		if strings.TrimSpace(volumeMount.Mode) != "" {
 			v += ":" + volumeMount.Mode
 		}
-		cmdArgs = append(cmdArgs, "-v", shellEscape(v))
+		cmdArgs = append(cmdArgs, "-v", util.ShellEscape(v))
 	}
 
 	for _, envVar := range options.EnvVars {
 		if strings.TrimSpace(envVar) != "" {
-			cmdArgs = append(cmdArgs, "-e", shellEscape(envVar))
+			cmdArgs = append(cmdArgs, "-e", util.ShellEscape(envVar))
 		}
 	}
 
 	if len(options.Entrypoint) > 0 {
-		cmdArgs = append(cmdArgs, "--entrypoint", shellEscape(options.Entrypoint[0]))
+		cmdArgs = append(cmdArgs, "--entrypoint", util.ShellEscape(options.Entrypoint[0]))
 	}
 
 	if strings.TrimSpace(options.RestartPolicy) != "" {
-		cmdArgs = append(cmdArgs, "--restart", shellEscape(options.RestartPolicy))
+		cmdArgs = append(cmdArgs, "--restart", util.ShellEscape(options.RestartPolicy))
 	}
 	if options.Privileged {
 		cmdArgs = append(cmdArgs, "--privileged")
@@ -491,11 +491,11 @@ func (r *defaultRunner) CreateContainer(ctx context.Context, c connector.Connect
 		cmdArgs = append(cmdArgs, "--rm")
 	}
 
-	cmdArgs = append(cmdArgs, shellEscape(options.ImageName))
+	cmdArgs = append(cmdArgs, util.ShellEscape(options.ImageName))
 
 	if len(options.Command) > 0 {
 		for _, cmdPart := range options.Command {
-			cmdArgs = append(cmdArgs, shellEscape(cmdPart))
+			cmdArgs = append(cmdArgs, util.ShellEscape(cmdPart))
 		}
 	}
 
@@ -526,7 +526,7 @@ func (r *defaultRunner) ContainerExists(ctx context.Context, c connector.Connect
 		return false, errors.New("containerNameOrID cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker inspect %s > /dev/null 2>&1", shellEscape(containerNameOrID))
+	cmd := fmt.Sprintf("docker inspect %s > /dev/null 2>&1", util.ShellEscape(containerNameOrID))
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
 		Timeout: DefaultDockerInspectTimeout,
@@ -555,7 +555,7 @@ func (r *defaultRunner) StartContainer(ctx context.Context, c connector.Connecto
 		return errors.New("containerNameOrID cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker start %s", shellEscape(containerNameOrID))
+	cmd := fmt.Sprintf("docker start %s", util.ShellEscape(containerNameOrID))
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
 		Timeout: DefaultDockerStartTimeout,
@@ -589,7 +589,7 @@ func (r *defaultRunner) StopContainer(ctx context.Context, c connector.Connector
 		execTimeout = (*timeout) + (30 * time.Second)
 	}
 
-	cmdArgs = append(cmdArgs, shellEscape(containerNameOrID))
+	cmdArgs = append(cmdArgs, util.ShellEscape(containerNameOrID))
 	cmd := strings.Join(cmdArgs, " ")
 
 	execOptions := &connector.ExecOptions{
@@ -625,7 +625,7 @@ func (r *defaultRunner) RestartContainer(ctx context.Context, c connector.Connec
 		execTimeout = (*timeout) + (10 * time.Second)
 	}
 
-	cmdArgs = append(cmdArgs, shellEscape(containerNameOrID))
+	cmdArgs = append(cmdArgs, util.ShellEscape(containerNameOrID))
 	cmd := strings.Join(cmdArgs, " ")
 
 	execOptions := &connector.ExecOptions{
@@ -656,7 +656,7 @@ func (r *defaultRunner) RemoveContainer(ctx context.Context, c connector.Connect
 	if removeVolumes {
 		cmdArgs = append(cmdArgs, "-v")
 	}
-	cmdArgs = append(cmdArgs, shellEscape(containerNameOrID))
+	cmdArgs = append(cmdArgs, util.ShellEscape(containerNameOrID))
 	cmd := strings.Join(cmdArgs, " ")
 
 	execOptions := &connector.ExecOptions{
@@ -690,7 +690,7 @@ func (r *defaultRunner) ListContainers(ctx context.Context, c connector.Connecto
 			if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
 				return nil, errors.New("filter key and value cannot be empty")
 			}
-			cmdArgs = append(cmdArgs, "--filter", shellEscape(fmt.Sprintf("%s=%s", key, value)))
+			cmdArgs = append(cmdArgs, "--filter", util.ShellEscape(fmt.Sprintf("%s=%s", key, value)))
 		}
 	}
 	cmdArgs = append(cmdArgs, "--format", "{{json .}}")
@@ -858,19 +858,19 @@ func (r *defaultRunner) GetContainerLogs(ctx context.Context, c connector.Connec
 		cmdArgs = append(cmdArgs, "--timestamps")
 	}
 	if strings.TrimSpace(options.Since) != "" {
-		cmdArgs = append(cmdArgs, "--since", shellEscape(options.Since))
+		cmdArgs = append(cmdArgs, "--since", util.ShellEscape(options.Since))
 	}
 	if strings.TrimSpace(options.Until) != "" {
-		cmdArgs = append(cmdArgs, "--until", shellEscape(options.Until))
+		cmdArgs = append(cmdArgs, "--until", util.ShellEscape(options.Until))
 	}
 	if strings.TrimSpace(options.Tail) != "" {
-		cmdArgs = append(cmdArgs, "--tail", shellEscape(options.Tail))
+		cmdArgs = append(cmdArgs, "--tail", util.ShellEscape(options.Tail))
 	}
 	if options.Details {
 		cmdArgs = append(cmdArgs, "--details")
 	}
 
-	cmdArgs = append(cmdArgs, shellEscape(containerNameOrID))
+	cmdArgs = append(cmdArgs, util.ShellEscape(containerNameOrID))
 	cmd := strings.Join(cmdArgs, " ")
 
 	execTimeout := 2 * time.Minute
@@ -904,7 +904,7 @@ func (r *defaultRunner) GetContainerStats(ctx context.Context, c connector.Conne
 		if !stream {
 			cmdArgs = append(cmdArgs, "--no-stream")
 		}
-		cmdArgs = append(cmdArgs, "--format", "{{json .}}", shellEscape(containerNameOrID))
+		cmdArgs = append(cmdArgs, "--format", "{{json .}}", util.ShellEscape(containerNameOrID))
 		cmd := strings.Join(cmdArgs, " ")
 
 		execTimeout := 30 * time.Second
@@ -960,22 +960,28 @@ func (r *defaultRunner) GetContainerStats(ctx context.Context, c connector.Conne
 
 			memParts := strings.Split(statData.MemUsage, " / ")
 			if len(memParts) > 0 {
-				cs.MemoryUsageBytes, _ = utils.ParseSizeToBytes(strings.TrimSpace(memParts[0]))
+				memUsage, _ := parseDockerSize(strings.TrimSpace(memParts[0]))
+				cs.MemoryUsageBytes = uint64(memUsage)
 			}
 			if len(memParts) > 1 {
-				cs.MemoryLimitBytes, _ = utils.ParseSizeToBytes(strings.TrimSpace(memParts[1]))
+				memLimit, _ := parseDockerSize(strings.TrimSpace(memParts[1]))
+				cs.MemoryLimitBytes = uint64(memLimit)
 			}
 
 			netIOParts := strings.Split(statData.NetIO, " / ")
 			if len(netIOParts) == 2 {
-				cs.NetworkRxBytes, _ = utils.ParseSizeToBytes(strings.TrimSpace(netIOParts[0]))
-				cs.NetworkTxBytes, _ = utils.ParseSizeToBytes(strings.TrimSpace(netIOParts[1]))
+				netRx, _ := parseDockerSize(strings.TrimSpace(netIOParts[0]))
+				cs.NetworkRxBytes = uint64(netRx)
+				netTx, _ := parseDockerSize(strings.TrimSpace(netIOParts[1]))
+				cs.NetworkTxBytes = uint64(netTx)
 			}
 
 			blockIOParts := strings.Split(statData.BlockIO, " / ")
 			if len(blockIOParts) == 2 {
-				cs.BlockReadBytes, _ = utils.ParseSizeToBytes(strings.TrimSpace(blockIOParts[0]))
-				cs.BlockWriteBytes, _ = utils.ParseSizeToBytes(strings.TrimSpace(blockIOParts[1]))
+				blockRead, _ := parseDockerSize(strings.TrimSpace(blockIOParts[0]))
+				cs.BlockReadBytes = uint64(blockRead)
+				blockWrite, _ := parseDockerSize(strings.TrimSpace(blockIOParts[1]))
+				cs.BlockWriteBytes = uint64(blockWrite)
 			}
 			pids, _ := strconv.ParseUint(statData.PIDs, 10, 64)
 			cs.PidsCurrent = pids
@@ -1005,7 +1011,7 @@ func (r *defaultRunner) InspectContainer(ctx context.Context, c connector.Connec
 		return nil, errors.New("containerNameOrID cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker inspect %s", shellEscape(containerNameOrID))
+	cmd := fmt.Sprintf("docker inspect %s", util.ShellEscape(containerNameOrID))
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
 		Timeout: DefaultDockerInspectTimeout,
@@ -1053,7 +1059,7 @@ func (r *defaultRunner) PauseContainer(ctx context.Context, c connector.Connecto
 		return errors.New("containerNameOrID cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker pause %s", shellEscape(containerNameOrID))
+	cmd := fmt.Sprintf("docker pause %s", util.ShellEscape(containerNameOrID))
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
 		Timeout: DefaultDockerStartTimeout,
@@ -1075,7 +1081,7 @@ func (r *defaultRunner) UnpauseContainer(ctx context.Context, c connector.Connec
 		return errors.New("containerNameOrID cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker unpause %s", shellEscape(containerNameOrID))
+	cmd := fmt.Sprintf("docker unpause %s", util.ShellEscape(containerNameOrID))
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
 		Timeout: DefaultDockerStartTimeout,
@@ -1107,15 +1113,15 @@ func (r *defaultRunner) ExecInContainer(ctx context.Context, c connector.Connect
 		cmdArgs = append(cmdArgs, "-t")
 	}
 	if strings.TrimSpace(user) != "" {
-		cmdArgs = append(cmdArgs, "--user", shellEscape(user))
+		cmdArgs = append(cmdArgs, "--user", util.ShellEscape(user))
 	}
 	if strings.TrimSpace(workDir) != "" {
-		cmdArgs = append(cmdArgs, "--workdir", shellEscape(workDir))
+		cmdArgs = append(cmdArgs, "--workdir", util.ShellEscape(workDir))
 	}
 
-	cmdArgs = append(cmdArgs, shellEscape(containerNameOrID))
+	cmdArgs = append(cmdArgs, util.ShellEscape(containerNameOrID))
 	for _, arg := range cmdArgsToExec {
-		cmdArgs = append(cmdArgs, shellEscape(arg))
+		cmdArgs = append(cmdArgs, util.ShellEscape(arg))
 	}
 	cmd := strings.Join(cmdArgs, " ")
 
@@ -1148,21 +1154,21 @@ func (r *defaultRunner) CreateDockerNetwork(ctx context.Context, c connector.Con
 	cmdArgs = append(cmdArgs, "docker", "network", "create")
 
 	if strings.TrimSpace(driver) != "" {
-		cmdArgs = append(cmdArgs, "--driver", shellEscape(driver))
+		cmdArgs = append(cmdArgs, "--driver", util.ShellEscape(driver))
 	}
 	if strings.TrimSpace(subnet) != "" {
-		cmdArgs = append(cmdArgs, "--subnet", shellEscape(subnet))
+		cmdArgs = append(cmdArgs, "--subnet", util.ShellEscape(subnet))
 	}
 	if strings.TrimSpace(gateway) != "" {
-		cmdArgs = append(cmdArgs, "--gateway", shellEscape(gateway))
+		cmdArgs = append(cmdArgs, "--gateway", util.ShellEscape(gateway))
 	}
 	if options != nil {
 		for k, v := range options {
-			cmdArgs = append(cmdArgs, "--opt", shellEscape(fmt.Sprintf("%s=%s", k, v)))
+			cmdArgs = append(cmdArgs, "--opt", util.ShellEscape(fmt.Sprintf("%s=%s", k, v)))
 		}
 	}
 
-	cmdArgs = append(cmdArgs, shellEscape(name))
+	cmdArgs = append(cmdArgs, util.ShellEscape(name))
 	cmd := strings.Join(cmdArgs, " ")
 
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute}
@@ -1182,7 +1188,7 @@ func (r *defaultRunner) RemoveDockerNetwork(ctx context.Context, c connector.Con
 		return errors.New("networkNameOrID cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker network rm %s", shellEscape(networkNameOrID))
+	cmd := fmt.Sprintf("docker network rm %s", util.ShellEscape(networkNameOrID))
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute}
 	_, stderr, err := c.Exec(ctx, cmd, execOptions)
 	if err != nil {
@@ -1204,7 +1210,7 @@ func (r *defaultRunner) ListDockerNetworks(ctx context.Context, c connector.Conn
 	cmdArgs = append(cmdArgs, "docker", "network", "ls")
 	if filters != nil {
 		for key, value := range filters {
-			cmdArgs = append(cmdArgs, "--filter", shellEscape(fmt.Sprintf("%s=%s", key, value)))
+			cmdArgs = append(cmdArgs, "--filter", util.ShellEscape(fmt.Sprintf("%s=%s", key, value)))
 		}
 	}
 	cmdArgs = append(cmdArgs, "--format", "{{json .}}")
@@ -1267,9 +1273,9 @@ func (r *defaultRunner) ConnectContainerToNetwork(ctx context.Context, c connect
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "docker", "network", "connect")
 	if strings.TrimSpace(ipAddress) != "" {
-		cmdArgs = append(cmdArgs, "--ip", shellEscape(ipAddress))
+		cmdArgs = append(cmdArgs, "--ip", util.ShellEscape(ipAddress))
 	}
-	cmdArgs = append(cmdArgs, shellEscape(networkNameOrID), shellEscape(containerNameOrID))
+	cmdArgs = append(cmdArgs, util.ShellEscape(networkNameOrID), util.ShellEscape(containerNameOrID))
 	cmd := strings.Join(cmdArgs, " ")
 
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute}
@@ -1300,7 +1306,7 @@ func (r *defaultRunner) DisconnectContainerFromNetwork(ctx context.Context, c co
 	if force {
 		cmdArgs = append(cmdArgs, "-f")
 	}
-	cmdArgs = append(cmdArgs, shellEscape(networkNameOrID), shellEscape(containerNameOrID))
+	cmdArgs = append(cmdArgs, util.ShellEscape(networkNameOrID), util.ShellEscape(containerNameOrID))
 	cmd := strings.Join(cmdArgs, " ")
 
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute}
@@ -1325,20 +1331,20 @@ func (r *defaultRunner) CreateDockerVolume(ctx context.Context, c connector.Conn
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "docker", "volume", "create")
 	if strings.TrimSpace(driver) != "" {
-		cmdArgs = append(cmdArgs, "--driver", shellEscape(driver))
+		cmdArgs = append(cmdArgs, "--driver", util.ShellEscape(driver))
 	}
 	if driverOpts != nil {
 		for k, v := range driverOpts {
-			cmdArgs = append(cmdArgs, "--opt", shellEscape(fmt.Sprintf("%s=%s", k, v)))
+			cmdArgs = append(cmdArgs, "--opt", util.ShellEscape(fmt.Sprintf("%s=%s", k, v)))
 		}
 	}
 	if labels != nil {
 		for k, v := range labels {
-			cmdArgs = append(cmdArgs, "--label", shellEscape(fmt.Sprintf("%s=%s", k, v)))
+			cmdArgs = append(cmdArgs, "--label", util.ShellEscape(fmt.Sprintf("%s=%s", k, v)))
 		}
 	}
 	if strings.TrimSpace(name) != "" {
-		cmdArgs = append(cmdArgs, shellEscape(name))
+		cmdArgs = append(cmdArgs, util.ShellEscape(name))
 	}
 	cmd := strings.Join(cmdArgs, " ")
 
@@ -1367,7 +1373,7 @@ func (r *defaultRunner) RemoveDockerVolume(ctx context.Context, c connector.Conn
 	if force {
 		cmdArgs = append(cmdArgs, "-f")
 	}
-	cmdArgs = append(cmdArgs, shellEscape(volumeName))
+	cmdArgs = append(cmdArgs, util.ShellEscape(volumeName))
 	cmd := strings.Join(cmdArgs, " ")
 
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute}
@@ -1391,7 +1397,7 @@ func (r *defaultRunner) ListDockerVolumes(ctx context.Context, c connector.Conne
 	cmdArgs = append(cmdArgs, "docker", "volume", "ls")
 	if filters != nil {
 		for key, value := range filters {
-			cmdArgs = append(cmdArgs, "--filter", shellEscape(fmt.Sprintf("%s=%s", key, value)))
+			cmdArgs = append(cmdArgs, "--filter", util.ShellEscape(fmt.Sprintf("%s=%s", key, value)))
 		}
 	}
 	cmdArgs = append(cmdArgs, "--format", "{{json .}}")
@@ -1459,7 +1465,7 @@ func (r *defaultRunner) InspectDockerVolume(ctx context.Context, c connector.Con
 		return nil, errors.New("volumeName cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker volume inspect %s", shellEscape(volumeName))
+	cmd := fmt.Sprintf("docker volume inspect %s", util.ShellEscape(volumeName))
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: DefaultDockerInspectTimeout}
 	stdout, stderr, err := c.Exec(ctx, cmd, execOptions)
 	if err != nil {
@@ -1542,7 +1548,7 @@ func (r *defaultRunner) DockerPrune(ctx context.Context, c connector.Connector, 
 	}
 	if filters != nil {
 		for key, value := range filters {
-			cmdArgs = append(cmdArgs, "--filter", shellEscape(fmt.Sprintf("%s=%s", key, value)))
+			cmdArgs = append(cmdArgs, "--filter", util.ShellEscape(fmt.Sprintf("%s=%s", key, value)))
 		}
 	}
 	cmd := strings.Join(cmdArgs, " ")
@@ -1671,7 +1677,7 @@ func (r *defaultRunner) ResolveDockerImage(ctx context.Context, c connector.Conn
 		return "", errors.New("imageName cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker image inspect --format '{{range .RepoDigests}}{{.}}{{println}}{{end}}' %s", shellEscape(imageName))
+	cmd := fmt.Sprintf("docker image inspect --format '{{range .RepoDigests}}{{.}}{{println}}{{end}}' %s", util.ShellEscape(imageName))
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: DefaultDockerInspectTimeout}
 
 	stdout, stderr, err := c.Exec(ctx, cmd, execOptions)
@@ -1681,7 +1687,7 @@ func (r *defaultRunner) ResolveDockerImage(ctx context.Context, c connector.Conn
 
 	output := strings.TrimSpace(string(stdout))
 	if output == "" {
-		cmdID := fmt.Sprintf("docker image inspect --format '{{.ID}}' %s", shellEscape(imageName))
+		cmdID := fmt.Sprintf("docker image inspect --format '{{.ID}}' %s", util.ShellEscape(imageName))
 		stdoutID, stderrID, errID := c.Exec(ctx, cmdID, execOptions)
 		if errID != nil {
 			return "", errors.Wrapf(errID, "failed to get ImageID for %s. Stderr: %s", imageName, string(stderrID))
@@ -1718,10 +1724,10 @@ func (r *defaultRunner) DockerSave(ctx context.Context, c connector.Connector, o
 		if strings.TrimSpace(name) == "" {
 			return errors.Errorf("image name at index %d cannot be empty", i)
 		}
-		escapedImageNames[i] = shellEscape(name)
+		escapedImageNames[i] = util.ShellEscape(name)
 	}
 
-	cmd := fmt.Sprintf("docker save -o %s %s", shellEscape(outputFilePath), strings.Join(escapedImageNames, " "))
+	cmd := fmt.Sprintf("docker save -o %s %s", util.ShellEscape(outputFilePath), strings.Join(escapedImageNames, " "))
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
 		Timeout: DefaultDockerBuildTimeout,
@@ -1743,7 +1749,7 @@ func (r *defaultRunner) DockerLoad(ctx context.Context, c connector.Connector, i
 		return errors.New("inputFilePath cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker load -i %s", shellEscape(inputFilePath))
+	cmd := fmt.Sprintf("docker load -i %s", util.ShellEscape(inputFilePath))
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
 		Timeout: DefaultDockerBuildTimeout,

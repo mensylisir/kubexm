@@ -8,6 +8,8 @@ import (
 
 func TestPathConstants(t *testing.T) {
 	t.Run("GeneralDefaultDirectories", func(t *testing.T) {
+		assert.Equal(t, ".kubexm", KubexmRootDirName, "KubexmRootDirName constant is incorrect")
+		assert.Equal(t, "logs", DefaultLogDirName, "DefaultLogDirName constant is incorrect")
 		assert.Equal(t, "certs", DefaultCertsDir)
 		assert.Equal(t, "container_runtime", DefaultContainerRuntimeDir)
 		assert.Equal(t, "kubernetes", DefaultKubernetesDir)
@@ -108,5 +110,15 @@ func TestPathConstants(t *testing.T) {
 		assert.Equal(t, "/etc/modules-load.d", ModulesLoadDefaultDir)
 		assert.Equal(t, "/etc/sysctl.d/99-kubernetes-cri.conf", KubernetesSysctlConfFile)
 		assert.Equal(t, "/etc/systemd/system/kubelet.service.d", KubeletSystemdDropinDir)
+	})
+
+	t.Run("CNIRelatedPaths", func(t *testing.T) {
+		assert.Equal(t, "/etc/cni/net.d", DefaultCNIConfDir)
+		assert.Equal(t, "/opt/cni/bin", DefaultCNIBinDir)
+	})
+
+	t.Run("HelmRelatedPaths", func(t *testing.T) {
+		assert.Equal(t, "/root/.helm", DefaultHelmHome)
+		assert.Equal(t, "/root/.cache/helm", DefaultHelmCache)
 	})
 }
