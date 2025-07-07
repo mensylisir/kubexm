@@ -26,6 +26,8 @@ type AddonConfig struct {
 	// PreInstall and PostInstall scripts. For simplicity, these are string arrays.
 	PreInstall  []string `json:"preInstall,omitempty"`
 	PostInstall []string `json:"postInstall,omitempty"`
+
+	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty" yaml:"timeoutSeconds,omitempty"`
 }
 
 // AddonSources defines the sources for an addon's manifests or charts.
@@ -89,6 +91,10 @@ func SetDefaults_AddonConfig(cfg *AddonConfig) {
 
 	if cfg.PreInstall == nil { cfg.PreInstall = []string{} }
 	if cfg.PostInstall == nil { cfg.PostInstall = []string{} }
+
+	if cfg.TimeoutSeconds == nil {
+		cfg.TimeoutSeconds = util.Int32Ptr(300) // Default to 300 seconds (5 minutes)
+	}
 }
 
 // Validate_AddonConfig validates AddonConfig.
@@ -173,5 +179,9 @@ func Validate_AddonConfig(cfg *AddonConfig, verrs *validation.ValidationErrors, 
 	}
 	if cfg.Delay != nil && *cfg.Delay < 0 {
 		verrs.Add(pathPrefix+".delay", fmt.Sprintf("cannot be negative, got %d", *cfg.Delay))
+	}
+
+	if cfg.TimeoutSeconds != nil && *cfg.TimeoutSeconds < 0 {
+		verrs.Add(pathPrefix+".timeoutSeconds", fmt.Sprintf("cannot be negative, got %d", *cfg.TimeoutSeconds))
 	}
 }

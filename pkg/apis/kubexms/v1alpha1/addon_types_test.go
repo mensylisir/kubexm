@@ -30,8 +30,9 @@ func TestSetDefaults_AddonConfig(t *testing.T) {
 					Chart: nil, // Chart is nil initially
 					Yaml:  nil, // Yaml is nil initially
 				},
-				PreInstall:  []string{},
-				PostInstall: []string{},
+				PreInstall:     []string{},
+				PostInstall:    []string{},
+				TimeoutSeconds: util.Int32Ptr(300),
 			},
 		},
 		{
@@ -47,6 +48,7 @@ func TestSetDefaults_AddonConfig(t *testing.T) {
 				Delay:       util.Int32Ptr(5),
 				PreInstall:  []string{},
 				PostInstall: []string{},
+				TimeoutSeconds: util.Int32Ptr(300),
 			},
 		},
 		{
@@ -69,8 +71,9 @@ func TestSetDefaults_AddonConfig(t *testing.T) {
 						Values: []string{},
 					},
 				},
-				PreInstall:  []string{},
-				PostInstall: []string{},
+				PreInstall:     []string{},
+				PostInstall:    []string{},
+				TimeoutSeconds: util.Int32Ptr(300),
 			},
 		},
 		{
@@ -92,8 +95,9 @@ func TestSetDefaults_AddonConfig(t *testing.T) {
 						Path: []string{},
 					},
 				},
-				PreInstall:  []string{},
-				PostInstall: []string{},
+				PreInstall:     []string{},
+				PostInstall:    []string{},
+				TimeoutSeconds: util.Int32Ptr(300),
 			},
 		},
 		{
@@ -118,8 +122,9 @@ func TestSetDefaults_AddonConfig(t *testing.T) {
 						Path: []string{"path/to/manifest.yaml"},
 					},
 				},
-				PreInstall:  []string{"echo pre"},
-				PostInstall: []string{"echo post"},
+				PreInstall:     []string{"echo pre"},
+				PostInstall:    []string{"echo post"},
+				TimeoutSeconds: util.Int32Ptr(120), // User specified value
 			},
 			expected: &AddonConfig{
 				Name:      "Full Addon",
@@ -141,8 +146,9 @@ func TestSetDefaults_AddonConfig(t *testing.T) {
 						Path: []string{"path/to/manifest.yaml"},
 					},
 				},
-				PreInstall:  []string{"echo pre"},
-				PostInstall: []string{"echo post"},
+				PreInstall:     []string{"echo pre"},
+				PostInstall:    []string{"echo post"},
+				TimeoutSeconds: util.Int32Ptr(120),
 			},
 		},
 	}
@@ -368,6 +374,37 @@ func TestValidate_AddonConfig(t *testing.T) {
 				Enabled: util.BoolPtr(false),
 			},
 			expectError: false,
+		},
+		{
+			name: "valid timeoutSeconds",
+			input: &AddonConfig{
+				Name:           "Timeout Addon",
+				Enabled:        util.BoolPtr(true),
+				Sources:        AddonSources{Yaml: &YamlSource{Path: []string{"a.yaml"}}},
+				TimeoutSeconds: util.Int32Ptr(300),
+			},
+			expectError: false,
+		},
+		{
+			name: "zero timeoutSeconds",
+			input: &AddonConfig{
+				Name:           "Zero Timeout Addon",
+				Enabled:        util.BoolPtr(true),
+				Sources:        AddonSources{Yaml: &YamlSource{Path: []string{"a.yaml"}}},
+				TimeoutSeconds: util.Int32Ptr(0),
+			},
+			expectError: false,
+		},
+		{
+			name: "negative timeoutSeconds",
+			input: &AddonConfig{
+				Name:           "Negative Timeout Addon",
+				Enabled:        util.BoolPtr(true),
+				Sources:        AddonSources{Yaml: &YamlSource{Path: []string{"a.yaml"}}},
+				TimeoutSeconds: util.Int32Ptr(-5),
+			},
+			expectError: true,
+			errorMsg:    []string{".timeoutSeconds", "cannot be negative"},
 		},
 	}
 

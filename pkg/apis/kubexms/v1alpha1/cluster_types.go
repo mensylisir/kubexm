@@ -11,15 +11,16 @@ import (
 	"github.com/mensylisir/kubexm/pkg/common" // Import common package
 )
 
-const (
-	// ClusterTypeKubeXM indicates a cluster where core components (kube-apiserver,
-	// kube-controller-manager, kube-scheduler, kube-proxy) are deployed as binaries.
-	ClusterTypeKubeXM = "kubexm"
-
-	// ClusterTypeKubeadm indicates a cluster where core components are deployed as static Pods
-	// managed by kubeadm.
-	ClusterTypeKubeadm = "kubeadm"
-)
+// Note: ClusterTypeKubeXM and ClusterTypeKubeadm constants are now defined in pkg/common/constants.go
+// const (
+// // ClusterTypeKubeXM indicates a cluster where core components (kube-apiserver,
+// // kube-controller-manager, kube-scheduler, kube-proxy) are deployed as binaries.
+// ClusterTypeKubeXM = "kubexm"
+//
+// // ClusterTypeKubeadm indicates a cluster where core components are deployed as static Pods
+// // managed by kubeadm.
+// ClusterTypeKubeadm = "kubeadm"
+// )
 
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -39,6 +40,7 @@ type Cluster struct {
 
 // ClusterSpec defines the desired state of the Kubernetes cluster.
 type ClusterSpec struct {
+	Type                 string                    `json:"type,omitempty" yaml:"type,omitempty"` // Cluster deployment type, e.g., "kubexm", "kubeadm"
 	Hosts                []HostSpec                `json:"hosts" yaml:"hosts"`
 	RoleGroups           *RoleGroupsSpec           `json:"roleGroups,omitempty" yaml:"roleGroups,omitempty"`
 	Global               *GlobalSpec               `json:"global,omitempty" yaml:"global,omitempty"`
@@ -161,6 +163,10 @@ func SetDefaults_Cluster(cfg *Cluster) {
 		return
 	}
 	cfg.SetGroupVersionKind(SchemeGroupVersion.WithKind("Cluster"))
+
+	if cfg.Spec.Type == "" { // Added default for ClusterSpec.Type
+		cfg.Spec.Type = common.ClusterTypeKubeXM
+	}
 
 	if cfg.Spec.Global == nil {
 		cfg.Spec.Global = &GlobalSpec{}
@@ -356,6 +362,12 @@ func Validate_Cluster(cfg *Cluster) error {
 	}
 	if strings.TrimSpace(cfg.ObjectMeta.Name) == "" {
 		verrs.Add("metadata.name", "cannot be empty")
+	}
+
+	// Validate ClusterSpec.Type
+	validClusterTypes := []string{common.ClusterTypeKubeXM, common.ClusterTypeKubeadm}
+	if !util.ContainsString(validClusterTypes, cfg.Spec.Type) {
+		verrs.Add("spec.type", fmt.Sprintf("invalid cluster type '%s', must be one of %v", cfg.Spec.Type, validClusterTypes))
 	}
 
 	if cfg.Spec.Global != nil {
@@ -802,6 +814,10 @@ func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *validation.ValidationEr
 
 	if cfg.CustomRoles != nil {
 		customRoleNames := make(map[string]bool)
+		predefinedRoles := []string{
+			common.RoleMaster, common.RoleWorker, common.RoleEtcd,
+			common.RoleLoadBalancer, common.RoleStorage, common.RoleRegistry,
+		}
 		for i, customRole := range cfg.CustomRoles {
 			// Use customRole.Name in the path for better identification
 			customRolePathPrefix := fmt.Sprintf("%s.customRoles[%d:%s]", pathPrefix, i, customRole.Name)
@@ -810,6 +826,9 @@ func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *validation.ValidationEr
 				customRolePathPrefixForEmptyName := fmt.Sprintf("%s.customRoles[%d]", pathPrefix, i)
 				verrs.Add(customRolePathPrefixForEmptyName+".name", "custom role name cannot be empty")
 			} else {
+				if util.ContainsString(predefinedRoles, customRole.Name) {
+					verrs.Add(customRolePathPrefix+".name", fmt.Sprintf("custom role name '%s' conflicts with a predefined role name", customRole.Name))
+				}
 				if _, exists := customRoleNames[customRole.Name]; exists {
 					verrs.Add(customRolePathPrefix+".name", fmt.Sprintf("custom role name '%s' is duplicated", customRole.Name))
 				}

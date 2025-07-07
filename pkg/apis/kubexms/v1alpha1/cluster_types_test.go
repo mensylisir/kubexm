@@ -21,6 +21,7 @@ func TestSetDefaults_Cluster_TypeMetaAndGlobal(t *testing.T) {
 
 	assert.Equal(t, SchemeGroupVersion.Group+"/"+SchemeGroupVersion.Version, cfg.APIVersion, "Default APIVersion mismatch")
 	assert.Equal(t, "Cluster", cfg.Kind, "Default Kind mismatch")
+	assert.Equal(t, common.ClusterTypeKubeXM, cfg.Spec.Type, "Default Spec.Type mismatch") // Check default Spec.Type
 	if assert.NotNil(t, cfg.Spec.Global, "Spec.Global should be initialized") {
 		assert.Equal(t, common.DefaultSSHPort, cfg.Spec.Global.Port, "Global.Port default mismatch")
 		assert.Equal(t, 30*time.Second, cfg.Spec.Global.ConnectionTimeout, "Global.ConnectionTimeout default mismatch")
@@ -185,8 +186,25 @@ func TestValidate_Cluster_TypeMeta(t *testing.T) {
    if assert.Error(t, err, "Expected validation error for TypeMeta, got nil") {
 	   verrs, ok := err.(*validation.ValidationErrors)
 	   assert.True(t, ok, "Error is not of type *validation.ValidationErrors")
-	   assert.Contains(t, verrs.Error(), "apiVersion: must be"); assert.Contains(t, verrs.Error(), "kind: must be Cluster")
+		assert.Contains(t, verrs.Error(), "apiVersion: must be")
+		assert.Contains(t, verrs.Error(), "kind: must be Cluster")
+	}
+
+	// Test Spec.Type validation
+	cfgInvalidType := newValidV1alpha1ClusterForTest()
+	cfgInvalidType.Spec.Type = "invalid-type"
+	errInvalidType := Validate_Cluster(cfgInvalidType)
+	if assert.Error(t, errInvalidType, "Expected validation error for invalid Spec.Type") {
+		verrs, ok := errInvalidType.(*validation.ValidationErrors)
+		assert.True(t, ok, "Error is not of type *validation.ValidationErrors")
+		assert.Contains(t, verrs.Error(), "spec.type: invalid cluster type 'invalid-type'")
    }
+
+	cfgKubeadmType := newValidV1alpha1ClusterForTest()
+	cfgKubeadmType.Spec.Type = common.ClusterTypeKubeadm
+	errKubeadmType := Validate_Cluster(cfgKubeadmType)
+	assert.NoError(t, errKubeadmType, "Validation should pass for Spec.Type = common.ClusterTypeKubeadm")
+
 }
 
 func TestValidate_Cluster_MissingRequiredFields(t *testing.T) {
@@ -357,6 +375,8 @@ func TestValidate_RoleGroupsSpec(t *testing.T) {
 		{"custom_role_host_empty", &RoleGroupsSpec{CustomRoles: []CustomRoleSpec{{Name: "db", Hosts: []string{"host1", " "}}}}, "spec.roleGroups.customRoles[0:db].hosts.hosts[1]: hostname cannot be empty"}, // Adjusted expected error
 		{"valid_custom_role", &RoleGroupsSpec{CustomRoles: []CustomRoleSpec{{Name: "monitoring", Hosts: []string{"mon1", "mon2"}}}}, ""},
 		{"valid_multiple_roles", &RoleGroupsSpec{Master:MasterRoleSpec{Hosts:[]string{"master1"}}, Worker:WorkerRoleSpec{Hosts:[]string{"worker1","worker2"}}, CustomRoles:[]CustomRoleSpec{{Name:"gpu-nodes",Hosts:[]string{"gpu1"}}}}, ""},
+		{"custom_role_conflicts_with_predefined_master", &RoleGroupsSpec{CustomRoles: []CustomRoleSpec{{Name: common.RoleMaster, Hosts: []string{"host1"}}}}, "custom role name 'master' conflicts with a predefined role name"},
+		{"custom_role_conflicts_with_predefined_worker", &RoleGroupsSpec{CustomRoles: []CustomRoleSpec{{Name: common.RoleWorker, Hosts: []string{"host1"}}}}, "custom role name 'worker' conflicts with a predefined role name"},
 	}
 
 	for _, tt := range tests {
