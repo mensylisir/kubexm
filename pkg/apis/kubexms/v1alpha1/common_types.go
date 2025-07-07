@@ -7,14 +7,18 @@ import (
 	"github.com/mensylisir/kubexm/pkg/util" // Ensure util is imported
 	"github.com/mensylisir/kubexm/pkg/util/validation" // Import validation
 	"fmt" // Import fmt
+	"github.com/mensylisir/kubexm/pkg/common" // Moved import here
 )
 
 // ContainerRuntimeType defines the type of container runtime.
 type ContainerRuntimeType string
 
+// Ensure common is imported if not already
+// import "github.com/mensylisir/kubexm/pkg/common" // Removed from here
+
 const (
-	ContainerRuntimeDocker     ContainerRuntimeType = "docker"
-	ContainerRuntimeContainerd ContainerRuntimeType = "containerd"
+	ContainerRuntimeDocker     ContainerRuntimeType = common.RuntimeDocker
+	ContainerRuntimeContainerd ContainerRuntimeType = common.RuntimeContainerd
 	// Add other runtimes like cri-o, isula if supported by YAML
 )
 
@@ -40,17 +44,17 @@ func SetDefaults_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig) {
 		return
 	}
 	if cfg.Type == "" {
-		cfg.Type = ContainerRuntimeContainerd // Default to Containerd
+		cfg.Type = ContainerRuntimeContainerd // Default to Containerd, which uses common.RuntimeContainerd
 	}
 
-	if cfg.Type == ContainerRuntimeDocker {
+	if cfg.Type == common.RuntimeDocker { // Use common constant
 		if cfg.Docker == nil {
 			cfg.Docker = &DockerConfig{}
 		}
 		SetDefaults_DockerConfig(cfg.Docker)
 	}
 
-	if cfg.Type == ContainerRuntimeContainerd {
+	if cfg.Type == common.RuntimeContainerd { // Use common constant
 		if cfg.Containerd == nil {
 			cfg.Containerd = &ContainerdConfig{}
 		}
@@ -66,11 +70,11 @@ func Validate_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig, verrs *validat
 	}
 	// Type should be defaulted by SetDefaults_ContainerRuntimeConfig before validation.
 	// So, it should be either Docker or Containerd.
-	if cfg.Type != ContainerRuntimeDocker && cfg.Type != ContainerRuntimeContainerd {
-		verrs.Add(pathPrefix+".type", fmt.Sprintf("invalid container runtime type '%s', must be '%s' or '%s'", cfg.Type, ContainerRuntimeDocker, ContainerRuntimeContainerd))
+	if cfg.Type != common.RuntimeDocker && cfg.Type != common.RuntimeContainerd { // Use common constants
+		verrs.Add(pathPrefix+".type", fmt.Sprintf("invalid container runtime type '%s', must be '%s' or '%s'", cfg.Type, common.RuntimeDocker, common.RuntimeContainerd))
 	}
 
-	if cfg.Type == ContainerRuntimeDocker {
+	if cfg.Type == common.RuntimeDocker { // Use common constant
 		if cfg.Docker == nil {
 			// Defaulting handles this
 		} else {
@@ -80,7 +84,7 @@ func Validate_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig, verrs *validat
 		verrs.Add(pathPrefix+".docker", "can only be set if type is 'docker'")
 	}
 
-	if cfg.Type == ContainerRuntimeContainerd {
+	if cfg.Type == common.RuntimeContainerd { // Use common constant
 		if cfg.Containerd == nil {
 			// Defaulting handles this
 		} else {

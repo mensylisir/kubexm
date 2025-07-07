@@ -20,6 +20,10 @@ const (
 	KubeProxyModeIPTables = "iptables"
 	KubeProxyModeIPVS    = "ipvs"
 
+	// Cluster Types
+	ClusterTypeKubeXM  = "kubexm"
+	ClusterTypeKubeadm = "kubeadm"
+
 	// --- Status Constants ---
 	StatusPending    = "Pending"
 	StatusProcessing = "Processing"
@@ -36,6 +40,18 @@ const (
 	CNICilium   = "cilium"
 	CNIMultus   = "multus"
 	// Add other CNI plugin names as needed, e.g. KubeOvn, Hybridnet
+
+	// --- Cilium Mode Constants ---
+	CiliumTunnelModeVXLAN     = "vxlan"
+	CiliumTunnelModeGeneve    = "geneve"
+	CiliumTunnelModeDisabled  = "disabled"
+
+	CiliumKPRModeProbe    = "probe"
+	CiliumKPRModeStrict   = "strict"
+	CiliumKPRModeDisabled = "disabled"
+
+	CiliumIdentityModeCRD     = "crd"
+	CiliumIdentityModeKVStore = "kvstore"
 
 	// --- Kernel Modules (consider moving to a system_constants.go if it grows) ---
 	KernelModuleBrNetfilter = "br_netfilter"
@@ -94,6 +110,11 @@ const (
 	HostTypeSSH    = "ssh"
 	HostTypeLocal  = "local"
 	DefaultArch    = "amd64"
+
+	// --- Container Runtimes ---
+	RuntimeDocker     = "docker"
+	RuntimeContainerd = "containerd"
+	// Add other runtime names like RuntimeCRIO = "cri-o" if needed
 
 	// --- Containerd ---
 	// ContainerdDefaultConfigFile is defined in paths.go

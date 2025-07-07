@@ -304,14 +304,14 @@ func TestValidate_KubeOvnConfig(t *testing.T) {
 		{"valid_enabled_defaults", &KubeOvnConfig{Enabled: util.BoolPtr(true)}, ""}, // Defaults applied by parent
 		{"valid_full", &KubeOvnConfig{
 			Enabled:    util.BoolPtr(true),
-			JoinCIDR:   util.StringPtr("100.64.0.0/16"),
-			Label:      util.StringPtr("custom/label"),
-			TunnelType: util.StringPtr("vxlan"),
+			JoinCIDR:   util.StrPtr("100.64.0.0/16"),
+			Label:      util.StrPtr("custom/label"),
+			TunnelType: util.StrPtr("vxlan"),
 			EnableSSL:  util.BoolPtr(true),
 		}, ""},
-		{"enabled_invalid_joinCIDR", &KubeOvnConfig{Enabled: util.BoolPtr(true), JoinCIDR: util.StringPtr("not-a-cidr")}, ".joinCIDR: invalid CIDR format"},
-		{"enabled_empty_label", &KubeOvnConfig{Enabled: util.BoolPtr(true), Label: util.StringPtr(" ")}, ".label: cannot be empty if specified"},
-		{"enabled_invalid_tunnelType", &KubeOvnConfig{Enabled: util.BoolPtr(true), TunnelType: util.StringPtr("gre")}, ".tunnelType: invalid type 'gre'"},
+		{"enabled_invalid_joinCIDR", &KubeOvnConfig{Enabled: util.BoolPtr(true), JoinCIDR: util.StrPtr("not-a-cidr")}, ".joinCIDR: invalid CIDR format"},
+		{"enabled_empty_label", &KubeOvnConfig{Enabled: util.BoolPtr(true), Label: util.StrPtr(" ")}, ".label: cannot be empty if specified"},
+		{"enabled_invalid_tunnelType", &KubeOvnConfig{Enabled: util.BoolPtr(true), TunnelType: util.StrPtr("gre")}, ".tunnelType: invalid type 'gre'"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -341,11 +341,11 @@ func TestValidate_HybridnetConfig(t *testing.T) {
 		{"valid_enabled_defaults", &HybridnetConfig{Enabled: util.BoolPtr(true)}, ""}, // Defaults applied by parent
 		{"valid_full", &HybridnetConfig{
 			Enabled:             util.BoolPtr(true),
-			DefaultNetworkType:  util.StringPtr("Underlay"),
+			DefaultNetworkType:  util.StrPtr("Underlay"),
 			EnableNetworkPolicy: util.BoolPtr(false),
 			InitDefaultNetwork:  util.BoolPtr(false),
 		}, ""},
-		{"enabled_invalid_networkType", &HybridnetConfig{Enabled: util.BoolPtr(true), DefaultNetworkType: util.StringPtr("Mixed")}, ".defaultNetworkType: invalid type 'Mixed'"},
+		{"enabled_invalid_networkType", &HybridnetConfig{Enabled: util.BoolPtr(true), DefaultNetworkType: util.StrPtr("Mixed")}, ".defaultNetworkType: invalid type 'Mixed'"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -485,7 +485,7 @@ func TestValidate_CalicoConfig(t *testing.T) {
 			DefaultIPPOOL:     util.BoolPtr(true),
 			EnableTypha:       util.BoolPtr(true),
 			TyphaReplicas:     util.IntPtr(3),
-			LogSeverityScreen: util.StringPtr("Debug"),
+			LogSeverityScreen: util.StrPtr("Debug"),
 			IPPools: []CalicoIPPool{
 				{Name: "pool1", CIDR: "10.0.1.0/24", Encapsulation: "IPIP", BlockSize: util.IntPtr(26)},
 				{Name: "pool2", CIDR: "10.0.2.0/24", Encapsulation: "VXLAN", NatOutgoing: util.BoolPtr(false)},
@@ -497,7 +497,7 @@ func TestValidate_CalicoConfig(t *testing.T) {
 		{"typha_enabled_invalid_replicas_zero", &CalicoConfig{EnableTypha: util.BoolPtr(true), TyphaReplicas: util.IntPtr(0)}, ".typhaReplicas: must be positive if Typha is enabled"},
 		{"typha_enabled_invalid_replicas_negative", &CalicoConfig{EnableTypha: util.BoolPtr(true), TyphaReplicas: util.IntPtr(-1)}, ".typhaReplicas: must be positive if Typha is enabled"},
 		{"typha_enabled_nil_replicas", &CalicoConfig{EnableTypha: util.BoolPtr(true), TyphaReplicas: nil}, ".typhaReplicas: must be positive if Typha is enabled"}, // After defaults, this would be 2. Test assumes direct validation.
-		{"invalid_logSeverityScreen", &CalicoConfig{LogSeverityScreen: util.StringPtr("Verbose")}, ".logSeverityScreen: invalid: 'Verbose'"},
+		{"invalid_logSeverityScreen", &CalicoConfig{LogSeverityScreen: util.StrPtr("Verbose")}, ".logSeverityScreen: invalid: 'Verbose'"},
 		{"ippool_empty_cidr", &CalicoConfig{IPPools: []CalicoIPPool{{Name: "p1", CIDR: ""}}}, ".ipPools[0:p1].cidr: cannot be empty"},
 		{"ippool_invalid_cidr", &CalicoConfig{IPPools: []CalicoIPPool{{Name: "p1", CIDR: "not-a-cidr"}}}, ".ipPools[0:p1].cidr: invalid CIDR 'not-a-cidr'"},
 		{"ippool_invalid_blockSize_low", &CalicoConfig{IPPools: []CalicoIPPool{{CIDR: "1.1.1.0/24", BlockSize: util.IntPtr(19)}}}, ".ipPools[0:].blockSize: must be between 20 and 32"},
