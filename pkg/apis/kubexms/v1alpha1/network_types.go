@@ -183,9 +183,9 @@ type CiliumConfig struct {
 
 	// EnableBPFMasquerade enables eBPF-based masquerading for traffic leaving the cluster.
 	// This is more efficient than traditional iptables-based masquerading.
-	// Defaults to false.
+	// If not specified, defaults to true. User can explicitly set to false.
 	// +optional
-	EnableBPFMasquerade bool `json:"enableBPFMasquerade,omitempty"`
+	EnableBPFMasquerade *bool `json:"enableBPFMasquerade,omitempty"`
 
 	// IdentityAllocationMode specifies how Cilium identities are allocated.
 	// "crd" is the standard mode. "kvstore" can be used for very large clusters.

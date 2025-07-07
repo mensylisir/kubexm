@@ -87,4 +87,32 @@ const (
 	ExternalLBTypeKubexmKH   = "kubexm-kh" // KubeXMS managed Keepalived + HAProxy
 	ExternalLBTypeKubexmKN   = "kubexm-kn" // KubeXMS managed Keepalived + Nginx
 	ExternalLBTypeExternal   = "external"  // User-provided external LB
+
+	// --- Host Defaults ---
+	DefaultSSHPort = 22
+	DefaultWorkDir = "/tmp/kubexms_work" // Default working directory on remote hosts / or local if applicable
+	HostTypeSSH    = "ssh"
+	HostTypeLocal  = "local"
+	DefaultArch    = "amd64"
+
+	// --- Containerd ---
+	// ContainerdDefaultConfigFile is defined in paths.go
+	ContainerdPluginCRI         = "io.containerd.grpc.v1.cri"
+
+	// --- DNS Defaults ---
+	DefaultCoreDNSUpstreamGoogle      = "8.8.8.8"
+	DefaultCoreDNSUpstreamCloudflare  = "1.1.1.1"
+	DefaultExternalZoneCacheSeconds = 300
+
+	// --- Docker Defaults ---
+	DockerLogOptMaxSizeDefault          = "100m"
+	DockerLogOptMaxFileDefault          = "3"
+	DockerMaxConcurrentDownloadsDefault = 3
+	DockerMaxConcurrentUploadsDefault   = 5
+	DefaultDockerBridgeName             = "docker0"
+	DockerLogDriverJSONFile             = "json-file"
+	DockerLogDriverJournald             = "journald"
+	DockerLogDriverSyslog               = "syslog"
+	DockerLogDriverFluentd              = "fluentd"
+	DockerLogDriverNone                 = "none"
 )

@@ -91,17 +91,17 @@ func SetDefaults_DockerConfig(cfg *DockerConfig) {
 	if cfg.ExecOpts == nil { cfg.ExecOpts = []string{} }
 	if cfg.LogOpts == nil {
 		cfg.LogOpts = map[string]string{
-			"max-size": "100m",
-			"max-file": "3",
+			"max-size": common.DockerLogOptMaxSizeDefault,
+			"max-file": common.DockerLogOptMaxFileDefault,
 		}
 	}
 	if cfg.DefaultAddressPools == nil { cfg.DefaultAddressPools = []DockerAddressPool{} }
 	if cfg.StorageOpts == nil { cfg.StorageOpts = []string{} }
 	if cfg.Runtimes == nil { cfg.Runtimes = make(map[string]DockerRuntime) }
 	if cfg.Auths == nil { cfg.Auths = make(map[string]DockerRegistryAuth) }
-	if cfg.MaxConcurrentDownloads == nil { cfg.MaxConcurrentDownloads = util.IntPtr(3) } // Docker default
-	if cfg.MaxConcurrentUploads == nil { cfg.MaxConcurrentUploads = util.IntPtr(5) }   // Docker default
-	if cfg.Bridge == nil { cfg.Bridge = util.StrPtr("docker0") }
+	if cfg.MaxConcurrentDownloads == nil { cfg.MaxConcurrentDownloads = util.IntPtr(common.DockerMaxConcurrentDownloadsDefault) }
+	if cfg.MaxConcurrentUploads == nil { cfg.MaxConcurrentUploads = util.IntPtr(common.DockerMaxConcurrentUploadsDefault) }
+	if cfg.Bridge == nil { cfg.Bridge = util.StrPtr(common.DefaultDockerBridgeName) }
 	// DefaultRuntime: Docker's default is typically "runc". Let Docker handle if not specified.
 
 	if cfg.InstallCRIDockerd == nil {
@@ -109,7 +109,7 @@ func SetDefaults_DockerConfig(cfg *DockerConfig) {
 	}
 	// No default for CRIDockerdVersion, let install logic handle it or require user input if specific version needed.
 
-	if cfg.LogDriver == nil { cfg.LogDriver = util.StrPtr("json-file") }
+	if cfg.LogDriver == nil { cfg.LogDriver = util.StrPtr(common.DockerLogDriverJSONFile) }
 	// Default DataRoot depends on OS, often /var/lib/docker. Let Docker daemon handle its own default if not set.
 	// if cfg.DataRoot == nil { cfg.DataRoot = util.StrPtr("/var/lib/docker") } // Example if we wanted to enforce it
 
@@ -151,12 +151,12 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *validation.ValidationErrors
 		}
 	}
 	if cfg.LogDriver != nil {
-	   validLogDrivers := []string{"json-file", "journald", "syslog", "fluentd", "none", ""}
-	   isValid := false
-	   for _, v := range validLogDrivers { if *cfg.LogDriver == v { isValid = true; break } }
-	   if !isValid {
-			verrs.Add(pathPrefix+".logDriver", fmt.Sprintf("invalid log driver '%s'", *cfg.LogDriver))
-	   }
+		validLogDrivers := []string{common.DockerLogDriverJSONFile, common.DockerLogDriverJournald, common.DockerLogDriverSyslog, common.DockerLogDriverFluentd, common.DockerLogDriverNone, ""}
+		isValid := false
+		for _, v := range validLogDrivers { if *cfg.LogDriver == v { isValid = true; break } }
+		if !isValid {
+			verrs.Add(pathPrefix+".logDriver", fmt.Sprintf("invalid log driver '%s', must be one of %v or empty for default", *cfg.LogDriver, validLogDrivers))
+		}
 	}
 	if cfg.BIP != nil && !util.IsValidCIDR(*cfg.BIP) {
 		verrs.Add(pathPrefix+".bip", fmt.Sprintf("invalid CIDR format '%s'", *cfg.BIP))
