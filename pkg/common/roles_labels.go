@@ -8,8 +8,11 @@ const (
 	RoleLoadBalancer   = "loadbalancer"
 	RoleStorage        = "storage"
 	RoleRegistry       = "registry"
-	// RoleControlNode is defined in general.go
+	ControlNodeRole    = "control-node" // Moved from general.go
 )
+
+// ControlNodeHostName is the special hostname used for operations running locally on the control machine.
+const ControlNodeHostName = "kubexm-control-node" // Moved from general.go
 
 // --- Kubernetes Node Labels & Taints ---
 const (
@@ -27,4 +30,13 @@ const (
 	LabelManagedBy = "app.kubernetes.io/managed-by"
 	// LabelValueKubexm is the value for the LabelManagedBy label.
 	LabelValueKubexm = "kubexm"
+
+	// Well-Known Topology Labels
+	LabelTopologyZone   = "topology.kubernetes.io/zone"
+	LabelTopologyRegion = "topology.kubernetes.io/region"
+
+	// Standard Taint Effects
+	TaintEffectNoSchedule        = "NoSchedule"
+	TaintEffectPreferNoSchedule  = "PreferNoSchedule"
+	TaintEffectNoExecute         = "NoExecute"
 )

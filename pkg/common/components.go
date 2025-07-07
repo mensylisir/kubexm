@@ -44,14 +44,21 @@ const (
 	HAProxyDefaultFrontendPort       = 6443 // Often same as APIServer for external LB
 )
 
-// --- Kernel Modules ---
+// --- Common Tools and Utils ---
 const (
-	KernelModuleBrNetfilter = "br_netfilter"
-	KernelModuleIpvs        = "ip_vs"
+	Helm       = "helm"
+	Crictl     = "crictl"
+	Socat      = "socat"
+	Conntrack  = "conntrack"
+	IPSet      = "ipset"
+	Ipvsadm    = "ipvsadm"
+	NfsUtils   = "nfs-utils"   // or nfs-common on Debian/Ubuntu
+	CephCommon = "ceph-common" // For CephFS and RBD
 )
 
-// --- Preflight Check related defaults ---
+// --- Image Repositories and Default Versions (where applicable) ---
 const (
-	DefaultMinCPUCores   = 2
-	DefaultMinMemoryMB   = 2048 // 2GB
+	CoreDNSImageRepository   = "registry.k8s.io/coredns" // Base repository
+	PauseImageRepository     = "registry.k8s.io/pause"
+	DefaultPauseImageVersion = "3.9" // Example, should be updated to a recent stable one
 )

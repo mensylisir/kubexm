@@ -102,21 +102,42 @@ func TestComponentConstants(t *testing.T) {
 		}
 	})
 
-	t.Run("KernelModules", func(t *testing.T) {
-		if KernelModuleBrNetfilter != "br_netfilter" {
-			t.Errorf("KernelModuleBrNetfilter constant is incorrect: got %s, want br_netfilter", KernelModuleBrNetfilter)
+	t.Run("CommonToolsAndUtils", func(t *testing.T) {
+		if Helm != "helm" {
+			t.Errorf("Helm constant is incorrect: got %s", Helm)
 		}
-		if KernelModuleIpvs != "ip_vs" {
-			t.Errorf("KernelModuleIpvs constant is incorrect: got %s, want ip_vs", KernelModuleIpvs)
+		if Crictl != "crictl" {
+			t.Errorf("Crictl constant is incorrect: got %s", Crictl)
+		}
+		if Socat != "socat" {
+			t.Errorf("Socat constant is incorrect: got %s", Socat)
+		}
+		if Conntrack != "conntrack" {
+			t.Errorf("Conntrack constant is incorrect: got %s", Conntrack)
+		}
+		if IPSet != "ipset" {
+			t.Errorf("IPSet constant is incorrect: got %s", IPSet)
+		}
+		if Ipvsadm != "ipvsadm" {
+			t.Errorf("Ipvsadm constant is incorrect: got %s", Ipvsadm)
+		}
+		if NfsUtils != "nfs-utils" {
+			t.Errorf("NfsUtils constant is incorrect: got %s", NfsUtils)
+		}
+		if CephCommon != "ceph-common" {
+			t.Errorf("CephCommon constant is incorrect: got %s", CephCommon)
 		}
 	})
 
-	t.Run("PreflightDefaults", func(t *testing.T) {
-		if DefaultMinCPUCores != 2 {
-			t.Errorf("DefaultMinCPUCores constant is incorrect: got %d, want 2", DefaultMinCPUCores)
+	t.Run("ImageRepositoriesAndVersions", func(t *testing.T) {
+		if CoreDNSImageRepository != "registry.k8s.io/coredns" {
+			t.Errorf("CoreDNSImageRepository constant is incorrect: got %s", CoreDNSImageRepository)
 		}
-		if DefaultMinMemoryMB != 2048 {
-			t.Errorf("DefaultMinMemoryMB constant is incorrect: got %d, want 2048", DefaultMinMemoryMB)
+		if PauseImageRepository != "registry.k8s.io/pause" {
+			t.Errorf("PauseImageRepository constant is incorrect: got %s", PauseImageRepository)
+		}
+		if DefaultPauseImageVersion != "3.9" { // Example, adjust if changed
+			t.Errorf("DefaultPauseImageVersion constant is incorrect: got %s", DefaultPauseImageVersion)
 		}
 	})
 }

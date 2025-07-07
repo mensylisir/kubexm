@@ -38,3 +38,24 @@ const (
 	KubeletCSICertsVolumeName = "kubelet-csi-certs"
 	KubeletCSICertsMountPath  = "/var/lib/kubelet/plugins_registry"
 )
+
+// --- Kubeadm ---
+const (
+	KubeadmInitConfigFileName               = "init-config.yaml"
+	KubeadmJoinConfigFileName               = "join-config.yaml"
+	KubeadmResetCommand                     = "reset"
+	KubeadmTokenDefaultTTL                  = "24h0m0s"
+	KubeadmDiscoveryTokenCACertHashPrefix = "sha256:"
+)
+
+// --- Certificate Common Names and Organizations ---
+const (
+	DefaultCertificateOrganization = "system:masters"
+	KubeletCertificateOrganization = "system:nodes"
+	KubeletCertificateCNPrefix     = "system:node:"
+)
+
+// --- Common Annotation Keys ---
+const (
+	AnnotationNodeKubeadmAlphaExcludeFromExternalLB = "node.kubernetes.io/exclude-from-external-load-balancers"
+)
