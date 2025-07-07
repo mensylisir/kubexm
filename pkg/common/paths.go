@@ -2,6 +2,10 @@ package common
 
 const (
 	// --- General Default Directories (some might be relative to KUBEXM work dir) ---
+	// KubexmRootDirName is the default root directory name for kubexm operations.
+	KubexmRootDirName = ".kubexm"
+	// DefaultLogDirName is the default directory name for logs within the KubexmRootDirName.
+	DefaultLogDirName = "logs"
 	// DefaultCertsDir is the default directory name for certificates.
 	DefaultCertsDir = "certs"
 	// DefaultContainerRuntimeDir is the default directory for container runtime artifacts.
@@ -125,4 +129,16 @@ const (
 	// KubernetesSysctlConfFile is a common pattern for K8s sysctl settings.
 	KubernetesSysctlConfFile  = "/etc/sysctl.d/99-kubernetes-cri.conf"
 	KubeletSystemdDropinDir   = "/etc/systemd/system/kubelet.service.d"
+)
+
+// --- CNI Related Paths ---
+const (
+	DefaultCNIConfDir = "/etc/cni/net.d"
+	DefaultCNIBinDir  = "/opt/cni/bin"
+)
+
+// --- Helm Related Paths ---
+const (
+	DefaultHelmHome  = "/root/.helm" // Or user specific path
+	DefaultHelmCache = "/root/.cache/helm" // Or user specific path
 )

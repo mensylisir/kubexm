@@ -14,6 +14,11 @@ func TestRolesLabelsConstants(t *testing.T) {
 		assert.Equal(t, "loadbalancer", RoleLoadBalancer, "RoleLoadBalancer constant is incorrect")
 		assert.Equal(t, "storage", RoleStorage, "RoleStorage constant is incorrect")
 		assert.Equal(t, "registry", RoleRegistry, "RoleRegistry constant is incorrect")
+		assert.Equal(t, "control-node", ControlNodeRole, "ControlNodeRole constant is incorrect")
+	})
+
+	t.Run("ControlNodeIdentifiers", func(t *testing.T) {
+		assert.Equal(t, "kubexm-control-node", ControlNodeHostName, "ControlNodeHostName constant is incorrect")
 	})
 
 	t.Run("KubernetesNodeLabelsAndTaints", func(t *testing.T) {
@@ -23,5 +28,16 @@ func TestRolesLabelsConstants(t *testing.T) {
 		assert.Equal(t, "node-role.kubernetes.io/control-plane", TaintKeyNodeRoleControlPlane, "TaintKeyNodeRoleControlPlane constant is incorrect")
 		assert.Equal(t, "app.kubernetes.io/managed-by", LabelManagedBy, "LabelManagedBy constant is incorrect")
 		assert.Equal(t, "kubexm", LabelValueKubexm, "LabelValueKubexm constant is incorrect")
+	})
+
+	t.Run("WellKnownTopologyLabels", func(t *testing.T) {
+		assert.Equal(t, "topology.kubernetes.io/zone", LabelTopologyZone)
+		assert.Equal(t, "topology.kubernetes.io/region", LabelTopologyRegion)
+	})
+
+	t.Run("StandardTaintEffects", func(t *testing.T) {
+		assert.Equal(t, "NoSchedule", TaintEffectNoSchedule)
+		assert.Equal(t, "PreferNoSchedule", TaintEffectPreferNoSchedule)
+		assert.Equal(t, "NoExecute", TaintEffectNoExecute)
 	})
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // DNS defines the overall DNS configuration for the cluster.
@@ -80,12 +81,8 @@ func SetDefaults_DNS(cfg *DNS) {
 	if cfg == nil {
 		return
 	}
-
-	// Defaults for CoreDNS
-	// No explicit default for cfg.CoreDNS itself, assume if DNS struct is present, CoreDNS part can be too.
-	// If user provides coredns: {} then cfg.CoreDNS will be non-nil.
 	if cfg.CoreDNS.UpstreamDNSServers == nil {
-		cfg.CoreDNS.UpstreamDNSServers = []string{"8.8.8.8", "1.1.1.1"} // Common public DNS
+		cfg.CoreDNS.UpstreamDNSServers = []string{"8.8.8.8", "1.1.1.1"}
 	}
 	if cfg.CoreDNS.ExternalZones == nil {
 		cfg.CoreDNS.ExternalZones = []ExternalZone{}
@@ -93,15 +90,12 @@ func SetDefaults_DNS(cfg *DNS) {
 	for i := range cfg.CoreDNS.ExternalZones {
 		SetDefaults_ExternalZone(&cfg.CoreDNS.ExternalZones[i])
 	}
-
-	// Defaults for NodeLocalDNS
 	if cfg.NodeLocalDNS.ExternalZones == nil {
 		cfg.NodeLocalDNS.ExternalZones = []ExternalZone{}
 	}
 	for i := range cfg.NodeLocalDNS.ExternalZones {
 		SetDefaults_ExternalZone(&cfg.NodeLocalDNS.ExternalZones[i])
 	}
-	// DNSEtcHosts and NodeEtcHosts are strings, typically no complex defaults needed unless specific content is expected.
 }
 
 // SetDefaults_ExternalZone sets default values for an ExternalZone.
@@ -115,7 +109,7 @@ func SetDefaults_ExternalZone(cfg *ExternalZone) {
 	if cfg.Nameservers == nil {
 		cfg.Nameservers = []string{}
 	}
-	if cfg.Cache == 0 { // Assuming 0 means not set, default to a sensible value like 300s
+	if cfg.Cache == 0 {
 		cfg.Cache = 300
 	}
 	if cfg.Rewrite == nil {
@@ -124,26 +118,18 @@ func SetDefaults_ExternalZone(cfg *ExternalZone) {
 }
 
 // Validate_DNS validates the DNS configuration.
-func Validate_DNS(cfg *DNS, verrs *ValidationErrors, pathPrefix string) {
+func Validate_DNS(cfg *DNS, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
-		// If the entire DNS section is optional and not provided, this is fine.
-		// If it's required, the caller (Validate_Cluster) should check for cfg != nil.
 		return
 	}
 
-	// Validate CoreDNS
 	coreDNSPath := pathPrefix + ".coredns"
 	if cfg.CoreDNS.UpstreamDNSServers != nil {
-		if len(cfg.CoreDNS.UpstreamDNSServers) == 0 {
-			// Allow empty if user explicitly provides empty list, otherwise default would fill it.
-			// Or enforce at least one if that's a requirement. For now, allow empty if set.
-		}
 		for i, server := range cfg.CoreDNS.UpstreamDNSServers {
 			if strings.TrimSpace(server) == "" {
-				verrs.Add("%s.upstreamDNSServers[%d]: server address cannot be empty", coreDNSPath, i)
+				verrs.Add(fmt.Sprintf("%s.upstreamDNSServers[%d]", coreDNSPath, i), "server address cannot be empty")
 			} else if !util.ValidateHostPortString(server) && !util.IsValidIP(server) && !util.IsValidDomainName(server) {
-				// Try ValidateHostPortString first, if that fails, it might be a simple IP or Domain without port
-				verrs.Add("%s.upstreamDNSServers[%d]: invalid server address format '%s'", coreDNSPath, i, server)
+				verrs.Add(fmt.Sprintf("%s.upstreamDNSServers[%d]", coreDNSPath, i), fmt.Sprintf("invalid server address format '%s'", server))
 			}
 		}
 	}
@@ -151,65 +137,58 @@ func Validate_DNS(cfg *DNS, verrs *ValidationErrors, pathPrefix string) {
 		ezPath := fmt.Sprintf("%s.externalZones[%d]", coreDNSPath, i)
 		Validate_ExternalZone(&ez, verrs, ezPath)
 	}
-	// AdditionalConfigs and RewriteBlock are free-form strings, harder to validate structurally.
 
-	// Validate NodeLocalDNS
 	nodeLocalDNSPath := pathPrefix + ".nodelocaldns"
 	for i, ez := range cfg.NodeLocalDNS.ExternalZones {
 		ezPath := fmt.Sprintf("%s.externalZones[%d]", nodeLocalDNSPath, i)
 		Validate_ExternalZone(&ez, verrs, ezPath)
 	}
-	// DNSEtcHosts and NodeEtcHosts are strings. Could validate for non-whitespace if set and not empty.
 	if cfg.DNSEtcHosts != "" && strings.TrimSpace(cfg.DNSEtcHosts) == "" {
-		verrs.Add("%s.dnsEtcHosts: cannot be only whitespace if specified", pathPrefix)
+		verrs.Add(pathPrefix+".dnsEtcHosts", "cannot be only whitespace if specified")
 	}
 	if cfg.NodeEtcHosts != "" && strings.TrimSpace(cfg.NodeEtcHosts) == "" {
-		verrs.Add("%s.nodeEtcHosts: cannot be only whitespace if specified", pathPrefix)
+		verrs.Add(pathPrefix+".nodeEtcHosts", "cannot be only whitespace if specified")
 	}
-
 }
 
 // Validate_ExternalZone validates an ExternalZone configuration.
-func Validate_ExternalZone(cfg *ExternalZone, verrs *ValidationErrors, pathPrefix string) {
+func Validate_ExternalZone(cfg *ExternalZone, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
 	if len(cfg.Zones) == 0 {
-		verrs.Add("%s.zones: must contain at least one zone name", pathPrefix)
+		verrs.Add(pathPrefix+".zones", "must contain at least one zone name")
 	}
 	for i, zone := range cfg.Zones {
 		if strings.TrimSpace(zone) == "" {
-			verrs.Add("%s.zones[%d]: zone name cannot be empty", pathPrefix, i)
-		} else if !util.IsValidDomainName(zone) { // Use util.IsValidDomainName
-			verrs.Add("%s.zones[%d]: invalid domain name format '%s'", pathPrefix, i, zone)
+			verrs.Add(fmt.Sprintf("%s.zones[%d]", pathPrefix, i), "zone name cannot be empty")
+		} else if !util.IsValidDomainName(zone) {
+			verrs.Add(fmt.Sprintf("%s.zones[%d]", pathPrefix, i), fmt.Sprintf("invalid domain name format '%s'", zone))
 		}
 	}
 
 	if len(cfg.Nameservers) == 0 {
-		verrs.Add("%s.nameservers: must contain at least one nameserver", pathPrefix)
+		verrs.Add(pathPrefix+".nameservers", "must contain at least one nameserver")
 	}
 	for i, ns := range cfg.Nameservers {
 		if strings.TrimSpace(ns) == "" {
-			verrs.Add("%s.nameservers[%d]: nameserver address cannot be empty", pathPrefix, i)
+			verrs.Add(fmt.Sprintf("%s.nameservers[%d]", pathPrefix, i), "nameserver address cannot be empty")
 		} else if !util.ValidateHostPortString(ns) && !util.IsValidIP(ns) && !util.IsValidDomainName(ns) {
-			// Try ValidateHostPortString first, if that fails, it might be a simple IP or Domain without port
-			verrs.Add("%s.nameservers[%d]: invalid nameserver address format '%s'", pathPrefix, i, ns)
+			verrs.Add(fmt.Sprintf("%s.nameservers[%d]", pathPrefix, i), fmt.Sprintf("invalid nameserver address format '%s'", ns))
 		}
 	}
 
 	if cfg.Cache < 0 {
-		verrs.Add("%s.cache: cannot be negative, got %d", pathPrefix, cfg.Cache)
+		verrs.Add(pathPrefix+".cache", fmt.Sprintf("cannot be negative, got %d", cfg.Cache))
 	}
 
 	for i, rule := range cfg.Rewrite {
 		rulePath := fmt.Sprintf("%s.rewrite[%d]", pathPrefix, i)
 		if strings.TrimSpace(rule.FromPattern) == "" {
-			verrs.Add("%s.fromPattern: cannot be empty", rulePath)
+			verrs.Add(rulePath+".fromPattern", "cannot be empty")
 		}
 		if strings.TrimSpace(rule.ToTemplate) == "" {
-			verrs.Add("%s.toTemplate: cannot be empty", rulePath)
+			verrs.Add(rulePath+".toTemplate", "cannot be empty")
 		}
-		// Further regex validation for FromPattern could be added if necessary,
-		// but that might be too complex for this level of validation.
 	}
 }

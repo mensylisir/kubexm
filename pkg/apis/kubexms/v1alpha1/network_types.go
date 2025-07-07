@@ -5,6 +5,7 @@ import (
 	"net" // For CIDR parsing and overlap checks
 	"strings"
 	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 var (
@@ -449,60 +450,51 @@ func SetDefaults_HybridnetConfig(cfg *HybridnetConfig) {
 }
 
 // --- Validation Functions ---
-func Validate_NetworkConfig(cfg *NetworkConfig, verrs *ValidationErrors, pathPrefix string) {
+// Added k8sSpec *KubernetesConfig to match the call from cluster_types.go
+func Validate_NetworkConfig(cfg *NetworkConfig, verrs *validation.ValidationErrors, pathPrefix string, k8sSpec *KubernetesConfig) {
 	if cfg == nil {
-		verrs.Add("%s: network configuration section cannot be nil", pathPrefix)
+		verrs.Add(pathPrefix, "network configuration section cannot be nil")
 		return
 	}
 
-	// podsCIDR := cfg.KubePodsCIDR // This line is fine
-	// if podsCIDR == "" && k8sSpec != nil { // k8sSpec no longer provides PodSubnet
-	//	podsCIDR = k8sSpec.PodSubnet
-	// }
 	if strings.TrimSpace(cfg.KubePodsCIDR) == "" {
-		verrs.Add("%s.kubePodsCIDR: cannot be empty", pathPrefix)
+		verrs.Add(pathPrefix+".kubePodsCIDR", "cannot be empty")
 	} else if !util.IsValidCIDR(cfg.KubePodsCIDR) {
-		verrs.Add("%s.kubePodsCIDR: invalid CIDR format '%s'", pathPrefix, cfg.KubePodsCIDR)
+		verrs.Add(pathPrefix+".kubePodsCIDR", fmt.Sprintf("invalid CIDR format '%s'", cfg.KubePodsCIDR))
 	}
 
-	// serviceCIDR := cfg.KubeServiceCIDR // This line is fine
-	// if serviceCIDR == "" && k8sSpec != nil { // k8sSpec no longer provides ServiceSubnet
-	//	serviceCIDR = k8sSpec.ServiceSubnet
-	// }
-	if cfg.KubeServiceCIDR != "" && !util.IsValidCIDR(cfg.KubeServiceCIDR) { // KubeServiceCIDR can be empty
-		verrs.Add("%s.kubeServiceCIDR: invalid CIDR format '%s'", pathPrefix, cfg.KubeServiceCIDR)
+	if cfg.KubeServiceCIDR != "" && !util.IsValidCIDR(cfg.KubeServiceCIDR) {
+		verrs.Add(pathPrefix+".kubeServiceCIDR", fmt.Sprintf("invalid CIDR format '%s'", cfg.KubeServiceCIDR))
 	}
 
-	// Check for CIDR overlap if both are validly formatted
 	if util.IsValidCIDR(cfg.KubePodsCIDR) && cfg.KubeServiceCIDR != "" && util.IsValidCIDR(cfg.KubeServiceCIDR) {
 		_, podsNet, errPods := net.ParseCIDR(cfg.KubePodsCIDR)
 		_, serviceNet, errServices := net.ParseCIDR(cfg.KubeServiceCIDR)
 
-		// Ensure no error occurred during parsing before using the nets
 		if errPods == nil && errServices == nil {
 			if util.NetworksOverlap(podsNet, serviceNet) {
-				verrs.Add("%s: kubePodsCIDR (%s) and kubeServiceCIDR (%s) overlap", pathPrefix, cfg.KubePodsCIDR, cfg.KubeServiceCIDR)
+				verrs.Add(pathPrefix, fmt.Sprintf("kubePodsCIDR (%s) and kubeServiceCIDR (%s) overlap", cfg.KubePodsCIDR, cfg.KubeServiceCIDR))
 			}
 		}
 	}
 
 	if cfg.Plugin == "calico" {
 		if cfg.Calico == nil {
-			verrs.Add("%s.calico: config cannot be nil if plugin is 'calico'", pathPrefix)
+			verrs.Add(pathPrefix+".calico", "config cannot be nil if plugin is 'calico'")
 		} else {
 			Validate_CalicoConfig(cfg.Calico, verrs, pathPrefix+".calico")
 		}
 	}
 	if cfg.Plugin == "flannel" {
 		if cfg.Flannel == nil {
-			verrs.Add("%s.flannel: config cannot be nil if plugin is 'flannel'", pathPrefix)
+			verrs.Add(pathPrefix+".flannel", "config cannot be nil if plugin is 'flannel'")
 		} else {
 			Validate_FlannelConfig(cfg.Flannel, verrs, pathPrefix+".flannel")
 		}
 	}
 	if cfg.Plugin == "cilium" {
 		if cfg.Cilium == nil {
-			verrs.Add("%s.cilium: config cannot be nil if plugin is 'cilium'", pathPrefix)
+			verrs.Add(pathPrefix+".cilium", "config cannot be nil if plugin is 'cilium'")
 		} else {
 			Validate_CiliumConfig(cfg.Cilium, verrs, pathPrefix+".cilium")
 		}
@@ -520,89 +512,86 @@ func Validate_NetworkConfig(cfg *NetworkConfig, verrs *ValidationErrors, pathPre
 }
 
 // Validate_IPPoolConfig validates IPPoolConfig.
-func Validate_IPPoolConfig(cfg *IPPoolConfig, verrs *ValidationErrors, pathPrefix string) {
+func Validate_IPPoolConfig(cfg *IPPoolConfig, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
 	if cfg.BlockSize != nil {
-		// Calico block size typically must be between 20 and 32.
-		// Allow 0 as "not set" or "use Calico default" if that's desired,
-		// but YAML example has 26, so we assume if set, it must be valid.
 		if *cfg.BlockSize < 20 || *cfg.BlockSize > 32 {
-			verrs.Add("%s.blockSize: must be between 20 and 32 if specified, got %d", pathPrefix, *cfg.BlockSize)
+			verrs.Add(pathPrefix+".blockSize", fmt.Sprintf("must be between 20 and 32 if specified, got %d", *cfg.BlockSize))
 		}
 	}
 }
 
-func Validate_CalicoConfig(cfg *CalicoConfig, verrs *ValidationErrors, pathPrefix string) {
+func Validate_CalicoConfig(cfg *CalicoConfig, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
 	if !util.ContainsString(validCalicoEncModes, cfg.IPIPMode) {
-		verrs.Add("%s.ipipMode: invalid: '%s', must be one of %v", pathPrefix, cfg.IPIPMode, validCalicoEncModes)
+		verrs.Add(pathPrefix+".ipipMode", fmt.Sprintf("invalid: '%s', must be one of %v", cfg.IPIPMode, validCalicoEncModes))
 	}
 	if !util.ContainsString(validCalicoEncModes, cfg.VXLANMode) {
-		verrs.Add("%s.vxlanMode: invalid: '%s', must be one of %v", pathPrefix, cfg.VXLANMode, validCalicoEncModes)
+		verrs.Add(pathPrefix+".vxlanMode", fmt.Sprintf("invalid: '%s', must be one of %v", cfg.VXLANMode, validCalicoEncModes))
 	}
 	if cfg.VethMTU != nil && *cfg.VethMTU < 0 {
-		verrs.Add("%s.vethMTU: invalid: %d", pathPrefix, *cfg.VethMTU)
+		verrs.Add(pathPrefix+".vethMTU", fmt.Sprintf("invalid: %d", *cfg.VethMTU))
 	}
 	if cfg.EnableTypha != nil && *cfg.EnableTypha && (cfg.TyphaReplicas == nil || *cfg.TyphaReplicas <= 0) {
-		verrs.Add("%s.typhaReplicas: must be positive if Typha is enabled", pathPrefix)
+		verrs.Add(pathPrefix+".typhaReplicas", "must be positive if Typha is enabled")
 	}
 	if cfg.LogSeverityScreen != nil && !util.ContainsString(validCalicoLogSeverities, *cfg.LogSeverityScreen) {
-		verrs.Add("%s.logSeverityScreen: invalid: '%s',  must be one of %v", pathPrefix, *cfg.LogSeverityScreen, validCalicoLogSeverities)
+		verrs.Add(pathPrefix+".logSeverityScreen", fmt.Sprintf("invalid: '%s',  must be one of %v", *cfg.LogSeverityScreen, validCalicoLogSeverities))
 	}
 	for i, pool := range cfg.IPPools {
 		poolPath := fmt.Sprintf("%s.ipPools[%d:%s]", pathPrefix, i, pool.Name)
 		if strings.TrimSpace(pool.CIDR) == "" {
-			verrs.Add("%s.cidr: cannot be empty", poolPath)
+			verrs.Add(poolPath+".cidr", "cannot be empty")
 		} else if !util.IsValidCIDR(pool.CIDR) {
-			verrs.Add("%s.cidr: invalid CIDR '%s'", poolPath, pool.CIDR)
+			verrs.Add(poolPath+".cidr", fmt.Sprintf("invalid CIDR '%s'", pool.CIDR))
 		}
 
 		if pool.BlockSize != nil && (*pool.BlockSize < 20 || *pool.BlockSize > 32) {
-			verrs.Add("%s.blockSize: must be between 20 and 32, got %d", poolPath, *pool.BlockSize)
+			verrs.Add(poolPath+".blockSize", fmt.Sprintf("must be between 20 and 32, got %d", *pool.BlockSize))
 		}
 		if !util.ContainsString(validCalicoPoolEncapsulations, pool.Encapsulation) {
-			verrs.Add("%s.encapsulation: invalid: '%s', must be one of %v", poolPath, pool.Encapsulation, validCalicoPoolEncapsulations)
+			verrs.Add(poolPath+".encapsulation", fmt.Sprintf("invalid: '%s', must be one of %v", pool.Encapsulation, validCalicoPoolEncapsulations))
 		}
 	}
 }
 
-func Validate_FlannelConfig(cfg *FlannelConfig, verrs *ValidationErrors, pathPrefix string) {
+func Validate_FlannelConfig(cfg *FlannelConfig, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
 	if !util.ContainsString(validFlannelBackendModes, cfg.BackendMode) {
-		verrs.Add("%s.backendMode: invalid: '%s', must be one of %v", pathPrefix, cfg.BackendMode, validFlannelBackendModes)
+		verrs.Add(pathPrefix+".backendMode", fmt.Sprintf("invalid: '%s', must be one of %v", cfg.BackendMode, validFlannelBackendModes))
 	}
 }
 
-func Validate_KubeOvnConfig(cfg *KubeOvnConfig, verrs *ValidationErrors, pathPrefix string) {
+func Validate_KubeOvnConfig(cfg *KubeOvnConfig, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil || cfg.Enabled == nil || !*cfg.Enabled {
 		return
 	}
 	if cfg.Label != nil && strings.TrimSpace(*cfg.Label) == "" {
-		verrs.Add("%s.label: cannot be empty if specified", pathPrefix)
+		verrs.Add(pathPrefix+".label", "cannot be empty if specified")
 	}
 	if cfg.TunnelType != nil && *cfg.TunnelType != "" {
 		if !util.ContainsString(validKubeOvnTunnelTypes, *cfg.TunnelType) {
-			verrs.Add("%s.tunnelType: invalid type '%s', must be one of %v", pathPrefix, *cfg.TunnelType, validKubeOvnTunnelTypes)
+			verrs.Add(pathPrefix+".tunnelType", fmt.Sprintf("invalid type '%s', must be one of %v", *cfg.TunnelType, validKubeOvnTunnelTypes))
 		}
 	}
 	if cfg.JoinCIDR != nil && *cfg.JoinCIDR != "" && !util.IsValidCIDR(*cfg.JoinCIDR) {
-		verrs.Add("%s.joinCIDR: invalid CIDR format '%s'", pathPrefix, *cfg.JoinCIDR)
+		verrs.Add(pathPrefix+".joinCIDR", fmt.Sprintf("invalid CIDR format '%s'", *cfg.JoinCIDR))
 	}
 }
 
-func Validate_HybridnetConfig(cfg *HybridnetConfig, verrs *ValidationErrors, pathPrefix string) {
+func Validate_HybridnetConfig(cfg *HybridnetConfig, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil || cfg.Enabled == nil || !*cfg.Enabled {
 		return
 	}
 	if cfg.DefaultNetworkType != nil && *cfg.DefaultNetworkType != "" {
 		if !util.ContainsString(validHybridnetNetworkTypes, *cfg.DefaultNetworkType) {
-			verrs.Add("%s.defaultNetworkType: invalid type '%s', must be one of %v", pathPrefix, *cfg.DefaultNetworkType, validHybridnetNetworkTypes)
+			verrs.Add(pathPrefix+".defaultNetworkType", fmt.Sprintf("invalid type '%s', must be one of %v", *cfg.DefaultNetworkType, validHybridnetNetworkTypes))
 		}
 	}
 }

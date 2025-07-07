@@ -5,6 +5,8 @@ import (
 	// "strconv" // No longer needed after removing local parseInt
 	// "unicode" // No longer needed after removing local isNumericSegment, isAlphanumericHyphenSegment
 	"github.com/mensylisir/kubexm/pkg/util" // Ensure util is imported
+	"github.com/mensylisir/kubexm/pkg/util/validation" // Import validation
+	"fmt" // Import fmt
 )
 
 // ContainerRuntimeType defines the type of container runtime.
@@ -38,7 +40,7 @@ func SetDefaults_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig) {
 		return
 	}
 	if cfg.Type == "" {
-		cfg.Type = ContainerRuntimeDocker // Default to Docker
+		cfg.Type = ContainerRuntimeContainerd // Default to Containerd
 	}
 
 	if cfg.Type == ContainerRuntimeDocker {
@@ -57,9 +59,9 @@ func SetDefaults_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig) {
 }
 
 // Validate_ContainerRuntimeConfig validates ContainerRuntimeConfig.
-func Validate_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig, verrs *ValidationErrors, pathPrefix string) {
+func Validate_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
-		verrs.Add("%s: section cannot be nil", pathPrefix)
+		verrs.Add(pathPrefix, "section cannot be nil")
 		return
 	}
 	validTypes := []ContainerRuntimeType{ContainerRuntimeDocker, ContainerRuntimeContainerd, ""} // Allow empty for default
@@ -71,7 +73,7 @@ func Validate_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig, verrs *Validat
 		}
 	}
 	if !isValid {
-		verrs.Add("%s.type: invalid container runtime type '%s'", pathPrefix, cfg.Type)
+		verrs.Add(pathPrefix+".type", fmt.Sprintf("invalid container runtime type '%s'", cfg.Type))
 	}
 
 	if cfg.Type == ContainerRuntimeDocker {
@@ -81,7 +83,7 @@ func Validate_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig, verrs *Validat
 			Validate_DockerConfig(cfg.Docker, verrs, pathPrefix+".docker")
 		}
 	} else if cfg.Docker != nil {
-		verrs.Add("%s.docker: can only be set if type is 'docker'", pathPrefix)
+		verrs.Add(pathPrefix+".docker", "can only be set if type is 'docker'")
 	}
 
 	if cfg.Type == ContainerRuntimeContainerd {
@@ -91,14 +93,14 @@ func Validate_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig, verrs *Validat
 			Validate_ContainerdConfig(cfg.Containerd, verrs, pathPrefix+".containerd")
 		}
 	} else if cfg.Containerd != nil {
-		verrs.Add("%s.containerd: can only be set if type is 'containerd'", pathPrefix)
+		verrs.Add(pathPrefix+".containerd", "can only be set if type is 'containerd'")
 	}
 
 	if cfg.Version != "" {
 		if strings.TrimSpace(cfg.Version) == "" {
-			verrs.Add("%s.version: cannot be only whitespace if specified", pathPrefix)
+			verrs.Add(pathPrefix+".version", "cannot be only whitespace if specified")
 		} else if !util.IsValidRuntimeVersion(cfg.Version) { // Use util.IsValidRuntimeVersion
-			verrs.Add("%s.version: '%s' is not a recognized version format", pathPrefix, cfg.Version)
+			verrs.Add(pathPrefix+".version", fmt.Sprintf("'%s' is not a recognized version format", cfg.Version))
 		}
 	}
 }

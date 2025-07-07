@@ -5,6 +5,7 @@ import (
 	// "net" // For IP validation - will be replaced by util.IsValidIP
 	"strings"
 	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 const (
@@ -118,61 +119,59 @@ func SetDefaults_HAProxyConfig(cfg *HAProxyConfig) {
 // --- Validation Functions ---
 
 // Validate_HAProxyConfig validates HAProxyConfig.
-// Note: ValidationErrors type is expected to be defined in cluster_types.go or a common errors file.
-func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *ValidationErrors, pathPrefix string) {
+func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
 	if cfg.SkipInstall != nil && *cfg.SkipInstall {
-		return // If skipping install, most other fields are not KubeXMS's concern for setup validation.
+		return
 	}
 
 	if cfg.FrontendBindAddress != nil {
 		trimmedAddr := strings.TrimSpace(*cfg.FrontendBindAddress)
 		if trimmedAddr == "" {
-			verrs.Add("%s.frontendBindAddress: cannot be empty if specified", pathPrefix)
+			verrs.Add(pathPrefix+".frontendBindAddress", "cannot be empty if specified")
 		} else if !util.IsValidIP(trimmedAddr) && trimmedAddr != "0.0.0.0" && trimmedAddr != "::" {
-			// Allow "0.0.0.0" and "::" as special bind addresses, otherwise expect a valid IP.
-			verrs.Add("%s.frontendBindAddress: invalid IP address format '%s'", pathPrefix, trimmedAddr)
+			verrs.Add(pathPrefix+".frontendBindAddress", fmt.Sprintf("invalid IP address format '%s'", trimmedAddr))
 		}
 	}
 
-	// FrontendPort is always defaulted, so check its value.
-	if *cfg.FrontendPort <= 0 || *cfg.FrontendPort > 65535 {
-		verrs.Add("%s.frontendPort: invalid port %d", pathPrefix, *cfg.FrontendPort)
+	if cfg.FrontendPort == nil {
+		verrs.Add(pathPrefix+".frontendPort", "is required and should have a default value")
+	} else if *cfg.FrontendPort <= 0 || *cfg.FrontendPort > 65535 {
+		verrs.Add(pathPrefix+".frontendPort", fmt.Sprintf("invalid port %d", *cfg.FrontendPort))
 	}
 
-	if cfg.Mode != nil && *cfg.Mode != "" {
-		if !util.ContainsString(validHAProxyModes, *cfg.Mode) { // Use constant
-			verrs.Add("%s.mode: invalid mode '%s', must be one of %v or empty for default", pathPrefix, *cfg.Mode, validHAProxyModes)
-		}
+	if cfg.Mode == nil {
+		verrs.Add(pathPrefix+".mode", "is required and should have a default value 'tcp'")
+	} else if *cfg.Mode != "" && !util.ContainsString(validHAProxyModes, *cfg.Mode) {
+		verrs.Add(pathPrefix+".mode", fmt.Sprintf("invalid mode '%s', must be one of %v or empty for default", *cfg.Mode, validHAProxyModes))
 	}
 
-	if cfg.BalanceAlgorithm != nil && *cfg.BalanceAlgorithm != "" {
-		if !util.ContainsString(validHAProxyBalanceAlgorithms, *cfg.BalanceAlgorithm) { // Use constant
-			verrs.Add("%s.balanceAlgorithm: invalid algorithm '%s', must be one of %v", pathPrefix, *cfg.BalanceAlgorithm, validHAProxyBalanceAlgorithms)
-		}
+	if cfg.BalanceAlgorithm == nil {
+		verrs.Add(pathPrefix+".balanceAlgorithm", "is required and should have a default value 'roundrobin'")
+	} else if *cfg.BalanceAlgorithm != "" && !util.ContainsString(validHAProxyBalanceAlgorithms, *cfg.BalanceAlgorithm) {
+		verrs.Add(pathPrefix+".balanceAlgorithm", fmt.Sprintf("invalid algorithm '%s', must be one of %v", *cfg.BalanceAlgorithm, validHAProxyBalanceAlgorithms))
 	}
 
 	if len(cfg.BackendServers) == 0 {
-		verrs.Add("%s.backendServers: must specify at least one backend server", pathPrefix)
+		verrs.Add(pathPrefix+".backendServers", "must specify at least one backend server")
 	}
 	for i, server := range cfg.BackendServers {
 		serverPath := fmt.Sprintf("%s.backendServers[%d:%s]", pathPrefix, i, server.Name)
 		if strings.TrimSpace(server.Name) == "" {
-			verrs.Add("%s.name: backend server name cannot be empty", serverPath)
+			verrs.Add(serverPath+".name", "backend server name cannot be empty")
 		}
 		if strings.TrimSpace(server.Address) == "" {
-			verrs.Add("%s.address: backend server address cannot be empty", serverPath)
-		} else if !util.ValidateHostPortString(server.Address) && !util.IsValidIP(server.Address) && !util.IsValidDomainName(server.Address) { // Use util functions
-			verrs.Add("%s.address: invalid backend server address format '%s'", serverPath, server.Address)
+			verrs.Add(serverPath+".address", "backend server address cannot be empty")
+		} else if !util.ValidateHostPortString(server.Address) && !util.IsValidIP(server.Address) && !util.IsValidDomainName(server.Address) {
+			verrs.Add(serverPath+".address", fmt.Sprintf("invalid backend server address format '%s'", server.Address))
 		}
 		if server.Port <= 0 || server.Port > 65535 {
-			verrs.Add("%s.port: invalid backend server port %d", serverPath, server.Port)
+			verrs.Add(serverPath+".port", fmt.Sprintf("invalid backend server port %d", server.Port))
 		}
-		if server.Weight != nil && *server.Weight < 0 { // Weight usually 0-256
-			verrs.Add("%s.weight: cannot be negative, got %d", serverPath, *server.Weight)
+		if server.Weight != nil && *server.Weight < 0 {
+			verrs.Add(serverPath+".weight", fmt.Sprintf("cannot be negative, got %d", *server.Weight))
 		}
 	}
-	// Validate ExtraConfig sections for non-empty lines if needed
 }

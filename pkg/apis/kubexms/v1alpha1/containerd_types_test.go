@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // stringPtr and boolPtr are expected to be in zz_helpers.go or similar within the package.
@@ -39,7 +40,7 @@ func TestSetDefaults_ContainerdConfig(t *testing.T) {
 			expected: &ContainerdConfig{
 				RegistryMirrors:    make(map[string][]string),
 				InsecureRegistries: []string{},
-				UseSystemdCgroup:   boolPtr(false), // Not overridden
+				UseSystemdCgroup:   boolPtr(false),
 				ConfigPath:         stringPtr("/etc/containerd/config.toml"),
 				DisabledPlugins:    []string{},
 				RequiredPlugins:    []string{"io.containerd.grpc.v1.cri"},
@@ -53,7 +54,7 @@ func TestSetDefaults_ContainerdConfig(t *testing.T) {
 				RegistryMirrors:    make(map[string][]string),
 				InsecureRegistries: []string{},
 				UseSystemdCgroup:   boolPtr(true),
-				ConfigPath:         stringPtr("/custom/path/config.toml"), // Not overridden
+				ConfigPath:         stringPtr("/custom/path/config.toml"),
 				DisabledPlugins:    []string{},
 				RequiredPlugins:    []string{"io.containerd.grpc.v1.cri"},
 				Imports:            []string{},
@@ -68,7 +69,7 @@ func TestSetDefaults_ContainerdConfig(t *testing.T) {
 				UseSystemdCgroup:   boolPtr(true),
 				ConfigPath:         stringPtr("/etc/containerd/config.toml"),
 				DisabledPlugins:    []string{},
-				RequiredPlugins:    []string{"custom.plugin"}, // Not overridden
+				RequiredPlugins:    []string{"custom.plugin"},
 				Imports:            []string{},
 			},
 		},
@@ -116,7 +117,7 @@ func TestValidate_ContainerdConfig(t *testing.T) {
 	}{
 		{
 			name:  "minimal valid after defaults",
-			input: &ContainerdConfig{}, // Defaults will make it valid
+			input: &ContainerdConfig{},
 		},
 		{
 			name: "valid with mirrors and insecure registries",
@@ -137,7 +138,7 @@ func TestValidate_ContainerdConfig(t *testing.T) {
 		{
 			name: "valid with version and extra toml",
 			input: &ContainerdConfig{
-				Version:         "1.6.0", // Valid version
+				Version:         "1.6.0",
 				ExtraTomlConfig: "[plugins.\"io.containerd.grpc.v1.cri\".registry]\n  config_path = \"/etc/containerd/certs.d\"",
 			},
 		},
@@ -157,10 +158,10 @@ func TestValidate_ContainerdConfig(t *testing.T) {
 
 	for _, tt := range validCases {
 		t.Run("Valid_"+tt.name, func(t *testing.T) {
-			SetDefaults_ContainerdConfig(tt.input) // Apply defaults
-			verrs := &ValidationErrors{}
+			SetDefaults_ContainerdConfig(tt.input)
+			verrs := &validation.ValidationErrors{}
 			Validate_ContainerdConfig(tt.input, verrs, "spec.containerd")
-			assert.True(t, verrs.IsEmpty(), "Expected no validation errors for '%s', but got: %s", tt.name, verrs.Error())
+			assert.False(t, verrs.HasErrors(), "Expected no validation errors for '%s', but got: %s", tt.name, verrs.Error())
 		})
 	}
 
@@ -180,12 +181,12 @@ func TestValidate_ContainerdConfig(t *testing.T) {
 		{"version_is_whitespace", &ContainerdConfig{Version: "   "}, []string{".version: cannot be only whitespace if specified"}},
 		{
 			"version_invalid_format_alphanum",
-			&ContainerdConfig{Version: "1.2.3a"}, // Should fail with isValidRuntimeVersion
+			&ContainerdConfig{Version: "1.2.3a"},
 			[]string{".version: '1.2.3a' is not a recognized version format"},
 		},
 		{
 			"version_invalid_chars_underscore",
-			&ContainerdConfig{Version: "1.2.3_beta"}, // Should fail
+			&ContainerdConfig{Version: "1.2.3_beta"},
 			[]string{".version: '1.2.3_beta' is not a recognized version format"},
 		},
 		{
@@ -208,7 +209,6 @@ func TestValidate_ContainerdConfig(t *testing.T) {
 			&ContainerdConfig{InsecureRegistries: []string{"invalid_host!"}},
 			[]string{"invalid host:port format for insecure registry"},
 		},
-		// Cases that should remain valid for InsecureRegistries
 		{
 			"valid_insecure_registry_ipv6_with_port",
 			&ContainerdConfig{InsecureRegistries: []string{"[::1]:5000"}},
@@ -233,16 +233,13 @@ func TestValidate_ContainerdConfig(t *testing.T) {
 
 	for _, tt := range invalidCases {
 		t.Run("Invalid_"+tt.name, func(t *testing.T) {
-			// Defaults are generally not applied here to test raw validation logic,
-			// but for version validation, it's independent of defaults on other fields.
-			// SetDefaults_ContainerdConfig(tt.input)
-			verrs := &ValidationErrors{}
+			verrs := &validation.ValidationErrors{}
 			Validate_ContainerdConfig(tt.input, verrs, "spec.containerd")
 
 			if tt.errContains == nil {
-				assert.True(t, verrs.IsEmpty(), "Expected no validation errors for '%s', but got: %s", tt.name, verrs.Error())
+				assert.False(t, verrs.HasErrors(), "Expected no validation errors for '%s', but got: %s", tt.name, verrs.Error())
 			} else {
-				assert.False(t, verrs.IsEmpty(), "Expected validation errors for '%s', but got none", tt.name)
+				assert.True(t, verrs.HasErrors(), "Expected validation errors for '%s', but got none", tt.name)
 				fullError := verrs.Error()
 				for _, errStr := range tt.errContains {
 					assert.Contains(t, fullError, errStr, "Error message for '%s' does not contain expected substring '%s'. Full error: %s", tt.name, errStr, fullError)

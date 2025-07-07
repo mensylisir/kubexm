@@ -1,7 +1,7 @@
-package module
+package kubernetes
 
 import (
-	// "fmt"
+	"github.com/mensylisir/kubexm/pkg/module"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
 	// kubernetestask "github.com/mensylisir/kubexm/pkg/task/kubernetes"
@@ -10,13 +10,13 @@ import (
 // ClusterBootstrapModule groups tasks for bootstrapping the Kubernetes cluster
 // using kubeadm (init master, join other masters, join workers).
 type ClusterBootstrapModule struct {
-	BaseModule
+	module.BaseModule
 }
 
 // NewClusterBootstrapModule creates a new ClusterBootstrapModule.
-func NewClusterBootstrapModule() Module {
+func NewClusterBootstrapModule() module.Module {
 	return &ClusterBootstrapModule{
-		BaseModule: NewBaseModule(
+		BaseModule: module.NewBaseModule(
 			"KubernetesClusterBootstrap",
 			[]task.Task{
 				// kubernetestask.NewInitMasterTask(),
@@ -39,4 +39,4 @@ func (m *ClusterBootstrapModule) Plan(ctx runtime.ModuleContext) (*task.Executio
 	return task.NewEmptyFragment(), nil // Placeholder
 }
 
-var _ Module = (*ClusterBootstrapModule)(nil)
+var _ module.Module = (*ClusterBootstrapModule)(nil)

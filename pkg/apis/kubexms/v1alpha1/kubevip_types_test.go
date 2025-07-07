@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // TestSetDefaults_KubeVIPConfig tests the SetDefaults_KubeVIPConfig function.
@@ -37,7 +38,7 @@ func TestSetDefaults_KubeVIPConfig(t *testing.T) {
 				EnableControlPlaneLB: boolPtr(true),
 				EnableServicesLB:     boolPtr(false),
 				ExtraArgs:            []string{},
-				BGPConfig:            &KubeVIPBGPConfig{}, // Should be initialized
+				BGPConfig:            &KubeVIPBGPConfig{},
 			},
 		},
 		{
@@ -48,7 +49,7 @@ func TestSetDefaults_KubeVIPConfig(t *testing.T) {
 				EnableControlPlaneLB: boolPtr(true),
 				EnableServicesLB:     boolPtr(false),
 				ExtraArgs:            []string{},
-				BGPConfig:            &KubeVIPBGPConfig{RouterID: "1.1.1.1"}, // Not overridden
+				BGPConfig:            &KubeVIPBGPConfig{RouterID: "1.1.1.1"},
 			},
 		},
 		{
@@ -101,7 +102,7 @@ func TestValidate_KubeVIPConfig(t *testing.T) {
 		},
 		{
 			name:        "nil config",
-			input:       nil, // Should not error, validator returns early
+			input:       nil,
 			expectErr:   false,
 		},
 		{
@@ -148,9 +149,9 @@ func TestValidate_KubeVIPConfig(t *testing.T) {
 		},
 		{
 			name:        "BGP mode missing BGPConfig (after defaults)",
-			input:       &KubeVIPConfig{Mode: stringPtr(KubeVIPModeBGP), VIP: stringPtr(validVIP)}, // BGPConfig would be initialized by defaults
-			expectErr:   true, // Validation should still fail due to missing required BGP fields
-			errContains: []string{".bgpConfig.routerID: router ID must be specified"}, // Example of a missing required field in BGPConfig
+			input:       &KubeVIPConfig{Mode: stringPtr(KubeVIPModeBGP), VIP: stringPtr(validVIP)},
+			expectErr:   true,
+			errContains: []string{".bgpConfig.routerID: router ID must be specified"},
 		},
 		{
 			name: "BGP mode missing RouterID",
@@ -192,15 +193,15 @@ func TestValidate_KubeVIPConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.input != nil { // Avoid panic on nil input
+			if tt.input != nil {
 				SetDefaults_KubeVIPConfig(tt.input)
 			}
 
-			verrs := &ValidationErrors{}
+			verrs := &validation.ValidationErrors{}
 			Validate_KubeVIPConfig(tt.input, verrs, "spec.kubevip")
 
 			if tt.expectErr {
-				assert.False(t, verrs.IsEmpty(), "Expected validation errors for test: %s, but got none", tt.name)
+				assert.True(t, verrs.HasErrors(), "Expected validation errors for test: %s, but got none", tt.name)
 				if len(tt.errContains) > 0 {
 					combinedErrors := verrs.Error()
 					for _, errStr := range tt.errContains {
@@ -208,7 +209,7 @@ func TestValidate_KubeVIPConfig(t *testing.T) {
 					}
 				}
 			} else {
-				assert.True(t, verrs.IsEmpty(), "Expected no validation errors for test: %s, but got: %s", tt.name, verrs.Error())
+				assert.False(t, verrs.HasErrors(), "Expected no validation errors for test: %s, but got: %s", tt.name, verrs.Error())
 			}
 		})
 	}

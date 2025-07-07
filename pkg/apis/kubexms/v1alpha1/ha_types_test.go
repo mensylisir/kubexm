@@ -1,28 +1,17 @@
 package v1alpha1
 
 import (
-	"strings"
 	"testing"
-	// "net" // Removed as unused
-	"github.com/stretchr/testify/assert" // Added import for testify/assert
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 func TestSetDefaults_HighAvailabilityConfig(t *testing.T) {
 	cfg := &HighAvailabilityConfig{}
 	SetDefaults_HighAvailabilityConfig(cfg)
-
-	// cfg.Type is removed. HA type is now in cfg.External.Type or cfg.Internal.Type
-	// if cfg.Type != "" {
-	// 	t.Errorf("Default Type = %s, want empty or specific default", cfg.Type)
-	// }
-
-	// ControlPlaneEndpoint is no longer part of HighAvailabilityConfig, so these checks are removed.
-	// if cfg.ControlPlaneEndpoint == nil {
-	// 	t.Fatal("ControlPlaneEndpoint should be initialized by defaults")
-	// }
-	// if cfg.ControlPlaneEndpoint.Port == nil || *cfg.ControlPlaneEndpoint.Port != 6443 {
-	// 	t.Errorf("Default ControlPlaneEndpoint.Port = %v, want 6443", cfg.ControlPlaneEndpoint.Port)
-	// }
 
 	t.Run("default with external ManagedKeepalivedHAProxy type", func(t *testing.T) {
 		haEnabled := true
@@ -30,7 +19,6 @@ func TestSetDefaults_HighAvailabilityConfig(t *testing.T) {
 			Enabled: &haEnabled,
 			External: &ExternalLoadBalancerConfig{
 				Type: "ManagedKeepalivedHAProxy",
-				// Enabled field is removed
 			},
 		}
 		SetDefaults_HighAvailabilityConfig(cfgExt)
@@ -49,7 +37,6 @@ func TestSetDefaults_HighAvailabilityConfig(t *testing.T) {
 			Enabled: &haEnabled,
 			External: &ExternalLoadBalancerConfig{
 				Type: "ManagedKeepalivedNginxLB",
-				// Enabled field is removed
 			},
 		}
 		SetDefaults_HighAvailabilityConfig(cfgExt)
@@ -66,13 +53,11 @@ func TestSetDefaults_HighAvailabilityConfig(t *testing.T) {
 			Enabled: &haEnabled,
 			Internal: &InternalLoadBalancerConfig{
 				Type: "KubeVIP",
-				// Enabled field is removed. Activation is based on HAConfig.Enabled and Internal block presence.
 			},
 		}
 		SetDefaults_HighAvailabilityConfig(cfgInt)
 		assert.NotNil(t, cfgInt.Internal, "Internal config should be initialized")
 		assert.NotNil(t, cfgInt.Internal.KubeVIP, "Internal.KubeVIP config should be initialized for Type KubeVIP")
-		// Check a KubeVIP default, e.g., Mode if it's defaulted in SetDefaults_KubeVIPConfig
 		assert.NotNil(t, cfgInt.Internal.KubeVIP.Mode, "KubeVIP.Mode should have a default")
 		assert.Equal(t, KubeVIPModeARP, *cfgInt.Internal.KubeVIP.Mode, "KubeVIP.Mode default mismatch")
 	})
@@ -90,16 +75,14 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 		cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
 			External: &ExternalLoadBalancerConfig{
 				Type: "ManagedKeepalivedHAProxy",
-				// Enabled field removed
 				Keepalived: &KeepalivedConfig{
 					VRID:      intPtr(1),
-					Priority:  intPtr(101), // Typical master priority
+					Priority:  intPtr(101),
 					Interface: stringPtr("eth0"),
-					// AuthType defaults to PASS
 					AuthPass:  stringPtr("secret"),
 				},
 				HAProxy: &HAProxyConfig{
-					FrontendPort:   intPtr(6443), // Explicitly set, though defaults
+					FrontendPort:   intPtr(6443),
 					BackendServers: []HAProxyBackendServer{{Name: "cp1", Address: "192.168.0.10", Port: 6443}},
 				},
 			}},
@@ -125,53 +108,9 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 			name: "invalid external LB type",
 			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
 				External: &ExternalLoadBalancerConfig{Type: "unknownExternalLB"}},
-			wantErrMsg: "spec.highAvailability.external.type: unknown external LB type 'unknownExternalLB'", // Exact full message
+			wantErrMsg: "spec.highAvailability.external.type: unknown external LB type 'unknownExternalLB'",
 			expectErr:  true,
 		},
-		// { // This test case is invalid because defaults will initialize Keepalived if nil.
-		//	name: "ManagedKeepalived without Keepalived section",
-		//	cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-		//		External: &ExternalLoadBalancerConfig{
-		//			Type:       "ManagedKeepalivedHAProxy",
-		//			Enabled:    boolPtr(true),
-		//			Keepalived: nil, // This is being tested
-		//			HAProxy: &HAProxyConfig{ // Make HAProxy part valid
-		//				FrontendPort:   intPtr(6443),
-		//				BackendServers: []HAProxyBackendServer{{Name: "cp1", Address: "192.168.0.10", Port: 6443}},
-		//			},
-		//		}},
-		//	wantErrMsg: "spec.highAvailability.external.keepalived: section must be present if type includes 'Keepalived'", // Exact error
-		//	expectErr:  true,
-		// },
-		// { // VIP validation removed as VIP field is removed
-		// 	name: "invalid VIP format",
-		// 	cfg: &HighAvailabilityConfig{Enabled: boolPtr(true), VIP: "invalid-ip",
-		// 		External: &ExternalLoadBalancerConfig{Type: "ManagedKeepalivedHAProxy", Enabled: boolPtr(true), Keepalived: &KeepalivedConfig{}}},
-		// 	wantErrMsg: ".vip: invalid IP address format 'invalid-ip'",
-		// 	expectErr:  true,
-		// },
-		// ControlPlaneEndpoint validation is now done at the ClusterSpec level, not within HAConfig validation directly.
-		// {
-		// 	name: "invalid ControlPlaneEndpoint.Address format",
-		// 	cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-		// 		/* ControlPlaneEndpoint moved */},
-		// 	wantErrMsg: ".controlPlaneEndpoint.address: invalid IP address format 'invalid-ip-too'",
-		// 	expectErr:  true,
-		// },
-		// {
-		// 	name: "invalid ControlPlaneEndpoint.Port low",
-		// 	cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-		// 		/* ControlPlaneEndpoint moved */},
-		// 	wantErrMsg: ".controlPlaneEndpoint.port: invalid port 0",
-		// 	expectErr:  true,
-		// },
-		// {
-		// 	name: "invalid ControlPlaneEndpoint.Port high",
-		// 	cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-		// 		/* ControlPlaneEndpoint moved */},
-		// 	wantErrMsg: ".controlPlaneEndpoint.port: invalid port 70000",
-		// 	expectErr:  true,
-		// },
 		{
 			name: "keepalived_config_present_external_type_mismatch",
 			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
@@ -179,18 +118,10 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 			wantErrMsg: ".external.keepalived: should not be set for UserProvided external LB type",
 			expectErr:  true,
 		},
-		// { // This validation now depends on ClusterSpec.ControlPlaneEndpoint, tested at higher level.
-		// 	name: "UserProvided external LB missing endpoint details",
-		// 	cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-		// 		External: &ExternalLoadBalancerConfig{Type: "UserProvided", Enabled: boolPtr(true)}},
-		// 	wantErrMsg: "if type is UserProvided, a corresponding ControlPlaneEndpoint", // Message might change
-		// 	expectErr:  true,
-		// },
-		// Add more tests for Internal Load Balancer types and their validations
 		{
 			name: "valid internal KubeVIP",
 			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-				Internal: &InternalLoadBalancerConfig{Type: "KubeVIP", KubeVIP: &KubeVIPConfig{ // Enabled field removed
+				Internal: &InternalLoadBalancerConfig{Type: "KubeVIP", KubeVIP: &KubeVIPConfig{
 					VIP:       stringPtr("192.168.1.100"),
 					Interface: stringPtr("eth0"),
 				}}},
@@ -199,60 +130,76 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 		{
 			name: "invalid internal LB type",
 			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-				Internal: &InternalLoadBalancerConfig{Type: "unknownInternalLB"}}, // Enabled field removed
-			wantErrMsg: "spec.highAvailability.internal.type: unknown internal LB type 'unknownInternalLB'", // Exact full message
+				Internal: &InternalLoadBalancerConfig{Type: "unknownInternalLB"}},
+			wantErrMsg: "spec.highAvailability.internal.type: unknown internal LB type 'unknownInternalLB'",
 			expectErr:  true,
 		},
 		{
 			name: "KubeVIP internal LB missing KubeVIP section",
 			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-				Internal: &InternalLoadBalancerConfig{Type: "KubeVIP", KubeVIP: nil}}, // Enabled field removed, KubeVIP will be defaulted to {}
-			wantErrMsg: ".internal.kubevip.vip: virtual IP address must be specified", // Error comes from Validate_KubeVIPConfig
+				Internal: &InternalLoadBalancerConfig{Type: common.InternalLBTypeKubeVIP, KubeVIP: nil}}, // Uses constant
+			wantErrMsg: ".internal.kubevip.vip: virtual IP address must be specified",
 			expectErr:  true,
+		},
+		{
+			name: "External and Internal LB simultaneously enabled",
+			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
+				External: &ExternalLoadBalancerConfig{Type: common.ExternalLBTypeExternal},
+				Internal: &InternalLoadBalancerConfig{Type: common.InternalLBTypeKubeVIP, KubeVIP: &KubeVIPConfig{VIP: stringPtr("1.1.1.1"), Interface: stringPtr("eth0")}}},
+			wantErrMsg: "external load balancer and internal load balancer cannot be enabled simultaneously",
+			expectErr:  true,
+		},
+		{
+			name: "Managed External LB (kubexm-kh) missing LoadBalancerHostGroupName",
+			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
+				External: &ExternalLoadBalancerConfig{
+					Type: common.ExternalLBTypeKubexmKH,
+					Keepalived: &KeepalivedConfig{VRID: intPtr(1), Priority: intPtr(100), Interface: stringPtr("eth0"), AuthPass: stringPtr("pass")},
+					HAProxy:    &HAProxyConfig{BackendServers: []HAProxyBackendServer{{Name: "s1", Address: "1.2.3.4:6443"}}},
+					// LoadBalancerHostGroupName is nil
+				}},
+			wantErrMsg: ".external.loadBalancerHostGroupName: must be specified for managed external LB type 'kubexm-kh'",
+			expectErr:  true,
+		},
+		{
+			name: "Managed External LB (kubexm-kn) with empty LoadBalancerHostGroupName",
+			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
+				External: &ExternalLoadBalancerConfig{
+					Type: common.ExternalLBTypeKubexmKN,
+					Keepalived:                &KeepalivedConfig{VRID: intPtr(1), Priority: intPtr(100), Interface: stringPtr("eth0"), AuthPass: stringPtr("pass")},
+					NginxLB:                   &NginxLBConfig{UpstreamServers: []NginxLBUpstreamServer{{Address: "1.2.3.4:6443"}}},
+					LoadBalancerHostGroupName: stringPtr("   "),
+				}},
+			wantErrMsg: ".external.loadBalancerHostGroupName: must be specified for managed external LB type 'kubexm-kn'",
+			expectErr:  true,
+		},
+		{
+			name: "Valid Managed External LB (kubexm-kh) with LoadBalancerHostGroupName",
+			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
+				External: &ExternalLoadBalancerConfig{
+					Type:                      common.ExternalLBTypeKubexmKH,
+					LoadBalancerHostGroupName: stringPtr("lb-group"),
+					Keepalived:                &KeepalivedConfig{VRID: intPtr(1), Priority: intPtr(100), Interface: stringPtr("eth0"), AuthPass: stringPtr("pass")},
+					HAProxy:                   &HAProxyConfig{BackendServers: []HAProxyBackendServer{{Name: "s1", Address: "1.2.3.4:6443"}}},
+				}},
+			expectErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			SetDefaults_HighAvailabilityConfig(tt.cfg) // Apply defaults first
-			verrs := &ValidationErrors{}
+			SetDefaults_HighAvailabilityConfig(tt.cfg)
+			verrs := &validation.ValidationErrors{}
 			Validate_HighAvailabilityConfig(tt.cfg, verrs, "spec.highAvailability")
 
 			if tt.expectErr {
-				if verrs.IsEmpty() {
-					t.Fatalf("Validate_HighAvailabilityConfig expected error for %s, got none", tt.name)
-				}
-				// Use exact match for specific known single error messages, otherwise substring
-				if verrs.IsEmpty() {
-					t.Fatalf("Validate_HighAvailabilityConfig expected error for %s, got none", tt.name)
-				}
-
-				found := false
-			// Exact match for specific single-error cases
-			if (tt.name == "invalid_external_LB_type" ||
-				 tt.name == "invalid_internal_LB_type" ||
-				 tt.name == "ManagedKeepalived_without_Keepalived_section") && len(verrs.Errors) == 1 {
-					if verrs.Errors[0] == tt.wantErrMsg {
-						found = true
-					}
-				} else {
-					// Fallback to strings.Contains for other error messages or multiple errors
-					if strings.Contains(verrs.Error(), tt.wantErrMsg) {
-						found = true
-					}
-				}
-
-				if !found {
-					t.Errorf("Validate_HighAvailabilityConfig error for %s. Expected to find '%s', got errors: %v", tt.name, tt.wantErrMsg, verrs.Errors)
+				assert.True(t, verrs.HasErrors(), "Validate_HighAvailabilityConfig expected error for %s, got none", tt.name)
+				if tt.wantErrMsg != "" {
+					assert.Contains(t, verrs.Error(), tt.wantErrMsg, "Validate_HighAvailabilityConfig error for %s", tt.name)
 				}
 			} else {
-				if !verrs.IsEmpty() {
-					t.Errorf("Validate_HighAvailabilityConfig for valid case %s failed: %v", tt.name, verrs)
-				}
+				assert.False(t, verrs.HasErrors(), "Validate_HighAvailabilityConfig for valid case %s failed: %v", tt.name, verrs.Error())
 			}
 		})
 	}
 }
-
-// isValidIP is already defined in ha_types.go, no need to redefine here
-// func isValidIP(ip string) bool { return net.ParseIP(ip) != nil }

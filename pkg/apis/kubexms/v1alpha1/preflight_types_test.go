@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 func TestSetDefaults_PreflightConfig(t *testing.T) {
@@ -19,19 +20,34 @@ func TestSetDefaults_PreflightConfig(t *testing.T) {
 	assert.NotNil(t, cfgCustom.DisableSwap)
 	assert.False(t, *cfgCustom.DisableSwap, "DisableSwap should not be overridden if already set")
 
-	// MinCPUCores and MinMemoryMB are not defaulted by SetDefaults_PreflightConfig currently
+	// MinCPUCores and MinMemoryMB are now defaulted
 	cfgNilCPU := &PreflightConfig{}
 	SetDefaults_PreflightConfig(cfgNilCPU)
-	assert.Nil(t, cfgNilCPU.MinCPUCores)
-	assert.Nil(t, cfgNilCPU.MinMemoryMB)
+	assert.NotNil(t, cfgNilCPU.MinCPUCores, "MinCPUCores should be defaulted")
+	if cfgNilCPU.MinCPUCores != nil {
+		assert.Equal(t, int32(2), *cfgNilCPU.MinCPUCores, "Default MinCPUCores mismatch")
+	}
+	assert.NotNil(t, cfgNilCPU.MinMemoryMB, "MinMemoryMB should be defaulted")
+	if cfgNilCPU.MinMemoryMB != nil {
+		assert.Equal(t, uint64(2048), *cfgNilCPU.MinMemoryMB, "Default MinMemoryMB mismatch")
+	}
 }
 
 func TestValidate_PreflightConfig(t *testing.T) {
-	validCfg := &PreflightConfig{MinCPUCores: int32Ptr(2), MinMemoryMB: uint64Ptr(2048), DisableSwap: boolPtr(true)}
-	SetDefaults_PreflightConfig(validCfg) // Ensure defaults are applied if any could affect validation (like DisableSwap)
-	verrsValid := &ValidationErrors{}
+	// Test case where all values are valid (using defaults or explicit valid settings)
+	validCfg := &PreflightConfig{} // Rely on defaults
+	SetDefaults_PreflightConfig(validCfg)
+	verrsValid := &validation.ValidationErrors{}
 	Validate_PreflightConfig(validCfg, verrsValid, "spec.preflight")
-	assert.True(t, verrsValid.IsEmpty(), "Validate_PreflightConfig for valid config failed: %v", verrsValid.Error())
+	assert.False(t, verrsValid.HasErrors(), "Validate_PreflightConfig for default valid config failed: %v", verrsValid.Error())
+
+	// Test with explicit valid values that are different from defaults (if applicable)
+	validExplicitCfg := &PreflightConfig{MinCPUCores: int32Ptr(4), MinMemoryMB: uint64Ptr(4096), DisableSwap: boolPtr(false)}
+	SetDefaults_PreflightConfig(validExplicitCfg) // Defaults won't override these
+	verrsValidExplicit := &validation.ValidationErrors{}
+	Validate_PreflightConfig(validExplicitCfg, verrsValidExplicit, "spec.preflight")
+	assert.False(t, verrsValidExplicit.HasErrors(), "Validate_PreflightConfig for explicit valid config failed: %v", verrsValidExplicit.Error())
+
 
 	tests := []struct {
 		name        string
@@ -39,12 +55,12 @@ func TestValidate_PreflightConfig(t *testing.T) {
 		wantErrMsg  string
 		expectErr   bool
 	}{
-		{"valid_nil_values", &PreflightConfig{DisableSwap: boolPtr(true)}, "", false}, // MinCPU/Mem not set, should be valid
+		// Now that MinCPU/Mem are defaulted, a config with only DisableSwap set will get defaults for others.
+		{"valid_disable_swap_only", &PreflightConfig{DisableSwap: boolPtr(true)}, "", false},
 		{"negative_cpu", &PreflightConfig{MinCPUCores: int32Ptr(-1)}, ".minCPUCores: must be positive", true},
 		{"zero_cpu", &PreflightConfig{MinCPUCores: int32Ptr(0)}, ".minCPUCores: must be positive", true},
 		{"zero_mem", &PreflightConfig{MinMemoryMB: uint64Ptr(0)}, ".minMemoryMB: must be positive", true},
-		// {"negative_mem", &PreflightConfig{MinMemoryMB: uint64Ptr(^uint64(0))}, ".minMemoryMB: must be positive", true}, // This test was flawed: MaxUint64 is not <= 0.
-		{"valid_min_values_only", &PreflightConfig{MinCPUCores: int32Ptr(1), MinMemoryMB: uint64Ptr(1)}, "", false},
+		{"valid_min_values_override_defaults", &PreflightConfig{MinCPUCores: int32Ptr(1), MinMemoryMB: uint64Ptr(1)}, "", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -53,14 +69,14 @@ func TestValidate_PreflightConfig(t *testing.T) {
 				SetDefaults_PreflightConfig(tt.cfg)
 			}
 
-			verrs := &ValidationErrors{}
+			verrs := &validation.ValidationErrors{}
 			Validate_PreflightConfig(tt.cfg, verrs, "spec.preflight")
 
 			if tt.expectErr {
-				assert.False(t, verrs.IsEmpty(), "Expected error for %s, got none", tt.name)
+				assert.True(t, verrs.HasErrors(), "Expected error for %s, got none", tt.name)
 				assert.Contains(t, verrs.Error(), tt.wantErrMsg, "Error for %s = %v, want to contain %q", tt.name, verrs.Error(), tt.wantErrMsg)
 			} else {
-				assert.True(t, verrs.IsEmpty(), "Expected no error for %s, got: %v", tt.name, verrs.Error())
+				assert.False(t, verrs.HasErrors(), "Expected no error for %s, got: %v", tt.name, verrs.Error())
 			}
 		})
 	}

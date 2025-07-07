@@ -36,4 +36,22 @@ func TestKubernetesInternalConstants(t *testing.T) {
 		assert.Equal(t, "kubelet-csi-certs", KubeletCSICertsVolumeName, "KubeletCSICertsVolumeName constant is incorrect")
 		assert.Equal(t, "/var/lib/kubelet/plugins_registry", KubeletCSICertsMountPath, "KubeletCSICertsMountPath constant is incorrect")
 	})
+
+	t.Run("KubeadmConstants", func(t *testing.T) {
+		assert.Equal(t, "init-config.yaml", KubeadmInitConfigFileName)
+		assert.Equal(t, "join-config.yaml", KubeadmJoinConfigFileName)
+		assert.Equal(t, "reset", KubeadmResetCommand)
+		assert.Equal(t, "24h0m0s", KubeadmTokenDefaultTTL)
+		assert.Equal(t, "sha256:", KubeadmDiscoveryTokenCACertHashPrefix)
+	})
+
+	t.Run("CertificateConstants", func(t *testing.T) {
+		assert.Equal(t, "system:masters", DefaultCertificateOrganization)
+		assert.Equal(t, "system:nodes", KubeletCertificateOrganization)
+		assert.Equal(t, "system:node:", KubeletCertificateCNPrefix)
+	})
+
+	t.Run("AnnotationKeyConstants", func(t *testing.T) {
+		assert.Equal(t, "node.kubernetes.io/exclude-from-external-load-balancers", AnnotationNodeKubeadmAlphaExcludeFromExternalLB)
+	})
 }

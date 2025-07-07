@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // Helper functions (intPtr, stringPtr, etc.) are expected to be in zz_helpers.go
@@ -29,8 +30,8 @@ func TestSetDefaults_EtcdConfig(t *testing.T) {
 				PeerPort:                     intPtr(2380),
 				DataDir:                      stringPtr("/var/lib/etcd"),
 				ClusterToken:                 "kubexm-etcd-default-token",
-				External:                     nil, // Not EtcdTypeExternal
-				ExtraArgs:                    []string{},
+				External:                     nil,
+				ExtraArgs:                    []string{"--logger=zap", "--log-outputs=stderr", "--auto-compaction-mode=periodic", "--client-cert-auth=true", "--peer-client-cert-auth=true", "--peer-auto-tls=false", "--auto-tls=false"}, // Expected default ExtraArgs for internal etcd
 				BackupDir:                    stringPtr("/var/backups/etcd"),
 				BackupPeriodHours:            intPtr(24),
 				KeepBackupNumber:             intPtr(7),
@@ -47,16 +48,16 @@ func TestSetDefaults_EtcdConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "type external, external config initialized",
-			input: &EtcdConfig{Type: EtcdTypeExternal},
+			name: "type external, no TLS in external",
+			input: &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{Endpoints: []string{"http://localhost:2379"}}},
 			expected: &EtcdConfig{
 				Type:                         EtcdTypeExternal,
 				ClientPort:                   intPtr(2379),
 				PeerPort:                     intPtr(2380),
 				DataDir:                      stringPtr("/var/lib/etcd"),
 				ClusterToken:                 "kubexm-etcd-default-token",
-				External:                     &ExternalEtcdConfig{Endpoints: []string{}}, // Initialized
-				ExtraArgs:                    []string{},
+				External:                     &ExternalEtcdConfig{Endpoints: []string{"http://localhost:2379"}},
+				ExtraArgs:                    []string{"--logger=zap", "--log-outputs=stderr", "--auto-compaction-mode=periodic"}, // No TLS args
 				BackupDir:                    stringPtr("/var/backups/etcd"),
 				BackupPeriodHours:            intPtr(24),
 				KeepBackupNumber:             intPtr(7),
@@ -73,20 +74,19 @@ func TestSetDefaults_EtcdConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "some fields pre-set",
-			input: &EtcdConfig{
-				ClientPort: intPtr(3379),
-				DataDir:    stringPtr("/mnt/myetcd"),
-				LogLevel:   stringPtr("debug"),
-			},
+			name: "type external with TLS",
+			input: &EtcdConfig{Type: EtcdTypeExternal, External: &ExternalEtcdConfig{
+				Endpoints: []string{"https://etcd.local:2379"},
+				CAFile:    "ca.crt", CertFile: "cert.crt", KeyFile: "key.pem",
+			}},
 			expected: &EtcdConfig{
-				Type:                         EtcdTypeKubeXMSInternal,
-				ClientPort:                   intPtr(3379), // Not overridden
+				Type:                         EtcdTypeExternal,
+				ClientPort:                   intPtr(2379),
 				PeerPort:                     intPtr(2380),
-				DataDir:                      stringPtr("/mnt/myetcd"), // Not overridden
+				DataDir:                      stringPtr("/var/lib/etcd"),
 				ClusterToken:                 "kubexm-etcd-default-token",
-				External:                     nil,
-				ExtraArgs:                    []string{},
+				External:                     &ExternalEtcdConfig{Endpoints: []string{"https://etcd.local:2379"}, CAFile: "ca.crt", CertFile: "cert.crt", KeyFile: "key.pem"},
+				ExtraArgs:                    []string{"--logger=zap", "--log-outputs=stderr", "--auto-compaction-mode=periodic", "--client-cert-auth=true"}, // External TLS only sets client-cert-auth
 				BackupDir:                    stringPtr("/var/backups/etcd"),
 				BackupPeriodHours:            intPtr(24),
 				KeepBackupNumber:             intPtr(7),
@@ -97,7 +97,38 @@ func TestSetDefaults_EtcdConfig(t *testing.T) {
 				QuotaBackendBytes:            int64Ptr(2147483648),
 				MaxRequestBytes:              uintPtr(1572864),
 				Metrics:                      stringPtr("basic"),
-				LogLevel:                     stringPtr("debug"), // Not overridden
+				LogLevel:                     stringPtr("info"),
+				MaxSnapshotsToKeep:           uintPtr(5),
+				MaxWALsToKeep:                uintPtr(5),
+			},
+		},
+		{
+			name: "some fields pre-set with custom ExtraArgs",
+			input: &EtcdConfig{
+				ClientPort: intPtr(3379),
+				DataDir:    stringPtr("/mnt/myetcd"),
+				LogLevel:   stringPtr("debug"),
+				ExtraArgs:  []string{"--logger=json", "--initial-cluster-token=my-custom-token"},
+			},
+			expected: &EtcdConfig{
+				Type:                         EtcdTypeKubeXMSInternal,
+				ClientPort:                   intPtr(3379),
+				PeerPort:                     intPtr(2380),
+				DataDir:                      stringPtr("/mnt/myetcd"),
+				ClusterToken:                 "kubexm-etcd-default-token", // Default token is still applied if not in ExtraArgs
+				External:                     nil,
+				ExtraArgs:                    []string{"--logger=json", "--initial-cluster-token=my-custom-token", "--log-outputs=stderr", "--auto-compaction-mode=periodic", "--client-cert-auth=true", "--peer-client-cert-auth=true", "--peer-auto-tls=false", "--auto-tls=false"}, // User's logger overrides default, others are appended
+				BackupDir:                    stringPtr("/var/backups/etcd"),
+				BackupPeriodHours:            intPtr(24),
+				KeepBackupNumber:             intPtr(7),
+				HeartbeatIntervalMillis:      intPtr(250),
+				ElectionTimeoutMillis:        intPtr(5000),
+				SnapshotCount:                uint64Ptr(10000),
+				AutoCompactionRetentionHours: intPtr(8),
+				QuotaBackendBytes:            int64Ptr(2147483648),
+				MaxRequestBytes:              uintPtr(1572864),
+				Metrics:                      stringPtr("basic"),
+				LogLevel:                     stringPtr("debug"),
 				MaxSnapshotsToKeep:           uintPtr(5),
 				MaxWALsToKeep:                uintPtr(5),
 			},
@@ -107,8 +138,36 @@ func TestSetDefaults_EtcdConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			SetDefaults_EtcdConfig(tt.input)
-			if !reflect.DeepEqual(tt.input, tt.expected) {
-				assert.Equal(t, tt.expected, tt.input)
+			// Custom comparison for ExtraArgs due to order indeterminacy
+			if tt.input != nil && tt.expected != nil {
+				// Compare ExtraArgs separately
+				actualArgs := tt.input.ExtraArgs
+				expectedArgsMap := make(map[string]bool)
+				for _, arg := range tt.expected.ExtraArgs {
+					expectedArgsMap[arg] = true
+				}
+
+				for _, arg := range actualArgs {
+					assert.True(t, expectedArgsMap[arg], "Unexpected arg %s in actual ExtraArgs for test %s. Expected: %v, Got: %v", arg, tt.name, tt.expected.ExtraArgs, actualArgs)
+					delete(expectedArgsMap, arg) // Mark as found
+				}
+				assert.Empty(t, expectedArgsMap, "Not all expected args found in actual ExtraArgs for test %s. Missing: %v. Expected: %v, Got: %v", tt.name, expectedArgsMap, tt.expected.ExtraArgs, actualArgs)
+
+				// Nil out ExtraArgs for DeepEqual comparison of the rest of the struct
+				tempInputExtraArgs := tt.input.ExtraArgs
+				tempExpectedExtraArgs := tt.expected.ExtraArgs
+				tt.input.ExtraArgs = nil
+				tt.expected.ExtraArgs = nil
+
+				if !reflect.DeepEqual(tt.input, tt.expected) {
+					assert.Equal(t, tt.expected, tt.input, "Struct mismatch (excluding ExtraArgs) for test %s", tt.name)
+				}
+				// Restore ExtraArgs
+				tt.input.ExtraArgs = tempInputExtraArgs
+				tt.expected.ExtraArgs = tempExpectedExtraArgs
+
+			} else { // Handle nil cases for input/expected directly
+				assert.Equal(t, tt.expected, tt.input, "Nil comparison failed for test %s", tt.name)
 			}
 		})
 	}
@@ -128,7 +187,7 @@ func TestValidate_EtcdConfig(t *testing.T) {
 			input: &EtcdConfig{
 				Type:         EtcdTypeExternal,
 				External:     &ExternalEtcdConfig{Endpoints: []string{"http://etcd1:2379", "http://etcd2:2379"}},
-				ClusterToken: "some-token", // Required even for external if not defaulted
+				ClusterToken: "some-token",
 			},
 		},
 		{
@@ -150,8 +209,8 @@ func TestValidate_EtcdConfig(t *testing.T) {
 				ElectionTimeoutMillis:        intPtr(1000),
 				SnapshotCount:                uint64Ptr(5000),
 				AutoCompactionRetentionHours: intPtr(1),
-				QuotaBackendBytes:            int64Ptr(4 * 1024 * 1024 * 1024), // 4GB
-				MaxRequestBytes:              uintPtr(2 * 1024 * 1024),       // 2MB
+				QuotaBackendBytes:            int64Ptr(4 * 1024 * 1024 * 1024),
+				MaxRequestBytes:              uintPtr(2 * 1024 * 1024),
 				Metrics:                      stringPtr("extensive"),
 				LogLevel:                     stringPtr("debug"),
 				MaxSnapshotsToKeep:           uintPtr(10),
@@ -162,16 +221,16 @@ func TestValidate_EtcdConfig(t *testing.T) {
 
 	for _, tt := range validCases {
 		t.Run("Valid_"+tt.name, func(t *testing.T) {
-			SetDefaults_EtcdConfig(tt.input) // Apply defaults
-			verrs := &ValidationErrors{}
+			SetDefaults_EtcdConfig(tt.input)
+			verrs := &validation.ValidationErrors{}
 			Validate_EtcdConfig(tt.input, verrs, "spec.etcd")
-			assert.True(t, verrs.IsEmpty(), "Expected no validation errors for '%s', but got: %s", tt.name, verrs.Error())
+			assert.False(t, verrs.HasErrors(), "Expected no validation errors for '%s', but got: %s", tt.name, verrs.Error())
 		})
 	}
 
 	invalidCases := []struct {
 		name        string
-		cfgBuilder  func() *EtcdConfig // Use a builder to avoid modifying shared input
+		cfgBuilder  func() *EtcdConfig
 		errContains []string
 	}{
 		{"invalid type", func() *EtcdConfig { return &EtcdConfig{Type: "invalid-type"} }, []string{"invalid type 'invalid-type'"}},
@@ -221,10 +280,10 @@ func TestValidate_EtcdConfig(t *testing.T) {
 	for _, tt := range invalidCases {
 		t.Run("Invalid_"+tt.name, func(t *testing.T) {
 			cfg := tt.cfgBuilder()
-			SetDefaults_EtcdConfig(cfg) // Apply defaults before validation
-			verrs := &ValidationErrors{}
+			SetDefaults_EtcdConfig(cfg)
+			verrs := &validation.ValidationErrors{}
 			Validate_EtcdConfig(cfg, verrs, "spec.etcd")
-			assert.False(t, verrs.IsEmpty(), "Expected validation errors for '%s', but got none", tt.name)
+			assert.True(t, verrs.HasErrors(), "Expected validation errors for '%s', but got none", tt.name)
 			if len(tt.errContains) > 0 {
 				fullError := verrs.Error()
 				for _, errStr := range tt.errContains {
@@ -260,8 +319,6 @@ func TestEtcdConfig_GetPortsAndDataDir(t *testing.T) {
 			PeerPort:   intPtr(customPeerPort),
 			DataDir:    stringPtr(customDataDir),
 		}
-		// Note: Getters should work correctly even if defaults haven't been run on the whole struct,
-		// as long as the specific fields they check are set or nil.
 		assert.Equal(t, customClientPort, specifiedCfg.GetClientPort())
 		assert.Equal(t, customPeerPort, specifiedCfg.GetPeerPort())
 		assert.Equal(t, customDataDir, specifiedCfg.GetDataDir())
@@ -269,13 +326,12 @@ func TestEtcdConfig_GetPortsAndDataDir(t *testing.T) {
 
 	t.Run("config with some nil fields (should use getter defaults)", func(t *testing.T) {
 		partialCfg := &EtcdConfig{
-			ClientPort: nil, // Explicitly nil
+			ClientPort: nil,
 			PeerPort: intPtr(12345),
 			DataDir: nil,
 		}
 		assert.Equal(t, 2379, partialCfg.GetClientPort(), "Client port should fallback to getter's default")
 		assert.Equal(t, 12345, partialCfg.GetPeerPort())
 		assert.Equal(t, "/var/lib/etcd", partialCfg.GetDataDir(), "DataDir should fallback to getter's default")
-
 	})
 }

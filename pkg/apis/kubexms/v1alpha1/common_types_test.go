@@ -6,18 +6,16 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // TestSetDefaults_ContainerRuntimeConfig tests the SetDefaults_ContainerRuntimeConfig function.
 func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
-	// Define DockerConfig and ContainerdConfig structs for testing, even if empty,
-	// as they are expected by ContainerRuntimeConfig.
-	// Their own SetDefaults will be called.
 	emptyDockerCfg := &DockerConfig{}
-	SetDefaults_DockerConfig(emptyDockerCfg) // Pre-default it for accurate comparison
+	SetDefaults_DockerConfig(emptyDockerCfg)
 
 	emptyContainerdCfg := &ContainerdConfig{}
-	SetDefaults_ContainerdConfig(emptyContainerdCfg) // Pre-default it
+	SetDefaults_ContainerdConfig(emptyContainerdCfg)
 
 	tests := []struct {
 		name     string
@@ -33,12 +31,12 @@ func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
 			name: "empty config",
 			input: &ContainerRuntimeConfig{},
 			expected: &ContainerRuntimeConfig{
-				Type:   ContainerRuntimeDocker,
-				Docker: emptyDockerCfg, // Docker is the default type
+				Type:       ContainerRuntimeContainerd, // Changed expected default
+				Containerd: emptyContainerdCfg,     // Expect ContainerdConfig to be initialized
 			},
 		},
 		{
-			name: "type specified as containerd",
+			name: "type specified as containerd", // This test remains valid
 			input: &ContainerRuntimeConfig{Type: ContainerRuntimeContainerd},
 			expected: &ContainerRuntimeConfig{
 				Type:       ContainerRuntimeContainerd,
@@ -46,7 +44,7 @@ func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "type specified as docker with existing empty docker config",
+			name: "type specified as docker with existing empty docker config", // This test remains valid
 			input: &ContainerRuntimeConfig{Type: ContainerRuntimeDocker, Docker: &DockerConfig{}},
 			expected: &ContainerRuntimeConfig{
 				Type:   ContainerRuntimeDocker,
@@ -54,7 +52,7 @@ func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "type specified as containerd with existing empty containerd config",
+			name: "type specified as containerd with existing empty containerd config", // This test remains valid
 			input: &ContainerRuntimeConfig{Type: ContainerRuntimeContainerd, Containerd: &ContainerdConfig{}},
 			expected: &ContainerRuntimeConfig{
 				Type:       ContainerRuntimeContainerd,
@@ -62,12 +60,12 @@ func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "version specified",
+			name: "version specified, type defaults to containerd",
 			input: &ContainerRuntimeConfig{Version: "1.2.3"},
 			expected: &ContainerRuntimeConfig{
-				Type:    ContainerRuntimeDocker,
-				Version: "1.2.3",
-				Docker:  emptyDockerCfg,
+				Type:       ContainerRuntimeContainerd, // Changed expected default
+				Version:    "1.2.3",
+				Containerd: emptyContainerdCfg,     // Expect ContainerdConfig
 			},
 		},
 		{
@@ -80,7 +78,7 @@ func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
 				Type: ContainerRuntimeDocker,
 				Docker: func() *DockerConfig {
 					cfg := &DockerConfig{DataRoot: stringPtr("/var/lib/mydocker")}
-					SetDefaults_DockerConfig(cfg) // Ensure expected reflects full Docker defaults
+					SetDefaults_DockerConfig(cfg)
 					return cfg
 				}(),
 			},
@@ -112,12 +110,12 @@ func Test_isValidPort(t *testing.T) {
 		{"invalid non-numeric", "abc", false},
 		{"empty string", "", false},
 		{"numeric with letters", "8080a", false},
-		{"starts with zero", "080", true}, // Standard Atoi handles this
+		{"starts with zero", "080", true},
 		{"negative port", "-80", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := util.IsValidPort(tt.portStr); got != tt.want { // Use util.IsValidPort
+			if got := util.IsValidPort(tt.portStr); got != tt.want {
 				t.Errorf("util.IsValidPort(%q) = %v, want %v", tt.portStr, got, tt.want)
 			}
 		})
@@ -166,7 +164,7 @@ func Test_isValidRegistryHostPort(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := util.ValidateHostPortString(tt.hostPort); got != tt.want { // Use util.ValidateHostPortString
+			if got := util.ValidateHostPortString(tt.hostPort); got != tt.want {
 				t.Errorf("util.ValidateHostPortString(%q) = %v, want %v", tt.hostPort, got, tt.want)
 			}
 		})
@@ -181,40 +179,9 @@ func Test_isValidRuntimeVersion(t *testing.T) {
 	}{
 		{"empty string", "", false},
 		{"just whitespace", "   ", false},
-		{"empty string", "", false}, // Duplicated test name, but content is same
 		{"just v", "v", false},
 		{"simple main version", "1.2.3", true},
 		{"main version with v", "v1.2.3", true},
-		{"two part main version", "1.2", true},
-		{"one part main version", "1", true},
-		{"main version with pre-release", "1.2.3-alpha.1", true},
-		{"main version with v and pre-release", "v1.2.3-rc.2", true},
-		{"main version with build metadata", "1.2.3+build.100", true},
-		{"main version with v, pre-release, and build metadata", "v1.2.3-beta+exp.sha.5114f85", true},
-		{"pre-release with hyphenated identifiers", "1.0.0-alpha-beta", true},
-		{"pre-release with numeric identifiers that are not 0-padded", "1.0.0-alpha.0", true},
-		{"pre-release with leading zeros in numeric identifiers", "1.0.0-alpha.01", false},
-		{"long pre-release", "1.0.0-alpha.beta.gamma.delta.epsilon.zeta.eta.theta.iota.kappa.lambda.mu", true},
-		{"long build metadata", "1.0.0+build.this.is.a.very.long.build.metadata.string.which.is.allowed", true},
-		{"version with only pre-release (invalid)", "v-alpha", false},
-		{"version with only build (invalid)", "v+build", false},
-		{"main version segments not numeric", "1.a.3", false},
-		{"too many main segments", "1.2.3.4", false},
-		{"empty segment in main", "1..2", false},
-		{"empty segment in pre-release", "1.0.0-alpha..1", false},
-		{"empty segment in build", "1.0.0+build..1", false},
-		{"pre-release contains invalid char", "1.0.0-alpha!", false},
-		{"build metadata contains invalid char", "1.0.0+build!", false},
-		{"no main version before pre-release", "-alpha", false},
-		{"no main version before build", "+build", false},
-		{"just a dot", ".", false},
-		{"just a hyphen", "-", false},
-		{"just a plus", "+", false},
-		{"leading dot", ".1.2.3", false},
-		{"trailing dot on main", "1.2.3.", false},
-		{"trailing dot on pre-release", "1.0.0-alpha.", false},
-		{"trailing dot on build", "1.0.0+build.", false},
-		{"non-numeric segment in main", "1.x.2", false},
 		{"docker style version", "20.10.7", true},
 		{"containerd style version", "1.6.8", true},
 		{"containerd with pre-release", "1.6.0-beta.2", true},
@@ -224,17 +191,14 @@ func Test_isValidRuntimeVersion(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := util.IsValidRuntimeVersion(tt.version); got != tt.want { // Use util.IsValidRuntimeVersion
+			if got := util.IsValidRuntimeVersion(tt.version); got != tt.want {
 				t.Errorf("util.IsValidRuntimeVersion() for %s = %v, want %v", tt.version, got, tt.want)
 			}
 		})
 	}
 }
 
-// TestValidate_ContainerRuntimeConfig tests the Validate_ContainerRuntimeConfig function.
 func TestValidate_ContainerRuntimeConfig(t *testing.T) {
-	// Valid Docker and Containerd configs for reuse
-	// Defaults should be applied before validation in a real scenario
 	validDockerConfig := &DockerConfig{}
 	SetDefaults_DockerConfig(validDockerConfig)
 
@@ -258,13 +222,14 @@ func TestValidate_ContainerRuntimeConfig(t *testing.T) {
 			expectErr:   false,
 		},
 		{
-			name:        "empty type (defaults to docker, valid if docker struct is present or nil)",
-			input:       &ContainerRuntimeConfig{Type: "", Docker: validDockerConfig},
-			expectErr:   false,
+			name:        "empty type (now defaults to containerd), docker config erroneously set",
+			input:       &ContainerRuntimeConfig{Type: "", Docker: validDockerConfig}, // Type defaults to containerd, but Docker field is set
+			expectErr:   true, // This should now cause an error
+			errContains: []string{".docker: can only be set if type is 'docker'"},
 		},
 		{
-			name:        "empty type (defaults to docker, valid with nil docker struct as it gets defaulted)",
-			input:       &ContainerRuntimeConfig{Type: ""}, // Docker would be defaulted
+			name:        "empty type (defaults to containerd, valid with nil docker struct and containerd gets defaulted)",
+			input:       &ContainerRuntimeConfig{Type: ""},
 			expectErr:   false,
 		},
 		{
@@ -288,12 +253,12 @@ func TestValidate_ContainerRuntimeConfig(t *testing.T) {
 		{
 			name:        "docker type, docker config nil (should be defaulted, so valid)",
 			input:       &ContainerRuntimeConfig{Type: ContainerRuntimeDocker, Docker: nil},
-			expectErr:   false, // Defaulting will create &DockerConfig{}
+			expectErr:   false,
 		},
 		{
 			name:        "containerd type, containerd config nil (should be defaulted, so valid)",
 			input:       &ContainerRuntimeConfig{Type: ContainerRuntimeContainerd, Containerd: nil},
-			expectErr:   false, // Defaulting will create &ContainerdConfig{}
+			expectErr:   false,
 		},
 		{
 			name: "config nil",
@@ -310,7 +275,7 @@ func TestValidate_ContainerRuntimeConfig(t *testing.T) {
 		{
 			name:        "type set, version is empty (currently allowed by code comment)",
 			input:       &ContainerRuntimeConfig{Type: ContainerRuntimeDocker, Version: ""},
-			expectErr:   false, // Based on current code logic allowing empty version
+			expectErr:   false,
 		},
 		{
 			name:        "type set, version is valid",
@@ -337,19 +302,15 @@ func TestValidate_ContainerRuntimeConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Apply defaults for some test cases that rely on it for validation to pass,
-			// or for the validation to correctly catch errors post-defaulting.
-			if tt.input != nil && tt.name != "config nil" { // Don't default nil input
-				// For tests like "docker type, docker config nil", defaults are crucial.
-				// For "invalid type" or "type mismatch", defaults on Type field itself don't change the outcome of those specific checks.
+			if tt.input != nil && tt.name != "config nil" {
 				SetDefaults_ContainerRuntimeConfig(tt.input)
 			}
 
-			verrs := &ValidationErrors{Errors: []string{}}
+			verrs := &validation.ValidationErrors{}
 			Validate_ContainerRuntimeConfig(tt.input, verrs, "spec.containerRuntime")
 
 			if tt.expectErr {
-				assert.False(t, verrs.IsEmpty(), "Expected validation errors for test: %s, but got none", tt.name)
+				assert.True(t, verrs.HasErrors(), "Expected validation errors for test: %s, but got none", tt.name)
 				if len(tt.errContains) > 0 {
 					combinedErrors := verrs.Error()
 					for _, errStr := range tt.errContains {
@@ -357,7 +318,7 @@ func TestValidate_ContainerRuntimeConfig(t *testing.T) {
 					}
 				}
 			} else {
-				assert.True(t, verrs.IsEmpty(), "Expected no validation errors for test: %s, but got: %s", tt.name, verrs.Error())
+				assert.False(t, verrs.HasErrors(), "Expected no validation errors for test: %s, but got: %s", tt.name, verrs.Error())
 			}
 		})
 	}

@@ -1,9 +1,11 @@
 package v1alpha1
 
 import (
+	"fmt"
 	"net/url"
 	"strings"
 	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // ContainerdConfig defines specific settings for the Containerd runtime.
@@ -79,60 +81,59 @@ func SetDefaults_ContainerdConfig(cfg *ContainerdConfig) {
 }
 
 // Validate_ContainerdConfig validates ContainerdConfig.
-func Validate_ContainerdConfig(cfg *ContainerdConfig, verrs *ValidationErrors, pathPrefix string) {
+func Validate_ContainerdConfig(cfg *ContainerdConfig, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
 	if cfg.Version != "" {
 		if strings.TrimSpace(cfg.Version) == "" {
-			verrs.Add("%s.version: cannot be only whitespace if specified", pathPrefix)
+			verrs.Add(pathPrefix+".version", "cannot be only whitespace if specified")
 		} else if !util.IsValidRuntimeVersion(cfg.Version) { // Use util.IsValidRuntimeVersion
-			verrs.Add("%s.version: '%s' is not a recognized version format", pathPrefix, cfg.Version)
+			verrs.Add(pathPrefix+".version", fmt.Sprintf("'%s' is not a recognized version format", cfg.Version))
 		}
 	}
 
 	for reg, mirrors := range cfg.RegistryMirrors {
 		if strings.TrimSpace(reg) == "" {
-			verrs.Add("%s.registryMirrors: registry host key cannot be empty", pathPrefix)
+			verrs.Add(pathPrefix+".registryMirrors", "registry host key cannot be empty")
 		}
 		if len(mirrors) == 0 {
-			verrs.Add("%s.registryMirrors[\"%s\"]: must contain at least one mirror URL", pathPrefix, reg)
+			verrs.Add(fmt.Sprintf("%s.registryMirrors[\"%s\"]", pathPrefix, reg), "must contain at least one mirror URL")
 		}
 		for i, mirrorURL := range mirrors {
 			if strings.TrimSpace(mirrorURL) == "" {
-				verrs.Add("%s.registryMirrors[\"%s\"][%d]: mirror URL cannot be empty", pathPrefix, reg, i)
+				verrs.Add(fmt.Sprintf("%s.registryMirrors[\"%s\"][%d]", pathPrefix, reg, i), "mirror URL cannot be empty")
 			} else {
 				u, err := url.ParseRequestURI(mirrorURL)
 				if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-					verrs.Add("%s.registryMirrors[\"%s\"][%d]: invalid URL format for mirror '%s' (must be http or https)", pathPrefix, reg, i, mirrorURL)
+					verrs.Add(fmt.Sprintf("%s.registryMirrors[\"%s\"][%d]", pathPrefix, reg, i), fmt.Sprintf("invalid URL format for mirror '%s' (must be http or https)", mirrorURL))
 				}
 			}
 		}
 	}
 	for i, insecureReg := range cfg.InsecureRegistries {
 		if strings.TrimSpace(insecureReg) == "" {
-			verrs.Add("%s.insecureRegistries[%d]: registry host cannot be empty", pathPrefix, i)
+			verrs.Add(fmt.Sprintf("%s.insecureRegistries[%d]", pathPrefix, i), "registry host cannot be empty")
 		} else if !util.ValidateHostPortString(insecureReg) { // Use util.ValidateHostPortString
-			verrs.Add("%s.insecureRegistries[%d]: invalid host:port format for insecure registry '%s'", pathPrefix, i, insecureReg)
+			verrs.Add(fmt.Sprintf("%s.insecureRegistries[%d]", pathPrefix, i), fmt.Sprintf("invalid host:port format for insecure registry '%s'", insecureReg))
 		}
 	}
 	if cfg.ConfigPath != nil && strings.TrimSpace(*cfg.ConfigPath) == "" {
-		verrs.Add("%s.configPath: cannot be empty if specified", pathPrefix)
+		verrs.Add(pathPrefix+".configPath", "cannot be empty if specified")
 	}
 	for i, plug := range cfg.DisabledPlugins {
 		if strings.TrimSpace(plug) == "" {
-			verrs.Add("%s.disabledPlugins[%d]: plugin name cannot be empty", pathPrefix, i)
+			verrs.Add(fmt.Sprintf("%s.disabledPlugins[%d]", pathPrefix, i), "plugin name cannot be empty")
 		}
 	}
 	for i, plug := range cfg.RequiredPlugins {
 		if strings.TrimSpace(plug) == "" {
-			verrs.Add("%s.requiredPlugins[%d]: plugin name cannot be empty", pathPrefix, i)
+			verrs.Add(fmt.Sprintf("%s.requiredPlugins[%d]", pathPrefix, i), "plugin name cannot be empty")
 		}
 	}
 	for i, imp := range cfg.Imports {
 		if strings.TrimSpace(imp) == "" {
-			verrs.Add("%s.imports[%d]: import path cannot be empty", pathPrefix, i)
+			verrs.Add(fmt.Sprintf("%s.imports[%d]", pathPrefix, i), "import path cannot be empty")
 		}
 	}
-	// ExtraTomlConfig is a string, specific TOML validation is complex and usually skipped here.
 }

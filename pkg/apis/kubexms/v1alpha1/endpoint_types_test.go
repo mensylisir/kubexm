@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // TestSetDefaults_ControlPlaneEndpointSpec tests the SetDefaults_ControlPlaneEndpointSpec function.
@@ -23,21 +24,20 @@ func TestSetDefaults_ControlPlaneEndpointSpec(t *testing.T) {
 			name:  "empty config",
 			input: &ControlPlaneEndpointSpec{},
 			expected: &ControlPlaneEndpointSpec{
-				Port: 6443, // Default port
-				// ExternalDNS defaults to false (zero value for bool)
+				Port: 6443,
 			},
 		},
 		{
 			name:  "port already set",
 			input: &ControlPlaneEndpointSpec{Port: 8443},
 			expected: &ControlPlaneEndpointSpec{
-				Port: 8443, // Not overridden
+				Port: 8443,
 			},
 		},
 		{
 			name:  "all fields set",
-			input: &ControlPlaneEndpointSpec{Domain: "k8s.example.com", Address: "192.168.1.100", Port: 6443, ExternalDNS: true /*, ExternalLoadBalancerType: "external", InternalLoadBalancerType: "haproxy"*/}, // Types removed
-			expected: &ControlPlaneEndpointSpec{Domain: "k8s.example.com", Address: "192.168.1.100", Port: 6443, ExternalDNS: true /*, ExternalLoadBalancerType: "external", InternalLoadBalancerType: "haproxy"*/}, // Types removed
+			input: &ControlPlaneEndpointSpec{Domain: "k8s.example.com", Address: "192.168.1.100", Port: 6443, ExternalDNS: true},
+			expected: &ControlPlaneEndpointSpec{Domain: "k8s.example.com", Address: "192.168.1.100", Port: 6443, ExternalDNS: true},
 		},
 	}
 
@@ -97,8 +97,8 @@ func TestValidate_ControlPlaneEndpointSpec(t *testing.T) {
 		},
 		{
 			name:        "port too low (user set, not default 0)",
-			input:       &ControlPlaneEndpointSpec{Domain: validDomain, Port: 0}, // Set to 0, but SetDefaults will change it to 6443 before validation
-			expectErr:   false, // After defaulting, port will be 6443, so it's valid
+			input:       &ControlPlaneEndpointSpec{Domain: validDomain, Port: 0},
+			expectErr:   false,
 		},
 		{
 			name:        "port explicitly too low",
@@ -112,23 +112,19 @@ func TestValidate_ControlPlaneEndpointSpec(t *testing.T) {
 			expectErr:   true,
 			errContains: []string{".port: invalid port 70000"},
 		},
-		// Tests for ExternalLoadBalancerType and InternalLoadBalancerType are removed as fields are removed.
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Apply defaults before validation.
-			// Note: For "port too low (user set, not default 0)", the input port:0 will become 6443 after defaults.
-			// The validation `cfg.Port != 0` is to check user-supplied non-defaulted invalid ports.
-			if tt.input != nil { // Avoid panic on nil input
+			if tt.input != nil {
 				SetDefaults_ControlPlaneEndpointSpec(tt.input)
 			}
 
-			verrs := &ValidationErrors{} // Assuming ValidationErrors is available
+			verrs := &validation.ValidationErrors{}
 			Validate_ControlPlaneEndpointSpec(tt.input, verrs, "spec.controlPlaneEndpoint")
 
 			if tt.expectErr {
-				assert.False(t, verrs.IsEmpty(), "Expected validation errors for test: %s, but got none", tt.name)
+				assert.True(t, verrs.HasErrors(), "Expected validation errors for test: %s, but got none", tt.name)
 				if len(tt.errContains) > 0 {
 					combinedErrors := verrs.Error()
 					for _, errStr := range tt.errContains {
@@ -136,7 +132,7 @@ func TestValidate_ControlPlaneEndpointSpec(t *testing.T) {
 					}
 				}
 			} else {
-				assert.True(t, verrs.IsEmpty(), "Expected no validation errors for test: %s, but got: %s", tt.name, verrs.Error())
+				assert.False(t, verrs.HasErrors(), "Expected no validation errors for test: %s, but got: %s", tt.name, verrs.Error())
 			}
 		})
 	}

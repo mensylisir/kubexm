@@ -1,11 +1,13 @@
 package runner
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath" // Required for filepath.Dir
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -514,12 +516,16 @@ func (r *defaultRunner) GetContainerdConfig(ctx context.Context, conn connector.
 		// Simplified representation for PluginConfigs for these specific values
 		if sandboxImage != nil || systemdCgroup != nil {
 			if opts.PluginConfigs == nil {
-				opts.PluginConfigs = make(map[string]interface{})
+				newMap := make(map[string]interface{})
+				opts.PluginConfigs = &newMap
 			}
-			criPlugins, ok := opts.PluginConfigs["io.containerd.grpc.v1.cri"].(map[string]interface{})
+			// Dereference opts.PluginConfigs to access the map
+			pluginConfigsMap := *opts.PluginConfigs
+
+			criPlugins, ok := pluginConfigsMap["io.containerd.grpc.v1.cri"].(map[string]interface{})
 			if !ok {
 				criPlugins = make(map[string]interface{})
-				opts.PluginConfigs["io.containerd.grpc.v1.cri"] = criPlugins
+				pluginConfigsMap["io.containerd.grpc.v1.cri"] = criPlugins
 			}
 			if sandboxImage != nil {
 				criPlugins["sandbox_image"] = *sandboxImage
@@ -687,7 +693,7 @@ oom_score = -999
 // This is a best-effort modification due to lack of a full TOML parser.
 // It focuses on setting simple top-level values and appending registry mirrors.
 // More complex structural changes to the TOML are not reliably supported.
-func (r *defaultRunner) ConfigureContainerd(ctx context.Context, conn connector.Connector, opts ContainerdConfigOptions, restartService bool) error {
+func (r *defaultRunner) ConfigureContainerd(ctx context.Context, conn connector.Connector, facts *Facts, opts ContainerdConfigOptions, restartService bool) error {
 	if conn == nil { return errors.New("connector cannot be nil for ConfigureContainerd") }
 
 	if err := r.Mkdirp(ctx, conn, filepath.Dir(containerdConfigPath), "0755", true); err != nil {
@@ -704,7 +710,7 @@ func (r *defaultRunner) ConfigureContainerd(ctx context.Context, conn connector.
 	}
 	currentContent := string(currentContentBytes)
 	lines := strings.Split(currentContent, "\n")
-	newLines := make([]string, 0, len(lines)+20) // Preallocate some space
+	// newLines := make([]string, 0, len(lines)+20) // Preallocate some space // Removed: newLines was declared but not used effectively
 
 	modified := false
 
@@ -795,23 +801,39 @@ func (r *defaultRunner) ConfigureContainerd(ctx context.Context, conn connector.
 	}
 
 	// Apply specific plugin values if present in opts.PluginConfigs (very simplified)
-	if criPluginMap, ok := opts.PluginConfigs["io.containerd.grpc.v1.cri"].(map[string]interface{}); ok {
-		if sandboxImage, ok := criPluginMap["sandbox_image"].(string); ok {
-			lines, modified = replaceOrAppendValue(lines, `[plugins."io.containerd.grpc.v1.cri"]`, "sandbox_image", sandboxImage); modified = true
-		}
-		if containerdMap, ok := criPluginMap["containerd"].(map[string]interface{}); ok {
-			if runtimesMap, ok := containerdMap["runtimes"].(map[string]interface{}); ok {
-				if runcMap, ok := runtimesMap["runc"].(map[string]interface{}); ok {
-					if optionsMap, ok := runcMap["options"].(map[string]interface{}); ok {
-						if systemdCgroup, ok := optionsMap["SystemdCgroup"].(bool); ok {
-							lines, modified = replaceOrAppendValue(lines, `[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]`, "SystemdCgroup", systemdCgroup); modified = true
+	if opts.PluginConfigs != nil {
+		pluginConfigsMap := *opts.PluginConfigs // Dereference the pointer to map
+		if criPluginMap, ok := pluginConfigsMap["io.containerd.grpc.v1.cri"].(map[string]interface{}); ok {
+			if sandboxImage, ok := criPluginMap["sandbox_image"].(string); ok {
+				lines, modified = replaceOrAppendValue(lines, `[plugins."io.containerd.grpc.v1.cri"]`, "sandbox_image", sandboxImage); modified = true
+			}
+			if containerdMap, ok := criPluginMap["containerd"].(map[string]interface{}); ok {
+				if runtimesMap, ok := containerdMap["runtimes"].(map[string]interface{}); ok {
+					if runcMap, ok := runtimesMap["runc"].(map[string]interface{}); ok {
+						if optionsMap, ok := runcMap["options"].(map[string]interface{}); ok {
+							if systemdCgroup, ok := optionsMap["SystemdCgroup"].(bool); ok {
+								lines, modified = replaceOrAppendValue(lines, `[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]`, "SystemdCgroup", systemdCgroup); modified = true
+							}
 						}
 					}
 				}
 			}
 		}
 	}
-
+	// Note: The following block was a duplicate or misplaced part from a previous merge/edit and has been removed.
+	// It incorrectly processed criPluginMap again and had an extra closing brace.
+	// if containerdMap, ok := criPluginMap["containerd"].(map[string]interface{}); ok {
+	// 	if runtimesMap, ok := containerdMap["runtimes"].(map[string]interface{}); ok {
+	// 		if runcMap, ok := runtimesMap["runc"].(map[string]interface{}); ok {
+	// 			if optionsMap, ok := runcMap["options"].(map[string]interface{}); ok {
+	// 				if systemdCgroup, ok := optionsMap["SystemdCgroup"].(bool); ok {
+	// 					lines, modified = replaceOrAppendValue(lines, `[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]`, "SystemdCgroup", systemdCgroup); modified = true
+	// 				}
+	// 			}
+	// 		}
+	// 	}
+	// }
+	// } // This was the extra closing brace causing syntax error.
 
 	// Handle Registry Mirrors (primarily by appending, as robust merging is hard)
 	// We will ensure the main registry section exists, then append mirror blocks.
@@ -884,9 +906,9 @@ func (r *defaultRunner) ConfigureContainerd(ctx context.Context, conn connector.
 	if len(mirrorSnippets) > 0 {
 		// Find where to append these snippets: inside the [plugins."io.containerd.grpc.v1.cri".registry.mirrors] block
 		// This is tricky. Simplest is to append at the end of the file if the section exists.
-		finalLines := make([]string, 0, len(lines)+len(mirrorSnippets))
-		registryMirrorsBlockEnd := false
-		appendedSnippets := false
+		// finalLines := make([]string, 0, len(lines)+len(mirrorSnippets)) // Removed: finalLines was declared but not used
+		// registryMirrorsBlockEnd := false // Removed: registryMirrorsBlockEnd was declared but not used
+		// appendedSnippets := false // Removed: appendedSnippets was declared but not used
 
 		// Try to append snippets at the end of the registry.mirrors section
 		// This assumes registry.mirrors is the last sub-table in registry, which is common
@@ -911,18 +933,19 @@ func (r *defaultRunner) ConfigureContainerd(ctx context.Context, conn connector.
 	}
 
 	if modified && restartService {
-		var currentFacts *Facts = facts // Use provided facts if available
-		if currentFacts == nil {
+		// Use provided facts if available, otherwise gather them.
+		// The 'facts' variable is now a parameter of ConfigureContainerd.
+		if facts == nil {
 			var errFacts error
-			currentFacts, errFacts = r.GatherFacts(ctx, conn)
+			facts, errFacts = r.GatherFacts(ctx, conn) // Assign to the 'facts' parameter
 			if errFacts != nil {
 				return errors.Wrap(errFacts, "failed to gather facts for containerd restart")
 			}
 		}
 
-		errRestart := r.RestartService(ctx, conn, currentFacts, "containerd")
+		errRestart := r.RestartService(ctx, conn, facts, "containerd")
 		if errRestart != nil {
-			errRestartAlt := r.RestartService(ctx, conn, currentFacts, "containerd.service")
+			errRestartAlt := r.RestartService(ctx, conn, facts, "containerd.service")
 			if errRestartAlt != nil {
 				return errors.Wrapf(errRestart, "failed to restart containerd (tried 'containerd', 'containerd.service') after configuration. Original error: %v", errRestartAlt)
 			}
@@ -983,9 +1006,9 @@ func (r *defaultRunner) CrictlPullImage(ctx context.Context, conn connector.Conn
 
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "crictl", "pull")
-	if authCreds != "" { cmdArgs = append(cmdArgs, "--auth", shellEscape(authCreds)) }
+	if authCreds != "" { cmdArgs = append(cmdArgs, "--auth", util.ShellEscape(authCreds)) }
 	// sandboxConfigPath is not directly used by `crictl pull` flags. crictl uses /etc/crictl.yaml.
-	cmdArgs = append(cmdArgs, shellEscape(imageName))
+	cmdArgs = append(cmdArgs, util.ShellEscape(imageName))
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 15 * time.Minute})
 	if err != nil {
@@ -999,7 +1022,7 @@ func (r *defaultRunner) CrictlRemoveImage(ctx context.Context, conn connector.Co
 	if conn == nil { return errors.New("connector cannot be nil") }
 	if imageName == "" { return errors.New("imageName cannot be empty") }
 
-	cmd := fmt.Sprintf("crictl rmi %s", shellEscape(imageName))
+	cmd := fmt.Sprintf("crictl rmi %s", util.ShellEscape(imageName))
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
 	if err != nil {
 		if strings.Contains(string(stderr), "not found") { return nil }
@@ -1012,7 +1035,7 @@ func (r *defaultRunner) CrictlInspectImage(ctx context.Context, conn connector.C
 	if conn == nil { return nil, errors.New("connector cannot be nil") }
 	if imageName == "" { return nil, errors.New("imageName cannot be empty") }
 
-	cmd := fmt.Sprintf("crictl inspecti %s -o json", shellEscape(imageName))
+	cmd := fmt.Sprintf("crictl inspecti %s -o json", util.ShellEscape(imageName))
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
 	if err != nil {
 		if strings.Contains(string(stderr), "not found") { return nil, nil } // Not found is not an application error here
@@ -1050,7 +1073,7 @@ func (r *defaultRunner) CrictlListPods(ctx context.Context, conn connector.Conne
 		for key, value := range filters {
 			// Common filters: --label, --name, --namespace, --state
 			if key == "label" || key == "name" || key == "namespace" || key == "state" || key == "id" {
-				cmdArgs = append(cmdArgs, fmt.Sprintf("--%s",key), shellEscape(value))
+				cmdArgs = append(cmdArgs, fmt.Sprintf("--%s",key), util.ShellEscape(value))
 			}
 		}
 	}
@@ -1080,9 +1103,9 @@ func (r *defaultRunner) CrictlRunPodSandbox(ctx context.Context, conn connector.
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "crictl", "runp")
 	if strings.TrimSpace(runtimeHandler) != "" {
-		cmdArgs = append(cmdArgs, "--runtime", shellEscape(runtimeHandler))
+		cmdArgs = append(cmdArgs, "--runtime", util.ShellEscape(runtimeHandler))
 	}
-	cmdArgs = append(cmdArgs, shellEscape(podSandboxConfigFile))
+	cmdArgs = append(cmdArgs, util.ShellEscape(podSandboxConfigFile))
 
 	cmd := strings.Join(cmdArgs, " ")
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
@@ -1098,7 +1121,7 @@ func (r *defaultRunner) CrictlStopPodSandbox(ctx context.Context, conn connector
 	if conn == nil { return errors.New("connector cannot be nil for CrictlStopPodSandbox") }
 	if podID == "" { return errors.New("podID is required for CrictlStopPodSandbox") }
 
-	cmd := fmt.Sprintf("crictl stopp %s", shellEscape(podID))
+	cmd := fmt.Sprintf("crictl stopp %s", util.ShellEscape(podID))
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
 	if err != nil {
 		// Idempotency: if already stopped or not found, crictl might return error but it's effectively stopped.
@@ -1120,7 +1143,7 @@ func (r *defaultRunner) CrictlRemovePodSandbox(ctx context.Context, conn connect
 	if conn == nil { return errors.New("connector cannot be nil for CrictlRemovePodSandbox") }
 	if podID == "" { return errors.New("podID is required for CrictlRemovePodSandbox") }
 
-	cmd := fmt.Sprintf("crictl rmp %s", shellEscape(podID))
+	cmd := fmt.Sprintf("crictl rmp %s", util.ShellEscape(podID))
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
 	if err != nil {
 		if strings.Contains(string(stderr), "not found") { // Idempotency
@@ -1137,7 +1160,7 @@ func (r *defaultRunner) CrictlInspectPod(ctx context.Context, conn connector.Con
 	if conn == nil { return nil, errors.New("connector cannot be nil for CrictlInspectPod") }
 	if podID == "" { return nil, errors.New("podID is required for CrictlInspectPod") }
 
-	cmd := fmt.Sprintf("crictl inspectp %s -o json", shellEscape(podID))
+	cmd := fmt.Sprintf("crictl inspectp %s -o json", util.ShellEscape(podID))
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
 	if err != nil {
 		if strings.Contains(string(stderr), "not found") {
@@ -1187,9 +1210,9 @@ func (r *defaultRunner) CrictlCreateContainerInPod(ctx context.Context, conn con
 	}
 
 	cmd := fmt.Sprintf("crictl create %s %s %s",
-		shellEscape(podID),
-		shellEscape(containerConfigFile),
-		shellEscape(podSandboxConfigFile))
+		util.ShellEscape(podID),
+		util.ShellEscape(containerConfigFile),
+		util.ShellEscape(podSandboxConfigFile))
 
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
 	if err != nil {
@@ -1205,7 +1228,7 @@ func (r *defaultRunner) CrictlStartContainerInPod(ctx context.Context, conn conn
 	if conn == nil { return errors.New("connector cannot be nil for CrictlStartContainerInPod") }
 	if containerID == "" { return errors.New("containerID is required for CrictlStartContainerInPod") }
 
-	cmd := fmt.Sprintf("crictl start %s", shellEscape(containerID))
+	cmd := fmt.Sprintf("crictl start %s", util.ShellEscape(containerID))
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
 	if err != nil {
 		// crictl start can fail if already started.
@@ -1232,7 +1255,7 @@ func (r *defaultRunner) CrictlStopContainerInPod(ctx context.Context, conn conne
 		// crictl's --timeout flag: "Seconds to wait for stop before killing the container"
 		cmdArgs = append(cmdArgs, "--timeout", fmt.Sprintf("%d", timeout))
 	}
-	cmdArgs = append(cmdArgs, shellEscape(containerID))
+	cmdArgs = append(cmdArgs, util.ShellEscape(containerID))
 	cmd := strings.Join(cmdArgs, " ")
 
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout + time.Duration(timeout)*time.Second})
@@ -1256,7 +1279,7 @@ func (r *defaultRunner) CrictlRemoveContainerInPod(ctx context.Context, conn con
 	if force {
 		cmdArgs = append(cmdArgs, "-f") // or --force
 	}
-	cmdArgs = append(cmdArgs, shellEscape(containerID))
+	cmdArgs = append(cmdArgs, util.ShellEscape(containerID))
 	cmd := strings.Join(cmdArgs, " ")
 
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
@@ -1275,7 +1298,7 @@ func (r *defaultRunner) CrictlInspectContainerInPod(ctx context.Context, conn co
 	if conn == nil { return nil, errors.New("connector cannot be nil for CrictlInspectContainerInPod") }
 	if containerID == "" { return nil, errors.New("containerID is required for CrictlInspectContainerInPod") }
 
-	cmd := fmt.Sprintf("crictl inspect %s -o json", shellEscape(containerID))
+	cmd := fmt.Sprintf("crictl inspect %s -o json", util.ShellEscape(containerID))
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
 	if err != nil {
 		if strings.Contains(string(stderr), "not found") {
@@ -1311,7 +1334,7 @@ func (r *defaultRunner) CrictlLogsForContainer(ctx context.Context, conn connect
 	cmdArgs = append(cmdArgs, "crictl", "logs")
 	if opts.Follow { cmdArgs = append(cmdArgs, "-f") }
 	if opts.Timestamps { cmdArgs = append(cmdArgs, "--timestamps") }
-	if opts.Since != "" { cmdArgs = append(cmdArgs, "--since", shellEscape(opts.Since)) }
+	if opts.Since != "" { cmdArgs = append(cmdArgs, "--since", util.ShellEscape(opts.Since)) }
 	if opts.TailLines != nil && *opts.TailLines > 0 {
 		cmdArgs = append(cmdArgs, "--tail", fmt.Sprintf("%d", *opts.TailLines))
 	} else if opts.NumLines != nil && *opts.NumLines > 0 { // Support for older --lines
@@ -1319,7 +1342,7 @@ func (r *defaultRunner) CrictlLogsForContainer(ctx context.Context, conn connect
 	}
 	// No --latest in modern crictl, handled by tail or since.
 
-	cmdArgs = append(cmdArgs, shellEscape(containerID))
+	cmdArgs = append(cmdArgs, util.ShellEscape(containerID))
 	cmd := strings.Join(cmdArgs, " ")
 
 	// Timeout for logs can be longer, especially if not following.
@@ -1351,9 +1374,9 @@ func (r *defaultRunner) CrictlExecInContainerSync(ctx context.Context, conn conn
 	if timeout > 0 {
 		cmdArgs = append(cmdArgs, "--timeout", fmt.Sprintf("%ds", int(timeout.Seconds())))
 	}
-	cmdArgs = append(cmdArgs, shellEscape(containerID))
+	cmdArgs = append(cmdArgs, util.ShellEscape(containerID))
 	for _, arg := range cmdToExec {
-		cmdArgs = append(cmdArgs, shellEscape(arg))
+		cmdArgs = append(cmdArgs, util.ShellEscape(arg))
 	}
 	cmd := strings.Join(cmdArgs, " ")
 
@@ -1390,9 +1413,9 @@ func (r *defaultRunner) CrictlPortForward(ctx context.Context, conn connector.Co
 	if len(ports) == 0 { return "", errors.New("at least one port mapping is required for CrictlPortForward") }
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "crictl", "port-forward", shellEscape(podID))
+	cmdArgs = append(cmdArgs, "crictl", "port-forward", util.ShellEscape(podID))
 	for _, p := range ports {
-		cmdArgs = append(cmdArgs, shellEscape(p))
+		cmdArgs = append(cmdArgs, util.ShellEscape(p))
 	}
 	cmd := strings.Join(cmdArgs, " ")
 
@@ -1484,7 +1507,7 @@ func (r *defaultRunner) CrictlStats(ctx context.Context, conn connector.Connecto
 		cmdArgs = append(cmdArgs, "-o", "json")
 	}
 	if strings.TrimSpace(resourceID) != "" {
-		cmdArgs = append(cmdArgs, shellEscape(resourceID))
+		cmdArgs = append(cmdArgs, util.ShellEscape(resourceID))
 	}
 	// Note: crictl stats -o json output is a stream of JSON objects if resourceID is empty or for multiple items.
 	// If resourceID is given, it's a single JSON object (or stream if it's a pod and it has multiple containers).
@@ -1511,7 +1534,7 @@ func (r *defaultRunner) CrictlPodStats(ctx context.Context, conn connector.Conne
 		cmdArgs = append(cmdArgs, "-o", "json")
 	}
 	if strings.TrimSpace(podID) != "" {
-		cmdArgs = append(cmdArgs, shellEscape(podID)) // If podID is given, it filters stats for that pod.
+		cmdArgs = append(cmdArgs, util.ShellEscape(podID)) // If podID is given, it filters stats for that pod.
 	}
 	// If podID is empty, it lists stats for all pods/containers.
 	// The JSON output structure can be complex (streaming JSON objects).
