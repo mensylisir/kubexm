@@ -47,6 +47,9 @@ func SetDefaults_NginxLBConfig(cfg *NginxLBConfig) {
 	if cfg.Mode == nil {
 		cfg.Mode = stringPtr("tcp")
 	}
+	if cfg.BalanceAlgorithm == nil {
+		cfg.BalanceAlgorithm = stringPtr("round_robin") // Nginx default is round-robin
+	}
 	if cfg.UpstreamServers == nil {
 		cfg.UpstreamServers = []NginxLBUpstreamServer{}
 	}
@@ -83,23 +86,32 @@ func Validate_NginxLBConfig(cfg *NginxLBConfig, verrs *validation.ValidationErro
 			verrs.Add(pathPrefix+".listenAddress", fmt.Sprintf("invalid IP address format '%s'", *cfg.ListenAddress))
 		}
 	}
+	// ListenAddress can be nil, allowing Nginx to use its own default binding.
 
-	if *cfg.ListenPort <= 0 || *cfg.ListenPort > 65535 {
+	if cfg.ListenPort == nil { // Should be set by defaults
+		verrs.Add(pathPrefix+".listenPort", "is required and should have a default value")
+	} else if *cfg.ListenPort <= 0 || *cfg.ListenPort > 65535 {
 		verrs.Add(pathPrefix+".listenPort", fmt.Sprintf("invalid port %d", *cfg.ListenPort))
 	}
 
-	if cfg.Mode != nil && *cfg.Mode != "" {
-	   validModes := []string{"tcp", "http"}
+	if cfg.Mode == nil { // Should be set by defaults
+		verrs.Add(pathPrefix+".mode", "is required and should have a default value 'tcp'")
+	} else if *cfg.Mode != "" { // Validate only if user provided a non-empty value
+	   validModes := []string{"tcp", "http"} // These could be constants
 	   if !util.ContainsString(validModes, *cfg.Mode) {
-		   verrs.Add(pathPrefix+".mode", fmt.Sprintf("invalid mode '%s', must be 'tcp' or 'http'", *cfg.Mode))
+		   verrs.Add(pathPrefix+".mode", fmt.Sprintf("invalid mode '%s', must be one of %v", *cfg.Mode, validModes))
 	   }
 	}
 
-	if cfg.BalanceAlgorithm != nil && *cfg.BalanceAlgorithm != "" {
-	   validAlgos := []string{"round_robin", "least_conn", "ip_hash", "hash", "random", "least_time"}
-	   if !util.ContainsString(validAlgos, *cfg.BalanceAlgorithm) {
-		   verrs.Add(pathPrefix+".balanceAlgorithm", fmt.Sprintf("invalid algorithm '%s'", *cfg.BalanceAlgorithm))
-	   }
+	if cfg.BalanceAlgorithm == nil { // Should be set by defaults
+		verrs.Add(pathPrefix+".balanceAlgorithm", "is required and should have a default value 'round_robin'")
+	} else if *cfg.BalanceAlgorithm != "" { // Validate only if user provided a non-empty value
+		// Nginx's default is round_robin for stream, and various for http depending on context.
+		// For simplicity, we list common ones. If empty, Nginx will use its internal default.
+		validAlgos := []string{"round_robin", "least_conn", "ip_hash", "hash", "random", "least_time"} // These could be constants
+		if !util.ContainsString(validAlgos, *cfg.BalanceAlgorithm) {
+			verrs.Add(pathPrefix+".balanceAlgorithm", fmt.Sprintf("invalid algorithm '%s', must be one of %v or empty for Nginx default", *cfg.BalanceAlgorithm, validAlgos))
+		}
 	}
 
 	if len(cfg.UpstreamServers) == 0 {

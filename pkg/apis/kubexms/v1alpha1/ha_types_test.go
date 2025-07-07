@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
@@ -135,9 +137,52 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 		{
 			name: "KubeVIP internal LB missing KubeVIP section",
 			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
-				Internal: &InternalLoadBalancerConfig{Type: "KubeVIP", KubeVIP: nil}},
+				Internal: &InternalLoadBalancerConfig{Type: common.InternalLBTypeKubeVIP, KubeVIP: nil}}, // Uses constant
 			wantErrMsg: ".internal.kubevip.vip: virtual IP address must be specified",
 			expectErr:  true,
+		},
+		{
+			name: "External and Internal LB simultaneously enabled",
+			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
+				External: &ExternalLoadBalancerConfig{Type: common.ExternalLBTypeExternal},
+				Internal: &InternalLoadBalancerConfig{Type: common.InternalLBTypeKubeVIP, KubeVIP: &KubeVIPConfig{VIP: stringPtr("1.1.1.1"), Interface: stringPtr("eth0")}}},
+			wantErrMsg: "external load balancer and internal load balancer cannot be enabled simultaneously",
+			expectErr:  true,
+		},
+		{
+			name: "Managed External LB (kubexm-kh) missing LoadBalancerHostGroupName",
+			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
+				External: &ExternalLoadBalancerConfig{
+					Type: common.ExternalLBTypeKubexmKH,
+					Keepalived: &KeepalivedConfig{VRID: intPtr(1), Priority: intPtr(100), Interface: stringPtr("eth0"), AuthPass: stringPtr("pass")},
+					HAProxy:    &HAProxyConfig{BackendServers: []HAProxyBackendServer{{Name: "s1", Address: "1.2.3.4:6443"}}},
+					// LoadBalancerHostGroupName is nil
+				}},
+			wantErrMsg: ".external.loadBalancerHostGroupName: must be specified for managed external LB type 'kubexm-kh'",
+			expectErr:  true,
+		},
+		{
+			name: "Managed External LB (kubexm-kn) with empty LoadBalancerHostGroupName",
+			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
+				External: &ExternalLoadBalancerConfig{
+					Type: common.ExternalLBTypeKubexmKN,
+					Keepalived:                &KeepalivedConfig{VRID: intPtr(1), Priority: intPtr(100), Interface: stringPtr("eth0"), AuthPass: stringPtr("pass")},
+					NginxLB:                   &NginxLBConfig{UpstreamServers: []NginxLBUpstreamServer{{Address: "1.2.3.4:6443"}}},
+					LoadBalancerHostGroupName: stringPtr("   "),
+				}},
+			wantErrMsg: ".external.loadBalancerHostGroupName: must be specified for managed external LB type 'kubexm-kn'",
+			expectErr:  true,
+		},
+		{
+			name: "Valid Managed External LB (kubexm-kh) with LoadBalancerHostGroupName",
+			cfg: &HighAvailabilityConfig{Enabled: boolPtr(true),
+				External: &ExternalLoadBalancerConfig{
+					Type:                      common.ExternalLBTypeKubexmKH,
+					LoadBalancerHostGroupName: stringPtr("lb-group"),
+					Keepalived:                &KeepalivedConfig{VRID: intPtr(1), Priority: intPtr(100), Interface: stringPtr("eth0"), AuthPass: stringPtr("pass")},
+					HAProxy:                   &HAProxyConfig{BackendServers: []HAProxyBackendServer{{Name: "s1", Address: "1.2.3.4:6443"}}},
+				}},
+			expectErr: false,
 		},
 	}
 

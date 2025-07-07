@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/util"
 	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"github.com/pkg/errors"
 )
 
@@ -31,16 +31,16 @@ func (r *defaultRunner) KubectlApply(ctx context.Context, conn connector.Connect
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "kubectl", "apply")
 	for _, filename := range opts.Filenames {
-		cmdArgs = append(cmdArgs, "-f", shellEscape(filename))
+		cmdArgs = append(cmdArgs, "-f", util.ShellEscape(filename))
 	}
 	if opts.Recursive {
 		cmdArgs = append(cmdArgs, "--recursive")
 	}
 	if opts.Namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.Force {
 		cmdArgs = append(cmdArgs, "--force")
@@ -48,11 +48,11 @@ func (r *defaultRunner) KubectlApply(ctx context.Context, conn connector.Connect
 	if opts.Prune {
 		cmdArgs = append(cmdArgs, "--prune")
 		if opts.Selector != "" {
-			cmdArgs = append(cmdArgs, "-l", shellEscape(opts.Selector))
+			cmdArgs = append(cmdArgs, "-l", util.ShellEscape(opts.Selector))
 		}
 	}
 	if opts.DryRun != "" && opts.DryRun != "none" {
-		cmdArgs = append(cmdArgs, "--dry-run="+shellEscape(opts.DryRun))
+		cmdArgs = append(cmdArgs, "--dry-run="+util.ShellEscape(opts.DryRun))
 	}
 	if !opts.Validate {
 		cmdArgs = append(cmdArgs, "--validate=false")
@@ -60,7 +60,7 @@ func (r *defaultRunner) KubectlApply(ctx context.Context, conn connector.Connect
 
 	cmd := strings.Join(cmdArgs, " ")
 	execOptions := &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultKubectlTimeout}
-	if utils.ContainsString(opts.Filenames, "-") {
+	if util.ContainsString(opts.Filenames, "-") { // Corrected from utils.ContainsString
 		execOptions.Stdin = []byte(opts.FileContent)
 	}
 
@@ -81,27 +81,27 @@ func (r *defaultRunner) KubectlGet(ctx context.Context, conn connector.Connector
 	}
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "get", shellEscape(resourceType))
+	cmdArgs = append(cmdArgs, "kubectl", "get", util.ShellEscape(resourceType))
 	if resourceName != "" {
-		cmdArgs = append(cmdArgs, shellEscape(resourceName))
+		cmdArgs = append(cmdArgs, util.ShellEscape(resourceName))
 	}
 	if opts.Namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.AllNamespaces {
 		cmdArgs = append(cmdArgs, "--all-namespaces")
 	}
 	if opts.OutputFormat != "" {
-		cmdArgs = append(cmdArgs, "-o", shellEscape(opts.OutputFormat))
+		cmdArgs = append(cmdArgs, "-o", util.ShellEscape(opts.OutputFormat))
 	}
 	if opts.Selector != "" {
-		cmdArgs = append(cmdArgs, "-l", shellEscape(opts.Selector))
+		cmdArgs = append(cmdArgs, "-l", util.ShellEscape(opts.Selector))
 	}
 	if opts.FieldSelector != "" {
-		cmdArgs = append(cmdArgs, "--field-selector", shellEscape(opts.FieldSelector))
+		cmdArgs = append(cmdArgs, "--field-selector", util.ShellEscape(opts.FieldSelector))
 	}
 	if opts.Watch {
 		cmdArgs = append(cmdArgs, "--watch")
@@ -116,7 +116,7 @@ func (r *defaultRunner) KubectlGet(ctx context.Context, conn connector.Connector
 		cmdArgs = append(cmdArgs, "--show-labels")
 	}
 	for _, lc := range opts.LabelColumns {
-		cmdArgs = append(cmdArgs, "--label-columns", shellEscape(lc))
+		cmdArgs = append(cmdArgs, "--label-columns", util.ShellEscape(lc))
 	}
 
 	cmd := strings.Join(cmdArgs, " ")
@@ -143,32 +143,32 @@ func (r *defaultRunner) KubectlDelete(ctx context.Context, conn connector.Connec
 	if !hasTarget {
 		return errors.New("resources to delete must be specified")
 	}
-	if utils.ContainsString(opts.Filenames, "-") && opts.FileContent == "" {
+	if util.ContainsString(opts.Filenames, "-") && opts.FileContent == "" {
 		return errors.New("FileContent must be provided with filename '-'")
 	}
 
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "kubectl", "delete")
 	if resourceType != "" {
-		cmdArgs = append(cmdArgs, shellEscape(resourceType))
+		cmdArgs = append(cmdArgs, util.ShellEscape(resourceType))
 		if resourceName != "" {
-			cmdArgs = append(cmdArgs, shellEscape(resourceName))
+			cmdArgs = append(cmdArgs, util.ShellEscape(resourceName))
 		}
 	}
 	for _, filename := range opts.Filenames {
-		cmdArgs = append(cmdArgs, "-f", shellEscape(filename))
+		cmdArgs = append(cmdArgs, "-f", util.ShellEscape(filename))
 	}
 	if opts.Recursive {
 		cmdArgs = append(cmdArgs, "--recursive")
 	}
 	if opts.Namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.Selector != "" && resourceName == "" {
-		cmdArgs = append(cmdArgs, "-l", shellEscape(opts.Selector))
+		cmdArgs = append(cmdArgs, "-l", util.ShellEscape(opts.Selector))
 	}
 	if opts.Force {
 		cmdArgs = append(cmdArgs, "--force")
@@ -186,7 +186,7 @@ func (r *defaultRunner) KubectlDelete(ctx context.Context, conn connector.Connec
 		cmdArgs = append(cmdArgs, "--ignore-not-found")
 	}
 	if opts.Cascade != "" {
-		cmdArgs = append(cmdArgs, "--cascade="+shellEscape(opts.Cascade))
+		cmdArgs = append(cmdArgs, "--cascade="+util.ShellEscape(opts.Cascade))
 	}
 
 	cmd := strings.Join(cmdArgs, " ")
@@ -194,7 +194,7 @@ func (r *defaultRunner) KubectlDelete(ctx context.Context, conn connector.Connec
 	if opts.Timeout > 0 && opts.Wait {
 		execOpt.Timeout = opts.Timeout + (1 * time.Minute)
 	}
-	if utils.ContainsString(opts.Filenames, "-") {
+	if util.ContainsString(opts.Filenames, "-") {
 		execOpt.Stdin = []byte(opts.FileContent)
 	}
 
@@ -237,18 +237,18 @@ func (r *defaultRunner) KubectlDescribe(ctx context.Context, conn connector.Conn
 		return "", errors.New("resourceType is required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "describe", shellEscape(resourceType))
+	cmdArgs = append(cmdArgs, "kubectl", "describe", util.ShellEscape(resourceType))
 	if resourceName != "" {
-		cmdArgs = append(cmdArgs, shellEscape(resourceName))
+		cmdArgs = append(cmdArgs, util.ShellEscape(resourceName))
 	}
 	if opts.Namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.Selector != "" && resourceName == "" {
-		cmdArgs = append(cmdArgs, "-l", shellEscape(opts.Selector))
+		cmdArgs = append(cmdArgs, "-l", util.ShellEscape(opts.Selector))
 	}
 
 	stdout, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultKubectlTimeout})
@@ -268,15 +268,15 @@ func (r *defaultRunner) KubectlLogs(ctx context.Context, conn connector.Connecto
 		return "", errors.New("podName is required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "logs", shellEscape(podName))
+	cmdArgs = append(cmdArgs, "kubectl", "logs", util.ShellEscape(podName))
 	if opts.Namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.Container != "" {
-		cmdArgs = append(cmdArgs, "-c", shellEscape(opts.Container))
+		cmdArgs = append(cmdArgs, "-c", util.ShellEscape(opts.Container))
 	}
 	if opts.Follow {
 		cmdArgs = append(cmdArgs, "-f")
@@ -285,7 +285,7 @@ func (r *defaultRunner) KubectlLogs(ctx context.Context, conn connector.Connecto
 		cmdArgs = append(cmdArgs, "-p")
 	}
 	if opts.SinceTime != "" {
-		cmdArgs = append(cmdArgs, "--since-time="+shellEscape(opts.SinceTime))
+		cmdArgs = append(cmdArgs, "--since-time="+util.ShellEscape(opts.SinceTime))
 	}
 	if opts.SinceSeconds != nil {
 		cmdArgs = append(cmdArgs, fmt.Sprintf("--since=%ds", *opts.SinceSeconds))
@@ -322,13 +322,13 @@ func (r *defaultRunner) KubectlExec(ctx context.Context, conn connector.Connecto
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "kubectl", "exec")
 	if opts.Namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if containerName != "" {
-		cmdArgs = append(cmdArgs, "-c", shellEscape(containerName))
+		cmdArgs = append(cmdArgs, "-c", util.ShellEscape(containerName))
 	}
 	if opts.Stdin {
 		cmdArgs = append(cmdArgs, "-i")
@@ -336,9 +336,9 @@ func (r *defaultRunner) KubectlExec(ctx context.Context, conn connector.Connecto
 	if opts.TTY {
 		cmdArgs = append(cmdArgs, "-t")
 	}
-	cmdArgs = append(cmdArgs, shellEscape(podName), "--")
+	cmdArgs = append(cmdArgs, util.ShellEscape(podName), "--")
 	for _, arg := range command {
-		cmdArgs = append(cmdArgs, shellEscape(arg))
+		cmdArgs = append(cmdArgs, util.ShellEscape(arg))
 	}
 
 	execTimeout := DefaultKubectlTimeout
@@ -457,12 +457,12 @@ func (r *defaultRunner) KubectlRolloutStatus(ctx context.Context, conn connector
 		return "", errors.New("resourceType and resourceName are required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "rollout", "status", fmt.Sprintf("%s/%s", shellEscape(resourceType), shellEscape(resourceName)))
+	cmdArgs = append(cmdArgs, "kubectl", "rollout", "status", fmt.Sprintf("%s/%s", util.ShellEscape(resourceType), util.ShellEscape(resourceName)))
 	if opts.Namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.Watch {
 		cmdArgs = append(cmdArgs, "--watch")
@@ -497,18 +497,18 @@ func (r *defaultRunner) KubectlScale(ctx context.Context, conn connector.Connect
 		return "", errors.New("replicas must be non-negative")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "scale", shellEscape(resourceType), shellEscape(resourceName), fmt.Sprintf("--replicas=%d", replicas))
+	cmdArgs = append(cmdArgs, "kubectl", "scale", util.ShellEscape(resourceType), util.ShellEscape(resourceName), fmt.Sprintf("--replicas=%d", replicas))
 	if opts.Namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.CurrentReplicas != nil {
 		cmdArgs = append(cmdArgs, fmt.Sprintf("--current-replicas=%d", *opts.CurrentReplicas))
 	}
 	if opts.ResourceVersion != nil {
-		cmdArgs = append(cmdArgs, "--resource-version=%s", shellEscape(*opts.ResourceVersion))
+		cmdArgs = append(cmdArgs, "--resource-version=%s", util.ShellEscape(*opts.ResourceVersion))
 	}
 	if opts.Timeout > 0 {
 		cmdArgs = append(cmdArgs, "--timeout", opts.Timeout.String())
@@ -534,7 +534,7 @@ func (r *defaultRunner) KubectlConfigView(ctx context.Context, conn connector.Co
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "kubectl", "config", "view", "-o", "json")
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.Minify {
 		cmdArgs = append(cmdArgs, "--minify")
@@ -584,7 +584,7 @@ func (r *defaultRunner) KubectlConfigUseContext(ctx context.Context, conn connec
 	if contextName == "" {
 		return errors.New("contextName is required")
 	}
-	_, stderr, err := conn.Exec(ctx, fmt.Sprintf("kubectl config use-context %s", shellEscape(contextName)), &connector.ExecOptions{Sudo: false, Timeout: DefaultKubectlTimeout})
+	_, stderr, err := conn.Exec(ctx, fmt.Sprintf("kubectl config use-context %s", util.ShellEscape(contextName)), &connector.ExecOptions{Sudo: false, Timeout: DefaultKubectlTimeout})
 	if err != nil {
 		return errors.Wrapf(err, "kubectl config use-context %s failed. Stderr: %s", contextName, string(stderr))
 	}
@@ -599,13 +599,13 @@ func (r *defaultRunner) KubectlTopNodes(ctx context.Context, conn connector.Conn
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "kubectl", "top", "nodes")
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.Selector != "" {
-		cmdArgs = append(cmdArgs, "--selector", shellEscape(opts.Selector))
+		cmdArgs = append(cmdArgs, "--selector", util.ShellEscape(opts.Selector))
 	}
 	if opts.SortBy != "" {
-		cmdArgs = append(cmdArgs, "--sort-by", shellEscape(opts.SortBy))
+		cmdArgs = append(cmdArgs, "--sort-by", util.ShellEscape(opts.SortBy))
 	}
 	if opts.UseHeapster {
 		cmdArgs = append(cmdArgs, "--heapster-namespace", "kube-system")
@@ -625,11 +625,11 @@ func (r *defaultRunner) KubectlTopNodes(ctx context.Context, conn connector.Conn
 	}
 	for i := range result.Items {
 		if result.Items[i].CPU.UsageNanoCores != "" {
-			parsed, _ := utils.ParseCPU(result.Items[i].CPU.UsageNanoCores)
+			parsed, _ := util.ParseCPU(result.Items[i].CPU.UsageNanoCores)
 			result.Items[i].CPU.UsageCoreNanos = &parsed
 		}
 		if result.Items[i].Memory.UsageBytes != "" {
-			parsed, _ := utils.ParseMemory(result.Items[i].Memory.UsageBytes)
+			parsed, _ := util.ParseMemory(result.Items[i].Memory.UsageBytes)
 			result.Items[i].Memory.UsageBytesParsed = &parsed
 		}
 	}
@@ -644,19 +644,19 @@ func (r *defaultRunner) KubectlTopPods(ctx context.Context, conn connector.Conne
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "kubectl", "top", "pods")
 	if opts.Namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace))
 	}
 	if opts.AllNamespaces {
 		cmdArgs = append(cmdArgs, "--all-namespaces")
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.Selector != "" {
-		cmdArgs = append(cmdArgs, "--selector", shellEscape(opts.Selector))
+		cmdArgs = append(cmdArgs, "--selector", util.ShellEscape(opts.Selector))
 	}
 	if opts.SortBy != "" {
-		cmdArgs = append(cmdArgs, "--sort-by", shellEscape(opts.SortBy))
+		cmdArgs = append(cmdArgs, "--sort-by", util.ShellEscape(opts.SortBy))
 	}
 	if opts.Containers {
 		cmdArgs = append(cmdArgs, "--containers")
@@ -677,21 +677,21 @@ func (r *defaultRunner) KubectlTopPods(ctx context.Context, conn connector.Conne
 	for i := range result.Items {
 		// Pod level metrics (if not --containers)
 		if result.Items[i].CPU.UsageNanoCores != "" {
-			parsed, _ := utils.ParseCPU(result.Items[i].CPU.UsageNanoCores)
+			parsed, _ := util.ParseCPU(result.Items[i].CPU.UsageNanoCores)
 			result.Items[i].CPU.UsageCoreNanos = &parsed
 		}
 		if result.Items[i].Memory.UsageBytes != "" {
-			parsed, _ := utils.ParseMemory(result.Items[i].Memory.UsageBytes)
+			parsed, _ := util.ParseMemory(result.Items[i].Memory.UsageBytes)
 			result.Items[i].Memory.UsageBytesParsed = &parsed
 		}
 		// Container level metrics
 		for j := range result.Items[i].Containers {
 			if result.Items[i].Containers[j].CPU.UsageNanoCores != "" {
-				parsed, _ := utils.ParseCPU(result.Items[i].Containers[j].CPU.UsageNanoCores)
+				parsed, _ := util.ParseCPU(result.Items[i].Containers[j].CPU.UsageNanoCores)
 				result.Items[i].Containers[j].CPU.UsageCoreNanos = &parsed
 			}
 			if result.Items[i].Containers[j].Memory.UsageBytes != "" {
-				parsed, _ := utils.ParseMemory(result.Items[i].Containers[j].Memory.UsageBytes)
+				parsed, _ := util.ParseMemory(result.Items[i].Containers[j].Memory.UsageBytes)
 				result.Items[i].Containers[j].Memory.UsageBytesParsed = &parsed
 			}
 		}
@@ -714,15 +714,15 @@ func (r *defaultRunner) KubectlExplain(ctx context.Context, conn connector.Conne
 		return "", errors.New("resourceType is required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "explain", shellEscape(resourceType))
+	cmdArgs = append(cmdArgs, "kubectl", "explain", util.ShellEscape(resourceType))
 	if opts.APIVersion != "" {
-		cmdArgs = append(cmdArgs, "--api-version", shellEscape(opts.APIVersion))
+		cmdArgs = append(cmdArgs, "--api-version", util.ShellEscape(opts.APIVersion))
 	}
 	if opts.Recursive {
 		cmdArgs = append(cmdArgs, "--recursive")
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 
 	stdout, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultKubectlTimeout})
@@ -741,9 +741,9 @@ func (r *defaultRunner) KubectlDrainNode(ctx context.Context, conn connector.Con
 		return errors.New("nodeName is required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "drain", shellEscape(nodeName))
+	cmdArgs = append(cmdArgs, "kubectl", "drain", util.ShellEscape(nodeName))
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.Force {
 		cmdArgs = append(cmdArgs, "--force")
@@ -758,7 +758,7 @@ func (r *defaultRunner) KubectlDrainNode(ctx context.Context, conn connector.Con
 		cmdArgs = append(cmdArgs, "--delete-emptydir-data")
 	} // Newer kubectl, was --delete-local-data
 	if opts.Selector != "" {
-		cmdArgs = append(cmdArgs, "--pod-selector", shellEscape(opts.Selector))
+		cmdArgs = append(cmdArgs, "--pod-selector", util.ShellEscape(opts.Selector))
 	} // Drains only pods matching selector
 	if opts.Timeout > 0 {
 		cmdArgs = append(cmdArgs, "--timeout", opts.Timeout.String())
@@ -786,12 +786,12 @@ func (r *defaultRunner) KubectlCordonNode(ctx context.Context, conn connector.Co
 		return errors.New("nodeName is required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "cordon", shellEscape(nodeName))
+	cmdArgs = append(cmdArgs, "kubectl", "cordon", util.ShellEscape(nodeName))
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.Selector != "" {
-		cmdArgs = append(cmdArgs, "--selector", shellEscape(opts.Selector))
+		cmdArgs = append(cmdArgs, "--selector", util.ShellEscape(opts.Selector))
 	}
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultKubectlTimeout})
 	if err != nil {
@@ -809,12 +809,12 @@ func (r *defaultRunner) KubectlUncordonNode(ctx context.Context, conn connector.
 		return errors.New("nodeName is required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "uncordon", shellEscape(nodeName))
+	cmdArgs = append(cmdArgs, "kubectl", "uncordon", util.ShellEscape(nodeName))
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.Selector != "" {
-		cmdArgs = append(cmdArgs, "--selector", shellEscape(opts.Selector))
+		cmdArgs = append(cmdArgs, "--selector", util.ShellEscape(opts.Selector))
 	}
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultKubectlTimeout})
 	if err != nil {
@@ -839,16 +839,16 @@ func (r *defaultRunner) KubectlTaintNode(ctx context.Context, conn connector.Con
 	if opts.All {
 		cmdArgs = append(cmdArgs, "--all")
 	} else {
-		cmdArgs = append(cmdArgs, shellEscape(nodeName))
+		cmdArgs = append(cmdArgs, util.ShellEscape(nodeName))
 	}
 	for _, taint := range taints {
-		cmdArgs = append(cmdArgs, shellEscape(taint))
+		cmdArgs = append(cmdArgs, util.ShellEscape(taint))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.Selector != "" {
-		cmdArgs = append(cmdArgs, "--selector", shellEscape(opts.Selector))
+		cmdArgs = append(cmdArgs, "--selector", util.ShellEscape(opts.Selector))
 	}
 	if opts.Overwrite {
 		cmdArgs = append(cmdArgs, "--overwrite")
@@ -870,24 +870,24 @@ func (r *defaultRunner) KubectlCreateSecretGeneric(ctx context.Context, conn con
 		return errors.New("secret name is required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "create", "secret", "generic", shellEscape(name))
+	cmdArgs = append(cmdArgs, "kubectl", "create", "secret", "generic", util.ShellEscape(name))
 	if namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.DryRun != "" && opts.DryRun != "none" {
-		cmdArgs = append(cmdArgs, "--dry-run="+shellEscape(opts.DryRun))
+		cmdArgs = append(cmdArgs, "--dry-run="+util.ShellEscape(opts.DryRun))
 	}
 	if !opts.Validate {
 		cmdArgs = append(cmdArgs, "--validate=false")
 	}
 	for k, v := range fromLiterals {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--from-literal=%s=%s", shellEscape(k), shellEscape(v)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--from-literal=%s=%s", util.ShellEscape(k), util.ShellEscape(v)))
 	}
 	for k, v := range fromFiles {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--from-file=%s=%s", shellEscape(k), shellEscape(v)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--from-file=%s=%s", util.ShellEscape(k), util.ShellEscape(v)))
 	}
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultKubectlTimeout})
@@ -906,21 +906,21 @@ func (r *defaultRunner) KubectlCreateSecretDockerRegistry(ctx context.Context, c
 		return errors.New("name, server, username, password required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "create", "secret", "docker-registry", shellEscape(name))
-	cmdArgs = append(cmdArgs, fmt.Sprintf("--docker-server=%s", shellEscape(dockerServer)))
-	cmdArgs = append(cmdArgs, fmt.Sprintf("--docker-username=%s", shellEscape(dockerUsername)))
-	cmdArgs = append(cmdArgs, fmt.Sprintf("--docker-password=%s", shellEscape(dockerPassword)))
+	cmdArgs = append(cmdArgs, "kubectl", "create", "secret", "docker-registry", util.ShellEscape(name))
+	cmdArgs = append(cmdArgs, fmt.Sprintf("--docker-server=%s", util.ShellEscape(dockerServer)))
+	cmdArgs = append(cmdArgs, fmt.Sprintf("--docker-username=%s", util.ShellEscape(dockerUsername)))
+	cmdArgs = append(cmdArgs, fmt.Sprintf("--docker-password=%s", util.ShellEscape(dockerPassword)))
 	if dockerEmail != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--docker-email=%s", shellEscape(dockerEmail)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--docker-email=%s", util.ShellEscape(dockerEmail)))
 	}
 	if namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.DryRun != "" && opts.DryRun != "none" {
-		cmdArgs = append(cmdArgs, "--dry-run="+shellEscape(opts.DryRun))
+		cmdArgs = append(cmdArgs, "--dry-run="+util.ShellEscape(opts.DryRun))
 	}
 	if !opts.Validate {
 		cmdArgs = append(cmdArgs, "--validate=false")
@@ -942,17 +942,17 @@ func (r *defaultRunner) KubectlCreateSecretTLS(ctx context.Context, conn connect
 		return errors.New("name, certPath, keyPath required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "create", "secret", "tls", shellEscape(name))
-	cmdArgs = append(cmdArgs, fmt.Sprintf("--cert=%s", shellEscape(certPath)))
-	cmdArgs = append(cmdArgs, fmt.Sprintf("--key=%s", shellEscape(keyPath)))
+	cmdArgs = append(cmdArgs, "kubectl", "create", "secret", "tls", util.ShellEscape(name))
+	cmdArgs = append(cmdArgs, fmt.Sprintf("--cert=%s", util.ShellEscape(certPath)))
+	cmdArgs = append(cmdArgs, fmt.Sprintf("--key=%s", util.ShellEscape(keyPath)))
 	if namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.DryRun != "" && opts.DryRun != "none" {
-		cmdArgs = append(cmdArgs, "--dry-run="+shellEscape(opts.DryRun))
+		cmdArgs = append(cmdArgs, "--dry-run="+util.ShellEscape(opts.DryRun))
 	}
 	if !opts.Validate {
 		cmdArgs = append(cmdArgs, "--validate=false")
@@ -974,27 +974,27 @@ func (r *defaultRunner) KubectlCreateConfigMap(ctx context.Context, conn connect
 		return errors.New("configmap name is required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "create", "configmap", shellEscape(name))
+	cmdArgs = append(cmdArgs, "kubectl", "create", "configmap", util.ShellEscape(name))
 	if namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.DryRun != "" && opts.DryRun != "none" {
-		cmdArgs = append(cmdArgs, "--dry-run="+shellEscape(opts.DryRun))
+		cmdArgs = append(cmdArgs, "--dry-run="+util.ShellEscape(opts.DryRun))
 	}
 	if !opts.Validate {
 		cmdArgs = append(cmdArgs, "--validate=false")
 	}
 	for k, v := range fromLiterals {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--from-literal=%s=%s", shellEscape(k), shellEscape(v)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--from-literal=%s=%s", util.ShellEscape(k), util.ShellEscape(v)))
 	}
 	for k, v := range fromFiles {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--from-file=%s=%s", shellEscape(k), shellEscape(v)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--from-file=%s=%s", util.ShellEscape(k), util.ShellEscape(v)))
 	}
 	if fromEnvFile != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--from-env-file=%s", shellEscape(fromEnvFile)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--from-env-file=%s", util.ShellEscape(fromEnvFile)))
 	}
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultKubectlTimeout})
@@ -1013,15 +1013,15 @@ func (r *defaultRunner) KubectlCreateServiceAccount(ctx context.Context, conn co
 		return errors.New("serviceaccount name is required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "create", "serviceaccount", shellEscape(name))
+	cmdArgs = append(cmdArgs, "kubectl", "create", "serviceaccount", util.ShellEscape(name))
 	if namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.DryRun != "" && opts.DryRun != "none" {
-		cmdArgs = append(cmdArgs, "--dry-run="+shellEscape(opts.DryRun))
+		cmdArgs = append(cmdArgs, "--dry-run="+util.ShellEscape(opts.DryRun))
 	}
 	if !opts.Validate {
 		cmdArgs = append(cmdArgs, "--validate=false")
@@ -1043,20 +1043,20 @@ func (r *defaultRunner) KubectlCreateRole(ctx context.Context, conn connector.Co
 		return errors.New("name, verbs, and resources are required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "create", "role", shellEscape(name))
-	cmdArgs = append(cmdArgs, fmt.Sprintf("--verb=%s", shellEscape(strings.Join(verbs, ","))))
-	cmdArgs = append(cmdArgs, fmt.Sprintf("--resource=%s", shellEscape(strings.Join(resources, ","))))
+	cmdArgs = append(cmdArgs, "kubectl", "create", "role", util.ShellEscape(name))
+	cmdArgs = append(cmdArgs, fmt.Sprintf("--verb=%s", util.ShellEscape(strings.Join(verbs, ","))))
+	cmdArgs = append(cmdArgs, fmt.Sprintf("--resource=%s", util.ShellEscape(strings.Join(resources, ","))))
 	if len(resourceNames) > 0 {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--resource-name=%s", shellEscape(strings.Join(resourceNames, ","))))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--resource-name=%s", util.ShellEscape(strings.Join(resourceNames, ","))))
 	}
 	if namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.DryRun != "" && opts.DryRun != "none" {
-		cmdArgs = append(cmdArgs, "--dry-run="+shellEscape(opts.DryRun))
+		cmdArgs = append(cmdArgs, "--dry-run="+util.ShellEscape(opts.DryRun))
 	}
 	if !opts.Validate {
 		cmdArgs = append(cmdArgs, "--validate=false")
@@ -1078,20 +1078,20 @@ func (r *defaultRunner) KubectlCreateClusterRole(ctx context.Context, conn conne
 		return errors.New("name, verbs, and resources are required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "create", "clusterrole", shellEscape(name))
-	cmdArgs = append(cmdArgs, fmt.Sprintf("--verb=%s", shellEscape(strings.Join(verbs, ","))))
-	cmdArgs = append(cmdArgs, fmt.Sprintf("--resource=%s", shellEscape(strings.Join(resources, ","))))
+	cmdArgs = append(cmdArgs, "kubectl", "create", "clusterrole", util.ShellEscape(name))
+	cmdArgs = append(cmdArgs, fmt.Sprintf("--verb=%s", util.ShellEscape(strings.Join(verbs, ","))))
+	cmdArgs = append(cmdArgs, fmt.Sprintf("--resource=%s", util.ShellEscape(strings.Join(resources, ","))))
 	if len(resourceNames) > 0 {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--resource-name=%s", shellEscape(strings.Join(resourceNames, ","))))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--resource-name=%s", util.ShellEscape(strings.Join(resourceNames, ","))))
 	}
 	if aggregationRule != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--aggregation-rule=%s", shellEscape(aggregationRule)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--aggregation-rule=%s", util.ShellEscape(aggregationRule)))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.DryRun != "" && opts.DryRun != "none" {
-		cmdArgs = append(cmdArgs, "--dry-run="+shellEscape(opts.DryRun))
+		cmdArgs = append(cmdArgs, "--dry-run="+util.ShellEscape(opts.DryRun))
 	}
 	if !opts.Validate {
 		cmdArgs = append(cmdArgs, "--validate=false")
@@ -1116,25 +1116,25 @@ func (r *defaultRunner) KubectlCreateRoleBinding(ctx context.Context, conn conne
 		return errors.New("serviceaccount, user, or group is required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "create", "rolebinding", shellEscape(name))
-	cmdArgs = append(cmdArgs, fmt.Sprintf("--role=%s", shellEscape(role)))
+	cmdArgs = append(cmdArgs, "kubectl", "create", "rolebinding", util.ShellEscape(name))
+	cmdArgs = append(cmdArgs, fmt.Sprintf("--role=%s", util.ShellEscape(role)))
 	if serviceAccount != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--serviceaccount=%s:%s", shellEscape(namespace), shellEscape(serviceAccount)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--serviceaccount=%s:%s", util.ShellEscape(namespace), util.ShellEscape(serviceAccount)))
 	} // Assume SA is in same namespace
 	for _, u := range users {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--user=%s", shellEscape(u)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--user=%s", util.ShellEscape(u)))
 	}
 	for _, g := range groups {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--group=%s", shellEscape(g)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--group=%s", util.ShellEscape(g)))
 	}
 	if namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.DryRun != "" && opts.DryRun != "none" {
-		cmdArgs = append(cmdArgs, "--dry-run="+shellEscape(opts.DryRun))
+		cmdArgs = append(cmdArgs, "--dry-run="+util.ShellEscape(opts.DryRun))
 	}
 	if !opts.Validate {
 		cmdArgs = append(cmdArgs, "--validate=false")
@@ -1159,26 +1159,26 @@ func (r *defaultRunner) KubectlCreateClusterRoleBinding(ctx context.Context, con
 		return errors.New("serviceaccount, user, or group is required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "create", "clusterrolebinding", shellEscape(name))
-	cmdArgs = append(cmdArgs, fmt.Sprintf("--clusterrole=%s", shellEscape(clusterRole)))
+	cmdArgs = append(cmdArgs, "kubectl", "create", "clusterrolebinding", util.ShellEscape(name))
+	cmdArgs = append(cmdArgs, fmt.Sprintf("--clusterrole=%s", util.ShellEscape(clusterRole)))
 	if serviceAccount != "" {
 		saParts := strings.Split(serviceAccount, ":") // Expects "namespace:name"
 		if len(saParts) != 2 {
 			return errors.New("serviceAccount for ClusterRoleBinding must be in format 'namespace:name'")
 		}
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--serviceaccount=%s:%s", shellEscape(saParts[0]), shellEscape(saParts[1])))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--serviceaccount=%s:%s", util.ShellEscape(saParts[0]), util.ShellEscape(saParts[1])))
 	}
 	for _, u := range users {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--user=%s", shellEscape(u)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--user=%s", util.ShellEscape(u)))
 	}
 	for _, g := range groups {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--group=%s", shellEscape(g)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--group=%s", util.ShellEscape(g)))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.DryRun != "" && opts.DryRun != "none" {
-		cmdArgs = append(cmdArgs, "--dry-run="+shellEscape(opts.DryRun))
+		cmdArgs = append(cmdArgs, "--dry-run="+util.ShellEscape(opts.DryRun))
 	}
 	if !opts.Validate {
 		cmdArgs = append(cmdArgs, "--validate=false")
@@ -1201,35 +1201,35 @@ func (r *defaultRunner) KubectlSetImage(ctx context.Context, conn connector.Conn
 	}
 	// resourceName can be empty if --all or -l is used
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "set", "image", shellEscape(resourceType))
+	cmdArgs = append(cmdArgs, "kubectl", "set", "image", util.ShellEscape(resourceType))
 	if resourceName != "" {
-		cmdArgs = append(cmdArgs, shellEscape(resourceName))
+		cmdArgs = append(cmdArgs, util.ShellEscape(resourceName))
 	}
 	containerSpec := newImage
 	if containerName != "" {
-		containerSpec = fmt.Sprintf("%s=%s", shellEscape(containerName), shellEscape(newImage))
+		containerSpec = fmt.Sprintf("%s=%s", util.ShellEscape(containerName), util.ShellEscape(newImage))
 	} else {
-		containerSpec = fmt.Sprintf("*=%s", shellEscape(newImage))
+		containerSpec = fmt.Sprintf("*=%s", util.ShellEscape(newImage))
 	} // Wildcard for all containers if name not specified
 	cmdArgs = append(cmdArgs, containerSpec)
 
 	if opts.Namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.All {
 		cmdArgs = append(cmdArgs, "--all")
 	}
 	if opts.Selector != "" {
-		cmdArgs = append(cmdArgs, "-l", shellEscape(opts.Selector))
+		cmdArgs = append(cmdArgs, "-l", util.ShellEscape(opts.Selector))
 	}
 	if opts.Local {
 		cmdArgs = append(cmdArgs, "--local")
 	}
 	if opts.DryRun != "" && opts.DryRun != "none" {
-		cmdArgs = append(cmdArgs, "--dry-run="+shellEscape(opts.DryRun))
+		cmdArgs = append(cmdArgs, "--dry-run="+util.ShellEscape(opts.DryRun))
 	}
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultKubectlTimeout})
@@ -1248,43 +1248,43 @@ func (r *defaultRunner) KubectlSetEnv(ctx context.Context, conn connector.Connec
 		return errors.New("resourceType is required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "set", "env", shellEscape(resourceType))
+	cmdArgs = append(cmdArgs, "kubectl", "set", "env", util.ShellEscape(resourceType))
 	if resourceName != "" {
-		cmdArgs = append(cmdArgs, shellEscape(resourceName))
+		cmdArgs = append(cmdArgs, util.ShellEscape(resourceName))
 	}
 	if containerName != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--containers=%s", shellEscape(containerName)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--containers=%s", util.ShellEscape(containerName)))
 	} // or -c
 	for k, v := range envVars {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("%s=%s", shellEscape(k), shellEscape(v)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("%s=%s", util.ShellEscape(k), util.ShellEscape(v)))
 	}
 	for _, k := range removeEnvVars {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("%s-", shellEscape(k)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("%s-", util.ShellEscape(k)))
 	} // Suffix with '-' to remove
 	if fromSecret != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--from=secret/%s", shellEscape(fromSecret)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--from=secret/%s", util.ShellEscape(fromSecret)))
 	}
 	if fromConfigMap != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--from=configmap/%s", shellEscape(fromConfigMap)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--from=configmap/%s", util.ShellEscape(fromConfigMap)))
 	}
 
 	if opts.Namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.All {
 		cmdArgs = append(cmdArgs, "--all")
 	}
 	if opts.Selector != "" {
-		cmdArgs = append(cmdArgs, "-l", shellEscape(opts.Selector))
+		cmdArgs = append(cmdArgs, "-l", util.ShellEscape(opts.Selector))
 	}
 	if opts.Local {
 		cmdArgs = append(cmdArgs, "--local")
 	}
 	if opts.DryRun != "" && opts.DryRun != "none" {
-		cmdArgs = append(cmdArgs, "--dry-run="+shellEscape(opts.DryRun))
+		cmdArgs = append(cmdArgs, "--dry-run="+util.ShellEscape(opts.DryRun))
 	}
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultKubectlTimeout})
@@ -1303,12 +1303,12 @@ func (r *defaultRunner) KubectlSetResources(ctx context.Context, conn connector.
 		return errors.New("resourceType is required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "set", "resources", shellEscape(resourceType))
+	cmdArgs = append(cmdArgs, "kubectl", "set", "resources", util.ShellEscape(resourceType))
 	if resourceName != "" {
-		cmdArgs = append(cmdArgs, shellEscape(resourceName))
+		cmdArgs = append(cmdArgs, util.ShellEscape(resourceName))
 	}
 	if containerName != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--containers=%s", shellEscape(containerName)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--containers=%s", util.ShellEscape(containerName)))
 	}
 
 	var limitsArgs, requestsArgs []string
@@ -1316,32 +1316,32 @@ func (r *defaultRunner) KubectlSetResources(ctx context.Context, conn connector.
 		limitsArgs = append(limitsArgs, fmt.Sprintf("%s=%s", k, v))
 	}
 	if len(limitsArgs) > 0 {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--limits=%s", shellEscape(strings.Join(limitsArgs, ","))))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--limits=%s", util.ShellEscape(strings.Join(limitsArgs, ","))))
 	}
 	for k, v := range requests {
 		requestsArgs = append(requestsArgs, fmt.Sprintf("%s=%s", k, v))
 	}
 	if len(requestsArgs) > 0 {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--requests=%s", shellEscape(strings.Join(requestsArgs, ","))))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--requests=%s", util.ShellEscape(strings.Join(requestsArgs, ","))))
 	}
 
 	if opts.Namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.All {
 		cmdArgs = append(cmdArgs, "--all")
 	}
 	if opts.Selector != "" {
-		cmdArgs = append(cmdArgs, "-l", shellEscape(opts.Selector))
+		cmdArgs = append(cmdArgs, "-l", util.ShellEscape(opts.Selector))
 	}
 	if opts.Local {
 		cmdArgs = append(cmdArgs, "--local")
 	}
 	if opts.DryRun != "" && opts.DryRun != "none" {
-		cmdArgs = append(cmdArgs, "--dry-run="+shellEscape(opts.DryRun))
+		cmdArgs = append(cmdArgs, "--dry-run="+util.ShellEscape(opts.DryRun))
 	}
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultKubectlTimeout})
@@ -1360,23 +1360,23 @@ func (r *defaultRunner) KubectlAutoscale(ctx context.Context, conn connector.Con
 		return errors.New("resourceType, resourceName, maxReplicas required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "autoscale", shellEscape(resourceType), shellEscape(resourceName))
+	cmdArgs = append(cmdArgs, "kubectl", "autoscale", util.ShellEscape(resourceType), util.ShellEscape(resourceName))
 	cmdArgs = append(cmdArgs, fmt.Sprintf("--min=%d", minReplicas))
 	cmdArgs = append(cmdArgs, fmt.Sprintf("--max=%d", maxReplicas))
 	if cpuPercent > 0 {
 		cmdArgs = append(cmdArgs, fmt.Sprintf("--cpu-percent=%d", cpuPercent))
 	}
 	if opts.Name != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--name=%s", shellEscape(opts.Name)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--name=%s", util.ShellEscape(opts.Name)))
 	}
 	if opts.Namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.DryRun != "" && opts.DryRun != "none" {
-		cmdArgs = append(cmdArgs, "--dry-run="+shellEscape(opts.DryRun))
+		cmdArgs = append(cmdArgs, "--dry-run="+util.ShellEscape(opts.DryRun))
 	}
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultKubectlTimeout})
@@ -1394,7 +1394,7 @@ func (r *defaultRunner) KubectlCompletion(ctx context.Context, conn connector.Co
 	if shell == "" {
 		return "", errors.New("shell is required")
 	}
-	cmd := fmt.Sprintf("kubectl completion %s", shellEscape(shell))
+	cmd := fmt.Sprintf("kubectl completion %s", util.ShellEscape(shell))
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: false, Timeout: DefaultKubectlTimeout})
 	if err != nil {
 		return string(stdout) + string(stderr), errors.Wrapf(err, "kubectl completion %s failed. Output: %s", shell, string(stdout)+string(stderr))
@@ -1413,25 +1413,25 @@ func (r *defaultRunner) KubectlWait(ctx context.Context, conn connector.Connecto
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "kubectl", "wait")
 	if resourceName != "" {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("%s/%s", shellEscape(resourceType), shellEscape(resourceName)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("%s/%s", util.ShellEscape(resourceType), util.ShellEscape(resourceName)))
 	} else {
-		cmdArgs = append(cmdArgs, shellEscape(resourceType)) // For selector-based wait
+		cmdArgs = append(cmdArgs, util.ShellEscape(resourceType)) // For selector-based wait
 	}
-	cmdArgs = append(cmdArgs, fmt.Sprintf("--for=%s", shellEscape(condition)))
+	cmdArgs = append(cmdArgs, fmt.Sprintf("--for=%s", util.ShellEscape(condition)))
 	if opts.Namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace))
 	}
 	if opts.AllNamespaces {
 		cmdArgs = append(cmdArgs, "--all-namespaces")
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.Selector != "" {
-		cmdArgs = append(cmdArgs, "-l", shellEscape(opts.Selector))
+		cmdArgs = append(cmdArgs, "-l", util.ShellEscape(opts.Selector))
 	}
 	if opts.FieldSelector != "" {
-		cmdArgs = append(cmdArgs, "--field-selector", shellEscape(opts.FieldSelector))
+		cmdArgs = append(cmdArgs, "--field-selector", util.ShellEscape(opts.FieldSelector))
 	}
 	if opts.Timeout > 0 {
 		cmdArgs = append(cmdArgs, "--timeout", opts.Timeout.String())
@@ -1466,31 +1466,31 @@ func (r *defaultRunner) KubectlLabel(ctx context.Context, conn connector.Connect
 	if overwrite {
 		cmdArgs = append(cmdArgs, "--overwrite")
 	}
-	cmdArgs = append(cmdArgs, shellEscape(resourceType))
+	cmdArgs = append(cmdArgs, util.ShellEscape(resourceType))
 	if resourceName != "" {
-		cmdArgs = append(cmdArgs, shellEscape(resourceName))
+		cmdArgs = append(cmdArgs, util.ShellEscape(resourceName))
 	}
 	for k, v := range labels {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("%s=%s", shellEscape(k), shellEscape(v)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("%s=%s", util.ShellEscape(k), util.ShellEscape(v)))
 	}
 
 	if opts.Namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace))
 	}
 	if opts.AllNamespaces && resourceName == "" && opts.Selector == "" {
 		cmdArgs = append(cmdArgs, "--all")
 	} // --all is usually for all resources of a type
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.Selector != "" && resourceName == "" {
-		cmdArgs = append(cmdArgs, "-l", shellEscape(opts.Selector))
+		cmdArgs = append(cmdArgs, "-l", util.ShellEscape(opts.Selector))
 	}
 	if opts.Local {
 		cmdArgs = append(cmdArgs, "--local")
 	}
 	if opts.DryRun != "" && opts.DryRun != "none" {
-		cmdArgs = append(cmdArgs, "--dry-run="+shellEscape(opts.DryRun))
+		cmdArgs = append(cmdArgs, "--dry-run="+util.ShellEscape(opts.DryRun))
 	}
 	if opts.Timeout > 0 {
 		cmdArgs = append(cmdArgs, "--timeout", opts.Timeout.String())
@@ -1519,31 +1519,31 @@ func (r *defaultRunner) KubectlAnnotate(ctx context.Context, conn connector.Conn
 	if overwrite {
 		cmdArgs = append(cmdArgs, "--overwrite")
 	}
-	cmdArgs = append(cmdArgs, shellEscape(resourceType))
+	cmdArgs = append(cmdArgs, util.ShellEscape(resourceType))
 	if resourceName != "" {
-		cmdArgs = append(cmdArgs, shellEscape(resourceName))
+		cmdArgs = append(cmdArgs, util.ShellEscape(resourceName))
 	}
 	for k, v := range annotations {
-		cmdArgs = append(cmdArgs, fmt.Sprintf("%s=%s", shellEscape(k), shellEscape(v)))
+		cmdArgs = append(cmdArgs, fmt.Sprintf("%s=%s", util.ShellEscape(k), util.ShellEscape(v)))
 	}
 
 	if opts.Namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace))
 	}
 	if opts.AllNamespaces && resourceName == "" && opts.Selector == "" {
 		cmdArgs = append(cmdArgs, "--all")
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.Selector != "" && resourceName == "" {
-		cmdArgs = append(cmdArgs, "-l", shellEscape(opts.Selector))
+		cmdArgs = append(cmdArgs, "-l", util.ShellEscape(opts.Selector))
 	}
 	if opts.Local {
 		cmdArgs = append(cmdArgs, "--local")
 	}
 	if opts.DryRun != "" && opts.DryRun != "none" {
-		cmdArgs = append(cmdArgs, "--dry-run="+shellEscape(opts.DryRun))
+		cmdArgs = append(cmdArgs, "--dry-run="+util.ShellEscape(opts.DryRun))
 	}
 	if opts.Timeout > 0 {
 		cmdArgs = append(cmdArgs, "--timeout", opts.Timeout.String())
@@ -1568,20 +1568,20 @@ func (r *defaultRunner) KubectlPatch(ctx context.Context, conn connector.Connect
 		patchType = "strategic"
 	} // Default patch type
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "kubectl", "patch", shellEscape(resourceType), shellEscape(resourceName))
-	cmdArgs = append(cmdArgs, "--type", shellEscape(patchType))
-	cmdArgs = append(cmdArgs, "-p", shellEscape(patchContent))
+	cmdArgs = append(cmdArgs, "kubectl", "patch", util.ShellEscape(resourceType), util.ShellEscape(resourceName))
+	cmdArgs = append(cmdArgs, "--type", util.ShellEscape(patchType))
+	cmdArgs = append(cmdArgs, "-p", util.ShellEscape(patchContent))
 	if opts.Namespace != "" {
-		cmdArgs = append(cmdArgs, "--namespace", shellEscape(opts.Namespace))
+		cmdArgs = append(cmdArgs, "--namespace", util.ShellEscape(opts.Namespace))
 	}
 	if opts.KubeconfigPath != "" {
-		cmdArgs = append(cmdArgs, "--kubeconfig", shellEscape(opts.KubeconfigPath))
+		cmdArgs = append(cmdArgs, "--kubeconfig", util.ShellEscape(opts.KubeconfigPath))
 	}
 	if opts.Local {
 		cmdArgs = append(cmdArgs, "--local")
 	}
 	if opts.DryRun != "" && opts.DryRun != "none" {
-		cmdArgs = append(cmdArgs, "--dry-run="+shellEscape(opts.DryRun))
+		cmdArgs = append(cmdArgs, "--dry-run="+util.ShellEscape(opts.DryRun))
 	}
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultKubectlTimeout})

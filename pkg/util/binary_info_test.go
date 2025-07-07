@@ -16,23 +16,23 @@ func TestGetBinaryInfo(t *testing.T) {
 	baseClusterName := "mycluster"
 
 	makeExpectedPaths := func(componentType BinaryType, componentNameForDir, version, arch, fileName string) (baseDir, componentDir, filePath string) {
-		kubexmRoot := filepath.Join(baseWorkDir, common.KUBEXM)
+		kubexmRoot := filepath.Join(baseWorkDir, common.KubexmRootDirName) // Updated
 		clusterBase := filepath.Join(kubexmRoot, baseClusterName)
 		typeDirName := ""
 		pathParts := []string{}
 
 		switch componentType {
 		case ETCD:
-			typeDirName = DirNameEtcd
+			typeDirName = common.DefaultEtcdDir // Updated
 			pathParts = append(pathParts, version, arch)
 		case KUBE, K3S, K8E:
-			typeDirName = DirNameKubernetes
+			typeDirName = common.DefaultKubernetesDir // Updated
 			pathParts = append(pathParts, version, arch)
 		case CNI, CALICOCTL:
-			typeDirName = filepath.Join(DirNameKubernetes, "cni")
+			typeDirName = filepath.Join(common.DefaultKubernetesDir, "cni") // Updated
 			pathParts = append(pathParts, componentNameForDir, version, arch)
 		case CONTAINERD, DOCKER, RUNC, CRIDOCKERD, CRICTL:
-			typeDirName = DirNameContainerRuntime
+			typeDirName = common.DefaultContainerRuntimeDir // Updated
 			pathParts = append(pathParts, componentNameForDir, version, arch)
 		case HELM, BUILD, REGISTRY:
 			typeDirName = string(componentType)
@@ -62,9 +62,9 @@ func TestGetBinaryInfo(t *testing.T) {
 		expectedFileName      string
 		expectedURLContains   string
 		expectedIsArchive     bool
-		expectedBaseDir       string // Will be dynamically populated if not error case
-		expectedComponentDir  string // Will be dynamically populated
-		expectedFilePath      string // Will be dynamically populated
+		expectedBaseDir       string
+		expectedComponentDir  string
+		expectedFilePath      string
 		expectedChecksumVal   string
 		expectedChecksumType  string
 		expectError           bool
@@ -304,21 +304,20 @@ func TestGetBinaryInfo(t *testing.T) {
 	}
 
 	for i := range tests {
-		tt := &tests[i] // Use a pointer to allow modification in loop
+		tt := &tests[i]
 		if !tt.expectError {
-			// Access the new defaultKnownBinaryDetails map
 			details, ok := defaultKnownBinaryDetails[strings.ToLower(tt.componentName)]
 			if !ok {
 				t.Fatalf("Test case %s uses an unknown component %s for path generation", tt.name, tt.componentName)
 			}
-			compNameForDir := details.ComponentNameForDir // Use capitalized field name
+			compNameForDir := details.ComponentNameForDir
 			if compNameForDir == "" {
 				compNameForDir = tt.componentName
 			}
-			if details.BinaryType == CNI || details.BinaryType == CALICOCTL { // Use capitalized field name
+			if details.BinaryType == CNI || details.BinaryType == CALICOCTL {
 				compNameForDir = tt.componentName
 			}
-			expectedBase, expectedComp, expectedFP := makeExpectedPaths(details.BinaryType, compNameForDir, tt.version, tt.expectedArch, tt.expectedFileName) // Use capitalized field name
+			expectedBase, expectedComp, expectedFP := makeExpectedPaths(details.BinaryType, compNameForDir, tt.version, tt.expectedArch, tt.expectedFileName)
 			tt.expectedBaseDir = expectedBase
 			tt.expectedComponentDir = expectedComp
 			tt.expectedFilePath = expectedFP
@@ -326,7 +325,7 @@ func TestGetBinaryInfo(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tc := tt // capture range variable
+		tc := tt
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.zone == "cn" {
 				os.Setenv("KXZONE", "cn")
@@ -339,7 +338,7 @@ func TestGetBinaryInfo(t *testing.T) {
 			if tc.name == "etcd_no_workdir" { currentWorkDir = "" }
 			if tc.name == "etcd_no_clustername" { currentClusterName = "" }
 
-			provider := NewBinaryProvider() // Create a provider instance
+			provider := NewBinaryProvider()
 			binInfo, err := provider.GetBinaryInfo(tc.componentName, tc.version, tc.arch, GetZone(), currentWorkDir, currentClusterName)
 
 			if tc.expectError {

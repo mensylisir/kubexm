@@ -4,29 +4,23 @@ import (
 	"fmt"
 	"strings"
 	"github.com/mensylisir/kubexm/pkg/util/validation"
+	"github.com/mensylisir/kubexm/pkg/common" // Import common
 )
 
 // ExternalLoadBalancerConfig defines settings for an external load balancing solution.
 type ExternalLoadBalancerConfig struct {
-	// Type specifies the kind of external load balancer.
-	// Examples: "UserProvided", "ManagedKeepalivedHAProxy", "ManagedKeepalivedNginxLB".
-	Type string `json:"type,omitempty"` // e.g., UserProvided, ManagedKeepalivedHAProxy
-
-	Keepalived *KeepalivedConfig `json:"keepalived,omitempty"`
-	HAProxy    *HAProxyConfig    `json:"haproxy,omitempty"`
-	NginxLB    *NginxLBConfig    `json:"nginxLB,omitempty"`
-
-	LoadBalancerHostGroupName *string `json:"loadBalancerHostGroupName,omitempty"`
+	Type string `json:"type,omitempty" yaml:"type,omitempty"`
+	Keepalived *KeepalivedConfig `json:"keepalived,omitempty" yaml:"keepalived,omitempty"`
+	HAProxy    *HAProxyConfig    `json:"haproxy,omitempty" yaml:"haproxy,omitempty"`
+	NginxLB    *NginxLBConfig    `json:"nginxLB,omitempty" yaml:"nginxLB,omitempty"`
+	LoadBalancerHostGroupName *string `json:"loadBalancerHostGroupName,omitempty" yaml:"loadBalancerHostGroupName,omitempty"`
 }
 
 // InternalLoadBalancerConfig defines settings for an internal load balancing solution.
 type InternalLoadBalancerConfig struct {
-	// Type specifies the kind of internal load balancer.
-	// Examples: "KubeVIP", "WorkerNodeHAProxy".
-	Type string `json:"type,omitempty"`
-
-	KubeVIP           *KubeVIPConfig `json:"kubevip,omitempty"`
-	WorkerNodeHAProxy *HAProxyConfig `json:"workerNodeHAProxy,omitempty"`
+	Type string `json:"type,omitempty" yaml:"type,omitempty"`
+	KubeVIP           *KubeVIPConfig `json:"kubevip,omitempty" yaml:"kubevip,omitempty"`
+	WorkerNodeHAProxy *HAProxyConfig `json:"workerNodeHAProxy,omitempty" yaml:"workerNodeHAProxy,omitempty"`
 }
 
 // HighAvailabilityConfig defines settings for cluster high availability.
@@ -45,26 +39,16 @@ func SetDefaults_HighAvailabilityConfig(cfg *HighAvailabilityConfig) {
 	}
 
 	if !*cfg.Enabled {
-		// If HA is not enabled, ensure External and Internal are nil to prevent defaulting/validation of sub-configs.
-		// This makes the intent clearer: if HA is off, specific LB configs are irrelevant.
 		cfg.External = nil
 		cfg.Internal = nil
 		return
 	}
 
-	// If HA is enabled, and External/Internal sections are provided (even if empty), default them.
 	if cfg.External != nil {
 		SetDefaults_ExternalLoadBalancerConfig(cfg.External)
-	} else {
-        // If HA is enabled but External is nil, we might want to initialize it
-        // if there's a sensible default for External an HA setup.
-        // For now, we assume if External is nil, user does not want external LB.
 	}
-
 	if cfg.Internal != nil {
 		SetDefaults_InternalLoadBalancerConfig(cfg.Internal)
-	} else {
-        // Similarly for Internal.
 	}
 }
 
@@ -72,22 +56,24 @@ func SetDefaults_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig) {
 	if cfg == nil {
 		return
 	}
-	// Type being set implies the user wants this LB.
-	// Sub-configs are defaulted if their corresponding type is matched.
 	if cfg.Type != "" {
-		if strings.Contains(cfg.Type, "Keepalived") {
+		isKeepalivedType := strings.Contains(cfg.Type, "Keepalived") || cfg.Type == common.ExternalLBTypeKubexmKH || cfg.Type == common.ExternalLBTypeKubexmKN
+		isHAProxyType := strings.Contains(cfg.Type, "HAProxy") || cfg.Type == common.ExternalLBTypeKubexmKH
+		isNginxLBType := strings.Contains(cfg.Type, "NginxLB") || cfg.Type == common.ExternalLBTypeKubexmKN
+
+		if isKeepalivedType {
 			if cfg.Keepalived == nil {
 				cfg.Keepalived = &KeepalivedConfig{}
 			}
 			SetDefaults_KeepalivedConfig(cfg.Keepalived)
 		}
-		if strings.Contains(cfg.Type, "HAProxy") { // This applies to ManagedKeepalivedHAProxy
+		if isHAProxyType {
 			if cfg.HAProxy == nil {
 				cfg.HAProxy = &HAProxyConfig{}
 			}
 			SetDefaults_HAProxyConfig(cfg.HAProxy)
 		}
-		if strings.Contains(cfg.Type, "NginxLB") {
+		if isNginxLBType {
 			if cfg.NginxLB == nil {
 				cfg.NginxLB = &NginxLBConfig{}
 			}
@@ -100,14 +86,14 @@ func SetDefaults_InternalLoadBalancerConfig(cfg *InternalLoadBalancerConfig) {
 	if cfg == nil {
 		return
 	}
-	// Type being set implies the user wants this LB.
-	if cfg.Type == "KubeVIP" {
+	if cfg.Type == common.InternalLBTypeKubeVIP {
 		if cfg.KubeVIP == nil {
 			cfg.KubeVIP = &KubeVIPConfig{}
 		}
 		SetDefaults_KubeVIPConfig(cfg.KubeVIP)
 	}
-	if cfg.Type == "WorkerNodeHAProxy" {
+	// Assuming "WorkerNodeHAProxy" should map to common.InternalLBTypeHAProxy
+	if cfg.Type == common.InternalLBTypeHAProxy || cfg.Type == "WorkerNodeHAProxy" {
 		if cfg.WorkerNodeHAProxy == nil {
 			cfg.WorkerNodeHAProxy = &HAProxyConfig{}
 		}
@@ -121,6 +107,13 @@ func Validate_HighAvailabilityConfig(cfg *HighAvailabilityConfig, verrs *validat
 	}
 
 	if cfg.Enabled != nil && *cfg.Enabled {
+		isExternalConfigured := cfg.External != nil && cfg.External.Type != ""
+		isInternalConfigured := cfg.Internal != nil && cfg.Internal.Type != ""
+
+		if isExternalConfigured && isInternalConfigured {
+			verrs.Add(pathPrefix, "external load balancer and internal load balancer cannot be enabled simultaneously")
+		}
+
 		if cfg.External != nil {
 			Validate_ExternalLoadBalancerConfig(cfg.External, verrs, pathPrefix+".external")
 		}
@@ -142,52 +135,58 @@ func Validate_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig, verrs 
 		return
 	}
 
-	validManagedTypes := []string{"ManagedKeepalivedHAProxy", "ManagedKeepalivedNginxLB"}
-	isManagedType := false
-	for _, mt := range validManagedTypes {
-		if cfg.Type == mt {
-			isManagedType = true
-			break
+	// Define known external LB types and their properties
+	isLegacyManagedKeepalivedHAProxy := cfg.Type == "ManagedKeepalivedHAProxy"
+	isLegacyManagedKeepalivedNginxLB := cfg.Type == "ManagedKeepalivedNginxLB"
+	isKubexmManagedKH := cfg.Type == common.ExternalLBTypeKubexmKH
+	isKubexmManagedKN := cfg.Type == common.ExternalLBTypeKubexmKN
+	isUserProvided := cfg.Type == "UserProvided"
+	isGenericExternal := cfg.Type == common.ExternalLBTypeExternal
+
+	isManagedType := isLegacyManagedKeepalivedHAProxy || isLegacyManagedKeepalivedNginxLB || isKubexmManagedKH || isKubexmManagedKN
+	isValidKnownType := isManagedType || isUserProvided || isGenericExternal
+
+	if !isValidKnownType {
+		verrs.Add(pathPrefix+".type", fmt.Sprintf("unknown external LB type '%s'", cfg.Type))
+		return
+	}
+
+	if isUserProvided || isGenericExternal {
+		if cfg.Keepalived != nil {
+			verrs.Add(pathPrefix+".keepalived", fmt.Sprintf("should not be set for '%s' external LB type", cfg.Type))
+		}
+		if cfg.HAProxy != nil {
+			verrs.Add(pathPrefix+".haproxy", fmt.Sprintf("should not be set for '%s' external LB type", cfg.Type))
+		}
+		if cfg.NginxLB != nil {
+			verrs.Add(pathPrefix+".nginxLB", fmt.Sprintf("should not be set for '%s' external LB type", cfg.Type))
 		}
 	}
 
-	if cfg.Type == "UserProvided" {
-		if cfg.Keepalived != nil {
-			verrs.Add(pathPrefix+".keepalived", "should not be set for UserProvided external LB type")
+	if isManagedType {
+		if cfg.Keepalived == nil {
+			verrs.Add(pathPrefix+".keepalived", "section must be present for managed LB type '"+cfg.Type+"'")
+		} else {
+			Validate_KeepalivedConfig(cfg.Keepalived, verrs, pathPrefix+".keepalived")
 		}
-		if cfg.HAProxy != nil {
-			verrs.Add(pathPrefix+".haproxy", "should not be set for UserProvided external LB type")
-		}
-		if cfg.NginxLB != nil {
-			verrs.Add(pathPrefix+".nginxLB", "should not be set for UserProvided external LB type")
-		}
-	} else if isManagedType {
-		if strings.Contains(cfg.Type, "Keepalived") {
-			if cfg.Keepalived == nil {
-				verrs.Add(pathPrefix+".keepalived", "section must be present if type includes 'Keepalived'")
-			} else {
-				Validate_KeepalivedConfig(cfg.Keepalived, verrs, pathPrefix+".keepalived")
-			}
-		}
-		if strings.Contains(cfg.Type, "HAProxy") {
+
+		if isLegacyManagedKeepalivedHAProxy || isKubexmManagedKH {
 			if cfg.HAProxy == nil {
-				verrs.Add(pathPrefix+".haproxy", "section must be present if type includes 'HAProxy'")
+				verrs.Add(pathPrefix+".haproxy", "section must be present for HAProxy based managed LB type '"+cfg.Type+"'")
 			} else {
 				Validate_HAProxyConfig(cfg.HAProxy, verrs, pathPrefix+".haproxy")
 			}
-		}
-		if strings.Contains(cfg.Type, "NginxLB") {
+		} else if isLegacyManagedKeepalivedNginxLB || isKubexmManagedKN {
 			if cfg.NginxLB == nil {
-				verrs.Add(pathPrefix+".nginxLB", "section must be present if type includes 'NginxLB'")
+				verrs.Add(pathPrefix+".nginxLB", "section must be present for NginxLB based managed LB type '"+cfg.Type+"'")
 			} else {
 				Validate_NginxLBConfig(cfg.NginxLB, verrs, pathPrefix+".nginxLB")
 			}
 		}
-		if cfg.LoadBalancerHostGroupName != nil && strings.TrimSpace(*cfg.LoadBalancerHostGroupName) == "" {
-			verrs.Add(pathPrefix+".loadBalancerHostGroupName", "cannot be empty if specified for managed external LB")
+
+		if cfg.LoadBalancerHostGroupName == nil || strings.TrimSpace(*cfg.LoadBalancerHostGroupName) == "" {
+			verrs.Add(pathPrefix+".loadBalancerHostGroupName", "must be specified for managed external LB type '"+cfg.Type+"'")
 		}
-	} else {
-		verrs.Add(pathPrefix+".type", fmt.Sprintf("unknown external LB type '%s'", cfg.Type))
 	}
 }
 
@@ -196,15 +195,18 @@ func Validate_InternalLoadBalancerConfig(cfg *InternalLoadBalancerConfig, verrs 
 		return
 	}
 
-	if cfg.Type == "KubeVIP" {
+	isKubeVIP := cfg.Type == common.InternalLBTypeKubeVIP || cfg.Type == "KubeVIP" // Allow legacy string "KubeVIP"
+	isHAProxy := cfg.Type == common.InternalLBTypeHAProxy || cfg.Type == "WorkerNodeHAProxy" // Allow legacy string "WorkerNodeHAProxy"
+
+	if isKubeVIP {
 		if cfg.KubeVIP == nil {
-			verrs.Add(pathPrefix+".kubevip", "section must be present if type is 'KubeVIP'")
+			verrs.Add(pathPrefix+".kubevip", "section must be present if type is '"+cfg.Type+"'")
 		} else {
 			Validate_KubeVIPConfig(cfg.KubeVIP, verrs, pathPrefix+".kubevip")
 		}
-	} else if cfg.Type == "WorkerNodeHAProxy" {
+	} else if isHAProxy {
 		if cfg.WorkerNodeHAProxy == nil {
-			verrs.Add(pathPrefix+".workerNodeHAProxy", "section must be present if type is 'WorkerNodeHAProxy'")
+			verrs.Add(pathPrefix+".workerNodeHAProxy", "section must be present if type is '"+cfg.Type+"'")
 		} else {
 			Validate_HAProxyConfig(cfg.WorkerNodeHAProxy, verrs, pathPrefix+".workerNodeHAProxy")
 		}

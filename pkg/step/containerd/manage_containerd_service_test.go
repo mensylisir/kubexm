@@ -223,8 +223,6 @@ func TestManageContainerdServiceStep_Rollback_ForStartAction(t *testing.T) {
 
 // Ensure mockRunnerForManageService implements runner.Runner
 var _ runner.Runner = (*mockRunnerForManageService)(nil)
-// Ensure mockStepContextForManageService implements step.StepContext
-var _ step.StepContext = (*mockStepContextForManageService)(t, nil, "")
 
 // Add dummy implementations for other runner.Runner methods for mockRunnerForManageService
 func (m *mockRunnerForManageService) GatherFacts(ctx context.Context, conn connector.Connector) (*runner.Facts, error) { return m.facts, nil } // Provide facts

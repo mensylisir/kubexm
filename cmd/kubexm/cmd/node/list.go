@@ -42,7 +42,7 @@ func clustersBaseDirForNodeCmd() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get user home directory: %w", err)
 	}
-	return filepath.Join(homeDir, common.DefaultKubeXMRootDir, common.DefaultClustersDir), nil
+	return filepath.Join(homeDir, common.KubexmRootDirName, "clusters"), nil
 }
 
 func init() {

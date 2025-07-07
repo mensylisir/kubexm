@@ -76,4 +76,15 @@ const (
 	// --- Default Value Placeholders ---
 	ValueAuto    = "auto"
 	ValueDefault = "default"
+
+	// --- LoadBalancer Types ---
+	// Internal LoadBalancer Types
+	InternalLBTypeHAProxy = "haproxy"
+	InternalLBTypeNginx   = "nginx"
+	InternalLBTypeKubeVIP = "kube-vip"
+
+	// External LoadBalancer Types
+	ExternalLBTypeKubexmKH   = "kubexm-kh" // KubeXMS managed Keepalived + HAProxy
+	ExternalLBTypeKubexmKN   = "kubexm-kn" // KubeXMS managed Keepalived + Nginx
+	ExternalLBTypeExternal   = "external"  // User-provided external LB
 )
