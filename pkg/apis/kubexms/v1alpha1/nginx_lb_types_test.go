@@ -51,9 +51,10 @@ func TestValidate_NginxLBConfig(t *testing.T) {
 		ConfigFilePath: stringPtr("/etc/nginx/nginx.conf"),
 		SkipInstall:   boolPtr(false),
 	}
+	SetDefaults_NginxLBConfig(&validCfg) // Call SetDefaults before validating validCfg
 	verrs := &validation.ValidationErrors{}
 	Validate_NginxLBConfig(&validCfg, verrs, "nginxLB")
-	assert.False(t, verrs.HasErrors(), "Validation failed for valid config: %v", verrs.Error())
+	assert.False(t, verrs.HasErrors(), "Validation failed for valid config after defaults: %v", verrs.Error())
 
 	skipInstallCfg := NginxLBConfig{SkipInstall: boolPtr(true)}
 	verrsSkip := &validation.ValidationErrors{}

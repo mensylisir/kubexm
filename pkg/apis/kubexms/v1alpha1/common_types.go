@@ -64,16 +64,10 @@ func Validate_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig, verrs *validat
 		verrs.Add(pathPrefix, "section cannot be nil")
 		return
 	}
-	validTypes := []ContainerRuntimeType{ContainerRuntimeDocker, ContainerRuntimeContainerd, ""} // Allow empty for default
-	isValid := false
-	for _, vt := range validTypes {
-		if cfg.Type == vt || (cfg.Type == "" && vt == ContainerRuntimeDocker) { // Defaulting "" to Docker
-			isValid = true
-			break
-		}
-	}
-	if !isValid {
-		verrs.Add(pathPrefix+".type", fmt.Sprintf("invalid container runtime type '%s'", cfg.Type))
+	// Type should be defaulted by SetDefaults_ContainerRuntimeConfig before validation.
+	// So, it should be either Docker or Containerd.
+	if cfg.Type != ContainerRuntimeDocker && cfg.Type != ContainerRuntimeContainerd {
+		verrs.Add(pathPrefix+".type", fmt.Sprintf("invalid container runtime type '%s', must be '%s' or '%s'", cfg.Type, ContainerRuntimeDocker, ContainerRuntimeContainerd))
 	}
 
 	if cfg.Type == ContainerRuntimeDocker {

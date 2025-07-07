@@ -167,20 +167,23 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	}
 	g := cfg.Spec.Global
 	if g.Port == 0 {
-		g.Port = 22
+		g.Port = common.DefaultSSHPort
 	}
 	if g.ConnectionTimeout == 0 {
 		g.ConnectionTimeout = 30 * time.Second
 	}
 	if g.WorkDir == "" {
-		g.WorkDir = "/tmp/kubexms_work"
+		g.WorkDir = common.DefaultWorkDir
 	}
 
 	for i := range cfg.Spec.Hosts {
 		host := &cfg.Spec.Hosts[i]
 		if host.Port == 0 && g != nil {
-			host.Port = g.Port
+			host.Port = g.Port // Inherits from global default if global.Port was 0 and then defaulted, or if global.Port was set
+		} else if host.Port == 0 { // If global is nil or global.Port was not set (remains 0)
+			host.Port = common.DefaultSSHPort
 		}
+
 		if host.User == "" && g != nil {
 			host.User = g.User
 		}
@@ -188,10 +191,10 @@ func SetDefaults_Cluster(cfg *Cluster) {
 			host.PrivateKeyPath = g.PrivateKeyPath
 		}
 		if host.Type == "" {
-			host.Type = "ssh"
+			host.Type = common.HostTypeSSH
 		}
 		if host.Arch == "" {
-			host.Arch = "amd64"
+			host.Arch = common.DefaultArch
 		}
 		if host.Labels == nil {
 			host.Labels = make(map[string]string)
@@ -387,7 +390,7 @@ func Validate_Cluster(cfg *Cluster) error {
 		if strings.TrimSpace(host.User) == "" {
 			verrs.Add(pathPrefix+".user", "cannot be empty (after defaults)")
 		}
-		if strings.ToLower(host.Type) != "local" {
+		if strings.ToLower(host.Type) != common.HostTypeLocal {
 			if host.Password == "" && host.PrivateKey == "" && host.PrivateKeyPath == "" {
 				verrs.Add(pathPrefix, "no SSH authentication method provided for non-local host")
 			}

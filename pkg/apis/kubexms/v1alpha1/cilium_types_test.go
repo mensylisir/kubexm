@@ -27,9 +27,9 @@ func TestSetDefaults_CiliumConfig_Standalone(t *testing.T) {
 				TunnelingMode:          "vxlan",
 				KubeProxyReplacement:   "strict",
 				IdentityAllocationMode: "crd",
-				EnableHubble:           false, // Defaulted by HubbleUI logic if HubbleUI is true
+				EnableHubble:           false,
 				HubbleUI:               false,
-				EnableBPFMasquerade:    false,
+				EnableBPFMasquerade:    boolPtr(true),
 			},
 		},
 		{
@@ -39,9 +39,9 @@ func TestSetDefaults_CiliumConfig_Standalone(t *testing.T) {
 				TunnelingMode:          "vxlan",
 				KubeProxyReplacement:   "strict",
 				IdentityAllocationMode: "crd",
-				EnableHubble:           true, // Should be forced to true
+				EnableHubble:           true,
 				HubbleUI:               true,
-				EnableBPFMasquerade:    false,
+				EnableBPFMasquerade:    boolPtr(true),
 			},
 		},
 		{
@@ -53,29 +53,29 @@ func TestSetDefaults_CiliumConfig_Standalone(t *testing.T) {
 				IdentityAllocationMode: "crd",
 				EnableHubble:           true,
 				HubbleUI:               true,
-				EnableBPFMasquerade:    false,
+				EnableBPFMasquerade:    boolPtr(true),
 			},
 		},
 		{
 			name: "partial input, e.g. only TunnelingMode set",
 			input: &CiliumConfig{TunnelingMode: "geneve"},
 			expected: &CiliumConfig{
-				TunnelingMode:          "geneve", // User specified
-				KubeProxyReplacement:   "strict", // Defaulted
-				IdentityAllocationMode: "crd",    // Defaulted
+				TunnelingMode:          "geneve",
+				KubeProxyReplacement:   "strict",
+				IdentityAllocationMode: "crd",
 				EnableHubble:           false,
 				HubbleUI:               false,
-				EnableBPFMasquerade:    false,
+				EnableBPFMasquerade:    boolPtr(true),
 			},
 		},
 		{
-			name: "all fields explicitly set by user",
+			name: "all fields explicitly set by user, EnableBPFMasquerade set to true by user",
 			input: &CiliumConfig{
 				TunnelingMode:          "disabled",
 				KubeProxyReplacement:   "probe",
 				EnableHubble:           true,
 				HubbleUI:               true,
-				EnableBPFMasquerade:    true,
+				EnableBPFMasquerade:    boolPtr(true),
 				IdentityAllocationMode: "kvstore",
 			},
 			expected: &CiliumConfig{
@@ -83,7 +83,26 @@ func TestSetDefaults_CiliumConfig_Standalone(t *testing.T) {
 				KubeProxyReplacement:   "probe",
 				EnableHubble:           true,
 				HubbleUI:               true,
-				EnableBPFMasquerade:    true,
+				EnableBPFMasquerade:    boolPtr(true),
+				IdentityAllocationMode: "kvstore",
+			},
+		},
+		{
+			name: "all fields explicitly set by user, EnableBPFMasquerade set to false by user",
+			input: &CiliumConfig{
+				TunnelingMode:          "disabled",
+				KubeProxyReplacement:   "probe",
+				EnableHubble:           true,
+				HubbleUI:               true,
+				EnableBPFMasquerade:    boolPtr(false),
+				IdentityAllocationMode: "kvstore",
+			},
+			expected: &CiliumConfig{
+				TunnelingMode:          "disabled",
+				KubeProxyReplacement:   "probe",
+				EnableHubble:           true,
+				HubbleUI:               true,
+				EnableBPFMasquerade:    boolPtr(false),
 				IdentityAllocationMode: "kvstore",
 			},
 		},
@@ -101,15 +120,15 @@ func TestSetDefaults_CiliumConfig_Standalone(t *testing.T) {
 
 // TestValidate_CiliumConfig_Standalone tests the Validate_CiliumConfig function directly.
 func TestValidate_CiliumConfig_Standalone(t *testing.T) {
-	validBaseConfig := func() *CiliumConfig { // Use a function to get a fresh base for each test
+	validBaseConfig := func() *CiliumConfig {
 		cfg := &CiliumConfig{}
-		SetDefaults_CiliumConfig(cfg) // Apply defaults as validation happens after defaulting
+		SetDefaults_CiliumConfig(cfg)
 		return cfg
 	}
 
 	tests := []struct {
 		name        string
-		setup       func() *CiliumConfig // Function to set up the config for the test
+		setup       func() *CiliumConfig
 		expectErr   bool
 		errContains []string
 	}{
@@ -118,7 +137,7 @@ func TestValidate_CiliumConfig_Standalone(t *testing.T) {
 			setup: func() *CiliumConfig {
 				return nil
 			},
-			expectErr: false, // Validation function should handle nil gracefully
+			expectErr: false,
 		},
 		{
 			name: "valid empty (after defaults)",
@@ -148,25 +167,16 @@ func TestValidate_CiliumConfig_Standalone(t *testing.T) {
 			errContains: []string{"kubeProxyReplacement: invalid mode 'invalid-kpr'"},
 		},
 		{
-			name: "HubbleUI true, EnableHubble false", // Defaulting fixes this, but validation should still catch if defaults somehow bypassed
+			name: "HubbleUI true, EnableHubble false (after defaults this is fixed)",
 			setup: func() *CiliumConfig {
-				// Simulate the state *after* defaulting for this validation test.
-				// SetDefaults_CiliumConfig would set EnableHubble to true if HubbleUI is true.
 				cfg := &CiliumConfig{
-					TunnelingMode:          "vxlan",
-					KubeProxyReplacement:   "strict",
-					IdentityAllocationMode: "crd",
-					EnableHubble:           true, // This is the state after defaulting fixes it
 					HubbleUI:               true,
+					EnableHubble:           false, // This will be true after SetDefaults
 				}
-				// If we were testing Validate_CiliumConfig in complete isolation
-				// without prior defaulting, the original test for inconsistency would be valid.
-				// However, since our change in Validate_CiliumConfig was to remove that
-				// specific check because defaults handle it, this test should now pass
-				// when validating a config that has been defaulted.
+				SetDefaults_CiliumConfig(cfg) // Apply defaults to simulate real scenario
 				return cfg
 			},
-			expectErr:   false, // Defaulting fixes this, so validation should not find an error.
+			expectErr:   false,
 			errContains: []string{},
 		},
 		{
@@ -190,14 +200,28 @@ func TestValidate_CiliumConfig_Standalone(t *testing.T) {
 			errContains: []string{"identityAllocationMode: invalid mode 'invalid-iam'"},
 		},
 		{
-			name: "all fields valid",
+			name: "all fields valid, BPFMasquerade true",
 			setup: func() *CiliumConfig {
 				cfg := validBaseConfig()
 				cfg.TunnelingMode = "geneve"
 				cfg.KubeProxyReplacement = "probe"
 				cfg.EnableHubble = true
 				cfg.HubbleUI = true
-				cfg.EnableBPFMasquerade = true
+				cfg.EnableBPFMasquerade = boolPtr(true)
+				cfg.IdentityAllocationMode = "kvstore"
+				return cfg
+			},
+			expectErr: false,
+		},
+		{
+			name: "all fields valid, BPFMasquerade false",
+			setup: func() *CiliumConfig {
+				cfg := validBaseConfig()
+				cfg.TunnelingMode = "geneve"
+				cfg.KubeProxyReplacement = "probe"
+				cfg.EnableHubble = true
+				cfg.HubbleUI = true
+				cfg.EnableBPFMasquerade = boolPtr(false)
 				cfg.IdentityAllocationMode = "kvstore"
 				return cfg
 			},
@@ -208,14 +232,6 @@ func TestValidate_CiliumConfig_Standalone(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			inputConfig := tt.setup()
-			// Note: Validation is typically called after defaulting in the main logic.
-			// For some specific validation tests (like the HubbleUI inconsistency),
-			// we might want to test the raw input *before* SetDefaults.
-			// However, the current Validate_CiliumConfig assumes it might see this state.
-			// If SetDefaults_CiliumConfig is always called before Validate_CiliumConfig in the controller,
-			// then the "HubbleUI true, EnableHubble false" case in validation might be redundant
-			// as defaults would fix it. But for robustness, testing the validation rule itself is fine.
-
 			verrs := &validation.ValidationErrors{}
 			Validate_CiliumConfig(inputConfig, verrs, "spec.network.cilium")
 
@@ -239,21 +255,17 @@ func TestValidate_NetworkConfig_Calls_Validate_CiliumConfig_Standalone(t *testin
 	netCfg := &NetworkConfig{
 		Plugin: "cilium",
 		Cilium: &CiliumConfig{
-			TunnelingMode: "invalid-mode", // This should be caught by Validate_CiliumConfig
+			TunnelingMode: "invalid-mode",
 		},
-		// KubePodsCIDR and KubeServiceCIDR are added to make NetworkConfig minimally valid for its own checks
 		KubePodsCIDR:    "10.244.0.0/16",
 		KubeServiceCIDR: "10.96.0.0/12",
 	}
-	// Initialize KubernetesConfig as it's now required by Validate_NetworkConfig
-	k8sConfig := &KubernetesConfig{Version: "v1.25.0"} // Add any other necessary fields for k8sConfig if its validation is triggered
+	k8sConfig := &KubernetesConfig{Version: "v1.25.0"}
 	SetDefaults_KubernetesConfig(k8sConfig, "test-cluster")
-
-
-	SetDefaults_NetworkConfig(netCfg) // Apply defaults to NetworkConfig and its sub-configs
+	SetDefaults_NetworkConfig(netCfg)
 
 	verrs := &validation.ValidationErrors{}
-	Validate_NetworkConfig(netCfg, verrs, "spec.network", k8sConfig) // Pass k8sConfig
+	Validate_NetworkConfig(netCfg, verrs, "spec.network", k8sConfig)
 
 	assert.True(t, verrs.HasErrors(), "Expected errors from CiliumConfig validation")
 	assert.Contains(t, verrs.Error(), "cilium.tunnelingMode: invalid mode 'invalid-mode'", "Expected Cilium validation error")
