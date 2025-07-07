@@ -3,6 +3,7 @@ package v1alpha1
 import (
 	"testing"
 
+	"github.com/mensylisir/kubexm/pkg/common" // Added import
 	"github.com/mensylisir/kubexm/pkg/util"
 	"github.com/mensylisir/kubexm/pkg/util/validation"
 	"github.com/stretchr/testify/assert"
@@ -22,15 +23,17 @@ func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
 			name: "empty config",
 			input: &ContainerRuntimeConfig{},
 			expected: &ContainerRuntimeConfig{
-				Type: ContainerRuntimeContainerd, // Default is now containerd
+				Type: ContainerRuntimeContainerd, // Default is now common.RuntimeContainerd via ContainerRuntimeContainerd const
 				Containerd: &ContainerdConfig{ // Expect containerd to be initialized and defaulted
+					Version:            "", // Default from SetDefaults_ContainerdConfig
 					RegistryMirrors:    map[string][]string{},
 					InsecureRegistries: []string{},
 					UseSystemdCgroup:   util.BoolPtr(true),
 					ConfigPath:         util.StrPtr("/etc/containerd/config.toml"),
 					DisabledPlugins:    []string{},
-					RequiredPlugins:    []string{"io.containerd.grpc.v1.cri"},
+					RequiredPlugins:    []string{common.ContainerdPluginCRI}, // Using common constant
 					Imports:            []string{},
+					ExtraTomlConfig:    "",
 				},
 				Docker: nil, // Docker should be nil
 			},
@@ -43,13 +46,15 @@ func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
 			expected: &ContainerRuntimeConfig{
 				Type: ContainerRuntimeContainerd,
 				Containerd: &ContainerdConfig{
+					Version:            "",
 					RegistryMirrors:    map[string][]string{},
 					InsecureRegistries: []string{},
 					UseSystemdCgroup:   util.BoolPtr(true),
 					ConfigPath:         util.StrPtr("/etc/containerd/config.toml"),
 					DisabledPlugins:    []string{},
-					RequiredPlugins:    []string{"io.containerd.grpc.v1.cri"},
+					RequiredPlugins:    []string{common.ContainerdPluginCRI},
 					Imports:            []string{},
+					ExtraTomlConfig:    "",
 				},
 				Docker: nil,
 			},
@@ -57,8 +62,8 @@ func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
 		{
 			name: "type specified as docker, with existing empty docker config",
 			input: &ContainerRuntimeConfig{
-				Type:   ContainerRuntimeDocker,
-				Docker: &DockerConfig{}, // Empty DockerConfig provided
+				Type:   ContainerRuntimeDocker, // This is common.RuntimeDocker
+				Docker: &DockerConfig{},       // Empty DockerConfig provided
 			},
 			expected: &ContainerRuntimeConfig{
 				Type: ContainerRuntimeDocker,
@@ -66,19 +71,24 @@ func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
 					RegistryMirrors:        []string{},
 					InsecureRegistries:     []string{},
 					ExecOpts:               []string{},
-					LogOpts:                map[string]string{"max-file": "3", "max-size": "100m"},
+					LogDriver:              util.StrPtr(common.DockerLogDriverJSONFile),
+					LogOpts:                map[string]string{"max-size": common.DockerLogOptMaxSizeDefault, "max-file": common.DockerLogOptMaxFileDefault},
 					DefaultAddressPools:    []DockerAddressPool{},
+					StorageDriver:          nil, // No default for storage driver itself
 					StorageOpts:            []string{},
+					DefaultRuntime:         nil, // Docker's default is runc
 					Runtimes:               map[string]DockerRuntime{},
-					MaxConcurrentDownloads: util.IntPtr(3),
-					MaxConcurrentUploads:   util.IntPtr(5),
-					Bridge:                 util.StrPtr("docker0"),
+					MaxConcurrentDownloads: util.IntPtr(common.DockerMaxConcurrentDownloadsDefault),
+					MaxConcurrentUploads:   util.IntPtr(common.DockerMaxConcurrentUploadsDefault),
+					Bridge:                 util.StrPtr(common.DefaultDockerBridgeName),
 					InstallCRIDockerd:      util.BoolPtr(true),
-					LogDriver:              util.StrPtr("json-file"),
+					CRIDockerdVersion:      nil, // No default version for cri-dockerd here
+					DataRoot:               nil, // No default DataRoot in DockerConfig defaults
+					Experimental:           util.BoolPtr(false),
 					IPTables:               util.BoolPtr(true),
 					IPMasq:                 util.BoolPtr(true),
-					Experimental:           util.BoolPtr(false),
 					Auths:                  map[string]DockerRegistryAuth{},
+					ExtraJSONConfig:        nil,
 				},
 				Containerd: nil,
 			},
@@ -86,19 +96,21 @@ func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
 		{
 			name: "type specified as containerd, with existing empty containerd config",
 			input: &ContainerRuntimeConfig{
-				Type:       ContainerRuntimeContainerd,
-				Containerd: &ContainerdConfig{}, // Empty ContainerdConfig provided
+				Type:       ContainerRuntimeContainerd, // This is common.RuntimeContainerd
+				Containerd: &ContainerdConfig{},       // Empty ContainerdConfig provided
 			},
 			expected: &ContainerRuntimeConfig{
 				Type: ContainerRuntimeContainerd,
 				Containerd: &ContainerdConfig{
+					Version:            "",
 					RegistryMirrors:    map[string][]string{},
 					InsecureRegistries: []string{},
 					UseSystemdCgroup:   util.BoolPtr(true),
 					ConfigPath:         util.StrPtr("/etc/containerd/config.toml"),
 					DisabledPlugins:    []string{},
-					RequiredPlugins:    []string{"io.containerd.grpc.v1.cri"},
+					RequiredPlugins:    []string{common.ContainerdPluginCRI},
 					Imports:            []string{},
+					ExtraTomlConfig:    "",
 				},
 				Docker: nil,
 			},
@@ -112,25 +124,26 @@ func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
 				Type:    ContainerRuntimeContainerd,
 				Version: "1.5.0",
 				Containerd: &ContainerdConfig{
-					Version:            "", // Version in ContainerdConfig is separate from ContainerRuntimeConfig
+					Version:            "", // Version in ContainerdConfig is separate
 					RegistryMirrors:    map[string][]string{},
 					InsecureRegistries: []string{},
 					UseSystemdCgroup:   util.BoolPtr(true),
 					ConfigPath:         util.StrPtr("/etc/containerd/config.toml"),
 					DisabledPlugins:    []string{},
-					RequiredPlugins:    []string{"io.containerd.grpc.v1.cri"},
+					RequiredPlugins:    []string{common.ContainerdPluginCRI},
 					Imports:            []string{},
+					ExtraTomlConfig:    "",
 				},
 				Docker: nil,
 			},
 		},
 		{
-			name: "docker type with pre-filled docker config (no overrides by container_runtime default)",
+			name: "docker type with pre-filled docker config",
 			input: &ContainerRuntimeConfig{
 				Type: ContainerRuntimeDocker,
 				Docker: &DockerConfig{
 					InstallCRIDockerd: util.BoolPtr(false),
-					LogDriver:         util.StrPtr("journald"),
+					LogDriver:         util.StrPtr(common.DockerLogDriverJournald),
 				},
 			},
 			expected: &ContainerRuntimeConfig{
@@ -139,19 +152,24 @@ func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
 					RegistryMirrors:        []string{},
 					InsecureRegistries:     []string{},
 					ExecOpts:               []string{},
-					LogOpts:                map[string]string{"max-file": "3", "max-size": "100m"},
+					LogDriver:              util.StrPtr(common.DockerLogDriverJournald), // User's value preserved
+					LogOpts:                map[string]string{"max-size": common.DockerLogOptMaxSizeDefault, "max-file": common.DockerLogOptMaxFileDefault},
 					DefaultAddressPools:    []DockerAddressPool{},
+					StorageDriver:          nil,
 					StorageOpts:            []string{},
+					DefaultRuntime:         nil,
 					Runtimes:               map[string]DockerRuntime{},
-					MaxConcurrentDownloads: util.IntPtr(3),
-					MaxConcurrentUploads:   util.IntPtr(5),
-					Bridge:                 util.StrPtr("docker0"),
+					MaxConcurrentDownloads: util.IntPtr(common.DockerMaxConcurrentDownloadsDefault),
+					MaxConcurrentUploads:   util.IntPtr(common.DockerMaxConcurrentUploadsDefault),
+					Bridge:                 util.StrPtr(common.DefaultDockerBridgeName),
 					InstallCRIDockerd:      util.BoolPtr(false), // User's value preserved
-					LogDriver:              util.StrPtr("journald"), // User's value preserved
+					CRIDockerdVersion:      nil,
+					DataRoot:               nil,
+					Experimental:           util.BoolPtr(false),
 					IPTables:               util.BoolPtr(true),
 					IPMasq:                 util.BoolPtr(true),
-					Experimental:           util.BoolPtr(false),
 					Auths:                  map[string]DockerRegistryAuth{},
+					ExtraJSONConfig:        nil,
 				},
 				Containerd: nil,
 			},
@@ -172,11 +190,14 @@ func TestSetDefaults_ContainerRuntimeConfig(t *testing.T) {
 
 func TestValidate_ContainerRuntimeConfig(t *testing.T) {
 	// Create valid defaulted sub-configs to use in tests
-	validDockerCfg := &DockerConfig{}
-	SetDefaults_DockerConfig(validDockerCfg)
+	// Create a fully defaulted DockerConfig for expected values
+	fullyDefaultedDockerCfg := &DockerConfig{}
+	SetDefaults_DockerConfig(fullyDefaultedDockerCfg)
 
-	validContainerdCfg := &ContainerdConfig{}
-	SetDefaults_ContainerdConfig(validContainerdCfg)
+	// Create a fully defaulted ContainerdConfig for expected values
+	fullyDefaultedContainerdCfg := &ContainerdConfig{}
+	SetDefaults_ContainerdConfig(fullyDefaultedContainerdCfg)
+
 
 	tests := []struct {
 		name        string
@@ -187,51 +208,50 @@ func TestValidate_ContainerRuntimeConfig(t *testing.T) {
 		{
 			name: "valid docker type",
 			input: &ContainerRuntimeConfig{
-				Type:   ContainerRuntimeDocker,
-				Docker: validDockerCfg, // Use a defaulted valid config
+				Type:   ContainerRuntimeDocker, // This is common.RuntimeDocker
+				Docker: &DockerConfig{},       // Will be defaulted
 			},
 			expectError: false,
 		},
 		{
 			name: "valid containerd type",
 			input: &ContainerRuntimeConfig{
-				Type:       ContainerRuntimeContainerd,
-				Containerd: validContainerdCfg, // Use a defaulted valid config
+				Type:       ContainerRuntimeContainerd, // This is common.RuntimeContainerd
+				Containerd: &ContainerdConfig{},       // Will be defaulted
 			},
 			expectError: false,
 		},
 		{
-			name: "empty type (now defaults to containerd), docker config erroneously set",
+			name: "empty type (defaults to containerd), docker config erroneously set",
 			input: &ContainerRuntimeConfig{
-				// Type: "" // Simulates user not setting it, will be defaulted to containerd
-				Docker: validDockerCfg,
+				// Type is empty, will default to containerd
+				Docker: &DockerConfig{}, // Error: Docker config set when type will be containerd
 			},
 			expectError: true,
 			errorMsg:    ".docker: can only be set if type is 'docker'",
 		},
 		{
-			name: "empty type (defaults to containerd, valid with nil docker struct and containerd gets defaulted)",
+			name: "empty type (defaults to containerd, valid with nil docker struct)",
 			input: &ContainerRuntimeConfig{
-				// Type: "" // Will be defaulted to containerd
-				Docker: nil,
-				// Containerd: nil, // Will be defaulted
+				// Type is empty, will default to containerd
+				Docker: nil, // Correctly nil
 			},
 			expectError: false,
 		},
 		{
 			name: "invalid type",
 			input: &ContainerRuntimeConfig{
-				Type: "crio",
+				Type: "crio", // Invalid type string
 			},
 			expectError: true,
-			errorMsg:    ".type: invalid container runtime type 'crio'",
+			errorMsg:    ".type: invalid container runtime type 'crio', must be 'docker' or 'containerd'",
 		},
 		{
 			name: "docker type with containerd config set",
 			input: &ContainerRuntimeConfig{
 				Type:       ContainerRuntimeDocker,
-				Docker:     validDockerCfg,
-				Containerd: validContainerdCfg, // Error
+				Docker:     &DockerConfig{},
+				Containerd: &ContainerdConfig{}, // Error
 			},
 			expectError: true,
 			errorMsg:    ".containerd: can only be set if type is 'containerd'",
@@ -240,25 +260,25 @@ func TestValidate_ContainerRuntimeConfig(t *testing.T) {
 			name: "containerd type with docker config set",
 			input: &ContainerRuntimeConfig{
 				Type:       ContainerRuntimeContainerd,
-				Containerd: validContainerdCfg,
-				Docker:     validDockerCfg, // Error
+				Containerd: &ContainerdConfig{},
+				Docker:     &DockerConfig{}, // Error
 			},
 			expectError: true,
 			errorMsg:    ".docker: can only be set if type is 'docker'",
 		},
 		{
-			name: "docker type, docker config nil (should be defaulted, so valid)",
+			name: "docker type, docker config nil (defaulted)",
 			input: &ContainerRuntimeConfig{
 				Type:   ContainerRuntimeDocker,
-				Docker: nil, // Will be defaulted by SetDefaults_ContainerRuntimeConfig
+				Docker: nil, // Will be defaulted
 			},
 			expectError: false,
 		},
 		{
-			name: "containerd type, containerd config nil (should be defaulted, so valid)",
+			name: "containerd type, containerd config nil (defaulted)",
 			input: &ContainerRuntimeConfig{
 				Type:       ContainerRuntimeContainerd,
-				Containerd: nil, // Will be defaulted by SetDefaults_ContainerRuntimeConfig
+				Containerd: nil, // Will be defaulted
 			},
 			expectError: false,
 		},
