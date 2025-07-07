@@ -14,43 +14,43 @@ import (
 // that allows for more than just enabling/disabling by name (as seen in ClusterSpec.Addons which is []string).
 // It allows specifying sources like Helm charts or YAML manifests, along with other parameters.
 type AddonConfig struct {
-	Name    string `json:"name"`
-	Enabled *bool  `json:"enabled,omitempty"` // Pointer for optionality, defaults to true or based on addon
+	Name    string `json:"name" yaml:"name"`
+	Enabled *bool  `json:"enabled,omitempty" yaml:"enabled,omitempty"` // Pointer for optionality, defaults to true or based on addon
 
-	Namespace   string   `json:"namespace,omitempty"`
-	Retries     *int32   `json:"retries,omitempty"`
-	Delay       *int32   `json:"delay,omitempty"` // Delay in seconds between retries
+	Namespace   string   `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+	Retries     *int32   `json:"retries,omitempty" yaml:"retries,omitempty"`
+	Delay       *int32   `json:"delay,omitempty" yaml:"delay,omitempty"` // Delay in seconds between retries
 
-	Sources     AddonSources `json:"sources,omitempty"`
+	Sources     AddonSources `json:"sources,omitempty" yaml:"sources,omitempty"`
 
 	// PreInstall and PostInstall scripts. For simplicity, these are string arrays.
-	PreInstall  []string `json:"preInstall,omitempty"`
-	PostInstall []string `json:"postInstall,omitempty"`
+	PreInstall  []string `json:"preInstall,omitempty" yaml:"preInstall,omitempty"`
+	PostInstall []string `json:"postInstall,omitempty" yaml:"postInstall,omitempty"`
 
 	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty" yaml:"timeoutSeconds,omitempty"`
 }
 
 // AddonSources defines the sources for an addon's manifests or charts.
 type AddonSources struct {
-	Chart *ChartSource `json:"chart,omitempty"`
-	Yaml  *YamlSource  `json:"yaml,omitempty"`
+	Chart *ChartSource `json:"chart,omitempty" yaml:"chart,omitempty"`
+	Yaml  *YamlSource  `json:"yaml,omitempty" yaml:"yaml,omitempty"`
 }
 
 // ChartSource defines how to install an addon from a Helm chart.
 type ChartSource struct {
-	Name       string   `json:"name,omitempty"` // Chart name
-	Repo       string   `json:"repo,omitempty"` // Chart repository URL
-	Path       string   `json:"path,omitempty"` // Path to chart in repo (if not just name) or local path
-	Version    string   `json:"version,omitempty"`
-	ValuesFile string   `json:"valuesFile,omitempty"` // Path to a custom values file
-	Values     []string `json:"values,omitempty"`     // Inline values (e.g., "key1=value1,key2.subkey=value2")
-	Wait       *bool    `json:"wait,omitempty"`       // Whether to wait for chart resources to be ready
+	Name       string   `json:"name,omitempty" yaml:"name,omitempty"` // Chart name
+	Repo       string   `json:"repo,omitempty" yaml:"repo,omitempty"` // Chart repository URL
+	Path       string   `json:"path,omitempty" yaml:"path,omitempty"` // Path to chart in repo (if not just name) or local path
+	Version    string   `json:"version,omitempty" yaml:"version,omitempty"`
+	ValuesFile string   `json:"valuesFile,omitempty" yaml:"valuesFile,omitempty"` // Path to a custom values file
+	Values     []string `json:"values,omitempty" yaml:"values,omitempty"`     // Inline values (e.g., "key1=value1,key2.subkey=value2")
+	Wait       *bool    `json:"wait,omitempty" yaml:"wait,omitempty"`       // Whether to wait for chart resources to be ready
 }
 
 // YamlSource defines how to install an addon from YAML manifests.
 type YamlSource struct {
 	// Paths is a list of URLs or local file paths to YAML manifests.
-	Path []string `json:"path,omitempty"`
+	Path []string `json:"path,omitempty" yaml:"path,omitempty"`
 }
 
 // SetDefaults_AddonConfig sets default values for AddonConfig.

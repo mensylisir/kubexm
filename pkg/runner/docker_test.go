@@ -853,9 +853,30 @@ func TestDefaultRunner_ConfigureDockerDaemon(t *testing.T) {
 		assert.Contains(t, err.Error(), "failed to write Docker daemon config")
 	})
 
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/docker/docker/api/types/image"
+	//lint:ignore SA1019 we need to use this for now
+	"github.com/docker/docker/api/types/container"
+	"github.com/golang/mock/gomock"
+	"github.com/stretchr/testify/assert"
+	"github.com/pkg/errors"
+
+	"github.com/mensylisir/kubexm/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/connector/mocks"
+	"github.com/mensylisir/kubexm/pkg/util" // Added import for util
+)
+
 	t.Run("RestartServiceFails", func(t *testing.T) {
 		mockReadFileForEmpty()
-		opts4 := DockerDaemonOptions{Debug: boolPtr(true)}
+		opts4 := DockerDaemonOptions{Debug: util.BoolPtr(true)}
 		expectedJSON4, _ := json.MarshalIndent(opts4, "", "  ")
 		mockConn.EXPECT().Mkdirp(ctx, mockConn, filepath.Dir(dockerDaemonConfigPath), "0755", true).Return(nil).Times(1)
 		mockConn.EXPECT().WriteFile(ctx, mockConn, expectedJSON4, dockerDaemonConfigPath, "0644", true).Return(nil).Times(1)
@@ -918,14 +939,4 @@ func TestDefaultRunner_EnsureDefaultDockerConfig(t *testing.T) {
 		err := runner.EnsureDefaultDockerConfig(ctx, mockConn, mockFacts, true)
 		assert.NoError(t, err)
 	})
-}
-
-// strPtr is a helper function to get a pointer to a string.
-func strPtr(s string) *string {
-	return &s
-}
-
-// boolPtr is a helper function to get a pointer to a bool.
-func boolPtr(b bool) *bool {
-	return &b
 }
