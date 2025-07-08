@@ -2,12 +2,16 @@ package validation
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
 	"strings"
-
-	"github.com/mensylisir/kubexm/pkg/common" // Import common package
+	// "github.com/mensylisir/kubexm/pkg/common" // Temporarily removed
 )
+
+// Moved from common to here temporarily to resolve build issues.
+// Corrected to use PURE Go raw string literal. NO external quotes or concatenation.
+const localValidChartVersionRegexString = ` + "`^v?([0-9]+)(\\.[0-9]+){0,2}$`" + `
 
 // ValidationErrors is a collection of validation errors.
 type ValidationErrors struct {
@@ -39,15 +43,26 @@ func IsValidURL(u string) bool {
 }
 
 // validChartVersionRegex is the compiled regular expression for chart versions.
-// It's kept private as it's only used by IsValidChartVersion.
-var validChartVersionRegex = regexp.MustCompile(common.ValidChartVersionRegexString)
+var validChartVersionRegex = regexp.MustCompile(localValidChartVersionRegexString)
 
 // IsValidChartVersion checks if the version string matches common chart version patterns.
-// Allows "latest", "stable", or versions like "1.2.3", "v1.2.3", "1.2", "v1.0", "1", "v2"
-// as defined by common.ValidChartVersionRegexString.
 func IsValidChartVersion(version string) bool {
 	if version == "latest" || version == "stable" {
 		return true
 	}
 	return validChartVersionRegex.MatchString(version)
+}
+
+// IsValidDomainName checks if a string is a valid domain name.
+// It uses a regex based on RFC 1035 and RFC 1123.
+func IsValidDomainName(domain string) bool {
+	// Corrected to use PURE Go raw string literal. NO external quotes or concatenation.
+	const domainValidationRegexString = ` + "`^([a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?\\.)*([a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?)$`" + `
+	domainRegex := regexp.MustCompile(domainValidationRegexString)
+	return domainRegex.MatchString(domain)
+}
+
+// IsValidIP checks if the string is a valid IP address.
+func IsValidIP(ipStr string) bool {
+	return net.ParseIP(ipStr) != nil
 }

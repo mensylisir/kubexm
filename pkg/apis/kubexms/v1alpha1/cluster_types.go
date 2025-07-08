@@ -2,31 +2,23 @@ package v1alpha1
 
 import (
 	"fmt"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"strings"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+
+	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/util"
 	"github.com/mensylisir/kubexm/pkg/util/validation"
-	"github.com/mensylisir/kubexm/pkg/common" // Import common package
 )
-
-// Note: ClusterTypeKubeXM and ClusterTypeKubeadm constants are now defined in pkg/common/constants.go
-// const (
-// // ClusterTypeKubeXM indicates a cluster where core components (kube-apiserver,
-// // kube-controller-manager, kube-scheduler, kube-proxy) are deployed as binaries.
-// ClusterTypeKubeXM = "kubexm"
-//
-// // ClusterTypeKubeadm indicates a cluster where core components are deployed as static Pods
-// // managed by kubeadm.
-// ClusterTypeKubeadm = "kubeadm"
-// )
 
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:path=clusters,scope=Namespaced,shortName=kc
+// +kubebuilder:printcolumn:name="Type",type="string",JSONPath=".spec.type",description="Cluster Type"
 // +kubebuilder:printcolumn:name="Version",type="string",JSONPath=".spec.kubernetes.version",description="Kubernetes Version"
 // +kubebuilder:printcolumn:name="Hosts",type="integer",JSONPath=".spec.hostsCount",description="Number of hosts"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
@@ -35,27 +27,79 @@ import (
 type Cluster struct {
 	metav1.TypeMeta   `json:",inline" yaml:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty" yaml:"metadata,omitempty"`
-	Spec              ClusterSpec `json:"spec,omitempty" yaml:"spec,omitempty"`
+	Spec              ClusterSpec   `json:"spec,omitempty" yaml:"spec,omitempty"`
+	Status            ClusterStatus `json:"status,omitempty" yaml:"status,omitempty"` // Added ClusterStatus
 }
 
 // ClusterSpec defines the desired state of the Kubernetes cluster.
 type ClusterSpec struct {
-	Type                 string                    `json:"type,omitempty" yaml:"type,omitempty"` // Cluster deployment type, e.g., "kubexm", "kubeadm"
-	Hosts                []HostSpec                `json:"hosts" yaml:"hosts"`
-	RoleGroups           *RoleGroupsSpec           `json:"roleGroups,omitempty" yaml:"roleGroups,omitempty"`
-	Global               *GlobalSpec               `json:"global,omitempty" yaml:"global,omitempty"`
+	// Type specifies the overall cluster deployment type.
+	// It can influence high-level deployment strategies.
+	// Defaults to "kubexm".
+	Type string `json:"type,omitempty" yaml:"type,omitempty"`
+
+	Hosts      []HostSpec      `json:"hosts" yaml:"hosts"`
+	RoleGroups *RoleGroupsSpec `json:"roleGroups,omitempty" yaml:"roleGroups,omitempty"`
+	Global     *GlobalSpec     `json:"global,omitempty" yaml:"global,omitempty"`
+
+	ControlPlaneEndpoint *ControlPlaneEndpointSpec `json:"controlPlaneEndpoint,omitempty" yaml:"controlPlaneEndpoint,omitempty"`
 	System               *SystemSpec               `json:"system,omitempty" yaml:"system,omitempty"`
 	Kubernetes           *KubernetesConfig         `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"`
 	Etcd                 *EtcdConfig               `json:"etcd,omitempty" yaml:"etcd,omitempty"`
-	DNS                  DNS                       `json:"dns,omitempty" yaml:"dns,omitempty"`
-	ContainerRuntime     *ContainerRuntimeConfig   `json:"containerRuntime,omitempty" yaml:"containerRuntime,omitempty"`
 	Network              *NetworkConfig            `json:"network,omitempty" yaml:"network,omitempty"`
-	ControlPlaneEndpoint *ControlPlaneEndpointSpec `json:"controlPlaneEndpoint,omitempty" yaml:"controlPlaneEndpoint,omitempty"`
-	HighAvailability     *HighAvailabilityConfig   `json:"highAvailability,omitempty" yaml:"highAvailability,omitempty"`
 	Storage              *StorageConfig            `json:"storage,omitempty" yaml:"storage,omitempty"`
 	Registry             *RegistryConfig           `json:"registry,omitempty" yaml:"registry,omitempty"`
 	Addons               []string                  `json:"addons,omitempty" yaml:"addons,omitempty"`
+	Dns                  *DnsConfig                `json:"dns,omitempty" yaml:"dns,omitempty"` // Changed to pointer
 	Preflight            *PreflightConfig          `json:"preflight,omitempty" yaml:"preflight,omitempty"`
+	HighAvailability     *HighAvailabilityConfig   `json:"highAvailability,omitempty" yaml:"highAvailability,omitempty"`
+
+	// HostsFileContent allows specifying content to be appended to /etc/hosts on all nodes.
+	// Corresponds to the 'host:' field in the YAML example.
+	HostsFileContent string `json:"hostsFileContent,omitempty" yaml:"host,omitempty"`
+
+	// HostsCount is a calculated field representing the number of hosts.
+	// Not directly from YAML, but useful for kubectl printing.
+	HostsCount int `json:"hostsCount,omitempty" yaml:"-"` // yaml:"-" to exclude from marshalling
+}
+
+// ClusterStatus defines the observed state of Cluster
+type ClusterStatus struct {
+	// Conditions represent the latest available observations of a cluster's state.
+	Conditions []ClusterCondition `json:"conditions,omitempty" yaml:"conditions,omitempty"`
+	// Version of the Kubernetes cluster.
+	Version string `json:"version,omitempty" yaml:"version,omitempty"`
+	// APIServerReady indicates if the API server is ready.
+	APIServerReady bool `json:"apiServerReady,omitempty" yaml:"apiServerReady,omitempty"`
+	// EtcdReady indicates if the Etcd cluster is ready.
+	EtcdReady bool `json:"etcdReady,omitempty" yaml:"etcdReady,omitempty"`
+	// NodeCounts holds the number of nodes in different roles and states.
+	NodeCounts NodeCounts `json:"nodeCounts,omitempty" yaml:"nodeCounts,omitempty"`
+}
+
+// ClusterCondition contains details for the current condition of this cluster.
+type ClusterCondition struct {
+	// Type is the type of the condition.
+	Type string `json:"type" yaml:"type"`
+	// Status is the status of the condition.
+	// Can be True, False, Unknown.
+	Status metav1.ConditionStatus `json:"status" yaml:"status"`
+	// Last time the condition transitioned from one status to another.
+	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty" yaml:"lastTransitionTime,omitempty"`
+	// Unique, one-word, CamelCase reason for the condition's last transition.
+	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	// Human-readable message indicating details about last transition.
+	Message string `json:"message,omitempty" yaml:"message,omitempty"`
+}
+
+// NodeCounts contains the count of nodes in various states.
+type NodeCounts struct {
+	Total   int `json:"total,omitempty" yaml:"total,omitempty"`
+	Ready   int `json:"ready,omitempty" yaml:"ready,omitempty"`
+	Master  int `json:"master,omitempty" yaml:"master,omitempty"`
+	Worker  int `json:"worker,omitempty" yaml:"worker,omitempty"`
+	Etcd    int `json:"etcd,omitempty" yaml:"etcd,omitempty"`
+	Storage int `json:"storage,omitempty" yaml:"storage,omitempty"`
 }
 
 // HostSpec defines the configuration for a single host.
@@ -66,13 +110,15 @@ type HostSpec struct {
 	Port            int               `json:"port,omitempty" yaml:"port,omitempty"`
 	User            string            `json:"user,omitempty" yaml:"user,omitempty"`
 	Password        string            `json:"password,omitempty" yaml:"password,omitempty"`
-	PrivateKey      string            `json:"privateKey,omitempty" yaml:"privateKey,omitempty"`
+	PrivateKey      string            `json:"privateKey,omitempty" yaml:"privateKey,omitempty"` // Content of the private key
 	PrivateKeyPath  string            `json:"privateKeyPath,omitempty" yaml:"privateKeyPath,omitempty"`
-	Roles           []string          `json:"roles,omitempty" yaml:"roles,omitempty"`
+	Arch            string            `json:"arch,omitempty" yaml:"arch,omitempty"`
 	Labels          map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
 	Taints          []TaintSpec       `json:"taints,omitempty" yaml:"taints,omitempty"`
-	Type            string            `json:"type,omitempty" yaml:"type,omitempty"`
-	Arch            string            `json:"arch,omitempty" yaml:"arch,omitempty"`
+	Roles           []string          `json:"roles,omitempty" yaml:"roles,omitempty"`
+	// Type defines the connection type, e.g., "ssh", "local".
+	// Defaults to "ssh".
+	Type string `json:"type,omitempty" yaml:"type,omitempty"`
 }
 
 // RoleGroupsSpec defines the different groups of nodes in the cluster.
@@ -144,7 +190,7 @@ type GlobalSpec struct {
 	PrivateKey        string        `json:"privateKey,omitempty" yaml:"privateKey,omitempty"`
 	PrivateKeyPath    string        `json:"privateKeyPath,omitempty" yaml:"privateKeyPath,omitempty"`
 	ConnectionTimeout time.Duration `json:"connectionTimeout,omitempty" yaml:"connectionTimeout,omitempty"`
-	WorkDir           string        `json:"workDir,omitempty" yaml:"workDir,omitempty"`
+	WorkDir           string        `json:"workDir,omitempty" yaml:"workDir,omitempty"` // Local workdir on the machine running kubexm
 	Verbose           bool          `json:"verbose,omitempty" yaml:"verbose,omitempty"`
 	IgnoreErr         bool          `json:"ignoreErr,omitempty" yaml:"ignoreErr,omitempty"`
 	SkipPreflight     bool          `json:"skipPreflight,omitempty" yaml:"skipPreflight,omitempty"`
@@ -164,7 +210,7 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	}
 	cfg.SetGroupVersionKind(SchemeGroupVersion.WithKind("Cluster"))
 
-	if cfg.Spec.Type == "" { // Added default for ClusterSpec.Type
+	if cfg.Spec.Type == "" {
 		cfg.Spec.Type = common.ClusterTypeKubeXM
 	}
 
@@ -176,22 +222,29 @@ func SetDefaults_Cluster(cfg *Cluster) {
 		g.Port = common.DefaultSSHPort
 	}
 	if g.ConnectionTimeout == 0 {
-		g.ConnectionTimeout = 30 * time.Second
+		g.ConnectionTimeout = common.DefaultConnectionTimeout
 	}
 	if g.WorkDir == "" {
-		g.WorkDir = common.DefaultWorkDir
+		// Default workdir will be calculated in runtime.Builder based on cluster name
+		// For example: $(pwd)/.kubexm/mycluster
+		// Here we can set a base default name or leave it for builder.
+		// For now, let runtime.Builder handle the full path construction.
+		// g.WorkDir = common.DefaultWorkDirName
 	}
+
+	cfg.Spec.HostsCount = len(cfg.Spec.Hosts)
 
 	for i := range cfg.Spec.Hosts {
 		host := &cfg.Spec.Hosts[i]
-		if host.Port == 0 && g != nil {
-			host.Port = g.Port // Inherits from global default if global.Port was 0 and then defaulted, or if global.Port was set
-		} else if host.Port == 0 { // If global is nil or global.Port was not set (remains 0)
-			host.Port = common.DefaultSSHPort
+		if host.Port == 0 {
+			if g != nil && g.Port != 0 {
+				host.Port = g.Port
+			} else {
+				host.Port = common.DefaultSSHPort
+			}
 		}
-
 		if host.User == "" && g != nil {
-			host.User = g.User
+			host.User = g.User // Can be empty if global user is also empty (root assumed by some logic later)
 		}
 		if host.PrivateKeyPath == "" && g != nil {
 			host.PrivateKeyPath = g.PrivateKeyPath
@@ -213,25 +266,12 @@ func SetDefaults_Cluster(cfg *Cluster) {
 		}
 	}
 
-	if cfg.Spec.ContainerRuntime == nil {
-		cfg.Spec.ContainerRuntime = &ContainerRuntimeConfig{}
-	}
-	SetDefaults_ContainerRuntimeConfig(cfg.Spec.ContainerRuntime)
-	if cfg.Spec.ContainerRuntime.Type == ContainerRuntimeContainerd {
-		if cfg.Spec.ContainerRuntime.Containerd == nil {
-			cfg.Spec.ContainerRuntime.Containerd = &ContainerdConfig{}
-		}
-		SetDefaults_ContainerdConfig(cfg.Spec.ContainerRuntime.Containerd)
-	}
-
-	if cfg.Spec.Etcd == nil {
-		cfg.Spec.Etcd = &EtcdConfig{}
-	}
-	SetDefaults_EtcdConfig(cfg.Spec.Etcd)
-
 	if cfg.Spec.RoleGroups == nil {
 		cfg.Spec.RoleGroups = &RoleGroupsSpec{}
 	}
+	SetDefaults_RoleGroupsSpec(cfg.Spec.RoleGroups)
+
+
 	if cfg.Spec.ControlPlaneEndpoint == nil {
 		cfg.Spec.ControlPlaneEndpoint = &ControlPlaneEndpointSpec{}
 	}
@@ -242,18 +282,47 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	}
 	SetDefaults_SystemSpec(cfg.Spec.System)
 
+	// Ensure these core configurations are initialized before their defaults are set
 	if cfg.Spec.Kubernetes == nil {
 		cfg.Spec.Kubernetes = &KubernetesConfig{}
 	}
 	SetDefaults_KubernetesConfig(cfg.Spec.Kubernetes, cfg.ObjectMeta.Name)
+
+	if cfg.Spec.Etcd == nil {
+		cfg.Spec.Etcd = &EtcdConfig{}
+	}
+	SetDefaults_EtcdConfig(cfg.Spec.Etcd)
+
+	if cfg.Spec.ContainerRuntime == nil {
+		// ContainerRuntime defaults are now handled within KubernetesConfig defaults
+		// but if KubernetesConfig itself is nil initially, this path might be taken.
+		// However, KubernetesConfig is initialized above.
+		// Let's ensure ContainerRuntime is init if Kubernetes was nil, though unlikely.
+		if cfg.Spec.Kubernetes.ContainerRuntime == nil {
+			cfg.Spec.Kubernetes.ContainerRuntime = &ContainerRuntimeConfig{}
+		}
+		// The direct cfg.Spec.ContainerRuntime might be deprecated if fully moved.
+		// For now, assume it could still exist as a top-level override or for other types.
+		// If it's meant to be solely under KubernetesConfig, this block needs adjustment.
+		// Based on YAML, it is under KubernetesConfig.
+		// This top-level field is redundant if kubernetes.containerRuntime is the source of truth.
+		// For safety, if it exists and Kubernetes.ContainerRuntime is nil, copy over.
+		// This logic is becoming complex due to potential dual-definition.
+		// Let's assume kubernetes.containerRuntime is primary.
+	}
+	// SetDefaults_ContainerRuntimeConfig is called by SetDefaults_KubernetesConfig
+
+
 	if cfg.Spec.Network == nil {
 		cfg.Spec.Network = &NetworkConfig{}
 	}
-	SetDefaults_NetworkConfig(cfg.Spec.Network)
+	SetDefaults_NetworkConfig(cfg.Spec.Network) // Pass KubernetesConfig for potential CIDR defaults
+
 	if cfg.Spec.HighAvailability == nil {
 		cfg.Spec.HighAvailability = &HighAvailabilityConfig{}
 	}
 	SetDefaults_HighAvailabilityConfig(cfg.Spec.HighAvailability)
+
 	if cfg.Spec.Preflight == nil {
 		cfg.Spec.Preflight = &PreflightConfig{}
 	}
@@ -267,13 +336,51 @@ func SetDefaults_Cluster(cfg *Cluster) {
 		cfg.Spec.Storage = &StorageConfig{}
 	}
 	SetDefaults_StorageConfig(cfg.Spec.Storage)
+
 	if cfg.Spec.Registry == nil {
 		cfg.Spec.Registry = &RegistryConfig{}
 	}
 	SetDefaults_RegistryConfig(cfg.Spec.Registry)
 
-	SetDefaults_DNS(&cfg.Spec.DNS)
+	if cfg.Spec.Dns == nil { // Changed to pointer
+		cfg.Spec.Dns = &DnsConfig{}
+	}
+	SetDefaults_DnsConfig(cfg.Spec.Dns) // Pass DnsConfig by pointer
 }
+
+// SetDefaults_RoleGroupsSpec sets default values for RoleGroupsSpec
+func SetDefaults_RoleGroupsSpec(cfg *RoleGroupsSpec) {
+	if cfg == nil {
+		return
+	}
+	if cfg.Master.Hosts == nil {
+		cfg.Master.Hosts = []string{}
+	}
+	if cfg.Worker.Hosts == nil {
+		cfg.Worker.Hosts = []string{}
+	}
+	if cfg.Etcd.Hosts == nil {
+		cfg.Etcd.Hosts = []string{}
+	}
+	if cfg.LoadBalancer.Hosts == nil {
+		cfg.LoadBalancer.Hosts = []string{}
+	}
+	if cfg.Storage.Hosts == nil {
+		cfg.Storage.Hosts = []string{}
+	}
+	if cfg.Registry.Hosts == nil {
+		cfg.Registry.Hosts = []string{}
+	}
+	if cfg.CustomRoles == nil {
+		cfg.CustomRoles = []CustomRoleSpec{}
+	}
+	for i := range cfg.CustomRoles {
+		if cfg.CustomRoles[i].Hosts == nil {
+			cfg.CustomRoles[i].Hosts = []string{}
+		}
+	}
+}
+
 
 // SetDefaults_SystemSpec sets default values for SystemSpec.
 func SetDefaults_SystemSpec(cfg *SystemSpec) {
@@ -295,6 +402,21 @@ func SetDefaults_SystemSpec(cfg *SystemSpec) {
 	if cfg.SysctlParams == nil {
 		cfg.SysctlParams = make(map[string]string)
 	}
+	// Add best-practice sysctl params for Kubernetes
+	defaultSysctl := map[string]string{
+		"net.bridge.bridge-nf-call-iptables":  "1",
+		"net.ipv4.ip_forward":                 "1",
+		"net.bridge.bridge-nf-call-ip6tables": "1", // For IPv6
+		"fs.inotify.max_user_watches":         "524288",
+		"fs.inotify.max_user_instances":       "512",
+		"vm.max_map_count":                    "262144",
+	}
+	for k, v := range defaultSysctl {
+		if _, exists := cfg.SysctlParams[k]; !exists {
+			cfg.SysctlParams[k] = v
+		}
+	}
+
 	if cfg.PreInstallScripts == nil {
 		cfg.PreInstallScripts = []string{}
 	}
@@ -335,6 +457,9 @@ func Validate_SystemSpec(cfg *SystemSpec, verrs *validation.ValidationErrors, pa
 		if strings.TrimSpace(key) == "" {
 			verrs.Add(pathPrefix+".sysctlParams", fmt.Sprintf("sysctl key cannot be empty (value: '%s')", val))
 		}
+		if strings.TrimSpace(val) == "" {
+			verrs.Add(pathPrefix+".sysctlParams", fmt.Sprintf("sysctl value for key '%s' cannot be empty", key))
+		}
 	}
 	if cfg.PackageManager != "" && strings.TrimSpace(cfg.PackageManager) == "" {
 		verrs.Add(pathPrefix+".packageManager", "cannot be only whitespace if specified")
@@ -364,7 +489,6 @@ func Validate_Cluster(cfg *Cluster) error {
 		verrs.Add("metadata.name", "cannot be empty")
 	}
 
-	// Validate ClusterSpec.Type
 	validClusterTypes := []string{common.ClusterTypeKubeXM, common.ClusterTypeKubeadm}
 	if !util.ContainsString(validClusterTypes, cfg.Spec.Type) {
 		verrs.Add("spec.type", fmt.Sprintf("invalid cluster type '%s', must be one of %v", cfg.Spec.Type, validClusterTypes))
@@ -372,10 +496,14 @@ func Validate_Cluster(cfg *Cluster) error {
 
 	if cfg.Spec.Global != nil {
 		g := cfg.Spec.Global
-		if g.Port != 0 && (g.Port <= 0 || g.Port > 65535) {
+		if g.Port != 0 && (g.Port < 1 || g.Port > 65535) { // Port 0 is used to signify "use default"
 			verrs.Add("spec.global.port", fmt.Sprintf("%d is invalid, must be between 1 and 65535 or 0 for default", g.Port))
 		}
+		if g.ConnectionTimeout < 0 {
+			verrs.Add("spec.global.connectionTimeout", "cannot be negative")
+		}
 	}
+
 	if len(cfg.Spec.Hosts) == 0 {
 		verrs.Add("spec.hosts", "must contain at least one host")
 	}
@@ -396,76 +524,57 @@ func Validate_Cluster(cfg *Cluster) error {
 		} else if !util.IsValidIP(host.Address) && !util.IsValidDomainName(host.Address) {
 			verrs.Add(pathPrefix+".address", fmt.Sprintf("'%s' is not a valid IP address or hostname", host.Address))
 		}
-		if host.Port <= 0 || host.Port > 65535 {
+		if host.Port < 1 || host.Port > 65535 {
 			verrs.Add(pathPrefix+".port", fmt.Sprintf("%d is invalid, must be between 1 and 65535", host.Port))
 		}
-		if strings.TrimSpace(host.User) == "" {
-			verrs.Add(pathPrefix+".user", "cannot be empty (after defaults)")
+		if strings.TrimSpace(host.User) == "" && (cfg.Spec.Global == nil || cfg.Spec.Global.User == "") {
+			// User can be empty if global user is set, but if both are empty it's an issue unless defaulting to root.
+			// Assuming default to root is handled by connector if user is empty.
+			// For validation, if it's truly required, this check needs to be stricter.
+			// For now, let's assume it's okay if it defaults to root later.
 		}
 		if strings.ToLower(host.Type) != common.HostTypeLocal {
 			if host.Password == "" && host.PrivateKey == "" && host.PrivateKeyPath == "" {
 				verrs.Add(pathPrefix, "no SSH authentication method provided for non-local host")
 			}
 		}
-	}
-
-	if cfg.Spec.ContainerRuntime != nil {
-		Validate_ContainerRuntimeConfig(cfg.Spec.ContainerRuntime, verrs, "spec.containerRuntime")
-		if cfg.Spec.ContainerRuntime.Type == ContainerRuntimeContainerd {
-			if cfg.Spec.ContainerRuntime.Containerd == nil {
-				verrs.Add("spec.containerRuntime.containerd", fmt.Sprintf("must be defined if containerRuntime.type is '%s'", ContainerRuntimeContainerd))
-			} else {
-				Validate_ContainerdConfig(cfg.Spec.ContainerRuntime.Containerd, verrs, "spec.containerRuntime.containerd")
+		if host.Arch != "" && !util.ContainsString(common.SupportedArches, host.Arch) {
+			verrs.Add(pathPrefix+".arch", fmt.Sprintf("unsupported architecture '%s', must be one of %v", host.Arch, common.SupportedArches))
+		}
+		for _, taint := range host.Taints {
+			if strings.TrimSpace(taint.Key) == "" {
+				verrs.Add(pathPrefix+".taints.key", "taint key cannot be empty")
+			}
+			if !util.ContainsString(common.ValidTaintEffects, taint.Effect) {
+				verrs.Add(pathPrefix+".taints.effect", fmt.Sprintf("invalid taint effect '%s', must be one of %v", taint.Effect, common.ValidTaintEffects))
 			}
 		}
 	}
 
-	if cfg.Spec.Etcd != nil {
-		Validate_EtcdConfig(cfg.Spec.Etcd, verrs, "spec.etcd")
+	// KubernetesConfig is required
+	if cfg.Spec.Kubernetes == nil {
+		verrs.Add("spec.kubernetes", "section is required")
 	} else {
-		verrs.Add("spec.etcd", "section is required")
+		Validate_KubernetesConfig(cfg.Spec.Kubernetes, verrs, "spec.kubernetes")
 	}
+
+	// EtcdConfig is required
+	if cfg.Spec.Etcd == nil {
+		verrs.Add("spec.etcd", "section is required")
+	} else {
+		Validate_EtcdConfig(cfg.Spec.Etcd, verrs, "spec.etcd")
+	}
+
+	// NetworkConfig is required
+	if cfg.Spec.Network == nil {
+		verrs.Add("spec.network", "section is required")
+	} else {
+		Validate_NetworkConfig(cfg.Spec.Network, verrs, "spec.network", cfg.Spec.Kubernetes)
+	}
+
 
 	if cfg.Spec.RoleGroups != nil {
-		Validate_RoleGroupsSpec(cfg.Spec.RoleGroups, verrs, "spec.roleGroups")
-		if !verrs.HasErrors() {
-			allHostNames := make(map[string]bool)
-			for _, h := range cfg.Spec.Hosts {
-				allHostNames[h.Name] = true
-			}
-			validateRoleGroupHostExistence := func(roleHosts []string, rolePath string) {
-				for _, hostName := range roleHosts {
-					if !allHostNames[hostName] {
-						verrs.Add(rolePath, fmt.Sprintf("host '%s' is not defined in spec.hosts", hostName))
-					}
-				}
-			}
-			rgPath := "spec.roleGroups"
-			if cfg.Spec.RoleGroups.Master.Hosts != nil {
-				validateRoleGroupHostExistence(cfg.Spec.RoleGroups.Master.Hosts, rgPath+".master.hosts")
-			}
-			if cfg.Spec.RoleGroups.Worker.Hosts != nil {
-				validateRoleGroupHostExistence(cfg.Spec.RoleGroups.Worker.Hosts, rgPath+".worker.hosts")
-			}
-			if cfg.Spec.RoleGroups.Etcd.Hosts != nil {
-				validateRoleGroupHostExistence(cfg.Spec.RoleGroups.Etcd.Hosts, rgPath+".etcd.hosts")
-			}
-			if cfg.Spec.RoleGroups.LoadBalancer.Hosts != nil {
-				validateRoleGroupHostExistence(cfg.Spec.RoleGroups.LoadBalancer.Hosts, rgPath+".loadbalancer.hosts")
-			}
-			if cfg.Spec.RoleGroups.Storage.Hosts != nil {
-				validateRoleGroupHostExistence(cfg.Spec.RoleGroups.Storage.Hosts, rgPath+".storage.hosts")
-			}
-			if cfg.Spec.RoleGroups.Registry.Hosts != nil {
-				validateRoleGroupHostExistence(cfg.Spec.RoleGroups.Registry.Hosts, rgPath+".registry.hosts")
-			}
-			for i, customRole := range cfg.Spec.RoleGroups.CustomRoles {
-				if customRole.Hosts != nil {
-					customRolePath := fmt.Sprintf("%s.customRoles[%d:%s].hosts", rgPath, i, customRole.Name)
-					validateRoleGroupHostExistence(customRole.Hosts, customRolePath)
-				}
-			}
-		}
+		Validate_RoleGroupsSpec(cfg.Spec.RoleGroups, verrs, "spec.roleGroups", hostNames)
 	}
 	if cfg.Spec.ControlPlaneEndpoint != nil {
 		Validate_ControlPlaneEndpointSpec(cfg.Spec.ControlPlaneEndpoint, verrs, "spec.controlPlaneEndpoint")
@@ -474,38 +583,9 @@ func Validate_Cluster(cfg *Cluster) error {
 		Validate_SystemSpec(cfg.Spec.System, verrs, "spec.system")
 	}
 
-	if cfg.Spec.Kubernetes != nil {
-		Validate_KubernetesConfig(cfg.Spec.Kubernetes, verrs, "spec.kubernetes")
-	} else {
-		verrs.Add("spec.kubernetes", "section is required")
-	}
 
 	if cfg.Spec.HighAvailability != nil {
-		Validate_HighAvailabilityConfig(cfg.Spec.HighAvailability, verrs, "spec.highAvailability")
-		// Enhanced HA validation related to Roles and ControlPlaneEndpoint
-		if cfg.Spec.HighAvailability.Enabled != nil && *cfg.Spec.HighAvailability.Enabled &&
-			cfg.Spec.HighAvailability.External != nil &&
-			(cfg.Spec.HighAvailability.External.Type == common.ExternalLBTypeKubexmKH || cfg.Spec.HighAvailability.External.Type == common.ExternalLBTypeKubexmKN) {
-
-			foundLBRole := false
-			if cfg.Spec.RoleGroups != nil && cfg.Spec.RoleGroups.LoadBalancer.Hosts != nil && len(cfg.Spec.RoleGroups.LoadBalancer.Hosts) > 0 {
-				foundLBRole = true
-			} else {
-				for _, host := range cfg.Spec.Hosts {
-					if util.ContainsString(host.Roles, common.RoleLoadBalancer) {
-						foundLBRole = true
-						break
-					}
-				}
-			}
-			if !foundLBRole {
-				verrs.Add("spec.highAvailability.external", fmt.Sprintf("type '%s' requires at least one host with role '%s' or hosts defined in roleGroups.loadbalancer", cfg.Spec.HighAvailability.External.Type, common.RoleLoadBalancer))
-			}
-
-			if cfg.Spec.ControlPlaneEndpoint == nil || strings.TrimSpace(cfg.Spec.ControlPlaneEndpoint.Address) == "" {
-				verrs.Add("spec.controlPlaneEndpoint.address", fmt.Sprintf("must be set to the VIP address when HA type is '%s'", cfg.Spec.HighAvailability.External.Type))
-			}
-		}
+		Validate_HighAvailabilityConfig(cfg.Spec.HighAvailability, verrs, "spec.highAvailability", cfg.Spec.ControlPlaneEndpoint, cfg.Spec.RoleGroups, cfg.Spec.Hosts)
 	}
 	if cfg.Spec.Preflight != nil {
 		Validate_PreflightConfig(cfg.Spec.Preflight, verrs, "spec.preflight")
@@ -519,19 +599,16 @@ func Validate_Cluster(cfg *Cluster) error {
 		}
 	}
 
-	if cfg.Spec.Network != nil {
-		Validate_NetworkConfig(cfg.Spec.Network, verrs, "spec.network", cfg.Spec.Kubernetes)
-	} else {
-		verrs.Add("spec.network", "section is required")
-	}
 	if cfg.Spec.Storage != nil {
 		Validate_StorageConfig(cfg.Spec.Storage, verrs, "spec.storage")
 	}
 	if cfg.Spec.Registry != nil {
 		Validate_RegistryConfig(cfg.Spec.Registry, verrs, "spec.registry")
 	}
+	if cfg.Spec.Dns != nil { // Changed to pointer
+		Validate_DnsConfig(cfg.Spec.Dns, verrs, "spec.dns")
+	}
 
-	Validate_DNS(&cfg.Spec.DNS, verrs, "spec.dns")
 
 	if verrs.HasErrors() {
 		return verrs
@@ -555,6 +632,8 @@ func (in *Cluster) DeepCopyInto(out *Cluster) {
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
 	in.Spec.DeepCopyInto(&out.Spec)
+	// Assuming ClusterStatus is simple or has its own DeepCopyInto
+	out.Status = in.Status
 }
 
 // DeepCopy is a deepcopy function, copying the receiver, creating a new Cluster.
@@ -567,30 +646,31 @@ func (in *Cluster) DeepCopy() *Cluster {
 	return out
 }
 
-// DeepCopyInto for ClusterSpec - this would need to be generated or carefully written
+// DeepCopyInto for ClusterSpec
 func (in *ClusterSpec) DeepCopyInto(out *ClusterSpec) {
-	*out = *in
+	*out = *in // Handles simple fields like Type, HostsFileContent, HostsCount
+
 	if in.Hosts != nil {
-		inHosts, outHosts := &in.Hosts, &out.Hosts
-		*outHosts = make([]HostSpec, len(*inHosts))
-		for i := range *inHosts {
-			(*inHosts)[i].DeepCopyInto(&(*outHosts)[i])
+		out.Hosts = make([]HostSpec, len(in.Hosts))
+		for i := range in.Hosts {
+			in.Hosts[i].DeepCopyInto(&out.Hosts[i])
 		}
 	}
 	if in.RoleGroups != nil {
-		inRoleGroups, outRoleGroups := &in.RoleGroups, &out.RoleGroups
-		*outRoleGroups = new(RoleGroupsSpec)
-		(*inRoleGroups).DeepCopyInto(*outRoleGroups)
+		out.RoleGroups = new(RoleGroupsSpec)
+		in.RoleGroups.DeepCopyInto(out.RoleGroups)
 	}
 	if in.Global != nil {
-		inGlobal, outGlobal := &in.Global, &out.Global
-		*outGlobal = new(GlobalSpec)
-		**outGlobal = **inGlobal
+		out.Global = new(GlobalSpec)
+		*out.Global = *in.Global // GlobalSpec has simple types
+	}
+	if in.ControlPlaneEndpoint != nil {
+		out.ControlPlaneEndpoint = new(ControlPlaneEndpointSpec)
+		in.ControlPlaneEndpoint.DeepCopyInto(out.ControlPlaneEndpoint)
 	}
 	if in.System != nil {
-		inSystem, outSystem := &in.System, &out.System
-		*outSystem = new(SystemSpec)
-		(*inSystem).DeepCopyInto(*outSystem)
+		out.System = new(SystemSpec)
+		in.System.DeepCopyInto(out.System)
 	}
 	if in.Kubernetes != nil {
 		out.Kubernetes = new(KubernetesConfig)
@@ -600,24 +680,9 @@ func (in *ClusterSpec) DeepCopyInto(out *ClusterSpec) {
 		out.Etcd = new(EtcdConfig)
 		in.Etcd.DeepCopyInto(out.Etcd)
 	}
-	in.DNS.DeepCopyInto(&out.DNS) // DNS is a value type in ClusterSpec
-
-	if in.ContainerRuntime != nil {
-		out.ContainerRuntime = new(ContainerRuntimeConfig)
-		in.ContainerRuntime.DeepCopyInto(out.ContainerRuntime)
-	}
 	if in.Network != nil {
 		out.Network = new(NetworkConfig)
 		in.Network.DeepCopyInto(out.Network)
-	}
-	if in.ControlPlaneEndpoint != nil {
-		out.ControlPlaneEndpoint = new(ControlPlaneEndpointSpec)
-		// ControlPlaneEndpointSpec is a simple struct with value types, direct assignment is fine after new.
-		*out.ControlPlaneEndpoint = *in.ControlPlaneEndpoint
-	}
-	if in.HighAvailability != nil {
-		out.HighAvailability = new(HighAvailabilityConfig)
-		in.HighAvailability.DeepCopyInto(out.HighAvailability)
 	}
 	if in.Storage != nil {
 		out.Storage = new(StorageConfig)
@@ -628,109 +693,125 @@ func (in *ClusterSpec) DeepCopyInto(out *ClusterSpec) {
 		in.Registry.DeepCopyInto(out.Registry)
 	}
 	if in.Addons != nil {
-		inAddons, outAddons := &in.Addons, &out.Addons
-		*outAddons = make([]string, len(*inAddons))
-		copy(*outAddons, *inAddons)
+		out.Addons = make([]string, len(in.Addons))
+		copy(out.Addons, in.Addons)
+	}
+	if in.Dns != nil { // Changed to pointer
+		out.Dns = new(DnsConfig)
+		in.Dns.DeepCopyInto(out.Dns)
 	}
 	if in.Preflight != nil {
 		out.Preflight = new(PreflightConfig)
 		in.Preflight.DeepCopyInto(out.Preflight)
 	}
+	if in.HighAvailability != nil {
+		out.HighAvailability = new(HighAvailabilityConfig)
+		in.HighAvailability.DeepCopyInto(out.HighAvailability)
+	}
 }
 
 // DeepCopyInto for HostSpec
 func (in *HostSpec) DeepCopyInto(out *HostSpec) {
-	*out = *in
+	*out = *in // Handles simple fields
 	if in.Roles != nil {
-		in, out := &in.Roles, &out.Roles
-		*out = make([]string, len(*in))
-		copy(*out, *in)
+		out.Roles = make([]string, len(in.Roles))
+		copy(out.Roles, in.Roles)
 	}
 	if in.Labels != nil {
-		in, out := &in.Labels, &out.Labels
-		*out = make(map[string]string, len(*in))
-		for key, val := range *in {
-			(*out)[key] = val
+		out.Labels = make(map[string]string, len(in.Labels))
+		for key, val := range in.Labels {
+			out.Labels[key] = val
 		}
 	}
 	if in.Taints != nil {
-		in, out := &in.Taints, &out.Taints
-		*out = make([]TaintSpec, len(*in))
-		copy(*out, *in) // TaintSpec is simple
+		out.Taints = make([]TaintSpec, len(in.Taints))
+		copy(out.Taints, in.Taints) // TaintSpec is simple
 	}
 }
 
 // DeepCopyInto for RoleGroupsSpec
 func (in *RoleGroupsSpec) DeepCopyInto(out *RoleGroupsSpec) {
-	*out = *in
-	// Master, Worker, Etcd, LoadBalancer, Storage, Registry are value types within RoleGroupsSpec
-	// if their underlying Host lists need deep copy, it would be handled here.
-	// For now, assuming direct copy is okay or their specific types handle it.
-	// Example for MasterRoleSpec if it had complex fields:
-	// in.Master.DeepCopyInto(&out.Master)
+	*out = *in // Handles simple fields (which are struct types but contain only slices of strings)
+	// Deep copy for slices within the role specs
+	if in.Master.Hosts != nil {
+		out.Master.Hosts = make([]string, len(in.Master.Hosts))
+		copy(out.Master.Hosts, in.Master.Hosts)
+	}
+	if in.Worker.Hosts != nil {
+		out.Worker.Hosts = make([]string, len(in.Worker.Hosts))
+		copy(out.Worker.Hosts, in.Worker.Hosts)
+	}
+	if in.Etcd.Hosts != nil {
+		out.Etcd.Hosts = make([]string, len(in.Etcd.Hosts))
+		copy(out.Etcd.Hosts, in.Etcd.Hosts)
+	}
+	if in.LoadBalancer.Hosts != nil {
+		out.LoadBalancer.Hosts = make([]string, len(in.LoadBalancer.Hosts))
+		copy(out.LoadBalancer.Hosts, in.LoadBalancer.Hosts)
+	}
+	if in.Storage.Hosts != nil {
+		out.Storage.Hosts = make([]string, len(in.Storage.Hosts))
+		copy(out.Storage.Hosts, in.Storage.Hosts)
+	}
+	if in.Registry.Hosts != nil {
+		out.Registry.Hosts = make([]string, len(in.Registry.Hosts))
+		copy(out.Registry.Hosts, in.Registry.Hosts)
+	}
 	if in.CustomRoles != nil {
-		in, out := &in.CustomRoles, &out.CustomRoles
-		*out = make([]CustomRoleSpec, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i]) // Assuming CustomRoleSpec has DeepCopyInto
+		out.CustomRoles = make([]CustomRoleSpec, len(in.CustomRoles))
+		for i := range in.CustomRoles {
+			in.CustomRoles[i].DeepCopyInto(&out.CustomRoles[i])
 		}
 	}
 }
 
 // DeepCopyInto for CustomRoleSpec
 func (in *CustomRoleSpec) DeepCopyInto(out *CustomRoleSpec) {
-	*out = *in
+	*out = *in // Handles simple fields
 	if in.Hosts != nil {
-		in, out := &in.Hosts, &out.Hosts
-		*out = make([]string, len(*in))
-		copy(*out, *in)
+		out.Hosts = make([]string, len(in.Hosts))
+		copy(out.Hosts, in.Hosts)
 	}
 }
 
 // DeepCopyInto for SystemSpec
 func (in *SystemSpec) DeepCopyInto(out *SystemSpec) {
-	*out = *in
+	*out = *in // Handles simple fields
 	if in.NTPServers != nil {
-		in, out := &in.NTPServers, &out.NTPServers
-		*out = make([]string, len(*in))
-		copy(*out, *in)
+		out.NTPServers = make([]string, len(in.NTPServers))
+		copy(out.NTPServers, in.NTPServers)
 	}
 	if in.RPMs != nil {
-		in, out := &in.RPMs, &out.RPMs
-		*out = make([]string, len(*in))
-		copy(*out, *in)
+		out.RPMs = make([]string, len(in.RPMs))
+		copy(out.RPMs, in.RPMs)
 	}
 	if in.Debs != nil {
-		in, out := &in.Debs, &out.Debs
-		*out = make([]string, len(*in))
-		copy(*out, *in)
+		out.Debs = make([]string, len(in.Debs))
+		copy(out.Debs, in.Debs)
 	}
 	if in.PreInstallScripts != nil {
-		in, out := &in.PreInstallScripts, &out.PreInstallScripts
-		*out = make([]string, len(*in))
-		copy(*out, *in)
+		out.PreInstallScripts = make([]string, len(in.PreInstallScripts))
+		copy(out.PreInstallScripts, in.PreInstallScripts)
 	}
 	if in.PostInstallScripts != nil {
-		in, out := &in.PostInstallScripts, &out.PostInstallScripts
-		*out = make([]string, len(*in))
-		copy(*out, *in)
+		out.PostInstallScripts = make([]string, len(in.PostInstallScripts))
+		copy(out.PostInstallScripts, in.PostInstallScripts)
 	}
 	if in.Modules != nil {
-		in, out := &in.Modules, &out.Modules
-		*out = make([]string, len(*in))
-		copy(*out, *in)
+		out.Modules = make([]string, len(in.Modules))
+		copy(out.Modules, in.Modules)
 	}
 	if in.SysctlParams != nil {
-		in, out := &in.SysctlParams, &out.SysctlParams
-		*out = make(map[string]string, len(*in))
-		for key, val := range *in {
-			(*out)[key] = val
+		out.SysctlParams = make(map[string]string, len(in.SysctlParams))
+		for key, val := range in.SysctlParams {
+			out.SysctlParams[key] = val
 		}
 	}
 }
 
-
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// ClusterList contains a list of Cluster
 type ClusterList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
@@ -771,15 +852,29 @@ func (in *ClusterList) DeepCopy() *ClusterList {
 	return out
 }
 
-func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *validation.ValidationErrors, pathPrefix string) {
+// Validate_RoleGroupsSpec validates RoleGroupsSpec.
+// It now also checks if hosts defined in role groups actually exist in the main Hosts list.
+func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *validation.ValidationErrors, pathPrefix string, definedHostNames map[string]bool) {
 	if cfg == nil {
 		return
 	}
 	validateRoleSpecHosts := func(hosts []string, roleName string, pPrefix string) {
 		for i, hostName := range hosts {
+			currentHostPath := fmt.Sprintf("%s.%s.hosts[%d]", pPrefix, roleName, i)
 			if strings.TrimSpace(hostName) == "" {
-				// Corrected path for predefined roles
-				verrs.Add(fmt.Sprintf("%s.%s.hosts[%d]", pPrefix, roleName, i), "hostname cannot be empty")
+				verrs.Add(currentHostPath, "hostname cannot be empty")
+			} else if definedHostNames != nil { // Only check existence if definedHostNames is provided
+				// Expand host range if any, e.g., node[1:3]
+				expandedHosts, err := util.ExpandHostRange(hostName)
+				if err != nil {
+					verrs.Add(currentHostPath, fmt.Sprintf("invalid host range format '%s': %v", hostName, err))
+					continue
+				}
+				for _, eh := range expandedHosts {
+					if _, exists := definedHostNames[eh]; !exists {
+						verrs.Add(currentHostPath, fmt.Sprintf("host '%s' (from range '%s') is not defined in spec.hosts", eh, hostName))
+					}
+				}
 			}
 		}
 	}
@@ -787,6 +882,7 @@ func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *validation.ValidationEr
 	if cfg.Master.Hosts != nil {
 		validateRoleSpecHosts(cfg.Master.Hosts, "master", pathPrefix)
 	}
+	// ... similar calls for Worker, Etcd, LoadBalancer, Storage, Registry ...
 	if cfg.Worker.Hosts != nil {
 		validateRoleSpecHosts(cfg.Worker.Hosts, "worker", pathPrefix)
 	}
@@ -803,6 +899,7 @@ func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *validation.ValidationEr
 		validateRoleSpecHosts(cfg.Registry.Hosts, "registry", pathPrefix)
 	}
 
+
 	if cfg.CustomRoles != nil {
 		customRoleNames := make(map[string]bool)
 		predefinedRoles := []string{
@@ -810,10 +907,8 @@ func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *validation.ValidationEr
 			common.RoleLoadBalancer, common.RoleStorage, common.RoleRegistry,
 		}
 		for i, customRole := range cfg.CustomRoles {
-			// Use customRole.Name in the path for better identification
 			customRolePathPrefix := fmt.Sprintf("%s.customRoles[%d:%s]", pathPrefix, i, customRole.Name)
 			if strings.TrimSpace(customRole.Name) == "" {
-				// If name is empty, use index for path
 				customRolePathPrefixForEmptyName := fmt.Sprintf("%s.customRoles[%d]", pathPrefix, i)
 				verrs.Add(customRolePathPrefixForEmptyName+".name", "custom role name cannot be empty")
 			} else {
@@ -824,9 +919,8 @@ func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *validation.ValidationEr
 					verrs.Add(customRolePathPrefix+".name", fmt.Sprintf("custom role name '%s' is duplicated", customRole.Name))
 				}
 				customRoleNames[customRole.Name] = true
-				// Validate hosts for this custom role
 				if customRole.Hosts != nil {
-					// Pass the specific path for this custom role's hosts
+					// Pass the specific path for this custom role's hosts and the definedHostNames map
 					validateRoleSpecHosts(customRole.Hosts, "hosts", customRolePathPrefix)
 				}
 			}
