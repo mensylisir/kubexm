@@ -51,6 +51,7 @@
 ---
 
 本文档反映了当前 `pkg/common/constants.go` 的主要内容。未来如果添加新的通用常量，
+分组存放吧，不要全放到constants中
 
 
 
