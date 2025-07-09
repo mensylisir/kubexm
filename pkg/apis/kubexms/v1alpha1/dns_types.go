@@ -2,11 +2,10 @@ package v1alpha1
 
 import (
 	"fmt"
-	"net"
 	"strings"
 
 	"github.com/mensylisir/kubexm/pkg/common" // Import common package
-	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
+	"github.com/mensylisir/kubexm/pkg/util"   // Import the util package
 	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
