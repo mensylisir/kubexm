@@ -50,7 +50,7 @@ type ClusterSpec struct {
 	Storage              *StorageConfig            `json:"storage,omitempty" yaml:"storage,omitempty"`
 	Registry             *RegistryConfig           `json:"registry,omitempty" yaml:"registry,omitempty"`
 	Addons               []string                  `json:"addons,omitempty" yaml:"addons,omitempty"`
-	Dns                  *DnsConfig                `json:"dns,omitempty" yaml:"dns,omitempty"` // Changed to pointer
+	Dns                  *DNS                      `json:"dns,omitempty" yaml:"dns,omitempty"` // Changed to pointer
 	Preflight            *PreflightConfig          `json:"preflight,omitempty" yaml:"preflight,omitempty"`
 	HighAvailability     *HighAvailabilityConfig   `json:"highAvailability,omitempty" yaml:"highAvailability,omitempty"`
 
@@ -271,7 +271,6 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	}
 	SetDefaults_RoleGroupsSpec(cfg.Spec.RoleGroups)
 
-
 	if cfg.Spec.ControlPlaneEndpoint == nil {
 		cfg.Spec.ControlPlaneEndpoint = &ControlPlaneEndpointSpec{}
 	}
@@ -293,7 +292,7 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	}
 	SetDefaults_EtcdConfig(cfg.Spec.Etcd)
 
-	if cfg.Spec.ContainerRuntime == nil {
+	if cfg.Spec.Kubernetes.ContainerRuntime == nil {
 		// ContainerRuntime defaults are now handled within KubernetesConfig defaults
 		// but if KubernetesConfig itself is nil initially, this path might be taken.
 		// However, KubernetesConfig is initialized above.
@@ -311,7 +310,6 @@ func SetDefaults_Cluster(cfg *Cluster) {
 		// Let's assume kubernetes.containerRuntime is primary.
 	}
 	// SetDefaults_ContainerRuntimeConfig is called by SetDefaults_KubernetesConfig
-
 
 	if cfg.Spec.Network == nil {
 		cfg.Spec.Network = &NetworkConfig{}
@@ -343,9 +341,9 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	SetDefaults_RegistryConfig(cfg.Spec.Registry)
 
 	if cfg.Spec.Dns == nil { // Changed to pointer
-		cfg.Spec.Dns = &DnsConfig{}
+		cfg.Spec.Dns = &DNS{}
 	}
-	SetDefaults_DnsConfig(cfg.Spec.Dns) // Pass DnsConfig by pointer
+	SetDefaults_DNS(cfg.Spec.Dns) // Pass DnsConfig by pointer
 }
 
 // SetDefaults_RoleGroupsSpec sets default values for RoleGroupsSpec
@@ -380,7 +378,6 @@ func SetDefaults_RoleGroupsSpec(cfg *RoleGroupsSpec) {
 		}
 	}
 }
-
 
 // SetDefaults_SystemSpec sets default values for SystemSpec.
 func SetDefaults_SystemSpec(cfg *SystemSpec) {
@@ -572,7 +569,6 @@ func Validate_Cluster(cfg *Cluster) error {
 		Validate_NetworkConfig(cfg.Spec.Network, verrs, "spec.network", cfg.Spec.Kubernetes)
 	}
 
-
 	if cfg.Spec.RoleGroups != nil {
 		Validate_RoleGroupsSpec(cfg.Spec.RoleGroups, verrs, "spec.roleGroups", hostNames)
 	}
@@ -583,9 +579,8 @@ func Validate_Cluster(cfg *Cluster) error {
 		Validate_SystemSpec(cfg.Spec.System, verrs, "spec.system")
 	}
 
-
 	if cfg.Spec.HighAvailability != nil {
-		Validate_HighAvailabilityConfig(cfg.Spec.HighAvailability, verrs, "spec.highAvailability", cfg.Spec.ControlPlaneEndpoint, cfg.Spec.RoleGroups, cfg.Spec.Hosts)
+		Validate_HighAvailabilityConfig(cfg.Spec.HighAvailability, verrs, "spec.highAvailability")
 	}
 	if cfg.Spec.Preflight != nil {
 		Validate_PreflightConfig(cfg.Spec.Preflight, verrs, "spec.preflight")
@@ -606,9 +601,8 @@ func Validate_Cluster(cfg *Cluster) error {
 		Validate_RegistryConfig(cfg.Spec.Registry, verrs, "spec.registry")
 	}
 	if cfg.Spec.Dns != nil { // Changed to pointer
-		Validate_DnsConfig(cfg.Spec.Dns, verrs, "spec.dns")
+		Validate_DNS(cfg.Spec.Dns, verrs, "spec.dns")
 	}
-
 
 	if verrs.HasErrors() {
 		return verrs
@@ -697,7 +691,7 @@ func (in *ClusterSpec) DeepCopyInto(out *ClusterSpec) {
 		copy(out.Addons, in.Addons)
 	}
 	if in.Dns != nil { // Changed to pointer
-		out.Dns = new(DnsConfig)
+		out.Dns = new(DNS)
 		in.Dns.DeepCopyInto(out.Dns)
 	}
 	if in.Preflight != nil {
@@ -898,7 +892,6 @@ func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *validation.ValidationEr
 	if cfg.Registry.Hosts != nil {
 		validateRoleSpecHosts(cfg.Registry.Hosts, "registry", pathPrefix)
 	}
-
 
 	if cfg.CustomRoles != nil {
 		customRoleNames := make(map[string]bool)
