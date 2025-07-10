@@ -2,9 +2,11 @@ package preflight
 
 import (
 	"fmt"
+	"strings" // Added for HostsFileContent parsing
 
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
-	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/common" // Still needed for RoleMaster etc.
+	"github.com/mensylisir/kubexm/pkg/util"   // Added for NonEmptyNodeIDs
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	commonstep "github.com/mensylisir/kubexm/pkg/step/common"
@@ -84,7 +86,7 @@ func (t *SetupKubernetesPrerequisitesTask) Plan(ctx task.TaskContext) (*task.Exe
 	configureSELinuxStep := osstep.NewConfigureSELinuxStep("ConfigureSELinux", selinuxMode, true)
 	configureSELinuxNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{
 		Name:  configureSELinuxStep.Meta().Name, Step: configureSELinuxStep, Hosts: targetHosts,
-		Dependencies: common.NonEmptyNodeIDs(lastGlobalStepID),
+		Dependencies: util.NonEmptyNodeIDs(lastGlobalStepID),
 	})
 	lastGlobalStepID = configureSELinuxNodeID
 
@@ -97,7 +99,7 @@ func (t *SetupKubernetesPrerequisitesTask) Plan(ctx task.TaskContext) (*task.Exe
 	disableFirewallStep := osstep.NewDisableFirewallStep("DisableFirewalls", true, targetFirewalls)
 	disableFirewallNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{
 		Name:  disableFirewallStep.Meta().Name, Step: disableFirewallStep, Hosts: targetHosts,
-		Dependencies: common.NonEmptyNodeIDs(lastGlobalStepID),
+		Dependencies: util.NonEmptyNodeIDs(lastGlobalStepID),
 	})
 	lastGlobalStepID = disableFirewallNodeID
 
@@ -109,7 +111,7 @@ func (t *SetupKubernetesPrerequisitesTask) Plan(ctx task.TaskContext) (*task.Exe
 	setIPTablesAltStep := osstep.NewSetIPTablesAlternativesStep("SetIPTablesAlternatives", iptablesMode, true)
 	setIPTablesAltNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{
 		Name:  setIPTablesAltStep.Meta().Name, Step: setIPTablesAltStep, Hosts: targetHosts,
-		Dependencies: common.NonEmptyNodeIDs(lastGlobalStepID),
+		Dependencies: util.NonEmptyNodeIDs(lastGlobalStepID),
 	})
 	lastGlobalStepID = setIPTablesAltNodeID
 
@@ -142,7 +144,7 @@ func (t *SetupKubernetesPrerequisitesTask) Plan(ctx task.TaskContext) (*task.Exe
 			updateHostsStep := osstep.NewUpdateEtcHostsStep("UpdateEtcHostsFile", etcHostsEntries, true)
 			updateHostsNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{
 				Name:  updateHostsStep.Meta().Name, Step: updateHostsStep, Hosts: targetHosts,
-				Dependencies: common.NonEmptyNodeIDs(lastGlobalStepID),
+				Dependencies: util.NonEmptyNodeIDs(lastGlobalStepID),
 			})
 			lastGlobalStepID = updateHostsNodeID
 		}
@@ -153,7 +155,7 @@ func (t *SetupKubernetesPrerequisitesTask) Plan(ctx task.TaskContext) (*task.Exe
 		applyLimitsStep := osstep.NewApplySecurityLimitsStep("ApplySecurityLimits", clusterCfg.Spec.System.SecurityLimits, "", true)
 		applyLimitsNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{
 			Name:  applyLimitsStep.Meta().Name, Step: applyLimitsStep, Hosts: targetHosts,
-			Dependencies: common.NonEmptyNodeIDs(lastGlobalStepID),
+			Dependencies: util.NonEmptyNodeIDs(lastGlobalStepID),
 		})
 		lastGlobalStepID = applyLimitsNodeID
 	}
