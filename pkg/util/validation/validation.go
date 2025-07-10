@@ -10,8 +10,7 @@ import (
 )
 
 // Moved from common to here temporarily to resolve build issues.
-// Corrected to use PURE Go raw string literal. NO external quotes or concatenation.
-const localValidChartVersionRegexString = ` + "`^v?([0-9]+)(\\.[0-9]+){0,2}$`" + `
+const localValidChartVersionRegexString = `^v?([0-9]+)(\.[0-9]+){0,2}$`
 
 // ValidationErrors is a collection of validation errors.
 type ValidationErrors struct {
@@ -56,8 +55,7 @@ func IsValidChartVersion(version string) bool {
 // IsValidDomainName checks if a string is a valid domain name.
 // It uses a regex based on RFC 1035 and RFC 1123.
 func IsValidDomainName(domain string) bool {
-	// Corrected to use PURE Go raw string literal. NO external quotes or concatenation.
-	const domainValidationRegexString = ` + "`^([a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?\\.)*([a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?)$`" + `
+	const domainValidationRegexString = `^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)$`
 	domainRegex := regexp.MustCompile(domainValidationRegexString)
 	return domainRegex.MatchString(domain)
 }

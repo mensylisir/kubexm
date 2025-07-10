@@ -18,7 +18,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/plan"
 	resourcemocks "github.com/mensylisir/kubexm/pkg/resource/mocks"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/common" as commonsteps // Alias to avoid clash with package 'common'
+	commonsteps "github.com/mensylisir/kubexm/pkg/step/common" // Alias to avoid clash with package 'common'
 	stepetcd "github.com/mensylisir/kubexm/pkg/step/etcd"
 	"github.com/mensylisir/kubexm/pkg/task"
 	taskmocks "github.com/mensylisir/kubexm/pkg/task/mocks"
