@@ -26,6 +26,8 @@ SkipInstall 这种字段属于部署逻辑，而不是 Keepalived 本身的配�
 
 本文档描述了 Kubexm 项目的 API 设计。在此上下文中，“API 设计”指的是项目所使用的 **Kubernetes 自定义资源定义 (Custom Resource Definitions - CRDs)**。这些 CRDs 允许用户通过标准的 Kubernetes API（例如，使用 `kubectl` 和 YAML 文件）以声明式的方式定义和管理 Kubexm 所控制的资源。
 
+**注意：删掉DeepCopy和DeepCopyInto,注释掉register.go，先不实现controller，当前阶段是实现功能而不是controller**
+
 ## 1. 概述
 
 Kubexm 使用 Kubernetes CRDs 来对集群及其组件的期望状态进行建模。用户可以创建这些自定义资源的实例，Kubexm 系统（通常通过一个控制器或操作员模式的组件，或者由命令行工具在特定流程中触发）会监测这些资源的变化，并采取相应行动以使实际状态与期望状态一致。
