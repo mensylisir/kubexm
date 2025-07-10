@@ -40,8 +40,8 @@ func (m *WorkerModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, 
 	}
 
 	// Define task instances
-	installBinariesTask := taskKube.NewInstallKubeBinariesTask(nil) // Target worker roles if needed
-	pullImagesTask := taskKube.NewPullImagesTask(nil)             // Target worker roles
+	installBinariesTask := taskKube.NewInstallKubeBinariesTask([]string{common.RoleWorker})
+	pullImagesTask := taskKube.NewPullImagesTask([]string{common.RoleWorker})
 	joinWorkersTask := taskKube.NewJoinWorkerNodesTask()
 
 	var lastBinariesExits, lastImagesExits []plan.NodeID

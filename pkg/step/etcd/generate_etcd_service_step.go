@@ -12,11 +12,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-)
-
-const (
-	// EtcdServiceFileRemotePath is the default path for etcd.service on target nodes.
-	EtcdServiceFileRemotePath = "/etc/systemd/system/etcd.service"
+	"github.com/mensylisir/kubexm/pkg/common" // Added for common constants
 )
 
 // EtcdServiceData holds data for templating the etcd.service file.
@@ -49,14 +45,14 @@ func NewGenerateEtcdServiceStep(instanceName string, serviceData EtcdServiceData
 	}
 	rPath := remotePath
 	if rPath == "" {
-		rPath = EtcdServiceFileRemotePath
+		rPath = common.EtcdDefaultSystemdFile
 	}
 	// Set defaults for ServiceData if not provided
 	if serviceData.Description == "" {
 		serviceData.Description = "etcd Distributed Key-Value Store"
 	}
 	if serviceData.ExecStart == "" {
-		serviceData.ExecStart = "/usr/local/bin/etcd --config-file=" + EtcdConfigRemotePath // Default config path
+		serviceData.ExecStart = "/usr/local/bin/etcd --config-file=" + common.EtcdDefaultConfFile // Use common constant
 	}
 	if serviceData.User == "" {
 		serviceData.User = "etcd"

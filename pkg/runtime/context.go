@@ -54,8 +54,6 @@ type Context struct {
 	currentHost    connector.Host
 	controlNode    connector.Host            // Represents the machine running Kubexm CLI
 	ConnectionPool *connector.ConnectionPool // Added connection pool
-
-	ClusterArtifactsDir string
 }
 
 // HostRuntimeInfo holds connection and facts for a specific host.

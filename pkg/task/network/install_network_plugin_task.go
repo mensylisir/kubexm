@@ -9,22 +9,19 @@ import (
 // InstallNetworkPluginTask deploys the chosen CNI network plugin.
 type InstallNetworkPluginTask struct {
 	task.BaseTask
-	// CNIPluginName string // e.g., "calico", "flannel" - from ClusterConfig
-	// CNIManifestURLOrPath string // Path/URL to the CNI manifest template or static file
-	// CNIConfigParams map[string]interface{} // Parameters for CNI manifest template
+	NetworkConfig *v1alpha1.NetworkConfig // To access plugin type, CNI specific configs, CIDRs
 }
 
 // NewInstallNetworkPluginTask creates a new InstallNetworkPluginTask.
-func NewInstallNetworkPluginTask( /*pluginName, manifestPath string, params map[string]interface{}*/ ) task.Task {
+func NewInstallNetworkPluginTask() task.Task { // Config will be fetched from context
 	return &InstallNetworkPluginTask{
-		BaseTask: task.BaseTask{
-			TaskName: "InstallNetworkPlugin",
-			TaskDesc: "Deploys the CNI network plugin to the cluster.",
-			// This task usually runs steps on a master node (kubectl apply) or control node (template rendering).
-		},
-		// CNIPluginName: pluginName,
-		// CNIManifestURLOrPath: manifestPath,
-		// CNIConfigParams: params,
+		BaseTask: task.NewBaseTask( // Use NewBaseTask
+			"InstallNetworkPlugin",
+			"Deploys the CNI network plugin to the cluster.",
+			nil,   // RunOnRoles - typically control-node or a master
+			nil,   // HostFilter
+			false, // IgnoreError
+		),
 	}
 }
 
@@ -35,20 +32,75 @@ func (t *InstallNetworkPluginTask) IsRequired(ctx task.TaskContext) (bool, error
 }
 
 func (t *InstallNetworkPluginTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
-	// Plan would involve:
-	// 1. Determine CNI plugin type and version from ClusterConfig.
-	// 2. Step: (Optional) Download CNI manifest/template to control node if it's remote.
-	//    (Could use a resource.RemoteFileHandle or similar).
-	// 3. Step: RenderTemplateStep to render the CNI manifest using CNIConfigParams (on control node).
-	// 4. Step: UploadFileStep to upload the rendered manifest to a master node.
-	// 5. Step: KubectlApplyStep on the master node to apply the manifest.
-	//
-	// Dependencies:
-	//  - KubectlApplyStep depends on UploadFileStep.
-	//  - UploadFileStep depends on RenderTemplateStep (if applicable).
-	//  - RenderTemplateStep depends on Download (if applicable).
-	//  - This whole task depends on the Kubernetes control plane being ready (InitMasterTask, JoinMastersTask).
-	return task.NewEmptyFragment(), nil // Placeholder
+	logger := ctx.GetLogger().With("task", t.Name())
+	networkFragment := task.NewExecutionFragment(t.Name())
+
+	clusterCfg := ctx.GetClusterConfig()
+	if clusterCfg.Spec.Network == nil || clusterCfg.Spec.Network.Plugin == "" {
+		logger.Info("No CNI plugin specified, skipping network plugin installation.")
+		return task.NewEmptyFragment(), nil
+	}
+	t.NetworkConfig = clusterCfg.Spec.Network // Store for easy access
+
+	logger.Info("Planning CNI plugin installation.", "plugin", t.NetworkConfig.Plugin)
+
+	// controlNode, _ := ctx.GetControlNode()
+	// masterNodes, _ := ctx.GetHostsByRole(common.RoleMaster)
+	// if len(masterNodes) == 0 { return nil, fmt.Errorf("no master node found to apply CNI manifest for plugin %s", t.NetworkConfig.Plugin) }
+	// execNode := masterNodes[0] // Apply CNI from one master
+
+	// --- Conceptual Plan ---
+	// manifestContent := ""
+	// manifestIsTemplate := false
+	// templateData := make(map[string]interface{})
+
+	// switch t.NetworkConfig.Plugin {
+	// case common.CNICalico:
+	//    // manifestContent = calicoManifestTemplateContent (could be embedded or from resource.LocalFileHandle)
+	//    // manifestIsTemplate = true
+	//    // templateData["PodCIDR"] = t.NetworkConfig.KubePodsCIDR
+	//    // templateData["CalicoConfig"] = t.NetworkConfig.Calico
+	//    // ... other calico specific params
+	// case common.CNIFlannel:
+	//    // manifestContent = flannelManifestContent
+	//    // templateData["PodCIDR"] = t.NetworkConfig.KubePodsCIDR
+	//    // ...
+	// case common.CNICilium:
+	//    // Cilium is often installed via Helm or a more complex operator.
+	//    // This task might create HelmInstallStep or KubectlApplyStep for an operator.
+	//    // For simplicity, assume YAML manifest for now.
+	//    // manifestContent = ciliumManifestContent
+	//    // templateData["CiliumConfig"] = t.NetworkConfig.Cilium
+	// default:
+	//    return nil, fmt.Errorf("unsupported CNI plugin: %s", t.NetworkConfig.Plugin)
+	// }
+
+	// var lastStepID plan.NodeID = ""
+	// localRenderedManifestPath := filepath.Join(ctx.GetGlobalWorkDir(), "rendered-"+t.NetworkConfig.Plugin+"-cni.yaml")
+
+	// if manifestIsTemplate {
+	//    renderStep := commonsteps.NewRenderTemplateStep("Render-"+t.NetworkConfig.Plugin+"-CNI", manifestContent, templateData, localRenderedManifestPath, "0644", false)
+	//    renderNodeID, _ := networkFragment.AddNode(&plan.ExecutionNode{ Step: renderStep, Hosts: []connector.Host{controlNode}})
+	//    lastStepID = renderNodeID
+	// } else {
+	//    // If static manifest, resource handle would place it at localRenderedManifestPath (or similar)
+	//    // For now, assume content is ready or use a resource handle for it.
+	// }
+
+	// remoteManifestPath := "/tmp/" + t.NetworkConfig.Plugin + "-cni.yaml"
+	// uploadStep := commonsteps.NewUploadFileStep("Upload-"+t.NetworkConfig.Plugin+"-CNI", localRenderedManifestPath, remoteManifestPath, "0644", false, false)
+	// uploadNodeID, _ := networkFragment.AddNode(&plan.ExecutionNode{ Step: uploadStep, Hosts: []connector.Host{execNode}, Dependencies: []plan.NodeID{lastStepID} })
+	// lastStepID = uploadNodeID
+
+	// applyStep := kubernetessteps.NewKubectlApplyStep("Apply-"+t.NetworkConfig.Plugin+"-CNI", remoteManifestPath, "", false, 3, 10) // Retries
+	// applyNodeID, _ := networkFragment.AddNode(&plan.ExecutionNode{ Step: applyStep, Hosts: []connector.Host{execNode}, Dependencies: []plan.NodeID{lastStepID} })
+
+	// networkFragment.EntryNodes = ...
+	// networkFragment.ExitNodes = []plan.NodeID{applyNodeID}
+	// networkFragment.CalculateEntryAndExitNodes()
+
+	logger.Warn("InstallNetworkPluginTask.Plan is a placeholder and needs full implementation.", "plugin", t.NetworkConfig.Plugin)
+	return task.NewEmptyFragment(), nil // Placeholder until fully implemented
 }
 
 var _ task.Task = (*InstallNetworkPluginTask)(nil)

@@ -8,6 +8,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
 	taskKube "github.com/mensylisir/kubexm/pkg/task/kubernetes"
+	"github.com/mensylisir/kubexm/pkg/common" // Added for common.AllHostsRole
 )
 
 // ControlPlaneModule is responsible for setting up the Kubernetes control plane.
@@ -42,8 +43,8 @@ func (m *ControlPlaneModule) Plan(ctx module.ModuleContext) (*task.ExecutionFrag
 	isFirstTaskInModule := true
 
 	// Explicitly define task instances to manage their fragments and linking
-	installBinariesTask := taskKube.NewInstallKubeBinariesTask(nil) // Roles can be refined if needed
-	pullImagesTask := taskKube.NewPullImagesTask(nil)
+	installBinariesTask := taskKube.NewInstallKubeBinariesTask([]string{common.AllHostsRole})
+	pullImagesTask := taskKube.NewPullImagesTask([]string{common.AllHostsRole}) // Core images might be pulled on all nodes
 	initCPTask := taskKube.NewInitControlPlaneTask()
 	joinCPTask := taskKube.NewJoinControlPlaneTask()
 

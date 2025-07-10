@@ -23,11 +23,13 @@ func SetDefaults_PreflightConfig(cfg *PreflightConfig) {
 		cfg.DisableSwap = util.BoolPtr(true) // Default to disabling swap
 	}
 	if cfg.MinCPUCores == nil {
-		defaultCPU := int32(2)
+		// Use common.DefaultMinCPUCores
+		defaultCPU := int32(common.DefaultMinCPUCores)
 		cfg.MinCPUCores = &defaultCPU
 	}
 	if cfg.MinMemoryMB == nil {
-		defaultMem := uint64(2048) // 2GB
+		// Use common.DefaultMinMemoryMB
+		defaultMem := uint64(common.DefaultMinMemoryMB) // Ensure type compatibility if necessary
 		cfg.MinMemoryMB = &defaultMem
 	}
 }

@@ -70,7 +70,9 @@ func (p *UpgradeClusterPipeline) Plan(ctx pipeline.PipelineContext) (*plan.Execu
 
 	if len(p.Modules()) == 0 || (len(p.Modules()) == 1 && p.Modules()[0].Name() == "PlaceholderUpgrade") {
 	    logger.Warn("UpgradeClusterPipeline has no effective modules defined. Returning empty graph.")
-	    return task.NewEmptyFragment(), nil // Ensure this returns *plan.ExecutionGraph
+		emptyGraph := plan.NewExecutionGraph(p.Name())
+		emptyGraph.CalculateEntryAndExitNodes()
+	    return emptyGraph, nil
 	}
 
 	for i, mod := range p.Modules() {
@@ -103,22 +105,36 @@ func (p *UpgradeClusterPipeline) Plan(ctx pipeline.PipelineContext) (*plan.Execu
 	return finalGraph, nil
 }
 
-func (p *UpgradeClusterPipeline) Run(ctx *runtime.Context, dryRun bool) (*plan.GraphExecutionResult, error) {
+func (p *UpgradeClusterPipeline) Run(ctx pipeline.PipelineContext, graph *plan.ExecutionGraph, dryRun bool) (*plan.GraphExecutionResult, error) {
 	logger := ctx.GetLogger().With("pipeline", p.Name())
 	logger.Info("Running cluster upgrade pipeline...", "dryRun", dryRun, "target_version", p.TargetVersion)
 
-	pipelineCtx := ctx
-	executionGraph, err := p.Plan(pipelineCtx)
-	if err != nil {
-		return nil, fmt.Errorf("planning phase for pipeline %s failed: %w", p.Name(), err)
+	engineCtx, ok := ctx.(engine.EngineExecuteContext)
+	if !ok {
+		err := fmt.Errorf("pipeline context cannot be asserted to engine.EngineExecuteContext for pipeline %s", p.Name())
+		logger.Error(err, "Context type assertion failed")
+		return nil, err
 	}
 
-	if executionGraph.IsEmpty() {
-		logger.Info("Pipeline planned no executable nodes for upgrade. Nothing to run.")
+	var currentGraph *plan.ExecutionGraph
+	var err error
+	if graph == nil {
+		logger.Info("No pre-computed graph provided to UpgradeClusterPipeline.Run, planning now...")
+		currentGraph, err = p.Plan(ctx)
+		if err != nil {
+			logger.Error(err, "Pipeline planning phase failed within Run method.")
+			return nil, fmt.Errorf("planning phase for pipeline %s failed: %w", p.Name(), err)
+		}
+	} else {
+		currentGraph = graph
+	}
+
+	if currentGraph == nil || currentGraph.IsEmpty() {
+		logger.Info("Pipeline planned no executable nodes for upgrade or was given an empty graph. Nothing to run.")
 		return &plan.GraphExecutionResult{GraphName: p.Name(), Status: plan.StatusSuccess}, nil
 	}
 
-	result, execErr := ctx.GetEngine().Execute(ctx, executionGraph, dryRun)
+	result, execErr := ctx.GetEngine().Execute(engineCtx, currentGraph, dryRun)
 	if execErr != nil {
 		if result == nil { result = &plan.GraphExecutionResult{GraphName: p.Name(), Status: plan.StatusFailed} }
 		return result, fmt.Errorf("execution phase for pipeline %s failed: %w", p.Name(), execErr)

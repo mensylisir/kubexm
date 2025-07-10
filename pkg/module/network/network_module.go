@@ -17,26 +17,39 @@ type NetworkModule struct {
 
 // NewNetworkModule creates a new NetworkModule.
 func NewNetworkModule() module.Module {
-	tasks := []task.Task{
-		taskNetwork.NewInstallNetworkPluginTask(), // Task to install CNI
-	}
-	base := module.NewBaseModule("KubernetesNetworkSetup", tasks)
+	base := module.NewBaseModule("KubernetesNetworkSetup", nil) // Tasks are now fetched via GetTasks
 	return &NetworkModule{BaseModule: base}
+}
+
+// GetTasks returns the list of tasks for the NetworkModule.
+func (m *NetworkModule) GetTasks(ctx module.ModuleContext) ([]task.Task, error) {
+	// For this module, the task is static.
+	// More complex modules might determine tasks dynamically based on ctx.
+	return []task.Task{
+		taskNetwork.NewInstallNetworkPluginTask(),
+	}, nil
 }
 
 func (m *NetworkModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("module", m.Name())
 	moduleFragment := task.NewExecutionFragment(m.Name() + "-Fragment")
 
-	taskCtx, ok := ctx.(task.TaskContext)
-	if !ok {
-		return nil, fmt.Errorf("module context cannot be asserted to task.TaskContext for %s", m.Name())
+	// The ModuleContext (ctx) should be directly usable by tasks if runtime.Context implements both.
+	// task.Plan(ctx task.TaskContext) means ctx must satisfy task.TaskContext.
+	// runtime.Context implements all these context interfaces.
+
+	definedTasks, err := m.GetTasks(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tasks for module %s: %w", m.Name(), err)
+	}
+	if len(definedTasks) == 0 { // Should not happen for this static module if constructor is right
+		logger.Info("No tasks defined for NetworkModule. Skipping.")
+		return task.NewEmptyFragment(), nil
 	}
 
-	// This module typically has one primary task: InstallNetworkPluginTask
-	installPluginTask := taskNetwork.NewInstallNetworkPluginTask()
+	installPluginTask := definedTasks[0] // Assuming only one task for this simple module
 
-	isRequired, err := installPluginTask.IsRequired(taskCtx)
+	isRequired, err := installPluginTask.IsRequired(ctx) // Pass module.ModuleContext
 	if err != nil { return nil, fmt.Errorf("failed to check IsRequired for %s: %w", installPluginTask.Name(), err) }
 
 	if !isRequired {

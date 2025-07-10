@@ -69,9 +69,9 @@ func (s *KubectlApplyStep) Run(ctx runtime.StepContext, host connector.Host) err
 		// Retries and RetryDelay can be handled by ExecOptions if it supports them,
 		// or implemented in a loop here. For now, assuming ExecOptions handles it.
 		// If ExecOptions doesn't support retries, this step would need its own loop.
-		// The current connector.ExecOptions has Retries and RetryDelay.
-		Retries:    s.Retries,
-		RetryDelay: time.Duration(s.RetryDelay) * time.Second,
+		// The current connector.ExecOptions has Retries and RetryDelaySeconds.
+		Retries:           s.Retries,
+		RetryDelaySeconds: s.RetryDelay, // Pass int directly
 	}
 
 
