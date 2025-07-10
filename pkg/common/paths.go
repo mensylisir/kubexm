@@ -1,144 +1,157 @@
 package common
 
-const (
-	// --- General Default Directories (some might be relative to KUBEXM work dir) ---
-	// KubexmRootDirName is the default root directory name for kubexm operations.
-	KubexmRootDirName = ".kubexm"
-	// DefaultLogDirName is the default directory name for logs within the KubexmRootDirName.
-	DefaultLogDirName = "logs"
-	// DefaultCertsDir is the default directory name for certificates.
-	DefaultCertsDir = "certs"
-	// DefaultContainerRuntimeDir is the default directory for container runtime artifacts.
-	DefaultContainerRuntimeDir = "container_runtime"
-	// DefaultKubernetesDir is the default directory for kubernetes artifacts.
-	DefaultKubernetesDir = "kubernetes"
-	// DefaultEtcdDir is the default directory for etcd artifacts.
-	DefaultEtcdDir = "etcd"
+// This file defines constants related to file system paths used within Kubexm.
 
-	// --- Kubexm Work Directories (typically under KUBEXM/.<clustername>/) ---
-	// DefaultBinDir is for downloaded binaries.
-	DefaultBinDir = "bin"
-	// DefaultConfDir is for generated configuration files.
-	DefaultConfDir = "conf"
-	// DefaultScriptsDir is for temporary scripts.
-	DefaultScriptsDir = "scripts"
-	// DefaultBackupDir is for backup files.
-	DefaultBackupDir = "backup"
+const (
+	// --- General Default Directory Names for Kubexm Local Workstation (machine running kubexm) ---
+	// These define the structure within the main Kubexm work directory (e.g., $(pwd)/.kubexm/${cluster_name}/).
+
+	// KubexmRootDirName is the top-level directory created by kubexm in the current working directory (e.g., ".kubexm")
+	// if no global work_dir is specified in config. The full path would be like $(pwd)/.kubexm.
+	KubexmRootDirName = ".kubexm"
+
+	// DefaultLogDirName is the subdirectory for log files within a specific cluster's work directory.
+	// e.g., $(pwd)/.kubexm/${cluster_name}/logs
+	DefaultLogDirName = "logs"
+
+	// DefaultCertsDir is the subdirectory for generated certificates within a specific cluster's work directory
+	// on the machine running Kubexm. This is where Kubexm will store CA certs and other PKI assets
+	// it generates locally before distribution.
+	// e.g., $(pwd)/.kubexm/${cluster_name}/certs
+	DefaultCertsDir = "certs"
+
+	// DefaultArtifactsDir is a general subdirectory for downloaded artifacts within a specific cluster's work directory
+	// on the machine running Kubexm. Specific components will have subdirectories under this.
+	// e.g., $(pwd)/.kubexm/${cluster_name}/artifacts
+	DefaultArtifactsDir = "artifacts"
+
+	// DefaultBinDirName is the subdirectory within a component's artifact path (under DefaultArtifactsDir) for binaries.
+	// e.g., $(pwd)/.kubexm/${cluster_name}/artifacts/etcd/${etcd_version}/${arch}/bin
+	DefaultBinDirName = "bin"
+	// DefaultConfDirName is the subdirectory for generated configuration files locally before upload, if needed,
+	// within a component's artifact path.
+	// e.g., $(pwd)/.kubexm/${cluster_name}/artifacts/etcd/${etcd_version}/${arch}/conf
+	DefaultConfDirName = "conf"
+	// DefaultScriptsDirName is for temporary scripts generated locally before upload, if needed,
+	// within a component's artifact path.
+	DefaultScriptsDirName = "scripts"
+	// DefaultBackupDirName is for backup files, potentially within a cluster's work directory or a global backup path.
+	// e.g., $(pwd)/.kubexm/${cluster_name}/backup
+	DefaultBackupDirName = "backup"
+
+	// Component-specific artifact parent directories under DefaultArtifactsDir and a component type directory.
+	// These names should ideally match the BinaryType strings from types.go for consistency in path construction.
+	// Example path structure: ${GlobalWorkDir}/${ClusterName}/artifacts/${ComponentTypeDir}/${ComponentName}/${Version}/${Arch}
+	// These are names for directories on the Kubexm local machine where artifacts are staged.
+	DefaultContainerRuntimeDir = "container_runtime" // Parent dir for different runtimes like docker, containerd
+	DefaultKubernetesDir       = "kubernetes"        // Parent dir for different K8s components like kubelet, kubeadm
+	DefaultEtcdDir             = "etcd"              // Parent dir for etcd artifacts
+
+	ArtifactsEtcdDir             = "etcd"
+	ArtifactsKubeDir             = "kube"
+	ArtifactsCNIDir              = "cni"
+	ArtifactsHelmDir             = "helm"
+	ArtifactsDockerDir           = "docker"
+	ArtifactsContainerdDir       = "containerd"
+	ArtifactsRuncDir             = "runc"
+	ArtifactsCrictlDir           = "crictl"
+	ArtifactsCriDockerdDir       = "cri-dockerd"
+	ArtifactsCalicoctlDir        = "calicoctl"
+	ArtifactsRegistryDir         = "registry"
+	ArtifactsComposeDir          = "compose"
+	ArtifactsBuildDir            = "build"
+	ArtifactsGenericBinariesDir  = "generic"
 )
 
-// --- Kubernetes System Directories (Standard paths on nodes) ---
+// --- Standard Paths on Target Nodes ---
+// These constants define well-known paths on the actual cluster nodes (masters, workers, etcd nodes).
 const (
-	KubeletHomeDir          = "/var/lib/kubelet"
-	KubernetesConfigDir     = "/etc/kubernetes"
-	KubernetesManifestsDir  = "/etc/kubernetes/manifests"
-	KubernetesPKIDir        = "/etc/kubernetes/pki"
-	DefaultKubeconfigPath   = "/root/.kube/config" // Path for admin kubeconfig on control node/user machine
+	KubeletHomeDir         = "/var/lib/kubelet"          // Default directory for Kubelet data on a node.
+	KubernetesConfigDir    = "/etc/kubernetes"           // Main directory for Kubernetes configuration files on a node.
+	KubernetesManifestsDir = "/etc/kubernetes/manifests" // Directory for static Pod manifests on control-plane nodes.
+	KubernetesPKIDir       = "/etc/kubernetes/pki"       // Directory for Kubernetes PKI assets on a node.
+	DefaultKubeconfigPath  = "/root/.kube/config"        // Standard path for the admin kubeconfig on a user's machine or control node.
 
-	// Kubernetes PKI file names (standard kubeadm layout within KubernetesPKIDir)
-	// CACertFileName is defined in constants.go as ca.pem
-	CAKeyFileName                   = "ca.key"
-	APIServerCertFileName           = "apiserver.crt"
-	APIServerKeyFileName            = "apiserver.key"
-	APIServerKubeletClientCertFileName = "apiserver-kubelet-client.crt"
-	APIServerKubeletClientKeyFileName  = "apiserver-kubelet-client.key"
-	FrontProxyCACertFileName        = "front-proxy-ca.crt"
-	FrontProxyCAKeyFileName         = "front-proxy-ca.key"
-	FrontProxyClientCertFileName    = "front-proxy-client.crt"
-	FrontProxyClientKeyFileName     = "front-proxy-client.key"
-	ServiceAccountPublicKeyFileName  = "sa.pub"
-	ServiceAccountPrivateKeyFileName = "sa.key"
-	APIServerEtcdClientCertFileName = "apiserver-etcd-client.crt" // Etcd specific PKI (if managed by kubeadm)
-	APIServerEtcdClientKeyFileName  = "apiserver-etcd-client.key"
+	CAKeyFileName                      = "ca.key"                         // Cluster CA private key.
+	APIServerCertFileName              = "apiserver.crt"                  // API server certificate.
+	APIServerKeyFileName               = "apiserver.key"                  // API server private key.
+	APIServerKubeletClientCertFileName = "apiserver-kubelet-client.crt" // Cert for API server to connect to Kubelets.
+	APIServerKubeletClientKeyFileName  = "apiserver-kubelet-client.key"  // Key for API server to connect to Kubelets.
+	FrontProxyCACertFileName           = "front-proxy-ca.crt"           // Front proxy CA certificate.
+	FrontProxyCAKeyFileName            = "front-proxy-ca.key"           // Front proxy CA private key.
+	FrontProxyClientCertFileName       = "front-proxy-client.crt"       // Front proxy client certificate.
+	FrontProxyClientKeyFileName        = "front-proxy-client.key"       // Front proxy client private key.
+	ServiceAccountPublicKeyFileName    = "sa.pub"                       // Service account public key.
+	ServiceAccountPrivateKeyFileName   = "sa.key"                       // Service account private key.
+	APIServerEtcdClientCertFileName    = "apiserver-etcd-client.crt"    // Cert for API server to connect to Etcd.
+	APIServerEtcdClientKeyFileName     = "apiserver-etcd-client.key"     // Key for API server to connect to Etcd.
 
-	// Kubernetes Config Files (standard kubeadm layout within KubernetesConfigDir)
-	KubeadmConfigFileName       = "kubeadm-config.yaml"
-	KubeletConfigFileName       = "kubelet.conf"
-	KubeletSystemdEnvFileName   = "10-kubeadm.conf"      // Kubelet systemd drop-in
-	ControllerManagerConfigFileName = "controller-manager.conf"
-	SchedulerConfigFileName     = "scheduler.conf"
-	AdminConfigFileName         = "admin.conf" // Kubeconfig for cluster admin
+	KubeadmConfigFileName               = "kubeadm-config.yaml"     // Kubeadm configuration file.
+	KubeletKubeconfigFileName           = "kubelet.conf"            // Kubelet's kubeconfig file name.
+	KubeletSystemdEnvFileName           = "10-kubeadm.conf"         // Kubelet systemd drop-in environment file name.
+	ControllerManagerKubeconfigFileName = "controller-manager.conf" // Controller Manager's kubeconfig file name.
+	SchedulerKubeconfigFileName         = "scheduler.conf"          // Scheduler's kubeconfig file name.
+	AdminKubeconfigFileName             = "admin.conf"              // Kubeconfig for cluster admin.
+	KubeProxyKubeconfigFileName         = "kube-proxy.conf"         // Kube-proxy's kubeconfig file name.
 
-	// Static Pod manifests (within KubernetesManifestsDir)
 	KubeAPIServerStaticPodFileName       = "kube-apiserver.yaml"
 	KubeControllerManagerStaticPodFileName = "kube-controller-manager.yaml"
 	KubeSchedulerStaticPodFileName      = "kube-scheduler.yaml"
-	EtcdStaticPodFileName               = "etcd.yaml" // If kubeadm manages etcd
+	EtcdStaticPodFileName               = "etcd.yaml"
 )
 
-// --- Etcd System Directories & Files (Standard paths on nodes for binary installs) ---
 const (
-	// EtcdDefaultDataDir is defined in constants.go
-	EtcdDefaultWalDir       = "/var/lib/etcd/wal"   // Etcd default WAL directory
-	EtcdDefaultConfDir      = "/etc/etcd"           // Etcd configuration directory
-	ExternalEtcdDefaultPKIDir = "/etc/etcd/pki"       // Etcd PKI directory (for binary installs)
-	// EtcdDefaultBinDir is defined in constants.go
-	// EtcdDefaultSystemdFile is defined in constants.go
-	// EtcdDefaultConfFile is defined in constants.go (as .yaml)
-
-	// Etcd PKI file names (for binary installs, within ExternalEtcdDefaultPKIDir)
-	EtcdServerCert          = "server.crt"
-	EtcdServerKey           = "server.key"
-	EtcdPeerCert            = "peer.crt"
-	EtcdPeerKey             = "peer.key"
-	// EtcdCaCert is often the same as Kubernetes CA or a dedicated Etcd CA
-	// EtcdCaCert              = "ca.crt"
-	// EtcdCaKey               = "ca.key"
+	EtcdDefaultWalDir         = "/var/lib/etcd/wal" // Etcd default WAL directory.
+	EtcdDefaultConfDirTarget  = "/etc/etcd"         // Target Etcd configuration directory on nodes.
+	EtcdDefaultPKIDirTarget   = "/etc/etcd/pki"     // Target Etcd PKI directory on nodes for binary installs.
+	EtcdEnvFileTarget         = "/etc/etcd.env"     // Target path for etcd environment file for binary installs.
 )
 
-// --- Container Runtime Directories & Files (Standard paths on nodes) ---
 const (
-	// Containerd
-	ContainerdDefaultConfDir      = "/etc/containerd"
-	ContainerdDefaultConfigFile   = "/etc/containerd/config.toml"
-	ContainerdDefaultSocketPath   = "/run/containerd/containerd.sock"
-	ContainerdDefaultSystemdFile  = "/etc/systemd/system/containerd.service"
-	// Runc (often placed in a common bin dir like /usr/local/bin)
+	ContainerdDefaultConfDirTarget     = "/etc/containerd"                         // Target Containerd configuration directory on nodes.
+	ContainerdDefaultConfigFileTarget  = "/etc/containerd/config.toml"             // Target Containerd main config file on nodes.
+	ContainerdDefaultSystemdFile       = "/etc/systemd/system/containerd.service"  // Default systemd file path for Containerd.
 
-	// Docker
-	DockerDefaultConfDir      = "/etc/docker"
-	DockerDefaultConfigFile   = "/etc/docker/daemon.json"
-	DockerDefaultDataRoot     = "/var/lib/docker"
-	DockerDefaultSocketPath   = "/var/run/docker.sock"
-	DockerDefaultSystemdFile  = "/lib/systemd/system/docker.service" // Path can vary by distro
+	DockerDefaultConfDirTarget     = "/etc/docker"                         // Target Docker configuration directory on nodes.
+	DockerDefaultConfigFileTarget  = "/etc/docker/daemon.json"             // Target Docker daemon config file on nodes.
+	DockerDefaultSystemdFile       = "/lib/systemd/system/docker.service"  // Default systemd file path for Docker (can be distro-specific).
 
-	// CRI-Dockerd (for Docker with recent Kubernetes)
-	CniDockerdSocketPath      = "/var/run/cri-dockerd.sock"
-	CniDockerdSystemdFile     = "/etc/systemd/system/cri-dockerd.service"
+	CniDockerdSystemdFile     = "/etc/systemd/system/cri-dockerd.service" // Default systemd file path for CRI-Dockerd.
 )
 
-// --- High Availability (HA) Component Paths ---
 const (
-	// Keepalived
-	KeepalivedDefaultConfDir      = "/etc/keepalived"
-	KeepalivedDefaultConfigFile   = "/etc/keepalived/keepalived.conf"
-	KeepalivedDefaultSystemdFile  = "/etc/systemd/system/keepalived.service"
+	KeepalivedDefaultConfDirTarget     = "/etc/keepalived"                         // Target Keepalived configuration directory on nodes.
+	KeepalivedDefaultConfigFileTarget  = "/etc/keepalived/keepalived.conf"       // Target Keepalived main config file on nodes.
+	KeepalivedDefaultSystemdFile       = "/etc/systemd/system/keepalived.service"  // Default systemd file path for Keepalived.
 
-	// HAProxy
-	HAProxyDefaultConfDir       = "/etc/haproxy"
-	HAProxyDefaultConfigFile    = "/etc/haproxy/haproxy.cfg"
-	HAProxyDefaultSystemdFile   = "/etc/systemd/system/haproxy.service"
+	HAProxyDefaultConfDirTarget      = "/etc/haproxy"                          // Target HAProxy configuration directory on nodes.
+	HAProxyDefaultConfigFileTarget   = "/etc/haproxy/haproxy.cfg"              // Target HAProxy main config file on nodes.
+	HAProxyDefaultSystemdFile        = "/etc/systemd/system/haproxy.service"   // Default systemd file path for HAProxy.
 
-	// Kube-VIP
-	KubeVIPManifestFileName = "kube-vip.yaml" // Kube-VIP static pod manifest
+	KubeVIPManifestFileName = "kube-vip.yaml" // Kube-VIP static pod manifest file name.
 )
 
-// --- System Configuration Paths ---
 const (
-	SysctlDefaultConfFile     = "/etc/sysctl.conf"
-	ModulesLoadDefaultDir     = "/etc/modules-load.d"
-	// KubernetesSysctlConfFile is a common pattern for K8s sysctl settings.
-	KubernetesSysctlConfFile  = "/etc/sysctl.d/99-kubernetes-cri.conf"
-	KubeletSystemdDropinDir   = "/etc/systemd/system/kubelet.service.d"
+	SysctlDefaultConfFileTarget    = "/etc/sysctl.conf"                      // Target sysctl main configuration file.
+	ModulesLoadDefaultDirTarget    = "/etc/modules-load.d"                 // Target directory for kernel modules to load on boot.
+	KubernetesSysctlConfFileTarget = "/etc/sysctl.d/99-kubernetes-cri.conf"  // Common target path for Kubernetes-specific sysctl settings.
+	KubeletSystemdDropinDirTarget  = "/etc/systemd/system/kubelet.service.d" // Target directory for Kubelet systemd drop-in files.
 )
 
-// --- CNI Related Paths ---
 const (
-	DefaultCNIConfDir = "/etc/cni/net.d"
-	DefaultCNIBinDir  = "/opt/cni/bin"
+	DefaultCNIConfDirTarget = "/etc/cni/net.d" // Target directory for CNI configuration files.
+	DefaultCNIBinDirTarget  = "/opt/cni/bin"   // Target directory for CNI plugin binaries.
 )
 
-// --- Helm Related Paths ---
 const (
-	DefaultHelmHome  = "/root/.helm" // Or user specific path
-	DefaultHelmCache = "/root/.cache/helm" // Or user specific path
+	DefaultHelmHome  = "/root/.helm"       // Default Helm home directory.
+	DefaultHelmCache = "/root/.cache/helm" // Default Helm cache directory.
+)
+
+const (
+	KubeletKubeconfigPathTarget          = "/etc/kubernetes/kubelet.conf"
+	KubeletBootstrapKubeconfigPathTarget = "/etc/kubernetes/bootstrap-kubelet.conf"
+	KubeletConfigYAMLPathTarget          = "/var/lib/kubelet/config.yaml"
+	KubeletFlagsEnvPathTarget            = "/var/lib/kubelet/kubeadm-flags.env"
+	KubeletPKIDirTarget                  = "/var/lib/kubelet/pki"
 )
