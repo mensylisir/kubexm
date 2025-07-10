@@ -6,8 +6,10 @@ import (
 	// "github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // No longer needed in constructor
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/runtime"
-	steppreflight "github.com/mensylisir/kubexm/pkg/step/preflight" // Renamed import for clarity
+	// "github.com/mensylisir/kubexm/pkg/runtime" // No longer needed as TaskContext is from pkg/task
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // For PreflightConfig
+	"github.com/mensylisir/kubexm/pkg/common"                 // For common constants
+	steppreflight "github.com/mensylisir/kubexm/pkg/step/preflight"
 	"github.com/mensylisir/kubexm/pkg/task"
 )
 
@@ -56,24 +58,26 @@ func (t *SystemChecksTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragmen
 	clusterCfg := ctx.GetClusterConfig() // Get config from context
 
 	// Default values for checks
-	minCores := 2
-	minMemoryMB := uint64(2048) // 2GB
-	runDisableSwapStep := true
-	sudoForSwap := true
+	minCoresVal := int32(common.DefaultMinCPUCores) // Use constants
+	minMemoryMBVal := uint64(common.DefaultMinMemoryMB)
+	// runDisableSwapStep is determined by PreflightConfig.DisableSwap which defaults to true.
+	// The actual DisableSwapStep would be in a different task like InitialNodeSetupTask or SetupKernelTask.
 
 	if clusterCfg != nil && clusterCfg.Spec.Preflight != nil {
-		if clusterCfg.Spec.Preflight.MinCPUCores > 0 {
-			minCores = clusterCfg.Spec.Preflight.MinCPUCores
+		preflightCfg := clusterCfg.Spec.Preflight
+		if preflightCfg.MinCPUCores != nil && *preflightCfg.MinCPUCores > 0 {
+			minCoresVal = *preflightCfg.MinCPUCores
 		}
-		if clusterCfg.Spec.Preflight.MinMemoryMB > 0 {
-			minMemoryMB = clusterCfg.Spec.Preflight.MinMemoryMB
+		if preflightCfg.MinMemoryMB != nil && *preflightCfg.MinMemoryMB > 0 {
+			minMemoryMBVal = *preflightCfg.MinMemoryMB
 		}
-		runDisableSwapStep = clusterCfg.Spec.Preflight.DisableSwap
+		// DisableSwap is handled by SetDefaults_PreflightConfig to be *true by default.
+		// This task only *checks*; another task would *perform* the swap disabling if needed.
 	}
 
 	// Node 1: CheckCPU
 	cpuCheckStepName := fmt.Sprintf("%s-CPUCheck", t.Name())
-	cpuCheckStep := steppreflight.NewCheckCPUStep(cpuCheckStepName, minCores, false)
+	cpuCheckStep := steppreflight.NewCheckCPUStep(cpuCheckStepName, minCoresVal, false) // Pass value
 	nodeIDCPUCheck := plan.NodeID(cpuCheckStepName)
 	nodes[nodeIDCPUCheck] = &plan.ExecutionNode{
 		Name:     "SystemCPUCheck",
