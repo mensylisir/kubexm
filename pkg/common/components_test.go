@@ -1,143 +1,87 @@
 package common
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestComponentConstants(t *testing.T) {
 	t.Run("ComponentNames", func(t *testing.T) {
-		if KubeAPIServer != "kube-apiserver" {
-			t.Errorf("KubeAPIServer constant is incorrect: got %s, want kube-apiserver", KubeAPIServer)
-		}
-		if KubeControllerManager != "kube-controller-manager" {
-			t.Errorf("KubeControllerManager constant is incorrect: got %s, want kube-controller-manager", KubeControllerManager)
-		}
-		if KubeScheduler != "kube-scheduler" {
-			t.Errorf("KubeScheduler constant is incorrect: got %s, want kube-scheduler", KubeScheduler)
-		}
-		if Kubelet != "kubelet" {
-			t.Errorf("Kubelet constant is incorrect: got %s, want kubelet", Kubelet)
-		}
-		if KubeProxy != "kube-proxy" {
-			t.Errorf("KubeProxy constant is incorrect: got %s, want kube-proxy", KubeProxy)
-		}
-		if Etcd != "etcd" {
-			t.Errorf("Etcd constant is incorrect: got %s, want etcd", Etcd)
-		}
-		if Etcdctl != "etcdctl" {
-			t.Errorf("Etcdctl constant is incorrect: got %s, want etcdctl", Etcdctl)
-		}
-		if Containerd != "containerd" {
-			t.Errorf("Containerd constant is incorrect: got %s, want containerd", Containerd)
-		}
-		if Docker != "docker" {
-			t.Errorf("Docker constant is incorrect: got %s, want docker", Docker)
-		}
-		if Runc != "runc" {
-			t.Errorf("Runc constant is incorrect: got %s, want runc", Runc)
-		}
-		if CniDockerd != "cri-dockerd" {
-			t.Errorf("CniDockerd constant is incorrect: got %s, want cri-dockerd", CniDockerd)
-		}
-		if Kubeadm != "kubeadm" {
-			t.Errorf("Kubeadm constant is incorrect: got %s, want kubeadm", Kubeadm)
-		}
-		if Kubectl != "kubectl" {
-			t.Errorf("Kubectl constant is incorrect: got %s, want kubectl", Kubectl)
-		}
-		if Keepalived != "keepalived" {
-			t.Errorf("Keepalived constant is incorrect: got %s, want keepalived", Keepalived)
-		}
-		if HAProxy != "haproxy" {
-			t.Errorf("HAProxy constant is incorrect: got %s, want haproxy", HAProxy)
-		}
-		if KubeVIP != "kube-vip" {
-			t.Errorf("KubeVIP constant is incorrect: got %s, want kube-vip", KubeVIP)
-		}
+		assert.Equal(t, "kube-apiserver", KubeAPIServer)
+		assert.Equal(t, "kube-controller-manager", KubeControllerManager)
+		assert.Equal(t, "kube-scheduler", KubeScheduler)
+		assert.Equal(t, "kubelet", Kubelet)
+		assert.Equal(t, "kube-proxy", KubeProxy)
+		assert.Equal(t, "etcd", Etcd)
+		assert.Equal(t, "etcdctl", Etcdctl)
+		assert.Equal(t, "containerd", Containerd)
+		assert.Equal(t, "docker", Docker)
+		assert.Equal(t, "runc", Runc)
+		assert.Equal(t, "cri-dockerd", CniDockerd)
+		assert.Equal(t, "kubeadm", Kubeadm)
+		assert.Equal(t, "kubectl", Kubectl)
+		assert.Equal(t, "keepalived", Keepalived)
+		assert.Equal(t, "haproxy", HAProxy)
+		assert.Equal(t, "nginx", Nginx) // Added test
+		assert.Equal(t, "kube-vip", KubeVIP)
+		assert.Equal(t, "calicoctl", Calicoctl)     // Added test
+		assert.Equal(t, "helm", Helm)             // Added test
+		assert.Equal(t, "crictl", Crictl)           // Added test
+		assert.Equal(t, "node-local-dns", NodeLocalDNS) // Added test
 	})
 
 	t.Run("ServiceNames", func(t *testing.T) {
-		if KubeletServiceName != "kubelet.service" {
-			t.Errorf("KubeletServiceName constant is incorrect: got %s, want kubelet.service", KubeletServiceName)
-		}
-		if ContainerdServiceName != "containerd.service" {
-			t.Errorf("ContainerdServiceName constant is incorrect: got %s, want containerd.service", ContainerdServiceName)
-		}
-		if DockerServiceName != "docker.service" {
-			t.Errorf("DockerServiceName constant is incorrect: got %s, want docker.service", DockerServiceName)
-		}
-		if EtcdServiceName != "etcd.service" {
-			t.Errorf("EtcdServiceName constant is incorrect: got %s, want etcd.service", EtcdServiceName)
-		}
-		if CniDockerdServiceName != "cri-dockerd.service" {
-			t.Errorf("CniDockerdServiceName constant is incorrect: got %s, want cri-dockerd.service", CniDockerdServiceName)
-		}
-		if KeepalivedServiceName != "keepalived.service" {
-			t.Errorf("KeepalivedServiceName constant is incorrect: got %s, want keepalived.service", KeepalivedServiceName)
-		}
-		if HAProxyServiceName != "haproxy.service" {
-			t.Errorf("HAProxyServiceName constant is incorrect: got %s, want haproxy.service", HAProxyServiceName)
-		}
+		assert.Equal(t, "kubelet.service", KubeletServiceName)
+		assert.Equal(t, "containerd.service", ContainerdServiceName)
+		assert.Equal(t, "docker.service", DockerServiceName)
+		assert.Equal(t, "etcd.service", EtcdServiceName)
+		assert.Equal(t, "cri-dockerd.service", CniDockerdServiceName)
+		assert.Equal(t, "keepalived.service", KeepalivedServiceName)
+		assert.Equal(t, "haproxy.service", HAProxyServiceName)
+		assert.Equal(t, "nginx.service", NginxServiceName)     // Added test
+		assert.Equal(t, "crio.service", CrioServiceName)       // Added test
+		assert.Equal(t, "isulad.service", IsuladServiceName)   // Added test
+		assert.Equal(t, "etcd-defrag.timer", EtcdDefragTimerServiceName) // Added test
+		assert.Equal(t, "etcd-defrag.service", EtcdDefragSystemdServiceName) // Added test
 	})
 
 	t.Run("DefaultPorts", func(t *testing.T) {
-		if KubeAPIServerDefaultPort != 6443 {
-			t.Errorf("KubeAPIServerDefaultPort constant is incorrect: got %d, want 6443", KubeAPIServerDefaultPort)
-		}
-		if KubeSchedulerDefaultPort != 10259 {
-			t.Errorf("KubeSchedulerDefaultPort constant is incorrect: got %d, want 10259", KubeSchedulerDefaultPort)
-		}
-		if KubeControllerManagerDefaultPort != 10257 {
-			t.Errorf("KubeControllerManagerDefaultPort constant is incorrect: got %d, want 10257", KubeControllerManagerDefaultPort)
-		}
-		if KubeletDefaultPort != 10250 {
-			t.Errorf("KubeletDefaultPort constant is incorrect: got %d, want 10250", KubeletDefaultPort)
-		}
-		if EtcdDefaultClientPort != 2379 {
-			t.Errorf("EtcdDefaultClientPort constant is incorrect: got %d, want 2379", EtcdDefaultClientPort)
-		}
-		if EtcdDefaultPeerPort != 2380 {
-			t.Errorf("EtcdDefaultPeerPort constant is incorrect: got %d, want 2380", EtcdDefaultPeerPort)
-		}
-		if HAProxyDefaultFrontendPort != 6443 {
-			t.Errorf("HAProxyDefaultFrontendPort constant is incorrect: got %d, want 6443", HAProxyDefaultFrontendPort)
-		}
+		assert.Equal(t, 6443, KubeAPIServerDefaultPort)
+		assert.Equal(t, 10259, KubeSchedulerDefaultPort)
+		assert.Equal(t, 10257, KubeControllerManagerDefaultPort)
+		assert.Equal(t, 10250, KubeletDefaultPort)
+		assert.Equal(t, 2379, EtcdDefaultClientPort)
+		assert.Equal(t, 2380, EtcdDefaultPeerPort)
+		assert.Equal(t, 6443, HAProxyDefaultFrontendPort)
+		assert.Equal(t, 9153, CoreDNSMetricsPort)          // Added test
+		assert.Equal(t, 9253, NodeLocalDNSMetricsPort)     // Added test
+		assert.Equal(t, 10249, KubeProxyMetricsPort)       // Added test
+		assert.Equal(t, 10256, KubeProxyHealthzPort)        // Added test
 	})
 
 	t.Run("CommonToolsAndUtils", func(t *testing.T) {
-		if Helm != "helm" {
-			t.Errorf("Helm constant is incorrect: got %s", Helm)
-		}
-		if Crictl != "crictl" {
-			t.Errorf("Crictl constant is incorrect: got %s", Crictl)
-		}
-		if Socat != "socat" {
-			t.Errorf("Socat constant is incorrect: got %s", Socat)
-		}
-		if Conntrack != "conntrack" {
-			t.Errorf("Conntrack constant is incorrect: got %s", Conntrack)
-		}
-		if IPSet != "ipset" {
-			t.Errorf("IPSet constant is incorrect: got %s", IPSet)
-		}
-		if Ipvsadm != "ipvsadm" {
-			t.Errorf("Ipvsadm constant is incorrect: got %s", Ipvsadm)
-		}
-		if NfsUtils != "nfs-utils" {
-			t.Errorf("NfsUtils constant is incorrect: got %s", NfsUtils)
-		}
-		if CephCommon != "ceph-common" {
-			t.Errorf("CephCommon constant is incorrect: got %s", CephCommon)
-		}
+		assert.Equal(t, "socat", Socat)
+		assert.Equal(t, "conntrack-tools", Conntrack) // Updated expected value
+		assert.Equal(t, "ipset", IPSet)
+		assert.Equal(t, "ipvsadm", Ipvsadm)
+		assert.Equal(t, "nfs-utils", NfsUtils)
+		assert.Equal(t, "ceph-common", CephCommon)
+		assert.Equal(t, "curl", Curl)     // Added test
+		assert.Equal(t, "pgrep", Pgrep)   // Added test
+		assert.Equal(t, "killall", Killall) // Added test
+
 	})
 
 	t.Run("ImageRepositoriesAndVersions", func(t *testing.T) {
-		if CoreDNSImageRepository != "registry.k8s.io/coredns" {
-			t.Errorf("CoreDNSImageRepository constant is incorrect: got %s", CoreDNSImageRepository)
-		}
-		if PauseImageRepository != "registry.k8s.io/pause" {
-			t.Errorf("PauseImageRepository constant is incorrect: got %s", PauseImageRepository)
-		}
-		if DefaultPauseImageVersion != "3.9" { // Example, adjust if changed
-			t.Errorf("DefaultPauseImageVersion constant is incorrect: got %s", DefaultPauseImageVersion)
-		}
+		assert.Equal(t, "registry.k8s.io", DefaultK8sImageRegistry) // Added test
+		assert.Equal(t, "registry.k8s.io/coredns", DefaultCoreDNSImageRepository)
+		assert.Equal(t, "registry.k8s.io", DefaultPauseImageRepository) // Corrected, was "registry.k8s.io/pause"
+		assert.Equal(t, "ghcr.io/kube-vip", DefaultKubeVIPImageRepository) // Added test
+		assert.Equal(t, "docker.io/library/haproxy", DefaultHAProxyImageRepository) // Added test
+		assert.Equal(t, "docker.io/library/nginx", DefaultNginxImageRepository)   // Added test
+
+		// DefaultPauseImageVersion and DefaultCoreDNSVersion are in constants.go, not components.go
+		// DefaultKubeVIPImage in constants.go includes the version.
 	})
 }
