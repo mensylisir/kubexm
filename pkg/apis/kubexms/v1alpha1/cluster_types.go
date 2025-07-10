@@ -6,7 +6,6 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/util"
@@ -23,6 +22,8 @@ import (
 // +kubebuilder:printcolumn:name="Hosts",type="integer",JSONPath=".spec.hostsCount",description="Number of hosts"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
 // Cluster is the top-level configuration object.
 type Cluster struct {
 	metav1.TypeMeta   `json:",inline" yaml:",inline"`
@@ -32,6 +33,7 @@ type Cluster struct {
 }
 
 // ClusterSpec defines the desired state of the Kubernetes cluster.
+// +k8s:deepcopy-gen=true
 type ClusterSpec struct {
 	// Type specifies the overall cluster deployment type.
 	// It can influence high-level deployment strategies.
@@ -64,6 +66,7 @@ type ClusterSpec struct {
 }
 
 // ClusterStatus defines the observed state of Cluster
+// +k8s:deepcopy-gen=true
 type ClusterStatus struct {
 	// Conditions represent the latest available observations of a cluster's state.
 	Conditions []ClusterCondition `json:"conditions,omitempty" yaml:"conditions,omitempty"`
@@ -103,6 +106,7 @@ type NodeCounts struct {
 }
 
 // HostSpec defines the configuration for a single host.
+// +k8s:deepcopy-gen=true
 type HostSpec struct {
 	Name            string            `json:"name" yaml:"name"`
 	Address         string            `json:"address" yaml:"address"`
@@ -122,6 +126,7 @@ type HostSpec struct {
 }
 
 // RoleGroupsSpec defines the different groups of nodes in the cluster.
+// +k8s:deepcopy-gen=true
 type RoleGroupsSpec struct {
 	Master       MasterRoleSpec       `json:"master,omitempty" yaml:"master,omitempty"`
 	Worker       WorkerRoleSpec       `json:"worker,omitempty" yaml:"worker,omitempty"`
@@ -133,42 +138,50 @@ type RoleGroupsSpec struct {
 }
 
 // MasterRoleSpec defines the configuration for master nodes.
+// +k8s:deepcopy-gen=true
 type MasterRoleSpec struct {
 	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
 // WorkerRoleSpec defines the configuration for worker nodes.
+// +k8s:deepcopy-gen=true
 type WorkerRoleSpec struct {
 	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
 // EtcdRoleSpec defines the configuration for etcd nodes.
+// +k8s:deepcopy-gen=true
 type EtcdRoleSpec struct {
 	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
 // LoadBalancerRoleSpec defines the configuration for load balancer nodes.
+// +k8s:deepcopy-gen=true
 type LoadBalancerRoleSpec struct {
 	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
 // StorageRoleSpec defines the configuration for storage nodes.
+// +k8s:deepcopy-gen=true
 type StorageRoleSpec struct {
 	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
 // RegistryRoleSpec defines the configuration for registry nodes.
+// +k8s:deepcopy-gen=true
 type RegistryRoleSpec struct {
 	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
 // CustomRoleSpec defines a custom role group.
+// +k8s:deepcopy-gen=true
 type CustomRoleSpec struct {
 	Name  string   `json:"name" yaml:"name"`
 	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
 // SystemSpec defines system-level configuration.
+// +k8s:deepcopy-gen=true
 type SystemSpec struct {
 	NTPServers         []string          `json:"ntpServers,omitempty" yaml:"ntpServers,omitempty"`
 	Timezone           string            `json:"timezone,omitempty" yaml:"timezone,omitempty"`
@@ -610,240 +623,11 @@ func Validate_Cluster(cfg *Cluster) error {
 	return nil
 }
 
-// DeepCopyObject implements runtime.Object.
-func (c *Cluster) DeepCopyObject() runtime.Object {
-	if c == nil {
-		return nil
-	}
-	out := new(Cluster)
-	c.DeepCopyInto(out)
-	return out
-}
-
-// DeepCopyInto is a manually implemented deepcopy function.
-func (in *Cluster) DeepCopyInto(out *Cluster) {
-	*out = *in
-	out.TypeMeta = in.TypeMeta
-	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
-	in.Spec.DeepCopyInto(&out.Spec)
-	// Assuming ClusterStatus is simple or has its own DeepCopyInto
-	out.Status = in.Status
-}
-
-// DeepCopy is a deepcopy function, copying the receiver, creating a new Cluster.
-func (in *Cluster) DeepCopy() *Cluster {
-	if in == nil {
-		return nil
-	}
-	out := new(Cluster)
-	in.DeepCopyInto(out)
-	return out
-}
-
-// DeepCopyInto for ClusterSpec
-func (in *ClusterSpec) DeepCopyInto(out *ClusterSpec) {
-	*out = *in // Handles simple fields like Type, HostsFileContent, HostsCount
-
-	if in.Hosts != nil {
-		out.Hosts = make([]HostSpec, len(in.Hosts))
-		for i := range in.Hosts {
-			in.Hosts[i].DeepCopyInto(&out.Hosts[i])
-		}
-	}
-	if in.RoleGroups != nil {
-		out.RoleGroups = new(RoleGroupsSpec)
-		in.RoleGroups.DeepCopyInto(out.RoleGroups)
-	}
-	if in.Global != nil {
-		out.Global = new(GlobalSpec)
-		*out.Global = *in.Global // GlobalSpec has simple types
-	}
-	if in.ControlPlaneEndpoint != nil {
-		out.ControlPlaneEndpoint = new(ControlPlaneEndpointSpec)
-		in.ControlPlaneEndpoint.DeepCopyInto(out.ControlPlaneEndpoint)
-	}
-	if in.System != nil {
-		out.System = new(SystemSpec)
-		in.System.DeepCopyInto(out.System)
-	}
-	if in.Kubernetes != nil {
-		out.Kubernetes = new(KubernetesConfig)
-		in.Kubernetes.DeepCopyInto(out.Kubernetes)
-	}
-	if in.Etcd != nil {
-		out.Etcd = new(EtcdConfig)
-		in.Etcd.DeepCopyInto(out.Etcd)
-	}
-	if in.Network != nil {
-		out.Network = new(NetworkConfig)
-		in.Network.DeepCopyInto(out.Network)
-	}
-	if in.Storage != nil {
-		out.Storage = new(StorageConfig)
-		in.Storage.DeepCopyInto(out.Storage)
-	}
-	if in.Registry != nil {
-		out.Registry = new(RegistryConfig)
-		in.Registry.DeepCopyInto(out.Registry)
-	}
-	if in.Addons != nil {
-		out.Addons = make([]string, len(in.Addons))
-		copy(out.Addons, in.Addons)
-	}
-	if in.Dns != nil { // Changed to pointer
-		out.Dns = new(DNS)
-		in.Dns.DeepCopyInto(out.Dns)
-	}
-	if in.Preflight != nil {
-		out.Preflight = new(PreflightConfig)
-		in.Preflight.DeepCopyInto(out.Preflight)
-	}
-	if in.HighAvailability != nil {
-		out.HighAvailability = new(HighAvailabilityConfig)
-		in.HighAvailability.DeepCopyInto(out.HighAvailability)
-	}
-}
-
-// DeepCopyInto for HostSpec
-func (in *HostSpec) DeepCopyInto(out *HostSpec) {
-	*out = *in // Handles simple fields
-	if in.Roles != nil {
-		out.Roles = make([]string, len(in.Roles))
-		copy(out.Roles, in.Roles)
-	}
-	if in.Labels != nil {
-		out.Labels = make(map[string]string, len(in.Labels))
-		for key, val := range in.Labels {
-			out.Labels[key] = val
-		}
-	}
-	if in.Taints != nil {
-		out.Taints = make([]TaintSpec, len(in.Taints))
-		copy(out.Taints, in.Taints) // TaintSpec is simple
-	}
-}
-
-// DeepCopyInto for RoleGroupsSpec
-func (in *RoleGroupsSpec) DeepCopyInto(out *RoleGroupsSpec) {
-	*out = *in // Handles simple fields (which are struct types but contain only slices of strings)
-	// Deep copy for slices within the role specs
-	if in.Master.Hosts != nil {
-		out.Master.Hosts = make([]string, len(in.Master.Hosts))
-		copy(out.Master.Hosts, in.Master.Hosts)
-	}
-	if in.Worker.Hosts != nil {
-		out.Worker.Hosts = make([]string, len(in.Worker.Hosts))
-		copy(out.Worker.Hosts, in.Worker.Hosts)
-	}
-	if in.Etcd.Hosts != nil {
-		out.Etcd.Hosts = make([]string, len(in.Etcd.Hosts))
-		copy(out.Etcd.Hosts, in.Etcd.Hosts)
-	}
-	if in.LoadBalancer.Hosts != nil {
-		out.LoadBalancer.Hosts = make([]string, len(in.LoadBalancer.Hosts))
-		copy(out.LoadBalancer.Hosts, in.LoadBalancer.Hosts)
-	}
-	if in.Storage.Hosts != nil {
-		out.Storage.Hosts = make([]string, len(in.Storage.Hosts))
-		copy(out.Storage.Hosts, in.Storage.Hosts)
-	}
-	if in.Registry.Hosts != nil {
-		out.Registry.Hosts = make([]string, len(in.Registry.Hosts))
-		copy(out.Registry.Hosts, in.Registry.Hosts)
-	}
-	if in.CustomRoles != nil {
-		out.CustomRoles = make([]CustomRoleSpec, len(in.CustomRoles))
-		for i := range in.CustomRoles {
-			in.CustomRoles[i].DeepCopyInto(&out.CustomRoles[i])
-		}
-	}
-}
-
-// DeepCopyInto for CustomRoleSpec
-func (in *CustomRoleSpec) DeepCopyInto(out *CustomRoleSpec) {
-	*out = *in // Handles simple fields
-	if in.Hosts != nil {
-		out.Hosts = make([]string, len(in.Hosts))
-		copy(out.Hosts, in.Hosts)
-	}
-}
-
-// DeepCopyInto for SystemSpec
-func (in *SystemSpec) DeepCopyInto(out *SystemSpec) {
-	*out = *in // Handles simple fields
-	if in.NTPServers != nil {
-		out.NTPServers = make([]string, len(in.NTPServers))
-		copy(out.NTPServers, in.NTPServers)
-	}
-	if in.RPMs != nil {
-		out.RPMs = make([]string, len(in.RPMs))
-		copy(out.RPMs, in.RPMs)
-	}
-	if in.Debs != nil {
-		out.Debs = make([]string, len(in.Debs))
-		copy(out.Debs, in.Debs)
-	}
-	if in.PreInstallScripts != nil {
-		out.PreInstallScripts = make([]string, len(in.PreInstallScripts))
-		copy(out.PreInstallScripts, in.PreInstallScripts)
-	}
-	if in.PostInstallScripts != nil {
-		out.PostInstallScripts = make([]string, len(in.PostInstallScripts))
-		copy(out.PostInstallScripts, in.PostInstallScripts)
-	}
-	if in.Modules != nil {
-		out.Modules = make([]string, len(in.Modules))
-		copy(out.Modules, in.Modules)
-	}
-	if in.SysctlParams != nil {
-		out.SysctlParams = make(map[string]string, len(in.SysctlParams))
-		for key, val := range in.SysctlParams {
-			out.SysctlParams[key] = val
-		}
-	}
-}
-
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-
 // ClusterList contains a list of Cluster
 type ClusterList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Cluster `json:"items"`
-}
-
-// DeepCopyObject implements runtime.Object.
-func (cl *ClusterList) DeepCopyObject() runtime.Object {
-	if cl == nil {
-		return nil
-	}
-	out := new(ClusterList)
-	cl.DeepCopyInto(out)
-	return out
-}
-
-// DeepCopyInto is a manually implemented copy for compilation.
-func (in *ClusterList) DeepCopyInto(out *ClusterList) {
-	*out = *in
-	out.TypeMeta = in.TypeMeta
-	in.ListMeta.DeepCopyInto(&out.ListMeta)
-	if in.Items != nil {
-		inItems := in.Items
-		out.Items = make([]Cluster, len(inItems))
-		for i := range inItems {
-			inItems[i].DeepCopyInto(&out.Items[i])
-		}
-	}
-}
-
-// DeepCopy is a deepcopy function, copying the receiver, creating a new ClusterList.
-func (in *ClusterList) DeepCopy() *ClusterList {
-	if in == nil {
-		return nil
-	}
-	out := new(ClusterList)
-	in.DeepCopyInto(out)
-	return out
 }
 
 // Validate_RoleGroupsSpec validates RoleGroupsSpec.

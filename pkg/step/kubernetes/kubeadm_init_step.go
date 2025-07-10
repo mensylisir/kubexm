@@ -2,6 +2,8 @@ package kubernetes
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
@@ -91,6 +93,97 @@ func (s *KubeadmInitStep) Run(ctx runtime.StepContext, host connector.Host) erro
 	//    logger.Info("Found and cached kubeadm join command.")
 	// }
 	// Similar for token, cert key, discovery hash.
+
+	// Parse output for critical information
+	outputStr := string(stdout)
+
+	// Regex for worker join command
+	// Example: kubeadm join <control-plane-host>:<control-plane-port> --token <token> --discovery-token-ca-cert-hash sha256:<hash>
+	workerJoinRegex := regexp.MustCompile(`kubeadm join .* --token\s*([^\s]+)\s*--discovery-token-ca-cert-hash\s*sha256:([a-f0-9]{64})`)
+	// Regex for control-plane join command (includes --certificate-key)
+	// Example: kubeadm join <control-plane-host>:<control-plane-port> --token <token> --discovery-token-ca-cert-hash sha256:<hash> --control-plane --certificate-key <key>
+	controlPlaneJoinRegex := regexp.MustCompile(`kubeadm join .* --token\s*([^\s]+)\s*--discovery-token-ca-cert-hash\s*sha256:([a-f0-9]{64})\s*--control-plane\s*--certificate-key\s*([a-f0-9]{64})`)
+
+	// Extract worker join info
+	workerMatches := workerJoinRegex.FindStringSubmatch(outputStr)
+	if len(workerMatches) == 3 {
+		token := workerMatches[1]
+		discoveryHash := workerMatches[2]
+		ctx.TaskCache().Set(KubeadmTokenCacheKey, token)
+		ctx.TaskCache().Set(KubeadmDiscoveryHashCacheKey, discoveryHash)
+		// Try to find the full join command line for workers
+		for _, line := range strings.Split(outputStr, "\n") {
+			trimmedLine := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmedLine, "kubeadm join") && !strings.Contains(trimmedLine, "--control-plane") {
+				ctx.TaskCache().Set(KubeadmJoinCommandCacheKey, trimmedLine) // Cache the first worker join command found
+				logger.Info("Found and cached kubeadm worker join command.", "command", trimmedLine)
+				break
+			}
+		}
+		logger.Info("Cached kubeadm token and discovery hash.", "token", token, "hash", discoveryHash)
+	} else {
+		logger.Warn("Could not parse worker join token and discovery hash from kubeadm init output.")
+	}
+
+	// Extract control-plane join info (certificate key)
+	// This often appears separately or as part of a longer join command for control plane nodes.
+	// The regex above tries to capture it if it's in a full command.
+	// Kubeadm also prints it like: --certificate-key <key>
+	cpMatches := controlPlaneJoinRegex.FindStringSubmatch(outputStr)
+	if len(cpMatches) == 4 {
+		// Token and hash might be redundant if already captured by worker regex, but good to have if format differs.
+		// cpToken := cpMatches[1]
+		// cpDiscoveryHash := cpMatches[2]
+		certificateKey := cpMatches[3]
+		ctx.TaskCache().Set(KubeadmCertificateKeyCacheKey, certificateKey)
+		logger.Info("Cached kubeadm certificate key for control-plane join.", "key", certificateKey)
+
+		// Try to find the full control-plane join command line
+		for _, line := range strings.Split(outputStr, "\n") {
+			trimmedLine := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmedLine, "kubeadm join") && strings.Contains(trimmedLine, "--control-plane") {
+				// Cache the full control-plane join command if needed by other steps.
+				// For now, just caching the key is often sufficient as other parts are known or in cache.
+				// Example: ctx.TaskCache().Set("KubeadmControlPlaneJoinCommand", trimmedLine)
+				logger.Info("Found control-plane join command line.", "command", trimmedLine)
+				break
+			}
+		}
+	} else {
+		// Fallback: search for certificate key if not in a full join command line in the output
+		certKeyRegex := regexp.MustCompile(`--certificate-key\s*([a-f0-9]{64})`)
+		certKeyMatch := certKeyRegex.FindStringSubmatch(outputStr)
+		if len(certKeyMatch) == 2 {
+			certificateKey := certKeyMatch[1]
+			ctx.TaskCache().Set(KubeadmCertificateKeyCacheKey, certificateKey)
+			logger.Info("Cached kubeadm certificate key (found standalone).", "key", certificateKey)
+		} else {
+			logger.Warn("Could not parse certificate key from kubeadm init output.")
+		}
+	}
+
+	// It's also common for kubeadm to output the token and hash separately.
+	// Example: "Your Kubernetes control-plane has initialized successfully!"
+	// "To start using your cluster, you need to run the following as a regular user:"
+	//   mkdir -p $HOME/.kube
+	//   sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+	//   sudo chown $(id -u):$(id -g) $HOME/.kube/config
+	//
+	// "Alternatively, if you are the root user, you can run:"
+	//   export KUBECONFIG=/etc/kubernetes/admin.conf
+	//
+	// "You should now deploy a pod network to the cluster."
+	// "Run \"kubectl apply -f [podnetwork].yaml\" with one of the options listed at:"
+	//   https://kubernetes.io/docs/concepts/cluster-administration/addons/
+	//
+	// "Then you can join any number of worker nodes by running the following on each as root:"
+	// kubeadm join 10.0.2.15:6443 --token abcdef.0123456789abcdef \
+	//	--discovery-token-ca-cert-hash sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+	//
+	// "Then you can join any number of control-plane nodes by running the following on each as root:"
+	// kubeadm join 10.0.2.15:6443 --token abcdef.0123456789abcdef \
+	//	--discovery-token-ca-cert-hash sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+	//	--control-plane --certificate-key 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 
 	return nil
 }

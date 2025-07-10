@@ -197,89 +197,41 @@ func (s *ConfigureSysctlStep) Run(ctx step.StepContext, host connector.Host) err
 		return fmt.Errorf("failed to create directory %s for sysctl config: %w", confDir, errMkdir)
 	}
 
-	// Read existing content to avoid duplicate lines, or simply append and let sysctl -p handle it.
-	// A robust way is to build the desired content and overwrite, or manage lines carefully.
-	// For this implementation, we will append if not present, or ensure the line matches.
-
-	// Fetch existing content
-	var existingContent string
-	fileExists, _ := runnerSvc.Exists(ctx.GoContext(), conn, s.ConfFile)
-	if fileExists {
-		contentBytes, errRead := runnerSvc.ReadFile(ctx.GoContext(), conn, s.ConfFile)
-		if errRead != nil {
-			logger.Warn("Could not read existing sysctl conf file, may create new or append duplicates.", "file", s.ConfFile, "error", errRead)
-		} else {
-			existingContent = string(contentBytes)
-		}
+	// 2. Ensure parameters are persistent
+	logger.Info("Ensuring sysctl parameters are persistent.", "file", s.ConfFile)
+	confDir := filepath.Dir(s.ConfFile)
+	if errMkdir := runnerSvc.Mkdirp(ctx.GoContext(), conn, confDir, "0755", s.Sudo); errMkdir != nil {
+		return fmt.Errorf("failed to create directory %s for sysctl config: %w", confDir, errMkdir)
 	}
 
+	// Build the content for the sysctl configuration file.
+	// This will overwrite s.ConfFile with only the parameters defined in s.Params.
 	var contentBuilder strings.Builder
-	contentBuilder.WriteString(existingContent)
-	if !strings.HasSuffix(existingContent, "\n") && existingContent != "" {
-		contentBuilder.WriteString("\n")
-	}
-
-	needsWrite := !fileExists
-	currentLines := strings.Split(existingContent, "\n")
-	existingParamsMap := make(map[string]string)
-	for _, line := range currentLines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
+	contentBuilder.WriteString(fmt.Sprintf("# File managed by Kubexm for step: %s\n", s.meta.Name))
+	contentBuilder.WriteString("# Changes to this file may be overwritten.\n")
+	for key, value := range s.Params {
+		// Ensure keys and values are reasonably safe for config file
+		// Basic sanitization: trim whitespace. More complex sanitization might be needed
+		// if keys/values can contain special characters that break sysctl.conf format.
+		sKey := strings.TrimSpace(key)
+		sValue := strings.TrimSpace(value)
+		if sKey == "" {
+			logger.Warn("Skipping empty sysctl key.")
 			continue
 		}
-		parts := strings.SplitN(trimmed, "=", 2)
-		if len(parts) == 2 {
-			existingParamsMap[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
-		}
+		contentBuilder.WriteString(fmt.Sprintf("%s = %s\n", sKey, sValue))
 	}
+	finalContent := contentBuilder.String()
 
-	// Build the new content ensuring our params are present and correct
-	// This is a bit naive; a proper config management tool would handle this better.
-	// We'll just ensure our lines are there. If a key exists with a different value, this won't update it.
-	// A better approach might be to remove lines for s.Params keys and then add them.
-	// For now: Add if not exactly present.
-	finalLines := []string{}
-	if fileExists { // If file exists, preserve non-kubexm lines
-	    for _, line := range currentLines {
-		    trimmed := strings.TrimSpace(line)
-		    isOurParam := false
-		    for key := range s.Params {
-			    if strings.HasPrefix(trimmed, key+"=") || strings.HasPrefix(trimmed, key+" =") {
-				    isOurParam = true
-				    break
-			    }
-		    }
-		    if !isOurParam {
-			    finalLines = append(finalLines, line)
-		    }
-	    }
+	logger.Info("Writing sysctl parameters to persistent config file.", "file", s.ConfFile)
+	errWrite := runnerSvc.WriteFile(ctx.GoContext(), conn, []byte(finalContent), s.ConfFile, "0644", s.Sudo)
+	if errWrite != nil {
+		return fmt.Errorf("failed to write sysctl params to %s: %w", s.ConfFile, errWrite)
 	}
+	logger.Info("Sysctl parameters written to persistent config.", "file", s.ConfFile)
 
-
-	for key, value := range s.Params {
-		expectedLine := fmt.Sprintf("%s = %s", key, value)
-		finalLines = append(finalLines, expectedLine)
-		// Simple check if line needs to be added (doesn't handle updates of existing values well)
-		if val, ok := existingParamsMap[key]; !ok || val != value {
-			needsWrite = true
-		}
-	}
-
-	if needsWrite {
-		finalContent := strings.Join(finalLines, "\n")
-		// Ensure there's a trailing newline if content is not empty
-		if finalContent != "" && !strings.HasSuffix(finalContent, "\n") {
-			finalContent += "\n"
-		}
-
-		logger.Info("Writing sysctl parameters to persistent config file.", "file", s.ConfFile)
-		errWrite := runnerSvc.WriteFile(ctx.GoContext(), conn, []byte(finalContent), s.ConfFile, "0644", s.Sudo)
-		if errWrite != nil {
-			return fmt.Errorf("failed to write sysctl params to %s: %w", s.ConfFile, errWrite)
-		}
-		logger.Info("Sysctl parameters written to persistent config.", "file", s.ConfFile)
-
-		// Apply persistent settings (sysctl -p or sysctl --system)
+	// Apply persistent settings (sysctl -p or sysctl --system)
+	// Using -p <file> targets only our file, which is safer if other sysctl files exist.
 		// Using --system is generally preferred if available and targets all /etc/sysctl.d files.
 		// Using -p <file> targets only our file.
 		applyCmd := fmt.Sprintf("sysctl -p %s", s.ConfFile)

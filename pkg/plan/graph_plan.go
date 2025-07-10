@@ -94,6 +94,51 @@ func (g *ExecutionGraph) AddNode(id NodeID, node *ExecutionNode) error {
 	return nil
 }
 
+// IsEmpty checks if the graph contains any nodes.
+func (g *ExecutionGraph) IsEmpty() bool {
+	return len(g.Nodes) == 0
+}
+
+// LinkFragments adds dependencies from all fromNodeIDs to all toNodeIDs within the graph.
+// It ensures that the nodes exist in the graph before adding dependencies.
+// This function is typically used by a Pipeline or Module to link the
+// ExecutionFragments of its constituent parts.
+func LinkFragments(graph *ExecutionGraph, fromNodeIDs []NodeID, toNodeIDs []NodeID) error {
+	if graph == nil || graph.Nodes == nil {
+		return fmt.Errorf("cannot link fragments in a nil or uninitialized graph")
+	}
+	// If there are no source exit points or no target entry points, there's nothing to link.
+	if len(fromNodeIDs) == 0 || len(toNodeIDs) == 0 {
+		return nil
+	}
+
+	// Verify all specified nodes exist to prevent partial linking on error.
+	for _, id := range fromNodeIDs {
+		if _, exists := graph.Nodes[id]; !exists {
+			return fmt.Errorf("LinkFragments: source node ID '%s' not found in graph", id)
+		}
+	}
+	for _, id := range toNodeIDs {
+		if _, exists := graph.Nodes[id]; !exists {
+			return fmt.Errorf("LinkFragments: target node ID '%s' not found in graph", id)
+		}
+	}
+
+	// Add dependencies: each node in toNodeIDs depends on all nodes in fromNodeIDs.
+	for _, toID := range toNodeIDs {
+		targetNode := graph.Nodes[toID] // Known to exist from the check above
+		// Append all fromNodeIDs as dependencies, AddDependency will handle duplicates if any.
+		for _, fromID := range fromNodeIDs {
+			if err := graph.AddDependency(fromID, toID); err != nil {
+				// This could happen if AddDependency has stricter rules (e.g. self-loop if fromID == toID)
+				// or other internal errors.
+				return fmt.Errorf("LinkFragments: failed to add dependency from '%s' to '%s': %w", fromID, toID, err)
+			}
+		}
+	}
+	return nil
+}
+
 // AddDependency creates a dependency between two nodes (from -> to).
 // It returns an error if either node does not exist or if the dependency would be self-referential.
 func (g *ExecutionGraph) AddDependency(from NodeID, to NodeID) error {

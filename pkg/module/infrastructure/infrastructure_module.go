@@ -40,8 +40,13 @@ func (m *InfrastructureModule) Plan(ctx module.ModuleContext) (*task.ExecutionFr
 	var allModuleExitNodes []plan.NodeID
 
 	// 1. ETCD Setup (PKI Generation + Installation)
-	// This assumes etcdHostsForAltNames would be derived from clusterCfg within GenerateEtcdPkiTask or passed if complex.
-	generatePkiTask := taskEtcd.NewGenerateEtcdPkiTask(nil, clusterCfg.Spec.ControlPlaneEndpoint.Domain, "lb.kubexm.internal")
+	// ControlPlaneEndpoint.Domain and a default LB domain are passed for SAN generation if needed.
+	cpDomain := ""
+	if clusterCfg.Spec.ControlPlaneEndpoint != nil {
+		cpDomain = clusterCfg.Spec.ControlPlaneEndpoint.Domain
+	}
+	// TODO: Make "lb.kubexm.internal" a configurable default or derive from cluster domain.
+	generatePkiTask := taskEtcd.NewGenerateEtcdPkiTask(cpDomain, "lb.kubexm.internal")
 	installEtcdTask := taskEtcd.NewInstallETCDTask()
 
 	etcdTasks := []task.Task{generatePkiTask, installEtcdTask}
@@ -71,16 +76,17 @@ func (m *InfrastructureModule) Plan(ctx module.ModuleContext) (*task.ExecutionFr
 
 	// 2. Container Runtime Setup
 	var containerRuntimeTask task.Task
-	if clusterCfg.Spec.ContainerRuntime == nil {
-		return nil, fmt.Errorf("containerRuntime spec is nil, cannot determine runtime type")
+	// clusterCfg.Spec.Kubernetes.ContainerRuntime is the correct path
+	if clusterCfg.Spec.Kubernetes == nil || clusterCfg.Spec.Kubernetes.ContainerRuntime == nil {
+		return nil, fmt.Errorf("kubernetes.containerRuntime spec is nil, cannot determine runtime type")
 	}
-	switch clusterCfg.Spec.ContainerRuntime.Type {
-	case v1alpha1.ContainerdRuntime:
-		containerRuntimeTask = taskContainerd.NewInstallContainerdTask(nil) // Run on all roles by default, or specific roles
-	case v1alpha1.DockerRuntime:
-		containerRuntimeTask = taskDocker.NewInstallDockerTask(nil)
+	switch clusterCfg.Spec.Kubernetes.ContainerRuntime.Type {
+	case v1alpha1.ContainerRuntimeContainerd: // Use defined constant
+		containerRuntimeTask = taskContainerd.NewInstallContainerdTask([]string{common.AllHostsRole})
+	case v1alpha1.ContainerRuntimeDocker:    // Use defined constant
+		containerRuntimeTask = taskDocker.NewInstallDockerTask([]string{common.AllHostsRole})
 	default:
-		return nil, fmt.Errorf("unsupported container runtime type: %s", clusterCfg.Spec.ContainerRuntime.Type)
+		return nil, fmt.Errorf("unsupported container runtime type: %s", clusterCfg.Spec.Kubernetes.ContainerRuntime.Type)
 	}
 
 	isRequired, err := containerRuntimeTask.IsRequired(taskCtx)
