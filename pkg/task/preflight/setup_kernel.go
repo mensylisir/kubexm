@@ -8,7 +8,8 @@ import (
 	"github.com/mensylisir/kubexm/pkg/task"    // For task.BaseTask, task.ExecutionFragment, task.Task interface
 
 	// Assuming these New... functions return actual step.Step instances
-	steppreflight "github.com/mensylisir/kubexm/pkg/step/preflight" // For preflight.NewLoadKernelModulesStep, preflight.NewSetSystemConfigStep
+	// steppreflight "github.com/mensylisir/kubexm/pkg/step/preflight" // No longer used, using osstep
+	osstep "github.com/mensylisir/kubexm/pkg/step/os" // For os steps
 	// "github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // For accessing config types
 )
 
@@ -54,35 +55,27 @@ func (t *SetupKernelTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment
 	reloadSysctl := true
 
 	// Override with values from config if provided
-	// Assuming ClusterConfig.Spec.Kernel exists and has Modules and SysctlParams fields
-	if clusterConfig.Spec.Kernel != nil {
-		if len(clusterConfig.Spec.Kernel.Modules) > 0 {
-			kernelModules = clusterConfig.Spec.Kernel.Modules
+	// Access System spec for Modules and SysctlParams
+	if clusterConfig.Spec.System != nil {
+		if len(clusterConfig.Spec.System.Modules) > 0 {
+			kernelModules = clusterConfig.Spec.System.Modules
 			logger.Debug("Overriding kernel modules from config", "modules", kernelModules)
 		}
-		if len(clusterConfig.Spec.Kernel.SysctlParams) > 0 {
-			sysctlParams = clusterConfig.Spec.Kernel.SysctlParams
+		if len(clusterConfig.Spec.System.SysctlParams) > 0 {
+			sysctlParams = clusterConfig.Spec.System.SysctlParams
 			logger.Debug("Overriding sysctl params from config", "params", sysctlParams)
 		}
-		// Example for SysctlConfigFilePath if it were part of v1alpha1.KernelConfig:
-		// if clusterConfig.Spec.Kernel.SysctlConfigFilePath != "" {
-		//    sysctlConfigPath = clusterConfig.Spec.Kernel.SysctlConfigFilePath
-		//    logger.Debug("Overriding sysctl config file path from config", "path", sysctlConfigPath)
-		// }
+		// SysctlConfigPath could also be part of SystemSpec if needed
 	}
 
 	// Create Step instances
-	// IMPORTANT: These New...Step functions must return objects implementing step.Step
-	// And they should take necessary parameters directly, not "StepSpec" structs.
 	loadModulesStepName := fmt.Sprintf("%s-LoadModules", t.Name())
-	// Using os.NewLoadKernelModulesStep(instanceName string, modules []string, sudo bool, confFile string)
-	// The confFile for modules is often /etc/modules-load.d/<name>.conf
-	// Let LoadKernelModulesStep use its default config file path.
-	loadModulesStep := os.NewLoadKernelModulesStep(loadModulesStepName, kernelModules, true, "") // sudo true, default conf file
+	// Constructor: NewLoadKernelModulesStep(instanceName string, modules []string, sudo bool, confFile string)
+	loadModulesStep := osstep.NewLoadKernelModulesStep(loadModulesStepName, kernelModules, true, "") // sudo true, default conf file
 
 	setSysctlStepName := fmt.Sprintf("%s-SetSysctl", t.Name())
-	// Using os.NewSetSystemConfigStep(instanceName string, params map[string]string, configFilePath string, reload bool, sudo bool)
-	setSysctlStep := os.NewSetSystemConfigStep(setSysctlStepName, sysctlParams, sysctlConfigPath, reloadSysctl, true) // sudo true
+	// Constructor: NewConfigureSysctlStep(instanceName string, params map[string]string, sudo bool, confFile string)
+	setSysctlStep := osstep.NewConfigureSysctlStep(setSysctlStepName, sysctlParams, true, sysctlConfigPath) // sudo true
 
 	// Define ExecutionNodes
 	fragment := task.NewExecutionFragment(t.Name() + "-Fragment")
