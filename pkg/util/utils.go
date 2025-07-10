@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/mensylisir/kubexm/pkg/plan" // Added for plan.NodeID
 )
 
 // ShellEscape provides basic shell escaping for a string.
@@ -373,4 +375,16 @@ func EnsureExtraArgs(currentArgs []string, defaultArgs map[string]string) []stri
 		}
 	}
 	return finalArgs
+}
+
+// NonEmptyNodeIDs filters a list of NodeIDs, returning only those that are not empty strings.
+// This is useful for constructing dependency lists where some dependencies might be conditional.
+func NonEmptyNodeIDs(ids ...plan.NodeID) []plan.NodeID {
+	result := make([]plan.NodeID, 0, len(ids))
+	for _, id := range ids {
+		if id != "" { // plan.NodeID is likely `type NodeID string`
+			result = append(result, id)
+		}
+	}
+	return result
 }

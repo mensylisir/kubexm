@@ -57,13 +57,57 @@ func (s *ConfigureSELinuxStep) Precheck(ctx step.StepContext, host connector.Hos
 	currentMode := strings.ToLower(strings.TrimSpace(string(stdout)))
 	logger.Info("Current SELinux mode.", "mode", currentMode)
 
-	if currentMode == s.Mode {
-		// TODO: Also check persistent config in /etc/selinux/config
-		logger.Info("SELinux is already in the desired mode.", "mode", s.Mode)
-		return true, nil
+	if currentMode == s.Mode || (s.Mode == "disabled" && currentMode == "permissive") {
+		// Runtime check passed (or is permissively set for a desired 'disabled' state)
+		// Now check persistent config
+		selinuxConfigFile := "/etc/selinux/config"
+		configExists, _ := runnerSvc.Exists(ctx.GoContext(), conn, selinuxConfigFile)
+		if !configExists {
+			logger.Info("SELinux config file does not exist, persistent state does not match.", "file", selinuxConfigFile)
+			return false, nil // Needs Run to create/set it
+		}
+
+		contentBytes, errRead := runnerSvc.ReadFile(ctx.GoContext(), conn, selinuxConfigFile)
+		if errRead != nil {
+			logger.Warn("Failed to read SELinux config file for persistent check. Assuming mismatch.", "file", selinuxConfigFile, "error", errRead)
+			return false, nil
+		}
+
+		persistentMode := ""
+		configLines := strings.Split(string(contentBytes), "\n")
+		for _, line := range configLines {
+			trimmedLine := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmedLine, "SELINUX=") {
+				parts := strings.SplitN(trimmedLine, "=", 2)
+				if len(parts) == 2 {
+					persistentMode = strings.ToLower(strings.TrimSpace(parts[1]))
+					break
+				}
+			}
+		}
+		logger.Info("Current persistent SELinux mode from config file.", "mode", persistentMode, "file", selinuxConfigFile)
+		if persistentMode == s.Mode {
+			if currentMode == s.Mode { // Both runtime and persistent match
+				logger.Info("SELinux runtime and persistent settings are already in the desired mode.", "mode", s.Mode)
+				return true, nil
+			} else if s.Mode == "disabled" && currentMode == "permissive" {
+				// This is acceptable: desired is "disabled" (persistent), runtime is "permissive" (after setenforce 0)
+				// A reboot would make runtime "disabled" too.
+				logger.Info("SELinux persistent setting is 'disabled', runtime is 'permissive'. Considered done for 'disabled' target pre-reboot.")
+				return true, nil
+			}
+			// Runtime matches but persistent does not - this is unusual or runtime was just set without persistence.
+			// Or persistent matches, but runtime doesn't (e.g. user changed runtime manually).
+			// In either case, re-running to ensure both is safer.
+			logger.Info("SELinux persistent setting matches, but runtime may need alignment or vice-versa. Will run.", "runtime", currentMode, "persistent", persistentMode, "desired", s.Mode)
+			return false, nil
+
+		}
+		logger.Info("SELinux persistent setting does not match desired mode.", "persistent", persistentMode, "desired", s.Mode)
+		return false, nil // Persistent config needs update
 	}
 
-	logger.Info("SELinux not in desired mode.", "current", currentMode, "desired", s.Mode)
+	logger.Info("SELinux runtime mode not in desired state.", "current", currentMode, "desired", s.Mode)
 	return false, nil
 }
 
