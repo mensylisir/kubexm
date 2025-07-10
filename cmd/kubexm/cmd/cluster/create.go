@@ -89,9 +89,25 @@ var createCmd = &cobra.Command{
 		// For now, RuntimeBuilder primarily uses the config file.
 		// Global flags like Verbose are handled by logger init. YesAssume is passed to pipeline.
 
-		// Pass absPath, runnerSvc, connectionPool, connectorFactory to NewRuntimeBuilder
+		// Load config first
+		clusterConfig, err := config.ParseFromFile(absPath)
+		if err != nil {
+			log.Errorf("Failed to parse cluster configuration: %v", err)
+			return fmt.Errorf("failed to parse cluster configuration from %s: %w", absPath, err)
+		}
+
+		// Apply CLI overrides to the loaded config
+		if createOptions.SkipPreflight {
+			if clusterConfig.Spec.Global == nil {
+				clusterConfig.Spec.Global = &v1alpha1.GlobalSpec{}
+			}
+			clusterConfig.Spec.Global.SkipPreflight = true
+			log.Info("Preflight checks will be skipped due to --skip-preflight flag.")
+		}
+
+		// Pass the potentially modified clusterConfig to NewRuntimeBuilderFromConfig
 		// engineSvc will be passed to Build method.
-		rtBuilder := runtime.NewRuntimeBuilder(absPath, runnerSvc, connectionPool, connectorFactory)
+		rtBuilder := runtime.NewRuntimeBuilderFromConfig(clusterConfig, runnerSvc, connectionPool, connectorFactory)
 
 		log.Info("Building runtime environment...")
 		runtimeCtx, cleanupFunc, err := rtBuilder.Build(goCtx, engineSvc) // Pass engineSvc to Build

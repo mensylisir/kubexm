@@ -134,9 +134,9 @@ func (s *DisableSwapStep) Run(ctx step.StepContext, host connector.Host) error {
 
 	// 2. Persistently disable swap in /etc/fstab
 	// Create a backup of fstab first
-	s.fstabBackupPath = fstabPath + ".kubexm_bak_" + fmt.Sprintf("%d", ctx.GoContext().Value("pipelineStartTime")) // Include a timestamp or unique ID if multiple runs
+	s.fstabBackupPath = fstabPath + ".kubexm.bak" // Simpler, predictable backup name
 
-	backupCmd := fmt.Sprintf("cp %s %s", fstabPath, s.fstabBackupPath)
+	backupCmd := fmt.Sprintf("cp -f %s %s", fstabPath, s.fstabBackupPath) // Add -f to overwrite previous backup
 	logger.Info("Backing up /etc/fstab.", "to", s.fstabBackupPath)
 	_, stderrBackup, errBackup := runnerSvc.RunWithOptions(ctx.GoContext(), conn, backupCmd, execOpts)
 	if errBackup != nil {

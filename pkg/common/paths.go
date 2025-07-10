@@ -35,7 +35,7 @@ const (
 	DefaultKubeconfigPath   = "/root/.kube/config" // Path for admin kubeconfig on control node/user machine
 
 	// Kubernetes PKI file names (standard kubeadm layout within KubernetesPKIDir)
-	CACertFileName                  = "ca.crt"
+	// CACertFileName is defined in constants.go as ca.pem
 	CAKeyFileName                   = "ca.key"
 	APIServerCertFileName           = "apiserver.crt"
 	APIServerKeyFileName            = "apiserver.key"
@@ -67,15 +67,15 @@ const (
 
 // --- Etcd System Directories & Files (Standard paths on nodes for binary installs) ---
 const (
-	EtcdDefaultDataDir      = "/var/lib/etcd"       // Etcd default data directory
+	// EtcdDefaultDataDir is defined in constants.go
 	EtcdDefaultWalDir       = "/var/lib/etcd/wal"   // Etcd default WAL directory
 	EtcdDefaultConfDir      = "/etc/etcd"           // Etcd configuration directory
-	EtcdDefaultPKIDir       = "/etc/etcd/pki"       // Etcd PKI directory (for binary installs)
-	EtcdDefaultBinDir       = "/usr/local/bin"      // Etcd binaries default install directory (shared with other bins)
-	EtcdDefaultSystemdFile  = "/etc/systemd/system/etcd.service" // Etcd systemd service file
-	EtcdDefaultConfFile     = "/etc/etcd/etcd.conf.yml" // Example etcd config file name (can vary)
+	ExternalEtcdDefaultPKIDir = "/etc/etcd/pki"       // Etcd PKI directory (for binary installs)
+	// EtcdDefaultBinDir is defined in constants.go
+	// EtcdDefaultSystemdFile is defined in constants.go
+	// EtcdDefaultConfFile is defined in constants.go (as .yaml)
 
-	// Etcd PKI file names (for binary installs, within EtcdDefaultPKIDir)
+	// Etcd PKI file names (for binary installs, within ExternalEtcdDefaultPKIDir)
 	EtcdServerCert          = "server.crt"
 	EtcdServerKey           = "server.key"
 	EtcdPeerCert            = "peer.crt"

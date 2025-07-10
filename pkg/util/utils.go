@@ -1,6 +1,8 @@
 package util
 
 import (
+	"errors"
+	"fmt"
 	"net"
 	"regexp"
 	"strconv"
@@ -374,3 +376,60 @@ func EnsureExtraArgs(currentArgs []string, defaultArgs map[string]string) []stri
 	}
 	return finalArgs
 }
+
+// ExpandHostRange expands a hostname pattern with a range into a list of hostnames.
+// Examples:
+//   "node[1:3]" -> ["node1", "node2", "node3"]
+//   "node[01:03]" -> ["node01", "node02", "node03"]
+//   "node1" -> ["node1"]
+// Returns an error if the pattern is invalid.
+func ExpandHostRange(pattern string) ([]string, error) {
+	re := regexp.MustCompile(`^(.*)\[([0-9]+):([0-9]+)\](.*)$`)
+	matches := re.FindStringSubmatch(pattern)
+
+	if len(matches) == 0 {
+		// No range pattern, return the pattern itself as a single host
+		if strings.TrimSpace(pattern) == "" {
+			return nil, errors.New("host pattern cannot be empty")
+		}
+		return []string{pattern}, nil
+	}
+
+	prefix := matches[1]
+	startStr := matches[2]
+	endStr := matches[3]
+	suffix := matches[4]
+
+	start, err := strconv.Atoi(startStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid start range in pattern '%s': %w", pattern, err)
+	}
+	end, err := strconv.Atoi(endStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid end range in pattern '%s': %w", pattern, err)
+	}
+
+	if start > end {
+		return nil, fmt.Errorf("start range cannot be greater than end range in pattern '%s'", pattern)
+	}
+
+	var hostnames []string
+	formatStr := "%s%0" + fmt.Sprintf("%dd", len(startStr)) + "%s"
+	if len(startStr) == 1 || (len(startStr) > 1 && startStr[0] != '0') { // No leading zero or not intended for padding
+		formatStr = "%s%d%s"
+	}
+
+
+	for i := start; i <= end; i++ {
+		hostnames = append(hostnames, fmt.Sprintf(formatStr, prefix, i, suffix))
+	}
+
+	if len(hostnames) == 0 { // Should not happen if start <= end, but as a safeguard
+		return nil, fmt.Errorf("expanded to zero hostnames for pattern '%s', check range", pattern)
+	}
+
+	return hostnames, nil
+}
+
+// NonEmptyNodeIDs filters a list of NodeIDs, returning only those that are not empty strings.
+// NonEmptyNodeIDs was moved to pkg/plan/utils.go to break an import cycle.

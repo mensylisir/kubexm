@@ -12,14 +12,11 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/common" // Added for common constants
 )
 
-const (
-	// EtcdConfigRemotePath is the default path for etcd.yaml on target nodes.
-	EtcdConfigRemotePath = "/etc/etcd/etcd.yaml"
-	// EtcdConfigDataCacheKey can be used to pass etcd config data if not directly available.
-	EtcdConfigDataCacheKey = "EtcdConfigData"
-)
+// EtcdConfigDataCacheKey can be used to pass etcd config data if not directly available.
+const EtcdConfigDataCacheKey = "EtcdConfigData"
 
 // EtcdNodeConfigData holds the configuration parameters for a single etcd node, used for templating.
 type EtcdNodeConfigData struct {
@@ -68,7 +65,7 @@ func NewGenerateEtcdConfigStep(instanceName string, config EtcdNodeConfigData, r
 	}
 	rPath := remotePath
 	if rPath == "" {
-		rPath = EtcdConfigRemotePath
+		rPath = common.EtcdDefaultConfFile
 	}
 	return &GenerateEtcdConfigStep{
 		meta: spec.StepMeta{
@@ -91,7 +88,7 @@ func NewGenerateEtcdConfigStepFromCache(instanceName, cacheKey, remotePath strin
 	}
 	rPath := remotePath
 	if rPath == "" {
-		rPath = EtcdConfigRemotePath
+		rPath = common.EtcdDefaultConfFile
 	}
 	return &GenerateEtcdConfigStep{
 		meta: spec.StepMeta{Name: name, Description: "Generates etcd.yaml from cached data."},

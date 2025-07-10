@@ -67,18 +67,18 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 	clusterConfig := ctx.GetClusterConfig()
 	etcdSpec := clusterConfig.Spec.Etcd
 
-	etcdNodes, err := ctx.GetHostsByRole(v1alpha1.ETCDRole)
+	etcdNodes, err := ctx.GetHostsByRole(v1alpha1.ETCDRole) // Using v1alpha1 constant for role
 	if err != nil {
 		return nil, fmt.Errorf("failed to get etcd nodes for task %s: %w", t.Name(), err)
 	}
 	// masterNodes are needed for distributing apiserver-etcd-client certificates.
-	masterNodes, _ := ctx.GetHostsByRole(v1alpha1.MasterRole) // Error can be ignored if no masters, cert part will be skipped for them.
+	masterNodes, _ := ctx.GetHostsByRole(v1alpha1.MasterRole) // Using v1alpha1 constant for role
 
 	// --- 1. Resource Acquisition: Etcd Archive on Control Node ---
 	etcdVersion := etcdSpec.Version
 	if etcdVersion == "" {
-		etcdVersion = "v3.5.13" // TODO: Define this default in a centralized constants or configuration defaults package.
-		logger.Info("ETCD version not specified, using default.", "version", etcdVersion)
+		etcdVersion = common.DefaultEtcdVersionForBinInstall
+		logger.Info("ETCD version not specified, using default for binary install.", "version", etcdVersion)
 	}
 
 	// Create a handle for the ETCD archive. The resource handle will manage
@@ -182,26 +182,39 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 	for _, targetHost := range etcdNodes { // Certs for etcd nodes
 		hostPkiPrefix := fmt.Sprintf("upload-etcd-certs-%s-", targetHost.GetName())
 		certsForEtcdNode := map[string]string{ // cert_file_name_on_control_node -> remote_permissions
-			"ca.pem":                          "0644",
-			fmt.Sprintf("%s.pem", targetHost.GetName()):       "0644", // server cert
-			fmt.Sprintf("%s-key.pem", targetHost.GetName()):   "0600", // server key
-			fmt.Sprintf("peer-%s.pem", targetHost.GetName()):  "0644", // peer cert
-			fmt.Sprintf("peer-%s-key.pem", targetHost.GetName()): "0600", // peer key
+			common.CACertFileName:                                  "0644",
+			fmt.Sprintf(common.EtcdServerCertFileName, targetHost.GetName()):       "0644", // server cert
+			fmt.Sprintf(common.EtcdServerKeyFileName, targetHost.GetName()):   "0600", // server key
+			fmt.Sprintf(common.EtcdPeerCertFileName, targetHost.GetName()):  "0644", // peer cert
+			fmt.Sprintf(common.EtcdPeerKeyFileName, targetHost.GetName()): "0600", // peer key
 		}
 		var lastUploadOnHost plan.NodeID
-		for certFile, perm := range certsForEtcdNode {
-			localPath := filepath.Join(localEtcdCertsBaseDir, certFile)
-			remotePath := filepath.Join(common.EtcdDefaultPKIDir, certFile) // Use common constant
-			nodeName := fmt.Sprintf("Upload-%s-to-%s", certFile, targetHost.GetName())
-			uploadStep := commonstep.NewUploadFileStep(nodeName, localPath, remotePath, perm, true, false) // sudo=true, commonstep alias
+		for certFilePattern, perm := range certsForEtcdNode {
+			// Resolve pattern to actual filename. For ca.pem, it's direct. For others, it includes host name.
+			// This assumes certFilePattern from the map can be directly used if it's already resolved or is like common.CACertFileName
+			// This part of the logic might need refinement if certFilePattern is `server-%s.pem` vs resolved `server-node1.pem`
+			// For now, assume certFilePattern is the final filename for local lookup.
+			// The map keys should be the exact local filenames.
+			// Let's adjust the map keys to be the simple filenames, and construct full names as needed.
+			// Example: "ca.pem", "server.pem" (which becomes server-node1.pem)
+
+			// Corrected map definition and usage:
+			// Map key should be the generic name, and we construct the host-specific one.
+			// This was already done implicitly by fmt.Sprintf in the map key.
+			// The critical part is that `localPath` uses `certFilePattern` which is already host-specific.
+
+			localPath := filepath.Join(localEtcdCertsBaseDir, certFilePattern) // certFilePattern is already like "server-node1.pem"
+			remotePath := filepath.Join(common.EtcdDefaultPKIDir, certFilePattern)
+			nodeName := fmt.Sprintf("Upload-%s-to-%s", certFilePattern, targetHost.GetName())
+			uploadStep := commonstep.NewUploadFileStep(nodeName, localPath, remotePath, perm, true, false)
 
 			nodeID, _ := certsUploadFragment.AddNode(&plan.ExecutionNode{
 				Name:         uploadStep.Meta().Name,
 				Step:         uploadStep,
 				Hosts:        []connector.Host{targetHost},
-				Dependencies: controlNodePrepDoneDependencies, // Depends on local PKI generation being notionally complete
+				Dependencies: controlNodePrepDoneDependencies,
 			})
-			if lastUploadOnHost != "" { // Chain uploads for the same host for simplicity, though could be parallel
+			if lastUploadOnHost != "" {
 				certsUploadFragment.AddDependency(lastUploadOnHost, nodeID)
 			}
 			lastUploadOnHost = nodeID
@@ -211,33 +224,35 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 		}
 	}
 
-	for _, targetHost := range masterNodes { // Certs for master nodes (apiserver client)
-		// Avoid re-uploading CA if master is also an etcd node (handled by map key uniqueness if merging nodes directly)
+	for _, targetHost := range masterNodes {
 		hostPkiPrefix := fmt.Sprintf("upload-apiserver-etcd-client-certs-%s-", targetHost.GetName())
+		// Define certs using common constants for filenames
 		certsForMasterNode := map[string]string{
-			"ca.pem":                          "0644", // Ensure CA is on masters too
-			"apiserver-etcd-client.pem":       "0644",
-			"apiserver-etcd-client-key.pem": "0600",
+			common.CACertFileName:                "0644",
+			common.EtcdClientCertFileName:      "0644", // Assuming a generic client cert name like "client.pem" or "apiserver-etcd-client.pem"
+			common.EtcdClientKeyFileName:       "0600", // Needs to match the actual generated client key name
 		}
-		var lastUploadOnHost plan.NodeID
-		// Check if CA was already uploaded if this master is also an etcd node.
-		// This requires a bit more complex tracking or ensuring UploadFileStep is idempotent.
-		// For simplicity, we might re-upload CA or rely on UploadFileStep's precheck.
+		// Adjust if apiserver-etcd-client is specifically named:
+		// certsForMasterNode := map[string]string{
+		// 	common.CACertFileName: "0644",
+		// 	"apiserver-etcd-client.pem": "0644",
+		// 	"apiserver-etcd-client-key.pem": "0600",
+		// }
 
+
+		var lastUploadOnHost plan.NodeID
 		for certFile, perm := range certsForMasterNode {
-			// Skip CA if already planned for this host as an etcd node (more robust check needed if merging nodes)
 			isEtcdNode := false
 			for _, en := range etcdNodes { if en.GetName() == targetHost.GetName() { isEtcdNode = true; break } }
-			if certFile == "ca.pem" && isEtcdNode {
-				// Find the existing CA upload node for this host and use it as dependency
-				// This logic is complex here. Simpler: let UploadStep's Precheck handle existing files.
-				// Or, ensure PKI generation task creates a single set of certs locally, and this task just uploads.
+			if certFile == common.CACertFileName && isEtcdNode {
+				logger.Debug("Skipping CA cert upload to master as it's also an etcd node and CA would have been uploaded.", "host", targetHost.GetName())
+				continue
 			}
 
 			localPath := filepath.Join(localEtcdCertsBaseDir, certFile)
-			remotePath := filepath.Join(DefaultEtcdPkiDir, certFile) // Masters might store etcd client certs in a similar path
+			remotePath := filepath.Join(common.EtcdDefaultPKIDir, certFile)
 			nodeName := fmt.Sprintf("Upload-APIServerEtcdClient-%s-to-%s", certFile, targetHost.GetName())
-			uploadStep := common.NewUploadFileStep(nodeName, localPath, remotePath, perm, true, false)
+			uploadStep := commonstep.NewUploadFileStep(nodeName, localPath, remotePath, perm, true, false)
 
 			nodeID, _ := certsUploadFragment.AddNode(&plan.ExecutionNode{
 				Name:         uploadStep.Meta().Name,

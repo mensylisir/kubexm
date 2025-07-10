@@ -8,7 +8,7 @@ const (
 	RoleLoadBalancer   = "loadbalancer"
 	RoleStorage        = "storage"
 	RoleRegistry       = "registry"
-	ControlNodeRole    = "control-node" // Moved from general.go
+	// ControlNodeRole is defined in constants.go
 )
 
 // ControlNodeHostName is the special hostname used for operations running locally on the control machine.
