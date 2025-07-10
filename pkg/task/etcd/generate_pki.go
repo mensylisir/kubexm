@@ -21,14 +21,13 @@ type GenerateEtcdPkiTask struct {
 	taskName             string
 	taskDesc             string
 	runOnRoles           []string
-	AltNameHosts         []pki.HostSpecForAltNames // Used by GenerateEtcdAltNamesStep
-	ControlPlaneEndpoint string                  // Used by GenerateEtcdAltNamesStep
-	DefaultLBDomain      string                  // Used by GenerateEtcdAltNamesStep
+	// AltNameHosts removed, task will derive SANs from context and other params
+	ControlPlaneEndpoint string // Used for SANs on certs that need to be accessible via CP endpoint
+	DefaultLBDomain      string // Fallback domain for SANs
 }
 
 // NewGenerateEtcdPkiTask creates a new task for generating etcd PKI.
 func NewGenerateEtcdPkiTask(
-	altNameHosts []pki.HostSpecForAltNames,
 	cpEndpoint string,
 	defaultLBDomain string,
 ) task.Task { // Return task.Task
@@ -36,7 +35,6 @@ func NewGenerateEtcdPkiTask(
 		taskName:             "GenerateEtcdPki",
 		taskDesc:             "Generates all necessary etcd PKI (CA, member, client certificates).",
 		runOnRoles:           []string{common.ControlNodeRole}, // Explicitly target control-node role
-		AltNameHosts:         altNameHosts,
 		ControlPlaneEndpoint: cpEndpoint,
 		DefaultLBDomain:      defaultLBDomain,
 	}

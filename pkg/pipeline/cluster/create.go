@@ -4,11 +4,15 @@ import (
 	"fmt"
 
 	"github.com/mensylisir/kubexm/pkg/module"
-	"github.com/mensylisir/kubexm/pkg/module/etcd"
+	// "github.com/mensylisir/kubexm/pkg/module/etcd" // Not directly used by name, but by specific module constructors
+	"github.com/mensylisir/kubexm/pkg/module/addon"
+	"github.com/mensylisir/kubexm/pkg/module/infrastructure"
+	"github.com/mensylisir/kubexm/pkg/module/kubernetes"
+	"github.com/mensylisir/kubexm/pkg/module/network"
 	"github.com/mensylisir/kubexm/pkg/module/preflight"
 	"github.com/mensylisir/kubexm/pkg/pipeline" // For pipeline.Pipeline and pipeline.PipelineContext
 	"github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/runtime" // For *runtime.Context in Run method
+	// "github.com/mensylisir/kubexm/pkg/runtime" // For *runtime.Context in Run method - no, use interface
 )
 
 // CreateClusterPipeline defines the pipeline for creating a new Kubernetes cluster.
@@ -134,37 +138,51 @@ func (p *CreateClusterPipeline) Plan(ctx pipeline.PipelineContext) (*plan.Execut
 }
 
 // Run executes the pipeline.
-func (p *CreateClusterPipeline) Run(ctx *runtime.Context, dryRun bool) (*plan.GraphExecutionResult, error) {
+// It takes pipeline.PipelineContext, but the underlying concrete type is expected
+// to be *runtime.Context which implements all necessary context interfaces.
+func (p *CreateClusterPipeline) Run(ctx pipeline.PipelineContext, graph *plan.ExecutionGraph, dryRun bool) (*plan.GraphExecutionResult, error) {
 	logger := ctx.GetLogger().With("pipeline", p.Name())
 	logger.Info("Running pipeline...", "dryRun", dryRun)
 
-	// Plan the pipeline using the PipelineContext view of the full runtime.Context
-	// The concrete *runtime.Context should implement runtime.PipelineContext.
-	// As *runtime.Context implements pipeline.PipelineContext, direct use is fine.
-	pipelineCtx := ctx
-
-	executionGraph, err := p.Plan(pipelineCtx)
-	if err != nil {
-		logger.Error(err, "Pipeline planning phase failed.")
-		return nil, fmt.Errorf("planning phase for pipeline %s failed: %w", p.Name(), err)
+	// The Engine's Execute method expects an engine.EngineExecuteContext.
+	// The runtime.Context (which is the concrete type for ctx) implements this.
+	engineCtx, ok := ctx.(engine.EngineExecuteContext)
+	if !ok {
+		// This would be a programming error if the context passed to Run isn't the full runtime.Context.
+		err := fmt.Errorf("pipeline context cannot be asserted to engine.EngineExecuteContext for pipeline %s", p.Name())
+		logger.Error(err, "Context type assertion failed")
+		return nil, err
 	}
 
-	if executionGraph == nil || len(executionGraph.Nodes) == 0 {
-		logger.Info("Pipeline planned no executable nodes. Nothing to run.")
-		// Return an empty but successful result
+	// Note: The Plan() method should ideally be called by the CLI/caller of Run,
+	// and the resulting graph passed into this Run method, as per the Pipeline interface.
+	// For this implementation, if graph is nil, we can plan it here.
+	var currentGraph *plan.ExecutionGraph
+	var err error
+	if graph == nil {
+		logger.Info("No pre-computed graph provided to Run, planning now...")
+		currentGraph, err = p.Plan(ctx)
+		if err != nil {
+			logger.Error(err, "Pipeline planning phase failed within Run method.")
+			return nil, fmt.Errorf("planning phase for pipeline %s failed: %w", p.Name(), err)
+		}
+	} else {
+		currentGraph = graph
+	}
+
+	if currentGraph == nil || len(currentGraph.Nodes) == 0 {
+		logger.Info("Pipeline planned no executable nodes or was given an empty graph. Nothing to run.")
 		return &plan.GraphExecutionResult{
 			GraphName:   p.Name(),
-			Status:      plan.StatusSuccess, // Or a specific "NoOp" status if defined
+			Status:      plan.StatusSuccess,
 			NodeResults: make(map[plan.NodeID]*plan.NodeResult),
 		}, nil
 	}
 
-	logger.Info("Executing pipeline plan...", "num_nodes", len(executionGraph.Nodes))
-	// The Engine expects the full *runtime.Context, not just the PipelineContext facade.
-	result, execErr := ctx.GetEngine().Execute(ctx, executionGraph, dryRun)
+	logger.Info("Executing pipeline plan...", "num_nodes", len(currentGraph.Nodes))
+	result, execErr := ctx.GetEngine().Execute(engineCtx, currentGraph, dryRun) // Pass asserted engineCtx
 	if execErr != nil {
 		logger.Error(execErr, "Pipeline execution failed.")
-		// Result might be partially populated even if execErr is not nil
 		if result == nil {
 			// Create a minimal result if engine returned nil result on error
 			result = &plan.GraphExecutionResult{GraphName: p.Name(), Status: plan.StatusFailed}

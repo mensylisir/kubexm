@@ -72,7 +72,10 @@ func (p *DeleteClusterPipeline) Plan(ctx pipeline.PipelineContext) (*plan.Execut
 
 	if len(p.Modules()) == 0 || (len(p.Modules()) == 1 && p.Modules()[0].Name() == "PlaceholderTeardown") {
 	    logger.Warn("DeleteClusterPipeline has no effective modules defined. Returning empty graph.")
-	    return task.NewEmptyFragment(), nil // task.NewEmptyFragment() returns an empty ExecutionFragment, ensure this is *plan.ExecutionGraph
+	    // Return an empty plan.ExecutionGraph
+		emptyGraph := plan.NewExecutionGraph(p.Name())
+		emptyGraph.CalculateEntryAndExitNodes() // Should result in empty entry/exit
+	    return emptyGraph, nil
 	}
 
 
@@ -107,22 +110,36 @@ func (p *DeleteClusterPipeline) Plan(ctx pipeline.PipelineContext) (*plan.Execut
 	return finalGraph, nil
 }
 
-func (p *DeleteClusterPipeline) Run(ctx *runtime.Context, dryRun bool) (*plan.GraphExecutionResult, error) {
+func (p *DeleteClusterPipeline) Run(ctx pipeline.PipelineContext, graph *plan.ExecutionGraph, dryRun bool) (*plan.GraphExecutionResult, error) {
 	logger := ctx.GetLogger().With("pipeline", p.Name())
 	logger.Info("Running cluster deletion pipeline...", "dryRun", dryRun)
 
-	pipelineCtx := ctx
-	executionGraph, err := p.Plan(pipelineCtx)
-	if err != nil {
-		return nil, fmt.Errorf("planning phase for pipeline %s failed: %w", p.Name(), err)
+	engineCtx, ok := ctx.(engine.EngineExecuteContext)
+	if !ok {
+		err := fmt.Errorf("pipeline context cannot be asserted to engine.EngineExecuteContext for pipeline %s", p.Name())
+		logger.Error(err, "Context type assertion failed")
+		return nil, err
 	}
 
-	if executionGraph.IsEmpty() { // Assuming IsEmpty for ExecutionGraph
-		logger.Info("Pipeline planned no executable nodes for deletion. Nothing to run.")
+	var currentGraph *plan.ExecutionGraph
+	var err error
+	if graph == nil {
+		logger.Info("No pre-computed graph provided to DeleteClusterPipeline.Run, planning now...")
+		currentGraph, err = p.Plan(ctx)
+		if err != nil {
+			logger.Error(err, "Pipeline planning phase failed within Run method.")
+			return nil, fmt.Errorf("planning phase for pipeline %s failed: %w", p.Name(), err)
+		}
+	} else {
+		currentGraph = graph
+	}
+
+	if currentGraph == nil || currentGraph.IsEmpty() { // Assuming IsEmpty for ExecutionGraph
+		logger.Info("Pipeline planned no executable nodes for deletion or was given an empty graph. Nothing to run.")
 		return &plan.GraphExecutionResult{GraphName: p.Name(), Status: plan.StatusSuccess}, nil
 	}
 
-	result, execErr := ctx.GetEngine().Execute(ctx, executionGraph, dryRun)
+	result, execErr := ctx.GetEngine().Execute(engineCtx, currentGraph, dryRun)
 	if execErr != nil {
 		if result == nil { result = &plan.GraphExecutionResult{GraphName: p.Name(), Status: plan.StatusFailed} }
 		return result, fmt.Errorf("execution phase for pipeline %s failed: %w", p.Name(), execErr)

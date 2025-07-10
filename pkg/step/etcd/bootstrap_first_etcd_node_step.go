@@ -7,6 +7,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	commonstep "github.com/mensylisir/kubexm/pkg/step/common" // Added import
 )
 
 // BootstrapFirstEtcdNodeStep ensures the first etcd node is configured with 'initial-cluster-state: new'
@@ -98,19 +99,19 @@ func (s *BootstrapFirstEtcdNodeStep) Run(ctx runtime.StepContext, host connector
 	// 2. systemctl enable etcd
 	// 3. systemctl start etcd
 
-	daemonReloadStep := NewManageEtcdServiceStep("DaemonReloadForEtcdBootstrap", ActionDaemonReload, s.ServiceName, s.Sudo)
+	daemonReloadStep := commonstep.NewManageServiceStep("DaemonReloadForEtcdBootstrap", commonstep.ActionDaemonReload, s.ServiceName, s.Sudo)
 	logger.Info("Executing daemon-reload.")
 	if err := daemonReloadStep.Run(ctx, host); err != nil {
 		return fmt.Errorf("failed to run daemon-reload for %s: %w", s.ServiceName, err)
 	}
 
-	enableStep := NewManageEtcdServiceStep("EnableEtcdForBootstrap", ActionEnable, s.ServiceName, s.Sudo)
+	enableStep := commonstep.NewManageServiceStep("EnableEtcdForBootstrap", commonstep.ActionEnable, s.ServiceName, s.Sudo)
 	logger.Info("Enabling etcd service.")
 	if err := enableStep.Run(ctx, host); err != nil {
 		return fmt.Errorf("failed to enable %s service: %w", s.ServiceName, err)
 	}
 
-	startStep := NewManageEtcdServiceStep("StartEtcdForBootstrap", ActionStart, s.ServiceName, s.Sudo)
+	startStep := commonstep.NewManageServiceStep("StartEtcdForBootstrap", commonstep.ActionStart, s.ServiceName, s.Sudo)
 	logger.Info("Starting etcd service.")
 	if err := startStep.Run(ctx, host); err != nil {
 		return fmt.Errorf("failed to start %s service: %w", s.ServiceName, err)
