@@ -2,11 +2,13 @@ package v1alpha1
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/common" // Added common import
 	"github.com/mensylisir/kubexm/pkg/util" // Added import for util
 	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // PreflightConfig holds configuration for preflight checks.
+// +k8s:deepcopy-gen=true
 type PreflightConfig struct {
 	MinCPUCores   *int32  `json:"minCPUCores,omitempty" yaml:"minCPUCores,omitempty"`     // Pointer for optionality
 	MinMemoryMB   *uint64 `json:"minMemoryMB,omitempty" yaml:"minMemoryMB,omitempty"`     // Pointer for optionality
@@ -33,34 +35,6 @@ func SetDefaults_PreflightConfig(cfg *PreflightConfig) {
 		cfg.MinMemoryMB = &defaultMem
 	}
 }
-
-// DeepCopyInto creates a deep copy of the PreflightConfig.
-func (in *PreflightConfig) DeepCopyInto(out *PreflightConfig) {
-	*out = *in
-	if in.MinCPUCores != nil {
-		val := *in.MinCPUCores
-		out.MinCPUCores = &val
-	}
-	if in.MinMemoryMB != nil {
-		val := *in.MinMemoryMB
-		out.MinMemoryMB = &val
-	}
-	if in.DisableSwap != nil {
-		val := *in.DisableSwap
-		out.DisableSwap = &val
-	}
-}
-
-// DeepCopy creates a new PreflightConfig.
-func (in *PreflightConfig) DeepCopy() *PreflightConfig {
-	if in == nil {
-		return nil
-	}
-	out := new(PreflightConfig)
-	in.DeepCopyInto(out)
-	return out
-}
-
 
 // Validate_PreflightConfig validates PreflightConfig.
 func Validate_PreflightConfig(cfg *PreflightConfig, verrs *validation.ValidationErrors, pathPrefix string) {

@@ -137,6 +137,19 @@ const (
 	EtcdDefaultSystemdFile     = "/etc/systemd/system/etcd.service"
 	EtcdDefaultBinDir          = "/usr/local/bin"
 	DefaultEtcdVersionForBinInstall = "v3.5.13" // As used in the task
+
+	// Containerd specific
+	ContainerdPluginCRI = "cri"
+
+	// System Configuration Defaults
+	DefaultSELinuxMode    = "permissive"
+	DefaultIPTablesMode   = "legacy"
+)
+
+// Valid System Configuration Values
+var (
+	ValidSELinuxModes  = []string{"permissive", "enforcing", "disabled", ""} // Empty allows no-op/system default
+	ValidIPTablesModes = []string{"legacy", "nft", ""}                      // Empty allows no-op/system default
 )
 
 // File Permissions
