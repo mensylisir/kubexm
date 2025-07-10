@@ -22,23 +22,21 @@ import (
 // +kubebuilder:printcolumn:name="Hosts",type="integer",JSONPath=".spec.hostsCount",description="Number of hosts"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-
 // Cluster is the top-level configuration object.
 type Cluster struct {
 	metav1.TypeMeta   `json:",inline" yaml:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 	Spec              ClusterSpec   `json:"spec,omitempty" yaml:"spec,omitempty"`
-	Status            ClusterStatus `json:"status,omitempty" yaml:"status,omitempty"` // Added ClusterStatus
+	Status            ClusterStatus `json:"status,omitempty" yaml:"status,omitempty"`
 }
 
 // ClusterSpec defines the desired state of the Kubernetes cluster.
 // +k8s:deepcopy-gen=true
 type ClusterSpec struct {
-	// Type specifies the overall cluster deployment type.
-	// It can influence high-level deployment strategies.
-	// Defaults to "kubexm".
-	Type string `json:"type,omitempty" yaml:"type,omitempty"`
+	// Type specifies the overall cluster deployment type (e.g., "kubexm", "kubeadm").
+	// It influences high-level deployment strategies.
+	// Defaults to common.KubernetesDeploymentTypeKubexm.
+	Type common.KubernetesDeploymentType `json:"type,omitempty" yaml:"type,omitempty"`
 
 	Hosts      []HostSpec      `json:"hosts" yaml:"hosts"`
 	RoleGroups *RoleGroupsSpec `json:"roleGroups,omitempty" yaml:"roleGroups,omitempty"`
@@ -46,13 +44,13 @@ type ClusterSpec struct {
 
 	ControlPlaneEndpoint *ControlPlaneEndpointSpec `json:"controlPlaneEndpoint,omitempty" yaml:"controlPlaneEndpoint,omitempty"`
 	System               *SystemSpec               `json:"system,omitempty" yaml:"system,omitempty"`
-	Kubernetes           *KubernetesConfig         `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"`
+	Kubernetes           *KubernetesConfig         `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"` // ContainerRuntime is now solely within KubernetesConfig
 	Etcd                 *EtcdConfig               `json:"etcd,omitempty" yaml:"etcd,omitempty"`
 	Network              *NetworkConfig            `json:"network,omitempty" yaml:"network,omitempty"`
 	Storage              *StorageConfig            `json:"storage,omitempty" yaml:"storage,omitempty"`
 	Registry             *RegistryConfig           `json:"registry,omitempty" yaml:"registry,omitempty"`
 	Addons               []string                  `json:"addons,omitempty" yaml:"addons,omitempty"`
-	Dns                  *DNS                      `json:"dns,omitempty" yaml:"dns,omitempty"` // Changed to pointer
+	Dns                  *DNS                      `json:"dns,omitempty" yaml:"dns,omitempty"`
 	Preflight            *PreflightConfig          `json:"preflight,omitempty" yaml:"preflight,omitempty"`
 	HighAvailability     *HighAvailabilityConfig   `json:"highAvailability,omitempty" yaml:"highAvailability,omitempty"`
 
@@ -68,31 +66,20 @@ type ClusterSpec struct {
 // ClusterStatus defines the observed state of Cluster
 // +k8s:deepcopy-gen=true
 type ClusterStatus struct {
-	// Conditions represent the latest available observations of a cluster's state.
-	Conditions []ClusterCondition `json:"conditions,omitempty" yaml:"conditions,omitempty"`
-	// Version of the Kubernetes cluster.
-	Version string `json:"version,omitempty" yaml:"version,omitempty"`
-	// APIServerReady indicates if the API server is ready.
-	APIServerReady bool `json:"apiServerReady,omitempty" yaml:"apiServerReady,omitempty"`
-	// EtcdReady indicates if the Etcd cluster is ready.
-	EtcdReady bool `json:"etcdReady,omitempty" yaml:"etcdReady,omitempty"`
-	// NodeCounts holds the number of nodes in different roles and states.
-	NodeCounts NodeCounts `json:"nodeCounts,omitempty" yaml:"nodeCounts,omitempty"`
+	Conditions     []ClusterCondition `json:"conditions,omitempty" yaml:"conditions,omitempty"`
+	Version        string             `json:"version,omitempty" yaml:"version,omitempty"`
+	APIServerReady bool               `json:"apiServerReady,omitempty" yaml:"apiServerReady,omitempty"`
+	EtcdReady      bool               `json:"etcdReady,omitempty" yaml:"etcdReady,omitempty"`
+	NodeCounts     NodeCounts         `json:"nodeCounts,omitempty" yaml:"nodeCounts,omitempty"`
 }
 
 // ClusterCondition contains details for the current condition of this cluster.
 type ClusterCondition struct {
-	// Type is the type of the condition.
-	Type string `json:"type" yaml:"type"`
-	// Status is the status of the condition.
-	// Can be True, False, Unknown.
-	Status metav1.ConditionStatus `json:"status" yaml:"status"`
-	// Last time the condition transitioned from one status to another.
-	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty" yaml:"lastTransitionTime,omitempty"`
-	// Unique, one-word, CamelCase reason for the condition's last transition.
-	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
-	// Human-readable message indicating details about last transition.
-	Message string `json:"message,omitempty" yaml:"message,omitempty"`
+	Type               string                 `json:"type" yaml:"type"`
+	Status             metav1.ConditionStatus `json:"status" yaml:"status"`
+	LastTransitionTime metav1.Time            `json:"lastTransitionTime,omitempty" yaml:"lastTransitionTime,omitempty"`
+	Reason             string                 `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Message            string                 `json:"message,omitempty" yaml:"message,omitempty"`
 }
 
 // NodeCounts contains the count of nodes in various states.
@@ -114,15 +101,15 @@ type HostSpec struct {
 	Port            int               `json:"port,omitempty" yaml:"port,omitempty"`
 	User            string            `json:"user,omitempty" yaml:"user,omitempty"`
 	Password        string            `json:"password,omitempty" yaml:"password,omitempty"`
-	PrivateKey      string            `json:"privateKey,omitempty" yaml:"privateKey,omitempty"` // Content of the private key
+	PrivateKey      string            `json:"privateKey,omitempty" yaml:"privateKey,omitempty"`
 	PrivateKeyPath  string            `json:"privateKeyPath,omitempty" yaml:"privateKeyPath,omitempty"`
 	Arch            string            `json:"arch,omitempty" yaml:"arch,omitempty"`
 	Labels          map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
 	Taints          []TaintSpec       `json:"taints,omitempty" yaml:"taints,omitempty"`
 	Roles           []string          `json:"roles,omitempty" yaml:"roles,omitempty"`
-	// Type defines the connection type, e.g., "ssh", "local".
-	// Defaults to "ssh".
-	Type string `json:"type,omitempty" yaml:"type,omitempty"`
+	// Type defines the connection type (e.g., "ssh", "local").
+	// Defaults to common.HostConnectionTypeSSH.
+	Type common.HostConnectionType `json:"type,omitempty" yaml:"type,omitempty"`
 }
 
 // RoleGroupsSpec defines the different groups of nodes in the cluster.
@@ -196,6 +183,7 @@ type SystemSpec struct {
 }
 
 // GlobalSpec contains settings applicable to the entire cluster or as defaults for hosts.
+// +k8s:deepcopy-gen=true
 type GlobalSpec struct {
 	User              string        `json:"user,omitempty" yaml:"user,omitempty"`
 	Port              int           `json:"port,omitempty" yaml:"port,omitempty"`
@@ -203,13 +191,14 @@ type GlobalSpec struct {
 	PrivateKey        string        `json:"privateKey,omitempty" yaml:"privateKey,omitempty"`
 	PrivateKeyPath    string        `json:"privateKeyPath,omitempty" yaml:"privateKeyPath,omitempty"`
 	ConnectionTimeout time.Duration `json:"connectionTimeout,omitempty" yaml:"connectionTimeout,omitempty"`
-	WorkDir           string        `json:"workDir,omitempty" yaml:"workDir,omitempty"` // Local workdir on the machine running kubexm
+	WorkDir           string        `json:"workDir,omitempty" yaml:"workDir,omitempty"`
 	Verbose           bool          `json:"verbose,omitempty" yaml:"verbose,omitempty"`
 	IgnoreErr         bool          `json:"ignoreErr,omitempty" yaml:"ignoreErr,omitempty"`
 	SkipPreflight     bool          `json:"skipPreflight,omitempty" yaml:"skipPreflight,omitempty"`
 }
 
 // TaintSpec defines a Kubernetes node taint.
+// +k8s:deepcopy-gen=true
 type TaintSpec struct {
 	Key    string `json:"key" yaml:"key"`
 	Value  string `json:"value" yaml:"value"`
@@ -221,10 +210,10 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	if cfg == nil {
 		return
 	}
-	cfg.SetGroupVersionKind(SchemeGroupVersion.WithKind("Cluster"))
+	// cfg.SetGroupVersionKind(SchemeGroupVersion.WithKind("Cluster")) // This will be set by the K8s machinery
 
 	if cfg.Spec.Type == "" {
-		cfg.Spec.Type = common.ClusterTypeKubeXM
+		cfg.Spec.Type = common.KubernetesDeploymentTypeKubexm // Use typed constant
 	}
 
 	if cfg.Spec.Global == nil {
@@ -237,13 +226,7 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	if g.ConnectionTimeout == 0 {
 		g.ConnectionTimeout = common.DefaultConnectionTimeout
 	}
-	if g.WorkDir == "" {
-		// Default workdir will be calculated in runtime.Builder based on cluster name
-		// For example: $(pwd)/.kubexm/mycluster
-		// Here we can set a base default name or leave it for builder.
-		// For now, let runtime.Builder handle the full path construction.
-		// g.WorkDir = common.DefaultWorkDirName
-	}
+	// WorkDir default is handled by runtime.Builder
 
 	cfg.Spec.HostsCount = len(cfg.Spec.Hosts)
 
@@ -257,13 +240,13 @@ func SetDefaults_Cluster(cfg *Cluster) {
 			}
 		}
 		if host.User == "" && g != nil {
-			host.User = g.User // Can be empty if global user is also empty (root assumed by some logic later)
+			host.User = g.User
 		}
 		if host.PrivateKeyPath == "" && g != nil {
 			host.PrivateKeyPath = g.PrivateKeyPath
 		}
 		if host.Type == "" {
-			host.Type = common.HostTypeSSH
+			host.Type = common.HostConnectionTypeSSH // Use typed constant
 		}
 		if host.Arch == "" {
 			host.Arch = common.DefaultArch
@@ -294,40 +277,20 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	}
 	SetDefaults_SystemSpec(cfg.Spec.System)
 
-	// Ensure these core configurations are initialized before their defaults are set
 	if cfg.Spec.Kubernetes == nil {
 		cfg.Spec.Kubernetes = &KubernetesConfig{}
 	}
-	SetDefaults_KubernetesConfig(cfg.Spec.Kubernetes, cfg.ObjectMeta.Name)
+	SetDefaults_KubernetesConfig(cfg.Spec.Kubernetes, cfg.ObjectMeta.Name) // This will call SetDefaults_ContainerRuntimeConfig
 
 	if cfg.Spec.Etcd == nil {
 		cfg.Spec.Etcd = &EtcdConfig{}
 	}
 	SetDefaults_EtcdConfig(cfg.Spec.Etcd)
 
-	if cfg.Spec.Kubernetes.ContainerRuntime == nil {
-		// ContainerRuntime defaults are now handled within KubernetesConfig defaults
-		// but if KubernetesConfig itself is nil initially, this path might be taken.
-		// However, KubernetesConfig is initialized above.
-		// Let's ensure ContainerRuntime is init if Kubernetes was nil, though unlikely.
-		if cfg.Spec.Kubernetes.ContainerRuntime == nil {
-			cfg.Spec.Kubernetes.ContainerRuntime = &ContainerRuntimeConfig{}
-		}
-		// The direct cfg.Spec.ContainerRuntime might be deprecated if fully moved.
-		// For now, assume it could still exist as a top-level override or for other types.
-		// If it's meant to be solely under KubernetesConfig, this block needs adjustment.
-		// Based on YAML, it is under KubernetesConfig.
-		// This top-level field is redundant if kubernetes.containerRuntime is the source of truth.
-		// For safety, if it exists and Kubernetes.ContainerRuntime is nil, copy over.
-		// This logic is becoming complex due to potential dual-definition.
-		// Let's assume kubernetes.containerRuntime is primary.
-	}
-	// SetDefaults_ContainerRuntimeConfig is called by SetDefaults_KubernetesConfig
-
 	if cfg.Spec.Network == nil {
 		cfg.Spec.Network = &NetworkConfig{}
 	}
-	SetDefaults_NetworkConfig(cfg.Spec.Network) // Pass KubernetesConfig for potential CIDR defaults
+	SetDefaults_NetworkConfig(cfg.Spec.Network)
 
 	if cfg.Spec.HighAvailability == nil {
 		cfg.Spec.HighAvailability = &HighAvailabilityConfig{}
@@ -353,10 +316,10 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	}
 	SetDefaults_RegistryConfig(cfg.Spec.Registry)
 
-	if cfg.Spec.Dns == nil { // Changed to pointer
+	if cfg.Spec.Dns == nil {
 		cfg.Spec.Dns = &DNS{}
 	}
-	SetDefaults_DNS(cfg.Spec.Dns) // Pass DnsConfig by pointer
+	SetDefaults_DNS(cfg.Spec.Dns)
 }
 
 // SetDefaults_RoleGroupsSpec sets default values for RoleGroupsSpec
@@ -412,11 +375,10 @@ func SetDefaults_SystemSpec(cfg *SystemSpec) {
 	if cfg.SysctlParams == nil {
 		cfg.SysctlParams = make(map[string]string)
 	}
-	// Add best-practice sysctl params for Kubernetes
 	defaultSysctl := map[string]string{
 		"net.bridge.bridge-nf-call-iptables":  "1",
 		"net.ipv4.ip_forward":                 "1",
-		"net.bridge.bridge-nf-call-ip6tables": "1", // For IPv6
+		"net.bridge.bridge-nf-call-ip6tables": "1",
 		"fs.inotify.max_user_watches":         "524288",
 		"fs.inotify.max_user_instances":       "512",
 		"vm.max_map_count":                    "262144",
@@ -426,7 +388,6 @@ func SetDefaults_SystemSpec(cfg *SystemSpec) {
 			cfg.SysctlParams[k] = v
 		}
 	}
-
 	if cfg.PreInstallScripts == nil {
 		cfg.PreInstallScripts = []string{}
 	}
@@ -489,24 +450,27 @@ func Validate_SystemSpec(cfg *SystemSpec, verrs *validation.ValidationErrors, pa
 // Validate_Cluster validates the Cluster configuration.
 func Validate_Cluster(cfg *Cluster) error {
 	verrs := &validation.ValidationErrors{}
-	if cfg.APIVersion != SchemeGroupVersion.Group+"/"+SchemeGroupVersion.Version {
-		verrs.Add("apiVersion", fmt.Sprintf("must be %s/%s, got %s", SchemeGroupVersion.Group, SchemeGroupVersion.Version, cfg.APIVersion))
-	}
-	if cfg.Kind != "Cluster" {
-		verrs.Add("kind", fmt.Sprintf("must be Cluster, got %s", cfg.Kind))
-	}
+	// APIVersion and Kind validation is often handled by K8s machinery when CRD is applied/retrieved.
+	// However, explicit check can be useful if this object is constructed manually.
+	// if cfg.APIVersion != SchemeGroupVersion.Group+"/"+SchemeGroupVersion.Version {
+	// 	verrs.Add("apiVersion", fmt.Sprintf("must be %s/%s, got %s", SchemeGroupVersion.Group, SchemeGroupVersion.Version, cfg.APIVersion))
+	// }
+	// if cfg.Kind != "Cluster" {
+	// 	verrs.Add("kind", fmt.Sprintf("must be Cluster, got %s", cfg.Kind))
+	// }
 	if strings.TrimSpace(cfg.ObjectMeta.Name) == "" {
 		verrs.Add("metadata.name", "cannot be empty")
 	}
 
-	validClusterTypes := []string{common.ClusterTypeKubeXM, common.ClusterTypeKubeadm}
-	if !util.ContainsString(validClusterTypes, cfg.Spec.Type) {
-		verrs.Add("spec.type", fmt.Sprintf("invalid cluster type '%s', must be one of %v", cfg.Spec.Type, validClusterTypes))
+	// Validate Spec.Type against common.KubernetesDeploymentType values
+	if cfg.Spec.Type != common.KubernetesDeploymentTypeKubexm && cfg.Spec.Type != common.KubernetesDeploymentTypeKubeadm && cfg.Spec.Type != "" {
+		verrs.Add("spec.type", fmt.Sprintf("invalid cluster type '%s', must be '%s' or '%s' or empty for default",
+			cfg.Spec.Type, common.KubernetesDeploymentTypeKubexm, common.KubernetesDeploymentTypeKubeadm))
 	}
 
 	if cfg.Spec.Global != nil {
 		g := cfg.Spec.Global
-		if g.Port != 0 && (g.Port < 1 || g.Port > 65535) { // Port 0 is used to signify "use default"
+		if g.Port != 0 && (g.Port < 1 || g.Port > 65535) {
 			verrs.Add("spec.global.port", fmt.Sprintf("%d is invalid, must be between 1 and 65535 or 0 for default", g.Port))
 		}
 		if g.ConnectionTimeout < 0 {
@@ -534,16 +498,11 @@ func Validate_Cluster(cfg *Cluster) error {
 		} else if !util.IsValidIP(host.Address) && !util.IsValidDomainName(host.Address) {
 			verrs.Add(pathPrefix+".address", fmt.Sprintf("'%s' is not a valid IP address or hostname", host.Address))
 		}
-		if host.Port < 1 || host.Port > 65535 {
+		if host.Port < 1 || host.Port > 65535 { // Port 0 is handled by defaulting
 			verrs.Add(pathPrefix+".port", fmt.Sprintf("%d is invalid, must be between 1 and 65535", host.Port))
 		}
-		if strings.TrimSpace(host.User) == "" && (cfg.Spec.Global == nil || cfg.Spec.Global.User == "") {
-			// User can be empty if global user is set, but if both are empty it's an issue unless defaulting to root.
-			// Assuming default to root is handled by connector if user is empty.
-			// For validation, if it's truly required, this check needs to be stricter.
-			// For now, let's assume it's okay if it defaults to root later.
-		}
-		if strings.ToLower(host.Type) != common.HostTypeLocal {
+		// User can be empty if global user is set or if it defaults to root (handled by connector)
+		if host.Type != common.HostConnectionTypeLocal && host.Type != "" { // Allow empty for default
 			if host.Password == "" && host.PrivateKey == "" && host.PrivateKeyPath == "" {
 				verrs.Add(pathPrefix, "no SSH authentication method provided for non-local host")
 			}
@@ -551,34 +510,38 @@ func Validate_Cluster(cfg *Cluster) error {
 		if host.Arch != "" && !util.ContainsString(common.SupportedArches, host.Arch) {
 			verrs.Add(pathPrefix+".arch", fmt.Sprintf("unsupported architecture '%s', must be one of %v", host.Arch, common.SupportedArches))
 		}
-		for _, taint := range host.Taints {
+		// Validate HostSpec.Type
+		if host.Type != common.HostConnectionTypeSSH && host.Type != common.HostConnectionTypeLocal && host.Type != "" {
+			verrs.Add(pathPrefix+".type", fmt.Sprintf("invalid host type '%s', must be '%s' or '%s' or empty for default",
+				host.Type, common.HostConnectionTypeSSH, common.HostConnectionTypeLocal))
+		}
+		for ti, taint := range host.Taints {
+			taintPathPrefix := fmt.Sprintf("%s.taints[%d]", pathPrefix, ti)
 			if strings.TrimSpace(taint.Key) == "" {
-				verrs.Add(pathPrefix+".taints.key", "taint key cannot be empty")
+				verrs.Add(taintPathPrefix+".key", "taint key cannot be empty")
 			}
 			if !util.ContainsString(common.ValidTaintEffects, taint.Effect) {
-				verrs.Add(pathPrefix+".taints.effect", fmt.Sprintf("invalid taint effect '%s', must be one of %v", taint.Effect, common.ValidTaintEffects))
+				verrs.Add(taintPathPrefix+".effect", fmt.Sprintf("invalid taint effect '%s', must be one of %v", taint.Effect, common.ValidTaintEffects))
 			}
 		}
 	}
 
-	// KubernetesConfig is required
 	if cfg.Spec.Kubernetes == nil {
 		verrs.Add("spec.kubernetes", "section is required")
 	} else {
 		Validate_KubernetesConfig(cfg.Spec.Kubernetes, verrs, "spec.kubernetes")
 	}
 
-	// EtcdConfig is required
 	if cfg.Spec.Etcd == nil {
 		verrs.Add("spec.etcd", "section is required")
 	} else {
 		Validate_EtcdConfig(cfg.Spec.Etcd, verrs, "spec.etcd")
 	}
 
-	// NetworkConfig is required
 	if cfg.Spec.Network == nil {
 		verrs.Add("spec.network", "section is required")
 	} else {
+		// Assuming KubernetesConfig is not nil due to above check or defaulting
 		Validate_NetworkConfig(cfg.Spec.Network, verrs, "spec.network", cfg.Spec.Kubernetes)
 	}
 
@@ -591,14 +554,12 @@ func Validate_Cluster(cfg *Cluster) error {
 	if cfg.Spec.System != nil {
 		Validate_SystemSpec(cfg.Spec.System, verrs, "spec.system")
 	}
-
 	if cfg.Spec.HighAvailability != nil {
 		Validate_HighAvailabilityConfig(cfg.Spec.HighAvailability, verrs, "spec.highAvailability")
 	}
 	if cfg.Spec.Preflight != nil {
 		Validate_PreflightConfig(cfg.Spec.Preflight, verrs, "spec.preflight")
 	}
-
 	if cfg.Spec.Addons != nil {
 		for i, addonName := range cfg.Spec.Addons {
 			if strings.TrimSpace(addonName) == "" {
@@ -606,14 +567,13 @@ func Validate_Cluster(cfg *Cluster) error {
 			}
 		}
 	}
-
 	if cfg.Spec.Storage != nil {
 		Validate_StorageConfig(cfg.Spec.Storage, verrs, "spec.storage")
 	}
 	if cfg.Spec.Registry != nil {
 		Validate_RegistryConfig(cfg.Spec.Registry, verrs, "spec.registry")
 	}
-	if cfg.Spec.Dns != nil { // Changed to pointer
+	if cfg.Spec.Dns != nil {
 		Validate_DNS(cfg.Spec.Dns, verrs, "spec.dns")
 	}
 
@@ -622,6 +582,8 @@ func Validate_Cluster(cfg *Cluster) error {
 	}
 	return nil
 }
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // ClusterList contains a list of Cluster
 type ClusterList struct {
@@ -642,7 +604,6 @@ func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *validation.ValidationEr
 			if strings.TrimSpace(hostName) == "" {
 				verrs.Add(currentHostPath, "hostname cannot be empty")
 			} else if definedHostNames != nil { // Only check existence if definedHostNames is provided
-				// Expand host range if any, e.g., node[1:3]
 				expandedHosts, err := util.ExpandHostRange(hostName)
 				if err != nil {
 					verrs.Add(currentHostPath, fmt.Sprintf("invalid host range format '%s': %v", hostName, err))
@@ -660,7 +621,6 @@ func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *validation.ValidationEr
 	if cfg.Master.Hosts != nil {
 		validateRoleSpecHosts(cfg.Master.Hosts, "master", pathPrefix)
 	}
-	// ... similar calls for Worker, Etcd, LoadBalancer, Storage, Registry ...
 	if cfg.Worker.Hosts != nil {
 		validateRoleSpecHosts(cfg.Worker.Hosts, "worker", pathPrefix)
 	}
@@ -697,7 +657,6 @@ func Validate_RoleGroupsSpec(cfg *RoleGroupsSpec, verrs *validation.ValidationEr
 				}
 				customRoleNames[customRole.Name] = true
 				if customRole.Hosts != nil {
-					// Pass the specific path for this custom role's hosts and the definedHostNames map
 					validateRoleSpecHosts(customRole.Hosts, "hosts", customRolePathPrefix)
 				}
 			}

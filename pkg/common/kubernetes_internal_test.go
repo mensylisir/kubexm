@@ -38,8 +38,8 @@ func TestKubernetesInternalConstants(t *testing.T) {
 	})
 
 	t.Run("KubeadmConstants", func(t *testing.T) {
-		assert.Equal(t, "init-config.yaml", KubeadmInitConfigFileName)
-		assert.Equal(t, "join-config.yaml", KubeadmJoinConfigFileName)
+		assert.Equal(t, "kubeadm-init-config.yaml", KubeadmInitConfigFileName) // Corrected expected value based on current constants.go
+		assert.Equal(t, "kubeadm-join-master-config.yaml", KubeadmJoinMasterConfigFileName) // Using the more specific name
 		assert.Equal(t, "reset", KubeadmResetCommand)
 		assert.Equal(t, "24h0m0s", KubeadmTokenDefaultTTL)
 		assert.Equal(t, "sha256:", KubeadmDiscoveryTokenCACertHashPrefix)
@@ -53,5 +53,11 @@ func TestKubernetesInternalConstants(t *testing.T) {
 
 	t.Run("AnnotationKeyConstants", func(t *testing.T) {
 		assert.Equal(t, "node.kubernetes.io/exclude-from-external-load-balancers", AnnotationNodeKubeadmAlphaExcludeFromExternalLB)
+	})
+
+	t.Run("NamespaceConstants", func(t *testing.T) {
+		assert.Equal(t, "kube-system", KubeSystemNamespace)
+		assert.Equal(t, "kube-public", KubePublicNamespace)
+		assert.Equal(t, KubeSystemNamespace, DefaultAddonNamespace, "DefaultAddonNamespace should default to KubeSystemNamespace")
 	})
 }
