@@ -541,5 +541,3 @@ func TestValidate_SchedulerConfig(t *testing.T) {
 		})
 	}
 }
-
-[end of pkg/apis/kubexms/v1alpha1/kubernetes_types_test.go]
