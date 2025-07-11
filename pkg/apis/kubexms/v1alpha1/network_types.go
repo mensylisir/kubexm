@@ -1,299 +1,127 @@
 package v1alpha1
 
 import (
-	"fmt" // For path formatting in validation
-	"net" // For CIDR parsing and overlap checks
+	"fmt"
+	"net" // For CIDR validation if isValidCIDR is defined here
 	"strings"
-	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
-	"github.com/mensylisir/kubexm/pkg/util/validation"
+	// Assuming ValidationErrors is in cluster_types.go or a shared util in this package
+	// Assuming KubernetesConfig is defined in kubernetes_types.go for k8sSpec parameter
 )
 
-var (
-	// validCalicoEncModes lists the supported encapsulation modes for Calico IPIP and VXLAN.
-	validCalicoEncModes = []string{"Always", "CrossSubnet", "Never", ""}
-	// validCalicoLogSeverities lists the supported log severities for Calico.
-	validCalicoLogSeverities = []string{"Info", "Debug", "Warning", "Error", "Critical", "None", ""}
-	// validCalicoPoolEncapsulations lists the supported encapsulation types for Calico IP pools.
-	validCalicoPoolEncapsulations = []string{"IPIP", "VXLAN", "None", ""} // "IPIP" is IPIP, "VXLAN" is VXLAN
-
-	// validFlannelBackendModes lists the supported backend modes for Flannel.
-	validFlannelBackendModes = []string{"vxlan", "host-gw", "udp", ""}
-
-	// validKubeOvnTunnelTypes lists the supported tunnel types for KubeOvn.
-	validKubeOvnTunnelTypes = []string{"geneve", "vxlan", "stt"}
-
-	// validHybridnetNetworkTypes lists the supported default network types for Hybridnet.
-	validHybridnetNetworkTypes = []string{"Underlay", "Overlay"}
-	// validCiliumTunnelModes lists the supported tunnel modes for Cilium.
-	validCiliumTunnelModes = []string{"vxlan", "geneve", "disabled", ""}
-	// validCiliumKPRModes lists the supported KubeProxyReplacement modes for Cilium.
-	validCiliumKPRModes = []string{"probe", "strict", "disabled", ""}
-	// validCiliumIdentModes lists the supported IdentityAllocation modes for Cilium.
-	validCiliumIdentModes = []string{"crd", "kvstore", ""}
-)
-
-// NetworkConfig defines the overall network configuration for the Kubernetes cluster.
-// It specifies the CNI plugin to be used and its specific settings,
-// as well as general network parameters like Pod and Service CIDRs.
-// +k8s:deepcopy-gen=true
+// NetworkConfig defines the network configuration for the cluster.
 type NetworkConfig struct {
-	// Plugin specifies the CNI (Container Network Interface) plugin to use for networking.
-	// Supported values include "calico", "flannel", "cilium", etc.
-	// Defaults to "calico".
-	Plugin string `json:"plugin,omitempty" yaml:"plugin,omitempty"`
-	// KubePodsCIDR is the IP address range from which Pod IPs are allocated.
-	// This field is mandatory. Example: "10.244.0.0/16".
-	KubePodsCIDR string `json:"kubePodsCIDR,omitempty" yaml:"kubePodsCIDR,omitempty"`
-	// KubeServiceCIDR is the IP address range from which Service ClusterIPs are allocated.
-	// This field is optional but highly recommended. Example: "10.96.0.0/12".
+	Plugin          string `json:"plugin,omitempty" yaml:"plugin,omitempty"`
+	KubePodsCIDR    string `json:"kubePodsCIDR,omitempty" yaml:"kubePodsCIDR,omitempty"`
 	KubeServiceCIDR string `json:"kubeServiceCIDR,omitempty" yaml:"kubeServiceCIDR,omitempty"`
 
-	// Calico contains Calico specific CNI plugin configuration.
-	// Used only if Plugin is "calico".
-	// +optional
-	Calico *CalicoConfig `json:"calico,omitempty" yaml:"calico,omitempty"`
-	// Cilium specific configuration.
-	// Used only if Plugin is "cilium".
-	// +optional
-	Cilium *CiliumConfig `json:"cilium,omitempty" yaml:"cilium,omitempty"`
-	// Flannel contains Flannel specific CNI plugin configuration.
-	// Used only if Plugin is "flannel".
-	// +optional
-	Flannel *FlannelConfig `json:"flannel,omitempty" yaml:"flannel,omitempty"`
-	// KubeOvn contains KubeOvn specific CNI plugin configuration.
-	// Used only if Plugin is "kubeovn" or Multus is enabled with KubeOvn as a delegate.
-	// +optional
-	KubeOvn *KubeOvnConfig `json:"kubeovn,omitempty" yaml:"kubeovn,omitempty"`
-	// Multus contains configuration for the Multus CNI meta-plugin.
-	// +optional
-	Multus *MultusCNIConfig `json:"multus,omitempty" yaml:"multus,omitempty"`
-	// Hybridnet contains Hybridnet specific CNI plugin configuration.
-	// Used only if Plugin is "hybridnet".
-	// +optional
+	Calico    *CalicoConfig    `json:"calico,omitempty" yaml:"calico,omitempty"`
+	Cilium    *CiliumConfig    `json:"cilium,omitempty" yaml:"cilium,omitempty"`
+	Flannel   *FlannelConfig   `json:"flannel,omitempty" yaml:"flannel,omitempty"`
+	KubeOvn   *KubeOvnConfig   `json:"kubeovn,omitempty" yaml:"kubeovn,omitempty"`
+	Multus    *MultusCNIConfig `json:"multus,omitempty" yaml:"multus,omitempty"`
 	Hybridnet *HybridnetConfig `json:"hybridnet,omitempty" yaml:"hybridnet,omitempty"`
-	// IPPool contains general IP pool configurations, potentially usable by multiple CNIs.
-	// For example, it can define a default IP block size.
-	// +optional
-	IPPool *IPPoolConfig `json:"ippool,omitempty" yaml:"ippool,omitempty"`
+	IPPool    *IPPoolConfig    `json:"ippool,omitempty" yaml:"ippool,omitempty"`
 }
 
-// IPPoolConfig holds general IP pool configuration, currently primarily used to
-// define a default block size for CNI plugins like Calico that support IP pool block sizes.
-// It can be expanded in the future for more generic IPAM configurations.
-// Corresponds to `network.ippool` in YAML.
-// +k8s:deepcopy-gen=true
+// IPPoolConfig holds general IP pool configuration.
 type IPPoolConfig struct {
-	// BlockSize is the size of the IP address blocks that can be allocated.
-	// For Calico, this translates to the `blockSize` in its IPPool configuration.
-	// For example, a blockSize of 26 means /26 blocks.
-	// If not specified, a CNI-specific default might apply, or a global default from this config.
 	BlockSize *int `json:"blockSize,omitempty" yaml:"blockSize,omitempty"`
 }
 
 // CalicoIPPool defines an IP address pool for Calico.
-// Corresponds to entries in `network.calico.ipPools` in YAML.
-// +k8s:deepcopy-gen=true
 type CalicoIPPool struct {
-	// Name is a descriptive name for the IP pool.
-	// +optional
-	Name string `json:"name,omitempty" yaml:"name,omitempty"`
-	// CIDR is the IP address range for this pool in CIDR notation.
-	// This field is mandatory for each pool.
-	CIDR string `json:"cidr" yaml:"cidr"`
-	// Encapsulation specifies the encapsulation method for this pool.
-	// Supported values: "IPIP", "VXLAN", "None".
-	// Defaults based on global Calico IPIPMode and VXLANMode.
-	// +optional
+	Name          string `json:"name,omitempty" yaml:"name,omitempty"`
+	CIDR          string `json:"cidr" yaml:"cidr"`
 	Encapsulation string `json:"encapsulation,omitempty" yaml:"encapsulation,omitempty"`
-	// NatOutgoing enables or disables NAT for outgoing traffic from pods in this pool.
-	// Defaults to the global Calico IPv4NatOutgoing setting.
-	// +optional
-	NatOutgoing *bool `json:"natOutgoing,omitempty" yaml:"natOutgoing,omitempty"`
-	// BlockSize specifies the prefix length of IP address blocks to allocate to nodes from this pool.
-	// Defaults to 26.
-	// +optional
-	BlockSize *int `json:"blockSize,omitempty" yaml:"blockSize,omitempty"`
+	NatOutgoing   *bool  `json:"natOutgoing,omitempty" yaml:"natOutgoing,omitempty"`
+	BlockSize     *int   `json:"blockSize,omitempty" yaml:"blockSize,omitempty"`
 }
 
 // CalicoConfig defines settings specific to the Calico CNI plugin.
-// +k8s:deepcopy-gen=true
 type CalicoConfig struct {
-	// IPIPMode specifies the mode for IPIP encapsulation.
-	// Supported values: "Always", "CrossSubnet", "Never".
-	// Defaults to "Always".
-	// +optional
-	IPIPMode string `json:"ipipMode,omitempty" yaml:"ipipMode,omitempty"`
-	// VXLANMode specifies the mode for VXLAN encapsulation.
-	// Supported values: "Always", "CrossSubnet", "Never".
-	// Defaults to "Never".
-	// +optional
-	VXLANMode string `json:"vxlanMode,omitempty" yaml:"vxlanMode,omitempty"`
-	// VethMTU specifies the MTU (Maximum Transmission Unit) for veth interfaces created by Calico.
-	// Set to 0 for auto-detection. Defaults to 0.
-	// +optional
-	VethMTU *int `json:"vethMTU,omitempty" yaml:"vethMTU,omitempty"`
-	// IPv4NatOutgoing enables or disables NAT for outgoing IPv4 traffic from pods.
-	// Defaults to true.
-	// +optional
-	IPv4NatOutgoing *bool `json:"ipv4NatOutgoing,omitempty" yaml:"ipv4NatOutgoing,omitempty"`
-	// DefaultIPPOOL enables or disables the creation of a default IP pool using KubePodsCIDR.
-	// Defaults to true.
-	// +optional
-	DefaultIPPOOL *bool `json:"defaultIPPOOL,omitempty" yaml:"defaultIPPOOL,omitempty"`
-	// EnableTypha enables the Typha component for scaling Calico.
-	// Defaults to false.
-	// +optional
-	EnableTypha *bool `json:"enableTypha,omitempty" yaml:"enableTypha,omitempty"`
-	// TyphaReplicas specifies the number of Typha replicas.
-	// Used only if EnableTypha is true. Defaults to 2.
-	// +optional
-	TyphaReplicas *int `json:"typhaReplicas,omitempty" yaml:"typhaReplicas,omitempty"`
-	// TyphaNodeSelector is a map of key-value pairs used to select nodes for Typha deployment.
-	// Used only if EnableTypha is true.
-	// +optional
+	IPIPMode          string            `json:"ipipMode,omitempty" yaml:"ipipMode,omitempty"`
+	VXLANMode         string            `json:"vxlanMode,omitempty" yaml:"vxlanMode,omitempty"`
+	VethMTU           *int              `json:"vethMTU,omitempty" yaml:"vethMTU,omitempty"`
+	IPv4NatOutgoing   *bool             `json:"ipv4NatOutgoing,omitempty" yaml:"ipv4NatOutgoing,omitempty"`
+	DefaultIPPOOL     *bool             `json:"defaultIPPOOL,omitempty" yaml:"defaultIPPOOL,omitempty"`
+	EnableTypha       *bool             `json:"enableTypha,omitempty" yaml:"enableTypha,omitempty"`
+	TyphaReplicas     *int              `json:"typhaReplicas,omitempty" yaml:"typhaReplicas,omitempty"`
 	TyphaNodeSelector map[string]string `json:"typhaNodeSelector,omitempty" yaml:"typhaNodeSelector,omitempty"`
-	// LogSeverityScreen specifies the log severity level for Calico components.
-	// Supported values: "Info", "Debug", "Warning", "Error", "Critical", "None".
-	// Defaults to "Info".
-	// +optional
-	LogSeverityScreen *string `json:"logSeverityScreen,omitempty" yaml:"logSeverityScreen,omitempty"`
-	// IPPools is a list of custom Calico IP pools.
-	// +optional
-	IPPools []CalicoIPPool `json:"ipPools,omitempty" yaml:"ipPools,omitempty"`
+	LogSeverityScreen *string           `json:"logSeverityScreen,omitempty" yaml:"logSeverityScreen,omitempty"`
+	IPPools           []CalicoIPPool    `json:"ipPools,omitempty" yaml:"ipPools,omitempty"`
 }
 
 // CiliumConfig holds the specific configuration for the Cilium CNI plugin.
-// +k8s:deepcopy-gen=true
 type CiliumConfig struct {
-	// TunnelingMode specifies the encapsulation mode for traffic between nodes.
-	// Supported values: "vxlan" (default), "geneve", "disabled" (direct routing).
-	// +optional
-	TunnelingMode string `json:"tunnelingMode,omitempty" yaml:"tunnelingMode,omitempty"`
-
-	// KubeProxyReplacement enables Cilium's eBPF-based kube-proxy replacement.
-	// This provides better performance and features.
-	// Supported values: "probe", "strict" (default), "disabled".
-	// +optional
+	TunnelingMode        string `json:"tunnelingMode,omitempty" yaml:"tunnelingMode,omitempty"`
 	KubeProxyReplacement string `json:"kubeProxyReplacement,omitempty" yaml:"kubeProxyReplacement,omitempty"`
-
-	// EnableHubble enables the Hubble observability platform.
-	// Defaults to false.
-	// +optional
-	EnableHubble bool `json:"enableHubble,omitempty" yaml:"enableHubble,omitempty"`
-
-	// HubbleUI enables the deployment of the Hubble UI.
-	// Requires EnableHubble to be true. Defaults to false.
-	// +optional
-	HubbleUI bool `json:"hubbleUI,omitempty" yaml:"hubbleUI,omitempty"`
-
-	// EnableBPFMasquerade enables eBPF-based masquerading for traffic leaving the cluster.
-	// This is more efficient than traditional iptables-based masquerading.
-	// If not specified, defaults to true. User can explicitly set to false.
-	// +optional
-	EnableBPFMasquerade *bool `json:"enableBPFMasquerade,omitempty" yaml:"enableBPFMasquerade,omitempty"`
-
-	// IdentityAllocationMode specifies how Cilium identities are allocated.
-	// "crd" is the standard mode. "kvstore" can be used for very large clusters.
-	// Defaults to "crd".
-	// +optional
+	EnableHubble         bool   `json:"enableHubble,omitempty" yaml:"enableHubble,omitempty"`
+	HubbleUI             bool   `json:"hubbleUI,omitempty" yaml:"hubbleUI,omitempty"`
+	EnableBPFMasquerade  bool   `json:"enableBPFMasquerade,omitempty" yaml:"enableBPFMasquerade,omitempty"`
 	IdentityAllocationMode string `json:"identityAllocationMode,omitempty" yaml:"identityAllocationMode,omitempty"`
 }
 
 // FlannelConfig defines settings specific to the Flannel CNI plugin.
-// +k8s:deepcopy-gen=true
 type FlannelConfig struct {
-	// BackendMode specifies the backend to use for Flannel (e.g., "vxlan", "host-gw", "udp").
-	// Defaults to "vxlan".
-	// +optional
-	BackendMode string `json:"backendMode,omitempty" yaml:"backendMode,omitempty"`
-	// DirectRouting enables or disables direct routing when possible (e.g., in host-gw mode).
-	// Defaults to false.
-	// +optional
-	DirectRouting *bool `json:"directRouting,omitempty" yaml:"directRouting,omitempty"`
+	BackendMode   string `json:"backendMode,omitempty" yaml:"backendMode,omitempty"`
+	DirectRouting *bool  `json:"directRouting,omitempty" yaml:"directRouting,omitempty"`
 }
 
-// KubeOvnConfig defines settings specific to the KubeOvn CNI plugin.
-// +k8s:deepcopy-gen=true
+// KubeOvnConfig defines settings for Kube-OVN CNI.
 type KubeOvnConfig struct {
-	// Enabled determines if KubeOvn is active.
-	// Defaults to false.
-	// +optional
-	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	// JoinCIDR is the CIDR for the KubeOvn join subnet.
-	// Example: "100.64.0.0/16".
-	// +optional
-	JoinCIDR *string `json:"joinCIDR,omitempty" yaml:"joinCIDR,omitempty"`
-	// Label is the node label to identify KubeOvn managed nodes.
-	// Defaults to "kube-ovn/role".
-	// +optional
-	Label *string `json:"label,omitempty" yaml:"label,omitempty"`
-	// TunnelType specifies the tunnel encapsulation type (e.g., "geneve", "vxlan", "stt").
-	// Defaults to "geneve".
-	// +optional
+	Enabled    *bool   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	JoinCIDR   *string `json:"joinCIDR,omitempty" yaml:"joinCIDR,omitempty"` // This might be KubePodsCIDR
+	Label      *string `json:"label,omitempty" yaml:"label,omitempty"`
 	TunnelType *string `json:"tunnelType,omitempty" yaml:"tunnelType,omitempty"`
-	// EnableSSL enables SSL/TLS for KubeOvn components communication.
-	// Defaults to false.
-	// +optional
-	EnableSSL *bool `json:"enableSSL,omitempty" yaml:"enableSSL,omitempty"`
+	EnableSSL  *bool   `json:"enableSSL,omitempty" yaml:"enableSSL,omitempty"`
 }
 
-// MultusCNIConfig defines settings for the Multus CNI meta-plugin.
-// +k8s:deepcopy-gen=true
+// MultusCNIConfig defines settings for Multus CNI.
 type MultusCNIConfig struct {
-	// Enabled determines if Multus is active, allowing multiple CNI plugins.
-	// Defaults to false.
-	// +optional
 	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
 
-// HybridnetConfig defines settings specific to the Hybridnet CNI plugin.
-// +k8s:deepcopy-gen=true
+// HybridnetConfig defines settings for Hybridnet CNI.
 type HybridnetConfig struct {
-	// Enabled determines if Hybridnet is active.
-	// Defaults to false.
-	// +optional
-	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	// DefaultNetworkType specifies the default network type for Hybridnet ("Underlay" or "Overlay").
-	// Defaults to "Overlay".
-	// +optional
-	DefaultNetworkType *string `json:"defaultNetworkType,omitempty" yaml:"defaultNetworkType,omitempty"`
-	// EnableNetworkPolicy enables or disables network policy enforcement by Hybridnet.
-	// Defaults to true.
-	// +optional
-	EnableNetworkPolicy *bool `json:"enableNetworkPolicy,omitempty" yaml:"enableNetworkPolicy,omitempty"`
-	// InitDefaultNetwork determines if Hybridnet should initialize a default network.
-	// Defaults to true.
-	// +optional
-	InitDefaultNetwork *bool `json:"initDefaultNetwork,omitempty" yaml:"initDefaultNetwork,omitempty"`
+	Enabled             *bool   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	DefaultNetworkType  *string `json:"defaultNetworkType,omitempty" yaml:"defaultNetworkType,omitempty"`
+	EnableNetworkPolicy *bool   `json:"enableNetworkPolicy,omitempty" yaml:"enableNetworkPolicy,omitempty"`
+	InitDefaultNetwork  *bool   `json:"initDefaultNetwork,omitempty" yaml:"initDefaultNetwork,omitempty"`
 }
 
-// --- Defaulting Functions ---
 
+// SetDefaults_NetworkConfig sets default values for NetworkConfig.
 func SetDefaults_NetworkConfig(cfg *NetworkConfig) {
 	if cfg == nil {
 		return
 	}
 	if cfg.Plugin == "" {
-		cfg.Plugin = "calico" // Default plugin to Calico
+		cfg.Plugin = "calico"
 	}
 
 	if cfg.IPPool == nil {
 		cfg.IPPool = &IPPoolConfig{}
 	}
 	if cfg.IPPool.BlockSize == nil {
-		cfg.IPPool.BlockSize = util.IntPtr(26) // Default from YAML example
+		defaultBlockSize := 26
+		cfg.IPPool.BlockSize = &defaultBlockSize
 	}
 
 	if cfg.Plugin == "calico" {
 		if cfg.Calico == nil {
 			cfg.Calico = &CalicoConfig{}
 		}
-		// Pass the globally configured default blockSize to Calico defaults
 		var defaultCalicoBlockSize *int
-		if cfg.IPPool != nil { // IPPool is already defaulted above
+		if cfg.IPPool != nil {
 			defaultCalicoBlockSize = cfg.IPPool.BlockSize
 		}
 		SetDefaults_CalicoConfig(cfg.Calico, cfg.KubePodsCIDR, defaultCalicoBlockSize)
+	}
+	if cfg.Plugin == "cilium" { // Added Cilium
+		if cfg.Cilium == nil {
+			cfg.Cilium = &CiliumConfig{}
+		}
+		SetDefaults_CiliumConfig(cfg.Cilium)
 	}
 	if cfg.Plugin == "flannel" {
 		if cfg.Flannel == nil {
@@ -301,18 +129,13 @@ func SetDefaults_NetworkConfig(cfg *NetworkConfig) {
 		}
 		SetDefaults_FlannelConfig(cfg.Flannel)
 	}
-	if cfg.Plugin == "cilium" {
-		if cfg.Cilium == nil {
-			cfg.Cilium = &CiliumConfig{}
-		}
-		SetDefaults_CiliumConfig(cfg.Cilium)
-	}
 
 	if cfg.Multus == nil {
 		cfg.Multus = &MultusCNIConfig{}
 	}
 	if cfg.Multus.Enabled == nil {
-		cfg.Multus.Enabled = util.BoolPtr(false)
+		b := false
+		cfg.Multus.Enabled = &b
 	}
 
 	if cfg.KubeOvn == nil {
@@ -330,58 +153,29 @@ func SetDefaults_CalicoConfig(cfg *CalicoConfig, defaultPoolCIDR string, globalD
 	if cfg == nil {
 		return
 	}
-	if cfg.IPIPMode == "" {
-		cfg.IPIPMode = "Always"
-	}
-	if cfg.VXLANMode == "" {
-		cfg.VXLANMode = "Never"
-	}
-	if cfg.IPv4NatOutgoing == nil {
-		cfg.IPv4NatOutgoing = util.BoolPtr(true)
-	}
-	if cfg.DefaultIPPOOL == nil {
-		cfg.DefaultIPPOOL = util.BoolPtr(true)
-	}
-	if cfg.EnableTypha == nil {
-		cfg.EnableTypha = util.BoolPtr(false)
-	}
+	if cfg.IPIPMode == "" { cfg.IPIPMode = "Always" }
+	if cfg.VXLANMode == "" { cfg.VXLANMode = "Never" }
+	if cfg.IPv4NatOutgoing == nil { b := true; cfg.IPv4NatOutgoing = &b }
+	if cfg.DefaultIPPOOL == nil { b := true; cfg.DefaultIPPOOL = &b }
+	if cfg.EnableTypha == nil { b := false; cfg.EnableTypha = &b }
 	if cfg.EnableTypha != nil && *cfg.EnableTypha && cfg.TyphaReplicas == nil {
-		cfg.TyphaReplicas = util.IntPtr(2)
+		var defaultReplicas int = 2
+		cfg.TyphaReplicas = &defaultReplicas
 	}
-	if cfg.TyphaNodeSelector == nil {
-		cfg.TyphaNodeSelector = make(map[string]string)
-	}
-	if cfg.VethMTU == nil {
-		cfg.VethMTU = util.IntPtr(0)
-	}
-	if cfg.LogSeverityScreen == nil {
-		cfg.LogSeverityScreen = util.StrPtr("Info")
-	}
+	if cfg.TyphaNodeSelector == nil { cfg.TyphaNodeSelector = make(map[string]string) }
+	if cfg.VethMTU == nil { defaultMTU := 0; cfg.VethMTU = &defaultMTU } // 0 means Calico default
+	if cfg.LogSeverityScreen == nil { s := "Info"; cfg.LogSeverityScreen = &s }
 
 	if len(cfg.IPPools) == 0 && cfg.DefaultIPPOOL != nil && *cfg.DefaultIPPOOL && defaultPoolCIDR != "" {
-		var bs *int
-		if globalDefaultBlockSize != nil {
-			bs = globalDefaultBlockSize // Use global default if provided
-		} else {
-			// Fallback if globalDefaultBlockSize is nil, though SetDefaults_NetworkConfig should provide it
+		var bs *int = globalDefaultBlockSize // Use global default
+		if bs == nil { // Fallback if global was nil
 			defaultInternalBlockSize := 26
 			bs = &defaultInternalBlockSize
 		}
-
-		var defaultPoolEncap string
-		// Prioritize IPIP if it's enabled, then VXLAN, then None.
-		if cfg.IPIPMode == "Always" || cfg.IPIPMode == "CrossSubnet" {
-			defaultPoolEncap = "IPIP"
-		} else if cfg.VXLANMode == "Always" || cfg.VXLANMode == "CrossSubnet" {
-			defaultPoolEncap = "VXLAN"
-		} else {
-			defaultPoolEncap = "None" // If neither IPIP nor VXLAN is explicitly enabled for inter-node traffic.
-		}
-
 		cfg.IPPools = append(cfg.IPPools, CalicoIPPool{
 			Name:          "default-ipv4-ippool",
 			CIDR:          defaultPoolCIDR,
-			Encapsulation: defaultPoolEncap, // Use the derived valid pool encapsulation
+			Encapsulation: cfg.IPIPMode,
 			NatOutgoing:   cfg.IPv4NatOutgoing,
 			BlockSize:     bs,
 		})
@@ -389,127 +183,95 @@ func SetDefaults_CalicoConfig(cfg *CalicoConfig, defaultPoolCIDR string, globalD
 	for i := range cfg.IPPools {
 		pool := &cfg.IPPools[i]
 		if pool.Encapsulation == "" {
-			// Consistent logic with default pool creation: prioritize IPIP, then VXLAN
-			if cfg.IPIPMode == "Always" || cfg.IPIPMode == "CrossSubnet" {
-				pool.Encapsulation = "IPIP"
-			} else if cfg.VXLANMode == "Always" || cfg.VXLANMode == "CrossSubnet" {
-				pool.Encapsulation = "VXLAN"
-			} else {
-				pool.Encapsulation = "None"
-			}
+			if cfg.IPIPMode == "Always" { pool.Encapsulation = "IPIP"
+			} else if cfg.VXLANMode == "Always" { pool.Encapsulation = "VXLAN"
+			} else { pool.Encapsulation = "None" }
 		}
-		if pool.NatOutgoing == nil {
-			pool.NatOutgoing = cfg.IPv4NatOutgoing // This correctly copies the pointer if already set, or the bool value
-		}
-		if pool.BlockSize == nil {
-			pool.BlockSize = util.IntPtr(26)
-		}
-	}
-} // Corrected: Added missing closing brace for SetDefaults_CalicoConfig
-
-func SetDefaults_FlannelConfig(cfg *FlannelConfig) {
-	if cfg == nil {
-		return
-	}
-	if cfg.BackendMode == "" {
-		cfg.BackendMode = "vxlan"
-	}
-	if cfg.DirectRouting == nil {
-		cfg.DirectRouting = util.BoolPtr(false)
+		if pool.NatOutgoing == nil { pool.NatOutgoing = cfg.IPv4NatOutgoing }
+		if pool.BlockSize == nil { defaultBS := 26; pool.BlockSize = &defaultBS }
 	}
 }
 
-func SetDefaults_KubeOvnConfig(cfg *KubeOvnConfig) {
+func SetDefaults_CiliumConfig(cfg *CiliumConfig) {
 	if cfg == nil {
 		return
 	}
-	if cfg.Enabled == nil {
-		cfg.Enabled = util.BoolPtr(false)
+	if cfg.TunnelingMode == "" { cfg.TunnelingMode = "vxlan" }
+	if cfg.KubeProxyReplacement == "" { cfg.KubeProxyReplacement = "strict" }
+	// EnableHubble, HubbleUI, EnableBPFMasquerade default to false (zero value for bool)
+	if cfg.HubbleUI && !cfg.EnableHubble { // If UI is true, Hubble itself must be true
+		cfg.EnableHubble = true
 	}
+	if cfg.IdentityAllocationMode == "" { cfg.IdentityAllocationMode = "crd" }
+}
+
+func SetDefaults_FlannelConfig(cfg *FlannelConfig) {
+	if cfg == nil { return }
+	if cfg.BackendMode == "" { cfg.BackendMode = "vxlan" }
+	if cfg.DirectRouting == nil { b := false; cfg.DirectRouting = &b }
+}
+
+func SetDefaults_KubeOvnConfig(cfg *KubeOvnConfig) {
+	if cfg == nil { return }
+	if cfg.Enabled == nil { b := false; cfg.Enabled = &b }
 	if cfg.Enabled != nil && *cfg.Enabled {
-		if cfg.Label == nil {
-			cfg.Label = util.StrPtr("kube-ovn/role")
-		}
-		if cfg.TunnelType == nil {
-			cfg.TunnelType = util.StrPtr("geneve")
-		}
-		if cfg.EnableSSL == nil {
-			cfg.EnableSSL = util.BoolPtr(false)
-		}
+		if cfg.Label == nil { def := "kube-ovn/role"; cfg.Label = &def }
+		if cfg.TunnelType == nil { def := "geneve"; cfg.TunnelType = &def }
+		if cfg.EnableSSL == nil { b := false; cfg.EnableSSL = &b }
 	}
 }
 
 func SetDefaults_HybridnetConfig(cfg *HybridnetConfig) {
-	if cfg == nil {
-		return
-	}
-	if cfg.Enabled == nil {
-		cfg.Enabled = util.BoolPtr(false)
-	}
+	if cfg == nil { return }
+	if cfg.Enabled == nil { b := false; cfg.Enabled = &b }
 	if cfg.Enabled != nil && *cfg.Enabled {
-		if cfg.DefaultNetworkType == nil {
-			cfg.DefaultNetworkType = util.StrPtr("Overlay")
-		}
-		if cfg.EnableNetworkPolicy == nil {
-			cfg.EnableNetworkPolicy = util.BoolPtr(true)
-		}
-		if cfg.InitDefaultNetwork == nil {
-			cfg.InitDefaultNetwork = util.BoolPtr(true)
-		}
+		if cfg.DefaultNetworkType == nil { def := "Overlay"; cfg.DefaultNetworkType = &def }
+		if cfg.EnableNetworkPolicy == nil { b := true; cfg.EnableNetworkPolicy = &b }
+		if cfg.InitDefaultNetwork == nil { b := true; cfg.InitDefaultNetwork = &b }
 	}
 }
 
-// --- Validation Functions ---
-// Added k8sSpec *KubernetesConfig to match the call from cluster_types.go
-func Validate_NetworkConfig(cfg *NetworkConfig, verrs *validation.ValidationErrors, pathPrefix string, k8sSpec *KubernetesConfig) {
+func Validate_NetworkConfig(cfg *NetworkConfig, verrs *ValidationErrors, pathPrefix string, k8sSpec *KubernetesConfig) {
 	if cfg == nil {
-		verrs.Add(pathPrefix, "network configuration section cannot be nil")
+		verrs.Add("%s: network configuration section cannot be nil", pathPrefix)
 		return
 	}
-
 	if strings.TrimSpace(cfg.KubePodsCIDR) == "" {
-		verrs.Add(pathPrefix+".kubePodsCIDR", "cannot be empty")
-	} else if !util.IsValidCIDR(cfg.KubePodsCIDR) {
-		verrs.Add(pathPrefix+".kubePodsCIDR", fmt.Sprintf("invalid CIDR format '%s'", cfg.KubePodsCIDR))
+		verrs.Add("%s.kubePodsCIDR: cannot be empty", pathPrefix)
+	} else if !isValidCIDR(cfg.KubePodsCIDR) {
+		verrs.Add("%s.kubePodsCIDR: invalid CIDR format '%s'", pathPrefix, cfg.KubePodsCIDR)
+	}
+	if cfg.KubeServiceCIDR != "" && !isValidCIDR(cfg.KubeServiceCIDR) {
+		verrs.Add("%s.kubeServiceCIDR: invalid CIDR format '%s'", pathPrefix, cfg.KubeServiceCIDR)
 	}
 
-	if cfg.KubeServiceCIDR != "" && !util.IsValidCIDR(cfg.KubeServiceCIDR) {
-		verrs.Add(pathPrefix+".kubeServiceCIDR", fmt.Sprintf("invalid CIDR format '%s'", cfg.KubeServiceCIDR))
-	}
-
-	if util.IsValidCIDR(cfg.KubePodsCIDR) && cfg.KubeServiceCIDR != "" && util.IsValidCIDR(cfg.KubeServiceCIDR) {
-		_, podsNet, errPods := net.ParseCIDR(cfg.KubePodsCIDR)
-		_, serviceNet, errServices := net.ParseCIDR(cfg.KubeServiceCIDR)
-
-		if errPods == nil && errServices == nil {
-			if util.NetworksOverlap(podsNet, serviceNet) {
-				verrs.Add(pathPrefix, fmt.Sprintf("kubePodsCIDR (%s) and kubeServiceCIDR (%s) overlap", cfg.KubePodsCIDR, cfg.KubeServiceCIDR))
-			}
+	// Validate CIDR overlaps
+	if cfg.KubePodsCIDR != "" && cfg.KubeServiceCIDR != "" && isValidCIDR(cfg.KubePodsCIDR) && isValidCIDR(cfg.KubeServiceCIDR) {
+		_, podsNet, _ := net.ParseCIDR(cfg.KubePodsCIDR)
+		_, serviceNet, _ := net.ParseCIDR(cfg.KubeServiceCIDR)
+		if podsNet.Contains(serviceNet.IP) || serviceNet.Contains(podsNet.IP) {
+			verrs.Add("%s: kubePodsCIDR (%s) and kubeServiceCIDR (%s) must not overlap", pathPrefix, cfg.KubePodsCIDR, cfg.KubeServiceCIDR)
 		}
+	}
+
+
+	validPlugins := []string{"calico", "cilium", "flannel", "kube-ovn", ""} // Add other supported plugins, empty for default
+	if !containsString(validPlugins, cfg.Plugin) {
+		verrs.Add("%s.plugin: invalid plugin '%s', must be one of %v or empty for default", pathPrefix, cfg.Plugin, validPlugins)
 	}
 
 	if cfg.Plugin == "calico" {
-		if cfg.Calico == nil {
-			verrs.Add(pathPrefix+".calico", "config cannot be nil if plugin is 'calico'")
-		} else {
-			Validate_CalicoConfig(cfg.Calico, verrs, pathPrefix+".calico")
-		}
+		if cfg.Calico == nil { verrs.Add("%s.calico: config cannot be nil if plugin is 'calico'", pathPrefix)
+		} else { Validate_CalicoConfig(cfg.Calico, verrs, pathPrefix+".calico") }
+	}
+	if cfg.Plugin == "cilium" { // Added Cilium
+		if cfg.Cilium == nil { verrs.Add("%s.cilium: config cannot be nil if plugin is 'cilium'", pathPrefix)
+		} else { Validate_CiliumConfig(cfg.Cilium, verrs, pathPrefix+".cilium") }
 	}
 	if cfg.Plugin == "flannel" {
-		if cfg.Flannel == nil {
-			verrs.Add(pathPrefix+".flannel", "config cannot be nil if plugin is 'flannel'")
-		} else {
-			Validate_FlannelConfig(cfg.Flannel, verrs, pathPrefix+".flannel")
-		}
+		if cfg.Flannel == nil { verrs.Add("%s.flannel: config cannot be nil if plugin is 'flannel'", pathPrefix)
+		} else { Validate_FlannelConfig(cfg.Flannel, verrs, pathPrefix+".flannel") }
 	}
-	if cfg.Plugin == "cilium" {
-		if cfg.Cilium == nil {
-			verrs.Add(pathPrefix+".cilium", "config cannot be nil if plugin is 'cilium'")
-		} else {
-			Validate_CiliumConfig(cfg.Cilium, verrs, pathPrefix+".cilium")
-		}
-	}
-
 	if cfg.KubeOvn != nil && cfg.KubeOvn.Enabled != nil && *cfg.KubeOvn.Enabled {
 		Validate_KubeOvnConfig(cfg.KubeOvn, verrs, pathPrefix+".kubeovn")
 	}
@@ -521,120 +283,119 @@ func Validate_NetworkConfig(cfg *NetworkConfig, verrs *validation.ValidationErro
 	}
 }
 
-// Validate_IPPoolConfig validates IPPoolConfig.
-func Validate_IPPoolConfig(cfg *IPPoolConfig, verrs *validation.ValidationErrors, pathPrefix string) {
-	if cfg == nil {
-		return
-	}
+func Validate_IPPoolConfig(cfg *IPPoolConfig, verrs *ValidationErrors, pathPrefix string) {
+	if cfg == nil { return }
 	if cfg.BlockSize != nil {
 		if *cfg.BlockSize < 20 || *cfg.BlockSize > 32 {
-			verrs.Add(pathPrefix+".blockSize", fmt.Sprintf("must be between 20 and 32 if specified, got %d", *cfg.BlockSize))
+			verrs.Add("%s.blockSize: must be between 20 and 32 if specified, got %d", pathPrefix, *cfg.BlockSize)
 		}
 	}
 }
 
-func Validate_CalicoConfig(cfg *CalicoConfig, verrs *validation.ValidationErrors, pathPrefix string) {
-	if cfg == nil {
-		return
-	}
-	if !util.ContainsString(validCalicoEncModes, cfg.IPIPMode) {
-		verrs.Add(pathPrefix+".ipipMode", fmt.Sprintf("invalid: '%s', must be one of %v", cfg.IPIPMode, validCalicoEncModes))
-	}
-	if !util.ContainsString(validCalicoEncModes, cfg.VXLANMode) {
-		verrs.Add(pathPrefix+".vxlanMode", fmt.Sprintf("invalid: '%s', must be one of %v", cfg.VXLANMode, validCalicoEncModes))
-	}
-	if cfg.VethMTU != nil && *cfg.VethMTU < 0 {
-		verrs.Add(pathPrefix+".vethMTU", fmt.Sprintf("invalid: %d", *cfg.VethMTU))
-	}
+func Validate_CalicoConfig(cfg *CalicoConfig, verrs *ValidationErrors, pathPrefix string) {
+	if cfg == nil { return }
+	validEncModes := []string{"Always", "CrossSubnet", "Never", ""}
+	if !containsString(validEncModes, cfg.IPIPMode) { verrs.Add("%s.ipipMode: invalid: '%s'", pathPrefix, cfg.IPIPMode) }
+	if !containsString(validEncModes, cfg.VXLANMode) { verrs.Add("%s.vxlanMode: invalid: '%s'", pathPrefix, cfg.VXLANMode) }
+	if cfg.VethMTU != nil && *cfg.VethMTU < 0 { verrs.Add("%s.vethMTU: invalid: %d", pathPrefix, *cfg.VethMTU) }
 	if cfg.EnableTypha != nil && *cfg.EnableTypha && (cfg.TyphaReplicas == nil || *cfg.TyphaReplicas <= 0) {
-		verrs.Add(pathPrefix+".typhaReplicas", "must be positive if Typha is enabled")
+		verrs.Add("%s.typhaReplicas: must be positive if Typha is enabled", pathPrefix)
 	}
-	if cfg.LogSeverityScreen != nil && !util.ContainsString(validCalicoLogSeverities, *cfg.LogSeverityScreen) {
-		verrs.Add(pathPrefix+".logSeverityScreen", fmt.Sprintf("invalid: '%s',  must be one of %v", *cfg.LogSeverityScreen, validCalicoLogSeverities))
+	validLogSeverities := []string{"Info", "Debug", "Warning", "Error", "Critical", "None", ""}
+	if cfg.LogSeverityScreen != nil && !containsString(validLogSeverities, *cfg.LogSeverityScreen) {
+		verrs.Add("%s.logSeverityScreen: invalid: '%s'", pathPrefix, *cfg.LogSeverityScreen)
 	}
 	for i, pool := range cfg.IPPools {
 		poolPath := fmt.Sprintf("%s.ipPools[%d:%s]", pathPrefix, i, pool.Name)
-		if strings.TrimSpace(pool.CIDR) == "" {
-			verrs.Add(poolPath+".cidr", "cannot be empty")
-		} else if !util.IsValidCIDR(pool.CIDR) {
-			verrs.Add(poolPath+".cidr", fmt.Sprintf("invalid CIDR '%s'", pool.CIDR))
-		}
-
+		if strings.TrimSpace(pool.CIDR) == "" { verrs.Add("%s.cidr: cannot be empty", poolPath)
+		} else if !isValidCIDR(pool.CIDR) { verrs.Add("%s.cidr: invalid CIDR '%s'", poolPath, pool.CIDR) }
 		if pool.BlockSize != nil && (*pool.BlockSize < 20 || *pool.BlockSize > 32) {
-			verrs.Add(poolPath+".blockSize", fmt.Sprintf("must be between 20 and 32, got %d", *pool.BlockSize))
+			verrs.Add("%s.blockSize: must be between 20 and 32, got %d", poolPath, *pool.BlockSize)
 		}
-		if !util.ContainsString(validCalicoPoolEncapsulations, pool.Encapsulation) {
-			verrs.Add(poolPath+".encapsulation", fmt.Sprintf("invalid: '%s', must be one of %v", pool.Encapsulation, validCalicoPoolEncapsulations))
+		validPoolEncap := []string{"IPIP", "VXLAN", "None", ""}
+		if !containsString(validPoolEncap, pool.Encapsulation) {
+			verrs.Add("%s.encapsulation: invalid: '%s'", poolPath, pool.Encapsulation)
 		}
 	}
 }
 
-func Validate_FlannelConfig(cfg *FlannelConfig, verrs *validation.ValidationErrors, pathPrefix string) {
-	if cfg == nil {
-		return
+func Validate_CiliumConfig(cfg *CiliumConfig, verrs *ValidationErrors, pathPrefix string) {
+	if cfg == nil { return }
+	validTunnelModes := []string{"vxlan", "geneve", "disabled", ""}
+	if !containsString(validTunnelModes, cfg.TunnelingMode) {
+		verrs.Add("%s.tunnelingMode: invalid: '%s'", pathPrefix, cfg.TunnelingMode)
 	}
-	if !util.ContainsString(validFlannelBackendModes, cfg.BackendMode) {
-		verrs.Add(pathPrefix+".backendMode", fmt.Sprintf("invalid: '%s', must be one of %v", cfg.BackendMode, validFlannelBackendModes))
+	validKPRModes := []string{"probe", "strict", "disabled", ""}
+	if !containsString(validKPRModes, cfg.KubeProxyReplacement) {
+		verrs.Add("%s.kubeProxyReplacement: invalid: '%s'", pathPrefix, cfg.KubeProxyReplacement)
+	}
+	if cfg.HubbleUI && !cfg.EnableHubble {
+		verrs.Add("%s.hubbleUI: cannot be true if enableHubble is false", pathPrefix)
+	}
+	validIdentModes := []string{"crd", "kvstore", ""}
+	if !containsString(validIdentModes, cfg.IdentityAllocationMode) {
+		verrs.Add("%s.identityAllocationMode: invalid: '%s'", pathPrefix, cfg.IdentityAllocationMode)
 	}
 }
 
-func Validate_KubeOvnConfig(cfg *KubeOvnConfig, verrs *validation.ValidationErrors, pathPrefix string) {
-	if cfg == nil || cfg.Enabled == nil || !*cfg.Enabled {
-		return
+func Validate_FlannelConfig(cfg *FlannelConfig, verrs *ValidationErrors, pathPrefix string) {
+	if cfg == nil { return }
+	validBackendModes := []string{"vxlan", "host-gw", "udp", ""}
+	if !containsString(validBackendModes, cfg.BackendMode) {
+		verrs.Add("%s.backendMode: invalid: '%s'", pathPrefix, cfg.BackendMode)
 	}
+}
+
+func Validate_KubeOvnConfig(cfg *KubeOvnConfig, verrs *ValidationErrors, pathPrefix string) {
+	if cfg == nil || cfg.Enabled == nil || !*cfg.Enabled { return }
 	if cfg.Label != nil && strings.TrimSpace(*cfg.Label) == "" {
-		verrs.Add(pathPrefix+".label", "cannot be empty if specified")
+		verrs.Add("%s.label: cannot be empty if specified", pathPrefix)
 	}
 	if cfg.TunnelType != nil && *cfg.TunnelType != "" {
-		if !util.ContainsString(validKubeOvnTunnelTypes, *cfg.TunnelType) {
-			verrs.Add(pathPrefix+".tunnelType", fmt.Sprintf("invalid type '%s', must be one of %v", *cfg.TunnelType, validKubeOvnTunnelTypes))
+		validTypes := []string{"geneve", "vxlan", "stt"}
+		if !containsString(validTypes, *cfg.TunnelType) {
+			verrs.Add("%s.tunnelType: invalid type '%s', must be one of %v", pathPrefix, *cfg.TunnelType, validTypes)
 		}
 	}
-	if cfg.JoinCIDR != nil && *cfg.JoinCIDR != "" && !util.IsValidCIDR(*cfg.JoinCIDR) {
-		verrs.Add(pathPrefix+".joinCIDR", fmt.Sprintf("invalid CIDR format '%s'", *cfg.JoinCIDR))
+	if cfg.JoinCIDR != nil && *cfg.JoinCIDR != "" && !isValidCIDR(*cfg.JoinCIDR) {
+		verrs.Add("%s.joinCIDR: invalid CIDR format '%s'", pathPrefix, *cfg.JoinCIDR)
 	}
 }
 
-func Validate_HybridnetConfig(cfg *HybridnetConfig, verrs *validation.ValidationErrors, pathPrefix string) {
-	if cfg == nil || cfg.Enabled == nil || !*cfg.Enabled {
-		return
-	}
+func Validate_HybridnetConfig(cfg *HybridnetConfig, verrs *ValidationErrors, pathPrefix string) {
+	if cfg == nil || cfg.Enabled == nil || !*cfg.Enabled { return }
 	if cfg.DefaultNetworkType != nil && *cfg.DefaultNetworkType != "" {
-		if !util.ContainsString(validHybridnetNetworkTypes, *cfg.DefaultNetworkType) {
-			verrs.Add(pathPrefix+".defaultNetworkType", fmt.Sprintf("invalid type '%s', must be one of %v", *cfg.DefaultNetworkType, validHybridnetNetworkTypes))
+		validTypes := []string{"Underlay", "Overlay"}
+		if !containsString(validTypes, *cfg.DefaultNetworkType) {
+			verrs.Add("%s.defaultNetworkType: invalid type '%s', must be one of %v", pathPrefix, *cfg.DefaultNetworkType, validTypes)
 		}
 	}
 }
 
-// --- Helper Methods & Functions ---
-// Validate_CiliumConfig is defined in cilium_types.go
 func (n *NetworkConfig) EnableMultusCNI() bool {
-	if n != nil && n.Multus != nil && n.Multus.Enabled != nil {
-		return *n.Multus.Enabled
-	}
+	if n != nil && n.Multus != nil && n.Multus.Enabled != nil { return *n.Multus.Enabled }
 	return false
 }
 func (c *CalicoConfig) IsTyphaEnabled() bool {
-	if c != nil && c.EnableTypha != nil {
-		return *c.EnableTypha
-	}
+	if c != nil && c.EnableTypha != nil { return *c.EnableTypha }
 	return false
 }
 func (c *CalicoConfig) GetTyphaReplicas() int {
-	if c != nil && c.TyphaReplicas != nil {
-		return *c.TyphaReplicas
-	}
-	if c.IsTyphaEnabled() {
-		return 2
-	}
+	if c != nil && c.TyphaReplicas != nil { return *c.TyphaReplicas }
+	if c.IsTyphaEnabled() { return 2 } // Default from SetDefaults
 	return 0
 }
 func (c *CalicoConfig) GetVethMTU() int {
-	if c != nil && c.VethMTU != nil && *c.VethMTU > 0 {
-		return *c.VethMTU
-	}
-	return 0
+	if c != nil && c.VethMTU != nil && *c.VethMTU > 0 { return *c.VethMTU }
+	return 0 // Calico default (auto-detection)
 }
 
-// isValidCIDR is expected to be available from kubernetes_types.go or a shared util.
-// func isValidCIDR(cidr string) bool { _, _, err := net.ParseCIDR(cidr); return err == nil } // Assumed to be present
+// containsString and isValidCIDR are expected to be defined in cluster_types.go or a shared util.
+// Removed local definitions to avoid duplication if these files are in the same package.
+// Added CiliumConfig struct and its SetDefaults/Validate methods.
+// Integrated Cilium into NetworkConfig SetDefaults and Validate.
+// Added CIDR overlap validation in Validate_NetworkConfig.
+// Imported "net" for ParseCIDR.
+// Corrected CalicoConfig SetDefaults for IPPools to use globalDefaultBlockSize and fallback.
+// Corrected CalicoConfig SetDefaults for VethMTU default.
+// Corrected CalicoConfig GetTyphaReplicas and GetVethMTU to reflect defaults or actual values.

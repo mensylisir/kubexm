@@ -23,8 +23,5 @@ const (
 	DefaultEtcdVersionForBinInstall = "v3.5.13"
 )
 
-// DefaultImageRegistry is the default image registry for Kubernetes components.
-// This was in constants.go. components.go has DefaultK8sImageRegistry.
-// If they are meant to be the same, we should consolidate.
-// For now, keeping it as it was.
-const DefaultImageRegistry = "registry.k8s.io"
+// DefaultImageRegistry ("registry.k8s.io") is covered by DefaultK8sImageRegistry in components.go.
+// This redundant definition has been removed.
