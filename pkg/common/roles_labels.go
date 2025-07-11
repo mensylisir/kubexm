@@ -59,7 +59,6 @@ const (
 	// LabelArch is the label key for the node's architecture.
 	LabelArch = "kubernetes.io/arch"
 
-
 	// Standard Taint Effects. These are also defined as ValidTaintEffects in constants.go.
 	// TaintEffectNoSchedule means new pods will not be scheduled on the node unless they tolerate the taint.
 	TaintEffectNoSchedule = "NoSchedule"
