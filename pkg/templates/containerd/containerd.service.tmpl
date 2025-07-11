@@ -1,0 +1,32 @@
+[Unit]
+Description={{ .Description }}
+Documentation={{ .Documentation }}
+After={{ .After }}
+{{- if .Wants }}
+Wants={{ .Wants }}
+{{- end }}
+
+[Service]
+{{- range .ExecStartPre }}
+ExecStartPre={{ . }}
+{{- end }}
+ExecStart={{ .ExecStart }}
+{{- if .ExecReload }}
+ExecReload={{ .ExecReload }}
+{{- end }}
+{{- if .Environment }}
+{{- range .Environment }}
+Environment="{{ . }}"
+{{- end }}
+{{- end }}
+Delegate={{ .Delegate }}
+KillMode={{ .KillMode }}
+Restart={{ .Restart }}
+RestartSec={{ .RestartSec }}
+LimitNOFILE={{ .LimitNOFILE }}
+LimitNPROC={{ .LimitNPROC }}
+LimitCORE={{ .LimitCORE }}
+TasksMax={{ .TasksMax }}
+
+[Install]
+WantedBy={{ .WantedBy }}

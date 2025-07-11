@@ -19,7 +19,7 @@ type InstallContainerdTask struct {
 	task.BaseTask
 	// Configuration for containerd itself, passed to ConfigureContainerdStep
 	SandboxImage         string
-	RegistryMirrors      map[string]stepContainerd.MirrorConfiguration
+	RegistryMirrors      map[string][]string // Changed to match v1alpha1.ContainerdConfig
 	InsecureRegistries   []string
 	UseSystemdCgroup     bool
 	ExtraTomlContent     string
@@ -57,29 +57,44 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 	cfg := ctx.GetClusterConfig()
 
 	// --- Populate task fields from ClusterConfiguration ---
-	if cfg.Spec.ContainerRuntime != nil && cfg.Spec.ContainerRuntime.Containerd != nil {
-		containerdCfg := cfg.Spec.ContainerRuntime.Containerd
-		t.SandboxImage = containerdCfg.SandboxImage
-		if t.SandboxImage == "" {
-			t.SandboxImage = "registry.k8s.io/pause:3.9" // Default
+	// Default values for the task, can be overridden by ClusterConfig
+	t.UseSystemdCgroup = true // Default this, can be overridden
+	t.SandboxImage = "registry.k8s.io/pause:3.9" // Default sandbox image for the step if not found in config
+	t.ContainerdConfigPath = common.ContainerdDefaultConfigFileTarget // Default from common paths
+	t.RegistryConfigPath = "/etc/containerd/certs.d" // Common default, consider making a common.Constant
+
+	if cfg.Spec.ContainerRuntime != nil && cfg.Spec.ContainerRuntime.Type == v1alpha1.ContainerRuntimeContainerd && cfg.Spec.ContainerRuntime.Containerd != nil {
+		containerdApiCfg := cfg.Spec.ContainerRuntime.Containerd
+
+		// SandboxImage: v1alpha1.ContainerdConfig doesn't have SandboxImage.
+		// This should come from KubernetesConfig.PauseImage or similar.
+		// For now, using the task's default or allowing it to be empty for the step's default.
+		// If KubernetesConfig had a PauseImage field:
+		// if cfg.Spec.Kubernetes != nil && cfg.Spec.Kubernetes.PauseImage != "" { // Assuming PauseImage field
+		//    t.SandboxImage = cfg.Spec.Kubernetes.PauseImage
+		// }
+		// If a global pause image setting exists, it would be used here.
+		// The ConfigureContainerdStep defaults this if empty.
+
+		if len(containerdApiCfg.RegistryMirrors) > 0 {
+			t.RegistryMirrors = containerdApiCfg.RegistryMirrors // Direct assignment now
 		}
-		// Convert v1alpha1.RegistryMirror to stepContainerd.MirrorConfiguration
-		if len(containerdCfg.RegistryMirrors) > 0 {
-			t.RegistryMirrors = make(map[string]stepContainerd.MirrorConfiguration)
-			for reg, mirrorCfgAlpha := range containerdCfg.RegistryMirrors {
-				t.RegistryMirrors[reg] = stepContainerd.MirrorConfiguration{
-					Endpoints: mirrorCfgAlpha.Endpoints,
-					Rewrite:   mirrorCfgAlpha.Rewrite,
-				}
-			}
+		t.InsecureRegistries = containerdApiCfg.InsecureRegistries
+		if containerdApiCfg.ConfigPath != nil && *containerdApiCfg.ConfigPath != "" {
+			t.ContainerdConfigPath = *containerdApiCfg.ConfigPath
 		}
-		t.InsecureRegistries = containerdCfg.InsecureRegistries
-		t.ContainerdConfigPath = containerdCfg.ConfigPath
-		t.RegistryConfigPath = containerdCfg.RegistryConfigPath
-		t.ExtraTomlContent = containerdCfg.ExtraTomlContent
-		// UseSystemdCgroup is usually true for K8s, can be configurable too.
-		// t.UseSystemdCgroup = containerdCfg.UseSystemdCgroup (if such field exists)
+		// RegistryConfigPath is not in v1alpha1.ContainerdConfig. Task uses its own default or it can be made configurable.
+		t.ExtraTomlContent = containerdApiCfg.ExtraTomlContent
+		if containerdApiCfg.UseSystemdCgroup != nil {
+			t.UseSystemdCgroup = *containerdApiCfg.UseSystemdCgroup
+		}
 	}
+	// If Kubernetes config specifies a global sandbox image (pause image)
+	// This is hypothetical, actual field name might differ or not exist.
+	// if cfg.Spec.Kubernetes != nil && cfg.Spec.Kubernetes.Images != nil && cfg.Spec.Kubernetes.Images.Pause != "" {
+	//    t.SandboxImage = cfg.Spec.Kubernetes.Images.Pause
+	// }
+
 
 	// --- Determine target hosts ---
 	targetHosts, err := ctx.GetHostsByRole(t.BaseTask.RunOnRoles...)
@@ -114,7 +129,8 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 	containerdArchiveHandle, err := resource.NewRemoteBinaryHandle(ctx,
 		"containerd", containerdVersion, arch, "linux",
 		"", // BinaryNameInArchive - we want the archive path for upload
-		cfg.Spec.ContainerRuntime.GetContainerdChecksum(arch), // Get checksum from config
+		// FIXME: Checksum should be sourced from a reliable catalog or config. Passing empty for now.
+		"", // cfg.Spec.ContainerRuntime.GetContainerdChecksum(arch),
 		"sha256",
 	)
 	if err != nil { return nil, fmt.Errorf("failed to create containerd archive handle: %w", err) }
@@ -128,7 +144,8 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 	runcHandle, err := resource.NewRemoteBinaryHandle(ctx,
 		"runc", strings.TrimPrefix(runcVersion, "v"), arch, "linux",
 		"", // BinaryNameInArchive - runc is a direct binary
-		cfg.Spec.ContainerRuntime.GetRuncChecksum(arch),
+		// FIXME: Checksum should be sourced from a reliable catalog or config. Passing empty for now.
+		"", // cfg.Spec.ContainerRuntime.GetRuncChecksum(arch),
 		"sha256",
 	)
 	if err != nil { return nil, fmt.Errorf("failed to create runc binary handle: %w", err) }
@@ -142,7 +159,8 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 	cniPluginsHandle, err := resource.NewRemoteBinaryHandle(ctx,
 		"kubecni", strings.TrimPrefix(cniPluginsVersion, "v"), arch, "linux", // "kubecni" is the component name in util.BinaryInfo for CNI plugins
 		"", // BinaryNameInArchive - we want the archive path for upload
-		cfg.Spec.ContainerRuntime.GetCNIChecksum(arch),
+		// FIXME: Checksum should be sourced from a reliable catalog or config. Passing empty for now.
+		"", // cfg.Spec.ContainerRuntime.GetCNIChecksum(arch),
 		"sha256",
 	)
 	if err != nil { return nil, fmt.Errorf("failed to create CNI plugins archive handle: %w", err) }

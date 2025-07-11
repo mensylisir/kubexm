@@ -87,5 +87,20 @@ const (
 	DefaultNginxImageRepository   = "docker.io/library/nginx"               // Default image repository for Nginx.
 	// DefaultPauseImageVersion is defined in constants.go.
 	// DefaultCoreDNSVersion is defined in constants.go.
-	// DefaultKubeVIPImage is defined in constants.go (contains version).
+	// DefaultKubeVIPImage is defined in images.go (contains version).
+)
+
+// --- Default Socket Paths ---
+// Moved from original constants.go
+const (
+	ContainerdSocketPath = "unix:///run/containerd/containerd.sock" // Default socket path for Containerd.
+	DockerSocketPath     = "unix:///var/run/docker.sock"             // Default socket path for Docker.
+	CriDockerdSocketPath = "/var/run/cri-dockerd.sock"               // Default socket path for cri-dockerd.
+	// Consider adding other runtime sockets if they become relevant e.g. CRIO
+)
+
+// --- Containerd Specific ---
+// Moved from original constants.go
+const (
+	ContainerdPluginCRI = "cri" // Name of the CRI plugin for Containerd.
 )

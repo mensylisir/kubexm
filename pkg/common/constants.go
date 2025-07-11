@@ -22,160 +22,99 @@ const (
 	ClusterTypeKubeadm = "kubeadm"
 )
 
-// Default SSH connection parameters.
-const (
-	DefaultSSHPort           = 22
-	DefaultConnectionTimeout = 30 * time.Second
-)
-
-// Default and supported architectures.
-const DefaultArch = "amd64"
-
-// SupportedArches lists the CPU architectures supported by Kubexm.
-var SupportedArches = []string{"amd64", "arm64"}
-
-// Host types for connection.
-const (
-	HostTypeSSH   = "ssh"   // Indicates an SSH connection to a remote host.
-	HostTypeLocal = "local" // Indicates operations are to be performed on the local machine.
-)
-
-// ValidTaintEffects lists the valid effects for Kubernetes node taints.
-var ValidTaintEffects = []string{"NoSchedule", "PreferNoSchedule", "NoExecute"}
-
-// DomainValidationRegexString is used for validating domain names.
-const DomainValidationRegexString = `^([a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?\\.)*([a-zA-Z0-9]([a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])?)$`
+// Default SSH connection parameters moved to ssh.go
+// Default and supported architectures moved to arch.go
+// HostTypeSSH and HostTypeLocal moved to types.go (as HostConnectionType) or covered by roles_labels.go
+// ValidTaintEffects moved to roles_labels.go
+// DomainValidationRegexString moved to dns.go
 
 // Default values for various components and settings.
 const (
-	DefaultKubernetesAPIServerPort = 6443      // Default secure port for Kubernetes API server.
-	DefaultK8sVersion              = "v1.28.2" // Example default Kubernetes version.
-	DefaultImageRegistry           = "registry.k8s.io" // Default image registry for Kubernetes components.
-	PauseImageName                 = "pause"           // Name of the pause image.
-	DefaultEtcdVersion             = "3.5.10-0"        // Example default Etcd version.
-	DefaultCoreDNSVersion          = "v1.10.1"         // Example default CoreDNS version.
-	DefaultContainerdVersion       = "1.7.11"          // Example default Containerd version.
+	// DefaultKubernetesAPIServerPort moved to components.go
+	// DefaultK8sVersion moved to images.go
+	// DefaultImageRegistry moved to images.go
+	// PauseImageName moved to images.go
+	// DefaultEtcdVersion moved to images.go
+	// DefaultCoreDNSVersion moved to images.go
+	// DefaultContainerdVersion moved to images.go
 
-	DefaultKeepalivedAuthPass   = "kxm_pass"           // Default auth password for Keepalived.
-	DefaultHAProxyFrontendPort  = 6443                 // Default frontend port for HAProxy for K8s API.
-	DefaultHAProxyMode          = "tcp"                // Default mode for HAProxy.
-	DefaultHAProxyAlgorithm     = "roundrobin"         // Default load balancing algorithm for HAProxy.
-	DefaultKubeletHairpinMode   = "promiscuous-bridge" // Default hairpin mode for Kubelet.
-	DefaultLocalRegistryDataDir = "/var/lib/registry"    // Default data directory for a locally deployed image registry.
-	DefaultRemoteWorkDir        = "/tmp/kubexms_work"    // Default working directory on remote hosts.
-
-	DefaultWorkDirName = ".kubexm" // Default name for the main work directory on the control machine (within the execution path, e.g., $(pwd)/.kubexm).
-	DefaultTmpDirName  = ".kubexm_tmp" // Default name for a temporary directory under the system's temp path on the control machine.
+	// DefaultKeepalivedAuthPass moved to keepalived_defaults.go
+	// DefaultHAProxyFrontendPort moved to components.go
+	// DefaultHAProxyMode moved to haproxy_defaults.go
+	// DefaultHAProxyAlgorithm moved to haproxy_defaults.go
+	DefaultKubeletHairpinMode   = "promiscuous-bridge" // Default hairpin mode for Kubelet. // To kubernetes_internal.go
+	DefaultLocalRegistryDataDir = "/var/lib/registry"    // Default data directory for a locally deployed image registry. // To paths.go
+	// DefaultRemoteWorkDir moved to workdirs.go
+	// DefaultWorkDirName moved to workdirs.go
+	// DefaultTmpDirName moved to workdirs.go
 
 	// Socket paths for container runtimes.
-	ContainerdSocketPath = "unix:///run/containerd/containerd.sock" // Default socket path for Containerd.
-	DockerSocketPath     = "unix:///var/run/docker.sock"             // Default socket path for Docker.
-	CriDockerdSocketPath = "/var/run/cri-dockerd.sock"               // Default socket path for cri-dockerd.
+	// ContainerdSocketPath moved to components.go
+	// DockerSocketPath moved to components.go
+	// CriDockerdSocketPath moved to components.go
 
 	// Essential Kernel Modules for Kubernetes.
-	KernelModuleBrNetfilter = "br_netfilter" // Kernel module for bridge netfilter.
-	KernelModuleIpvs        = "ip_vs"        // Kernel module for IPVS.
+	KernelModuleBrNetfilter = "br_netfilter" // Kernel module for bridge netfilter. // To kubernetes_internal.go
+	KernelModuleIpvs        = "ip_vs"        // Kernel module for IPVS. // To kubernetes_internal.go
 
-	// Default preflight check values.
-	DefaultMinCPUCores = 2            // Default minimum CPU cores required.
-	DefaultMinMemoryMB = uint64(2048) // Default minimum memory in MB (2GB).
+	// Default preflight check values moved to preflight.go
 
 	// Cgroup driver names.
-	CgroupDriverSystemd  = "systemd"
-	CgroupDriverCgroupfs = "cgroupfs"
+	CgroupDriverSystemd  = "systemd"  // To kubernetes_internal.go
+	CgroupDriverCgroupfs = "cgroupfs" // To kubernetes_internal.go
 
 	// KubeProxy modes.
-	KubeProxyModeIPTables = "iptables"
-	KubeProxyModeIPVS     = "ipvs"
+	KubeProxyModeIPTables = "iptables" // To kubernetes_internal.go
+	KubeProxyModeIPVS     = "ipvs"     // To kubernetes_internal.go
 
 	// CNI plugin names (string values; typed versions are in types.go).
-	CNICalicoStr    = "calico"
-	CNIFlannelStr  = "flannel"
-	CNICiliumStr    = "cilium"
-	CNIMultusStr    = "multus"
-	CNIKubeOvnStr   = "kube-ovn"
-	CNIHybridnetStr = "hybridnet"
+	CNICalicoStr    = "calico"    // To cni_strings.go
+	CNIFlannelStr  = "flannel"   // To cni_strings.go
+	CNICiliumStr    = "cilium"    // To cni_strings.go
+	CNIMultusStr    = "multus"    // To cni_strings.go
+	CNIKubeOvnStr   = "kube-ovn"  // To cni_strings.go
+	CNIHybridnetStr = "hybridnet" // To cni_strings.go
 
 	// Container Runtime names (string values; typed versions are in types.go).
-	RuntimeDockerStr     = "docker"
-	RuntimeContainerdStr = "containerd"
-	RuntimeCRIOStr       = "cri-o"
-	RuntimeIsulaStr      = "isula"
+	RuntimeDockerStr     = "docker"     // To runtime_strings.go
+	RuntimeContainerdStr = "containerd" // To runtime_strings.go
+	RuntimeCRIOStr       = "cri-o"      // To runtime_strings.go
+	RuntimeIsulaStr      = "isula"      // To runtime_strings.go
 
-	// Special Role Names used internally.
-	AllHostsRole        = "all"                 // Represents all hosts in the inventory for targeting operations.
-	ControlNodeRole     = "control-node"        // Represents the machine where kubexm CLI is running, for local operations.
-	ControlNodeHostName = "kubexm-control-node" // Special hostname for the control machine.
+	// Special Role Names used internally. // Moved to roles_labels.go
+	AllHostsRole        = "all"
+	ControlNodeRole     = "control-node"
+	ControlNodeHostName = "kubexm-control-node"
 
-	// Docker specific defaults for daemon configuration.
-	DockerDefaultDataRoot               = "/var/lib/docker" // Default data directory for Docker.
-	DockerLogOptMaxSizeDefault          = "100m"            // Default max size for Docker log files.
-	DockerLogOptMaxFileDefault          = "5"               // Default max number of log files for Docker.
-	DockerMaxConcurrentDownloadsDefault = 3                 // Default max concurrent image downloads for Docker.
-	DockerMaxConcurrentUploadsDefault   = 5                 // Default max concurrent image uploads for Docker.
-	DefaultDockerBridgeName             = "docker0"         // Default bridge name for Docker.
-	DockerLogDriverJSONFile             = "json-file"
-	DockerLogDriverJournald             = "journald"
-	DockerLogDriverSyslog               = "syslog"
-	DockerLogDriverFluentd              = "fluentd"
-	DockerLogDriverNone                 = "none"
+	// Docker specific defaults for daemon configuration moved to docker_defaults.go
+	// Keepalived specific defaults moved to keepalived_defaults.go
 
-	// Keepalived specific defaults.
-	KeepalivedAuthTypePASS        = "PASS"                               // Default authentication type for Keepalived.
-	KeepalivedAuthTypeAH          = "AH"                                 // AH authentication type for Keepalived.
-	DefaultKeepalivedPreempt      = true                                 // Default preempt mode for Keepalived.
-	DefaultKeepalivedCheckScript  = "/etc/keepalived/check_apiserver.sh" // Example health check script path for Keepalived.
-	DefaultKeepalivedInterval     = 5                                    // Default health check interval for Keepalived.
-	DefaultKeepalivedRise         = 2                                    // Default rise count for Keepalived health check.
-	DefaultKeepalivedFall         = 2                                    // Default fall count for Keepalived health check.
-	DefaultKeepalivedAdvertInt    = 1                                    // Default advertisement interval for Keepalived.
-	DefaultKeepalivedLVScheduler  = "rr"                                 // Default LVS scheduler for Keepalived.
+	// Nginx LoadBalancer specific defaults
+	// DefaultNginxListenPort moved to components.go
+	// DefaultNginxMode moved to nginx_defaults.go
+	// DefaultNginxAlgorithm moved to nginx_defaults.go
+	DefaultNginxConfigFilePath = "/etc/nginx/nginx.conf" // Default config file path for Nginx. // To paths.go
 
-	// Nginx LoadBalancer specific defaults.
-	DefaultNginxListenPort     = 6443                            // Default listen port for Nginx LB.
-	DefaultNginxMode           = "stream"                          // Default mode for Nginx LB (TCP).
-	DefaultNginxAlgorithm      = "round_robin"                     // Default load balancing algorithm for Nginx.
-	DefaultNginxConfigFilePath = "/etc/nginx/nginx.conf"         // Default config file path for Nginx.
+	// KubeVIP specific defaults moved to images.go (DefaultKubeVIPImage)
 
-	// KubeVIP specific defaults.
-	DefaultKubeVIPImage = "ghcr.io/kube-vip/kube-vip:v0.7.0" // Example default Kube-VIP image.
-
-	// DNS specific defaults.
-	DefaultCoreDNSUpstreamGoogle     = "8.8.8.8"     // Google's public DNS.
-	DefaultCoreDNSUpstreamCloudflare = "1.1.1.1"     // Cloudflare's public DNS.
-	DefaultExternalZoneCacheSeconds  = 300           // Default cache time for external DNS zones.
+	// DNS specific defaults moved to dns.go
 
 	// Etcd specific paths and names.
-	EtcdDefaultPKIDir               = "/etc/kubernetes/pki/etcd" // Standard path for etcd PKI assets when managed by kubeadm.
-	EtcdDefaultDataDir              = "/var/lib/etcd"            // Default data directory for Etcd.
-	CACertFileName                  = "ca.pem"                   // Common name for CA certificate file (PEM format).
-	EtcdServerCertFileName          = "server.pem"               // Default Etcd server certificate filename.
-	EtcdServerKeyFileName           = "server-key.pem"           // Default Etcd server key filename.
-	EtcdPeerCertFileName            = "peer.pem"                 // Default Etcd peer certificate filename.
-	EtcdPeerKeyFileName             = "peer-key.pem"             // Default Etcd peer key filename.
-	EtcdClientCertFileName          = "client.pem"               // Default Etcd client certificate filename (generic).
-	EtcdClientKeyFileName           = "client-key.pem"           // Default Etcd client key filename (generic).
-	EtcdDefaultBinDir               = "/usr/local/bin"           // Default directory for Etcd binaries.
-	DefaultEtcdVersionForBinInstall = "v3.5.13"                  // Default Etcd version for binary installations.
+	EtcdDefaultPKIDir               = "/etc/kubernetes/pki/etcd" // Standard path for etcd PKI assets when managed by kubeadm. // To paths.go
+	EtcdDefaultDataDir              = "/var/lib/etcd"            // Default data directory for Etcd. // To paths.go
+	CACertFileName                  = "ca.pem"                   // Common name for CA certificate file (PEM format). // To paths.go or pki.go
+	EtcdServerCertFileName          = "server.pem"               // Default Etcd server certificate filename. // To paths.go or pki.go
+	EtcdServerKeyFileName           = "server-key.pem"           // Default Etcd server key filename. // To paths.go or pki.go
+	EtcdPeerCertFileName            = "peer.pem"                 // Default Etcd peer certificate filename. // To paths.go or pki.go
+	EtcdPeerKeyFileName             = "peer-key.pem"             // Default Etcd peer key filename. // To paths.go or pki.go
+	EtcdClientCertFileName          = "client.pem"               // Default Etcd client certificate filename (generic). // To paths.go or pki.go
+	EtcdClientKeyFileName           = "client-key.pem"           // Default Etcd client key filename (generic). // To paths.go or pki.go
+	EtcdDefaultBinDir               = "/usr/local/bin"           // Default directory for Etcd binaries. // To paths.go (but should use DefaultBinDir)
+	// DefaultEtcdVersionForBinInstall moved to images.go
 
 	// Containerd specific constants.
-	ContainerdPluginCRI = "cri" // Name of the CRI plugin for Containerd.
-
-	// System Configuration Defaults.
-	DefaultSELinuxMode  = "permissive" // Default SELinux mode.
-	DefaultIPTablesMode = "legacy"     // Default IPTable mode.
+	ContainerdPluginCRI = "cri" // Name of the CRI plugin for Containerd. // To components.go
 )
 
-// Valid System Configuration Values for certain string enum-like fields.
-var (
-	ValidSELinuxModes  = []string{"permissive", "enforcing", "disabled", ""} // Empty allows no-op/system default
-	ValidIPTablesModes = []string{"legacy", "nft", ""}                      // Empty allows no-op/system default
-)
-
-// Default File Permissions used across the application.
-const (
-	DefaultDirPermission        = os.FileMode(0755) // Default permission for directories created by Kubexm.
-	DefaultFilePermission       = os.FileMode(0644) // Default permission for files created by Kubexm.
-	DefaultKubeconfigPermission = os.FileMode(0600) // Restricted permission for Kubeconfig files.
-	DefaultPrivateKeyPermission = os.FileMode(0600) // Restricted permission for private key files.
-)
+// Valid System Configuration Values for certain string enum-like fields. // Moved to system_config.go
+// Default File Permissions used across the application. // Moved to permissions.go

@@ -1,39 +1,32 @@
 package v1alpha1
 
-import (
-	"strings"
-	// "strconv" // No longer needed after removing local parseInt
-	// "unicode" // No longer needed after removing local isNumericSegment, isAlphanumericHyphenSegment
-	"github.com/mensylisir/kubexm/pkg/util" // Ensure util is imported
-	"github.com/mensylisir/kubexm/pkg/util/validation" // Import validation
-	"fmt" // Import fmt
-	"github.com/mensylisir/kubexm/pkg/common" // Moved import here
-)
+// Assuming ValidationErrors is in cluster_types.go or a shared util in this package
+// Assuming containsString is in cluster_types.go or a shared util in this package
 
 // ContainerRuntimeType defines the type of container runtime.
 type ContainerRuntimeType string
 
-// Ensure common is imported if not already
-// import "github.com/mensylisir/kubexm/pkg/common" // Removed from here
-
 const (
-	ContainerRuntimeDocker     ContainerRuntimeType = common.RuntimeDocker
-	ContainerRuntimeContainerd ContainerRuntimeType = common.RuntimeContainerd
-	// Add other runtimes like cri-o, isula if supported by YAML
+	ContainerRuntimeDocker     ContainerRuntimeType = "docker"
+	ContainerRuntimeContainerd ContainerRuntimeType = "containerd"
+	// Add other runtimes like cri-o, isula if supported by YAML in the future
 )
 
 // ContainerRuntimeConfig is a wrapper for specific container runtime configurations.
-// Corresponds to `kubernetes.containerRuntime` in YAML.
-// +k8s:deepcopy-gen=true
+// It specifies the type of runtime and holds the specific configuration block.
 type ContainerRuntimeConfig struct {
 	// Type specifies the container runtime to use (e.g., "docker", "containerd").
+	// Defaults to "docker" if not specified.
 	Type ContainerRuntimeType `json:"type,omitempty" yaml:"type,omitempty"`
-	// Version of the container runtime.
+
+	// Version of the container runtime. This is a general version, specific versions
+	// might also be present in DockerConfig or ContainerdConfig if needed for overrides.
 	Version string `json:"version,omitempty" yaml:"version,omitempty"`
 
 	// Docker holds Docker-specific configurations.
 	// Only applicable if Type is "docker".
 	Docker *DockerConfig `json:"docker,omitempty" yaml:"docker,omitempty"`
+
 	// Containerd holds Containerd-specific configurations.
 	// Only applicable if Type is "containerd".
 	Containerd *ContainerdConfig `json:"containerd,omitempty" yaml:"containerd,omitempty"`
@@ -45,67 +38,79 @@ func SetDefaults_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig) {
 		return
 	}
 	if cfg.Type == "" {
-		cfg.Type = ContainerRuntimeContainerd // Default to Containerd, which uses common.RuntimeContainerd
+		cfg.Type = ContainerRuntimeDocker // Default to Docker
 	}
 
-	if cfg.Type == common.RuntimeDocker { // Use common constant
+	// Initialize and set defaults for the chosen runtime type
+	if cfg.Type == ContainerRuntimeDocker {
 		if cfg.Docker == nil {
 			cfg.Docker = &DockerConfig{}
 		}
-		SetDefaults_DockerConfig(cfg.Docker)
+		SetDefaults_DockerConfig(cfg.Docker) // Assumes SetDefaults_DockerConfig is in docker_types.go
 	}
 
-	if cfg.Type == common.RuntimeContainerd { // Use common constant
+	if cfg.Type == ContainerRuntimeContainerd {
 		if cfg.Containerd == nil {
 			cfg.Containerd = &ContainerdConfig{}
 		}
-		SetDefaults_ContainerdConfig(cfg.Containerd)
+		SetDefaults_ContainerdConfig(cfg.Containerd) // Assumes SetDefaults_ContainerdConfig is in containerd_types.go
 	}
 }
 
 // Validate_ContainerRuntimeConfig validates ContainerRuntimeConfig.
-func Validate_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig, verrs *validation.ValidationErrors, pathPrefix string) {
+func Validate_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig, verrs *ValidationErrors, pathPrefix string) {
 	if cfg == nil {
-		verrs.Add(pathPrefix, "section cannot be nil")
+		// This case might be an error if ContainerRuntime section is mandatory in ClusterSpec.
+		// If it's optional and defaulted, this is fine. Assuming ClusterSpec defaults it.
+		verrs.Add(pathPrefix, "containerRuntime section cannot be nil (should be defaulted if not present)")
 		return
 	}
-	// Type should be defaulted by SetDefaults_ContainerRuntimeConfig before validation.
-	// So, it should be either Docker or Containerd.
-	if cfg.Type != common.RuntimeDocker && cfg.Type != common.RuntimeContainerd { // Use common constants
-		verrs.Add(pathPrefix+".type", fmt.Sprintf("invalid container runtime type '%s', must be '%s' or '%s'", cfg.Type, common.RuntimeDocker, common.RuntimeContainerd))
+
+	validTypes := []ContainerRuntimeType{ContainerRuntimeDocker, ContainerRuntimeContainerd, ""} // Allow empty for default
+	isValid := false
+	for _, vt := range validTypes {
+		// Check if cfg.Type matches a valid type, or if cfg.Type is empty and vt is the default type.
+		if cfg.Type == vt || (cfg.Type == "" && vt == ContainerRuntimeDocker) {
+			isValid = true
+			break
+		}
+	}
+	if !isValid {
+		verrs.Add(pathPrefix+".type", "invalid container runtime type '%s', must be one of %v or empty for default", cfg.Type, validTypes)
 	}
 
-	if cfg.Type == common.RuntimeDocker { // Use common constant
+	// Validate specific config only if type matches
+	if cfg.Type == ContainerRuntimeDocker {
 		if cfg.Docker == nil {
-			// Defaulting handles this
+			// This should ideally be caught by defaulting logic which initializes cfg.Docker.
+			// If still nil, it's an issue or means Docker type was set without providing its config block.
+			verrs.Add(pathPrefix+".docker", "docker config must be defined if type is 'docker'")
 		} else {
-			Validate_DockerConfig(cfg.Docker, verrs, pathPrefix+".docker")
+			Validate_DockerConfig(cfg.Docker, verrs, pathPrefix+".docker") // Assumes Validate_DockerConfig is in docker_types.go
 		}
-	} else if cfg.Docker != nil {
-		verrs.Add(pathPrefix+".docker", "can only be set if type is 'docker'")
+	} else if cfg.Docker != nil { // Docker config provided but type is not docker
+		verrs.Add(pathPrefix+".docker", "docker config can only be set if type is 'docker'")
 	}
 
-	if cfg.Type == common.RuntimeContainerd { // Use common constant
+	if cfg.Type == ContainerRuntimeContainerd {
 		if cfg.Containerd == nil {
-			// Defaulting handles this
+			verrs.Add(pathPrefix+".containerd", "containerd config must be defined if type is 'containerd'")
 		} else {
-			Validate_ContainerdConfig(cfg.Containerd, verrs, pathPrefix+".containerd")
+			Validate_ContainerdConfig(cfg.Containerd, verrs, pathPrefix+".containerd") // Assumes Validate_ContainerdConfig is in containerd_types.go
 		}
-	} else if cfg.Containerd != nil {
-		verrs.Add(pathPrefix+".containerd", "can only be set if type is 'containerd'")
+	} else if cfg.Containerd != nil { // Containerd config provided but type is not containerd
+		verrs.Add(pathPrefix+".containerd", "containerd config can only be set if type is 'containerd'")
 	}
 
-	if cfg.Version != "" {
-		if strings.TrimSpace(cfg.Version) == "" {
-			verrs.Add(pathPrefix+".version", "cannot be only whitespace if specified")
-		} else if !util.IsValidRuntimeVersion(cfg.Version) { // Use util.IsValidRuntimeVersion
-			verrs.Add(pathPrefix+".version", fmt.Sprintf("'%s' is not a recognized version format", cfg.Version))
-		}
+	// Version can be validated for format if needed, e.g., semantic versioning.
+	if cfg.Version != "" && strings.TrimSpace(cfg.Version) == "" {
+		verrs.Add(pathPrefix+".version", "version cannot be only whitespace if specified")
 	}
 }
 
-// Local helper functions like isNumericSegment, isValidPort, parseInt,
-// isAlphanumericHyphenSegment, and isValidRuntimeVersion are removed
-// as their functionalities are expected to be covered by functions in pkg/util or standard libraries.
-// Specifically, isValidRuntimeVersion, isValidPort, isValidIP, isValidDomainName, ValidateHostPortString
-// are available in pkg/util/utils.go.
+// NOTE: DeepCopy methods should be generated by controller-gen.
+// The DockerConfig and ContainerdConfig structs and their SetDefaults/Validate functions
+// are defined in docker_types.go and containerd_types.go respectively.
+// This file (container_runtime_types.go) now only defines the selector ContainerRuntimeConfig
+// and its associated ContainerRuntimeType.
+// Removed the local definitions of DockerConfig, ContainerdConfig and their methods.

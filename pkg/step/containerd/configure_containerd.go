@@ -10,9 +10,11 @@ import (
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/spec" // Added for StepMeta
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/templates" // Added for templates.Get
 )
 
 const DefaultContainerdConfigPath = "/etc/containerd/config.toml"
+const ContainerdConfigTemplateName = "containerd/config.toml.tmpl"
 
 // MirrorConfiguration holds endpoint and rewrite rules for a registry mirror.
 type MirrorConfiguration struct {
@@ -20,62 +22,13 @@ type MirrorConfiguration struct {
 	Rewrite   map[string]string // Optional: for advanced image name rewriting
 }
 
-// containerdConfigTemplate is the Go template for generating config.toml.
-const containerdConfigTemplate = `
-version = 2
-# Ensure CRI plugin is enabled for Kubernetes. Default is often enabled.
-# If you need to ensure it's not in disabled_plugins:
-# disabled_plugins = [] # Or ensure "io.containerd.grpc.v1.cri" is not listed if others are disabled.
-
-[plugins."io.containerd.grpc.v1.cri"]
-  sandbox_image = "{{ .SandboxImage }}"
-  [plugins."io.containerd.grpc.v1.cri".containerd]
-    default_runtime_name = "runc"
-    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
-      runtime_type = "io.containerd.runc.v2"
-      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
-        BinaryName = "runc"
-        {{if .UseSystemdCgroup}}
-        SystemdCgroup = true
-        {{else}}
-        SystemdCgroup = false
-        {{end}}
-  # Registry mirrors configuration
-  [plugins."io.containerd.grpc.v1.cri".registry]
-    config_path = "{{ .RegistryConfigPath }}" # Set to a directory like "/etc/containerd/certs.d" if using individual host certs/configs.
-    {{if .RegistryMirrors}}
-    [plugins."io.containerd.grpc.v1.cri".registry.mirrors]
-      {{range $registry, $mirrorConfig := .RegistryMirrors}}
-      [plugins."io.containerd.grpc.v1.cri".registry.mirrors."{{$registry}}"]
-        endpoint = [{{range $i, $ep := $mirrorConfig.Endpoints}}{{if $i}}, {{end}}"{{$ep}}"{{end}}]
-        {{- if $mirrorConfig.Rewrite}}
-        [plugins."io.containerd.grpc.v1.cri".registry.mirrors."{{$registry}}".rewrite]
-          {{- range $pattern, $replacement := $mirrorConfig.Rewrite}}
-          "{{$pattern}}" = "{{$replacement}}"
-          {{- end}}
-        {{- end}}
-      {{end}}
-    {{end}}
-    # Insecure registries configuration
-    {{if .InsecureRegistries}}
-    [plugins."io.containerd.grpc.v1.cri".registry.configs]
-      {{range .InsecureRegistries}}
-      [plugins."io.containerd.grpc.v1.cri".registry.configs."{{.}}".tls] # {{.}} is the insecure registry hostname:port
-        insecure_skip_verify = true # For HTTP or self-signed HTTPS
-      {{end}}
-    {{end}}
-
-{{if .ExtraTomlContent}}
-# Extra TOML content provided by user
-{{.ExtraTomlContent}}
-{{end}}
-`
+// const containerdConfigTemplate = `...` // REMOVED
 
 // ConfigureContainerdStep configures containerd by writing its config.toml.
 type ConfigureContainerdStep struct {
 	meta               spec.StepMeta
 	SandboxImage       string
-	RegistryMirrors    map[string]MirrorConfiguration // Changed to MirrorConfiguration struct
+	APIRegistryMirrors map[string][]string // Store the API spec version
 	InsecureRegistries []string
 	ConfigFilePath     string
 	RegistryConfigPath string // For plugins."io.containerd.grpc.v1.cri".registry.config_path
@@ -85,10 +38,11 @@ type ConfigureContainerdStep struct {
 }
 
 // NewConfigureContainerdStep creates a new ConfigureContainerdStep.
+// Accepts registryMirrors as map[string][]string, matching v1alpha1.ContainerdConfig.
 func NewConfigureContainerdStep(
 	instanceName string,
 	sandboxImage string,
-	registryMirrors map[string]MirrorConfiguration,
+	apiRegistryMirrors map[string][]string, // Changed parameter type
 	insecureRegistries []string,
 	configFilePath string,
 	registryConfigPath string,
@@ -116,7 +70,7 @@ func NewConfigureContainerdStep(
 			Description: fmt.Sprintf("Configures containerd by writing %s with specified mirrors, insecure registries, sandbox image and cgroup settings.", effectivePath),
 		},
 		SandboxImage:       effectiveSandboxImage,
-		RegistryMirrors:    registryMirrors,
+		APIRegistryMirrors: apiRegistryMirrors, // Use the new field
 		InsecureRegistries: insecureRegistries,
 		ConfigFilePath:     effectivePath,
 		RegistryConfigPath: registryConfigPath,
@@ -133,14 +87,30 @@ func (s *ConfigureContainerdStep) Meta() *spec.StepMeta {
 
 // renderExpectedConfig generates the expected config content for precheck comparison.
 func (s *ConfigureContainerdStep) renderExpectedConfig() (string, error) {
-	tmpl, err := template.New("containerdConfig").Parse(containerdConfigTemplate)
+	templateString, err := templates.Get(ContainerdConfigTemplateName)
 	if err != nil {
-		return "", fmt.Errorf("dev error: failed to parse internal containerd config template: %w", err)
+		return "", fmt.Errorf("failed to get containerd config template '%s': %w", ContainerdConfigTemplateName, err)
+	}
+	tmpl, err := template.New("containerdConfig").Parse(templateString)
+	if err != nil {
+		return "", fmt.Errorf("dev error: failed to parse containerd config template: %w", err)
 	}
 	var expectedBuf bytes.Buffer
+
+	// Adapt APIRegistryMirrors (map[string][]string) to the structure expected by the template
+	// The template expects map[string]MirrorConfiguration where MirrorConfiguration has Endpoints.
+	templateRegistryMirrors := make(map[string]MirrorConfiguration)
+	if s.APIRegistryMirrors != nil {
+		for host, endpoints := range s.APIRegistryMirrors {
+			templateRegistryMirrors[host] = MirrorConfiguration{Endpoints: endpoints}
+			// If MirrorConfiguration had a Rewrite field that needed to be populated from API,
+			// that logic would go here. For now, assuming only Endpoints.
+		}
+	}
+
 	templateData := map[string]interface{}{
 		"SandboxImage":       s.SandboxImage,
-		"RegistryMirrors":    s.RegistryMirrors,
+		"RegistryMirrors":    templateRegistryMirrors, // Use the adapted structure
 		"InsecureRegistries": s.InsecureRegistries,
 		"UseSystemdCgroup":   s.UseSystemdCgroup,
 		"RegistryConfigPath": s.RegistryConfigPath,
