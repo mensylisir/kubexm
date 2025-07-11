@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/common"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"net"
@@ -10,15 +11,6 @@ import (
 	"time"
 )
 
-const (
-	// ClusterTypeKubeXM indicates a cluster where core components (kube-apiserver,
-	// kube-controller-manager, kube-scheduler, kube-proxy) are deployed as binaries.
-	ClusterTypeKubeXM = "kubexm"
-
-	// ClusterTypeKubeadm indicates a cluster where core components are deployed as static Pods
-	// managed by kubeadm.
-	ClusterTypeKubeadm = "kubeadm"
-)
 
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -168,7 +160,7 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	// cfg.SetGroupVersionKind(SchemeGroupVersion.WithKind("Cluster")) // Will be set by K8s machinery
 
 	if cfg.Spec.Type == "" {
-		cfg.Spec.Type = ClusterTypeKubeXM // Default to kubexm type
+		cfg.Spec.Type = common.ClusterTypeKubeXM // Default to kubexm type
 	}
 
 	if cfg.Spec.Global == nil {
@@ -322,7 +314,7 @@ func Validate_Cluster(cfg *Cluster) error {
 		verrs.Add("metadata.name: cannot be empty")
 	}
 
-	validClusterTypes := []string{ClusterTypeKubeXM, ClusterTypeKubeadm, ""} // Allow empty for default
+	validClusterTypes := []string{common.ClusterTypeKubeXM, common.ClusterTypeKubeadm, ""} // Allow empty for default
 	isValidClusterType := false
 	for _, vt := range validClusterTypes {
 		if cfg.Spec.Type == vt {
