@@ -129,3 +129,20 @@ const (
 	// DefaultAddonNamespace is the default namespace for installing addons if not specified.
 	DefaultAddonNamespace = KubeSystemNamespace
 )
+
+// --- Kubelet Configurations ---
+const (
+	DefaultKubeletHairpinMode = "promiscuous-bridge" // Default hairpin mode for Kubelet.
+)
+
+// --- Cgroup driver names ---
+const (
+	CgroupDriverSystemd  = "systemd"
+	CgroupDriverCgroupfs = "cgroupfs"
+)
+
+// --- KubeProxy modes ---
+const (
+	KubeProxyModeIPTables = "iptables"
+	KubeProxyModeIPVS     = "ipvs"
+)
