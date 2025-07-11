@@ -54,7 +54,7 @@ type GenerateEtcdConfigStep struct {
 	ConfigDataCacheKey  string             // OR: Cache key to retrieve EtcdNodeConfigData for this host.
 	RemoteConfigPath    string             // Path on the target node where etcd.yaml will be written.
 	Sudo                bool
-	TemplateContent     string // Optional: if not using default, provide custom template content.
+	// TemplateContent     string // Optional: if not using default, provide custom template content. // REMOVED
 }
 
 // NewGenerateEtcdConfigStep creates a new GenerateEtcdConfigStep.
@@ -178,9 +178,14 @@ func (s *GenerateEtcdConfigStep) Precheck(ctx runtime.StepContext, host connecto
 }
 
 func (s *GenerateEtcdConfigStep) renderEtcdConfig(data *EtcdNodeConfigData) (string, error) {
-	tmplContent := s.TemplateContent
-	if tmplContent == "" {
-		tmplContent = defaultEtcdConfigTemplate
+	// tmplContent := s.TemplateContent // REMOVED
+	// if tmplContent == "" { // REMOVED
+	// 	tmplContent = defaultEtcdConfigTemplate // REMOVED
+	// } // REMOVED
+
+	tmplContent, err := templates.Get(EtcdConfigTemplateName) // EtcdConfigTemplateName needs to be defined
+	if err != nil {
+		return "", fmt.Errorf("failed to get etcd config template '%s': %w", EtcdConfigTemplateName, err)
 	}
 
 	tmpl, err := template.New("etcdConfig").Funcs(sprig.TxtFuncMap()).Parse(tmplContent)
@@ -252,37 +257,6 @@ func (s *GenerateEtcdConfigStep) Rollback(ctx runtime.StepContext, host connecto
 
 var _ step.Step = (*GenerateEtcdConfigStep)(nil)
 
-const defaultEtcdConfigTemplate = `name: {{ .Name }}
-data-dir: {{ .DataDir }}
-{{- if .WalDir }}
-wal-dir: {{ .WalDir }}
-{{- end }}
-listen-peer-urls: {{ .ListenPeerURLs }}
-listen-client-urls: {{ .ListenClientURLs }}
-initial-advertise-peer-urls: {{ .InitialAdvertisePeerURLs }}
-advertise-client-urls: {{ .AdvertiseClientURLs }}
-initial-cluster: "{{ .InitialCluster }}"
-initial-cluster-token: {{ .InitialClusterToken }}
-initial-cluster-state: {{ .InitialClusterState }}
-client-transport-security:
-  client-cert-auth: {{ .ClientCertAuth | default true }}
-  auto-tls: {{ .ClientAutoTLS | default false }}
-  trusted-ca-file: {{ .TrustedCAFile }}
-  cert-file: {{ .CertFile }}
-  key-file: {{ .KeyFile }}
-peer-transport-security:
-  client-cert-auth: {{ .PeerClientCertAuth | default true }} # For peer, client-cert-auth means it requires incoming peers to have a client cert signed by its CA.
-  auto-tls: {{ .PeerAutoTLS | default false }}
-  trusted-ca-file: {{ .PeerTrustedCAFile }}
-  cert-file: {{ .PeerCertFile }}
-  key-file: {{ .PeerKeyFile }}
-snapshot-count: {{ .SnapshotCount | default "10000" }}
-auto-compaction-retention: "{{ .AutoCompactionRetention | default "1" }}" # Default to 1 hour if not specified
-max-request-bytes: {{ .MaxRequestBytes | default "10485760" }} # 10 MiB
-quota-backend-bytes: {{ .QuotaBackendBytes | default "8589934592" }} # 8 GiB
-# Enable V2 Emulation for older clients if needed, though generally discouraged for new clusters.
-# enable-v2: false
-# Logging (example, adjust as needed)
-# log-level: "info"
-# log-outputs: ["stderr"] # Or ["systemd/journal"] if using systemd service
-`
+const EtcdConfigTemplateName = "etcd/etcd.conf.yaml.tmpl"
+
+// const defaultEtcdConfigTemplate = `...` // REMOVED

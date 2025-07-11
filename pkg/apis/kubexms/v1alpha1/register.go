@@ -1,3 +1,4 @@
+/*
 package v1alpha1
 
 import (
@@ -42,3 +43,11 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil
 }
+*/
+
+// Content commented out as per instruction in docs/2-api设计.md
+// to focus on functionality before controller implementation.
+package v1alpha1
+
+// Placeholder to keep the package valid.
+// Actual registration logic is commented out above.

@@ -61,6 +61,13 @@ const (
 	ArtifactsComposeDir          = "compose"
 	ArtifactsBuildDir            = "build"
 	ArtifactsGenericBinariesDir  = "generic"
+
+	// DefaultInstallPrefix is a common prefix for installations, e.g. /usr/local
+	DefaultInstallPrefix = "/usr/local"
+	// DefaultBinDir is a common directory for binaries, often under DefaultInstallPrefix.
+	DefaultBinDir = DefaultInstallPrefix + "/bin" // e.g. /usr/local/bin
+	// DefaultEtcDir is a common directory for config, often under DefaultInstallPrefix or /etc.
+	DefaultEtcDir = DefaultInstallPrefix + "/etc" // e.g. /usr/local/etc, or system /etc
 )
 
 // --- Standard Paths on Target Nodes ---

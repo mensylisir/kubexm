@@ -1,0 +1,5 @@
+# File managed by Kubexm for step: {{ .StepName }}
+# Changes to this file may be overwritten.
+{{- range $key, $value := .Params }}
+{{ $key }} = {{ $value }}
+{{- end }}
