@@ -25,9 +25,9 @@ func TestComponentConstants(t *testing.T) {
 		assert.Equal(t, "haproxy", HAProxy)
 		assert.Equal(t, "nginx", Nginx) // Added test
 		assert.Equal(t, "kube-vip", KubeVIP)
-		assert.Equal(t, "calicoctl", Calicoctl)     // Added test
-		assert.Equal(t, "helm", Helm)             // Added test
-		assert.Equal(t, "crictl", Crictl)           // Added test
+		assert.Equal(t, "calicoctl", Calicoctl)         // Added test
+		assert.Equal(t, "helm", Helm)                   // Added test
+		assert.Equal(t, "crictl", Crictl)               // Added test
 		assert.Equal(t, "node-local-dns", NodeLocalDNS) // Added test
 	})
 
@@ -39,10 +39,10 @@ func TestComponentConstants(t *testing.T) {
 		assert.Equal(t, "cri-dockerd.service", CniDockerdServiceName)
 		assert.Equal(t, "keepalived.service", KeepalivedServiceName)
 		assert.Equal(t, "haproxy.service", HAProxyServiceName)
-		assert.Equal(t, "nginx.service", NginxServiceName)     // Added test
-		assert.Equal(t, "crio.service", CrioServiceName)       // Added test
-		assert.Equal(t, "isulad.service", IsuladServiceName)   // Added test
-		assert.Equal(t, "etcd-defrag.timer", EtcdDefragTimerServiceName) // Added test
+		assert.Equal(t, "nginx.service", NginxServiceName)                   // Added test
+		assert.Equal(t, "crio.service", CrioServiceName)                     // Added test
+		assert.Equal(t, "isulad.service", IsuladServiceName)                 // Added test
+		assert.Equal(t, "etcd-defrag.timer", EtcdDefragTimerServiceName)     // Added test
 		assert.Equal(t, "etcd-defrag.service", EtcdDefragSystemdServiceName) // Added test
 	})
 
@@ -54,10 +54,10 @@ func TestComponentConstants(t *testing.T) {
 		assert.Equal(t, 2379, EtcdDefaultClientPort)
 		assert.Equal(t, 2380, EtcdDefaultPeerPort)
 		assert.Equal(t, 6443, HAProxyDefaultFrontendPort)
-		assert.Equal(t, 9153, CoreDNSMetricsPort)          // Added test
-		assert.Equal(t, 9253, NodeLocalDNSMetricsPort)     // Added test
-		assert.Equal(t, 10249, KubeProxyMetricsPort)       // Added test
-		assert.Equal(t, 10256, KubeProxyHealthzPort)        // Added test
+		assert.Equal(t, 9153, CoreDNSMetricsPort)      // Added test
+		assert.Equal(t, 9253, NodeLocalDNSMetricsPort) // Added test
+		assert.Equal(t, 10249, KubeProxyMetricsPort)   // Added test
+		assert.Equal(t, 10256, KubeProxyHealthzPort)   // Added test
 	})
 
 	t.Run("CommonToolsAndUtils", func(t *testing.T) {
@@ -67,8 +67,8 @@ func TestComponentConstants(t *testing.T) {
 		assert.Equal(t, "ipvsadm", Ipvsadm)
 		assert.Equal(t, "nfs-utils", NfsUtils)
 		assert.Equal(t, "ceph-common", CephCommon)
-		assert.Equal(t, "curl", Curl)     // Added test
-		assert.Equal(t, "pgrep", Pgrep)   // Added test
+		assert.Equal(t, "curl", Curl)       // Added test
+		assert.Equal(t, "pgrep", Pgrep)     // Added test
 		assert.Equal(t, "killall", Killall) // Added test
 
 	})
@@ -76,10 +76,10 @@ func TestComponentConstants(t *testing.T) {
 	t.Run("ImageRepositoriesAndVersions", func(t *testing.T) {
 		assert.Equal(t, "registry.k8s.io", DefaultK8sImageRegistry) // Added test
 		assert.Equal(t, "registry.k8s.io/coredns", DefaultCoreDNSImageRepository)
-		assert.Equal(t, "registry.k8s.io", DefaultPauseImageRepository) // Corrected, was "registry.k8s.io/pause"
-		assert.Equal(t, "ghcr.io/kube-vip", DefaultKubeVIPImageRepository) // Added test
+		assert.Equal(t, "registry.k8s.io", DefaultPauseImageRepository)             // Corrected, was "registry.k8s.io/pause"
+		assert.Equal(t, "ghcr.io/kube-vip", DefaultKubeVIPImageRepository)          // Added test
 		assert.Equal(t, "docker.io/library/haproxy", DefaultHAProxyImageRepository) // Added test
-		assert.Equal(t, "docker.io/library/nginx", DefaultNginxImageRepository)   // Added test
+		assert.Equal(t, "docker.io/library/nginx", DefaultNginxImageRepository)     // Added test
 
 		// DefaultPauseImageVersion and DefaultCoreDNSVersion are in constants.go, not components.go
 		// DefaultKubeVIPImage in constants.go includes the version.
