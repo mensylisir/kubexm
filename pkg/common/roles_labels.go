@@ -68,3 +68,15 @@ const (
 	// TaintEffectNoExecute means existing pods on the node that do not tolerate the taint will be evicted.
 	TaintEffectNoExecute = "NoExecute"
 )
+
+// ValidTaintEffects lists the valid effects for Kubernetes node taints.
+// Moved from original constants.go
+var ValidTaintEffects = []string{TaintEffectNoSchedule, TaintEffectPreferNoSchedule, TaintEffectNoExecute}
+
+// Special Role Names used internally.
+// Moved from original constants.go
+const (
+	AllHostsRole        = "all"                 // Represents all hosts in the inventory for targeting operations.
+	ControlNodeRole     = "control-node"        // Represents the machine where kubexm CLI is running, for local operations.
+	ControlNodeHostName = "kubexm-control-node" // Special hostname for the control machine.
+)
