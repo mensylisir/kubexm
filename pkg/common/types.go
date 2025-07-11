@@ -10,6 +10,14 @@ const (
 	KubernetesDeploymentTypeKubexm KubernetesDeploymentType = "kubexm"
 )
 
+// Cluster type constants for backward compatibility and API consistency
+const (
+	// ClusterTypeKubeXM indicates a cluster where core components are deployed as binaries
+	ClusterTypeKubeXM = string(KubernetesDeploymentTypeKubexm)
+	// ClusterTypeKubeadm indicates a cluster where core components are deployed as static Pods
+	ClusterTypeKubeadm = string(KubernetesDeploymentTypeKubeadm)
+)
+
 // EtcdDeploymentType defines the type of Etcd deployment.
 type EtcdDeploymentType string
 
