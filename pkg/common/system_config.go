@@ -9,7 +9,7 @@ const (
 // Valid System Configuration Values for certain string enum-like fields.
 var (
 	ValidSELinuxModes  = []string{"permissive", "enforcing", "disabled", ""} // Empty allows no-op/system default
-	ValidIPTablesModes = []string{"legacy", "nft", ""}                      // Empty allows no-op/system default
+	ValidIPTablesModes = []string{"legacy", "nft", ""}                       // Empty allows no-op/system default
 )
 
 // Essential Kernel Modules for Kubernetes.
