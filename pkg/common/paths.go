@@ -47,20 +47,20 @@ const (
 	DefaultKubernetesDir       = "kubernetes"        // Parent dir for different K8s components like kubelet, kubeadm
 	DefaultEtcdDir             = "etcd"              // Parent dir for etcd artifacts
 
-	ArtifactsEtcdDir             = "etcd"
-	ArtifactsKubeDir             = "kube"
-	ArtifactsCNIDir              = "cni"
-	ArtifactsHelmDir             = "helm"
-	ArtifactsDockerDir           = "docker"
-	ArtifactsContainerdDir       = "containerd"
-	ArtifactsRuncDir             = "runc"
-	ArtifactsCrictlDir           = "crictl"
-	ArtifactsCriDockerdDir       = "cri-dockerd"
-	ArtifactsCalicoctlDir        = "calicoctl"
-	ArtifactsRegistryDir         = "registry"
-	ArtifactsComposeDir          = "compose"
-	ArtifactsBuildDir            = "build"
-	ArtifactsGenericBinariesDir  = "generic"
+	ArtifactsEtcdDir            = "etcd"
+	ArtifactsKubeDir            = "kube"
+	ArtifactsCNIDir             = "cni"
+	ArtifactsHelmDir            = "helm"
+	ArtifactsDockerDir          = "docker"
+	ArtifactsContainerdDir      = "containerd"
+	ArtifactsRuncDir            = "runc"
+	ArtifactsCrictlDir          = "crictl"
+	ArtifactsCriDockerdDir      = "cri-dockerd"
+	ArtifactsCalicoctlDir       = "calicoctl"
+	ArtifactsRegistryDir        = "registry"
+	ArtifactsComposeDir         = "compose"
+	ArtifactsBuildDir           = "build"
+	ArtifactsGenericBinariesDir = "generic"
 
 	// DefaultInstallPrefix is a common prefix for installations, e.g. /usr/local
 	DefaultInstallPrefix = "/usr/local"
@@ -79,12 +79,12 @@ const (
 	KubernetesPKIDir       = "/etc/kubernetes/pki"       // Directory for Kubernetes PKI assets on a node.
 	DefaultKubeconfigPath  = "/root/.kube/config"        // Standard path for the admin kubeconfig on a user's machine or control node.
 
-	CACertFileName                     = "ca.crt"                         // Common name for CA certificate file.
-	CAKeyFileName                      = "ca.key"                         // Cluster CA private key.
-	APIServerCertFileName              = "apiserver.crt"                  // API server certificate.
-	APIServerKeyFileName               = "apiserver.key"                  // API server private key.
+	CACertFileName                     = "ca.crt"                       // Common name for CA certificate file.
+	CAKeyFileName                      = "ca.key"                       // Cluster CA private key.
+	APIServerCertFileName              = "apiserver.crt"                // API server certificate.
+	APIServerKeyFileName               = "apiserver.key"                // API server private key.
 	APIServerKubeletClientCertFileName = "apiserver-kubelet-client.crt" // Cert for API server to connect to Kubelets.
-	APIServerKubeletClientKeyFileName  = "apiserver-kubelet-client.key"  // Key for API server to connect to Kubelets.
+	APIServerKubeletClientKeyFileName  = "apiserver-kubelet-client.key" // Key for API server to connect to Kubelets.
 	FrontProxyCACertFileName           = "front-proxy-ca.crt"           // Front proxy CA certificate.
 	FrontProxyCAKeyFileName            = "front-proxy-ca.key"           // Front proxy CA private key.
 	FrontProxyClientCertFileName       = "front-proxy-client.crt"       // Front proxy client certificate.
@@ -92,7 +92,7 @@ const (
 	ServiceAccountPublicKeyFileName    = "sa.pub"                       // Service account public key.
 	ServiceAccountPrivateKeyFileName   = "sa.key"                       // Service account private key.
 	APIServerEtcdClientCertFileName    = "apiserver-etcd-client.crt"    // Cert for API server to connect to Etcd.
-	APIServerEtcdClientKeyFileName     = "apiserver-etcd-client.key"     // Key for API server to connect to Etcd.
+	APIServerEtcdClientKeyFileName     = "apiserver-etcd-client.key"    // Key for API server to connect to Etcd.
 
 	KubeadmConfigFileName               = "kubeadm-config.yaml"     // Kubeadm configuration file.
 	KubeletKubeconfigFileName           = "kubelet.conf"            // Kubelet's kubeconfig file name.
@@ -102,46 +102,46 @@ const (
 	AdminKubeconfigFileName             = "admin.conf"              // Kubeconfig for cluster admin.
 	KubeProxyKubeconfigFileName         = "kube-proxy.conf"         // Kube-proxy's kubeconfig file name.
 
-	KubeAPIServerStaticPodFileName       = "kube-apiserver.yaml"
+	KubeAPIServerStaticPodFileName         = "kube-apiserver.yaml"
 	KubeControllerManagerStaticPodFileName = "kube-controller-manager.yaml"
-	KubeSchedulerStaticPodFileName      = "kube-scheduler.yaml"
-	EtcdStaticPodFileName               = "etcd.yaml"
+	KubeSchedulerStaticPodFileName         = "kube-scheduler.yaml"
+	EtcdStaticPodFileName                  = "etcd.yaml"
 )
 
 const (
-	EtcdDefaultWalDir         = "/var/lib/etcd/wal" // Etcd default WAL directory.
-	EtcdDefaultConfDirTarget  = "/etc/etcd"         // Target Etcd configuration directory on nodes.
-	EtcdDefaultPKIDirTarget   = "/etc/etcd/pki"     // Target Etcd PKI directory on nodes for binary installs.
-	EtcdEnvFileTarget         = "/etc/etcd.env"     // Target path for etcd environment file for binary installs.
+	EtcdDefaultWalDir        = "/var/lib/etcd/wal" // Etcd default WAL directory.
+	EtcdDefaultConfDirTarget = "/etc/etcd"         // Target Etcd configuration directory on nodes.
+	EtcdDefaultPKIDirTarget  = "/etc/etcd/pki"     // Target Etcd PKI directory on nodes for binary installs.
+	EtcdEnvFileTarget        = "/etc/etcd.env"     // Target path for etcd environment file for binary installs.
 )
 
 const (
-	ContainerdDefaultConfDirTarget     = "/etc/containerd"                         // Target Containerd configuration directory on nodes.
-	ContainerdDefaultConfigFileTarget  = "/etc/containerd/config.toml"             // Target Containerd main config file on nodes.
-	ContainerdDefaultSystemdFile       = "/etc/systemd/system/containerd.service"  // Default systemd file path for Containerd.
+	ContainerdDefaultConfDirTarget    = "/etc/containerd"                        // Target Containerd configuration directory on nodes.
+	ContainerdDefaultConfigFileTarget = "/etc/containerd/config.toml"            // Target Containerd main config file on nodes.
+	ContainerdDefaultSystemdFile      = "/etc/systemd/system/containerd.service" // Default systemd file path for Containerd.
 
-	DockerDefaultConfDirTarget     = "/etc/docker"                         // Target Docker configuration directory on nodes.
-	DockerDefaultConfigFileTarget  = "/etc/docker/daemon.json"             // Target Docker daemon config file on nodes.
-	DockerDefaultSystemdFile       = "/lib/systemd/system/docker.service"  // Default systemd file path for Docker (can be distro-specific).
+	DockerDefaultConfDirTarget    = "/etc/docker"                        // Target Docker configuration directory on nodes.
+	DockerDefaultConfigFileTarget = "/etc/docker/daemon.json"            // Target Docker daemon config file on nodes.
+	DockerDefaultSystemdFile      = "/lib/systemd/system/docker.service" // Default systemd file path for Docker (can be distro-specific).
 
-	CniDockerdSystemdFile     = "/etc/systemd/system/cri-dockerd.service" // Default systemd file path for CRI-Dockerd.
+	CniDockerdSystemdFile = "/etc/systemd/system/cri-dockerd.service" // Default systemd file path for CRI-Dockerd.
 )
 
 const (
-	KeepalivedDefaultConfDirTarget     = "/etc/keepalived"                         // Target Keepalived configuration directory on nodes.
-	KeepalivedDefaultConfigFileTarget  = "/etc/keepalived/keepalived.conf"       // Target Keepalived main config file on nodes.
-	KeepalivedDefaultSystemdFile       = "/etc/systemd/system/keepalived.service"  // Default systemd file path for Keepalived.
+	KeepalivedDefaultConfDirTarget    = "/etc/keepalived"                        // Target Keepalived configuration directory on nodes.
+	KeepalivedDefaultConfigFileTarget = "/etc/keepalived/keepalived.conf"        // Target Keepalived main config file on nodes.
+	KeepalivedDefaultSystemdFile      = "/etc/systemd/system/keepalived.service" // Default systemd file path for Keepalived.
 
-	HAProxyDefaultConfDirTarget      = "/etc/haproxy"                          // Target HAProxy configuration directory on nodes.
-	HAProxyDefaultConfigFileTarget   = "/etc/haproxy/haproxy.cfg"              // Target HAProxy main config file on nodes.
-	HAProxyDefaultSystemdFile        = "/etc/systemd/system/haproxy.service"   // Default systemd file path for HAProxy.
+	HAProxyDefaultConfDirTarget    = "/etc/haproxy"                        // Target HAProxy configuration directory on nodes.
+	HAProxyDefaultConfigFileTarget = "/etc/haproxy/haproxy.cfg"            // Target HAProxy main config file on nodes.
+	HAProxyDefaultSystemdFile      = "/etc/systemd/system/haproxy.service" // Default systemd file path for HAProxy.
 
 	KubeVIPManifestFileName = "kube-vip.yaml" // Kube-VIP static pod manifest file name.
 )
 
 const (
 	SysctlDefaultConfFileTarget    = "/etc/sysctl.conf"                      // Target sysctl main configuration file.
-	ModulesLoadDefaultDirTarget    = "/etc/modules-load.d"                 // Target directory for kernel modules to load on boot.
+	ModulesLoadDefaultDirTarget    = "/etc/modules-load.d"                   // Target directory for kernel modules to load on boot.
 	KubernetesSysctlConfFileTarget = "/etc/sysctl.d/99-kubernetes-cri.conf"  // Common target path for Kubernetes-specific sysctl settings.
 	KubeletSystemdDropinDirTarget  = "/etc/systemd/system/kubelet.service.d" // Target directory for Kubelet systemd drop-in files.
 )
@@ -173,14 +173,14 @@ const (
 
 // Etcd PKI Filenames (for binary deployments, stored under EtcdDefaultPKIDirTarget)
 const (
-	EtcdCaCertFileName           = "ca.crt"
-	EtcdCaKeyFileName            = "ca.key" // Typically not distributed to nodes
-	EtcdServerCertFileName       = "server.crt"
-	EtcdServerKeyFileName        = "server.key"
-	EtcdPeerCertFileName         = "peer.crt"
-	EtcdPeerKeyFileName          = "peer.key"
-	EtcdAdminClientCertFileName  = "admin.crt"  // For etcdctl admin access on nodes
-	EtcdAdminClientKeyFileName   = "admin.key"  // For etcdctl admin access on nodes
+	EtcdCaCertFileName          = "ca.crt"
+	EtcdCaKeyFileName           = "ca.key" // Typically not distributed to nodes
+	EtcdServerCertFileName      = "server.crt"
+	EtcdServerKeyFileName       = "server.key"
+	EtcdPeerCertFileName        = "peer.crt"
+	EtcdPeerKeyFileName         = "peer.key"
+	EtcdAdminClientCertFileName = "admin.crt" // For etcdctl admin access on nodes
+	EtcdAdminClientKeyFileName  = "admin.key" // For etcdctl admin access on nodes
 	// APIServerEtcdClientCertFileName is already defined above for K8s PKI connecting to Etcd.
 )
 

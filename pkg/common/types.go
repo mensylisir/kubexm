@@ -62,11 +62,11 @@ const (
 type CNIType string
 
 const (
-	CNITypeCalico   CNIType = "calico"
-	CNITypeFlannel  CNIType = "flannel"
-	CNITypeCilium   CNIType = "cilium"
-	CNITypeKubeOvn  CNIType = "kube-ovn"
-	CNITypeMultus   CNIType = "multus"
+	CNITypeCalico    CNIType = "calico"
+	CNITypeFlannel   CNIType = "flannel"
+	CNITypeCilium    CNIType = "cilium"
+	CNITypeKubeOvn   CNIType = "kube-ovn"
+	CNITypeMultus    CNIType = "multus"
 	CNITypeHybridnet CNIType = "hybridnet"
 )
 
@@ -88,20 +88,20 @@ const (
 type BinaryType string
 
 const (
-	BinaryTypeEtcd         BinaryType = "etcd"
-	BinaryTypeKube         BinaryType = "kube" // For kubeadm, kubelet, kubectl etc.
-	BinaryTypeCNI          BinaryType = "cni"
-	BinaryTypeHelm         BinaryType = "helm"
-	BinaryTypeDocker       BinaryType = "docker"
-	BinaryTypeContainerd   BinaryType = "containerd"
-	BinaryTypeRunc         BinaryType = "runc"
-	BinaryTypeCrictl       BinaryType = "crictl"
-	BinaryTypeCriDockerd   BinaryType = "cri-dockerd"
-	BinaryTypeCalicoctl    BinaryType = "calicoctl"
-	BinaryTypeRegistry     BinaryType = "registry" // For Harbor, Docker Registry
-	BinaryTypeCompose      BinaryType = "compose"   // Docker Compose
-	BinaryTypeBuild        BinaryType = "build"     // For buildx
-	BinaryTypeGeneric      BinaryType = "generic"   // For other generic binaries
+	BinaryTypeEtcd       BinaryType = "etcd"
+	BinaryTypeKube       BinaryType = "kube" // For kubeadm, kubelet, kubectl etc.
+	BinaryTypeCNI        BinaryType = "cni"
+	BinaryTypeHelm       BinaryType = "helm"
+	BinaryTypeDocker     BinaryType = "docker"
+	BinaryTypeContainerd BinaryType = "containerd"
+	BinaryTypeRunc       BinaryType = "runc"
+	BinaryTypeCrictl     BinaryType = "crictl"
+	BinaryTypeCriDockerd BinaryType = "cri-dockerd"
+	BinaryTypeCalicoctl  BinaryType = "calicoctl"
+	BinaryTypeRegistry   BinaryType = "registry" // For Harbor, Docker Registry
+	BinaryTypeCompose    BinaryType = "compose"  // Docker Compose
+	BinaryTypeBuild      BinaryType = "build"    // For buildx
+	BinaryTypeGeneric    BinaryType = "generic"  // For other generic binaries
 )
 
 // HostConnectionType defines the method of connecting to a host.

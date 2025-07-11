@@ -38,7 +38,7 @@ func TestKubernetesInternalConstants(t *testing.T) {
 	})
 
 	t.Run("KubeadmConstants", func(t *testing.T) {
-		assert.Equal(t, "kubeadm-init-config.yaml", KubeadmInitConfigFileName) // Corrected expected value based on current constants.go
+		assert.Equal(t, "kubeadm-init-config.yaml", KubeadmInitConfigFileName)              // Corrected expected value based on current constants.go
 		assert.Equal(t, "kubeadm-join-master-config.yaml", KubeadmJoinMasterConfigFileName) // Using the more specific name
 		assert.Equal(t, "reset", KubeadmResetCommand)
 		assert.Equal(t, "24h0m0s", KubeadmTokenDefaultTTL)
