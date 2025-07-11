@@ -60,6 +60,7 @@ const (
 	NodeLocalDNSMetricsPort          = 9253  // Default metrics port for NodeLocal DNSCache.
 	KubeProxyMetricsPort             = 10249 // Default metrics port for KubeProxy.
 	KubeProxyHealthzPort             = 10256 // Default health check port for KubeProxy.
+	EtcdctlDefaultEndpoint           = "127.0.0.1:2379" // Default endpoint for etcdctl on an etcd node.
 )
 
 // --- Common Tools and Utility Packages ---

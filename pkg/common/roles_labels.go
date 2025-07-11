@@ -18,7 +18,7 @@ const (
 	RoleStorage = "storage" // Although not explicitly in all configs, good to have for extensibility
 	// RoleRegistry identifies a host designated to run a local container image registry.
 	RoleRegistry = "registry"
-	// RoleControlNode is defined in constants.go as "control-node", representing the Kubexm execution machine.
+	// RoleControlNode representing the Kubexm execution machine is defined in "Special Role Names".
 )
 
 // ControlNodeHostName is the special hostname used for operations running locally on the machine executing Kubexm.

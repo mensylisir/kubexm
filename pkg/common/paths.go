@@ -79,6 +79,7 @@ const (
 	KubernetesPKIDir       = "/etc/kubernetes/pki"       // Directory for Kubernetes PKI assets on a node.
 	DefaultKubeconfigPath  = "/root/.kube/config"        // Standard path for the admin kubeconfig on a user's machine or control node.
 
+	CACertFileName                     = "ca.crt"                         // Common name for CA certificate file.
 	CAKeyFileName                      = "ca.key"                         // Cluster CA private key.
 	APIServerCertFileName              = "apiserver.crt"                  // API server certificate.
 	APIServerKeyFileName               = "apiserver.key"                  // API server private key.
@@ -161,4 +162,29 @@ const (
 	KubeletConfigYAMLPathTarget          = "/var/lib/kubelet/config.yaml"
 	KubeletFlagsEnvPathTarget            = "/var/lib/kubelet/kubeadm-flags.env"
 	KubeletPKIDirTarget                  = "/var/lib/kubelet/pki"
+)
+
+const (
+	// DefaultLocalRegistryDataDir is the default data directory for a locally deployed image registry.
+	DefaultLocalRegistryDataDir = "/var/lib/registry"
+	// DefaultNginxConfigFilePathTarget is the default config file path for Nginx (e.g., when used as a load balancer).
+	DefaultNginxConfigFilePathTarget = "/etc/nginx/nginx.conf"
+)
+
+// Etcd PKI Filenames (for binary deployments, stored under EtcdDefaultPKIDirTarget)
+const (
+	EtcdCaCertFileName           = "ca.crt"
+	EtcdCaKeyFileName            = "ca.key" // Typically not distributed to nodes
+	EtcdServerCertFileName       = "server.crt"
+	EtcdServerKeyFileName        = "server.key"
+	EtcdPeerCertFileName         = "peer.crt"
+	EtcdPeerKeyFileName          = "peer.key"
+	EtcdAdminClientCertFileName  = "admin.crt"  // For etcdctl admin access on nodes
+	EtcdAdminClientKeyFileName   = "admin.key"  // For etcdctl admin access on nodes
+	// APIServerEtcdClientCertFileName is already defined above for K8s PKI connecting to Etcd.
+)
+
+// Specific Etcd data directory constant for target nodes (binary deployment)
+const (
+	EtcdDefaultDataDirTarget = "/var/lib/etcd" // From docs/4 and constants.go
 )
