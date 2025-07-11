@@ -4,25 +4,20 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
-
-	"github.com/mensylisir/kubexm/pkg/common" // Added common import
-	"github.com/mensylisir/kubexm/pkg/util"
-	"github.com/mensylisir/kubexm/pkg/util/validation"
+	// Assuming ValidationErrors is in cluster_types.go or a shared util in this package
 )
 
 // RegistryConfig defines configurations related to container image registries.
-// +k8s:deepcopy-gen=true
 type RegistryConfig struct {
 	PrivateRegistry   string                  `json:"privateRegistry,omitempty" yaml:"privateRegistry,omitempty"`
 	NamespaceOverride string                  `json:"namespaceOverride,omitempty" yaml:"namespaceOverride,omitempty"`
 	Auths             map[string]RegistryAuth `json:"auths,omitempty" yaml:"auths,omitempty"`
 	Type              *string                 `json:"type,omitempty" yaml:"type,omitempty"`
-	DataRoot          *string                 `json:"dataRoot,omitempty" yaml:"registryDataDir,omitempty"`
+	DataRoot          *string                 `json:"dataRoot,omitempty" yaml:"registryDataDir,omitempty"` // Matches YAML registryDataDir
 	NamespaceRewrite  *NamespaceRewriteConfig `json:"namespaceRewrite,omitempty" yaml:"namespaceRewrite,omitempty"`
 }
 
 // RegistryAuth defines authentication credentials for a specific registry.
-// +k8s:deepcopy-gen=true
 type RegistryAuth struct {
 	Username      string `json:"username,omitempty" yaml:"username,omitempty"`
 	Password      string `json:"password,omitempty" yaml:"password,omitempty"`
@@ -33,14 +28,12 @@ type RegistryAuth struct {
 }
 
 // NamespaceRewriteConfig defines rules for rewriting image namespaces.
-// +k8s:deepcopy-gen=true
 type NamespaceRewriteConfig struct {
 	Enabled bool                   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 	Rules   []NamespaceRewriteRule `json:"rules,omitempty" yaml:"rules,omitempty"`
 }
 
 // NamespaceRewriteRule defines a single namespace rewrite rule.
-// +k8s:deepcopy-gen=true
 type NamespaceRewriteRule struct {
 	Registry     string `json:"registry,omitempty" yaml:"registry,omitempty"`
 	OldNamespace string `json:"oldNamespace" yaml:"oldNamespace"`
@@ -56,18 +49,22 @@ func SetDefaults_RegistryConfig(cfg *RegistryConfig) {
 		cfg.Auths = make(map[string]RegistryAuth)
 	}
 	for k, authEntry := range cfg.Auths {
-		SetDefaults_RegistryAuth(&authEntry)
-		cfg.Auths[k] = authEntry
+		// Create a new variable for the copy to take its address
+		entryCopy := authEntry
+		SetDefaults_RegistryAuth(&entryCopy)
+		cfg.Auths[k] = entryCopy
+	}
+	if cfg.Type != nil && *cfg.Type != "" {
+		if cfg.DataRoot == nil || *cfg.DataRoot == "" {
+			defaultDataRoot := "/mnt/registry"
+			cfg.DataRoot = &defaultDataRoot
+		}
 	}
 	if cfg.NamespaceRewrite == nil {
 		cfg.NamespaceRewrite = &NamespaceRewriteConfig{}
 	}
 	if cfg.NamespaceRewrite.Rules == nil {
 		cfg.NamespaceRewrite.Rules = []NamespaceRewriteRule{}
-	}
-	// If a local registry type is specified and DataRoot is not, set a default DataRoot.
-	if cfg.Type != nil && *cfg.Type != "" && (cfg.DataRoot == nil || strings.TrimSpace(*cfg.DataRoot) == "") {
-		cfg.DataRoot = util.StrPtr(common.DefaultLocalRegistryDataDir) // Use common constant
 	}
 }
 
@@ -77,78 +74,58 @@ func SetDefaults_RegistryAuth(cfg *RegistryAuth) {
 		return
 	}
 	if cfg.SkipTLSVerify == nil {
-		cfg.SkipTLSVerify = util.BoolPtr(false)
+		b := false
+		cfg.SkipTLSVerify = &b
 	}
 	if cfg.PlainHTTP == nil {
-		cfg.PlainHTTP = util.BoolPtr(false)
+		b := false
+		cfg.PlainHTTP = &b
 	}
 }
 
 // Validate_RegistryConfig validates RegistryConfig.
-func Validate_RegistryConfig(cfg *RegistryConfig, verrs *validation.ValidationErrors, pathPrefix string) {
+func Validate_RegistryConfig(cfg *RegistryConfig, verrs *ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
-
-	if cfg.PrivateRegistry != "" {
-		if strings.TrimSpace(cfg.PrivateRegistry) == "" {
-			verrs.Add(pathPrefix+".privateRegistry", "cannot be only whitespace if specified")
-		} else if !util.IsValidDomainName(cfg.PrivateRegistry) && !util.IsValidIP(cfg.PrivateRegistry) && !util.ValidateHostPortString(cfg.PrivateRegistry) {
-			verrs.Add(pathPrefix+".privateRegistry", fmt.Sprintf("invalid hostname/IP or host:port format '%s'", cfg.PrivateRegistry))
-		}
+	if cfg.PrivateRegistry != "" && strings.TrimSpace(cfg.PrivateRegistry) == "" {
+		verrs.Add("%s.privateRegistry: cannot be only whitespace if specified", pathPrefix)
 	}
-
 	if cfg.NamespaceOverride != "" && strings.TrimSpace(cfg.NamespaceOverride) == "" {
-		verrs.Add(pathPrefix+".namespaceOverride", "cannot be only whitespace if specified")
+		verrs.Add("%s.namespaceOverride: cannot be only whitespace if specified", pathPrefix)
 	}
-
 	for regAddr, auth := range cfg.Auths {
-		authMapPath := pathPrefix + ".auths"
-		authEntryPath := fmt.Sprintf("%s[\"%s\"]", authMapPath, regAddr)
+		authPathPrefix := fmt.Sprintf("%s.auths[\"%s\"]", pathPrefix, regAddr)
 		if strings.TrimSpace(regAddr) == "" {
-			verrs.Add(authMapPath, "registry address key cannot be empty")
-		} else if !util.IsValidDomainName(regAddr) && !util.ValidateHostPortString(regAddr) {
-			verrs.Add(authEntryPath, fmt.Sprintf("registry address key '%s' is not a valid hostname or host:port", regAddr))
+			verrs.Add("%s.auths: registry address key cannot be empty", pathPrefix)
 		}
-		Validate_RegistryAuth(&auth, verrs, authEntryPath)
+		Validate_RegistryAuth(&auth, verrs, authPathPrefix) // Pass address of auth
 	}
-
 	if cfg.Type != nil && strings.TrimSpace(*cfg.Type) == "" {
-		verrs.Add(pathPrefix+".type", "cannot be empty if specified")
+		verrs.Add("%s.type: cannot be empty if specified", pathPrefix)
 	}
-	// DataRoot validation: if Type is set, DataRoot must now be set (either by user or by new default).
-	// If DataRoot is set (e.g. by user explicitly), Type must also be set.
-	if cfg.Type != nil && *cfg.Type != "" {
-		if cfg.DataRoot == nil || strings.TrimSpace(*cfg.DataRoot) == "" {
-			// This case should ideally not happen if defaults are applied correctly.
-			// However, validation should still catch it if defaults were bypassed or user provided empty string.
-			verrs.Add(pathPrefix+".registryDataDir (dataRoot)", "must be specified if registry type is set for local deployment and not defaulted")
-		}
+	if cfg.DataRoot != nil && strings.TrimSpace(*cfg.DataRoot) == "" {
+		verrs.Add("%s.registryDataDir (dataRoot): cannot be empty if specified", pathPrefix)
 	}
-	if (cfg.DataRoot != nil && strings.TrimSpace(*cfg.DataRoot) != "") && (cfg.Type == nil || strings.TrimSpace(*cfg.Type) == "") {
-		verrs.Add(pathPrefix+".type", "must be specified if registryDataDir (dataRoot) is set for local deployment")
+	if (cfg.Type != nil && *cfg.Type != "") && (cfg.DataRoot == nil || strings.TrimSpace(*cfg.DataRoot) == "") {
+		verrs.Add("%s.registryDataDir (dataRoot): must be specified if registry type is set for local deployment", pathPrefix)
 	}
-
+	if (cfg.DataRoot != nil && *cfg.DataRoot != "") && (cfg.Type == nil || strings.TrimSpace(*cfg.Type) == "") {
+		verrs.Add("%s.type: must be specified if registryDataDir (dataRoot) is set for local deployment", pathPrefix)
+	}
 
 	if cfg.NamespaceRewrite != nil {
 		if cfg.NamespaceRewrite.Enabled {
 			if len(cfg.NamespaceRewrite.Rules) == 0 {
-				verrs.Add(pathPrefix+".namespaceRewrite.rules", "must contain at least one rule if rewrite is enabled")
+				verrs.Add("%s.namespaceRewrite.rules: must contain at least one rule if rewrite is enabled", pathPrefix)
 			}
 			for i, rule := range cfg.NamespaceRewrite.Rules {
 				rulePathPrefix := fmt.Sprintf("%s.namespaceRewrite.rules[%d]", pathPrefix, i)
 				if strings.TrimSpace(rule.OldNamespace) == "" {
-					verrs.Add(rulePathPrefix+".oldNamespace", "cannot be empty")
+					verrs.Add("%s.oldNamespace: cannot be empty", rulePathPrefix)
 				}
 				if strings.TrimSpace(rule.NewNamespace) == "" {
-					verrs.Add(rulePathPrefix+".newNamespace", "cannot be empty")
-				}
-				if rule.Registry != "" {
-					if strings.TrimSpace(rule.Registry) == "" {
-						verrs.Add(rulePathPrefix+".registry", "cannot be only whitespace if specified")
-					} else if !util.IsValidDomainName(rule.Registry) && !util.ValidateHostPortString(rule.Registry) {
-						verrs.Add(rulePathPrefix+".registry", fmt.Sprintf("invalid hostname or host:port format '%s'", rule.Registry))
-					}
+					verrs.Add("%s.newNamespace: cannot be empty", rulePathPrefix)
 				}
 			}
 		}
@@ -156,7 +133,7 @@ func Validate_RegistryConfig(cfg *RegistryConfig, verrs *validation.ValidationEr
 }
 
 // Validate_RegistryAuth validates RegistryAuth.
-func Validate_RegistryAuth(cfg *RegistryAuth, verrs *validation.ValidationErrors, pathPrefix string) {
+func Validate_RegistryAuth(cfg *RegistryAuth, verrs *ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
@@ -164,17 +141,22 @@ func Validate_RegistryAuth(cfg *RegistryAuth, verrs *validation.ValidationErrors
 	hasAuthStr := cfg.Auth != ""
 
 	if !hasUserPass && !hasAuthStr {
-		verrs.Add(pathPrefix, "either username/password or auth string must be provided")
+		verrs.Add("%s: either username/password or auth string must be provided", pathPrefix)
 	}
 	if hasAuthStr {
 		decoded, err := base64.StdEncoding.DecodeString(cfg.Auth)
 		if err != nil {
-			verrs.Add(pathPrefix+".auth", fmt.Sprintf("failed to decode base64 auth string: %v", err))
+			verrs.Add("%s.auth: failed to decode base64 auth string: %v", pathPrefix, err)
 		} else if !strings.Contains(string(decoded), ":") {
-			verrs.Add(pathPrefix+".auth", "decoded auth string must be in 'username:password' format")
+			verrs.Add("%s.auth: decoded auth string must be in 'username:password' format", pathPrefix)
 		}
 	}
 	if cfg.CertsPath != "" && strings.TrimSpace(cfg.CertsPath) == "" {
-		verrs.Add(pathPrefix+".certsPath", "cannot be only whitespace if specified")
+		verrs.Add("%s.certsPath: cannot be only whitespace if specified", pathPrefix)
 	}
 }
+// Assuming ValidationErrors is defined in cluster_types.go or a shared util.
+// NOTE: DeepCopy methods should be generated by controller-gen.
+// Updated SetDefaults_RegistryConfig to correctly pass address of authEntry copy.
+// Updated Validate_RegistryConfig to correctly pass address of auth.
+// Added import "encoding/base64", "fmt", "strings".

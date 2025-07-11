@@ -28,7 +28,7 @@ type MirrorConfiguration struct {
 type ConfigureContainerdStep struct {
 	meta               spec.StepMeta
 	SandboxImage       string
-	RegistryMirrors    map[string]MirrorConfiguration // Changed to MirrorConfiguration struct
+	APIRegistryMirrors map[string][]string // Store the API spec version
 	InsecureRegistries []string
 	ConfigFilePath     string
 	RegistryConfigPath string // For plugins."io.containerd.grpc.v1.cri".registry.config_path
@@ -38,10 +38,11 @@ type ConfigureContainerdStep struct {
 }
 
 // NewConfigureContainerdStep creates a new ConfigureContainerdStep.
+// Accepts registryMirrors as map[string][]string, matching v1alpha1.ContainerdConfig.
 func NewConfigureContainerdStep(
 	instanceName string,
 	sandboxImage string,
-	registryMirrors map[string]MirrorConfiguration,
+	apiRegistryMirrors map[string][]string, // Changed parameter type
 	insecureRegistries []string,
 	configFilePath string,
 	registryConfigPath string,
@@ -69,7 +70,7 @@ func NewConfigureContainerdStep(
 			Description: fmt.Sprintf("Configures containerd by writing %s with specified mirrors, insecure registries, sandbox image and cgroup settings.", effectivePath),
 		},
 		SandboxImage:       effectiveSandboxImage,
-		RegistryMirrors:    registryMirrors,
+		APIRegistryMirrors: apiRegistryMirrors, // Use the new field
 		InsecureRegistries: insecureRegistries,
 		ConfigFilePath:     effectivePath,
 		RegistryConfigPath: registryConfigPath,
@@ -95,9 +96,21 @@ func (s *ConfigureContainerdStep) renderExpectedConfig() (string, error) {
 		return "", fmt.Errorf("dev error: failed to parse containerd config template: %w", err)
 	}
 	var expectedBuf bytes.Buffer
+
+	// Adapt APIRegistryMirrors (map[string][]string) to the structure expected by the template
+	// The template expects map[string]MirrorConfiguration where MirrorConfiguration has Endpoints.
+	templateRegistryMirrors := make(map[string]MirrorConfiguration)
+	if s.APIRegistryMirrors != nil {
+		for host, endpoints := range s.APIRegistryMirrors {
+			templateRegistryMirrors[host] = MirrorConfiguration{Endpoints: endpoints}
+			// If MirrorConfiguration had a Rewrite field that needed to be populated from API,
+			// that logic would go here. For now, assuming only Endpoints.
+		}
+	}
+
 	templateData := map[string]interface{}{
 		"SandboxImage":       s.SandboxImage,
-		"RegistryMirrors":    s.RegistryMirrors,
+		"RegistryMirrors":    templateRegistryMirrors, // Use the adapted structure
 		"InsecureRegistries": s.InsecureRegistries,
 		"UseSystemdCgroup":   s.UseSystemdCgroup,
 		"RegistryConfigPath": s.RegistryConfigPath,
