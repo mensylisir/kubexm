@@ -8,10 +8,13 @@ import (
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/templates"
+	"github.com/mensylisir/kubexm/pkg/util"
 )
 
 const (
-	defaultSysctlConfFile = "/etc/sysctl.d/99-kubexm.conf"
+	defaultSysctlConfFile    = "/etc/sysctl.d/99-kubexm.conf"
+	SysctlConfigTemplateName = "os/sysctl.conf.tmpl"
 )
 
 // ConfigureSysctlStep applies kernel sysctl parameters and ensures they persist.
@@ -83,30 +86,42 @@ func (s *ConfigureSysctlStep) areParamsInConfFile(ctx step.StepContext, runnerSv
 		return false, nil
 	}
 	content := string(contentBytes)
-	lines := strings.Split(content, "\n")
-
-	configuredParams := make(map[string]string)
-	for _, line := range lines {
-		trimmedLine := strings.TrimSpace(line)
-		if trimmedLine == "" || strings.HasPrefix(trimmedLine, "#") || strings.HasPrefix(trimmedLine, ";") {
-			continue
-		}
-		parts := strings.SplitN(trimmedLine, "=", 2)
-		if len(parts) == 2 {
-			key := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
-			configuredParams[key] = value
-		}
+	// Instead of parsing the file, render the expected content and compare.
+	// This is more robust if the template adds comments or specific formatting.
+	templateData := map[string]interface{}{
+		"StepName": s.meta.Name, // Or a fixed string if the step name in comments isn't critical for matching
+		"Params":   s.Params,
+	}
+	templateString, err := templates.Get(SysctlConfigTemplateName)
+	if err != nil {
+		logger.Error("Failed to get sysctl config template for precheck", "error", err)
+		return false, fmt.Errorf("failed to get sysctl config template '%s' for precheck: %w", SysctlConfigTemplateName, err)
+	}
+	expectedContent, err := util.RenderTemplate(templateString, templateData)
+	if err != nil {
+		logger.Error("Failed to render expected sysctl config for precheck", "error", err)
+		return false, fmt.Errorf("failed to render sysctl config template for precheck: %w", err)
+	}
+	if !strings.HasSuffix(expectedContent, "\n") {
+		expectedContent += "\n"
 	}
 
-	for key, expectedValue := range s.Params {
-		currentValue, found := configuredParams[key]
-		if !found || strings.TrimSpace(currentValue) != strings.TrimSpace(expectedValue) {
-			logger.Info("Sysctl param not correctly configured in persistent file.", "key", key, "expected", expectedValue, "found_in_file", currentValue)
-			return false, nil
-		}
+	// Normalize both for comparison (e.g. trim spaces from each line, ignore empty lines, ignore comments if needed)
+	// For now, a direct comparison after ensuring trailing newline.
+	// Consider a more robust line-by-line comparison ignoring comments and blank lines if direct match fails.
+	normalizedCurrentContent := strings.ReplaceAll(strings.TrimSpace(content), "\r\n", "\n") + "\n"
+	normalizedExpectedContent := strings.ReplaceAll(strings.TrimSpace(expectedContent), "\r\n", "\n") + "\n"
+
+
+	if normalizedCurrentContent == normalizedExpectedContent {
+		return true, nil
 	}
-	return true, nil
+
+	logger.Info("Sysctl config file content does not match expected rendered template.")
+	// For debugging:
+	// logger.Debug("Current content (normalized)", "content", normalizedCurrentContent)
+	// logger.Debug("Expected content (normalized)", "content", normalizedExpectedContent)
+	return false, nil
 }
 
 
@@ -204,24 +219,27 @@ func (s *ConfigureSysctlStep) Run(ctx step.StepContext, host connector.Host) err
 		return fmt.Errorf("failed to create directory %s for sysctl config: %w", confDir, errMkdir)
 	}
 
-	// Build the content for the sysctl configuration file.
-	// This will overwrite s.ConfFile with only the parameters defined in s.Params.
-	var contentBuilder strings.Builder
-	contentBuilder.WriteString(fmt.Sprintf("# File managed by Kubexm for step: %s\n", s.meta.Name))
-	contentBuilder.WriteString("# Changes to this file may be overwritten.\n")
-	for key, value := range s.Params {
-		// Ensure keys and values are reasonably safe for config file
-		// Basic sanitization: trim whitespace. More complex sanitization might be needed
-		// if keys/values can contain special characters that break sysctl.conf format.
-		sKey := strings.TrimSpace(key)
-		sValue := strings.TrimSpace(value)
-		if sKey == "" {
-			logger.Warn("Skipping empty sysctl key.")
-			continue
-		}
-		contentBuilder.WriteString(fmt.Sprintf("%s = %s\n", sKey, sValue))
+	// Build the content for the sysctl configuration file using the template.
+	templateData := map[string]interface{}{
+		"StepName": s.meta.Name,
+		"Params":   s.Params,
 	}
-	finalContent := contentBuilder.String()
+	templateString, err := templates.Get(SysctlConfigTemplateName)
+	if err != nil {
+		return fmt.Errorf("failed to get sysctl config template '%s': %w", SysctlConfigTemplateName, err)
+	}
+	finalContent, err := util.RenderTemplate(templateString, templateData)
+	if err != nil {
+		return fmt.Errorf("failed to render sysctl config template: %w", err)
+	}
+	// Ensure finalContent has a trailing newline if template doesn't guarantee it and it's desired.
+	// Generally, text templates that generate line-by-line output often end without a final newline
+	// if the last line of the template doesn't have one.
+	// For sysctl.conf, it's good practice.
+	if !strings.HasSuffix(finalContent, "\n") {
+		finalContent += "\n"
+	}
+
 
 	logger.Info("Writing sysctl parameters to persistent config file.", "file", s.ConfFile)
 	errWrite := runnerSvc.WriteFile(ctx.GoContext(), conn, []byte(finalContent), s.ConfFile, "0644", s.Sudo)
