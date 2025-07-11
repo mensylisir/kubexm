@@ -990,7 +990,7 @@ func (e *EtcdConfig) GetDataDir() string {
 上面提出的改进建议属于“锦上添花”，旨在处理更高级的企业级场景（如自定义PKI、云存储备份）和防止用户配置错误。即使不进行这些修改，你当前的定义也已经是一个非常高质量的API设计。
 
 
-### common_types.go
+### container_runtime_types.go
 ```azure
 package v1alpha1
 
