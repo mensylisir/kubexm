@@ -1,13 +1,14 @@
 package common
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/util" // For util.RenderTemplate
+	"github.com/mensylisir/kubexm/pkg/util"
 )
 
 // RenderTemplateStep renders a Go template and writes it to a remote file.

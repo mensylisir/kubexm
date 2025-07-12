@@ -7,6 +7,7 @@ import (
 	"time" // For temporary filename generation
 
 	"github.com/mensylisir/kubexm/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/util"
 )
 
 // UserExists checks if a user exists on the remote system.
@@ -202,7 +203,7 @@ func (r *defaultRunner) ModifyUser(ctx context.Context, conn connector.Connector
 	if modifications.NewComment != nil {
 		// If the comment contains spaces or shell-sensitive characters, it should be quoted
 		// to be treated as a single argument by the shell that `conn.Exec` might invoke.
-		cmdParts = append(cmdParts, "-c", shellEscape(*modifications.NewComment))
+		cmdParts = append(cmdParts, "-c", util.ShellEscape(*modifications.NewComment))
 		modifiedSomething = true
 	}
 
@@ -301,7 +302,7 @@ func (r *defaultRunner) ConfigureSudoer(ctx context.Context, conn connector.Conn
 	// visudo needs to read the temp file. It doesn't need sudo to read a /tmp file.
 	// However, `visudo` itself often requires sudo to run, even in check mode, depending on system config.
 	// Let's assume visudo -cf needs sudo to operate correctly or to access its own required files.
-	visudoCmd := fmt.Sprintf("visudo -cf %s", shellEscape(remoteTempPath))
+	visudoCmd := fmt.Sprintf("visudo -cf %s", util.ShellEscape(remoteTempPath))
 	_, visudoStderr, visudoErr := r.RunWithOptions(ctx, conn, visudoCmd, &connector.ExecOptions{Sudo: true})
 	if visudoErr != nil {
 		// If visudo fails, the content is bad. Temp file will be cleaned by defer.
@@ -315,7 +316,7 @@ func (r *defaultRunner) ConfigureSudoer(ctx context.Context, conn connector.Conn
 	}
 
 	// 4. Move temporary file to final destination with sudo
-	mvCmd := fmt.Sprintf("mv %s %s", shellEscape(remoteTempPath), shellEscape(finalSudoerPath))
+	mvCmd := fmt.Sprintf("mv %s %s", util.ShellEscape(remoteTempPath), util.ShellEscape(finalSudoerPath))
 	_, mvStderr, mvErr := r.RunWithOptions(ctx, conn, mvCmd, &connector.ExecOptions{Sudo: true})
 	if mvErr != nil {
 		// Attempt to clean up finalSudoerPath if mv failed but left a partial/incorrect file,
@@ -358,7 +359,7 @@ func (r *defaultRunner) SetUserPassword(ctx context.Context, conn connector.Conn
 	// Construct the input for chpasswd
 	chpasswdInput := fmt.Sprintf("%s:%s", username, hashedPassword)
 	// Escape the input for the echo command to handle special characters in username or hash safely
-	escapedInput := shellEscape(chpasswdInput) // shellEscape is from file.go
+	escapedInput := util.ShellEscape(chpasswdInput) // util.ShellEscape is from file.go
 
 	// Command: echo 'username:hashed_password' | chpasswd
 	// The sudo applies to chpasswd.

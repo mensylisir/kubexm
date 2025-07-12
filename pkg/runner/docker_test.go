@@ -853,27 +853,6 @@ func TestDefaultRunner_ConfigureDockerDaemon(t *testing.T) {
 		assert.Contains(t, err.Error(), "failed to write Docker daemon config")
 	})
 
-import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"path/filepath"
-	"strings"
-	"testing"
-	"time"
-
-	"github.com/docker/docker/api/types/image"
-	//lint:ignore SA1019 we need to use this for now
-	"github.com/docker/docker/api/types/container"
-	"github.com/golang/mock/gomock"
-	"github.com/stretchr/testify/assert"
-	"github.com/pkg/errors"
-
-	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/connector/mocks"
-	"github.com/mensylisir/kubexm/pkg/util" // Added import for util
-)
-
 	t.Run("RestartServiceFails", func(t *testing.T) {
 		mockReadFileForEmpty()
 		opts4 := DockerDaemonOptions{Debug: util.BoolPtr(true)}

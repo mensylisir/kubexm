@@ -59,7 +59,7 @@ func (s *HelmInstallStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *HelmInstallStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *HelmInstallStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	// Precheck could try 'helm status <releaseName> -n <namespace>'
 	// If it succeeds, the release might already exist.
 	// This is a simplified precheck; a more robust one would check version and values.
@@ -95,7 +95,7 @@ func (s *HelmInstallStep) Precheck(ctx runtime.StepContext, host connector.Host)
 	return false, nil
 }
 
-func (s *HelmInstallStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *HelmInstallStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName())
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -144,7 +144,7 @@ func (s *HelmInstallStep) Run(ctx runtime.StepContext, host connector.Host) erro
 	return nil
 }
 
-func (s *HelmInstallStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *HelmInstallStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName())
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)

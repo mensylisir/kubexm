@@ -14,32 +14,47 @@ import (
 
 // ContainerdModule installs and configures containerd.
 type ContainerdModule struct {
-	module.BaseModule
-	// cfg *v1alpha1.Cluster // Stored if needed by Plan for IsEnabled logic, or tasks constructed in Plan
+	name  string
+	tasks []task.Task
 }
 
 // NewContainerdModule creates a new module for containerd.
-func NewContainerdModule() module.Module { // Removed *v1alpha1.Cluster from params
+func NewContainerdModule() module.Module {
 	// Define roles where containerd should be installed (typically all nodes that run containers)
-	containerdRoles := []string{common.MasterRole, common.WorkerRole}
+	containerdRoles := []string{common.RoleMaster, common.RoleWorker}
 
 	// Instantiate tasks. NewInstallContainerdTask now only takes roles.
 	// Specific configurations (version, mirrors, etc.) are pulled by the task from ClusterConfig via TaskContext.
 	installTask := taskContainerd.NewInstallContainerdTask(containerdRoles)
 
-	modTasks := []task.Task{installTask}
-	base := module.NewBaseModule("ContainerdRuntime", modTasks)
-	m := &ContainerdModule{BaseModule: base}
-	return m
+	return &ContainerdModule{
+		name:  "ContainerdRuntime",
+		tasks: []task.Task{installTask},
+	}
+}
+
+// Name returns the name of the module.
+func (m *ContainerdModule) Name() string {
+	return m.name
+}
+
+// Description returns a brief description of the module.
+func (m *ContainerdModule) Description() string {
+	return "Installs and configures containerd container runtime"
+}
+
+// GetTasks returns a list of tasks that belong to this module.
+func (m *ContainerdModule) GetTasks(ctx module.ModuleContext) ([]task.Task, error) {
+	return m.tasks, nil
 }
 
 // Plan generates the execution fragment for the containerd module.
-func (m *ContainerdModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragment, error) {
+func (m *ContainerdModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("module", m.Name())
 	clusterConfig := ctx.GetClusterConfig()
 
 	// Enablement Check
-	if clusterConfig.Spec.ContainerRuntime == nil || clusterConfig.Spec.ContainerRuntime.Type != v1alpha1.ContainerdRuntime { // Use v1alpha1 constant
+	if clusterConfig.Spec.ContainerRuntime == nil || clusterConfig.Spec.ContainerRuntime.Type != v1alpha1.ContainerRuntimeContainerd { // Use v1alpha1 constant
 		logger.Info("Containerd module is not enabled (ContainerRuntime.Type is not 'containerd'). Skipping.")
 		return task.NewEmptyFragment(), nil
 	}
@@ -49,10 +64,18 @@ func (m *ContainerdModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragm
 	var previousTaskExitNodes []plan.NodeID
 	isFirstEffectiveTask := true
 
-	for _, currentTask := range m.Tasks() { // m.Tasks() from BaseModule
-		taskCtx, ok := ctx.(runtime.TaskContext)
+	// Get tasks from the module
+	tasks, err := m.GetTasks(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tasks for module %s: %w", m.Name(), err)
+	}
+
+	for _, currentTask := range tasks {
+		// The ModuleContext should also implement TaskContext
+		// since it has all the required methods
+		taskCtx, ok := ctx.(task.TaskContext)
 		if !ok {
-			return nil, fmt.Errorf("module context cannot be asserted to task context for module %s, task %s", m.Name(), currentTask.Name())
+			return nil, fmt.Errorf("module context does not implement TaskContext for module %s, task %s", m.Name(), currentTask.Name())
 		}
 
 		taskIsRequired, err := currentTask.IsRequired(taskCtx)

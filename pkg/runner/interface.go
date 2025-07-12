@@ -186,7 +186,7 @@ type Runner interface {
 	DockerPrune(ctx context.Context, conn connector.Connector, pruneType string, filters map[string]string, all bool) (string, error)
 	GetDockerDaemonConfig(ctx context.Context, conn connector.Connector) (*DockerDaemonOptions, error)
 	ConfigureDockerDaemon(ctx context.Context, conn connector.Connector, opts DockerDaemonOptions, restartService bool) error
-	EnsureDefaultDockerConfig(ctx context.Context, conn connector.Connector, facts *Facts) error
+	EnsureDefaultDockerConfig(ctx context.Context, conn connector.Connector, facts *Facts, restartService bool) error
 	CtrListNamespaces(ctx context.Context, conn connector.Connector) ([]string, error)
 	CtrListImages(ctx context.Context, conn connector.Connector, namespace string) ([]CtrImageInfo, error)
 	CtrPullImage(ctx context.Context, conn connector.Connector, namespace, imageName string, allPlatforms bool, user string) error
@@ -229,7 +229,7 @@ type Runner interface {
 	ConfigureCrictl(ctx context.Context, conn connector.Connector, configFileContent string, configFilePath string) error
 	EnsureDefaultContainerdConfig(ctx context.Context, conn connector.Connector, facts *Facts) error
 	GetContainerdConfig(ctx context.Context, conn connector.Connector) (*ContainerdConfigOptions, error)
-	ConfigureContainerd(ctx context.Context, conn connector.Connector, opts ContainerdConfigOptions, restartService bool) error
+	ConfigureContainerd(ctx context.Context, conn connector.Connector, facts *Facts, opts ContainerdConfigOptions, restartService bool) error
 	HelmInstall(ctx context.Context, conn connector.Connector, releaseName, chartPath string, opts HelmInstallOptions) error
 	HelmUninstall(ctx context.Context, conn connector.Connector, releaseName string, opts HelmUninstallOptions) error
 	HelmList(ctx context.Context, conn connector.Connector, opts HelmListOptions) ([]HelmReleaseInfo, error)

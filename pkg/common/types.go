@@ -82,34 +82,12 @@ const (
 type TaskStatus string
 
 const (
-	TaskStatusPending    TaskStatus = "Pending"
+	// These constants are already defined in task_constants.go
+	// TaskStatusPending    TaskStatus = "Pending"
 	TaskStatusProcessing TaskStatus = "Processing"
 	TaskStatusSuccess    TaskStatus = "Success"
-	TaskStatusFailed     TaskStatus = "Failed"
-	TaskStatusSkipped    TaskStatus = "Skipped"
-)
-
-// BinaryType defines the type of a binary artifact.
-// This was previously in pkg/util/binary_info.go's context but makes sense in common if used widely.
-// Or it can be a sub-type within a more specific package if only used there.
-// For now, placing a simplified version here as per the idea of centralizing types.
-type BinaryType string
-
-const (
-	BinaryTypeEtcd       BinaryType = "etcd"
-	BinaryTypeKube       BinaryType = "kube" // For kubeadm, kubelet, kubectl etc.
-	BinaryTypeCNI        BinaryType = "cni"
-	BinaryTypeHelm       BinaryType = "helm"
-	BinaryTypeDocker     BinaryType = "docker"
-	BinaryTypeContainerd BinaryType = "containerd"
-	BinaryTypeRunc       BinaryType = "runc"
-	BinaryTypeCrictl     BinaryType = "crictl"
-	BinaryTypeCriDockerd BinaryType = "cri-dockerd"
-	BinaryTypeCalicoctl  BinaryType = "calicoctl"
-	BinaryTypeRegistry   BinaryType = "registry" // For Harbor, Docker Registry
-	BinaryTypeCompose    BinaryType = "compose"  // Docker Compose
-	BinaryTypeBuild      BinaryType = "build"    // For buildx
-	BinaryTypeGeneric    BinaryType = "generic"  // For other generic binaries
+	// TaskStatusFailed     TaskStatus = "Failed"
+	// TaskStatusSkipped    TaskStatus = "Skipped"
 )
 
 // HostConnectionType defines the method of connecting to a host.
@@ -120,4 +98,10 @@ const (
 	HostConnectionTypeSSH HostConnectionType = "ssh"
 	// HostConnectionTypeLocal indicates operations on the local machine.
 	HostConnectionTypeLocal HostConnectionType = "local"
+)
+
+// Legacy aliases for backward compatibility
+const (
+	HostTypeSSH   = HostConnectionTypeSSH
+	HostTypeLocal = HostConnectionTypeLocal
 )

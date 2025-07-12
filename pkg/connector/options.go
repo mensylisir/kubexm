@@ -29,6 +29,8 @@ type ExecOptions struct {
 	// Stream, if not nil, will have the command's stdout and stderr
 	// written to it in real-time.
 	Stream io.Writer
+	// Stdin provides input data for the command
+	Stdin []byte
 }
 
 // FileTransferOptions defines the options for file transfer.

@@ -1,11 +1,9 @@
 package v1alpha1
 
 import (
-	"fmt"
 	"strings"
-	"github.com/mensylisir/kubexm/pkg/util" // Ensured util is imported
-	"github.com/mensylisir/kubexm/pkg/common" // Import common
-	"github.com/mensylisir/kubexm/pkg/util/validation"
+	"github.com/mensylisir/kubexm/pkg/util"
+	"github.com/mensylisir/kubexm/pkg/common"
 )
 
 const (
@@ -86,19 +84,19 @@ func SetDefaults_KubeVIPConfig(cfg *KubeVIPConfig) {
 }
 
 // Validate_KubeVIPConfig validates KubeVIPConfig.
-func Validate_KubeVIPConfig(cfg *KubeVIPConfig, verrs *validation.ValidationErrors, pathPrefix string) {
+func Validate_KubeVIPConfig(cfg *KubeVIPConfig, verrs *ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
 	if cfg.Mode != nil && *cfg.Mode != "" {
 	   if !util.ContainsString(validKubeVIPModes, *cfg.Mode) {
-		   verrs.Add(pathPrefix+".mode", fmt.Sprintf("invalid mode '%s', must be one of %v", *cfg.Mode, validKubeVIPModes))
+		   verrs.Add(pathPrefix+".mode: invalid mode '"+*cfg.Mode+"', must be one of ARP, BGP")
 	   }
 	}
 	if cfg.VIP == nil || strings.TrimSpace(*cfg.VIP) == "" {
 		verrs.Add(pathPrefix+".vip", "virtual IP address must be specified")
 	} else if !util.IsValidIP(*cfg.VIP) {
-		verrs.Add(pathPrefix+".vip", fmt.Sprintf("invalid IP address format '%s'", *cfg.VIP))
+		verrs.Add(pathPrefix+".vip: invalid IP address format '"+*cfg.VIP+"'")
 	}
 	if cfg.Mode != nil && *cfg.Mode == KubeVIPModeARP {
 		if cfg.Interface == nil || strings.TrimSpace(*cfg.Interface) == "" {
@@ -114,16 +112,16 @@ func Validate_KubeVIPConfig(cfg *KubeVIPConfig, verrs *validation.ValidationErro
 	   } else {
 		   bp := pathPrefix + ".bgpConfig"
 		   if strings.TrimSpace(cfg.BGPConfig.RouterID) == "" {
-			   verrs.Add(bp+".routerID", "router ID must be specified for BGP mode")
+			   verrs.Add(bp+".routerID: router ID must be specified for BGP mode")
 		   }
-		   if cfg.BGPConfig.ASN == 0 { verrs.Add(bp+".asn", "local ASN must be specified for BGP mode")}
-		   if cfg.BGPConfig.PeerASN == 0 { verrs.Add(bp+".peerASN", "peer ASN must be specified for BGP mode")}
-		   if strings.TrimSpace(cfg.BGPConfig.PeerAddress) == "" { verrs.Add(bp+".peerAddress", "peer address must be specified for BGP mode")
+		   if cfg.BGPConfig.ASN == 0 { verrs.Add(bp+".asn: local ASN must be specified for BGP mode")}
+		   if cfg.BGPConfig.PeerASN == 0 { verrs.Add(bp+".peerASN: peer ASN must be specified for BGP mode")}
+		   if strings.TrimSpace(cfg.BGPConfig.PeerAddress) == "" { verrs.Add(bp+".peerAddress: peer address must be specified for BGP mode")
 		   } else if !util.IsValidIP(cfg.BGPConfig.PeerAddress) {
-			   verrs.Add(bp+".peerAddress", fmt.Sprintf("invalid IP '%s'", cfg.BGPConfig.PeerAddress))
+			   verrs.Add(bp+".peerAddress: invalid IP '"+cfg.BGPConfig.PeerAddress+"'")
 		   }
 			if cfg.BGPConfig.SourceAddress != "" && !util.IsValidIP(cfg.BGPConfig.SourceAddress) {
-				verrs.Add(bp+".sourceAddress", fmt.Sprintf("invalid IP address format '%s'", cfg.BGPConfig.SourceAddress))
+				verrs.Add(bp+".sourceAddress: invalid IP address format '"+cfg.BGPConfig.SourceAddress+"'")
 			}
 	   }
 	}

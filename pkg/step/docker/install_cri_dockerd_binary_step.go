@@ -51,7 +51,7 @@ func (s *InstallCriDockerdBinaryStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *InstallCriDockerdBinaryStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *InstallCriDockerdBinaryStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -80,7 +80,7 @@ func (s *InstallCriDockerdBinaryStep) Precheck(ctx runtime.StepContext, host con
 	return false, nil
 }
 
-func (s *InstallCriDockerdBinaryStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *InstallCriDockerdBinaryStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	extractedDirVal, found := ctx.TaskCache().Get(s.ExtractedDirCacheKey)
 	if !found {
@@ -148,7 +148,7 @@ func (s *InstallCriDockerdBinaryStep) Run(ctx runtime.StepContext, host connecto
 	return nil
 }
 
-func (s *InstallCriDockerdBinaryStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *InstallCriDockerdBinaryStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)

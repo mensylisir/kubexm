@@ -63,7 +63,7 @@ func (s *BackupEtcdStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *BackupEtcdStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *BackupEtcdStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	// Precheck for backup might involve checking if etcdctl exists and if the cluster is healthy.
 	// However, a direct precheck for "is backup already done?" is not straightforward unless
@@ -98,7 +98,7 @@ func (s *BackupEtcdStep) Precheck(ctx runtime.StepContext, host connector.Host) 
 	return false, nil // Always run the backup when this step is scheduled.
 }
 
-func (s *BackupEtcdStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *BackupEtcdStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -160,7 +160,7 @@ func (s *BackupEtcdStep) Run(ctx runtime.StepContext, host connector.Host) error
 	return nil
 }
 
-func (s *BackupEtcdStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *BackupEtcdStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	// Rollback for a backup operation could mean deleting the created backup file.
 	// This is often desired to clean up if the overall process fails after this step.

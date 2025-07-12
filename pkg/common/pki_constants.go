@@ -83,7 +83,7 @@ const (
 // Certificate generation constants
 const (
 	// Certificate subject organization
-	DefaultCertificateOrganization  = "kubexm"                         // Default certificate organization
+	DefaultKubexmCertificateOrganization = "kubexm"                         // Default certificate organization for kubexm
 	DefaultCertificateCountry       = "CN"                             // Default certificate country
 	DefaultCertificateProvince      = "Beijing"                        // Default certificate province
 	DefaultCertificateCity          = "Beijing"                        // Default certificate city

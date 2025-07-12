@@ -22,9 +22,9 @@ import (
 	"github.com/mensylisir/kubexm/pkg/util"
 )
 
-// mockTaskContextForResource provides a mock runtime.TaskContext.
+// mockTaskContextForResource provides a mock task.TaskContext.
 type mockTaskContextForResource struct {
-	// Embed an unexported/unimplemented interface to satisfy the compiler if methods are added to runtime.TaskContext
+	// Embed an unexported/unimplemented interface to satisfy the compiler if methods are added to task.TaskContext
 	// runtime.taskContextInternal // Example of such embedding pattern
 	logger        *logger.Logger
 	goCtx         context.Context

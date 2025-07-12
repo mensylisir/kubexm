@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 )
@@ -43,7 +42,7 @@ func (s *DeleteFileStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *DeleteFileStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *DeleteFileStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -65,7 +64,7 @@ func (s *DeleteFileStep) Precheck(ctx runtime.StepContext, host connector.Host) 
 	return false, nil
 }
 
-func (s *DeleteFileStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *DeleteFileStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -85,9 +84,9 @@ func (s *DeleteFileStep) Run(ctx runtime.StepContext, host connector.Host) error
 	// Let's refine this. If s.Recursive, we should use a command.
 	if s.Recursive {
 		rmCmd := fmt.Sprintf("rm -rf %s", s.RemotePath)
-		_, stderr, errRm := runnerSvc.Run(ctx.GoContext(), conn, rmCmd, s.Sudo)
+		_, errRm := runnerSvc.Run(ctx.GoContext(), conn, rmCmd, s.Sudo)
 		if errRm != nil {
-			return fmt.Errorf("failed to recursively remove %s: %w. Stderr: %s", s.RemotePath, errRm, string(stderr))
+			return fmt.Errorf("failed to recursively remove %s: %w", s.RemotePath, errRm)
 		}
 	} else {
 		// Simple file removal
@@ -103,7 +102,7 @@ func (s *DeleteFileStep) Run(ctx runtime.StepContext, host connector.Host) error
 	return nil
 }
 
-func (s *DeleteFileStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *DeleteFileStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	logger.Info("Rollback for DeleteFileStep is not applicable (would mean restoring the file/directory).")
 	return nil

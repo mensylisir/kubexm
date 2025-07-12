@@ -13,15 +13,11 @@ import (
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/connector"
-	connectormocks "github.com/mensylisir/kubexm/pkg/connector/mocks"
-	loggermocks "github.com/mensylisir/kubexm/pkg/logger/mocks"
 	"github.com/mensylisir/kubexm/pkg/plan"
-	resourcemocks "github.com/mensylisir/kubexm/pkg/resource/mocks"
 	"github.com/mensylisir/kubexm/pkg/step"
 	commonsteps "github.com/mensylisir/kubexm/pkg/step/common" // Alias to avoid clash with package 'common'
 	stepetcd "github.com/mensylisir/kubexm/pkg/step/etcd"
 	"github.com/mensylisir/kubexm/pkg/task"
-	taskmocks "github.com/mensylisir/kubexm/pkg/task/mocks"
 )
 
 // TestInstallETCDTask_Plan_BinaryInstall_SingleNode tests the Plan method for a single Etcd node, binary install.
@@ -229,5 +225,3 @@ func TestInstallETCDTask_Plan_BinaryInstall_SingleNode(t *testing.T) {
 	mockTaskCtx.AssertExpectations(t)
 	// mockResourceHandle.AssertExpectations(t) // If we were able to mock it
 }
-
-[end of pkg/task/etcd/install_etcd_task_test.go]

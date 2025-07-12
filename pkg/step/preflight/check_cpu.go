@@ -8,7 +8,6 @@ import (
 	// "time" // No longer needed
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec" // Added for StepMeta
 	"github.com/mensylisir/kubexm/pkg/step"
 )
@@ -44,7 +43,7 @@ func (s *CheckCPUStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *CheckCPUStep) determineActualCores(ctx runtime.StepContext, host connector.Host) (int, error) {
+func (s *CheckCPUStep) determineActualCores(ctx step.StepContext, host connector.Host) (int, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName())
 
 	facts, errFacts := ctx.GetHostFacts(host)
@@ -91,7 +90,7 @@ func (s *CheckCPUStep) determineActualCores(ctx runtime.StepContext, host connec
 	return parsedCores, nil
 }
 
-func (s *CheckCPUStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *CheckCPUStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 
 	if host == nil {
@@ -122,7 +121,7 @@ func (s *CheckCPUStep) Precheck(ctx runtime.StepContext, host connector.Host) (b
 	return false, nil // Indicate Run should be called to report this failure.
 }
 
-func (s *CheckCPUStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *CheckCPUStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 
 	// Precheck should have populated s.checkError if there was an issue or requirement not met.
@@ -146,7 +145,7 @@ func (s *CheckCPUStep) Run(ctx runtime.StepContext, host connector.Host) error {
 	return errors.New(unknownFailureMsg)
 }
 
-func (s *CheckCPUStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *CheckCPUStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	// No action to rollback for a check-only step.
 	return nil
 }

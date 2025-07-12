@@ -54,7 +54,7 @@ func (h *LocalCertificateHandle) getControlNode(ctx task.TaskContext) ([]connect
 
 // Path returns the expected final local path of the certificate on the control node.
 // Structure: GlobalWorkDir (e.g., $(pwd)/.kubexm)/${cluster_name}/certs/${h.ResourceName}/${h.CertFileName}
-func (h *LocalCertificateHandle) Path(ctx runtime.TaskContext) (string, error) {
+func (h *LocalCertificateHandle) Path(ctx task.TaskContext) (string, error) {
 	if h.ClusterName == "" {
 		err := fmt.Errorf("ClusterName is empty in LocalCertificateHandle for resource %s/%s", h.ResourceName, h.CertFileName)
 		ctx.GetLogger().Error(err.Error())
@@ -63,7 +63,7 @@ func (h *LocalCertificateHandle) Path(ctx runtime.TaskContext) (string, error) {
 	// GlobalWorkDir is like $(pwd)/.kubexm
 	// Path: $(pwd)/.kubexm/${cluster_name}/certs/${h.ResourceName}/${h.CertFileName}
 	// Example: .kubexm/mycluster/certs/etcd/ca.pem
-	// runtime.TaskContext provides GetGlobalWorkDir() and GetClusterConfig().Name for these.
+	// task.TaskContext provides GetGlobalWorkDir() and GetClusterConfig().Name for these.
 	// However, the design doc 21-其他说明.md suggests paths like:
 	// workdir/.kubexm/${cluster_name}/certs/etcd/
 	// Where `workdir` is $(pwd).
@@ -83,7 +83,7 @@ func (h *LocalCertificateHandle) Path(ctx runtime.TaskContext) (string, error) {
 	// This matches common.DefaultCertsDir and common.DefaultEtcdDir usage.
 	// The runtime.Context has GetCertsDir() and GetEtcdCertsDir().
 	// For a generic cert, it should be runtime.Context.GetCertsDir() + h.ResourceName + h.CertFileName.
-	// Let's assume runtime.TaskContext has a GetCertsDir() method.
+	// Let's assume task.TaskContext has a GetCertsDir() method.
 	certsBaseDir := filepath.Join(ctx.GetGlobalWorkDir(), common.DefaultCertsDir) // GlobalWorkDir/certs
 	resourceCertsDir := filepath.Join(certsBaseDir, h.ResourceName)               // GlobalWorkDir/certs/etcd
 	return filepath.Join(resourceCertsDir, h.CertFileName), nil
@@ -93,7 +93,7 @@ func (h *LocalCertificateHandle) Path(ctx runtime.TaskContext) (string, error) {
 // The actual generation of the certificate is assumed to be handled by other dedicated steps
 // (e.g., GenerateCACertStep, GenerateSignedCertStep) planned by a Task.
 // This handle's role is to provide the standardized path and verify if it's already met.
-func (h *LocalCertificateHandle) EnsurePlan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
+func (h *LocalCertificateHandle) EnsurePlan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("resource_handle", h.ID())
 	nodes := make(map[plan.NodeID]*plan.ExecutionNode)
 

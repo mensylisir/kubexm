@@ -41,7 +41,7 @@ func (s *RemoveEtcdBinariesStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *RemoveEtcdBinariesStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *RemoveEtcdBinariesStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -71,7 +71,7 @@ func (s *RemoveEtcdBinariesStep) Precheck(ctx runtime.StepContext, host connecto
 	return false, nil
 }
 
-func (s *RemoveEtcdBinariesStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *RemoveEtcdBinariesStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -100,7 +100,7 @@ func (s *RemoveEtcdBinariesStep) Run(ctx runtime.StepContext, host connector.Hos
 	return nil
 }
 
-func (s *RemoveEtcdBinariesStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *RemoveEtcdBinariesStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	logger.Info("Rollback for RemoveEtcdBinariesStep is not applicable (would mean reinstalling).")
 	// If this step failed mid-way, some binaries might be removed, some not.

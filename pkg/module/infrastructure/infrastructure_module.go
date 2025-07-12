@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
+	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/module"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -76,17 +77,17 @@ func (m *InfrastructureModule) Plan(ctx module.ModuleContext) (*task.ExecutionFr
 
 	// 2. Container Runtime Setup
 	var containerRuntimeTask task.Task
-	// clusterCfg.Spec.Kubernetes.ContainerRuntime is the correct path
-	if clusterCfg.Spec.Kubernetes == nil || clusterCfg.Spec.Kubernetes.ContainerRuntime == nil {
-		return nil, fmt.Errorf("kubernetes.containerRuntime spec is nil, cannot determine runtime type")
+	// According to API design, ContainerRuntime is directly in Spec
+	if clusterCfg.Spec.ContainerRuntime == nil {
+		return nil, fmt.Errorf("containerRuntime spec is nil, cannot determine runtime type")
 	}
-	switch clusterCfg.Spec.Kubernetes.ContainerRuntime.Type {
+	switch clusterCfg.Spec.ContainerRuntime.Type {
 	case v1alpha1.ContainerRuntimeContainerd: // Use defined constant
 		containerRuntimeTask = taskContainerd.NewInstallContainerdTask([]string{common.AllHostsRole})
 	case v1alpha1.ContainerRuntimeDocker:    // Use defined constant
 		containerRuntimeTask = taskDocker.NewInstallDockerTask([]string{common.AllHostsRole})
 	default:
-		return nil, fmt.Errorf("unsupported container runtime type: %s", clusterCfg.Spec.Kubernetes.ContainerRuntime.Type)
+		return nil, fmt.Errorf("unsupported container runtime type: %s", clusterCfg.Spec.ContainerRuntime.Type)
 	}
 
 	isRequired, err := containerRuntimeTask.IsRequired(taskCtx)

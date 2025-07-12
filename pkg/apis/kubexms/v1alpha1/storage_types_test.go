@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/mensylisir/kubexm/pkg/util/validation"
 	"github.com/mensylisir/kubexm/pkg/util" // Added import
 )
 
@@ -127,7 +126,7 @@ func TestValidate_StorageConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Apply defaults because some valid states depend on defaults (like OpenEBS enabled by default)
 			SetDefaults_StorageConfig(tt.cfg)
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			Validate_StorageConfig(tt.cfg, verrs, "spec.storage")
 
 			if tt.expectErr {

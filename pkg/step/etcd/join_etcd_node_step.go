@@ -48,7 +48,7 @@ func (s *JoinEtcdNodeStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *JoinEtcdNodeStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *JoinEtcdNodeStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -82,7 +82,7 @@ func (s *JoinEtcdNodeStep) Precheck(ctx runtime.StepContext, host connector.Host
 	return false, nil
 }
 
-func (s *JoinEtcdNodeStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *JoinEtcdNodeStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 
 	// Assumption: etcd.yaml is already correctly configured with 'initial-cluster-state: existing'
@@ -116,7 +116,7 @@ func (s *JoinEtcdNodeStep) Run(ctx runtime.StepContext, host connector.Host) err
 	return nil
 }
 
-func (s *JoinEtcdNodeStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *JoinEtcdNodeStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 
 	stopStep := NewManageEtcdServiceStep("StopEtcdForJoinRollback", ActionStop, s.ServiceName, s.Sudo)

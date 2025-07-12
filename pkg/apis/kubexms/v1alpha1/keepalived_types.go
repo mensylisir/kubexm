@@ -3,9 +3,8 @@ package v1alpha1
 import (
 	"fmt"
 	"strings"
-	"github.com/mensylisir/kubexm/pkg/util/validation"
 	"github.com/mensylisir/kubexm/pkg/common"
-	"github.com/mensylisir/kubexm/pkg/util" // Import util package
+	"github.com/mensylisir/kubexm/pkg/util"
 )
 
 var (
@@ -112,7 +111,7 @@ func SetDefaults_KeepalivedConfig(cfg *KeepalivedConfig) {
 // --- Validation Functions ---
 
 // Validate_KeepalivedConfig validates KeepalivedConfig.
-func Validate_KeepalivedConfig(cfg *KeepalivedConfig, verrs *validation.ValidationErrors, pathPrefix string) {
+func Validate_KeepalivedConfig(cfg *KeepalivedConfig, verrs *ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
@@ -123,13 +122,13 @@ func Validate_KeepalivedConfig(cfg *KeepalivedConfig, verrs *validation.Validati
 	if cfg.VRID == nil {
 		verrs.Add(pathPrefix+".vrid", "virtual router ID must be specified")
 	} else if *cfg.VRID < 1 || *cfg.VRID > 255 {
-		verrs.Add(pathPrefix+".vrid", fmt.Sprintf("must be between 1 and 255, got %d", *cfg.VRID))
+		verrs.Add(pathPrefix + ".vrid: must be between 1 and 255, got " + fmt.Sprintf("%d", *cfg.VRID))
 	}
 
 	if cfg.Priority == nil {
 		verrs.Add(pathPrefix+".priority", "must be specified for master/backup election")
 	} else if *cfg.Priority < 1 || *cfg.Priority > 254 {
-		verrs.Add(pathPrefix+".priority", fmt.Sprintf("must be between 1 and 254, got %d", *cfg.Priority))
+		verrs.Add(pathPrefix + ".priority: must be between 1 and 254, got " + fmt.Sprintf("%d", *cfg.Priority))
 	}
 
 	if cfg.Interface == nil || strings.TrimSpace(*cfg.Interface) == "" {
@@ -141,7 +140,7 @@ func Validate_KeepalivedConfig(cfg *KeepalivedConfig, verrs *validation.Validati
 		verrs.Add(pathPrefix+".authType", "is required and should have a default value 'PASS'")
 	} else { // AuthType is not nil, proceed with validation
 		if !util.ContainsString(validKeepalivedAuthTypes, *cfg.AuthType) { // Use util.ContainsString
-			verrs.Add(pathPrefix+".authType", fmt.Sprintf("invalid value '%s', must be one of %v", *cfg.AuthType, validKeepalivedAuthTypes))
+			verrs.Add(pathPrefix + ".authType: invalid value '" + *cfg.AuthType + "', must be one of " + fmt.Sprintf("%v", validKeepalivedAuthTypes))
 		}
 
 		// AuthPass validation based on AuthType
@@ -160,7 +159,7 @@ func Validate_KeepalivedConfig(cfg *KeepalivedConfig, verrs *validation.Validati
 
 	for i, line := range cfg.ExtraConfig {
 	   if strings.TrimSpace(line) == "" {
-		   verrs.Add(fmt.Sprintf("%s.extraConfig[%d]", pathPrefix, i), "extra config line cannot be empty")
+		   verrs.Add(fmt.Sprintf("%s.extraConfig[%d]: extra config line cannot be empty", pathPrefix, i))
 	   }
 	}
 
@@ -168,16 +167,16 @@ func Validate_KeepalivedConfig(cfg *KeepalivedConfig, verrs *validation.Validati
 		verrs.Add(pathPrefix+".checkScript", "cannot be empty if specified")
 	}
 	if cfg.Interval != nil && *cfg.Interval <= 0 {
-		verrs.Add(pathPrefix+".interval", fmt.Sprintf("must be positive if specified, got %d", *cfg.Interval))
+		verrs.Add(pathPrefix + ".interval: must be positive if specified, got " + fmt.Sprintf("%d", *cfg.Interval))
 	}
 	if cfg.Rise != nil && *cfg.Rise <= 0 {
-		verrs.Add(pathPrefix+".rise", fmt.Sprintf("must be positive if specified, got %d", *cfg.Rise))
+		verrs.Add(pathPrefix + ".rise: must be positive if specified, got " + fmt.Sprintf("%d", *cfg.Rise))
 	}
 	if cfg.Fall != nil && *cfg.Fall <= 0 {
-		verrs.Add(pathPrefix+".fall", fmt.Sprintf("must be positive if specified, got %d", *cfg.Fall))
+		verrs.Add(pathPrefix + ".fall: must be positive if specified, got " + fmt.Sprintf("%d", *cfg.Fall))
 	}
 	if cfg.AdvertInt != nil && *cfg.AdvertInt <= 0 {
-		verrs.Add(pathPrefix+".advertInt", fmt.Sprintf("must be positive if specified, got %d", *cfg.AdvertInt))
+		verrs.Add(pathPrefix + ".advertInt: must be positive if specified, got " + fmt.Sprintf("%d", *cfg.AdvertInt))
 	}
 	if cfg.LVScheduler != nil {
 		if strings.TrimSpace(*cfg.LVScheduler) == "" {
@@ -186,7 +185,7 @@ func Validate_KeepalivedConfig(cfg *KeepalivedConfig, verrs *validation.Validati
 		// Optional: Validate against a list of known LVS schedulers if desired
 		// validLVSchedulers := []string{"rr", "wrr", "lc", "wlc", "lblc", "sh", "dh"}
 		// if !containsString(validLVSchedulers, *cfg.LVScheduler) {
-		// 	verrs.Add(pathPrefix+".lvScheduler", fmt.Sprintf("invalid LVS scheduler '%s'", *cfg.LVScheduler))
+		// 	verrs.Add(pathPrefix+".lvScheduler", "invalid LVS scheduler '%s'", *cfg.LVScheduler)
 		// }
 	}
 }

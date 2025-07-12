@@ -39,9 +39,21 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 		return nil, fmt.Errorf("conn.GetOS returned nil OS without error")
 	}
 
-	g, gCtx := errgroup.WithContext(ctx)
+	// Use a context with timeout for fact gathering
+	factCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 
+	g, gCtx := errgroup.WithContext(factCtx)
+	
+	// Set a reasonable limit on parallel operations to avoid overwhelming the connection
+	// Use a semaphore to limit concurrency
+	sem := make(chan struct{}, 5) // Max 5 concurrent operations
+
+	// Gather hostname
 	g.Go(func() error {
+		sem <- struct{}{}
+		defer func() { <-sem }()
+		
 		hostnameBytes, _, execErr := conn.Exec(gCtx, "hostname -f", nil)
 		if execErr != nil {
 			hostnameBytes, _, execErr = conn.Exec(gCtx, "hostname", nil)
@@ -53,91 +65,120 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 		return nil
 	})
 
+	// Set kernel from OS info (no need for separate call)
 	facts.Kernel = facts.OS.Kernel
 
+	// Gather CPU information
 	g.Go(func() error {
-		var cpuCmd, memCmd string
-		memIsKb := false
+		sem <- struct{}{}
+		defer func() { <-sem }()
+		
+		var cpuCmd string
 		switch strings.ToLower(facts.OS.ID) {
 		case "linux", "ubuntu", "debian", "centos", "rhel", "fedora", "almalinux", "rocky", "raspbian", "linuxmint":
 			cpuCmd = "nproc"
-			memCmd = "grep MemTotal /proc/meminfo | awk '{print $2}'"
-			memIsKb = true
 		case "darwin":
 			cpuCmd = "sysctl -n hw.ncpu"
-			memCmd = "sysctl -n hw.memsize"
-			memIsKb = false
 		default:
-			// For unknown OS, try nproc and /proc/meminfo as a common fallback, but be prepared for failure.
-			// Alternatively, leave cpuCmd/memCmd empty or return an error earlier.
-			// For now, we let it try, and errors will be caught below.
 			cpuCmd = "nproc" // Common fallback
-			memCmd = "grep MemTotal /proc/meminfo | awk '{print $2}'" // Common fallback
-			memIsKb = true
 		}
+		
 		if cpuCmd != "" {
 			cpuBytes, _, execErr := conn.Exec(gCtx, cpuCmd, nil)
 			if execErr == nil {
-				parsedCPU, parseErr := strconv.Atoi(strings.TrimSpace(string(cpuBytes)))
-				if parseErr == nil {
+				if parsedCPU, parseErr := strconv.Atoi(strings.TrimSpace(string(cpuBytes))); parseErr == nil {
 					facts.TotalCPU = parsedCPU
 				} else {
-					// Return error to errgroup
 					return fmt.Errorf("failed to parse CPU output for %s on %s: %w", facts.OS.ID, facts.Hostname, parseErr)
 				}
 			} else {
-				// Return error to errgroup
 				return fmt.Errorf("failed to exec CPU command '%s' for %s on %s: %w", cpuCmd, facts.OS.ID, facts.Hostname, execErr)
 			}
 		}
+		return nil
+	})
+
+	// Gather memory information
+	g.Go(func() error {
+		sem <- struct{}{}
+		defer func() { <-sem }()
+		
+		var memCmd string
+		var memIsKb bool
+		
+		switch strings.ToLower(facts.OS.ID) {
+		case "linux", "ubuntu", "debian", "centos", "rhel", "fedora", "almalinux", "rocky", "raspbian", "linuxmint":
+			memCmd = "awk '/MemTotal/ {print $2}' /proc/meminfo"
+			memIsKb = true
+		case "darwin":
+			memCmd = "sysctl -n hw.memsize"
+			memIsKb = false
+		default:
+			memCmd = "awk '/MemTotal/ {print $2}' /proc/meminfo" // Common fallback
+			memIsKb = true
+		}
+		
 		if memCmd != "" {
 			memBytes, _, execErr := conn.Exec(gCtx, memCmd, nil)
 			if execErr == nil {
-				memVal, parseErr := strconv.ParseUint(strings.TrimSpace(string(memBytes)), 10, 64)
-				if parseErr == nil {
+				if memVal, parseErr := strconv.ParseUint(strings.TrimSpace(string(memBytes)), 10, 64); parseErr == nil {
 					if memIsKb {
 						facts.TotalMemory = memVal / 1024 // Convert KB to MiB
 					} else {
 						facts.TotalMemory = memVal / (1024 * 1024) // Convert Bytes to MiB
 					}
 				} else {
-					// Return error to errgroup
 					return fmt.Errorf("failed to parse Memory output for %s on %s: %w", facts.OS.ID, facts.Hostname, parseErr)
 				}
 			} else {
-				// Return error to errgroup
 				return fmt.Errorf("failed to exec Memory command '%s' for %s on %s: %w", memCmd, facts.OS.ID, facts.Hostname, execErr)
 			}
 		}
 		return nil
 	})
 
+	// Gather IPv4 default route
 	g.Go(func() error {
-		var ip4Cmd, ip6Cmd string
+		sem <- struct{}{}
+		defer func() { <-sem }()
+		
+		var ip4Cmd string
 		switch strings.ToLower(facts.OS.ID) {
 		case "linux", "ubuntu", "debian", "centos", "rhel", "fedora", "almalinux", "rocky", "raspbian", "linuxmint":
-			ip4Cmd = "ip -4 route get 8.8.8.8 | awk '{print $7}' | head -n1"
-			ip6Cmd = "ip -6 route get 2001:4860:4860::8888 | awk '{print $10}' | head -n1" // Note: $10 for IPv6 source addr with `ip route get`
+			ip4Cmd = "ip -4 route get 8.8.8.8 | awk 'NR==1{print $7}'"
 		case "darwin":
-			// Placeholder for darwin IP logic. Example: ipconfig getifaddr en0 (for primary NIC, usually Wi-Fi or Ethernet)
-			// For default route IP: `route -n get default | grep 'interface:' | awk '{print $2}'` then `ifconfig <iface> inet | awk '/inet / {print $2}'`
-			// This is more complex and might need specific interface detection.
-			// For now, we'll leave it as a warning if not found.
-		default:
-			// Placeholder for other OS IP logic
+			ip4Cmd = "route -n get default | awk '/interface:/ {iface=$2} /inet/ {ip=$2} END {if (iface) print ip}'"
 		}
+		
 		if ip4Cmd != "" {
 			ip4Bytes, _, execErr := conn.Exec(gCtx, ip4Cmd, nil)
 			if execErr != nil {
-				// Log as warning, as IP might not be critical for all operations and might fail on systems without external connectivity.
+				// Non-critical error, log as warning
 				fmt.Fprintf(os.Stderr, "Warning: failed to get IPv4 default route for host %s (%s): %v\n", facts.Hostname, facts.OS.ID, execErr)
 			} else {
 				facts.IPv4Default = strings.TrimSpace(string(ip4Bytes))
 			}
 		}
+		return nil
+	})
+
+	// Gather IPv6 default route
+	g.Go(func() error {
+		sem <- struct{}{}
+		defer func() { <-sem }()
+		
+		var ip6Cmd string
+		switch strings.ToLower(facts.OS.ID) {
+		case "linux", "ubuntu", "debian", "centos", "rhel", "fedora", "almalinux", "rocky", "raspbian", "linuxmint":
+			ip6Cmd = "ip -6 route get 2001:4860:4860::8888 | awk 'NR==1{print $9}'"
+		case "darwin":
+			ip6Cmd = "route -n get -inet6 default | awk '/interface:/ {iface=$2} /inet6/ {ip=$2} END {if (iface) print ip}'"
+		}
+		
 		if ip6Cmd != "" {
 			ip6Bytes, _, execErr := conn.Exec(gCtx, ip6Cmd, nil)
 			if execErr != nil {
+				// Non-critical error, log as warning
 				fmt.Fprintf(os.Stderr, "Warning: failed to get IPv6 default route for host %s (%s): %v\n", facts.Hostname, facts.OS.ID, execErr)
 			} else {
 				facts.IPv6Default = strings.TrimSpace(string(ip6Bytes))
@@ -146,19 +187,40 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 		return nil
 	})
 
+	// Wait for all parallel fact gathering to complete
 	if err := g.Wait(); err != nil {
 		return facts, fmt.Errorf("failed during concurrent fact gathering: %w", err)
 	}
 
-	var pmErr, initErr error
-	facts.PackageManager, pmErr = r.detectPackageManager(ctx, conn, facts)
-	if pmErr != nil {
+	// Detect package manager and init system in parallel
+	pmChan := make(chan *PackageInfo, 1)
+	initChan := make(chan *ServiceInfo, 1)
+	pmErrChan := make(chan error, 1)
+	initErrChan := make(chan error, 1)
+
+	go func() {
+		pm, err := r.detectPackageManager(ctx, conn, facts)
+		pmChan <- pm
+		pmErrChan <- err
+	}()
+
+	go func() {
+		init, err := r.detectInitSystem(ctx, conn, facts)
+		initChan <- init
+		initErrChan <- err
+	}()
+
+	// Collect results
+	facts.PackageManager = <-pmChan
+	facts.InitSystem = <-initChan
+
+	if pmErr := <-pmErrChan; pmErr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to detect package manager for host %s (%s): %v\n", facts.Hostname, facts.OS.ID, pmErr)
 	}
-	facts.InitSystem, initErr = r.detectInitSystem(ctx, conn, facts)
-	if initErr != nil {
+	if initErr := <-initErrChan; initErr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to detect init system for host %s (%s): %v\n", facts.Hostname, facts.OS.ID, initErr)
 	}
+
 	return facts, nil
 }
 

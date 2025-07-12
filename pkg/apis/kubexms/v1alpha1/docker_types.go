@@ -10,7 +10,6 @@ import (
 	// Assuming isValidCIDR is available from kubernetes_types.go or similar
 	"github.com/mensylisir/kubexm/pkg/common" // Import the common package
 	"github.com/mensylisir/kubexm/pkg/util"   // Import the util package
-	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // DockerAddressPool defines a range of IP addresses for Docker networks.
@@ -121,7 +120,7 @@ func SetDefaults_DockerConfig(cfg *DockerConfig) {
 }
 
 // Validate_DockerConfig validates DockerConfig.
-func Validate_DockerConfig(cfg *DockerConfig, verrs *validation.ValidationErrors, pathPrefix string) {
+func Validate_DockerConfig(cfg *DockerConfig, verrs *ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
@@ -132,7 +131,7 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *validation.ValidationErrors
 		} else {
 			u, err := url.ParseRequestURI(mirror)
 			if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-				verrs.Add(mirrorPath, fmt.Sprintf("invalid URL format for mirror '%s' (must be http or https and valid URI)", mirror))
+				verrs.Add(mirrorPath + ": invalid URL format for mirror '" + mirror + "' (must be http or https and valid URI)")
 			}
 		}
 	}
@@ -141,7 +140,7 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *validation.ValidationErrors
 		if strings.TrimSpace(insecureReg) == "" {
 			verrs.Add(regPath, "registry host cannot be empty")
 		} else if !util.ValidateHostPortString(insecureReg) { // Use util.ValidateHostPortString
-			verrs.Add(regPath, fmt.Sprintf("invalid host:port format for insecure registry '%s'", insecureReg))
+			verrs.Add(regPath + ": invalid host:port format for insecure registry '" + insecureReg + "'")
 		}
 	}
 	if cfg.DataRoot != nil {
@@ -149,7 +148,7 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *validation.ValidationErrors
 		if trimmedDataRoot == "" {
 			verrs.Add(pathPrefix+".dataRoot", "cannot be empty if specified")
 		} else if trimmedDataRoot == "/tmp" || trimmedDataRoot == "/var/tmp" {
-			verrs.Add(pathPrefix+".dataRoot", fmt.Sprintf("path '%s' is not recommended for Docker data root", trimmedDataRoot))
+			verrs.Add(pathPrefix + ".dataRoot: path '" + trimmedDataRoot + "' is not recommended for Docker data root")
 		}
 	}
 	if cfg.LogDriver != nil {
@@ -157,19 +156,19 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *validation.ValidationErrors
 		isValid := false
 		for _, v := range validLogDrivers { if *cfg.LogDriver == v { isValid = true; break } }
 		if !isValid {
-			verrs.Add(pathPrefix+".logDriver", fmt.Sprintf("invalid log driver '%s', must be one of %v or empty for default", *cfg.LogDriver, validLogDrivers))
+			verrs.Add(pathPrefix + ".logDriver: invalid log driver '" + *cfg.LogDriver + "', must be one of " + fmt.Sprintf("%v", validLogDrivers) + " or empty for default")
 		}
 	}
 	if cfg.BIP != nil && !util.IsValidCIDR(*cfg.BIP) {
-		verrs.Add(pathPrefix+".bip", fmt.Sprintf("invalid CIDR format '%s'", *cfg.BIP))
+		verrs.Add(pathPrefix + ".bip: invalid CIDR format '" + *cfg.BIP + "'")
 	}
 	if cfg.FixedCIDR != nil && !util.IsValidCIDR(*cfg.FixedCIDR) {
-		verrs.Add(pathPrefix+".fixedCIDR", fmt.Sprintf("invalid CIDR format '%s'", *cfg.FixedCIDR))
+		verrs.Add(pathPrefix + ".fixedCIDR: invalid CIDR format '" + *cfg.FixedCIDR + "'")
 	}
 	for i, pool := range cfg.DefaultAddressPools {
 	   poolPath := fmt.Sprintf("%s.defaultAddressPools[%d]", pathPrefix, i)
-	   if !util.IsValidCIDR(pool.Base) { verrs.Add(poolPath+".base", fmt.Sprintf("invalid CIDR format '%s'", pool.Base)) }
-	   if pool.Size <= 0 || pool.Size > 32 { verrs.Add(poolPath+".size", fmt.Sprintf("invalid subnet size %d, must be > 0 and <= 32", pool.Size)) }
+	   if !util.IsValidCIDR(pool.Base) { verrs.Add(poolPath + ".base: invalid CIDR format '" + pool.Base + "'") }
+	   if pool.Size <= 0 || pool.Size > 32 { verrs.Add(poolPath + ".size: invalid subnet size " + fmt.Sprintf("%d", pool.Size) + ", must be > 0 and <= 32") }
 	}
 	if cfg.StorageDriver != nil && strings.TrimSpace(*cfg.StorageDriver) == "" {
 		verrs.Add(pathPrefix+".storageDriver", "cannot be empty if specified")
@@ -194,7 +193,7 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *validation.ValidationErrors
 		if strings.TrimSpace(*cfg.CRIDockerdVersion) == "" {
 			verrs.Add(versionPath, "cannot be only whitespace if specified")
 		} else if !util.IsValidRuntimeVersion(*cfg.CRIDockerdVersion) {
-			verrs.Add(versionPath, fmt.Sprintf("'%s' is not a recognized version format", *cfg.CRIDockerdVersion))
+			verrs.Add(versionPath + ": '" + *cfg.CRIDockerdVersion + "' is not a recognized version format")
 		}
 	}
 
@@ -208,7 +207,7 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *validation.ValidationErrors
 		if strings.TrimSpace(regAddr) == "" {
 			verrs.Add(authMapPath, "registry address key cannot be empty")
 		} else if !util.ValidateHostPortString(regAddr) && !util.IsValidDomainName(regAddr) {
-			verrs.Add(authEntryPath, fmt.Sprintf("registry key '%s' is not a valid hostname or host:port", regAddr))
+			verrs.Add(authEntryPath + ": registry key '" + regAddr + "' is not a valid hostname or host:port")
 		}
 
 		hasUserPass := auth.Username != "" && auth.Password != ""
@@ -220,7 +219,7 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *validation.ValidationErrors
 		if hasAuthStr {
 			decoded, err := base64.StdEncoding.DecodeString(auth.Auth)
 			if err != nil {
-				verrs.Add(authEntryPath+".auth", fmt.Sprintf("failed to decode base64 auth string: %v", err))
+				verrs.Add(authEntryPath + ".auth: failed to decode base64 auth string: " + fmt.Sprintf("%v", err))
 			} else if !strings.Contains(string(decoded), ":") {
 				verrs.Add(authEntryPath+".auth", "decoded auth string must be in 'username:password' format")
 			}

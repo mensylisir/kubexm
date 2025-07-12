@@ -7,11 +7,12 @@ import (
 	// "time" // May be needed later
 
 	"github.com/mensylisir/kubexm/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/util"
 )
 
 // --- System & Kernel Methods ---
 
-// shellEscape is defined in file.go and accessible within the package.
+// util.ShellEscape is defined in file.go and accessible within the package.
 
 func (r *defaultRunner) LoadModule(ctx context.Context, conn connector.Connector, facts *Facts, moduleName string, params ...string) error {
 	if conn == nil {
@@ -41,7 +42,7 @@ func (r *defaultRunner) LoadModule(ctx context.Context, conn connector.Connector
 	cmdParts := []string{"modprobe", moduleName}
 	if len(params) > 0 {
 		// Parameters should be escaped if they contain spaces or special characters.
-		// For simplicity now, assuming parameters are "safe" or that underlying shellEscape handles it if used.
+		// For simplicity now, assuming parameters are "safe" or that underlying util.ShellEscape handles it if used.
 		// However, modprobe parameters are typically simple.
 		cmdParts = append(cmdParts, params...)
 	}
@@ -157,7 +158,7 @@ func (r *defaultRunner) SetSysctl(ctx context.Context, conn connector.Connector,
 	}
 
 	// Temporary set
-	// Use shellEscape for key and value just in case, though sysctl -w is usually safe.
+	// Use util.ShellEscape for key and value just in case, though sysctl -w is usually safe.
 	// sysctl keys don't typically need escaping, but values might if they contain shell metachars.
 	// However, for sysctl, the value is usually passed directly.
 	// Let's assume key and value are "simple" enough not to break `sysctl -w`.
@@ -181,13 +182,13 @@ func (r *defaultRunner) SetSysctl(ctx context.Context, conn connector.Connector,
 
 		// Idempotency: Check if the exact line exists.
 		// Grep for exact line match. -x means whole line, -F means fixed string.
-		checkCmd := fmt.Sprintf("grep -Fxq -- %s %s", shellEscape(lineToAdd), shellEscape(sysctlConfFile))
+		checkCmd := fmt.Sprintf("grep -Fxq -- %s %s", util.ShellEscape(lineToAdd), util.ShellEscape(sysctlConfFile))
 		exists, _ := r.Check(ctx, conn, checkCmd, false) // Ignore error from Check, if grep fails, assume not found or file doesn't exist.
 
 		if !exists {
 			// Append the setting. Use `tee -a` for robustness with sudo.
 			// Need to escape lineToAdd for the echo command.
-			echoCmd := fmt.Sprintf("echo %s | tee -a %s", shellEscape(lineToAdd), shellEscape(sysctlConfFile))
+			echoCmd := fmt.Sprintf("echo %s | tee -a %s", util.ShellEscape(lineToAdd), util.ShellEscape(sysctlConfFile))
 			_, stderrPersist, errPersist := r.RunWithOptions(ctx, conn, echoCmd, &connector.ExecOptions{Sudo: true})
 			if errPersist != nil {
 				return fmt.Errorf("failed to persist sysctl setting '%s' to %s: %w (stderr: %s)", lineToAdd, sysctlConfFile, errPersist, string(stderrPersist))
@@ -230,7 +231,7 @@ func (r *defaultRunner) SetTimezone(ctx context.Context, conn connector.Connecto
 
 	// Prefer timedatectl if available (common on systemd systems)
 	if _, err := r.LookPath(ctx, conn, "timedatectl"); err == nil {
-		cmd := fmt.Sprintf("timedatectl set-timezone %s", shellEscape(timezone))
+		cmd := fmt.Sprintf("timedatectl set-timezone %s", util.ShellEscape(timezone))
 		_, stderr, execErr := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true})
 		if execErr != nil {
 			return fmt.Errorf("failed to set timezone to %s using timedatectl: %w (stderr: %s)", timezone, execErr, string(stderr))
@@ -283,7 +284,7 @@ func (r *defaultRunner) DisableSwap(ctx context.Context, conn connector.Connecto
 	//  .*) - rest of the line
 	// This should capture most common swap entries.
 	fstabPath := "/etc/fstab"
-	// Using a temp variable for the backup extension to avoid issues with shellEscape if used later.
+	// Using a temp variable for the backup extension to avoid issues with util.ShellEscape if used later.
 	backupExtension := ".kubexm-runner.bak"
 	// Escape for sed: single quotes around sed script, internal single quotes need to be `'\''`.
 	// The pattern itself does not contain single quotes here.

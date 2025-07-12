@@ -8,7 +8,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	// Assuming runtime.StepContext will be used, which step.StepContext is an interface for.
+	// Assuming step.StepContext will be used, which step.StepContext is an interface for.
 )
 
 // CheckEtcdHealthStep checks the health of an etcd endpoint or cluster.

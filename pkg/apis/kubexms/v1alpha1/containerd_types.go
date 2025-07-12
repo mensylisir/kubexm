@@ -6,7 +6,6 @@ import (
 	"strings"
 	"github.com/mensylisir/kubexm/pkg/common" // Import common package
 	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
-	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // ContainerdConfig defines specific settings for the Containerd runtime.
@@ -65,7 +64,7 @@ func SetDefaults_ContainerdConfig(cfg *ContainerdConfig) {
 		cfg.UseSystemdCgroup = util.BoolPtr(true)
 	}
 	if cfg.ConfigPath == nil {
-		cfg.ConfigPath = util.StrPtr(common.ContainerdDefaultConfigFile)
+		cfg.ConfigPath = util.StrPtr(common.ContainerdDefaultConfigFileTarget)
 	}
 	if cfg.DisabledPlugins == nil {
 		cfg.DisabledPlugins = []string{}
@@ -82,7 +81,7 @@ func SetDefaults_ContainerdConfig(cfg *ContainerdConfig) {
 }
 
 // Validate_ContainerdConfig validates ContainerdConfig.
-func Validate_ContainerdConfig(cfg *ContainerdConfig, verrs *validation.ValidationErrors, pathPrefix string) {
+func Validate_ContainerdConfig(cfg *ContainerdConfig, verrs *ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
@@ -90,7 +89,7 @@ func Validate_ContainerdConfig(cfg *ContainerdConfig, verrs *validation.Validati
 		if strings.TrimSpace(cfg.Version) == "" {
 			verrs.Add(pathPrefix+".version", "cannot be only whitespace if specified")
 		} else if !util.IsValidRuntimeVersion(cfg.Version) { // Use util.IsValidRuntimeVersion
-			verrs.Add(pathPrefix+".version", fmt.Sprintf("'%s' is not a recognized version format", cfg.Version))
+			verrs.Add(pathPrefix + ".version: '" + cfg.Version + "' is not a recognized version format")
 		}
 	}
 
@@ -99,24 +98,24 @@ func Validate_ContainerdConfig(cfg *ContainerdConfig, verrs *validation.Validati
 			verrs.Add(pathPrefix+".registryMirrors", "registry host key cannot be empty")
 		}
 		if len(mirrors) == 0 {
-			verrs.Add(fmt.Sprintf("%s.registryMirrors[\"%s\"]", pathPrefix, reg), "must contain at least one mirror URL")
+			verrs.Add(fmt.Sprintf("%s.registryMirrors[\"%s\"]: must contain at least one mirror URL", pathPrefix, reg))
 		}
 		for i, mirrorURL := range mirrors {
 			if strings.TrimSpace(mirrorURL) == "" {
-				verrs.Add(fmt.Sprintf("%s.registryMirrors[\"%s\"][%d]", pathPrefix, reg, i), "mirror URL cannot be empty")
+				verrs.Add(fmt.Sprintf("%s.registryMirrors[\"%s\"][%d]: mirror URL cannot be empty", pathPrefix, reg, i))
 			} else {
 				u, err := url.ParseRequestURI(mirrorURL)
 				if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-					verrs.Add(fmt.Sprintf("%s.registryMirrors[\"%s\"][%d]", pathPrefix, reg, i), fmt.Sprintf("invalid URL format for mirror '%s' (must be http or https)", mirrorURL))
+					verrs.Add(fmt.Sprintf("%s.registryMirrors[\"%s\"][%d]: invalid URL format for mirror '%s' (must be http or https)", pathPrefix, reg, i, mirrorURL))
 				}
 			}
 		}
 	}
 	for i, insecureReg := range cfg.InsecureRegistries {
 		if strings.TrimSpace(insecureReg) == "" {
-			verrs.Add(fmt.Sprintf("%s.insecureRegistries[%d]", pathPrefix, i), "registry host cannot be empty")
+			verrs.Add(fmt.Sprintf("%s.insecureRegistries[%d]: registry host cannot be empty", pathPrefix, i))
 		} else if !util.ValidateHostPortString(insecureReg) { // Use util.ValidateHostPortString
-			verrs.Add(fmt.Sprintf("%s.insecureRegistries[%d]", pathPrefix, i), fmt.Sprintf("invalid host:port format for insecure registry '%s'", insecureReg))
+			verrs.Add(fmt.Sprintf("%s.insecureRegistries[%d]: invalid host:port format for insecure registry '%s'", pathPrefix, i, insecureReg))
 		}
 	}
 	if cfg.ConfigPath != nil && strings.TrimSpace(*cfg.ConfigPath) == "" {
@@ -124,17 +123,17 @@ func Validate_ContainerdConfig(cfg *ContainerdConfig, verrs *validation.Validati
 	}
 	for i, plug := range cfg.DisabledPlugins {
 		if strings.TrimSpace(plug) == "" {
-			verrs.Add(fmt.Sprintf("%s.disabledPlugins[%d]", pathPrefix, i), "plugin name cannot be empty")
+			verrs.Add(fmt.Sprintf("%s.disabledPlugins[%d]: plugin name cannot be empty", pathPrefix, i))
 		}
 	}
 	for i, plug := range cfg.RequiredPlugins {
 		if strings.TrimSpace(plug) == "" {
-			verrs.Add(fmt.Sprintf("%s.requiredPlugins[%d]", pathPrefix, i), "plugin name cannot be empty")
+			verrs.Add(fmt.Sprintf("%s.requiredPlugins[%d]: plugin name cannot be empty", pathPrefix, i))
 		}
 	}
 	for i, imp := range cfg.Imports {
 		if strings.TrimSpace(imp) == "" {
-			verrs.Add(fmt.Sprintf("%s.imports[%d]", pathPrefix, i), "import path cannot be empty")
+			verrs.Add(fmt.Sprintf("%s.imports[%d]: import path cannot be empty", pathPrefix, i))
 		}
 	}
 }

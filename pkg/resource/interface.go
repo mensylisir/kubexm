@@ -16,7 +16,7 @@ type Handle interface {
 	// on the control node after it has been successfully acquired and prepared by EnsurePlan.
 	// Tasks use this path as the source for subsequent steps like UploadFileStep.
 	// Returns an error if the path cannot be determined (e.g. missing configuration).
-	Path(ctx runtime.TaskContext) (string, error)
+	Path(ctx task.TaskContext) (string, error)
 
 	// EnsurePlan generates an ExecutionFragment containing the necessary steps to
 	// acquire and prepare the resource locally on the control node.
@@ -25,5 +25,5 @@ type Handle interface {
 	//     it might return an empty fragment or a fragment indicating no action is needed.
 	//   - Otherwise, it returns a fragment with steps like Download, Extract, etc.
 	// The generated steps are intended to run on the control-node.
-	EnsurePlan(ctx runtime.TaskContext) (*task.ExecutionFragment, error)
+	EnsurePlan(ctx task.TaskContext) (*task.ExecutionFragment, error)
 }

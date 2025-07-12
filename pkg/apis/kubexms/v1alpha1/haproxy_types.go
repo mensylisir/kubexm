@@ -2,11 +2,9 @@ package v1alpha1
 
 import (
 	"fmt"
-	// "net" // For IP validation - will be replaced by util.IsValidIP
 	"strings"
-	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
-	"github.com/mensylisir/kubexm/pkg/common" // Import the common package
-	"github.com/mensylisir/kubexm/pkg/util/validation"
+	"github.com/mensylisir/kubexm/pkg/util"
+	"github.com/mensylisir/kubexm/pkg/common"
 )
 
 const (
@@ -120,7 +118,7 @@ func SetDefaults_HAProxyConfig(cfg *HAProxyConfig) {
 // --- Validation Functions ---
 
 // Validate_HAProxyConfig validates HAProxyConfig.
-func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *validation.ValidationErrors, pathPrefix string) {
+func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
@@ -133,26 +131,26 @@ func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *validation.ValidationErro
 		if trimmedAddr == "" {
 			verrs.Add(pathPrefix+".frontendBindAddress", "cannot be empty if specified")
 		} else if !util.IsValidIP(trimmedAddr) && trimmedAddr != "0.0.0.0" && trimmedAddr != "::" {
-			verrs.Add(pathPrefix+".frontendBindAddress", fmt.Sprintf("invalid IP address format '%s'", trimmedAddr))
+			verrs.Add(pathPrefix + ".frontendBindAddress: invalid IP address format '" + trimmedAddr + "'")
 		}
 	}
 
 	if cfg.FrontendPort == nil {
 		verrs.Add(pathPrefix+".frontendPort", "is required and should have a default value")
 	} else if *cfg.FrontendPort <= 0 || *cfg.FrontendPort > 65535 {
-		verrs.Add(pathPrefix+".frontendPort", fmt.Sprintf("invalid port %d", *cfg.FrontendPort))
+		verrs.Add(pathPrefix + ".frontendPort: invalid port " + fmt.Sprintf("%d", *cfg.FrontendPort))
 	}
 
 	if cfg.Mode == nil {
 		verrs.Add(pathPrefix+".mode", "is required and should have a default value 'tcp'")
 	} else if *cfg.Mode != "" && !util.ContainsString(validHAProxyModes, *cfg.Mode) {
-		verrs.Add(pathPrefix+".mode", fmt.Sprintf("invalid mode '%s', must be one of %v or empty for default", *cfg.Mode, validHAProxyModes))
+		verrs.Add(pathPrefix + ".mode: invalid mode '" + *cfg.Mode + "', must be one of " + fmt.Sprintf("%v", validHAProxyModes) + " or empty for default")
 	}
 
 	if cfg.BalanceAlgorithm == nil {
 		verrs.Add(pathPrefix+".balanceAlgorithm", "is required and should have a default value 'roundrobin'")
 	} else if *cfg.BalanceAlgorithm != "" && !util.ContainsString(validHAProxyBalanceAlgorithms, *cfg.BalanceAlgorithm) {
-		verrs.Add(pathPrefix+".balanceAlgorithm", fmt.Sprintf("invalid algorithm '%s', must be one of %v", *cfg.BalanceAlgorithm, validHAProxyBalanceAlgorithms))
+		verrs.Add(pathPrefix + ".balanceAlgorithm: invalid algorithm '" + *cfg.BalanceAlgorithm + "', must be one of " + fmt.Sprintf("%v", validHAProxyBalanceAlgorithms))
 	}
 
 	if len(cfg.BackendServers) == 0 {
@@ -166,13 +164,13 @@ func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *validation.ValidationErro
 		if strings.TrimSpace(server.Address) == "" {
 			verrs.Add(serverPath+".address", "backend server address cannot be empty")
 		} else if !util.ValidateHostPortString(server.Address) && !util.IsValidIP(server.Address) && !util.IsValidDomainName(server.Address) {
-			verrs.Add(serverPath+".address", fmt.Sprintf("invalid backend server address format '%s'", server.Address))
+			verrs.Add(serverPath + ".address: invalid backend server address format '" + server.Address + "'")
 		}
 		if server.Port <= 0 || server.Port > 65535 {
-			verrs.Add(serverPath+".port", fmt.Sprintf("invalid backend server port %d", server.Port))
+			verrs.Add(serverPath + ".port: invalid backend server port " + fmt.Sprintf("%d", server.Port))
 		}
 		if server.Weight != nil && *server.Weight < 0 {
-			verrs.Add(serverPath+".weight", fmt.Sprintf("cannot be negative, got %d", *server.Weight))
+			verrs.Add(serverPath + ".weight: cannot be negative, got " + fmt.Sprintf("%d", *server.Weight))
 		}
 	}
 }

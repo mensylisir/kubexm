@@ -49,7 +49,7 @@ func (h *PKIResourceHandle) ID() string {
 
 // Path returns the local path to the generated certificate file.
 // Example: <GlobalWorkDir>/.kubexm/<ClusterName>/certs/<OutputDirName>/<CertName>.crt
-func (h *PKIResourceHandle) Path(ctx runtime.TaskContext) (string, error) {
+func (h *PKIResourceHandle) Path(ctx task.TaskContext) (string, error) {
 	certsBaseDir := ctx.GetCertsDir() // Should give <GlobalWorkDir>/.kubexm/<ClusterName>/certs
 	if certsBaseDir == "" {
 		return "", fmt.Errorf("certs base directory is not configured in context")
@@ -62,7 +62,7 @@ func (h *PKIResourceHandle) Path(ctx runtime.TaskContext) (string, error) {
 	return filepath.Join(specificCertsDir, certFileName), nil
 }
 
-func (h *PKIResourceHandle) KeyPath(ctx runtime.TaskContext) (string, error) {
+func (h *PKIResourceHandle) KeyPath(ctx task.TaskContext) (string, error) {
 	certsBaseDir := ctx.GetCertsDir()
 	if certsBaseDir == "" {
 		return "", fmt.Errorf("certs base directory is not configured in context")
@@ -82,7 +82,7 @@ func (h *PKIResourceHandle) Type() string {
 
 // EnsurePlan generates an ExecutionFragment to create the certificate/CA if it doesn't exist.
 // Steps are planned to run on the local control node.
-func (h *PKIResourceHandle) EnsurePlan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
+func (h *PKIResourceHandle) EnsurePlan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("resource_id", h.ID())
 	logger.Info("Planning resource assurance for PKI resource...")
 

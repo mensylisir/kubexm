@@ -4,13 +4,13 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
-	"path/filepath"
 )
 
 //go:embed cni/*.tmpl
 //go:embed etcd/*.tmpl
 //go:embed kubernetes/*.tmpl
-// TODO: Add other component template directories here, e.g., docker, containerd
+//go:embed containerd/*.tmpl
+//go:embed os/*.tmpl
 var embeddedTemplates embed.FS
 
 // Get retrieves the content of an embedded template file.
@@ -43,4 +43,3 @@ func List() ([]string, error) {
 	}
 	return files, nil
 }
-```

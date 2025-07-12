@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
+	"github.com/mensylisir/kubexm/pkg/util"
 	// Assuming ValidationErrors is in cluster_types.go or a shared util in this package
 )
 
@@ -55,8 +56,8 @@ func SetDefaults_RegistryConfig(cfg *RegistryConfig) {
 		cfg.Auths[k] = entryCopy
 	}
 	if cfg.Type != nil && *cfg.Type != "" {
-		if cfg.DataRoot == nil || *cfg.DataRoot == "" {
-			defaultDataRoot := "/mnt/registry"
+		if cfg.DataRoot == nil || strings.TrimSpace(*cfg.DataRoot) == "" {
+			defaultDataRoot := "/var/lib/registry"
 			cfg.DataRoot = &defaultDataRoot
 		}
 	}
@@ -89,43 +90,53 @@ func Validate_RegistryConfig(cfg *RegistryConfig, verrs *ValidationErrors, pathP
 		return
 	}
 	if cfg.PrivateRegistry != "" && strings.TrimSpace(cfg.PrivateRegistry) == "" {
-		verrs.Add("%s.privateRegistry: cannot be only whitespace if specified", pathPrefix)
+		verrs.Add(pathPrefix + ".privateRegistry: cannot be only whitespace if specified")
+	} else if cfg.PrivateRegistry != "" && !isValidRegistryAddress(cfg.PrivateRegistry) {
+		verrs.Add(pathPrefix + ".privateRegistry: invalid hostname/IP or host:port format '" + cfg.PrivateRegistry + "'")
 	}
 	if cfg.NamespaceOverride != "" && strings.TrimSpace(cfg.NamespaceOverride) == "" {
-		verrs.Add("%s.namespaceOverride: cannot be only whitespace if specified", pathPrefix)
+		verrs.Add(pathPrefix + ".namespaceOverride: cannot be only whitespace if specified")
 	}
 	for regAddr, auth := range cfg.Auths {
 		authPathPrefix := fmt.Sprintf("%s.auths[\"%s\"]", pathPrefix, regAddr)
 		if strings.TrimSpace(regAddr) == "" {
-			verrs.Add("%s.auths: registry address key cannot be empty", pathPrefix)
+			verrs.Add(pathPrefix + ".auths: registry address key cannot be empty")
+		} else if !isValidRegistryAddress(regAddr) {
+			verrs.Add(fmt.Sprintf("%s.auths[\"%s\"]: registry address key '%s' is not a valid hostname or host:port", pathPrefix, regAddr, regAddr))
 		}
 		Validate_RegistryAuth(&auth, verrs, authPathPrefix) // Pass address of auth
 	}
 	if cfg.Type != nil && strings.TrimSpace(*cfg.Type) == "" {
-		verrs.Add("%s.type: cannot be empty if specified", pathPrefix)
+		verrs.Add(pathPrefix + ".type: cannot be empty if specified")
 	}
 	if cfg.DataRoot != nil && strings.TrimSpace(*cfg.DataRoot) == "" {
-		verrs.Add("%s.registryDataDir (dataRoot): cannot be empty if specified", pathPrefix)
+		verrs.Add(pathPrefix + ".dataRoot: cannot be only whitespace if specified")
 	}
 	if (cfg.Type != nil && *cfg.Type != "") && (cfg.DataRoot == nil || strings.TrimSpace(*cfg.DataRoot) == "") {
-		verrs.Add("%s.registryDataDir (dataRoot): must be specified if registry type is set for local deployment", pathPrefix)
+		verrs.Add(pathPrefix + ".registryDataDir (dataRoot): must be specified if registry type is set for local deployment")
 	}
-	if (cfg.DataRoot != nil && *cfg.DataRoot != "") && (cfg.Type == nil || strings.TrimSpace(*cfg.Type) == "") {
-		verrs.Add("%s.type: must be specified if registryDataDir (dataRoot) is set for local deployment", pathPrefix)
+	if (cfg.DataRoot != nil && strings.TrimSpace(*cfg.DataRoot) != "") && (cfg.Type == nil || strings.TrimSpace(*cfg.Type) == "") {
+		verrs.Add(pathPrefix + ".type: must be specified if registryDataDir (dataRoot) is set for local deployment")
 	}
 
 	if cfg.NamespaceRewrite != nil {
 		if cfg.NamespaceRewrite.Enabled {
 			if len(cfg.NamespaceRewrite.Rules) == 0 {
-				verrs.Add("%s.namespaceRewrite.rules: must contain at least one rule if rewrite is enabled", pathPrefix)
+				verrs.Add(pathPrefix + ".namespaceRewrite.rules: must contain at least one rule if rewrite is enabled")
 			}
 			for i, rule := range cfg.NamespaceRewrite.Rules {
 				rulePathPrefix := fmt.Sprintf("%s.namespaceRewrite.rules[%d]", pathPrefix, i)
 				if strings.TrimSpace(rule.OldNamespace) == "" {
-					verrs.Add("%s.oldNamespace: cannot be empty", rulePathPrefix)
+					verrs.Add(rulePathPrefix + ".oldNamespace: cannot be empty")
 				}
 				if strings.TrimSpace(rule.NewNamespace) == "" {
-					verrs.Add("%s.newNamespace: cannot be empty", rulePathPrefix)
+					verrs.Add(rulePathPrefix + ".newNamespace: cannot be empty")
+				}
+				if rule.Registry != "" && strings.TrimSpace(rule.Registry) == "" {
+					verrs.Add(rulePathPrefix + ".registry: cannot be only whitespace if specified")
+				}
+				if rule.Registry != "" && !isValidRegistryAddress(rule.Registry) {
+					verrs.Add(rulePathPrefix + ".registry: invalid hostname or host:port format '" + rule.Registry + "'")
 				}
 			}
 		}
@@ -141,20 +152,48 @@ func Validate_RegistryAuth(cfg *RegistryAuth, verrs *ValidationErrors, pathPrefi
 	hasAuthStr := cfg.Auth != ""
 
 	if !hasUserPass && !hasAuthStr {
-		verrs.Add("%s: either username/password or auth string must be provided", pathPrefix)
+		verrs.Add(pathPrefix + ": either username/password or auth string must be provided")
 	}
 	if hasAuthStr {
 		decoded, err := base64.StdEncoding.DecodeString(cfg.Auth)
 		if err != nil {
-			verrs.Add("%s.auth: failed to decode base64 auth string: %v", pathPrefix, err)
+			verrs.Add(pathPrefix + ".auth: failed to decode base64 auth string: " + fmt.Sprintf("%v", err))
 		} else if !strings.Contains(string(decoded), ":") {
-			verrs.Add("%s.auth: decoded auth string must be in 'username:password' format", pathPrefix)
+			verrs.Add(pathPrefix + ".auth: decoded auth string must be in 'username:password' format")
 		}
 	}
 	if cfg.CertsPath != "" && strings.TrimSpace(cfg.CertsPath) == "" {
-		verrs.Add("%s.certsPath: cannot be only whitespace if specified", pathPrefix)
+		verrs.Add(pathPrefix + ".certsPath: cannot be only whitespace if specified")
 	}
 }
+
+// isValidRegistryAddress validates registry address which can be:
+// - hostname
+// - hostname:port
+// - IP
+// - IP:port
+func isValidRegistryAddress(addr string) bool {
+	if addr == "" {
+		return false
+	}
+	
+	// Check if it contains port
+	parts := strings.Split(addr, ":")
+	if len(parts) == 1 {
+		// No port, just hostname or IP
+		return util.IsValidIP(addr) || util.IsValidDomainName(addr)
+	} else if len(parts) == 2 {
+		// hostname:port or IP:port
+		host := parts[0]
+		port := parts[1]
+		if port == "" {
+			return false
+		}
+		return (util.IsValidIP(host) || util.IsValidDomainName(host)) && util.IsValidPort(port)
+	}
+	return false
+}
+
 // Assuming ValidationErrors is defined in cluster_types.go or a shared util.
 // NOTE: DeepCopy methods should be generated by controller-gen.
 // Updated SetDefaults_RegistryConfig to correctly pass address of authEntry copy.

@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/mensylisir/kubexm/pkg/common" // Import common
 	"github.com/mensylisir/kubexm/pkg/util"   // Import util
-	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
 // TestSetDefaults_KubeVIPConfig tests the SetDefaults_KubeVIPConfig function.
@@ -93,14 +92,14 @@ func TestValidate_KubeVIPConfig(t *testing.T) {
 	}{
 		{
 			name:        "valid ARP mode",
-			input:       &KubeVIPConfig{Mode: stringPtr(KubeVIPModeARP), VIP: stringPtr(validVIP), Interface: stringPtr(validInterface)},
+			input:       &KubeVIPConfig{Mode: util.StrPtr(KubeVIPModeARP), VIP: util.StrPtr(validVIP), Interface: util.StrPtr(validInterface)},
 			expectErr:   false,
 		},
 		{
 			name: "valid BGP mode",
 			input: &KubeVIPConfig{
-				Mode: stringPtr(KubeVIPModeBGP),
-				VIP:  stringPtr(validVIP),
+				Mode: util.StrPtr(KubeVIPModeBGP),
+				VIP:  util.StrPtr(validVIP),
 				BGPConfig: &KubeVIPBGPConfig{RouterID: "1.1.1.1", PeerAddress: "10.0.0.1", PeerASN: 65001, ASN: 65000, SourceAddress: "10.0.0.2"},
 			},
 			expectErr: false,
@@ -112,85 +111,85 @@ func TestValidate_KubeVIPConfig(t *testing.T) {
 		},
 		{
 			name:        "invalid mode",
-			input:       &KubeVIPConfig{Mode: stringPtr("STP"), VIP: stringPtr(validVIP)},
+			input:       &KubeVIPConfig{Mode: util.StrPtr("STP"), VIP: util.StrPtr(validVIP)},
 			expectErr:   true,
 			errContains: []string{".mode: invalid mode 'STP'"},
 		},
 		{
 			name:        "missing VIP",
-			input:       &KubeVIPConfig{Mode: stringPtr(KubeVIPModeARP), Interface: stringPtr(validInterface)},
+			input:       &KubeVIPConfig{Mode: util.StrPtr(KubeVIPModeARP), Interface: util.StrPtr(validInterface)},
 			expectErr:   true,
 			errContains: []string{".vip: virtual IP address must be specified"},
 		},
 		{
 			name:        "empty VIP",
-			input:       &KubeVIPConfig{Mode: stringPtr(KubeVIPModeARP), VIP: stringPtr(" "), Interface: stringPtr(validInterface)},
+			input:       &KubeVIPConfig{Mode: util.StrPtr(KubeVIPModeARP), VIP: util.StrPtr(" "), Interface: util.StrPtr(validInterface)},
 			expectErr:   true,
 			errContains: []string{".vip: virtual IP address must be specified"},
 		},
 		{
 			name:        "invalid VIP format",
-			input:       &KubeVIPConfig{Mode: stringPtr(KubeVIPModeARP), VIP: stringPtr("not-an-ip"), Interface: stringPtr(validInterface)},
+			input:       &KubeVIPConfig{Mode: util.StrPtr(KubeVIPModeARP), VIP: util.StrPtr("not-an-ip"), Interface: util.StrPtr(validInterface)},
 			expectErr:   true,
 			errContains: []string{".vip: invalid IP address format 'not-an-ip'"},
 		},
 		{
 			name:        "ARP mode missing interface",
-			input:       &KubeVIPConfig{Mode: stringPtr(KubeVIPModeARP), VIP: stringPtr(validVIP)},
+			input:       &KubeVIPConfig{Mode: util.StrPtr(KubeVIPModeARP), VIP: util.StrPtr(validVIP)},
 			expectErr:   true,
 			errContains: []string{".interface: network interface must be specified for ARP mode"},
 		},
 		{
 			name:        "ARP mode empty interface",
-			input:       &KubeVIPConfig{Mode: stringPtr(KubeVIPModeARP), VIP: stringPtr(validVIP), Interface: stringPtr(" ")},
+			input:       &KubeVIPConfig{Mode: util.StrPtr(KubeVIPModeARP), VIP: util.StrPtr(validVIP), Interface: util.StrPtr(" ")},
 			expectErr:   true,
 			errContains: []string{".interface: network interface must be specified for ARP mode"},
 		},
 		{
 			name:        "empty image if specified",
-			input:       &KubeVIPConfig{Mode: stringPtr(KubeVIPModeARP), VIP: stringPtr(validVIP), Interface: stringPtr(validInterface), Image: stringPtr(" ")},
+			input:       &KubeVIPConfig{Mode: util.StrPtr(KubeVIPModeARP), VIP: util.StrPtr(validVIP), Interface: util.StrPtr(validInterface), Image: util.StrPtr(" ")},
 			expectErr:   true,
 			errContains: []string{".image: cannot be empty if specified"},
 		},
 		{
 			name:        "BGP mode missing BGPConfig (after defaults)",
-			input:       &KubeVIPConfig{Mode: stringPtr(KubeVIPModeBGP), VIP: stringPtr(validVIP)},
+			input:       &KubeVIPConfig{Mode: util.StrPtr(KubeVIPModeBGP), VIP: util.StrPtr(validVIP)},
 			expectErr:   true,
 			errContains: []string{".bgpConfig.routerID: router ID must be specified"},
 		},
 		{
 			name: "BGP mode missing RouterID",
-			input: &KubeVIPConfig{Mode: stringPtr(KubeVIPModeBGP), VIP: stringPtr(validVIP), BGPConfig: &KubeVIPBGPConfig{PeerAddress: "10.0.0.1", PeerASN: 65001, ASN: 65000}},
+			input: &KubeVIPConfig{Mode: util.StrPtr(KubeVIPModeBGP), VIP: util.StrPtr(validVIP), BGPConfig: &KubeVIPBGPConfig{PeerAddress: "10.0.0.1", PeerASN: 65001, ASN: 65000}},
 			expectErr:   true,
 			errContains: []string{".bgpConfig.routerID: router ID must be specified for BGP mode"},
 		},
 		{
 			name: "BGP mode missing ASN",
-			input: &KubeVIPConfig{Mode: stringPtr(KubeVIPModeBGP), VIP: stringPtr(validVIP), BGPConfig: &KubeVIPBGPConfig{RouterID: "1.1.1.1", PeerAddress: "10.0.0.1", PeerASN: 65001}},
+			input: &KubeVIPConfig{Mode: util.StrPtr(KubeVIPModeBGP), VIP: util.StrPtr(validVIP), BGPConfig: &KubeVIPBGPConfig{RouterID: "1.1.1.1", PeerAddress: "10.0.0.1", PeerASN: 65001}},
 			expectErr:   true,
 			errContains: []string{".bgpConfig.asn: local ASN must be specified for BGP mode"},
 		},
 		{
 			name: "BGP mode missing PeerASN",
-			input: &KubeVIPConfig{Mode: stringPtr(KubeVIPModeBGP), VIP: stringPtr(validVIP), BGPConfig: &KubeVIPBGPConfig{RouterID: "1.1.1.1", PeerAddress: "10.0.0.1", ASN: 65000}},
+			input: &KubeVIPConfig{Mode: util.StrPtr(KubeVIPModeBGP), VIP: util.StrPtr(validVIP), BGPConfig: &KubeVIPBGPConfig{RouterID: "1.1.1.1", PeerAddress: "10.0.0.1", ASN: 65000}},
 			expectErr:   true,
 			errContains: []string{".bgpConfig.peerASN: peer ASN must be specified for BGP mode"},
 		},
 		{
 			name: "BGP mode missing PeerAddress",
-			input: &KubeVIPConfig{Mode: stringPtr(KubeVIPModeBGP), VIP: stringPtr(validVIP), BGPConfig: &KubeVIPBGPConfig{RouterID: "1.1.1.1", PeerASN: 65001, ASN: 65000}},
+			input: &KubeVIPConfig{Mode: util.StrPtr(KubeVIPModeBGP), VIP: util.StrPtr(validVIP), BGPConfig: &KubeVIPBGPConfig{RouterID: "1.1.1.1", PeerASN: 65001, ASN: 65000}},
 			expectErr:   true,
 			errContains: []string{".bgpConfig.peerAddress: peer address must be specified for BGP mode"},
 		},
 		{
 			name: "BGP mode invalid PeerAddress",
-			input: &KubeVIPConfig{Mode: stringPtr(KubeVIPModeBGP), VIP: stringPtr(validVIP), BGPConfig: &KubeVIPBGPConfig{RouterID: "1.1.1.1", PeerAddress: "invalid-ip", PeerASN: 65001, ASN: 65000}},
+			input: &KubeVIPConfig{Mode: util.StrPtr(KubeVIPModeBGP), VIP: util.StrPtr(validVIP), BGPConfig: &KubeVIPBGPConfig{RouterID: "1.1.1.1", PeerAddress: "invalid-ip", PeerASN: 65001, ASN: 65000}},
 			expectErr:   true,
 			errContains: []string{".bgpConfig.peerAddress: invalid IP 'invalid-ip'"},
 		},
 		{
 			name: "BGP mode invalid SourceAddress",
-			input: &KubeVIPConfig{Mode: stringPtr(KubeVIPModeBGP), VIP: stringPtr(validVIP), BGPConfig: &KubeVIPBGPConfig{RouterID: "1.1.1.1", PeerAddress: "10.0.0.1", PeerASN: 65001, ASN: 65000, SourceAddress: "not-an-ip"}},
+			input: &KubeVIPConfig{Mode: util.StrPtr(KubeVIPModeBGP), VIP: util.StrPtr(validVIP), BGPConfig: &KubeVIPBGPConfig{RouterID: "1.1.1.1", PeerAddress: "10.0.0.1", PeerASN: 65001, ASN: 65000, SourceAddress: "not-an-ip"}},
 			expectErr:   true,
 			errContains: []string{".bgpConfig.sourceAddress: invalid IP address format 'not-an-ip'"},
 		},
@@ -202,7 +201,7 @@ func TestValidate_KubeVIPConfig(t *testing.T) {
 				SetDefaults_KubeVIPConfig(tt.input)
 			}
 
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			Validate_KubeVIPConfig(tt.input, verrs, "spec.kubevip")
 
 			if tt.expectErr {

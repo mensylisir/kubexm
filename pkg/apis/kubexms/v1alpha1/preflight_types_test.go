@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/mensylisir/kubexm/pkg/util/validation"
 	"github.com/mensylisir/kubexm/pkg/util" // Added import
 )
 
@@ -38,14 +37,14 @@ func TestValidate_PreflightConfig(t *testing.T) {
 	// Test case where all values are valid (using defaults or explicit valid settings)
 	validCfg := &PreflightConfig{} // Rely on defaults
 	SetDefaults_PreflightConfig(validCfg)
-	verrsValid := &validation.ValidationErrors{}
+	verrsValid := &ValidationErrors{}
 	Validate_PreflightConfig(validCfg, verrsValid, "spec.preflight")
 	assert.False(t, verrsValid.HasErrors(), "Validate_PreflightConfig for default valid config failed: %v", verrsValid.Error())
 
 	// Test with explicit valid values that are different from defaults (if applicable)
 	validExplicitCfg := &PreflightConfig{MinCPUCores: util.Int32Ptr(4), MinMemoryMB: util.Uint64Ptr(4096), DisableSwap: util.BoolPtr(false)}
 	SetDefaults_PreflightConfig(validExplicitCfg) // Defaults won't override these
-	verrsValidExplicit := &validation.ValidationErrors{}
+	verrsValidExplicit := &ValidationErrors{}
 	Validate_PreflightConfig(validExplicitCfg, verrsValidExplicit, "spec.preflight")
 	assert.False(t, verrsValidExplicit.HasErrors(), "Validate_PreflightConfig for explicit valid config failed: %v", verrsValidExplicit.Error())
 
@@ -70,7 +69,7 @@ func TestValidate_PreflightConfig(t *testing.T) {
 				SetDefaults_PreflightConfig(tt.cfg)
 			}
 
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			Validate_PreflightConfig(tt.cfg, verrs, "spec.preflight")
 
 			if tt.expectErr {

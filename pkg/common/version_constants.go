@@ -4,9 +4,9 @@ package common
 const (
 	// Kubernetes component versions
 	DefaultKubernetesVersion = "v1.28.0"      // Default Kubernetes version
-	DefaultEtcdVersion      = "v3.5.9"        // Default etcd version
+	// DefaultEtcdVersion is already defined in images.go
 	DefaultDockerVersion    = "24.0.0"        // Default Docker version
-	DefaultContainerdVersion = "1.7.0"       // Default containerd version
+	// DefaultContainerdVersion is already defined in images.go
 	DefaultRuncVersion      = "v1.1.7"        // Default runc version
 	DefaultCriDockerdVersion = "v0.3.4"       // Default cri-dockerd version
 	DefaultHelmVersion      = "v3.12.0"       // Default Helm version
@@ -19,7 +19,7 @@ const (
 	DefaultKubeVIPVersion   = "v0.6.0"        // Default kube-vip version
 	
 	// Additional component versions
-	DefaultCoreDNSVersion   = "v1.10.1"       // Default CoreDNS version
+	// DefaultCoreDNSVersion is already defined in images.go
 	DefaultPauseVersion     = "3.9"           // Default pause container version
 	DefaultNodeLocalDNSVersion = "1.22.20"   // Default node-local-dns version
 	DefaultRegistryVersion  = "2.8.2"        // Default registry version

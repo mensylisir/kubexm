@@ -5,8 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/mensylisir/kubexm/pkg/util/validation" // Import validation
-	"github.com/mensylisir/kubexm/pkg/util"           // Import util
+	"github.com/mensylisir/kubexm/pkg/util"
 )
 
 // TestSetDefaults_CiliumConfig_Standalone tests the SetDefaults_CiliumConfig function directly.
@@ -233,7 +232,7 @@ func TestValidate_CiliumConfig_Standalone(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			inputConfig := tt.setup()
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			Validate_CiliumConfig(inputConfig, verrs, "spec.network.cilium")
 
 			if tt.expectErr {
@@ -265,7 +264,7 @@ func TestValidate_NetworkConfig_Calls_Validate_CiliumConfig_Standalone(t *testin
 	SetDefaults_KubernetesConfig(k8sConfig, "test-cluster")
 	SetDefaults_NetworkConfig(netCfg)
 
-	verrs := &validation.ValidationErrors{}
+	verrs := &ValidationErrors{}
 	Validate_NetworkConfig(netCfg, verrs, "spec.network", k8sConfig)
 
 	assert.True(t, verrs.HasErrors(), "Expected errors from CiliumConfig validation")

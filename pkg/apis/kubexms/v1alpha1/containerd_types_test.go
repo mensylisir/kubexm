@@ -5,7 +5,6 @@ import (
 
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/util"
-	"github.com/mensylisir/kubexm/pkg/util/validation"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -321,7 +320,7 @@ func TestValidate_ContainerdConfig(t *testing.T) {
 				SetDefaults_ContainerdConfig(inputToTest)
 			}
 
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			Validate_ContainerdConfig(inputToTest, verrs, "spec.containerd")
 			if tt.expectError {
 				assert.True(t, verrs.HasErrors(), "Expected error for test '%s' but got none. Input: %+v", tt.name, tt.input)

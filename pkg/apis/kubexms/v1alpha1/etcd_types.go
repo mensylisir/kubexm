@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	"fmt"
 	"strings"
 )
 
@@ -98,68 +99,68 @@ func Validate_EtcdConfig(cfg *EtcdConfig, verrs *ValidationErrors, pathPrefix st
 	}
 	validTypes := []string{EtcdTypeKubeXMSInternal, EtcdTypeExternal, EtcdTypeInternal, ""} // Allow empty for default
 	if !containsString(validTypes, cfg.Type) { // Using local containsString, assuming ValidationErrors is from cluster_types.go
-		verrs.Add("%s.type: invalid type '%s', must be one of %v", pathPrefix, cfg.Type, validTypes)
+		verrs.Add(pathPrefix + ".type: invalid type '" + cfg.Type + "', must be one of " + fmt.Sprintf("%v", validTypes))
 	}
 	if cfg.Type == EtcdTypeExternal {
 		if cfg.External == nil {
-			verrs.Add("%s.external: must be defined if etcd.type is '%s'", pathPrefix, EtcdTypeExternal)
+			verrs.Add(pathPrefix + ".external: must be defined if etcd.type is '" + EtcdTypeExternal + "'")
 		} else {
 			if len(cfg.External.Endpoints) == 0 {
-				verrs.Add("%s.external.endpoints: must contain at least one endpoint if etcd.type is '%s'", pathPrefix, EtcdTypeExternal)
+				verrs.Add(pathPrefix + ".external.endpoints: must contain at least one endpoint if etcd.type is '" + EtcdTypeExternal + "'")
 			}
 			for i, ep := range cfg.External.Endpoints {
 				if strings.TrimSpace(ep) == "" {
-					verrs.Add("%s.external.endpoints[%d]: endpoint cannot be empty", pathPrefix, i)
+					verrs.Add(pathPrefix + ".external.endpoints[" + fmt.Sprintf("%d", i) + "]: endpoint cannot be empty")
 				}
 			}
 			if (cfg.External.CertFile != "" && cfg.External.KeyFile == "") || (cfg.External.CertFile == "" && cfg.External.KeyFile != "") {
-				verrs.Add("%s.external: certFile and keyFile must be specified together for mTLS", pathPrefix)
+				verrs.Add(pathPrefix + ".external: certFile and keyFile must be specified together for mTLS")
 			}
 		}
 	}
 	if cfg.ClientPort != nil && (*cfg.ClientPort <= 0 || *cfg.ClientPort > 65535) {
-	   verrs.Add("%s.clientPort: invalid port %d, must be between 1-65535", pathPrefix, *cfg.ClientPort)
+	   verrs.Add(pathPrefix + ".clientPort: invalid port " + fmt.Sprintf("%d", *cfg.ClientPort) + ", must be between 1-65535")
 	}
 	if cfg.PeerPort != nil && (*cfg.PeerPort <= 0 || *cfg.PeerPort > 65535) {
-	   verrs.Add("%s.peerPort: invalid port %d, must be between 1-65535", pathPrefix, *cfg.PeerPort)
+	   verrs.Add(pathPrefix + ".peerPort: invalid port " + fmt.Sprintf("%d", *cfg.PeerPort) + ", must be between 1-65535")
 	}
 	if cfg.DataDir != nil && strings.TrimSpace(*cfg.DataDir) == "" {
-		verrs.Add("%s.dataDir: cannot be empty if specified", pathPrefix)
+		verrs.Add(pathPrefix + ".dataDir: cannot be empty if specified")
 	}
 	if strings.TrimSpace(cfg.ClusterToken) == "" {
-		verrs.Add("%s.clusterToken: cannot be empty", pathPrefix)
+		verrs.Add(pathPrefix + ".clusterToken: cannot be empty")
 	}
 	if cfg.BackupPeriodHours != nil && *cfg.BackupPeriodHours < 0 {
-		verrs.Add("%s.backupPeriodHours: cannot be negative, got %d", pathPrefix, *cfg.BackupPeriodHours)
+		verrs.Add(pathPrefix + ".backupPeriodHours: cannot be negative, got " + fmt.Sprintf("%d", *cfg.BackupPeriodHours))
 	}
 	if cfg.KeepBackupNumber != nil && *cfg.KeepBackupNumber < 0 {
-		verrs.Add("%s.keepBackupNumber: cannot be negative, got %d", pathPrefix, *cfg.KeepBackupNumber)
+		verrs.Add(pathPrefix + ".keepBackupNumber: cannot be negative, got " + fmt.Sprintf("%d", *cfg.KeepBackupNumber))
 	}
 	if cfg.HeartbeatIntervalMillis != nil && *cfg.HeartbeatIntervalMillis <= 0 {
-		verrs.Add("%s.heartbeatIntervalMillis: must be positive, got %d", pathPrefix, *cfg.HeartbeatIntervalMillis)
+		verrs.Add(pathPrefix + ".heartbeatIntervalMillis: must be positive, got " + fmt.Sprintf("%d", *cfg.HeartbeatIntervalMillis))
 	}
 	if cfg.ElectionTimeoutMillis != nil && *cfg.ElectionTimeoutMillis <= 0 {
-		verrs.Add("%s.electionTimeoutMillis: must be positive, got %d", pathPrefix, *cfg.ElectionTimeoutMillis)
+		verrs.Add(pathPrefix + ".electionTimeoutMillis: must be positive, got " + fmt.Sprintf("%d", *cfg.ElectionTimeoutMillis))
 	}
 	if cfg.AutoCompactionRetentionHours != nil && *cfg.AutoCompactionRetentionHours < 0 {
-		verrs.Add("%s.autoCompactionRetentionHours: cannot be negative, got %d", pathPrefix, *cfg.AutoCompactionRetentionHours)
+		verrs.Add(pathPrefix + ".autoCompactionRetentionHours: cannot be negative, got " + fmt.Sprintf("%d", *cfg.AutoCompactionRetentionHours))
 	}
 	if cfg.QuotaBackendBytes != nil && *cfg.QuotaBackendBytes < 0 {
-		verrs.Add("%s.quotaBackendBytes: cannot be negative, got %d", pathPrefix, *cfg.QuotaBackendBytes)
+		verrs.Add(pathPrefix + ".quotaBackendBytes: cannot be negative, got " + fmt.Sprintf("%d", *cfg.QuotaBackendBytes))
 	}
 	if cfg.MaxRequestBytes != nil && *cfg.MaxRequestBytes == 0 {
-		verrs.Add("%s.maxRequestBytes: must be positive if set, got %d", pathPrefix, *cfg.MaxRequestBytes)
+		verrs.Add(pathPrefix + ".maxRequestBytes: must be positive if set, got " + fmt.Sprintf("%d", *cfg.MaxRequestBytes))
 	}
 	if cfg.Metrics != nil && *cfg.Metrics != "" {
 		validMetrics := []string{"basic", "extensive"}
 		if !containsString(validMetrics, *cfg.Metrics) {
-			verrs.Add("%s.metrics: invalid value '%s', must be 'basic' or 'extensive'", pathPrefix, *cfg.Metrics)
+			verrs.Add(pathPrefix + ".metrics: invalid value '" + *cfg.Metrics + "', must be 'basic' or 'extensive'")
 		}
 	}
 	if cfg.LogLevel != nil && *cfg.LogLevel != "" {
 		validLogLevels := []string{"debug", "info", "warn", "error", "panic", "fatal"}
 		if !containsString(validLogLevels, *cfg.LogLevel) {
-			verrs.Add("%s.logLevel: invalid value '%s'", pathPrefix, *cfg.LogLevel)
+			verrs.Add(pathPrefix + ".logLevel: invalid value '" + *cfg.LogLevel + "'")
 		}
 	}
 }

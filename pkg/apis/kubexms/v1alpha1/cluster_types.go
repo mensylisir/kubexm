@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/mensylisir/kubexm/pkg/common"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"net"
 	"regexp"
 	"strings"
@@ -39,7 +38,7 @@ type ClusterSpec struct {
 	System               *SystemSpec               `json:"system,omitempty" yaml:"system,omitempty"`
 	Kubernetes           *KubernetesConfig         `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"`
 	Etcd                 *EtcdConfig               `json:"etcd,omitempty" yaml:"etcd,omitempty"`
-	DNS                  DNS                       `json:"dns,omitempty" yaml:"dns,omitempty"` // Changed from *DNS and casing
+	DNS                  *DNS                      `json:"dns,omitempty" yaml:"dns,omitempty"`
 	ContainerRuntime     *ContainerRuntimeConfig   `json:"containerRuntime,omitempty" yaml:"containerRuntime,omitempty"`
 	Network              *NetworkConfig            `json:"network,omitempty" yaml:"network,omitempty"`
 	ControlPlaneEndpoint *ControlPlaneEndpointSpec `json:"controlPlaneEndpoint,omitempty" yaml:"controlPlaneEndpoint,omitempty"`
@@ -71,13 +70,12 @@ type HostSpec struct {
 
 // RoleGroupsSpec defines the different groups of nodes in the cluster.
 type RoleGroupsSpec struct {
-	Master       MasterRoleSpec       `json:"master,omitempty" yaml:"master,omitempty"`
-	Worker       WorkerRoleSpec       `json:"worker,omitempty" yaml:"worker,omitempty"`
-	Etcd         EtcdRoleSpec         `json:"etcd,omitempty" yaml:"etcd,omitempty"`
-	LoadBalancer LoadBalancerRoleSpec `json:"loadbalancer,omitempty" yaml:"loadbalancer,omitempty"`
-	Storage      StorageRoleSpec      `json:"storage,omitempty" yaml:"storage,omitempty"`
-	Registry     RegistryRoleSpec     `json:"registry,omitempty" yaml:"registry,omitempty"`
-	CustomRoles  []CustomRoleSpec     `json:"customRoles,omitempty" yaml:"customRoles,omitempty"`
+	Master       []string `json:"master,omitempty" yaml:"master,omitempty"`
+	Worker       []string `json:"worker,omitempty" yaml:"worker,omitempty"`
+	Etcd         []string `json:"etcd,omitempty" yaml:"etcd,omitempty"`
+	LoadBalancer []string `json:"loadbalancer,omitempty" yaml:"loadbalancer,omitempty"`
+	Storage      []string `json:"storage,omitempty" yaml:"storage,omitempty"`
+	Registry     []string `json:"registry,omitempty" yaml:"registry,omitempty"`
 }
 
 // MasterRoleSpec defines the configuration for master nodes.
@@ -157,6 +155,13 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	if cfg == nil {
 		return
 	}
+	// Set TypeMeta defaults
+	if cfg.APIVersion == "" {
+		cfg.APIVersion = "kubexms.io/v1alpha1"
+	}
+	if cfg.Kind == "" {
+		cfg.Kind = "Cluster"
+	}
 	// cfg.SetGroupVersionKind(SchemeGroupVersion.WithKind("Cluster")) // Will be set by K8s machinery
 
 	if cfg.Spec.Type == "" {
@@ -168,13 +173,13 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	}
 	g := cfg.Spec.Global
 	if g.Port == 0 {
-		g.Port = 22 // common.DefaultSSHPort
+		g.Port = common.DefaultSSHPort
 	}
 	if g.ConnectionTimeout == 0 {
-		g.ConnectionTimeout = 30 * time.Second // common.DefaultConnectionTimeout
+		g.ConnectionTimeout = common.DefaultConnectionTimeout
 	}
 	if g.WorkDir == "" {
-		g.WorkDir = "/tmp/kubexms_work" // Or common.DefaultRemoteWorkDir / common.DefaultWorkDirName logic
+		g.WorkDir = common.DefaultRemoteWorkDir
 	}
 
 	for i := range cfg.Spec.Hosts {
@@ -192,10 +197,10 @@ func SetDefaults_Cluster(cfg *Cluster) {
 			host.PrivateKey = g.PrivateKey
 		}
 		if host.Type == "" {
-			host.Type = "ssh" // common.HostConnectionTypeSSH
+			host.Type = string(common.HostConnectionTypeSSH)
 		}
 		if host.Arch == "" {
-			host.Arch = "amd64" // common.DefaultArch
+			host.Arch = common.DefaultArch
 		}
 		if host.Labels == nil {
 			host.Labels = make(map[string]string)
@@ -269,7 +274,7 @@ func SetDefaults_Cluster(cfg *Cluster) {
 	SetDefaults_RegistryConfig(cfg.Spec.Registry)
 
 	// Assuming DNS struct has a SetDefaults_DNS function if needed
-	// SetDefaults_DNS(&cfg.Spec.DNS) // For non-pointer DNS field
+	SetDefaults_DNS(&cfg.Spec.DNS) // For non-pointer DNS field
 }
 
 // SetDefaults_SystemSpec sets default values for SystemSpec.
@@ -291,6 +296,10 @@ func SetDefaults_SystemSpec(cfg *SystemSpec) {
 	}
 	if cfg.SysctlParams == nil {
 		cfg.SysctlParams = make(map[string]string)
+	}
+	// Set default sysctl parameters for Kubernetes
+	if len(cfg.SysctlParams) == 0 {
+		cfg.SysctlParams["net.bridge.bridge-nf-call-iptables"] = "1"
 	}
 	if cfg.PreInstallScripts == nil {
 		cfg.PreInstallScripts = []string{}
@@ -323,13 +332,13 @@ func Validate_Cluster(cfg *Cluster) error {
 		}
 	}
 	if !isValidClusterType {
-		verrs.Add("spec.type: invalid cluster type '%s', must be one of %v", cfg.Spec.Type, validClusterTypes)
+		verrs.Add("spec.type: invalid cluster type '" + cfg.Spec.Type + "', must be one of " + fmt.Sprintf("%v", validClusterTypes))
 	}
 
 	if cfg.Spec.Global != nil {
 		g := cfg.Spec.Global
 		if g.Port != 0 && (g.Port <= 0 || g.Port > 65535) {
-			verrs.Add("spec.global.port: %d is invalid, must be between 1 and 65535 or 0 for default", g.Port)
+			verrs.Add("spec.global.port: " + fmt.Sprintf("%d", g.Port) + " is invalid, must be between 1 and 65535 or 0 for default")
 		}
 	}
 	if len(cfg.Spec.Hosts) == 0 {
@@ -340,38 +349,39 @@ func Validate_Cluster(cfg *Cluster) error {
 		pathPrefix := fmt.Sprintf("spec.hosts[%d:%s]", i, host.Name)
 		if strings.TrimSpace(host.Name) == "" {
 			pathPrefix = fmt.Sprintf("spec.hosts[%d]", i)
-			verrs.Add("%s.name: cannot be empty", pathPrefix)
+			verrs.Add(pathPrefix + ".name: cannot be empty")
 		} else {
 			if _, exists := hostNames[host.Name]; exists {
-				verrs.Add("%s.name: '%s' is duplicated", pathPrefix, host.Name)
+				verrs.Add(pathPrefix + ".name: '" + host.Name + "' is duplicated")
 			}
 			hostNames[host.Name] = true
 		}
 		if strings.TrimSpace(host.Address) == "" {
-			verrs.Add("%s.address: cannot be empty", pathPrefix)
+			verrs.Add(pathPrefix + ".address: cannot be empty")
 		} else {
 			// Basic validation for IP or hostname
 			if net.ParseIP(host.Address) == nil { // Not an IP
 				// Check if it's a valid hostname (simple regex, can be more complex)
 				if matched, _ := regexp.MatchString(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`, host.Address); !matched {
-					verrs.Add("%s.address: '%s' is not a valid IP address or hostname", pathPrefix, host.Address)
+					verrs.Add(pathPrefix + ".address: '" + host.Address + "' is not a valid IP address or hostname")
 				}
 			}
 		}
 		if host.Port != 0 && (host.Port <= 0 || host.Port > 65535) { // Port 0 is defaulted
-			verrs.Add("%s.port: %d is invalid, must be between 1 and 65535", pathPrefix, host.Port)
+			verrs.Add(pathPrefix + ".port: " + fmt.Sprintf("%d", host.Port) + " is invalid, must be between 1 and 65535")
 		}
-		if host.User == "" && host.Type != "local" { // User can be empty for local type
+		if host.User == "" && host.Type != string(common.HostConnectionTypeLocal) { // User can be empty for local type
              // User can be defaulted from GlobalSpec as well. Actual check should be post-defaulting.
              // This check is simplified here.
+			verrs.Add(pathPrefix + ".user: cannot be empty (after defaults)")
         }
 
-		if host.Type != "local" && host.Type != "ssh" && host.Type != "" {
-			verrs.Add("%s.type: invalid host type '%s', must be 'local', 'ssh' or empty for default", pathPrefix, host.Type)
+		if host.Type != string(common.HostConnectionTypeLocal) && host.Type != string(common.HostConnectionTypeSSH) && host.Type != "" {
+			verrs.Add(pathPrefix + ".type: invalid host type '" + host.Type + "', must be 'local', 'ssh' or empty for default")
 		}
-		if host.Type == "ssh" {
+		if host.Type == string(common.HostConnectionTypeSSH) {
 			if host.Password == "" && host.PrivateKey == "" && host.PrivateKeyPath == "" {
-				verrs.Add("%s: no SSH authentication method provided for ssh host type", pathPrefix)
+				verrs.Add(pathPrefix + ": no SSH authentication method provided for ssh host type")
 			}
 		}
 		// Arch validation could use common.SupportedArches
@@ -430,7 +440,7 @@ func Validate_Cluster(cfg *Cluster) error {
 		Validate_RegistryConfig(cfg.Spec.Registry, verrs, "spec.registry")
 	}
 	// Validate DNS
-	// Validate_DNS(&cfg.Spec.DNS, verrs, "spec.dns") // For non-pointer DNS field
+	Validate_DNS(&cfg.Spec.DNS, verrs, "spec.dns") // For non-pointer DNS field
 
 	if !verrs.IsEmpty() {
 		return verrs
@@ -457,6 +467,9 @@ func (ve *ValidationErrors) Error() string {
 // IsEmpty checks if any errors were recorded.
 func (ve *ValidationErrors) IsEmpty() bool { return len(ve.Errors) == 0 }
 
+// HasErrors checks if any errors were recorded.
+func (ve *ValidationErrors) HasErrors() bool { return len(ve.Errors) > 0 }
+
 // DeepCopy methods have been removed as per instruction.
 // They should be generated by controller-gen.
 
@@ -476,3 +489,88 @@ type ClusterList struct {
 // relying on controller-gen for correct generation.
 // SchemeGroupVersion needs to be defined, typically in groupversion_info.go
 var SchemeGroupVersion = metav1.GroupVersion{Group: "kubexms.io", Version: "v1alpha1"}
+
+// Validate_SystemSpec validates system configuration
+func Validate_SystemSpec(cfg *SystemSpec, verrs *ValidationErrors, pathPrefix string) {
+	if cfg == nil {
+		return
+	}
+	
+	// Validate timezone
+	if cfg.Timezone != "" {
+		if strings.TrimSpace(cfg.Timezone) == "" {
+			verrs.Add(pathPrefix + ".timezone: cannot be only whitespace if specified")
+		} else if !strings.Contains(cfg.Timezone, "/") && cfg.Timezone != "UTC" {
+			verrs.Add(pathPrefix + ".timezone: '" + cfg.Timezone + "' may not be a valid timezone")
+		}
+	}
+	
+	// Validate package manager
+	if cfg.PackageManager != "" {
+		if strings.TrimSpace(cfg.PackageManager) == "" {
+			verrs.Add(pathPrefix + ".packageManager: cannot be only whitespace if specified")
+		} else {
+			validManagers := []string{"yum", "apt", "dnf", "zypper"}
+			valid := false
+			for _, manager := range validManagers {
+				if cfg.PackageManager == manager {
+					valid = true
+					break
+				}
+			}
+			if !valid {
+				verrs.Add(pathPrefix + ".packageManager: '" + cfg.PackageManager + "' is not a valid package manager")
+			}
+		}
+	}
+	
+	// Validate NTP servers
+	for i, server := range cfg.NTPServers {
+		if strings.TrimSpace(server) == "" {
+			verrs.Add(pathPrefix + ".ntpServers[" + fmt.Sprintf("%d", i) + "]: NTP server address cannot be empty")
+		}
+	}
+	
+	// Validate package lists
+	for i, pkg := range cfg.RPMs {
+		if strings.TrimSpace(pkg) == "" {
+			verrs.Add(pathPrefix + ".rpms[" + fmt.Sprintf("%d", i) + "]: RPM package name cannot be empty")
+		}
+	}
+	for i, pkg := range cfg.Debs {
+		if strings.TrimSpace(pkg) == "" {
+			verrs.Add(pathPrefix + ".debs[" + fmt.Sprintf("%d", i) + "]: DEB package name cannot be empty")
+		}
+	}
+
+	// Validate pre-install scripts
+	for i, script := range cfg.PreInstallScripts {
+		if strings.TrimSpace(script) == "" {
+			verrs.Add(pathPrefix + ".preInstallScripts[" + fmt.Sprintf("%d", i) + "]: pre-install script cannot be empty")
+		}
+	}
+
+	// Validate post-install scripts  
+	for i, script := range cfg.PostInstallScripts {
+		if strings.TrimSpace(script) == "" {
+			verrs.Add(pathPrefix + ".postInstallScripts[" + fmt.Sprintf("%d", i) + "]: post-install script cannot be empty")
+		}
+	}
+
+	// Validate kernel modules
+	for i, module := range cfg.Modules {
+		if strings.TrimSpace(module) == "" {
+			verrs.Add(pathPrefix + ".modules[" + fmt.Sprintf("%d", i) + "]: kernel module name cannot be empty")
+		}
+	}
+
+	// Validate sysctl parameters
+	for key, value := range cfg.SysctlParams {
+		if strings.TrimSpace(key) == "" {
+			verrs.Add(pathPrefix+".sysctlParams: sysctl key cannot be empty")
+		}
+		if strings.TrimSpace(value) == "" {
+			verrs.Add(pathPrefix+".sysctlParams["+key+"]: value cannot be empty")
+		}
+	}
+}

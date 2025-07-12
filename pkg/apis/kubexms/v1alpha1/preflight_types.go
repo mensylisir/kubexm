@@ -1,5 +1,7 @@
 package v1alpha1
 
+import "fmt"
+
 // Assuming ValidationErrors is in cluster_types.go or a shared util in this package
 
 // PreflightConfig holds configuration for preflight checks.
@@ -19,8 +21,15 @@ func SetDefaults_PreflightConfig(cfg *PreflightConfig) {
 		b := true
 		cfg.DisableSwap = &b
 	}
-	// Defaults for MinCPUCores and MinMemoryMB can be added if desired
-	// e.g., if cfg.MinCPUCores == nil { defaultCPU := int32(2); cfg.MinCPUCores = &defaultCPU }
+	// Set defaults for MinCPUCores and MinMemoryMB
+	if cfg.MinCPUCores == nil {
+		defaultCPU := int32(2)
+		cfg.MinCPUCores = &defaultCPU
+	}
+	if cfg.MinMemoryMB == nil {
+		defaultMemory := uint64(2048) // 2GB minimum
+		cfg.MinMemoryMB = &defaultMemory
+	}
 }
 
 // Validate_PreflightConfig validates PreflightConfig.
@@ -29,13 +38,13 @@ func Validate_PreflightConfig(cfg *PreflightConfig, verrs *ValidationErrors, pat
 		return
 	}
 	if cfg.MinCPUCores != nil && *cfg.MinCPUCores <= 0 {
-		verrs.Add("%s.minCPUCores: must be positive if specified, got %d", pathPrefix, *cfg.MinCPUCores)
+		verrs.Add(pathPrefix + ".minCPUCores: must be positive if specified, got " + fmt.Sprintf("%d", *cfg.MinCPUCores))
 	}
 	if cfg.MinMemoryMB != nil && *cfg.MinMemoryMB == 0 { // Memory should be positive, allow 0 if it means "no check" or use a very small min.
 		// For MinMemoryMB, 0 could be a valid "don't care" or "use system minimum".
 		// If it must be positive, then *cfg.MinMemoryMB <= 0.
 		// Based on typical usage, a minimum > 0 is expected.
-		verrs.Add("%s.minMemoryMB: must be positive if specified, got %d", pathPrefix, *cfg.MinMemoryMB)
+		verrs.Add(pathPrefix + ".minMemoryMB: must be positive if specified, got " + fmt.Sprintf("%d", *cfg.MinMemoryMB))
 	}
 	// No specific validation for DisableSwap (*bool) other than type.
 	// If SkipChecks were added, validate that check names are known.

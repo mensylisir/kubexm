@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
+	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/stretchr/testify/assert"
 	// "gopkg.in/yaml.v3" // No longer needed after an assertion change
 )
@@ -133,7 +134,7 @@ spec:
     version: "1.6.9"
     containerd:
       registryMirrors:
-        "docker.io":
+        docker.io:
         - "https://mirror.docker.com"
         - "https://another.mirror.com"
       insecureRegistries:
@@ -240,13 +241,13 @@ spec:
   - metrics-server
   roleGroups:
     master:
-      hosts: ["master-1"]
+    - "master-1"
     worker:
-      hosts: ["worker-1"]
+    - "worker-1"
     etcd:
-      hosts: ["master-1"]
+    - "master-1"
     registry:
-      hosts: ["master-1"]
+    - "master-1"
   storage:
     defaultStorageClass: "openebs-hostpath"
     openebs:
@@ -298,7 +299,7 @@ func TestParseFromFile_YAMLContents(t *testing.T) {
 		}
 
 		if assert.NotNil(t, cfg.Spec.Kubernetes, "Kubernetes spec should be present") {
-			assert.Equal(t, v1alpha1.ClusterTypeKubeXM, cfg.Spec.Kubernetes.Type, "cfg.Spec.Kubernetes.Type mismatch")
+			assert.Equal(t, common.ClusterTypeKubeXM, cfg.Spec.Kubernetes.Type, "cfg.Spec.Kubernetes.Type mismatch")
 			assert.Equal(t, "v1.25.0", cfg.Spec.Kubernetes.Version)
 			assert.Equal(t, "test-cluster", cfg.Spec.Kubernetes.ClusterName)
 			assert.Equal(t, "cluster.local", cfg.Spec.Kubernetes.DNSDomain)
@@ -331,7 +332,7 @@ func TestParseFromFile_YAMLContents(t *testing.T) {
 		assert.Len(t, cfg.Spec.Hosts, 2)
 
 		if assert.NotNil(t, cfg.Spec.Kubernetes) {
-			assert.Equal(t, v1alpha1.ClusterTypeKubeadm, cfg.Spec.Kubernetes.Type)
+			assert.Equal(t, common.ClusterTypeKubeadm, cfg.Spec.Kubernetes.Type)
 			// KubeletConfiguration is commented out in validYAMLFull, so these assertions would fail/panic.
 			// assert.NotNil(t, cfg.Spec.Kubernetes.KubeletConfiguration)
 			// assert.NotEmpty(t, cfg.Spec.Kubernetes.KubeletConfiguration.Raw, "KubeletConfiguration.Raw should not be empty")
@@ -565,7 +566,7 @@ func TestParseFromFile_ValidDueToDefaults(t *testing.T) {
 	assert.NoError(t, err, "ParseFromFile with YAML that should be valid due to defaults, failed")
 	if err == nil && assert.NotNil(t, cfg) {
 		if assert.NotNil(t, cfg.Spec.Kubernetes){
-			assert.Equal(t, v1alpha1.ClusterTypeKubeXM, cfg.Spec.Kubernetes.Type, "cfg.Spec.Kubernetes.Type default mismatch")
+			assert.Equal(t, common.ClusterTypeKubeXM, cfg.Spec.Kubernetes.Type, "cfg.Spec.Kubernetes.Type default mismatch")
 		}
 		if assert.NotNil(t, cfg.Spec.Global) {
 			assert.Equal(t, 22, cfg.Spec.Global.Port, "cfg.Spec.Global.Port default mismatch")

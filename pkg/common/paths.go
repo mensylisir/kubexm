@@ -6,24 +6,18 @@ const (
 	// --- General Default Directory Names for Kubexm Local Workstation (machine running kubexm) ---
 	// These define the structure within the main Kubexm work directory (e.g., $(pwd)/.kubexm/${cluster_name}/).
 
-	// KubexmRootDirName is the top-level directory created by kubexm in the current working directory (e.g., ".kubexm")
-	// if no global work_dir is specified in config. The full path would be like $(pwd)/.kubexm.
-	KubexmRootDirName = ".kubexm"
+	// KubexmRootDirName is already defined in directory_constants.go
+	// KubexmRootDirName = ".kubexm"
 
 	// DefaultLogDirName is the subdirectory for log files within a specific cluster's work directory.
 	// e.g., $(pwd)/.kubexm/${cluster_name}/logs
 	DefaultLogDirName = "logs"
 
-	// DefaultCertsDir is the subdirectory for generated certificates within a specific cluster's work directory
-	// on the machine running Kubexm. This is where Kubexm will store CA certs and other PKI assets
-	// it generates locally before distribution.
-	// e.g., $(pwd)/.kubexm/${cluster_name}/certs
-	DefaultCertsDir = "certs"
+	// DefaultCertsDir is already defined in directory_constants.go
+	// DefaultCertsDir = "certs"
 
-	// DefaultArtifactsDir is a general subdirectory for downloaded artifacts within a specific cluster's work directory
-	// on the machine running Kubexm. Specific components will have subdirectories under this.
-	// e.g., $(pwd)/.kubexm/${cluster_name}/artifacts
-	DefaultArtifactsDir = "artifacts"
+	// DefaultArtifactsDir is already defined in directory_constants.go
+	// DefaultArtifactsDir = "artifacts"
 
 	// DefaultBinDirName is the subdirectory within a component's artifact path (under DefaultArtifactsDir) for binaries.
 	// e.g., $(pwd)/.kubexm/${cluster_name}/artifacts/etcd/${etcd_version}/${arch}/bin
@@ -39,35 +33,32 @@ const (
 	// e.g., $(pwd)/.kubexm/${cluster_name}/backup
 	DefaultBackupDirName = "backup"
 
-	// Component-specific artifact parent directories under DefaultArtifactsDir and a component type directory.
-	// These names should ideally match the BinaryType strings from types.go for consistency in path construction.
-	// Example path structure: ${GlobalWorkDir}/${ClusterName}/artifacts/${ComponentTypeDir}/${ComponentName}/${Version}/${Arch}
-	// These are names for directories on the Kubexm local machine where artifacts are staged.
-	DefaultContainerRuntimeDir = "container_runtime" // Parent dir for different runtimes like docker, containerd
-	DefaultKubernetesDir       = "kubernetes"        // Parent dir for different K8s components like kubelet, kubeadm
-	DefaultEtcdDir             = "etcd"              // Parent dir for etcd artifacts
+	// Component-specific artifact parent directories are already defined in directory_constants.go
+	// DefaultContainerRuntimeDir = "container_runtime"
+	// DefaultKubernetesDir = "kubernetes"
+	// DefaultEtcdDir = "etcd"
 
-	ArtifactsEtcdDir            = "etcd"
-	ArtifactsKubeDir            = "kube"
-	ArtifactsCNIDir             = "cni"
-	ArtifactsHelmDir            = "helm"
-	ArtifactsDockerDir          = "docker"
-	ArtifactsContainerdDir      = "containerd"
-	ArtifactsRuncDir            = "runc"
-	ArtifactsCrictlDir          = "crictl"
-	ArtifactsCriDockerdDir      = "cri-dockerd"
-	ArtifactsCalicoctlDir       = "calicoctl"
-	ArtifactsRegistryDir        = "registry"
-	ArtifactsComposeDir         = "compose"
-	ArtifactsBuildDir           = "build"
-	ArtifactsGenericBinariesDir = "generic"
+	// These are already defined in directory_constants.go
+	// ArtifactsEtcdDir = "etcd"
+	// ArtifactsKubeDir = "kube"
+	// ArtifactsCNIDir = "cni"
+	// ArtifactsHelmDir = "helm"
+	// These are already defined in directory_constants.go
+	// ArtifactsDockerDir = "docker"
+	// ArtifactsContainerdDir = "containerd"
+	// ArtifactsRuncDir = "runc"
+	// ArtifactsCrictlDir = "crictl"
+	// ArtifactsCriDockerdDir = "cri-dockerd"
+	// ArtifactsCalicoctlDir = "calicoctl"
+	// ArtifactsRegistryDir = "registry"
+	// ArtifactsComposeDir = "compose"
+	// ArtifactsBuildDir = "build"
+	// ArtifactsGenericBinariesDir = "generic"
 
-	// DefaultInstallPrefix is a common prefix for installations, e.g. /usr/local
-	DefaultInstallPrefix = "/usr/local"
-	// DefaultBinDir is a common directory for binaries, often under DefaultInstallPrefix.
-	DefaultBinDir = DefaultInstallPrefix + "/bin" // e.g. /usr/local/bin
-	// DefaultEtcDir is a common directory for config, often under DefaultInstallPrefix or /etc.
-	DefaultEtcDir = DefaultInstallPrefix + "/etc" // e.g. /usr/local/etc, or system /etc
+	// These are already defined in directory_constants.go
+	// DefaultInstallPrefix = "/usr/local"
+	// DefaultBinDir = DefaultInstallPrefix + "/bin"
+	// DefaultEtcDir = DefaultInstallPrefix + "/etc"
 )
 
 // --- Standard Paths on Target Nodes ---
@@ -79,20 +70,21 @@ const (
 	KubernetesPKIDir       = "/etc/kubernetes/pki"       // Directory for Kubernetes PKI assets on a node.
 	DefaultKubeconfigPath  = "/root/.kube/config"        // Standard path for the admin kubeconfig on a user's machine or control node.
 
-	CACertFileName                     = "ca.crt"                       // Common name for CA certificate file.
-	CAKeyFileName                      = "ca.key"                       // Cluster CA private key.
-	APIServerCertFileName              = "apiserver.crt"                // API server certificate.
-	APIServerKeyFileName               = "apiserver.key"                // API server private key.
-	APIServerKubeletClientCertFileName = "apiserver-kubelet-client.crt" // Cert for API server to connect to Kubelets.
-	APIServerKubeletClientKeyFileName  = "apiserver-kubelet-client.key" // Key for API server to connect to Kubelets.
-	FrontProxyCACertFileName           = "front-proxy-ca.crt"           // Front proxy CA certificate.
-	FrontProxyCAKeyFileName            = "front-proxy-ca.key"           // Front proxy CA private key.
-	FrontProxyClientCertFileName       = "front-proxy-client.crt"       // Front proxy client certificate.
-	FrontProxyClientKeyFileName        = "front-proxy-client.key"       // Front proxy client private key.
-	ServiceAccountPublicKeyFileName    = "sa.pub"                       // Service account public key.
-	ServiceAccountPrivateKeyFileName   = "sa.key"                       // Service account private key.
-	APIServerEtcdClientCertFileName    = "apiserver-etcd-client.crt"    // Cert for API server to connect to Etcd.
-	APIServerEtcdClientKeyFileName     = "apiserver-etcd-client.key"    // Key for API server to connect to Etcd.
+	// These PKI constants are already defined in pki_constants.go
+	// CACertFileName = "ca.crt"
+	// CAKeyFileName = "ca.key"
+	// APIServerCertFileName = "apiserver.crt"
+	// APIServerKeyFileName = "apiserver.key"
+	// APIServerKubeletClientCertFileName = "apiserver-kubelet-client.crt"
+	// APIServerKubeletClientKeyFileName = "apiserver-kubelet-client.key"
+	// FrontProxyCACertFileName = "front-proxy-ca.crt"
+	// FrontProxyCAKeyFileName = "front-proxy-ca.key"
+	// FrontProxyClientCertFileName = "front-proxy-client.crt"
+	// FrontProxyClientKeyFileName = "front-proxy-client.key"
+	// ServiceAccountPublicKeyFileName = "sa.pub"
+	// ServiceAccountPrivateKeyFileName = "sa.key"
+	// APIServerEtcdClientCertFileName = "apiserver-etcd-client.crt"
+	// APIServerEtcdClientKeyFileName = "apiserver-etcd-client.key"
 
 	KubeadmConfigFileName               = "kubeadm-config.yaml"     // Kubeadm configuration file.
 	KubeletKubeconfigFileName           = "kubelet.conf"            // Kubelet's kubeconfig file name.
@@ -118,6 +110,7 @@ const (
 const (
 	ContainerdDefaultConfDirTarget    = "/etc/containerd"                        // Target Containerd configuration directory on nodes.
 	ContainerdDefaultConfigFileTarget = "/etc/containerd/config.toml"            // Target Containerd main config file on nodes.
+	ContainerdDefaultConfigFile       = "/etc/containerd/config.toml"            // Alias for compatibility
 	ContainerdDefaultSystemdFile      = "/etc/systemd/system/containerd.service" // Default systemd file path for Containerd.
 
 	DockerDefaultConfDirTarget    = "/etc/docker"                        // Target Docker configuration directory on nodes.
@@ -171,18 +164,15 @@ const (
 	DefaultNginxConfigFilePathTarget = "/etc/nginx/nginx.conf"
 )
 
-// Etcd PKI Filenames (for binary deployments, stored under EtcdDefaultPKIDirTarget)
-const (
-	EtcdCaCertFileName          = "ca.crt"
-	EtcdCaKeyFileName           = "ca.key" // Typically not distributed to nodes
-	EtcdServerCertFileName      = "server.crt"
-	EtcdServerKeyFileName       = "server.key"
-	EtcdPeerCertFileName        = "peer.crt"
-	EtcdPeerKeyFileName         = "peer.key"
-	EtcdAdminClientCertFileName = "admin.crt" // For etcdctl admin access on nodes
-	EtcdAdminClientKeyFileName  = "admin.key" // For etcdctl admin access on nodes
-	// APIServerEtcdClientCertFileName is already defined above for K8s PKI connecting to Etcd.
-)
+// Etcd PKI Filenames are already defined in pki_constants.go
+// EtcdCaCertFileName = "ca.crt"
+// EtcdCaKeyFileName = "ca.key"
+// EtcdServerCertFileName = "server.crt"
+// EtcdServerKeyFileName = "server.key"
+// EtcdPeerCertFileName = "peer.crt"
+// EtcdPeerKeyFileName = "peer.key"
+// EtcdAdminClientCertFileName = "admin.crt"
+// EtcdAdminClientKeyFileName = "admin.key"
 
 // Specific Etcd data directory constant for target nodes (binary deployment)
 const (

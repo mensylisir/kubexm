@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 )
@@ -48,7 +47,7 @@ func (s *VerifyContainerdCrictlStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *VerifyContainerdCrictlStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *VerifyContainerdCrictlStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	// This step is a verification step, its Precheck could be true if a previous run succeeded
 	// and cached a success status, or it could always return false to ensure verification runs.
 	// For simplicity, let's always run the verification if this step is scheduled.
@@ -57,7 +56,7 @@ func (s *VerifyContainerdCrictlStep) Precheck(ctx runtime.StepContext, host conn
 	return false, nil
 }
 
-func (s *VerifyContainerdCrictlStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *VerifyContainerdCrictlStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -103,7 +102,7 @@ func (s *VerifyContainerdCrictlStep) Run(ctx runtime.StepContext, host connector
 	return nil
 }
 
-func (s *VerifyContainerdCrictlStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *VerifyContainerdCrictlStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	logger.Info("Rollback for VerifyContainerdCrictlStep is not applicable as it's a verification step.")
 	return nil

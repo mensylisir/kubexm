@@ -44,7 +44,7 @@ func (s *RemoveDockerEngineStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *RemoveDockerEngineStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *RemoveDockerEngineStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -75,7 +75,7 @@ func (s *RemoveDockerEngineStep) Precheck(ctx runtime.StepContext, host connecto
 	return false, nil
 }
 
-func (s *RemoveDockerEngineStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *RemoveDockerEngineStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -105,7 +105,7 @@ func (s *RemoveDockerEngineStep) Run(ctx runtime.StepContext, host connector.Hos
 	return nil
 }
 
-func (s *RemoveDockerEngineStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *RemoveDockerEngineStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	logger.Info("Rollback for RemoveDockerEngineStep is not applicable (would mean reinstalling).")
 	return nil

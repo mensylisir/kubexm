@@ -53,7 +53,7 @@ func (s *BootstrapFirstEtcdNodeStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *BootstrapFirstEtcdNodeStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *BootstrapFirstEtcdNodeStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -88,7 +88,7 @@ func (s *BootstrapFirstEtcdNodeStep) Precheck(ctx runtime.StepContext, host conn
 	return false, nil
 }
 
-func (s *BootstrapFirstEtcdNodeStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *BootstrapFirstEtcdNodeStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 
 	// Assumption: etcd.yaml is already correctly configured with 'initial-cluster-state: new'
@@ -126,7 +126,7 @@ func (s *BootstrapFirstEtcdNodeStep) Run(ctx runtime.StepContext, host connector
 	return nil
 }
 
-func (s *BootstrapFirstEtcdNodeStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *BootstrapFirstEtcdNodeStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	// Rollback could involve stopping and disabling the service.
 	// However, if other nodes joined, simply stopping one node isn't a full cluster rollback.

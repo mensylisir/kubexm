@@ -1,5 +1,10 @@
 package v1alpha1
 
+import (
+	"fmt"
+	"strings"
+)
+
 // Assuming ValidationErrors is in cluster_types.go or a shared util in this package
 // Assuming containsString is in cluster_types.go or a shared util in this package
 
@@ -76,7 +81,7 @@ func Validate_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig, verrs *Validat
 		}
 	}
 	if !isValid {
-		verrs.Add(pathPrefix+".type", "invalid container runtime type '%s', must be one of %v or empty for default", cfg.Type, validTypes)
+		verrs.Add(pathPrefix + ".type: invalid container runtime type '" + string(cfg.Type) + "', must be one of " + fmt.Sprintf("%v", validTypes) + " or empty for default")
 	}
 
 	// Validate specific config only if type matches
@@ -86,7 +91,7 @@ func Validate_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig, verrs *Validat
 			// If still nil, it's an issue or means Docker type was set without providing its config block.
 			verrs.Add(pathPrefix+".docker", "docker config must be defined if type is 'docker'")
 		} else {
-			Validate_DockerConfig(cfg.Docker, verrs, pathPrefix+".docker") // Assumes Validate_DockerConfig is in docker_types.go
+			Validate_DockerConfig(cfg.Docker, verrs, pathPrefix+".docker") // Function defined in docker_types.go
 		}
 	} else if cfg.Docker != nil { // Docker config provided but type is not docker
 		verrs.Add(pathPrefix+".docker", "docker config can only be set if type is 'docker'")
@@ -96,7 +101,7 @@ func Validate_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig, verrs *Validat
 		if cfg.Containerd == nil {
 			verrs.Add(pathPrefix+".containerd", "containerd config must be defined if type is 'containerd'")
 		} else {
-			Validate_ContainerdConfig(cfg.Containerd, verrs, pathPrefix+".containerd") // Assumes Validate_ContainerdConfig is in containerd_types.go
+			Validate_ContainerdConfig(cfg.Containerd, verrs, pathPrefix+".containerd") // Function defined in containerd_types.go
 		}
 	} else if cfg.Containerd != nil { // Containerd config provided but type is not containerd
 		verrs.Add(pathPrefix+".containerd", "containerd config can only be set if type is 'containerd'")

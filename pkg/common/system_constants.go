@@ -33,13 +33,13 @@ const (
 // Security and permission constants
 const (
 	// File permissions (following Kubernetes security best practices)
-	DefaultFilePermission        = 0644  // Default file permission
-	DefaultDirPermission         = 0755  // Default directory permission
+	// DefaultFilePermission is already defined in permissions.go
+	// DefaultDirPermission is already defined in permissions.go
 	DefaultSecretFilePermission  = 0600  // Default secret file permission
 	DefaultSecretDirPermission   = 0700  // Default secret directory permission
 	DefaultExecutablePermission  = 0755  // Default executable permission
 	DefaultConfigFilePermission  = 0644  // Default config file permission
-	DefaultPrivateKeyPermission  = 0600  // Default private key permission
+	// DefaultPrivateKeyPermission is already defined in permissions.go
 	DefaultCertificatePermission = 0644  // Default certificate permission
 	
 	// Default users and groups
@@ -51,7 +51,7 @@ const (
 	DefaultSystemUser        = "root"     // Default system user
 	
 	// Default timeouts and intervals
-	DefaultConnectionTimeout = 30         // Default connection timeout in seconds
+	// DefaultConnectionTimeout is already defined in ssh.go
 	DefaultReadTimeout      = 30          // Default read timeout in seconds
 	DefaultWriteTimeout     = 30          // Default write timeout in seconds
 	DefaultRetryCount       = 3           // Default retry count
@@ -63,8 +63,8 @@ const (
 // Resource limits and requirements constants
 const (
 	// Default resource requirements
-	DefaultMinMemoryMB      = 2048        // Default minimum memory in MB
-	DefaultMinCPUCores      = 2           // Default minimum CPU cores
+	// DefaultMinMemoryMB is already defined in preflight.go
+	// DefaultMinCPUCores is already defined in preflight.go
 	DefaultMinDiskGB        = 20          // Default minimum disk space in GB
 	DefaultMaxPods          = 110         // Default maximum pods per node
 	DefaultMaxPodPidsLimit  = 4096        // Default maximum pids per pod
@@ -84,7 +84,7 @@ const (
 // Architecture and platform constants
 const (
 	// Supported architectures
-	DefaultArch             = "amd64"     // Default architecture
+	// DefaultArch is already defined in arch.go
 	ArchAMD64              = "amd64"      // AMD64 architecture
 	ArchARM64              = "arm64"      // ARM64 architecture
 	ArchPPC64LE            = "ppc64le"    // PowerPC 64-bit little-endian

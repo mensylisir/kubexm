@@ -4,19 +4,16 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"time" // Added for potential timeouts if not handled by steps
+	"time"
 
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
+	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/resource"
-	"github.com/mensylisir/kubexm/pkg/step/common"
-	"github.com/mensylisir/kubexm/pkg/step/etcd" // Specific etcd steps
+	stepcommon "github.com/mensylisir/kubexm/pkg/step/common" 
+	stepEtcd "github.com/mensylisir/kubexm/pkg/step/etcd"
 	"github.com/mensylisir/kubexm/pkg/task"
-	// "github.com/mensylisir/kubexm/pkg/runtime" // No longer used in signatures
-)
-
-	"github.com/mensylisir/kubexm/pkg/common" // Import common
 )
 
 // InstallETCDTask defines the task for installing ETCD cluster (binary deployment).
@@ -46,7 +43,7 @@ func (t *InstallETCDTask) IsRequired(ctx task.TaskContext) (bool, error) { // Ch
 		return false, nil
 	}
 	// This task specifically handles binary installation of etcd.
-	if clusterConfig.Spec.Etcd.Type != v1alpha1.EtcdTypeKubeXM {
+	if clusterConfig.Spec.Etcd.Type != v1alpha1.EtcdTypeKubeXMSInternal {
 		logger.Info("ETCD installation type is not KubeXM (binary), skipping this task.", "type", clusterConfig.Spec.Etcd.Type)
 		return false, nil
 	}
@@ -60,19 +57,18 @@ func (t *InstallETCDTask) IsRequired(ctx task.TaskContext) (bool, error) { // Ch
 }
 
 // Plan generates the execution plan (fragment) for installing ETCD.
-func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, error) { // Changed to task.TaskContext
+func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("task", t.Name())
 	logger.Info("Planning ETCD installation (binary type)...")
 
 	clusterConfig := ctx.GetClusterConfig()
 	etcdSpec := clusterConfig.Spec.Etcd
 
-	etcdNodes, err := ctx.GetHostsByRole(v1alpha1.ETCDRole) // Using v1alpha1 constant for role
+	etcdNodes, err := ctx.GetHostsByRole(v1alpha1.ETCDRole)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get etcd nodes for task %s: %w", t.Name(), err)
 	}
-	// masterNodes are needed for distributing apiserver-etcd-client certificates.
-	masterNodes, _ := ctx.GetHostsByRole(v1alpha1.MasterRole) // Using v1alpha1 constant for role
+	masterNodes, _ := ctx.GetHostsByRole(v1alpha1.MasterRole)
 
 	// --- 1. Resource Acquisition: Etcd Archive on Control Node ---
 	etcdVersion := etcdSpec.Version
@@ -151,17 +147,15 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 
 	archiveInternalDirName := strings.TrimSuffix(strings.TrimSuffix(filepath.Base(localEtcdArchivePathOnControlNode), ".tar.gz"), ".tar")
 
-	// This fragment will contain all steps for this task.
 	taskFragment := task.NewExecutionFragment(t.Name())
-	// Merge the local resource preparation steps first.
 	if err := taskFragment.MergeFragment(resourcePrepFragment); err != nil {
 		return nil, fmt.Errorf("failed to merge etcd archive resource prep fragment: %w", err)
 	}
-	// All subsequent remote operations will depend on the exit nodes of resourcePrepFragment.
 	controlNodePrepDoneDependencies := resourcePrepFragment.ExitNodes
 	if len(controlNodePrepDoneDependencies) == 0 && len(resourcePrepFragment.Nodes) > 0 {
-		// If prep fragment had nodes but no explicit exit nodes (e.g. single node fragment), use all its nodes as deps.
-		for id := range resourcePrepFragment.Nodes { controlNodePrepDoneDependencies = append(controlNodePrepDoneDependencies, id)}
+		for id := range resourcePrepFragment.Nodes { 
+			controlNodePrepDoneDependencies = append(controlNodePrepDoneDependencies, id)
+		}
 	}
 
 
@@ -181,32 +175,19 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 
 	for _, targetHost := range etcdNodes { // Certs for etcd nodes
 		hostPkiPrefix := fmt.Sprintf("upload-etcd-certs-%s-", targetHost.GetName())
-		certsForEtcdNode := map[string]string{ // cert_file_name_on_control_node -> remote_permissions
-			common.CACertFileName:                                  "0644",
-			fmt.Sprintf(common.EtcdServerCertFileName, targetHost.GetName()):       "0644", // server cert
-			fmt.Sprintf(common.EtcdServerKeyFileName, targetHost.GetName()):   "0600", // server key
-			fmt.Sprintf(common.EtcdPeerCertFileName, targetHost.GetName()):  "0644", // peer cert
-			fmt.Sprintf(common.EtcdPeerKeyFileName, targetHost.GetName()): "0600", // peer key
+		certsForEtcdNode := map[string]string{
+			"ca.pem":                                  "0644",
+			fmt.Sprintf("%s.pem", targetHost.GetName()):       "0644",
+			fmt.Sprintf("%s-key.pem", targetHost.GetName()):   "0600",
+			fmt.Sprintf("peer-%s.pem", targetHost.GetName()):  "0644",
+			fmt.Sprintf("peer-%s-key.pem", targetHost.GetName()): "0600",
 		}
 		var lastUploadOnHost plan.NodeID
 		for certFilePattern, perm := range certsForEtcdNode {
-			// Resolve pattern to actual filename. For ca.pem, it's direct. For others, it includes host name.
-			// This assumes certFilePattern from the map can be directly used if it's already resolved or is like common.CACertFileName
-			// This part of the logic might need refinement if certFilePattern is `server-%s.pem` vs resolved `server-node1.pem`
-			// For now, assume certFilePattern is the final filename for local lookup.
-			// The map keys should be the exact local filenames.
-			// Let's adjust the map keys to be the simple filenames, and construct full names as needed.
-			// Example: "ca.pem", "server.pem" (which becomes server-node1.pem)
-
-			// Corrected map definition and usage:
-			// Map key should be the generic name, and we construct the host-specific one.
-			// This was already done implicitly by fmt.Sprintf in the map key.
-			// The critical part is that `localPath` uses `certFilePattern` which is already host-specific.
-
-			localPath := filepath.Join(localEtcdCertsBaseDir, certFilePattern) // certFilePattern is already like "server-node1.pem"
-			remotePath := filepath.Join(common.EtcdDefaultPKIDir, certFilePattern)
+			localPath := filepath.Join(localEtcdCertsBaseDir, certFilePattern)
+			remotePath := filepath.Join("/etc/etcd/pki", certFilePattern)
 			nodeName := fmt.Sprintf("Upload-%s-to-%s", certFilePattern, targetHost.GetName())
-			uploadStep := commonstep.NewUploadFileStep(nodeName, localPath, remotePath, perm, true, false)
+			uploadStep := stepcommon.NewUploadFileStep(nodeName, localPath, remotePath, perm, true, false)
 
 			nodeID, _ := certsUploadFragment.AddNode(&plan.ExecutionNode{
 				Name:         uploadStep.Meta().Name,
@@ -228,9 +209,9 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 		hostPkiPrefix := fmt.Sprintf("upload-apiserver-etcd-client-certs-%s-", targetHost.GetName())
 		// Define certs using common constants for filenames
 		certsForMasterNode := map[string]string{
-			common.CACertFileName:                "0644",
-			common.EtcdClientCertFileName:      "0644", // Assuming a generic client cert name like "client.pem" or "apiserver-etcd-client.pem"
-			common.EtcdClientKeyFileName:       "0600", // Needs to match the actual generated client key name
+			"ca.pem":                "0644",
+			"apiserver-etcd-client.pem":      "0644",
+			"apiserver-etcd-client-key.pem":       "0600",
 		}
 		// Adjust if apiserver-etcd-client is specifically named:
 		// certsForMasterNode := map[string]string{
@@ -243,16 +224,21 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 		var lastUploadOnHost plan.NodeID
 		for certFile, perm := range certsForMasterNode {
 			isEtcdNode := false
-			for _, en := range etcdNodes { if en.GetName() == targetHost.GetName() { isEtcdNode = true; break } }
-			if certFile == common.CACertFileName && isEtcdNode {
+			for _, en := range etcdNodes { 
+				if en.GetName() == targetHost.GetName() { 
+					isEtcdNode = true
+					break 
+				} 
+			}
+			if certFile == "ca.pem" && isEtcdNode {
 				logger.Debug("Skipping CA cert upload to master as it's also an etcd node and CA would have been uploaded.", "host", targetHost.GetName())
 				continue
 			}
 
 			localPath := filepath.Join(localEtcdCertsBaseDir, certFile)
-			remotePath := filepath.Join(common.EtcdDefaultPKIDir, certFile)
+			remotePath := filepath.Join("/etc/etcd/pki", certFile)
 			nodeName := fmt.Sprintf("Upload-APIServerEtcdClient-%s-to-%s", certFile, targetHost.GetName())
-			uploadStep := commonstep.NewUploadFileStep(nodeName, localPath, remotePath, perm, true, false)
+			uploadStep := stepcommon.NewUploadFileStep(nodeName, localPath, remotePath, perm, true, false)
 
 			nodeID, _ := certsUploadFragment.AddNode(&plan.ExecutionNode{
 				Name:         uploadStep.Meta().Name,
@@ -277,185 +263,175 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 
 	// --- Per-Host ETCD Installation ---
 	initialClusterPeers := []string{}
-	etcdClientPort := etcdSpec.GetClientPort()      // Uses getter for default port if not set
-	etcdPeerPortResolved := etcdSpec.GetPeerPort() // Uses getter
+	etcdClientPort := 2379
+	etcdPeerPort := 2380
+	if etcdSpec.Port != 0 {
+		etcdClientPort = etcdSpec.Port
+	}
+	if etcdSpec.PeerPort != 0 {
+		etcdPeerPort = etcdSpec.PeerPort
+	}
 
 	for _, node := range etcdNodes {
-		// TODO: For InitialCluster, it's crucial to use the correct peer IP.
-		// This might be node.InternalAddress if defined and different, or an IP from node facts
-		// that is routable within the cluster for peer communication.
-		// Defaulting to node.GetAddress() for now.
 		nodePeerAddr := node.GetAddress()
-		initialClusterPeers = append(initialClusterPeers, fmt.Sprintf("%s=https://%s:%d", node.GetName(), nodePeerAddr, etcdPeerPortResolved))
+		initialClusterPeers = append(initialClusterPeers, fmt.Sprintf("%s=https://%s:%d", node.GetName(), nodePeerAddr, etcdPeerPort))
 	}
 	initialClusterString := strings.Join(initialClusterPeers, ",")
 
-	var allEtcdNodeServiceReadyNodeIDs []plan.NodeID // Collects final operational node for each etcd host
-	var firstEtcdNodeBootstrapSuccessNodeID plan.NodeID // Tracks the bootstrap success of the first etcd node
+	var allEtcdNodeServiceReadyNodeIDs []plan.NodeID
+	var firstEtcdNodeBootstrapSuccessNodeID plan.NodeID
 
 	for i, etcdHost := range etcdNodes {
 		nodeSpecificPrefix := fmt.Sprintf("etcd-%s-", strings.ReplaceAll(etcdHost.GetName(), ".", "-"))
 
-		// Base dependencies for this host's etcd setup:
-		// 1. Etcd archive ready on control node (lastCtrlNodeActivityID)
-		// 2. PKI certs for *this specific host* are uploaded.
-		currentHostProcessingDeps := []plan.NodeID{}
-		if lastCtrlNodeActivityID != "" {
-			currentHostProcessingDeps = append(currentHostProcessingDeps, lastCtrlNodeActivityID)
-		}
-		// Find the last PKI upload node ID for this specific etcdHost from the pkiDistributionSubFragment
-		thisHostLastPkiNodeID, foundPkiForHost := findLastPkiNodeForHost(pkiDistributionSubFragment, etcdHost.GetName(), etcdNodes, masterNodes)
-		if foundPkiForHost {
-			currentHostProcessingDeps = append(currentHostProcessingDeps, thisHostLastPkiNodeID)
-		} else {
-			logger.Warn("Could not determine specific PKI dependency node for etcd host, etcd setup might fail or use incorrect certs.", "host", etcdHost.GetName())
-			// This is a potential issue. For robustness, one might make it depend on all pkiDistributionGlobalExitNodeIDs,
-			// or ensure findLastPkiNodeForHost is reliable.
-		}
+		// Base dependencies: resource prep and PKI certs upload done
+		currentHostProcessingDeps := append([]plan.NodeID{}, controlNodePrepDoneDependencies...)
+		currentHostLastStepID := plan.NodeID("")
 
 		// Upload Etcd Archive to this etcdHost
-		remoteTempArchiveDir := "/tmp/kubexm-etcd-archives" // TODO: Make this configurable or use a host-specific temp path
+		remoteTempArchiveDir := "/tmp/kubexm-etcd-archives"
 		remoteEtcdArchivePathOnHost := filepath.Join(remoteTempArchiveDir, filepath.Base(localEtcdArchivePathOnControlNode))
 
-		uploadArchiveStep := commonstep.NewUploadFileStep( // commonstep alias
+		uploadArchiveStep := stepcommon.NewUploadFileStep(
 			fmt.Sprintf("UploadEtcdArchiveTo-%s", etcdHost.GetName()),
 			localEtcdArchivePathOnControlNode, remoteEtcdArchivePathOnHost, "0644", true, false,
 		)
-		uploadArchiveNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{ // Use taskFragment
-			Name:     uploadArchiveStep.Meta().Name, Step: uploadArchiveStep,
-			Hosts:    []connector.Host{etcdHost}, Dependencies: currentHostProcessingDeps,
-		}, plan.NodeID(nodeSpecificPrefix+"upload-archive"))
-		currentHostLastStepID := uploadArchiveNodeID // Update current dependency for this host's chain
+		uploadArchiveNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{
+			Name:         uploadArchiveStep.Meta().Name,
+			Step:         uploadArchiveStep,
+			Hosts:        []connector.Host{etcdHost},
+			Dependencies: currentHostProcessingDeps,
+		})
+		currentHostLastStepID = uploadArchiveNodeID
 
 		// Extract Etcd Archive on this etcdHost
-		etcdExtractDirOnHost := "/opt/kubexm/etcd-extracted" // TODO: Make this configurable
-		extractArchiveStep := commonstep.NewExtractArchiveStep( // commonstep alias
+		etcdExtractDirOnHost := "/opt/kubexm/etcd-extracted"
+		extractArchiveStep := stepcommon.NewExtractArchiveStep(
 			fmt.Sprintf("ExtractEtcdArchiveOn-%s", etcdHost.GetName()),
 			remoteEtcdArchivePathOnHost, etcdExtractDirOnHost,
-			true, // removeArchiveAfterExtract
-			true, // sudo for extraction
+			true, true, // removeArchiveAfterExtract, sudo
 		)
-		extractArchiveNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{ // Use taskFragment
-			Name:     extractArchiveStep.Meta().Name, Step: extractArchiveStep,
-			Hosts:    []connector.Host{etcdHost}, Dependencies: []plan.NodeID{currentHostLastStepID},
-		}, plan.NodeID(nodeSpecificPrefix+"extract-archive"))
+		extractArchiveNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{
+			Name:         extractArchiveStep.Meta().Name,
+			Step:         extractArchiveStep,
+			Hosts:        []connector.Host{etcdHost},
+			Dependencies: []plan.NodeID{currentHostLastStepID},
+		})
 		currentHostLastStepID = extractArchiveNodeID
 
-		// Path to the directory *inside* the extraction that holds etcd/etcdctl binaries
+		// Copy Binaries to System Path
 		pathContainingBinariesOnNode := filepath.Join(etcdExtractDirOnHost, archiveInternalDirName)
-
-		// Copy Binaries to System Path (e.g., /usr/local/bin)
-		// Using CommandSteps for explicit control over copy and chmod.
-		cmdCopyEtcd := fmt.Sprintf("cp -fp %s %s/etcd && chmod +x %s/etcd", filepath.Join(pathContainingBinariesOnNode, "etcd"), common.EtcdDefaultBinDir, common.EtcdDefaultBinDir)
-		cmdCopyEtcdctl := fmt.Sprintf("cp -fp %s %s/etcdctl && chmod +x %s/etcdctl", filepath.Join(pathContainingBinariesOnNode, "etcdctl"), common.EtcdDefaultBinDir, common.EtcdDefaultBinDir)
-
-		copyEtcdNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{ // Use taskFragment
-			Name: fmt.Sprintf("CopyEtcdBinaryOn-%s", etcdHost.GetName()),
-			Step: commonstep.NewCommandStep("", cmdCopyEtcd, true, false, 0, nil, 0, "", false, 0, "", false), // commonstep alias
-			Hosts: []connector.Host{etcdHost}, Dependencies: []plan.NodeID{currentHostLastStepID},
-		}, plan.NodeID(nodeSpecificPrefix+"copy-etcd"))
-
-		copyEtcdctlNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{ // Use taskFragment
-			Name: fmt.Sprintf("CopyEtcdctlBinaryOn-%s", etcdHost.GetName()),
-			Step: commonstep.NewCommandStep("", cmdCopyEtcdctl, true, false, 0, nil, 0, "", false, 0, "", false), // commonstep alias
-			Hosts: []connector.Host{etcdHost}, Dependencies: []plan.NodeID{currentHostLastStepID}, // Can run parallel to etcd copy
-		}, plan.NodeID(nodeSpecificPrefix+"copy-etcdctl"))
-
-		// Next steps depend on both binaries being copied.
-		configAndServiceSetupDeps := []plan.NodeID{copyEtcdNodeID, copyEtcdctlNodeID}
-		// Also ensure PKI certs for this host are in place before generating config that uses them.
-		if foundPkiForHost { // If we successfully identified the last PKI node for this host
-			configAndServiceSetupDeps = append(configAndServiceSetupDeps, thisHostLastPkiNodeID)
-		}
-
+		
+		copyEtcdStep := stepEtcd.NewCopyEtcdBinariesToPathStep(
+			fmt.Sprintf("CopyEtcdBinaryOn-%s", etcdHost.GetName()),
+			pathContainingBinariesOnNode, "/usr/local/bin",
+		)
+		copyEtcdNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{
+			Name:         copyEtcdStep.Meta().Name,
+			Step:         copyEtcdStep,
+			Hosts:        []connector.Host{etcdHost},
+			Dependencies: []plan.NodeID{currentHostLastStepID},
+		})
+		currentHostLastStepID = copyEtcdNodeID
 
 		// Generate etcd.yaml configuration file
-		nodeIP := etcdHost.GetAddress() // TODO: Use internal IP for listen/advertise if available and configured
-		etcdConfigData := etcd.EtcdNodeConfigData{
-			Name:                     etcdHost.GetName(), DataDir: etcdSpec.GetDataDir(),
-			ListenPeerURLs:           fmt.Sprintf("https://%s:%d,https://127.0.0.1:%d", nodeIP, etcdPeerPortResolved, etcdPeerPortResolved),
+		nodeIP := etcdHost.GetAddress()
+		etcdConfigData := stepEtcd.EtcdNodeConfigData{
+			Name:                     etcdHost.GetName(),
+			DataDir:                  "/var/lib/etcd",
+			ListenPeerURLs:           fmt.Sprintf("https://%s:%d,https://127.0.0.1:%d", nodeIP, etcdPeerPort, etcdPeerPort),
 			ListenClientURLs:         fmt.Sprintf("https://%s:%d,https://127.0.0.1:%d", nodeIP, etcdClientPort, etcdClientPort),
-			InitialAdvertisePeerURLs: fmt.Sprintf("https://%s:%d", nodeIP, etcdPeerPortResolved),
+			InitialAdvertisePeerURLs: fmt.Sprintf("https://%s:%d", nodeIP, etcdPeerPort),
 			AdvertiseClientURLs:      fmt.Sprintf("https://%s:%d", nodeIP, etcdClientPort),
-			InitialCluster:           initialClusterString, InitialClusterToken: etcdSpec.ClusterToken,
-			TrustedCAFile:            filepath.Join(common.EtcdDefaultPKIDir, common.CACertFileName), // Use common constants
-			CertFile:                 filepath.Join(common.EtcdDefaultPKIDir, fmt.Sprintf("%s.pem", etcdHost.GetName())),
-			KeyFile:                  filepath.Join(common.EtcdDefaultPKIDir, fmt.Sprintf("%s-key.pem", etcdHost.GetName())),
-			PeerTrustedCAFile:        filepath.Join(common.EtcdDefaultPKIDir, common.CACertFileName), // Use common constants
-			PeerCertFile:             filepath.Join(common.EtcdDefaultPKIDir, fmt.Sprintf("peer-%s.pem", etcdHost.GetName())),
-			PeerKeyFile:              filepath.Join(common.EtcdDefaultPKIDir, fmt.Sprintf("peer-%s-key.pem", etcdHost.GetName())),
-			SnapshotCount:            fmt.Sprintf("%d", etcdSpec.GetSnapshotCount()), // Use getters for defaults
-			AutoCompactionRetention:  fmt.Sprintf("%d", etcdSpec.GetAutoCompactionRetentionHours()),
-			MaxRequestBytes:          fmt.Sprintf("%d", etcdSpec.GetMaxRequestBytes()),
-			QuotaBackendBytes:        fmt.Sprintf("%d", etcdSpec.GetQuotaBackendBytes()),
+			InitialCluster:           initialClusterString,
+			InitialClusterToken:      "etcd-cluster-token",
+			TrustedCAFile:            "/etc/etcd/pki/ca.pem",
+			CertFile:                 fmt.Sprintf("/etc/etcd/pki/%s.pem", etcdHost.GetName()),
+			KeyFile:                  fmt.Sprintf("/etc/etcd/pki/%s-key.pem", etcdHost.GetName()),
+			PeerTrustedCAFile:        "/etc/etcd/pki/ca.pem",
+			PeerCertFile:             fmt.Sprintf("/etc/etcd/pki/peer-%s.pem", etcdHost.GetName()),
+			PeerKeyFile:              fmt.Sprintf("/etc/etcd/pki/peer-%s-key.pem", etcdHost.GetName()),
 		}
-		if i == 0 { etcdConfigData.InitialClusterState = "new" } else { etcdConfigData.InitialClusterState = "existing" }
+		if i == 0 {
+			etcdConfigData.InitialClusterState = "new"
+		} else {
+			etcdConfigData.InitialClusterState = "existing"
+		}
 
-		generateConfigStep := etcdstep.NewGenerateEtcdConfigStep( // etcdstep alias
+		generateConfigStep := stepEtcd.NewGenerateEtcdConfigStep(
 			fmt.Sprintf("GenerateEtcdConfig-%s", etcdHost.GetName()),
-			etcdConfigData, common.EtcdDefaultConfFile, true, // Use common constant for remote path
+			etcdConfigData, "/etc/etcd/etcd.conf.yml", true,
 		)
-		generateConfigNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{ // Use taskFragment
-			Name: generateConfigStep.Meta().Name, Step: generateConfigStep,
-			Hosts: []connector.Host{etcdHost}, Dependencies: configAndServiceSetupDeps,
-		}, plan.NodeID(nodeSpecificPrefix+"generate-config"))
+		generateConfigNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{
+			Name:         generateConfigStep.Meta().Name,
+			Step:         generateConfigStep,
+			Hosts:        []connector.Host{etcdHost},
+			Dependencies: []plan.NodeID{currentHostLastStepID},
+		})
 		currentHostLastStepID = generateConfigNodeID
 
 		// Generate etcd.service systemd file
-		generateServiceStep := etcdstep.NewGenerateEtcdServiceStep( // etcdstep alias
+		generateServiceStep := stepEtcd.NewGenerateEtcdServiceStep(
 			fmt.Sprintf("GenerateEtcdServiceFile-%s", etcdHost.GetName()),
-			// TODO: EtcdServiceData may need more fields if template is complex (e.g. User, Group)
-			etcdstep.EtcdServiceData{ExecStartArgs: "--config-file=" + common.EtcdDefaultConfFile}, // Use common constant
-			common.EtcdDefaultSystemdFile, true, // sudo=true, Use common constant
+			stepEtcd.EtcdServiceData{ExecStartArgs: "--config-file=/etc/etcd/etcd.conf.yml"},
+			"/etc/systemd/system/etcd.service", true,
 		)
-		generateServiceNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{ // Use taskFragment
-			Name: generateServiceStep.Meta().Name, Step: generateServiceStep,
-			Hosts: []connector.Host{etcdHost}, Dependencies: []plan.NodeID{currentHostLastStepID},
-		}, plan.NodeID(nodeSpecificPrefix+"generate-service"))
+		generateServiceNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{
+			Name:         generateServiceStep.Meta().Name,
+			Step:         generateServiceStep,
+			Hosts:        []connector.Host{etcdHost},
+			Dependencies: []plan.NodeID{currentHostLastStepID},
+		})
 		currentHostLastStepID = generateServiceNodeID
 
 		// Systemctl Daemon Reload
-		daemonReloadStep := etcd.NewManageEtcdServiceStep(
+		daemonReloadStep := stepEtcd.NewManageEtcdServiceStep(
 			fmt.Sprintf("DaemonReloadEtcd-%s", etcdHost.GetName()),
-			etcd.ActionDaemonReload, "etcd", true, // sudo=true
+			"daemon-reload", "etcd", true,
 		)
-		daemonReloadNodeID, _ := mainFragment.AddNode(&plan.ExecutionNode{
-			Name: daemonReloadStep.Meta().Name, Step: daemonReloadStep,
-			Hosts: []connector.Host{etcdHost}, Dependencies: []plan.NodeID{currentHostLastStepID},
-		}, plan.NodeID(nodeSpecificPrefix+"daemon-reload"))
+		daemonReloadNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{
+			Name:         daemonReloadStep.Meta().Name,
+			Step:         daemonReloadStep,
+			Hosts:        []connector.Host{etcdHost},
+			Dependencies: []plan.NodeID{currentHostLastStepID},
+		})
 		currentHostLastStepID = daemonReloadNodeID
 
-		// Bootstrap (if first node) or Join (for subsequent nodes)
+		// Start service (first node bootstrap, others join)
 		if i == 0 {
-			bootstrapStep := etcd.NewBootstrapFirstEtcdNodeStep(
+			bootstrapStep := stepEtcd.NewBootstrapFirstEtcdNodeStep(
 				fmt.Sprintf("BootstrapEtcd-%s", etcdHost.GetName()), "etcd", true,
 			)
-			bootstrapNodeID, _ := mainFragment.AddNode(&plan.ExecutionNode{
-				Name: bootstrapStep.Meta().Name, Step: bootstrapStep,
-				Hosts: []connector.Host{etcdHost}, Dependencies: []plan.NodeID{currentHostLastStepID},
-			}, plan.NodeID(nodeSpecificPrefix+"bootstrap"))
+			bootstrapNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{
+				Name:         bootstrapStep.Meta().Name,
+				Step:         bootstrapStep,
+				Hosts:        []connector.Host{etcdHost},
+				Dependencies: []plan.NodeID{currentHostLastStepID},
+			})
 			currentHostLastStepID = bootstrapNodeID
-			firstEtcdNodeBootstrapSuccessNodeID = currentHostLastStepID // Save this for other nodes to depend on
+			firstEtcdNodeBootstrapSuccessNodeID = currentHostLastStepID
 		} else {
 			joinDeps := []plan.NodeID{currentHostLastStepID}
-			if firstEtcdNodeBootstrapSuccessNodeID != "" { // Ensure first node has bootstrapped successfully
+			if firstEtcdNodeBootstrapSuccessNodeID != "" {
 				joinDeps = append(joinDeps, firstEtcdNodeBootstrapSuccessNodeID)
 			}
-			joinStep := etcd.NewJoinEtcdNodeStep(
+			joinStep := stepEtcd.NewJoinEtcdNodeStep(
 				fmt.Sprintf("JoinEtcd-%s", etcdHost.GetName()), "etcd", true,
 			)
-			joinNodeID, _ := mainFragment.AddNode(&plan.ExecutionNode{
-				Name: joinStep.Meta().Name, Step: joinStep,
-				Hosts: []connector.Host{etcdHost}, Dependencies: joinDeps,
-			}, plan.NodeID(nodeSpecificPrefix+"join"))
+			joinNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{
+				Name:         joinStep.Meta().Name,
+				Step:         joinStep,
+				Hosts:        []connector.Host{etcdHost},
+				Dependencies: joinDeps,
+			})
 			currentHostLastStepID = joinNodeID
 		}
 		allEtcdNodeServiceReadyNodeIDs = append(allEtcdNodeServiceReadyNodeIDs, currentHostLastStepID)
 	}
 
-	mainFragment.CalculateEntryAndExitNodes() // Recalculate after all nodes and internal dependencies are added
-	logger.Info("ETCD installation task planning complete.", "total_nodes", len(mainFragment.Nodes))
-	return mainFragment, nil
+	taskFragment.CalculateEntryAndExitNodes()
+	logger.Info("ETCD installation task planning complete.", "total_nodes", len(taskFragment.Nodes))
+	return taskFragment, nil
 }
 
 // Helper function to check if a host name is in a slice of connector.Host

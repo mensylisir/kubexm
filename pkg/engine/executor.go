@@ -11,6 +11,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/logger" // For logger.Logger type
 	"github.com/mensylisir/kubexm/pkg/plan"
+	"github.com/mensylisir/kubexm/pkg/runtime"
 	// runtime.StepContext is no longer used directly, replaced by engine.StepContext from interface.go
 	"github.com/mensylisir/kubexm/pkg/step"
 )
@@ -175,13 +176,8 @@ func (e *dagExecutor) Execute(ctx EngineExecuteContext, g *plan.ExecutionGraph, 
 				for _, host := range node.Hosts {
 					currentHost := host
 					hostGroup.Go(func() error {
-						stepCtxForHost := ctx.ForHost(currentHost) // Returns runtime.StepContext
-
-						// The runtime.StepContext interface needs to be usable with hostCtxGroup for cancellation.
-						// If stepCtxForHost is a *runtime.Context, we can create a new one with the errgroup's context.
-						// Use WithGoContext method from StepContext interface to correctly propagate errgroup's context
-						finalStepCtxForHost := stepCtxForHost.WithGoContext(hostCtxGroup)
-
+						stepCtxForHost := ctx.ForHost(currentHost) 
+						finalStepCtxForHost := stepCtxForHost.WithGoContext(hostCtxGroup.Context())
 						hostRes := e.runStepOnHost(finalStepCtxForHost, node.Step)
 						mu.Lock() // Corrected typo: nodeResLock -> nodeResultsLock
 						nodeRes.HostResults[currentHost.GetName()] = hostRes

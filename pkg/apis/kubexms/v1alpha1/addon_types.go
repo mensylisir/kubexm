@@ -98,7 +98,7 @@ func SetDefaults_AddonConfig(cfg *AddonConfig) {
 }
 
 // Validate_AddonConfig validates AddonConfig.
-func Validate_AddonConfig(cfg *AddonConfig, verrs *validation.ValidationErrors, pathPrefix string) {
+func Validate_AddonConfig(cfg *AddonConfig, verrs *ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return // Should not happen if called from a loop over an initialized slice
 	}
@@ -146,7 +146,7 @@ func Validate_AddonConfig(cfg *AddonConfig, verrs *validation.ValidationErrors, 
 
 		for i, val := range chart.Values {
 			if !strings.Contains(val, "=") {
-				verrs.Add(fmt.Sprintf("%s.values[%d]", csPath, i), fmt.Sprintf("invalid format '%s', expected key=value", val))
+				verrs.Add(fmt.Sprintf("%s.values[%d]: invalid format '%s', expected key=value", csPath, i, val))
 			}
 		}
 	}
@@ -159,7 +159,7 @@ func Validate_AddonConfig(cfg *AddonConfig, verrs *validation.ValidationErrors, 
 		}
 		for i, p := range yamlSource.Path {
 			if strings.TrimSpace(p) == "" {
-				verrs.Add(fmt.Sprintf("%s.path[%d]", ysPath, i), "path/URL cannot be empty")
+				verrs.Add(fmt.Sprintf("%s.path[%d]: path/URL cannot be empty", ysPath, i))
 			}
 			// Basic check for http/https or local path (does not check existence)
 			// This check is indicative and not exhaustive.
@@ -175,13 +175,13 @@ func Validate_AddonConfig(cfg *AddonConfig, verrs *validation.ValidationErrors, 
 	}
 
 	if cfg.Retries != nil && *cfg.Retries < 0 {
-		verrs.Add(pathPrefix+".retries", fmt.Sprintf("cannot be negative, got %d", *cfg.Retries))
+		verrs.Add(pathPrefix+".retries: cannot be negative")
 	}
 	if cfg.Delay != nil && *cfg.Delay < 0 {
-		verrs.Add(pathPrefix+".delay", fmt.Sprintf("cannot be negative, got %d", *cfg.Delay))
+		verrs.Add(pathPrefix+".delay: cannot be negative")
 	}
 
 	if cfg.TimeoutSeconds != nil && *cfg.TimeoutSeconds < 0 {
-		verrs.Add(pathPrefix+".timeoutSeconds", fmt.Sprintf("cannot be negative, got %d", *cfg.TimeoutSeconds))
+		verrs.Add(pathPrefix+".timeoutSeconds: cannot be negative")
 	}
 }

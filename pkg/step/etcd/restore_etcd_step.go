@@ -67,7 +67,7 @@ func (s *RestoreEtcdStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *RestoreEtcdStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *RestoreEtcdStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -110,7 +110,7 @@ func (s *RestoreEtcdStep) Precheck(ctx runtime.StepContext, host connector.Host)
 	return false, nil // Proceed with restore
 }
 
-func (s *RestoreEtcdStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *RestoreEtcdStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -171,7 +171,7 @@ func (s *RestoreEtcdStep) Run(ctx runtime.StepContext, host connector.Host) erro
 	return nil
 }
 
-func (s *RestoreEtcdStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *RestoreEtcdStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	// Rollback for a restore operation could mean deleting the NewDataDir if the restore failed
 	// or if subsequent steps in a larger restore task failed.
