@@ -16,7 +16,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/config" // For config.ParseFromFile
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/engine"
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/runner"
 	"github.com/mensylisir/kubexm/pkg/util"
@@ -61,8 +60,7 @@ func NewRuntimeBuilderFromConfig(cfg *v1alpha1.Cluster, runnerSvc runner.Runner,
 
 // Build constructs the full runtime Context.
 // It initializes services, connects to hosts, gathers facts, and sets up working directories.
-// The engineInst is the pre-initialized DAG execution engine.
-func (b *RuntimeBuilder) Build(ctx context.Context, engineInst engine.Engine) (*Context, func(), error) {
+func (b *RuntimeBuilder) Build(ctx context.Context) (*Context, func(), error) {
 	log := logger.Get() // Use a base logger for initial setup messages
 
 	var currentClusterConfig *v1alpha1.Cluster
@@ -89,24 +87,21 @@ func (b *RuntimeBuilder) Build(ctx context.Context, engineInst engine.Engine) (*
 		return nil, nil, fmt.Errorf("RuntimeBuilder: either configFilepath or clusterConfig must be provided")
 	}
 
-	if engineInst == nil {
-		return nil, nil, fmt.Errorf("engine instance cannot be nil when building runtime context")
-	}
-
-	// Initialize core services
-	//runnerSvc := runner.New() // Stateless runner service
-	//connectionPool := connector.NewConnectionPool(connector.DefaultPoolConfig())
 	cleanupFunc := func() {
 		log.Info("Shutting down connection pool...")
 		b.connectionPool.Shutdown()
-		// Add any other global cleanup tasks here
 	}
+
+	// Initialize caches with proper hierarchy
+	pipelineCache := cache.NewPipelineCache()
+	moduleCache := cache.NewModuleCache(pipelineCache)
+	taskCache := cache.NewTaskCache(moduleCache)
+	stepCache := cache.NewStepCache(taskCache)
 
 	// Prepare the main Context structure
 	runtimeCtx := &Context{
 		GoCtx:  ctx,
 		Logger: log,
-		Engine: engineInst,
 		Runner: b.runnerSvc,
 		// Recorder will be initialized below
 		ClusterConfig: currentClusterConfig,
@@ -116,10 +111,10 @@ func (b *RuntimeBuilder) Build(ctx context.Context, engineInst engine.Engine) (*
 		GlobalIgnoreErr:         currentClusterConfig.Spec.Global.IgnoreErr,
 		GlobalConnectionTimeout: currentClusterConfig.Spec.Global.ConnectionTimeout,
 		// Initialize caches
-		PipelineCache:  cache.NewPipelineCache(),
-		ModuleCache:    cache.NewModuleCache(),
-		TaskCache:      cache.NewTaskCache(),
-		StepCache:      cache.NewStepCache(),
+		PipelineCache:  pipelineCache,
+		ModuleCache:    moduleCache,
+		TaskCache:      taskCache,
+		StepCache:      stepCache,
 		ConnectionPool: b.connectionPool, // Assign created pool to context
 	}
 	if runtimeCtx.GlobalConnectionTimeout <= 0 { // Ensure a sensible default

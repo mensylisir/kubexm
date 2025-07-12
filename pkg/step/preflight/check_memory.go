@@ -8,7 +8,6 @@ import (
 	// "time" // No longer needed
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec" // Added for StepMeta
 	"github.com/mensylisir/kubexm/pkg/step"
 )
@@ -43,7 +42,7 @@ func (s *CheckMemoryStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *CheckMemoryStep) determineActualMemoryMB(ctx runtime.StepContext, host connector.Host) (uint64, error) {
+func (s *CheckMemoryStep) determineActualMemoryMB(ctx step.StepContext, host connector.Host) (uint64, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName())
 
 	facts, errFacts := ctx.GetHostFacts(host)
@@ -106,7 +105,7 @@ func (s *CheckMemoryStep) determineActualMemoryMB(ctx runtime.StepContext, host 
 	return calculatedMemoryMB, nil
 }
 
-func (s *CheckMemoryStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *CheckMemoryStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 
 	if host == nil {
@@ -136,7 +135,7 @@ func (s *CheckMemoryStep) Precheck(ctx runtime.StepContext, host connector.Host)
 	return false, nil
 }
 
-func (s *CheckMemoryStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *CheckMemoryStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 
 	if s.checkError != nil {
@@ -154,11 +153,7 @@ func (s *CheckMemoryStep) Run(ctx runtime.StepContext, host connector.Host) erro
 	return fmt.Errorf("host has %d MB memory, but minimum requirement is %d MB for step %s on host %s", s.actualMemoryMB, s.MinMemoryMB, s.meta.Name, host.GetName())
 }
 
-func (s *CheckMemoryStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
-	return nil
-}
-
-func (s *CheckMemoryStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *CheckMemoryStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	// No action to rollback for a check-only step.
 	return nil
 }

@@ -3,11 +3,9 @@ package pki
 import (
 	"fmt"
 	"path/filepath"
-	// "time" // No longer used
 
-	"github.com/mensylisir/kubexm/pkg/connector" // Keep for host parameter in interface methods
-	"github.com/mensylisir/kubexm/pkg/runtime"   // For runtime.StepContext
-	"github.com/mensylisir/kubexm/pkg/spec"    // Added for StepMeta
+	"github.com/mensylisir/kubexm/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 
@@ -79,7 +77,7 @@ func (s *SetupEtcdPkiDataContextStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *SetupEtcdPkiDataContextStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *SetupEtcdPkiDataContextStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name)
 	if host != nil {
 		logger = logger.With("host", host.GetName())
@@ -90,7 +88,7 @@ func (s *SetupEtcdPkiDataContextStep) Precheck(ctx runtime.StepContext, host con
 	return false, nil
 }
 
-func (s *SetupEtcdPkiDataContextStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *SetupEtcdPkiDataContextStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name)
 	if host != nil {
 		logger = logger.With("host", host.GetName())
@@ -106,20 +104,20 @@ func (s *SetupEtcdPkiDataContextStep) Run(ctx runtime.StepContext, host connecto
 
 	etcdSpecificPkiPath := filepath.Join(s.KubeConfToCache.PKIDirectory, s.EtcdSpecificSubPath)
 
-	ctx.ModuleCache().Set(s.KubeConfOutputKey, s.KubeConfToCache)
+	ctx.GetModuleCache().Set(s.KubeConfOutputKey, s.KubeConfToCache)
 	logger.Info("Stored KubeConf (PKI stub) in module cache.", "key", s.KubeConfOutputKey)
 
-	ctx.ModuleCache().Set(s.HostsOutputKey, s.HostsToCache)
+	ctx.GetModuleCache().Set(s.HostsOutputKey, s.HostsToCache)
 	logger.Info("Stored HostSpecForPKI list in module cache.", "key", s.HostsOutputKey)
 
-	ctx.ModuleCache().Set(s.EtcdPkiPathOutputKey, etcdSpecificPkiPath)
+	ctx.GetModuleCache().Set(s.EtcdPkiPathOutputKey, etcdSpecificPkiPath)
 	logger.Info("Derived and stored etcd-specific PKI path in module cache.", "key", s.EtcdPkiPathOutputKey, "path", etcdSpecificPkiPath)
 
 	logger.Info("Etcd PKI data context successfully populated into module cache.")
 	return nil
 }
 
-func (s *SetupEtcdPkiDataContextStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *SetupEtcdPkiDataContextStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name)
 	if host != nil {
 		logger = logger.With("host", host.GetName())
@@ -131,9 +129,9 @@ func (s *SetupEtcdPkiDataContextStep) Rollback(ctx runtime.StepContext, host con
 		"hostsKey", s.HostsOutputKey,
 		"etcdPkiPathKey", s.EtcdPkiPathOutputKey)
 
-	ctx.ModuleCache().Delete(s.KubeConfOutputKey)
-	ctx.ModuleCache().Delete(s.HostsOutputKey)
-	ctx.ModuleCache().Delete(s.EtcdPkiPathOutputKey)
+	ctx.GetModuleCache().Delete(s.KubeConfOutputKey)
+	ctx.GetModuleCache().Delete(s.HostsOutputKey)
+	ctx.GetModuleCache().Delete(s.EtcdPkiPathOutputKey)
 	logger.Info("Rollback for SetupEtcdPkiDataContextStep: Cleared ModuleCache keys.")
 	return nil
 }

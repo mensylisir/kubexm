@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/mensylisir/kubexm/pkg/util/validation"
 	"github.com/mensylisir/kubexm/pkg/util" // Added import
 )
 
@@ -58,14 +57,14 @@ func TestValidate_HAProxyConfig(t *testing.T) {
 		BackendServers:      []HAProxyBackendServer{validServer},
 		SkipInstall:         util.BoolPtr(false),
 	}
-	verrs := &validation.ValidationErrors{}
+	verrs := &ValidationErrors{}
 	Validate_HAProxyConfig(&validCfg, verrs, "haproxy")
 	if verrs.HasErrors() { // Corrected: Should be HasErrors() and expect NO error for validCfg
 		t.Errorf("Validation failed for valid config: %v", verrs.Error())
 	}
 
 	skipInstallCfg := HAProxyConfig{SkipInstall: util.BoolPtr(true)}
-	verrsSkip := &validation.ValidationErrors{}
+	verrsSkip := &ValidationErrors{}
 	Validate_HAProxyConfig(&skipInstallCfg, verrsSkip, "haproxy")
 	if verrsSkip.HasErrors() { // Updated to use HasErrors()
 		t.Errorf("Validation should pass (mostly skipped) if SkipInstall is true: %v", verrsSkip.Error()) // Updated to use Error()
@@ -98,7 +97,7 @@ func TestValidate_HAProxyConfig(t *testing.T) {
 			}
 
 			SetDefaults_HAProxyConfig(&tt.cfg)
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			Validate_HAProxyConfig(&tt.cfg, verrs, "haproxy")
 
 			assert.True(t, verrs.HasErrors(), "Expected error for %s, got none", tt.name) // Updated

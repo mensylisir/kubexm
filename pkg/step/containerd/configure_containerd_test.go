@@ -19,7 +19,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/runner"
-	"github.com/mensylisir/kubexm/pkg/runtime" // For runtime.Context full
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 

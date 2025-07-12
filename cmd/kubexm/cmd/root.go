@@ -1,15 +1,12 @@
 package cmd
 
 import (
-	"github.com/mensylisir/kubexm/cmd/kubexm/cmd/certs"   // Import the certs package
-	"github.com/mensylisir/kubexm/cmd/kubexm/cmd/cluster" // Import the cluster package
-	"github.com/mensylisir/kubexm/cmd/kubexm/cmd/config"  // Import the config package
-	"github.com/mensylisir/kubexm/cmd/kubexm/cmd/node"    // Import the node package
+	"github.com/mensylisir/kubexm/cmd/kubexm/cmd/certs"
+	"github.com/mensylisir/kubexm/cmd/kubexm/cmd/cluster"
+	"github.com/mensylisir/kubexm/cmd/kubexm/cmd/config"
+	"github.com/mensylisir/kubexm/cmd/kubexm/cmd/node"
+	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/spf13/cobra"
-	// Homedir will be needed if we add config file handling later
-	// homedir "github.com/mitchellh/go-homedir"
-	// Viper will be needed for config file handling
-	// "github.com/spf13/viper"
 )
 
 var (

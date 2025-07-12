@@ -5,7 +5,6 @@ import (
 
 	"github.com/mensylisir/kubexm/pkg/common" // Added import
 	"github.com/mensylisir/kubexm/pkg/util"
-	"github.com/mensylisir/kubexm/pkg/util/validation"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -360,7 +359,7 @@ func TestValidate_ContainerRuntimeConfig(t *testing.T) {
 				inputToTest = nil
 			}
 
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			Validate_ContainerRuntimeConfig(inputToTest, verrs, "spec.containerRuntime")
 
 			if tt.expectError {

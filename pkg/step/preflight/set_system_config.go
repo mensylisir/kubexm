@@ -7,7 +7,6 @@ import (
 	"time" // For timestamp in config file
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec" // Added for StepMeta
 	"github.com/mensylisir/kubexm/pkg/step"
 )
@@ -62,7 +61,7 @@ func (s *SetSystemConfigStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *SetSystemConfigStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *SetSystemConfigStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	if host == nil {
 		return false, fmt.Errorf("host is nil in Precheck for %s", s.meta.Name)
@@ -82,7 +81,7 @@ func (s *SetSystemConfigStep) Precheck(ctx runtime.StepContext, host connector.H
 	for key, expectedValue := range s.Params {
 		cmd := fmt.Sprintf("sysctl -n %s", key)
 		// Sudo typically not needed to read sysctl values.
-		stdoutBytes, stderrBytes, execErr := runnerSvc.RunWithOptions(ctx.GoContext(), conn, cmd, &connector.ExecOptions{Sudo: false, Check: true})
+		stdoutBytes, stderrBytes, execErr := runnerSvc.RunWithOptions(ctx.GoContext(), conn, cmd, &connector.ExecOptions{Sudo: false})
 		if execErr != nil {
 			logger.Warn("Failed to read current value of sysctl key, assuming not set as expected.", "key", key, "error", execErr, "stderr", string(stderrBytes))
 			return false, nil
@@ -97,7 +96,7 @@ func (s *SetSystemConfigStep) Precheck(ctx runtime.StepContext, host connector.H
 	return true, nil
 }
 
-func (s *SetSystemConfigStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *SetSystemConfigStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	if host == nil {
 		return fmt.Errorf("host is nil in Run for %s", s.meta.Name)
@@ -161,7 +160,7 @@ func (s *SetSystemConfigStep) Run(ctx runtime.StepContext, host connector.Host) 
 	return nil
 }
 
-func (s *SetSystemConfigStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *SetSystemConfigStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	if host == nil {
 		return fmt.Errorf("host is nil in Rollback for %s", s.meta.Name)

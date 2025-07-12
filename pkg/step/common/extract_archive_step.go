@@ -10,8 +10,9 @@ import (
 	"strings"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/spec"
-	"github.com/mensylisir/kubexm/pkg/step" // For step.Step and step.StepContext
+	"github.com/mensylisir/kubexm/pkg/step"
 )
 
 // ExtractArchiveStep extracts an archive (e.g., .tar.gz) to a specified directory.
@@ -297,28 +298,6 @@ func (s *ExtractArchiveStep) Rollback(ctx step.StepContext, host connector.Host)
 		}
 	}
 
-	return nil
-}
-
-func (s *ExtractArchiveStep) Rollback(ctx step.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
-	// Rolling back an extraction means removing the DestinationDir.
-	// This could be destructive if other files were in DestinationDir not from this archive.
-	// A safer rollback might involve tracking all created files/dirs, which is complex.
-	// For now, remove DestinationDir if it seems to have been created by this step.
-	// (This is a best-effort, potentially risky rollback).
-	logger.Info("Attempting to remove destination directory for rollback (best-effort).", "path", s.DestinationDir)
-	err := os.RemoveAll(s.DestinationDir) // Use RemoveAll for directories
-	if err != nil {
-		logger.Error(err, "Failed to remove destination directory during rollback.", "path", s.DestinationDir)
-		return fmt.Errorf("failed to remove %s during rollback: %w", s.DestinationDir, err)
-	}
-	logger.Info("Destination directory removed or was not present.", "path", s.DestinationDir)
-
-	// If archive was removed, there's no simple way to restore it without re-downloading.
-	if s.RemoveArchiveAfterExtract {
-		logger.Warn("Source archive was removed after extraction. Cannot restore it on rollback.", "path", s.SourceArchivePath)
-	}
 	return nil
 }
 

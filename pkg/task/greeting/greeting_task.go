@@ -21,19 +21,28 @@ Welcome to KubeXM - Kubernetes Xtreme Manager!
 
 // GreetingTask displays a welcome logo/message.
 type GreetingTask struct {
-	task.BaseTask
+	name        string
+	description string
 	LogoMessage string
 }
 
 // NewGreetingTask creates a new GreetingTask.
 func NewGreetingTask() task.Task {
 	return &GreetingTask{
-		BaseTask: task.BaseTask{ // Assuming BaseTask constructor or direct field setting
-			TaskName: "DisplayWelcomeGreeting",
-			TaskDesc: "Displays a welcome logo and message to the user.",
-		},
+		name:        "DisplayWelcomeGreeting",
+		description: "Displays a welcome logo and message to the user.",
 		LogoMessage: DefaultLogo,
 	}
+}
+
+// Name returns the task name.
+func (t *GreetingTask) Name() string {
+	return t.name
+}
+
+// Description returns the task description.
+func (t *GreetingTask) Description() string {
+	return t.description
 }
 
 // IsRequired for GreetingTask is always true as it's a cosmetic step.

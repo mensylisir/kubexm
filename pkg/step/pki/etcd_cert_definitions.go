@@ -3,8 +3,6 @@ package pki
 import (
 	"crypto/x509"
 	"fmt"
-	"net"
-	"strings"
 
 	certutil "k8s.io/client-go/util/cert"
 	// netutils "k8s.io/utils/net" // Not directly used in this file's definitions, but GenerateEtcdAltNamesStep uses it.

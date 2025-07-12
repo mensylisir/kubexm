@@ -2,12 +2,9 @@ package pki
 
 import (
 	"fmt"
-	// "path/filepath" // Not strictly needed if path is taken as is
-	// "time" // No longer needed for step.Result
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
-	"github.com/mensylisir/kubexm/pkg/spec" // Added for StepMeta
+	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 
@@ -55,10 +52,10 @@ func (s *DetermineEtcdPKIPathStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *DetermineEtcdPKIPathStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *DetermineEtcdPKIPathStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 
-	pkiPathVal, pathOk := ctx.ModuleCache().Get(s.PKIPathToEnsureSharedDataKey)
+	pkiPathVal, pathOk := ctx.GetModuleCache().Get(s.PKIPathToEnsureSharedDataKey)
 	if !pathOk {
 		logger.Debug("Etcd PKI path not found in Module Cache. Path determination/setup likely pending. Run will attempt.", "key", s.PKIPathToEnsureSharedDataKey)
 		return false, nil
@@ -86,7 +83,7 @@ func (s *DetermineEtcdPKIPathStep) Precheck(ctx runtime.StepContext, host connec
 	}
 	logger.Debug("Etcd PKI path exists on disk.", "path", pkiPath)
 
-	if val, taskCacheExists := ctx.TaskCache().Get(s.OutputPKIPathSharedDataKey); taskCacheExists {
+	if val, taskCacheExists := ctx.GetTaskCache().Get(s.OutputPKIPathSharedDataKey); taskCacheExists {
 		if storedPath, okStr := val.(string); okStr && storedPath == pkiPath {
 			logger.Info("Etcd PKI path already available in Task Cache and matches.", "path", pkiPath)
 			return true, nil
@@ -98,10 +95,10 @@ func (s *DetermineEtcdPKIPathStep) Precheck(ctx runtime.StepContext, host connec
 	return false, nil
 }
 
-func (s *DetermineEtcdPKIPathStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *DetermineEtcdPKIPathStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 
-	pkiPathVal, pathOk := ctx.ModuleCache().Get(s.PKIPathToEnsureSharedDataKey)
+	pkiPathVal, pathOk := ctx.GetModuleCache().Get(s.PKIPathToEnsureSharedDataKey)
 	if !pathOk {
 		return fmt.Errorf("etcd PKI path not found in Module Cache using key '%s' for step %s on host %s. Ensure a prior step (like SetupEtcdPkiDataContextStep) sets this value in ModuleCache", s.PKIPathToEnsureSharedDataKey, s.meta.Name, host.GetName())
 	}
@@ -122,16 +119,16 @@ func (s *DetermineEtcdPKIPathStep) Run(ctx runtime.StepContext, host connector.H
 	}
 	logger.Info("Etcd PKI directory ensured.", "path", pkiPath)
 
-	ctx.TaskCache().Set(s.OutputPKIPathSharedDataKey, pkiPath)
+	ctx.GetTaskCache().Set(s.OutputPKIPathSharedDataKey, pkiPath)
 	logger.Info("Stored etcd PKI path in Task Cache.", "key", s.OutputPKIPathSharedDataKey, "path", pkiPath)
 	return nil
 }
 
-func (s *DetermineEtcdPKIPathStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *DetermineEtcdPKIPathStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 
 	logger.Info("Attempting to remove TaskCache key for etcd PKI path.", "key", s.OutputPKIPathSharedDataKey)
-	ctx.TaskCache().Delete(s.OutputPKIPathSharedDataKey)
+	ctx.GetTaskCache().Delete(s.OutputPKIPathSharedDataKey)
 	logger.Info("Rollback for DetermineEtcdPKIPathStep: Cleared TaskCache key.", "key", s.OutputPKIPathSharedDataKey)
 	return nil
 }

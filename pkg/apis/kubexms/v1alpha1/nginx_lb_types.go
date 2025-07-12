@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"github.com/mensylisir/kubexm/pkg/util"
-	"github.com/mensylisir/kubexm/pkg/util/validation"
 	"github.com/mensylisir/kubexm/pkg/common"
 )
 
@@ -79,7 +78,7 @@ func SetDefaults_NginxLBConfig(cfg *NginxLBConfig) {
 }
 
 // Validate_NginxLBConfig validates NginxLBConfig.
-func Validate_NginxLBConfig(cfg *NginxLBConfig, verrs *validation.ValidationErrors, pathPrefix string) {
+func Validate_NginxLBConfig(cfg *NginxLBConfig, verrs *ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
@@ -89,64 +88,64 @@ func Validate_NginxLBConfig(cfg *NginxLBConfig, verrs *validation.ValidationErro
 
 	if cfg.ListenAddress != nil {
 		if strings.TrimSpace(*cfg.ListenAddress) == "" {
-			verrs.Add(pathPrefix+".listenAddress", "cannot be empty if specified")
+			verrs.Add(pathPrefix+".listenAddress: cannot be empty if specified")
 		} else if net.ParseIP(*cfg.ListenAddress) == nil && *cfg.ListenAddress != "0.0.0.0" && *cfg.ListenAddress != "::" {
-			verrs.Add(pathPrefix+".listenAddress", fmt.Sprintf("invalid IP address format '%s'", *cfg.ListenAddress))
+			verrs.Add(pathPrefix + ".listenAddress: invalid IP address format '" + *cfg.ListenAddress + "'")
 		}
 	}
 	// ListenAddress can be nil, allowing Nginx to use its own default binding.
 
 	if cfg.ListenPort == nil { // Should be set by defaults
-		verrs.Add(pathPrefix+".listenPort", "is required and should have a default value")
+		verrs.Add(pathPrefix+".listenPort: is required and should have a default value")
 	} else if *cfg.ListenPort <= 0 || *cfg.ListenPort > 65535 {
-		verrs.Add(pathPrefix+".listenPort", fmt.Sprintf("invalid port %d", *cfg.ListenPort))
+		verrs.Add(pathPrefix + ".listenPort: invalid port " + fmt.Sprintf("%d", *cfg.ListenPort))
 	}
 
 	if cfg.Mode == nil { // Should be set by defaults
-		verrs.Add(pathPrefix+".mode", "is required and should have a default value 'tcp'")
+		verrs.Add(pathPrefix+".mode: is required and should have a default value 'tcp'")
 	} else if *cfg.Mode != "" { // Validate only if user provided a non-empty value
 	   if !util.ContainsString(validNginxLBModes, *cfg.Mode) {
-		   verrs.Add(pathPrefix+".mode", fmt.Sprintf("invalid mode '%s', must be one of %v", *cfg.Mode, validNginxLBModes))
+		   verrs.Add(pathPrefix + ".mode: invalid mode '" + *cfg.Mode + "', must be one of " + fmt.Sprintf("%v", validNginxLBModes))
 	   }
 	}
 
 	if cfg.BalanceAlgorithm == nil { // Should be set by defaults
-		verrs.Add(pathPrefix+".balanceAlgorithm", "is required and should have a default value 'round_robin'")
+		verrs.Add(pathPrefix+".balanceAlgorithm: is required and should have a default value 'round_robin'")
 	} else if *cfg.BalanceAlgorithm != "" { // Validate only if user provided a non-empty value
 		// Nginx's default is round_robin for stream, and various for http depending on context.
 		// For simplicity, we list common ones. If empty, Nginx will use its internal default.
 		if !util.ContainsString(validNginxLBAlgorithms, *cfg.BalanceAlgorithm) {
-			verrs.Add(pathPrefix+".balanceAlgorithm", fmt.Sprintf("invalid algorithm '%s', must be one of %v or empty for Nginx default", *cfg.BalanceAlgorithm, validNginxLBAlgorithms))
+			verrs.Add(pathPrefix + ".balanceAlgorithm: invalid algorithm '" + *cfg.BalanceAlgorithm + "', must be one of " + fmt.Sprintf("%v", validNginxLBAlgorithms) + " or empty for Nginx default")
 		}
 	}
 
 	if len(cfg.UpstreamServers) == 0 {
-		verrs.Add(pathPrefix+".upstreamServers", "must specify at least one upstream server")
+		verrs.Add(pathPrefix+".upstreamServers: must specify at least one upstream server")
 	}
 	for i, server := range cfg.UpstreamServers {
 		serverPath := fmt.Sprintf("%s.upstreamServers[%d]", pathPrefix, i)
 		if strings.TrimSpace(server.Address) == "" {
-			verrs.Add(serverPath+".address", "upstream server address cannot be empty")
+			verrs.Add(serverPath+".address: upstream server address cannot be empty")
 		} else {
 			host, portStr, err := net.SplitHostPort(server.Address)
 			if err != nil {
-				verrs.Add(serverPath+".address", fmt.Sprintf("upstream server address '%s' must be in 'host:port' format", server.Address))
+				verrs.Add(serverPath + ".address: upstream server address '" + server.Address + "' must be in 'host:port' format")
 			} else {
 				if strings.TrimSpace(host) == "" {
-					verrs.Add(serverPath+".address", fmt.Sprintf("host part of upstream server address '%s' cannot be empty", server.Address))
+					verrs.Add(serverPath + ".address: host part of upstream server address '" + server.Address + "' cannot be empty")
 				} else if !util.IsValidIP(host) && !util.IsValidDomainName(host) {
-					verrs.Add(serverPath+".address", fmt.Sprintf("host part '%s' of upstream server address '%s' is not a valid host or IP", host, server.Address))
+					verrs.Add(serverPath + ".address: host part '" + host + "' of upstream server address '" + server.Address + "' is not a valid host or IP")
 				}
 				if port, errConv := strconv.Atoi(portStr); errConv != nil || port <= 0 || port > 65535 {
-					verrs.Add(serverPath+".address", fmt.Sprintf("port part '%s' of upstream server address '%s' is not a valid port number", portStr, server.Address))
+					verrs.Add(serverPath + ".address: port part '" + portStr + "' of upstream server address '" + server.Address + "' is not a valid port number")
 				}
 			}
 		}
 		if server.Weight != nil && *server.Weight < 0 {
-			verrs.Add(serverPath+".weight", fmt.Sprintf("cannot be negative, got %d", *server.Weight))
+			verrs.Add(serverPath + ".weight: cannot be negative")
 		}
 	}
 	if cfg.ConfigFilePath != nil && strings.TrimSpace(*cfg.ConfigFilePath) == "" {
-	   verrs.Add(pathPrefix+".configFilePath", "cannot be empty if specified")
+	   verrs.Add(pathPrefix+".configFilePath: cannot be empty if specified")
 	}
 }

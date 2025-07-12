@@ -42,7 +42,7 @@ func (s *KubectlApplyStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *KubectlApplyStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *KubectlApplyStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	// Precheck could try to see if resources defined in the manifest already exist and match.
 	// This is complex and often not done for a simple apply step.
 	// For now, assume the apply is idempotent or the desired state should always be enforced.
@@ -51,7 +51,7 @@ func (s *KubectlApplyStep) Precheck(ctx runtime.StepContext, host connector.Host
 	return false, nil
 }
 
-func (s *KubectlApplyStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *KubectlApplyStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName())
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -86,7 +86,7 @@ func (s *KubectlApplyStep) Run(ctx runtime.StepContext, host connector.Host) err
 	return nil
 }
 
-func (s *KubectlApplyStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *KubectlApplyStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName())
 	// Rollback for 'kubectl apply' could be 'kubectl delete -f <manifest>', but this can be risky
 	// if the manifest created shared resources or if the "previous" state is unknown.

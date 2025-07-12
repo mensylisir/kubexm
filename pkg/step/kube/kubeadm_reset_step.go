@@ -43,7 +43,7 @@ func (s *KubeadmResetStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *KubeadmResetStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *KubeadmResetStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	// Precheck for reset is tricky. If the node is not part of a cluster, reset might not do much or error.
 	// If it is part of a cluster, reset is a destructive action.
@@ -54,7 +54,7 @@ func (s *KubeadmResetStep) Precheck(ctx runtime.StepContext, host connector.Host
 	return false, nil
 }
 
-func (s *KubeadmResetStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *KubeadmResetStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -96,7 +96,7 @@ func (s *KubeadmResetStep) Run(ctx runtime.StepContext, host connector.Host) err
 	return nil
 }
 
-func (s *KubeadmResetStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *KubeadmResetStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	logger.Warn("Rollback for KubeadmResetStep is not applicable (would mean re-initializing the node).")
 	return nil

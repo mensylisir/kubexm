@@ -45,7 +45,7 @@ type RemoteBinaryHandle struct {
 // binaryNameInArchive is the name of the *specific target binary* within the archive,
 // or the name of the binary itself if it's not an archive.
 func NewRemoteBinaryHandle(
-	ctx runtime.TaskContext, // Needed for GetBinaryInfo (workDir, clusterName) and logger
+	ctx task.TaskContext, // Needed for GetBinaryInfo (workDir, clusterName) and logger
 	componentName, version, arch, osName, binaryNameInArchive string,
 	expectedChecksum, checksumAlgo string,
 ) (Handle, error) {
@@ -144,7 +144,7 @@ func (h *RemoteBinaryHandle) ID() string {
 
 // Path returns the expected local path of the target binary on the control node
 // after it has been successfully acquired and prepared.
-func (h *RemoteBinaryHandle) Path(ctx runtime.TaskContext) (string, error) {
+func (h *RemoteBinaryHandle) Path(ctx task.TaskContext) (string, error) {
 	if h.binaryInfo == nil {
 		return "", fmt.Errorf("binaryInfo not initialized for RemoteBinaryHandle %s, call NewRemoteBinaryHandle first", h.ComponentName)
 	}
@@ -169,7 +169,7 @@ func (h *RemoteBinaryHandle) Path(ctx runtime.TaskContext) (string, error) {
 // EnsurePlan generates an ExecutionFragment to download and (if necessary) extract the binary,
 // making the target binary available at the path returned by h.Path().
 // Steps are planned to run on the local control node.
-func (h *RemoteBinaryHandle) EnsurePlan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
+func (h *RemoteBinaryHandle) EnsurePlan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("resource_id", h.ID(), "component", h.ComponentName)
 	logger.Info("Planning resource assurance for remote binary...")
 

@@ -48,13 +48,13 @@ func (s *VerifyDockerCrictlStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *VerifyDockerCrictlStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *VerifyDockerCrictlStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	logger.Info("Verification step will always run if scheduled, precheck returns false.")
 	return false, nil
 }
 
-func (s *VerifyDockerCrictlStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *VerifyDockerCrictlStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -95,7 +95,7 @@ func (s *VerifyDockerCrictlStep) Run(ctx runtime.StepContext, host connector.Hos
 	return nil
 }
 
-func (s *VerifyDockerCrictlStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *VerifyDockerCrictlStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	logger.Info("Rollback for VerifyDockerCrictlStep is not applicable.")
 	return nil

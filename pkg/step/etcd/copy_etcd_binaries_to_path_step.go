@@ -54,7 +54,7 @@ func (s *CopyEtcdBinariesToPathStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *CopyEtcdBinariesToPathStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *CopyEtcdBinariesToPathStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 
 	runnerSvc := ctx.GetRunner()
@@ -120,7 +120,7 @@ func (s *CopyEtcdBinariesToPathStep) Precheck(ctx runtime.StepContext, host conn
 	return true, nil
 }
 
-func (s *CopyEtcdBinariesToPathStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *CopyEtcdBinariesToPathStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 
 	extractedDirVal, found := ctx.TaskCache().Get(s.ExtractedDirCacheKey)
@@ -186,7 +186,7 @@ func (s *CopyEtcdBinariesToPathStep) Run(ctx runtime.StepContext, host connector
 	return nil
 }
 
-func (s *CopyEtcdBinariesToPathStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *CopyEtcdBinariesToPathStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 
 	if s.TargetDir == "" {

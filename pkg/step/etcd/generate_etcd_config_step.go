@@ -103,7 +103,7 @@ func (s *GenerateEtcdConfigStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *GenerateEtcdConfigStep) getConfigDataForHost(ctx runtime.StepContext, host connector.Host) (*EtcdNodeConfigData, error) {
+func (s *GenerateEtcdConfigStep) getConfigDataForHost(ctx step.StepContext, host connector.Host) (*EtcdNodeConfigData, error) {
 	if s.ConfigDataCacheKey != "" {
 		configVal, found := ctx.TaskCache().Get(s.ConfigDataCacheKey) // Or a host-specific key: fmt.Sprintf("%s.%s", s.ConfigDataCacheKey, host.GetName())
 		if !found {
@@ -123,7 +123,7 @@ func (s *GenerateEtcdConfigStep) getConfigDataForHost(ctx runtime.StepContext, h
 	return &s.ConfigData, nil
 }
 
-func (s *GenerateEtcdConfigStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *GenerateEtcdConfigStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 
 	configData, err := s.getConfigDataForHost(ctx, host)
@@ -200,7 +200,7 @@ func (s *GenerateEtcdConfigStep) renderEtcdConfig(data *EtcdNodeConfigData) (str
 	return buf.String(), nil
 }
 
-func (s *GenerateEtcdConfigStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *GenerateEtcdConfigStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 
 	configData, err := s.getConfigDataForHost(ctx, host)
@@ -236,7 +236,7 @@ func (s *GenerateEtcdConfigStep) Run(ctx runtime.StepContext, host connector.Hos
 	return nil
 }
 
-func (s *GenerateEtcdConfigStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *GenerateEtcdConfigStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	logger.Info("Attempting to remove etcd configuration file for rollback.", "path", s.RemoteConfigPath)
 

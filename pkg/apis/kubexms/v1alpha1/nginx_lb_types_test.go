@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/mensylisir/kubexm/pkg/util/validation"
 	"github.com/mensylisir/kubexm/pkg/util" // Added import
 )
 
@@ -53,12 +52,12 @@ func TestValidate_NginxLBConfig(t *testing.T) {
 		SkipInstall:   util.BoolPtr(false),
 	}
 	SetDefaults_NginxLBConfig(&validCfg) // Call SetDefaults before validating validCfg
-	verrs := &validation.ValidationErrors{}
+	verrs := &ValidationErrors{}
 	Validate_NginxLBConfig(&validCfg, verrs, "nginxLB")
 	assert.False(t, verrs.HasErrors(), "Validation failed for valid config after defaults: %v", verrs.Error())
 
 	skipInstallCfg := NginxLBConfig{SkipInstall: util.BoolPtr(true)}
-	verrsSkip := &validation.ValidationErrors{}
+	verrsSkip := &ValidationErrors{}
 	Validate_NginxLBConfig(&skipInstallCfg, verrsSkip, "nginxLB")
 	assert.False(t, verrsSkip.HasErrors(), "Validation should pass if SkipInstall is true: %v", verrsSkip.Error())
 
@@ -97,7 +96,7 @@ func TestValidate_NginxLBConfig(t *testing.T) {
 			}
 
 			SetDefaults_NginxLBConfig(&tt.cfg)
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			Validate_NginxLBConfig(&tt.cfg, verrs, "nginxLB")
 
 			assert.True(t, verrs.HasErrors(), "Expected error for %s, got none", tt.name)

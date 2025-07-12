@@ -23,10 +23,13 @@ spec:
     address: 192.168.1.101
     port: 22
     user: testuser
+    privateKeyPath: "/dev/null"
     arch: amd64
     roles: ["etcd", "master", "worker"]
   - name: node2
     address: 192.168.1.102
+    user: testuser
+    privateKeyPath: "/dev/null"
     roles: ["worker"]
   roleGroups:
     etcd:
@@ -45,6 +48,11 @@ spec:
     plugin: "calico"
     kubePodsCIDR: "10.233.64.0/18"
     kubeServiceCIDR: "10.233.0.0/18"
+  controlPlaneEndpoint:
+    lb_address: "192.168.1.100"
+  containerRuntime:
+    type: "containerd"
+    version: "1.6.9"
 `
 	invalidConfigMissingHostsYAML = `
 apiVersion: kubexm.mensylisir.io/v1alpha1
@@ -68,6 +76,8 @@ spec:
   hosts:
   - name: node1
     address: 192.168.1.101
+    user: testuser
+    privateKeyPath: "/dev/null"
   roleGroups:
     etcd:
     - node-not-exist # This host is not in spec.hosts
@@ -77,6 +87,11 @@ spec:
     type: "kubexm"
   network:
     plugin: "calico"
+    kubePodsCIDR: "10.244.0.0/16"
+  controlPlaneEndpoint:
+    lb_address: "192.168.1.100"
+  containerRuntime:
+    type: "containerd"
 `
 )
 
@@ -131,7 +146,7 @@ func TestParseFromFile_ValidConfig(t *testing.T) {
 	if cfg.Spec.Hosts[1].Arch != common.DefaultArch {
 		t.Errorf("Expected hosts[1].arch default %s, got %s", common.DefaultArch, cfg.Spec.Hosts[1].Arch)
 	}
-	if cfg.Spec.Etcd.DataDir == "" { // Check if EtcdConfig.DataDir was defaulted
+	if cfg.Spec.Etcd.DataDir != nil && *cfg.Spec.Etcd.DataDir == "" { // Check if EtcdConfig.DataDir was defaulted
 		t.Error("Expected etcd.dataDir to be defaulted, but it's empty")
 	}
 	if cfg.Spec.Kubernetes.ClusterName != "test-cluster" { // Defaulted from metadata.name
@@ -155,7 +170,7 @@ func TestParseFromFile_NonExistentFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("ParseFromFile() with non-existent file did not return an error")
 	}
-	if !strings.Contains(err.Error(), "failed to read config file") {
+	if !strings.Contains(err.Error(), "failed to read configuration file") {
 		t.Errorf("Expected error about reading file, got: %v", err)
 	}
 }
@@ -190,7 +205,7 @@ func TestParseFromFile_ValidationFailure_BadRoleGroupHost(t *testing.T) {
 	}
 	// The exact error message depends on how Validate_RoleGroupsSpec formats it.
 	// It should mention "node-not-exist" and "not defined in spec.hosts".
-	expectedErrorPart := "host 'node-not-exist' (from range 'node-not-exist') is not defined in spec.hosts"
+	expectedErrorPart := "host 'node-not-exist' referenced in roleGroups but not defined in hosts spec"
 	if !strings.Contains(err.Error(), expectedErrorPart) {
 		t.Errorf("Expected validation error about non-existent host in role group, got: %v", err)
 	}
@@ -210,12 +225,19 @@ spec:
   hosts:
   - name: node1
     address: 192.168.1.1
+    user: testuser
+    privateKeyPath: "/dev/null"
   kubernetes:
     version: v1.28.0
   etcd:
     type: kubexm
   network:
     plugin: calico
+    kubePodsCIDR: "10.244.0.0/16"
+  controlPlaneEndpoint:
+    lb_address: "192.168.1.100"
+  containerRuntime:
+    type: "containerd"
 `
 	filePath := createTempConfigFile(t, configYAML)
 	cfg, err := ParseFromFile(filePath)

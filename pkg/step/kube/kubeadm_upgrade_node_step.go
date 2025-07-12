@@ -45,7 +45,7 @@ func (s *KubeadmUpgradeNodeStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *KubeadmUpgradeNodeStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *KubeadmUpgradeNodeStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	// Precheck for 'upgrade node' is complex. It depends on the overall cluster upgrade state
 	// and the current version of kubelet on this node vs the control plane version.
@@ -64,7 +64,7 @@ func (s *KubeadmUpgradeNodeStep) Precheck(ctx runtime.StepContext, host connecto
 	return false, nil
 }
 
-func (s *KubeadmUpgradeNodeStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *KubeadmUpgradeNodeStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -110,7 +110,7 @@ func (s *KubeadmUpgradeNodeStep) Run(ctx runtime.StepContext, host connector.Hos
 	return nil
 }
 
-func (s *KubeadmUpgradeNodeStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *KubeadmUpgradeNodeStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	logger.Warn("Rollback for KubeadmUpgradeNodeStep is complex and not automatically performed (would involve downgrading kubelet and rejoining or restoring from backup).")
 	return nil

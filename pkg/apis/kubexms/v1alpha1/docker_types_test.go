@@ -8,10 +8,9 @@ import (
 	"github.com/mensylisir/kubexm/pkg/common" // Import the common package
 	"github.com/mensylisir/kubexm/pkg/util"   // Import the util package
 	"k8s.io/apimachinery/pkg/runtime"        // Added for RawExtension in tests
-	"github.com/mensylisir/kubexm/pkg/util/validation"
 )
 
-// stringPtr, boolPtr, intPtr are expected to be in zz_helpers.go or similar within the package.
+// util.StrPtr, util.BoolPtr, util.IntPtr are expected to be in zz_helpers.go or similar within the package.
 // We will now use util.StrPtr, util.BoolPtr, util.IntPtr
 
 func TestSetDefaults_DockerConfig(t *testing.T) {
@@ -188,9 +187,9 @@ func TestValidate_DockerConfig(t *testing.T) {
 		{
 			name: "valid with specific log driver and data root",
 			input: &DockerConfig{
-				LogDriver: stringPtr("journald"),
-				DataRoot:  stringPtr("/var/lib/docker-custom"),
-				BIP:       stringPtr("172.20.0.1/16"),
+				LogDriver: util.StrPtr("journald"),
+				DataRoot:  util.StrPtr("/var/lib/docker-custom"),
+				BIP:       util.StrPtr("172.20.0.1/16"),
 			},
 		},
 		{
@@ -214,13 +213,13 @@ func TestValidate_DockerConfig(t *testing.T) {
 		{
 			name: "valid cri-dockerd version",
 			input: &DockerConfig{
-				CRIDockerdVersion: stringPtr("0.3.1"),
+				CRIDockerdVersion: util.StrPtr("0.3.1"),
 			},
 		},
 		{
 			name: "valid cri-dockerd version with v prefix",
 			input: &DockerConfig{
-				CRIDockerdVersion: stringPtr("v0.3.1"),
+				CRIDockerdVersion: util.StrPtr("v0.3.1"),
 			},
 		},
 		{
@@ -243,14 +242,14 @@ func TestValidate_DockerConfig(t *testing.T) {
 		},
 		{
 			name: "valid DataRoot",
-			input: &DockerConfig{DataRoot: stringPtr("/mnt/docker_data")},
+			input: &DockerConfig{DataRoot: util.StrPtr("/mnt/docker_data")},
 		},
 	}
 
 	for _, tt := range validCases {
 		t.Run("Valid_"+tt.name, func(t *testing.T) {
 			SetDefaults_DockerConfig(tt.input)
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			Validate_DockerConfig(tt.input, verrs, "spec.containerRuntime.docker")
 			assert.False(t, verrs.HasErrors(), "Expected no validation errors for '%s', but got: %s", tt.name, verrs.Error())
 		})
@@ -263,32 +262,32 @@ func TestValidate_DockerConfig(t *testing.T) {
 	}{
 		{"empty_mirror", &DockerConfig{RegistryMirrors: []string{" "}}, []string{".registryMirrors[0]: mirror URL cannot be empty"}},
 		{"empty_insecure", &DockerConfig{InsecureRegistries: []string{" "}}, []string{".insecureRegistries[0]: registry host cannot be empty"}},
-		{"empty_dataroot", &DockerConfig{DataRoot: stringPtr(" ")}, []string{".dataRoot: cannot be empty if specified"}},
-		{"invalid_logdriver", &DockerConfig{LogDriver: stringPtr("badlog")}, []string{".logDriver: invalid log driver 'badlog'"}},
+		{"empty_dataroot", &DockerConfig{DataRoot: util.StrPtr(" ")}, []string{".dataRoot: cannot be empty if specified"}},
+		{"invalid_logdriver", &DockerConfig{LogDriver: util.StrPtr("badlog")}, []string{".logDriver: invalid log driver 'badlog'"}},
 		{"invalid_mirror_url_scheme", &DockerConfig{RegistryMirrors: []string{"ftp://badmirror.com"}}, []string{"invalid URL format for mirror", "must be http or https"}},
 		{"invalid_mirror_url_format", &DockerConfig{RegistryMirrors: []string{"http://invalid domain/"}}, []string{"invalid URL format for mirror"}},
 		{"invalid_insecure_registry_format_bad_port", &DockerConfig{InsecureRegistries: []string{"myreg:port"}}, []string{"invalid host:port format for insecure registry"}},
 		{"invalid_insecure_registry_format_bad_host", &DockerConfig{InsecureRegistries: []string{"invalid_host!"}}, []string{"invalid host:port format for insecure registry"}},
-		{"invalid_bip", &DockerConfig{BIP: stringPtr("invalid")}, []string{".bip: invalid CIDR format 'invalid'"}},
-		{"invalid_fixedcidr", &DockerConfig{FixedCIDR: stringPtr("invalid")}, []string{".fixedCIDR: invalid CIDR format 'invalid'"}},
+		{"invalid_bip", &DockerConfig{BIP: util.StrPtr("invalid")}, []string{".bip: invalid CIDR format 'invalid'"}},
+		{"invalid_fixedcidr", &DockerConfig{FixedCIDR: util.StrPtr("invalid")}, []string{".fixedCIDR: invalid CIDR format 'invalid'"}},
 		{"addrpool_bad_base", &DockerConfig{DefaultAddressPools: []DockerAddressPool{{Base: "invalid", Size: 24}}}, []string{".defaultAddressPools[0].base: invalid CIDR format 'invalid'"}},
 		{"addrpool_bad_size_low", &DockerConfig{DefaultAddressPools: []DockerAddressPool{{Base: "172.30.0.0/16", Size: 0}}}, []string{".defaultAddressPools[0].size: invalid subnet size 0"}},
 		{"addrpool_bad_size_high", &DockerConfig{DefaultAddressPools: []DockerAddressPool{{Base: "172.30.0.0/16", Size: 33}}}, []string{".defaultAddressPools[0].size: invalid subnet size 33"}},
-		{"empty_storagedriver", &DockerConfig{StorageDriver: stringPtr(" ")}, []string{".storageDriver: cannot be empty if specified"}},
+		{"empty_storagedriver", &DockerConfig{StorageDriver: util.StrPtr(" ")}, []string{".storageDriver: cannot be empty if specified"}},
 		{"runtime_empty_name", &DockerConfig{Runtimes: map[string]DockerRuntime{" ": {Path: "/p"}}}, []string{".runtimes: runtime name key cannot be empty"}},
 		{"runtime_empty_path", &DockerConfig{Runtimes: map[string]DockerRuntime{"rt1": {Path: " "}}}, []string{".runtimes['rt1'].path: path cannot be empty"}},
-		{"mcd_zero", &DockerConfig{MaxConcurrentDownloads: intPtr(0)}, []string{".maxConcurrentDownloads: must be positive if specified"}},
-		{"mcu_zero", &DockerConfig{MaxConcurrentUploads: intPtr(0)}, []string{".maxConcurrentUploads: must be positive if specified"}},
-		{"empty_bridge", &DockerConfig{Bridge: stringPtr(" ")}, []string{".bridge: name cannot be empty"}},
-		{"empty_cridockerd_version", &DockerConfig{CRIDockerdVersion: stringPtr(" ")}, []string{".criDockerdVersion: cannot be only whitespace if specified"}},
+		{"mcd_zero", &DockerConfig{MaxConcurrentDownloads: util.IntPtr(0)}, []string{".maxConcurrentDownloads: must be positive if specified"}},
+		{"mcu_zero", &DockerConfig{MaxConcurrentUploads: util.IntPtr(0)}, []string{".maxConcurrentUploads: must be positive if specified"}},
+		{"empty_bridge", &DockerConfig{Bridge: util.StrPtr(" ")}, []string{".bridge: name cannot be empty"}},
+		{"empty_cridockerd_version", &DockerConfig{CRIDockerdVersion: util.StrPtr(" ")}, []string{".criDockerdVersion: cannot be only whitespace if specified"}},
 		{
 			"invalid_cridockerd_version_format",
-			&DockerConfig{CRIDockerdVersion: stringPtr("0.bad.1")},
+			&DockerConfig{CRIDockerdVersion: util.StrPtr("0.bad.1")},
 			[]string{".criDockerdVersion: '0.bad.1' is not a recognized version format"},
 		},
 		{
 			"invalid_cridockerd_version_char",
-			&DockerConfig{CRIDockerdVersion: stringPtr("v0.2.3_alpha")},
+			&DockerConfig{CRIDockerdVersion: util.StrPtr("v0.2.3_alpha")},
 			[]string{".criDockerdVersion: 'v0.2.3_alpha' is not a recognized version format"},
 		},
 		{"extraJsonConfig_empty_raw", &DockerConfig{ExtraJSONConfig: &runtime.RawExtension{Raw: []byte("")}}, []string{".extraJsonConfig: raw data cannot be empty"}},
@@ -297,14 +296,14 @@ func TestValidate_DockerConfig(t *testing.T) {
 		{"auths_no_auth_method", &DockerConfig{Auths: map[string]DockerRegistryAuth{"docker.io": {}}}, []string{".auths[\"docker.io\"]: either username/password or auth string must be provided"}},
 		{"auths_invalid_base64", &DockerConfig{Auths: map[string]DockerRegistryAuth{"docker.io": {Auth: "invalid-base64!"}}}, []string{".auths[\"docker.io\"].auth: failed to decode base64"}},
 		{"auths_auth_bad_format", &DockerConfig{Auths: map[string]DockerRegistryAuth{"docker.io": {Auth: "dXNlcg=="}}}, []string{".auths[\"docker.io\"].auth: decoded auth string must be in 'username:password' format"}},
-		{"dataroot_tmp", &DockerConfig{DataRoot: stringPtr("/tmp")}, []string{".dataRoot: path '/tmp' is not recommended"}},
-		{"dataroot_var_tmp", &DockerConfig{DataRoot: stringPtr("/var/tmp")}, []string{".dataRoot: path '/var/tmp' is not recommended"}},
+		{"dataroot_tmp", &DockerConfig{DataRoot: util.StrPtr("/tmp")}, []string{".dataRoot: path '/tmp' is not recommended"}},
+		{"dataroot_var_tmp", &DockerConfig{DataRoot: util.StrPtr("/var/tmp")}, []string{".dataRoot: path '/var/tmp' is not recommended"}},
 	}
 
 	for _, tt := range invalidCases {
 		t.Run("Invalid_"+tt.name, func(t *testing.T) {
 			SetDefaults_DockerConfig(tt.cfg)
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			Validate_DockerConfig(tt.cfg, verrs, "spec.containerRuntime.docker")
 			assert.True(t, verrs.HasErrors(), "Expected validation errors for '%s', but got none", tt.name)
 			if len(tt.errContains) > 0 {

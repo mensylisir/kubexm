@@ -16,6 +16,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/module"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/runner"
 	"github.com/mensylisir/kubexm/pkg/task"
 )
 

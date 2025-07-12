@@ -58,7 +58,7 @@ func (s *KubectlDeleteStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *KubectlDeleteStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *KubectlDeleteStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	// Precheck for delete: if the resource already doesn't exist, the step is done.
 	runnerSvc := ctx.GetRunner()
@@ -112,7 +112,7 @@ func (s *KubectlDeleteStep) Precheck(ctx runtime.StepContext, host connector.Hos
 	}
 }
 
-func (s *KubectlDeleteStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *KubectlDeleteStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -172,7 +172,7 @@ func (s *KubectlDeleteStep) Run(ctx runtime.StepContext, host connector.Host) er
 	return nil
 }
 
-func (s *KubectlDeleteStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *KubectlDeleteStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	logger.Warn("Rollback for KubectlDeleteStep is not applicable (would mean re-applying or re-creating the resource).")
 	return nil

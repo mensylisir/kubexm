@@ -47,7 +47,7 @@ func (s *KubeadmInitStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *KubeadmInitStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *KubeadmInitStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	// Kubeadm init is generally not idempotent in a simple way by checking file existence.
 	// It might be considered "done" if the control plane is already up and running.
 	// This would involve more complex checks (e.g., API server health, etcd health).
@@ -57,7 +57,7 @@ func (s *KubeadmInitStep) Precheck(ctx runtime.StepContext, host connector.Host)
 	return false, nil
 }
 
-func (s *KubeadmInitStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *KubeadmInitStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName())
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -188,7 +188,7 @@ func (s *KubeadmInitStep) Run(ctx runtime.StepContext, host connector.Host) erro
 	return nil
 }
 
-func (s *KubeadmInitStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *KubeadmInitStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName())
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)

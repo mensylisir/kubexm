@@ -2,10 +2,8 @@ package containerd
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 )
@@ -51,7 +49,7 @@ func (s *RemoveContainerdBinariesStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *RemoveContainerdBinariesStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *RemoveContainerdBinariesStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -79,7 +77,7 @@ func (s *RemoveContainerdBinariesStep) Precheck(ctx runtime.StepContext, host co
 	return false, nil
 }
 
-func (s *RemoveContainerdBinariesStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *RemoveContainerdBinariesStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -114,7 +112,7 @@ func (s *RemoveContainerdBinariesStep) Run(ctx runtime.StepContext, host connect
 	return nil
 }
 
-func (s *RemoveContainerdBinariesStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *RemoveContainerdBinariesStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	logger.Info("Rollback for RemoveContainerdBinariesStep is not applicable.")
 	return nil

@@ -433,3 +433,71 @@ func ExpandHostRange(pattern string) ([]string, error) {
 
 // NonEmptyNodeIDs filters a list of NodeIDs, returning only those that are not empty strings.
 // NonEmptyNodeIDs was moved to pkg/plan/utils.go to break an import cycle.
+
+// ParseCPU parses a CPU value string (e.g., "500m", "1", "1.5") and returns the value in nanocores.
+func ParseCPU(cpuStr string) (int64, error) {
+	if cpuStr == "" {
+		return 0, fmt.Errorf("empty CPU string")
+	}
+	
+	// Handle millicore notation (e.g., "500m")
+	if strings.HasSuffix(cpuStr, "m") {
+		milliStr := strings.TrimSuffix(cpuStr, "m")
+		milli, err := strconv.ParseFloat(milliStr, 64)
+		if err != nil {
+			return 0, fmt.Errorf("failed to parse CPU millicores '%s': %w", cpuStr, err)
+		}
+		// Convert millicores to nanocores (1 millicore = 1,000,000 nanocores)
+		return int64(milli * 1000000), nil
+	}
+	
+	// Handle core notation (e.g., "1", "1.5")
+	cores, err := strconv.ParseFloat(cpuStr, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse CPU cores '%s': %w", cpuStr, err)
+	}
+	
+	// Convert cores to nanocores (1 core = 1,000,000,000 nanocores)
+	return int64(cores * 1000000000), nil
+}
+
+// ParseMemory parses a memory value string (e.g., "1Gi", "512Mi", "1024", "2G") and returns the value in bytes.
+func ParseMemory(memStr string) (int64, error) {
+	if memStr == "" {
+		return 0, fmt.Errorf("empty memory string")
+	}
+	
+	// Define unit multipliers
+	units := map[string]int64{
+		"Ki": 1024,
+		"Mi": 1024 * 1024,
+		"Gi": 1024 * 1024 * 1024,
+		"Ti": 1024 * 1024 * 1024 * 1024,
+		"Pi": 1024 * 1024 * 1024 * 1024 * 1024,
+		"k":  1000,
+		"M":  1000 * 1000,
+		"G":  1000 * 1000 * 1000,
+		"T":  1000 * 1000 * 1000 * 1000,
+		"P":  1000 * 1000 * 1000 * 1000 * 1000,
+	}
+	
+	// Check for unit suffix
+	for unit, multiplier := range units {
+		if strings.HasSuffix(memStr, unit) {
+			valueStr := strings.TrimSuffix(memStr, unit)
+			value, err := strconv.ParseFloat(valueStr, 64)
+			if err != nil {
+				return 0, fmt.Errorf("failed to parse memory value '%s': %w", memStr, err)
+			}
+			return int64(value * float64(multiplier)), nil
+		}
+	}
+	
+	// No unit suffix, assume bytes
+	bytes, err := strconv.ParseInt(memStr, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse memory bytes '%s': %w", memStr, err)
+	}
+	
+	return bytes, nil
+}

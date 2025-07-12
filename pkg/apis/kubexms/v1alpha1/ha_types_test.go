@@ -5,7 +5,6 @@ import (
 
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/util"
-	"github.com/mensylisir/kubexm/pkg/util/validation"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -125,12 +124,12 @@ func TestSetDefaults_HighAvailabilityConfig(t *testing.T) {
 			name: "default with internal KubeVIP type",
 			input: &HighAvailabilityConfig{
 				Enabled:  util.BoolPtr(true),
-				Internal: &InternalLoadBalancerConfig{Type: common.InternalLBTypeKubeVIP},
+				Internal: &InternalLoadBalancerConfig{Type: string(string(common.InternalLBTypeKubeVIP))},
 			},
 			expected: &HighAvailabilityConfig{
 				Enabled: util.BoolPtr(true),
 				Internal: &InternalLoadBalancerConfig{
-					Type: common.InternalLBTypeKubeVIP,
+					Type: string(common.InternalLBTypeKubeVIP),
 					KubeVIP: &KubeVIPConfig{
 						Mode:                 util.StrPtr(common.DefaultKubeVIPMode), // common.DefaultKubeVIPMode is "ARP"
 						Image:                util.StrPtr(common.DefaultKubeVIPImage),
@@ -187,7 +186,7 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 			input: &HighAvailabilityConfig{
 				Enabled: util.BoolPtr(true),
 				External: &ExternalLoadBalancerConfig{
-					Type:                      common.ExternalLBTypeKubexmKH,
+					Type:                      string(common.ExternalLBTypeKubexmKH),
 					Keepalived:                validKeepalived,
 					HAProxy:                   validHAProxy,
 					LoadBalancerHostGroupName: util.StrPtr("lb-group"),
@@ -237,7 +236,7 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 			name: "valid internal KubeVIP",
 			input: &HighAvailabilityConfig{
 				Enabled:  util.BoolPtr(true),
-				Internal: &InternalLoadBalancerConfig{Type: common.InternalLBTypeKubeVIP, KubeVIP: validKubeVIP},
+				Internal: &InternalLoadBalancerConfig{Type: string(common.InternalLBTypeKubeVIP), KubeVIP: validKubeVIP},
 			},
 			expectError: false,
 		},
@@ -254,7 +253,7 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 			name: "KubeVIP internal LB missing KubeVIP section (will be defaulted, then validated for fields)",
 			input: &HighAvailabilityConfig{
 				Enabled:  util.BoolPtr(true),
-				Internal: &InternalLoadBalancerConfig{Type: common.InternalLBTypeKubeVIP, KubeVIP: nil},
+				Internal: &InternalLoadBalancerConfig{Type: string(common.InternalLBTypeKubeVIP), KubeVIP: nil},
 			},
 			expectError: true,
 			errorMsgs:    []string{
@@ -266,7 +265,7 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 			name: "KubeVIP internal LB with nil KubeVIP but defaulted, expecting VIP/Interface errors",
 			input: &HighAvailabilityConfig{
 				Enabled:  util.BoolPtr(true),
-				Internal: &InternalLoadBalancerConfig{Type: common.InternalLBTypeKubeVIP, KubeVIP: &KubeVIPConfig{}},
+				Internal: &InternalLoadBalancerConfig{Type: string(common.InternalLBTypeKubeVIP), KubeVIP: &KubeVIPConfig{}},
 			},
 			expectError: true,
 			errorMsgs:    []string{"spec.highAvailability.internal.kubevip.vip: virtual IP address must be specified", "spec.highAvailability.internal.kubevip.interface: network interface must be specified for ARP mode"},
@@ -276,7 +275,7 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 			input: &HighAvailabilityConfig{
 				Enabled:  util.BoolPtr(true),
 				External: &ExternalLoadBalancerConfig{Type: "UserProvided"},
-				Internal: &InternalLoadBalancerConfig{Type: common.InternalLBTypeKubeVIP, KubeVIP: validKubeVIP},
+				Internal: &InternalLoadBalancerConfig{Type: string(common.InternalLBTypeKubeVIP), KubeVIP: validKubeVIP},
 			},
 			expectError: true,
 			errorMsgs:    []string{"external load balancer and internal load balancer cannot be enabled simultaneously"},
@@ -285,7 +284,7 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 			name: "Managed External LB (kubexm-kh) missing LoadBalancerHostGroupName",
 			input: &HighAvailabilityConfig{
 				Enabled:  util.BoolPtr(true),
-				External: &ExternalLoadBalancerConfig{Type: common.ExternalLBTypeKubexmKH, Keepalived: validKeepalived, HAProxy: validHAProxy},
+				External: &ExternalLoadBalancerConfig{Type: string(common.ExternalLBTypeKubexmKH), Keepalived: validKeepalived, HAProxy: validHAProxy},
 			},
 			expectError: true,
 			errorMsgs:    []string{".external.loadBalancerHostGroupName: must be specified for managed external LB type"},
@@ -294,7 +293,7 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 			name: "Managed External LB (kubexm-kn) with empty LoadBalancerHostGroupName",
 			input: &HighAvailabilityConfig{
 				Enabled:  util.BoolPtr(true),
-				External: &ExternalLoadBalancerConfig{Type: common.ExternalLBTypeKubexmKN, Keepalived: validKeepalived, NginxLB: validNginxLB, LoadBalancerHostGroupName: util.StrPtr(" ")},
+				External: &ExternalLoadBalancerConfig{Type: string(common.ExternalLBTypeKubexmKN), Keepalived: validKeepalived, NginxLB: validNginxLB, LoadBalancerHostGroupName: util.StrPtr(" ")},
 			},
 			expectError: true,
 			errorMsgs:    []string{".external.loadBalancerHostGroupName: must be specified for managed external LB type"},
@@ -303,7 +302,7 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 			name: "Valid Managed External LB (kubexm-kh) with LoadBalancerHostGroupName",
 			input: &HighAvailabilityConfig{
 				Enabled:  util.BoolPtr(true),
-				External: &ExternalLoadBalancerConfig{Type: common.ExternalLBTypeKubexmKH, Keepalived: validKeepalived, HAProxy: validHAProxy, LoadBalancerHostGroupName: util.StrPtr("lb-nodes")},
+				External: &ExternalLoadBalancerConfig{Type: string(common.ExternalLBTypeKubexmKH), Keepalived: validKeepalived, HAProxy: validHAProxy, LoadBalancerHostGroupName: util.StrPtr("lb-nodes")},
 			},
 			expectError: false,
 		},
@@ -346,7 +345,7 @@ func TestValidate_HighAvailabilityConfig(t *testing.T) {
 				SetDefaults_HighAvailabilityConfig(inputToTest)
 			}
 
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			Validate_HighAvailabilityConfig(inputToTest, verrs, "spec.highAvailability")
 			if tt.expectError {
 				assert.True(t, verrs.HasErrors(), "Expected error for test '%s', but got none. Input: %+v, DefaultedOrOriginal: %+v", tt.name, tt.input, inputToTest)

@@ -12,9 +12,6 @@ import (
 	"time"
 
 	"github.com/Masterminds/semver/v3"
-	//lint:ignore SA1019 we need to use this for now
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
 	"github.com/pkg/errors"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
@@ -285,7 +282,7 @@ func (r *defaultRunner) ImageExists(ctx context.Context, c connector.Connector, 
 }
 
 // ListImages lists Docker images on the host.
-func (r *defaultRunner) ListImages(ctx context.Context, c connector.Connector, all bool) ([]image.Summary, error) {
+func (r *defaultRunner) ListImages(ctx context.Context, c connector.Connector, all bool) ([]ImageInfo, error) {
 	if c == nil {
 		return nil, errors.New("connector cannot be nil")
 	}
@@ -302,7 +299,7 @@ func (r *defaultRunner) ListImages(ctx context.Context, c connector.Connector, a
 		return nil, errors.Wrapf(err, "failed to list images. Stderr: %s", string(stderr))
 	}
 
-	var images []image.Summary
+	var images []ImageInfo
 	scanner := bufio.NewScanner(strings.NewReader(string(stdout)))
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -329,25 +326,24 @@ func (r *defaultRunner) ListImages(ctx context.Context, c connector.Connector, a
 			return nil, errors.Wrapf(parseErr, "failed to parse size '%s' for image %s", dockerImage.Size, dockerImage.ID)
 		}
 
-		summary := image.Summary{
+		imageInfo := ImageInfo{
 			ID:          dockerImage.ID,
-			RepoDigests: nil,
 			Size:        sizeBytes,
 			VirtualSize: sizeBytes,
 		}
 		if dockerImage.Repository != "<none>" && dockerImage.Tag != "<none>" {
-			summary.RepoTags = []string{fmt.Sprintf("%s:%s", dockerImage.Repository, dockerImage.Tag)}
+			imageInfo.RepoTags = []string{fmt.Sprintf("%s:%s", dockerImage.Repository, dockerImage.Tag)}
 		} else if dockerImage.Repository != "<none>" {
-			summary.RepoTags = []string{dockerImage.Repository}
+			imageInfo.RepoTags = []string{dockerImage.Repository}
 		}
 
 		if parsedTime, errTime := time.Parse("2006-01-02 15:04:05 -0700 MST", dockerImage.CreatedAt); errTime == nil {
-			summary.Created = parsedTime.Unix()
+			imageInfo.Created = fmt.Sprintf("%d", parsedTime.Unix())
 		} else if parsedTime, errTime := time.Parse("2006-01-02 15:04:05 Z0700 MST", dockerImage.CreatedAt); errTime == nil {
-			summary.Created = parsedTime.Unix()
+			imageInfo.Created = fmt.Sprintf("%d", parsedTime.Unix())
 		}
 
-		images = append(images, summary)
+		images = append(images, imageInfo)
 	}
 
 	if err := scanner.Err(); err != nil {

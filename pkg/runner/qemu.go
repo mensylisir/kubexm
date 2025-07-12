@@ -8,8 +8,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"crypto/rand"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"github.com/pkg/errors"
 	// Consider adding a libvirt client library if direct XML manipulation or more complex operations are needed,
 	// but for now, we'll stick to `virsh` commands for simplicity, aligning with the Docker implementation style.
@@ -19,6 +21,16 @@ var (
 	// Regex to parse memory like "1024 MiB" or "2 GiB" from virsh output
 	memRegex = regexp.MustCompile(`(\d+)\s*(KiB|MiB|GiB|TiB)`)
 )
+
+// generateUUID generates a simple UUID for VMs
+func generateUUID() string {
+	uuid := make([]byte, 16)
+	rand.Read(uuid)
+	uuid[6] = (uuid[6] & 0x0F) | 0x40 // version 4
+	uuid[8] = (uuid[8] & 0x3F) | 0x80 // variant 10
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:16])
+}
 
 // parseIntFromString tries to parse an integer from a string.
 func parseIntFromString(s string) (int, error) {
@@ -84,7 +96,7 @@ func (r *defaultRunner) CreateVMTemplate(ctx context.Context, conn connector.Con
 			return errors.Wrapf(err, "failed to create directory %s for disk image", diskDir)
 		}
 
-		createDiskCmd := fmt.Sprintf("qemu-img create -f qcow2 %s %dG", shellEscape(diskPath), diskSizeGB)
+		createDiskCmd := fmt.Sprintf("qemu-img create -f qcow2 %s %dG", util.ShellEscape(diskPath), diskSizeGB)
 		_, stderr, err := conn.Exec(ctx, createDiskCmd, &connector.ExecOptions{Sudo: true, Timeout: 5 * time.Minute})
 		if err != nil {
 			return errors.Wrapf(err, "failed to create disk image %s with qemu-img. Stderr: %s", diskPath, string(stderr))
@@ -106,7 +118,7 @@ func (r *defaultRunner) VMExists(ctx context.Context, conn connector.Connector, 
 	if conn == nil { return false, errors.New("connector cannot be nil") }
 	if strings.TrimSpace(vmName) == "" { return false, errors.New("vmName cannot be empty") }
 	// `virsh dominfo <domain>` exits 0 if domain exists, non-zero otherwise (e.g. 1 if not found)
-	cmd := fmt.Sprintf("virsh dominfo %s > /dev/null 2>&1", shellEscape(vmName))
+	cmd := fmt.Sprintf("virsh dominfo %s > /dev/null 2>&1", util.ShellEscape(vmName))
 	_, _, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
 	if err == nil { return true, nil } // Exit code 0 means domain exists
 
@@ -137,7 +149,7 @@ func (r *defaultRunner) StartVM(ctx context.Context, conn connector.Connector, v
 		return errors.Errorf("VM %s is in state '%s', cannot start", vmName, state)
 	}
 
-	startCmd := fmt.Sprintf("virsh start %s", shellEscape(vmName))
+	startCmd := fmt.Sprintf("virsh start %s", util.ShellEscape(vmName))
 	_, stderr, err := conn.Exec(ctx, startCmd, &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute})
 	if err != nil {
 		return errors.Wrapf(err, "failed to start VM %s. Stderr: %s", vmName, string(stderr))
@@ -165,7 +177,7 @@ func (r *defaultRunner) ShutdownVM(ctx context.Context, conn connector.Connector
 		return errors.Errorf("VM %s is in state '%s', cannot initiate shutdown", vmName, state)
 	}
 
-	shutdownCmd := fmt.Sprintf("virsh shutdown %s", shellEscape(vmName))
+	shutdownCmd := fmt.Sprintf("virsh shutdown %s", util.ShellEscape(vmName))
 	_, stderrShutdown, errShutdown := conn.Exec(ctx, shutdownCmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 
 	if errShutdown == nil { // Graceful shutdown initiated
@@ -217,7 +229,7 @@ func (r *defaultRunner) DestroyVM(ctx context.Context, conn connector.Connector,
 		return nil // Already off
 	}
 
-	cmd := fmt.Sprintf("virsh destroy %s", shellEscape(vmName))
+	cmd := fmt.Sprintf("virsh destroy %s", util.ShellEscape(vmName))
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if err != nil {
 		// Idempotency: if already not running or not found, virsh destroy might error but that's okay.
@@ -252,7 +264,7 @@ func (r *defaultRunner) UndefineVM(ctx context.Context, conn connector.Connector
 	// If state is "shut off" or domain not found, proceed.
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "virsh", "undefine", shellEscape(vmName))
+	cmdArgs = append(cmdArgs, "virsh", "undefine", util.ShellEscape(vmName))
 	if deleteSnapshots {
 		cmdArgs = append(cmdArgs, "--snapshots-metadata") // Deletes snapshot metadata
 	}
@@ -277,7 +289,7 @@ func (r *defaultRunner) UndefineVM(ctx context.Context, conn connector.Connector
 func (r *defaultRunner) GetVMState(ctx context.Context, conn connector.Connector, vmName string) (string, error) {
 	if conn == nil { return "", errors.New("connector cannot be nil") }
 	if strings.TrimSpace(vmName) == "" { return "", errors.New("vmName cannot be empty") }
-	cmd := fmt.Sprintf("virsh domstate %s", shellEscape(vmName))
+	cmd := fmt.Sprintf("virsh domstate %s", util.ShellEscape(vmName))
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
 	if err != nil {
 		// If domain not found, virsh domstate errors. This should be handled by caller if needed.
@@ -315,8 +327,8 @@ func (r *defaultRunner) ListVMs(ctx context.Context, conn connector.Connector, a
             // Let's try to get dominfo anyway.
         }
 
-        dominfoCmd := fmt.Sprintf("virsh dominfo %s", shellEscape(vmName))
-        infoStdout, infoStderr, errInfo := conn.Exec(ctx, dominfoCmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
+        dominfoCmd := fmt.Sprintf("virsh dominfo %s", util.ShellEscape(vmName))
+        infoStdout, _, errInfo := conn.Exec(ctx, dominfoCmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
         if errInfo != nil {
             // If dominfo fails, we might have a problem with this VM.
             // Add with available info or log a warning.
@@ -358,7 +370,7 @@ func (r *defaultRunner) ListVMs(ctx context.Context, conn connector.Connector, a
 func (r *defaultRunner) ImportVMTemplate(ctx context.Context, conn connector.Connector, name string, filePath string) error {
 	if conn == nil { return errors.New("connector cannot be nil") }
 	if name == "" || filePath == "" { return errors.New("name and filePath are required for importing VM template") }
-	cmd := fmt.Sprintf("virsh define %s", shellEscape(filePath))
+	cmd := fmt.Sprintf("virsh define %s", util.ShellEscape(filePath))
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if err != nil { return errors.Wrapf(err, "failed to define VM %s from %s. Stderr: %s", name, filePath, string(stderr)) }
 	return nil
@@ -367,7 +379,7 @@ func (r *defaultRunner) ImportVMTemplate(ctx context.Context, conn connector.Con
 func (r *defaultRunner) RefreshStoragePool(ctx context.Context, conn connector.Connector, poolName string) error {
 	if conn == nil { return errors.New("connector cannot be nil") }
 	if poolName == "" { return errors.New("poolName cannot be empty") }
-	cmd := fmt.Sprintf("virsh pool-refresh %s", shellEscape(poolName))
+	cmd := fmt.Sprintf("virsh pool-refresh %s", util.ShellEscape(poolName))
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute}) // Refresh can take time
 	if err != nil { return errors.Wrapf(err, "failed to refresh storage pool %s. Stderr: %s", poolName, string(stderr)) }
 	return nil
@@ -391,7 +403,7 @@ func (r *defaultRunner) CreateStoragePool(ctx context.Context, conn connector.Co
 	var defineCmd string
 	switch poolType {
 	case "dir":
-		defineCmd = fmt.Sprintf("virsh pool-define-as %s dir --target %s", shellEscape(name), shellEscape(targetPath))
+		defineCmd = fmt.Sprintf("virsh pool-define-as %s dir --target %s", util.ShellEscape(name), util.ShellEscape(targetPath))
 	// Add other pool types (logical, iscsi, etc.) as needed
 	default:
 		return errors.Errorf("unsupported poolType: %s", poolType)
@@ -405,7 +417,7 @@ func (r *defaultRunner) CreateStoragePool(ctx context.Context, conn connector.Co
 		}
 	}
 
-	buildCmd := fmt.Sprintf("virsh pool-build %s", shellEscape(name))
+	buildCmd := fmt.Sprintf("virsh pool-build %s", util.ShellEscape(name))
 	_, stderrBuild, errBuild := conn.Exec(ctx, buildCmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if errBuild != nil {
 		if !(strings.Contains(string(stderrBuild), "already built") || strings.Contains(string(stderrBuild), "No action required")) {
@@ -413,13 +425,13 @@ func (r *defaultRunner) CreateStoragePool(ctx context.Context, conn connector.Co
 		}
 	}
 
-	startCmd := fmt.Sprintf("virsh pool-start %s", shellEscape(name))
+	startCmd := fmt.Sprintf("virsh pool-start %s", util.ShellEscape(name))
 	_, stderrStart, errStart := conn.Exec(ctx, startCmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if errStart != nil && !strings.Contains(string(stderrStart), "already active") {
 		return errors.Wrapf(errStart, "failed to start pool %s. Stderr: %s", name, string(stderrStart))
 	}
 
-	autostartCmd := fmt.Sprintf("virsh pool-autostart %s", shellEscape(name))
+	autostartCmd := fmt.Sprintf("virsh pool-autostart %s", util.ShellEscape(name))
 	if _, _, errAutostart := conn.Exec(ctx, autostartCmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second}); errAutostart != nil {
 		// Log as warning, not a critical failure if pool is otherwise operational
 		// fmt.Printf("Warning: failed to set autostart for pool %s: %v\n", name, errAutostart)
@@ -430,7 +442,7 @@ func (r *defaultRunner) CreateStoragePool(ctx context.Context, conn connector.Co
 func (r *defaultRunner) StoragePoolExists(ctx context.Context, conn connector.Connector, poolName string) (bool, error) {
 	if conn == nil { return false, errors.New("connector cannot be nil") }
 	if poolName == "" { return false, errors.New("poolName cannot be empty") }
-	cmd := fmt.Sprintf("virsh pool-info %s > /dev/null 2>&1", shellEscape(poolName))
+	cmd := fmt.Sprintf("virsh pool-info %s > /dev/null 2>&1", util.ShellEscape(poolName))
 	_, _, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
 	if err == nil { return true, nil } // Exit 0 means pool exists
 	if cmdErr, ok := err.(*connector.CommandError); ok && cmdErr.ExitCode != 0 {
@@ -445,7 +457,7 @@ func (r *defaultRunner) DeleteStoragePool(ctx context.Context, conn connector.Co
 	if poolName == "" { return errors.New("poolName cannot be empty") }
 
 	// Attempt to destroy (stop) the pool first. This is idempotent.
-	destroyCmd := fmt.Sprintf("virsh pool-destroy %s", shellEscape(poolName))
+	destroyCmd := fmt.Sprintf("virsh pool-destroy %s", util.ShellEscape(poolName))
 	_, stderrDestroy, errDestroy := conn.Exec(ctx, destroyCmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if errDestroy != nil {
 		// Ignore errors if pool not found or not active, as that's fine for deletion.
@@ -457,7 +469,7 @@ func (r *defaultRunner) DeleteStoragePool(ctx context.Context, conn connector.Co
 	}
 
 	// Undefine the pool. This is also idempotent.
-	undefineCmd := fmt.Sprintf("virsh pool-undefine %s", shellEscape(poolName))
+	undefineCmd := fmt.Sprintf("virsh pool-undefine %s", util.ShellEscape(poolName))
 	_, stderrUndefine, errUndefine := conn.Exec(ctx, undefineCmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if errUndefine != nil {
 		if !strings.Contains(string(stderrUndefine), "not found") { // Ignore "not found" for undefine
@@ -470,7 +482,7 @@ func (r *defaultRunner) DeleteStoragePool(ctx context.Context, conn connector.Co
 func (r *defaultRunner) VolumeExists(ctx context.Context, conn connector.Connector, poolName string, volName string) (bool, error) {
 	if conn == nil { return false, errors.New("connector cannot be nil") }
 	if poolName == "" || volName == "" { return false, errors.New("poolName and volName cannot be empty") }
-	cmd := fmt.Sprintf("virsh vol-info --pool %s %s > /dev/null 2>&1", shellEscape(poolName), shellEscape(volName))
+	cmd := fmt.Sprintf("virsh vol-info --pool %s %s > /dev/null 2>&1", util.ShellEscape(poolName), util.ShellEscape(volName))
 	_, _, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
 	if err == nil { return true, nil }
 	if cmdErr, ok := err.(*connector.CommandError); ok && cmdErr.ExitCode != 0 {
@@ -485,9 +497,9 @@ func (r *defaultRunner) CloneVolume(ctx context.Context, conn connector.Connecto
 	if poolName == "" || origVolName == "" || newVolName == "" { return errors.New("poolName, origVolName, and newVolName are required") }
 
 	// virsh vol-clone [--pool <string>] <vol> <newname> [--new-format <string>] [--new-capacity <bytes>]
-	cloneCmdArgs := []string{"virsh", "vol-clone", "--pool", shellEscape(poolName), shellEscape(origVolName), shellEscape(newVolName)}
+	cloneCmdArgs := []string{"virsh", "vol-clone", "--pool", util.ShellEscape(poolName), util.ShellEscape(origVolName), util.ShellEscape(newVolName)}
 	if format != "" { // Assuming format here refers to new-format for clone, not capacity format.
-		cloneCmdArgs = append(cloneCmdArgs, "--new-format", shellEscape(format))
+		cloneCmdArgs = append(cloneCmdArgs, "--new-format", util.ShellEscape(format))
 	}
 	// Note: vol-clone can also take --new-capacity. If newSizeGB is for the final state after potential resize,
 	// it might be better to clone first, then resize. Or, if libvirt supports it well, use --new-capacity here.
@@ -512,7 +524,7 @@ func (r *defaultRunner) ResizeVolume(ctx context.Context, conn connector.Connect
 	if conn == nil { return errors.New("connector cannot be nil") }
 	if poolName == "" || volName == "" || newSizeGB == 0 { return errors.New("poolName, volName, and non-zero newSizeGB are required") }
 	capacityStr := fmt.Sprintf("%dG", newSizeGB) // virsh vol-resize takes size like "10G"
-	cmd := fmt.Sprintf("virsh vol-resize --pool %s %s %s", shellEscape(poolName), shellEscape(volName), shellEscape(capacityStr))
+	cmd := fmt.Sprintf("virsh vol-resize --pool %s %s %s", util.ShellEscape(poolName), util.ShellEscape(volName), util.ShellEscape(capacityStr))
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute})
 	if err != nil { return errors.Wrapf(err, "failed to resize volume %s in pool %s to %s. Stderr: %s", volName, poolName, capacityStr, string(stderr)) }
 	return nil
@@ -521,7 +533,7 @@ func (r *defaultRunner) ResizeVolume(ctx context.Context, conn connector.Connect
 func (r *defaultRunner) DeleteVolume(ctx context.Context, conn connector.Connector, poolName string, volName string) error {
 	if conn == nil { return errors.New("connector cannot be nil") }
 	if poolName == "" || volName == "" { return errors.New("poolName and volName are required") }
-	cmd := fmt.Sprintf("virsh vol-delete --pool %s %s", shellEscape(poolName), shellEscape(volName))
+	cmd := fmt.Sprintf("virsh vol-delete --pool %s %s", util.ShellEscape(poolName), util.ShellEscape(volName))
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if err != nil {
 		// Idempotency: if volume not found, it's okay.
@@ -543,16 +555,16 @@ func (r *defaultRunner) CreateVolume(ctx context.Context, conn connector.Connect
 	if exists { return nil } // Already exists
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "virsh", "vol-create-as", shellEscape(poolName), shellEscape(volName), fmt.Sprintf("%dG", sizeGB))
+	cmdArgs = append(cmdArgs, "virsh", "vol-create-as", util.ShellEscape(poolName), util.ShellEscape(volName), fmt.Sprintf("%dG", sizeGB))
 	if format != "" {
-		cmdArgs = append(cmdArgs, "--format", shellEscape(format))
+		cmdArgs = append(cmdArgs, "--format", util.ShellEscape(format))
 	}
 	if backingVolName != "" {
 		if backingVolFormat == "" {
 			return errors.New("backingVolFormat is required when backingVolName is provided")
 		}
-		cmdArgs = append(cmdArgs, "--backing-vol", shellEscape(backingVolName))
-		cmdArgs = append(cmdArgs, "--backing-vol-format", shellEscape(backingVolFormat))
+		cmdArgs = append(cmdArgs, "--backing-vol", util.ShellEscape(backingVolName))
+		cmdArgs = append(cmdArgs, "--backing-vol-format", util.ShellEscape(backingVolFormat))
 	}
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute})
@@ -615,8 +627,8 @@ func (r *defaultRunner) CreateCloudInitISO(ctx context.Context, conn connector.C
 	// or: mkisofs -o <output.iso> -V cidata -r -J <path_to_cloud_init_files_dir>
 	isoCmd := fmt.Sprintf("%s -o %s -V cidata -r -J %s",
 		isoCmdTool,
-		shellEscape(isoDestPath),
-		shellEscape(tmpDirPath), // Use the directory containing user-data, meta-data
+		util.ShellEscape(isoDestPath),
+		util.ShellEscape(tmpDirPath), // Use the directory containing user-data, meta-data
 	)
 
 	_, stderr, err := conn.Exec(ctx, isoCmd, &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute})
@@ -642,7 +654,7 @@ func (r *defaultRunner) CreateVM(ctx context.Context, conn connector.Connector, 
 	var xmlBuilder strings.Builder
 	xmlBuilder.WriteString(fmt.Sprintf("<domain type='kvm'>\n"))
 	xmlBuilder.WriteString(fmt.Sprintf("  <name>%s</name>\n", vmName))
-	xmlBuilder.WriteString(fmt.Sprintf("  <uuid>%s</uuid>\n", utils.GenerateUUID())) // Generate a UUID
+	xmlBuilder.WriteString(fmt.Sprintf("  <uuid>%s</uuid>\n", generateUUID())) // Generate a UUID
 	xmlBuilder.WriteString(fmt.Sprintf("  <memory unit='MiB'>%d</memory>\n", memoryMB))
 	xmlBuilder.WriteString(fmt.Sprintf("  <currentMemory unit='MiB'>%d</currentMemory>\n", memoryMB))
 	xmlBuilder.WriteString(fmt.Sprintf("  <vcpu placement='static'>%d</vcpu>\n", vcpus))
@@ -667,7 +679,7 @@ func (r *defaultRunner) CreateVM(ctx context.Context, conn connector.Connector, 
 
 	diskTargetLetter := 'a'
 	pciSlot := 0x04 // Starting PCI slot for disks
-	for i, diskPath := range diskPaths {
+	for _, diskPath := range diskPaths {
 		if diskPath == "" { continue }
 		xmlBuilder.WriteString("    <disk type='file' device='disk'>\n")
 		xmlBuilder.WriteString("      <driver name='qemu' type='qcow2' cache='none' io='native'/>\n") // Common settings
@@ -725,7 +737,7 @@ func (r *defaultRunner) CreateVM(ctx context.Context, conn connector.Connector, 
 	}
 	defer r.Remove(ctx, conn, tempXMLPath, true)
 
-	defineCmd := fmt.Sprintf("virsh define %s", shellEscape(tempXMLPath))
+	defineCmd := fmt.Sprintf("virsh define %s", util.ShellEscape(tempXMLPath))
 	_, stderrDefine, errDefine := conn.Exec(ctx, defineCmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if errDefine != nil {
 		return errors.Wrapf(errDefine, "failed to define VM %s. Stderr: %s\nXML:\n%s", vmName, string(stderrDefine), vmXML)
@@ -743,9 +755,9 @@ func (r *defaultRunner) AttachDisk(ctx context.Context, conn connector.Connector
 		return errors.New("vmName, diskPath, and targetDevice are required")
 	}
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "virsh", "attach-disk", shellEscape(vmName), shellEscape(diskPath), shellEscape(targetDevice))
+	cmdArgs = append(cmdArgs, "virsh", "attach-disk", util.ShellEscape(vmName), util.ShellEscape(diskPath), util.ShellEscape(targetDevice))
 	if driverType != "" {
-		cmdArgs = append(cmdArgs, "--driver", "qemu", "--subdriver", shellEscape(driverType))
+		cmdArgs = append(cmdArgs, "--driver", "qemu", "--subdriver", util.ShellEscape(driverType))
 	}
 	// diskType for attach-disk usually means 'cdrom', 'floppy', 'disk', 'lun'. 'file' or 'block' are source types.
 	// For simplicity, we'll assume it's a regular disk and not set --type unless explicitly needed.
@@ -764,7 +776,7 @@ func (r *defaultRunner) DetachDisk(ctx context.Context, conn connector.Connector
 	if vmName == "" || targetDeviceOrPath == "" {
 		return errors.New("vmName and targetDeviceOrPath are required")
 	}
-	cmd := fmt.Sprintf("virsh detach-disk %s %s --config --live", shellEscape(vmName), shellEscape(targetDeviceOrPath))
+	cmd := fmt.Sprintf("virsh detach-disk %s %s --config --live", util.ShellEscape(vmName), util.ShellEscape(targetDeviceOrPath))
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if err != nil {
 		if strings.Contains(string(stderr), "No disk found for target") || strings.Contains(string(stderr),"no target device found") || strings.Contains(string(stderr), "not found") {
@@ -782,7 +794,7 @@ func (r *defaultRunner) SetVMMemory(ctx context.Context, conn connector.Connecto
 	memoryKiB := memoryMB * 1024
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "virsh", "setmem", shellEscape(vmName), fmt.Sprintf("%dK", memoryKiB))
+	cmdArgs = append(cmdArgs, "virsh", "setmem", util.ShellEscape(vmName), fmt.Sprintf("%dK", memoryKiB))
 
 	if current {
 		cmdArgs = append(cmdArgs, "--live", "--config")
@@ -804,7 +816,7 @@ func (r *defaultRunner) SetVMCPUs(ctx context.Context, conn connector.Connector,
 	}
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "virsh", "setvcpus", shellEscape(vmName), fmt.Sprintf("%d", vcpus))
+	cmdArgs = append(cmdArgs, "virsh", "setvcpus", util.ShellEscape(vmName), fmt.Sprintf("%d", vcpus))
 	if current {
 		cmdArgs = append(cmdArgs, "--live", "--config")
 	} else {

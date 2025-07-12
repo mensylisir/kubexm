@@ -104,7 +104,7 @@ func (s *ManageServiceStep) Precheck(ctx step.StepContext, host connector.Host) 
 	case ActionEnable:
 		cmd := fmt.Sprintf("systemctl is-enabled %s", s.ServiceName)
 		// Use RunWithOptions with Check:true to handle non-zero exits gracefully for is-enabled
-		stdout, _, err := runnerSvc.RunWithOptions(ctx.GoContext(), conn, cmd, &connector.ExecOptions{Sudo: false, Check: true})
+		stdout, _, err := runnerSvc.RunWithOptions(ctx.GoContext(), conn, cmd, &connector.ExecOptions{Sudo: false})
 		if err != nil {
 			if cmdErr, ok := err.(*connector.CommandError); ok && cmdErr.ExitCode != 0 { // e.g. exit code 1 for "disabled"
                  // This means it's not "enabled"
@@ -122,7 +122,7 @@ func (s *ManageServiceStep) Precheck(ctx step.StepContext, host connector.Host) 
 		return false, nil
 	case ActionDisable:
 		cmd := fmt.Sprintf("systemctl is-enabled %s", s.ServiceName)
-		stdout, _, err := runnerSvc.RunWithOptions(ctx.GoContext(), conn, cmd, &connector.ExecOptions{Sudo: false, Check: true})
+		stdout, _, err := runnerSvc.RunWithOptions(ctx.GoContext(), conn, cmd, &connector.ExecOptions{Sudo: false})
 		if err != nil {
 			if cmdErr, ok := err.(*connector.CommandError); ok && cmdErr.ExitCode != 0 { // e.g. exit code 1 for "disabled"
                 logger.Info("Service is already not enabled (is-enabled returned non-zero), disable action satisfied.", "service", s.ServiceName, "exit_code", cmdErr.ExitCode, "stdout", string(stdout))
@@ -160,12 +160,9 @@ func (s *ManageServiceStep) Run(ctx step.StepContext, host connector.Host) error
 	}
 
 	logger.Info("Executing systemctl command.", "command", cmd)
-	// For is-active and is-enabled, Check:true allows us to inspect the exit code.
+	// For is-active and is-enabled, we need to handle non-zero exit codes gracefully.
 	// For other actions, we want an error if the command fails (non-zero exit).
 	runOpts := &connector.ExecOptions{Sudo: s.Sudo}
-	if s.Action == ActionIsActive || s.Action == ActionIsEnabled {
-		runOpts.Check = true
-	}
 
 	stdout, stderr, err := runnerSvc.RunWithOptions(ctx.GoContext(), conn, cmd, runOpts)
 

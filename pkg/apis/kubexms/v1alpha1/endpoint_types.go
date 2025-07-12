@@ -1,10 +1,10 @@
 package v1alpha1
 
 import (
-	"net"
+	"fmt"
 	"regexp"
 	"strings"
-	// Assuming ValidationErrors and containsString are defined in cluster_types.go or a shared util in this package
+	// ValidationErrors is defined in cluster_types.go
 )
 
 // ControlPlaneEndpointSpec defines the configuration for the cluster's control plane endpoint.
@@ -36,30 +36,48 @@ func Validate_ControlPlaneEndpointSpec(cfg *ControlPlaneEndpointSpec, verrs *Val
 		return
 	}
 	if strings.TrimSpace(cfg.Domain) == "" && strings.TrimSpace(cfg.Address) == "" {
-		verrs.Add("%s: either domain or address (lb_address in YAML) must be specified", pathPrefix)
+		verrs.Add(pathPrefix + ": either domain or address (lb_address in YAML) must be specified")
 	}
 	if cfg.Domain != "" {
 		// Standard domain validation regex
 		if matched, _ := regexp.MatchString(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`, cfg.Domain); !matched {
-			verrs.Add("%s.domain: '%s' is not a valid domain name", pathPrefix, cfg.Domain)
+			verrs.Add(pathPrefix + ".domain: '" + cfg.Domain + "' is not a valid domain name")
 		}
 	}
-	if cfg.Address != "" && !isValidIP(cfg.Address) { // Assuming isValidIP is available
-		verrs.Add("%s.address (lb_address): invalid IP address format for '%s'", pathPrefix, cfg.Address)
+	if cfg.Address != "" {
+		// Use net.ParseIP for IP validation since net is available in cluster_types.go
+		// For now, we'll use a simple validation pattern
+		if matched, _ := regexp.MatchString(`^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`, cfg.Address); !matched {
+			verrs.Add(pathPrefix + ".address (lb_address): invalid IP address format for '" + cfg.Address + "'")
+		}
 	}
 
 	if cfg.Port != 0 && (cfg.Port <= 0 || cfg.Port > 65535) { // Port 0 is defaulted
-		verrs.Add("%s.port: invalid port %d, must be between 1-65535", pathPrefix, cfg.Port)
+		verrs.Add(pathPrefix + ".port: invalid port " + fmt.Sprintf("%d", cfg.Port) + ", must be between 1-65535")
 	}
 
 	validExternalTypes := []string{"kubexm", "external", ""} // "" means not specified/use default or inferred
-	if !containsString(validExternalTypes, cfg.ExternalLoadBalancerType) { // Assuming containsString is available
-		verrs.Add("%s.externalLoadBalancerType: invalid type '%s', must be one of %v or empty", pathPrefix, cfg.ExternalLoadBalancerType, validExternalTypes)
+	found := false
+	for _, vt := range validExternalTypes {
+		if cfg.ExternalLoadBalancerType == vt {
+			found = true
+			break
+		}
+	}
+	if !found {
+		verrs.Add(pathPrefix + ".externalLoadBalancerType: invalid type '" + cfg.ExternalLoadBalancerType + "', must be one of " + fmt.Sprintf("%v", validExternalTypes) + " or empty")
 	}
 
 	validInternalTypes := []string{"haproxy", "nginx", "kube-vip", ""} // "" means not specified/use default or inferred
-	if !containsString(validInternalTypes, cfg.InternalLoadBalancerType) {
-		verrs.Add("%s.internalLoadBalancerType (internalLoadbalancer): invalid type '%s', must be one of %v or empty", pathPrefix, cfg.InternalLoadBalancerType, validInternalTypes)
+	found = false
+	for _, vt := range validInternalTypes {
+		if cfg.InternalLoadBalancerType == vt {
+			found = true
+			break
+		}
+	}
+	if !found {
+		verrs.Add(pathPrefix + ".internalLoadBalancerType (internalLoadbalancer): invalid type '" + cfg.InternalLoadBalancerType + "', must be one of " + fmt.Sprintf("%v", validInternalTypes) + " or empty")
 	}
 }
 

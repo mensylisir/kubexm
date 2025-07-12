@@ -126,7 +126,7 @@ func LinkFragments(graph *ExecutionGraph, fromNodeIDs []NodeID, toNodeIDs []Node
 
 	// Add dependencies: each node in toNodeIDs depends on all nodes in fromNodeIDs.
 	for _, toID := range toNodeIDs {
-		targetNode := graph.Nodes[toID] // Known to exist from the check above
+		// targetNode := graph.Nodes[toID] // Known to exist from the check above
 		// Append all fromNodeIDs as dependencies, AddDependency will handle duplicates if any.
 		for _, fromID := range fromNodeIDs {
 			if err := graph.AddDependency(fromID, toID); err != nil {

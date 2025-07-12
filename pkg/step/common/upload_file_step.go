@@ -7,7 +7,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	// Assuming runtime.StepContext will be passed, which implements step.StepContext
+	// Assuming step.StepContext will be passed, which implements step.StepContext
 	// No direct import of runtime needed here if we use step.StepContext interface in methods.
 )
 

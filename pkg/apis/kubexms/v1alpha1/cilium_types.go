@@ -1,9 +1,10 @@
 package v1alpha1
 
-import (
-	"fmt" // Import fmt
-	"github.com/mensylisir/kubexm/pkg/util" // Added import for util
-	"github.com/mensylisir/kubexm/pkg/util/validation"
+// Valid values for Cilium configuration
+var (
+	validCiliumTunnelModes = []string{"vxlan", "geneve", "disabled", ""}
+	validCiliumKPRModes    = []string{"probe", "strict", "disabled", ""}
+	validCiliumIdentModes  = []string{"crd", "kvstore", ""}
 )
 
 // SetDefaults_CiliumConfig provides default values for CiliumConfig.
@@ -23,46 +24,42 @@ func SetDefaults_CiliumConfig(cfg *CiliumConfig) {
 	}
 	// If HubbleUI is true, EnableHubble should also be true.
 	if cfg.HubbleUI && !cfg.EnableHubble {
-		cfg.EnableHubble = true // EnableHubble is bool, so this is fine.
+		cfg.EnableHubble = true
 	}
-
-	// EnableBPFMasquerade is now *bool in CiliumConfig (network_types.go)
+	// EnableBPFMasquerade defaults to true if not explicitly set
 	if cfg.EnableBPFMasquerade == nil {
-		cfg.EnableBPFMasquerade = util.BoolPtr(true) // Default to true if not specified
+		trueVal := true
+		cfg.EnableBPFMasquerade = &trueVal
 	}
-	// EnableHubble (bool type) defaults to false unless HubbleUI is true (already handled above)
 }
 
 // Validate_CiliumConfig validates CiliumConfig.
 // The CiliumConfig struct itself is defined in network_types.go.
-func Validate_CiliumConfig(cfg *CiliumConfig, verrs *validation.ValidationErrors, pathPrefix string) {
+func Validate_CiliumConfig(cfg *CiliumConfig, verrs *ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
 
 	if cfg.TunnelingMode != "" {
-		// Use package-level variable from network_types.go
-		if !util.ContainsString(validCiliumTunnelModes, cfg.TunnelingMode) {
-			verrs.Add(pathPrefix+".tunnelingMode", fmt.Sprintf("invalid mode '%s', must be one of %v", cfg.TunnelingMode, validCiliumTunnelModes))
+		if !containsString(validCiliumTunnelModes, cfg.TunnelingMode) {
+			verrs.Add(pathPrefix+".tunnelingMode: invalid mode '"+cfg.TunnelingMode+"', must be one of vxlan, geneve, disabled, or empty")
 		}
 	}
 
 	if cfg.KubeProxyReplacement != "" {
-		// Use package-level variable from network_types.go
-		if !util.ContainsString(validCiliumKPRModes, cfg.KubeProxyReplacement) {
-			verrs.Add(pathPrefix+".kubeProxyReplacement", fmt.Sprintf("invalid mode '%s', must be one of %v", cfg.KubeProxyReplacement, validCiliumKPRModes))
+		if !containsString(validCiliumKPRModes, cfg.KubeProxyReplacement) {
+			verrs.Add(pathPrefix+".kubeProxyReplacement: invalid mode '"+cfg.KubeProxyReplacement+"', must be one of probe, strict, disabled, or empty")
 		}
 	}
 
 	if cfg.IdentityAllocationMode != "" {
-		// Use package-level variable from network_types.go
-		if !util.ContainsString(validCiliumIdentModes, cfg.IdentityAllocationMode) {
-			verrs.Add(pathPrefix+".identityAllocationMode", fmt.Sprintf("invalid mode '%s', must be one of %v", cfg.IdentityAllocationMode, validCiliumIdentModes))
+		if !containsString(validCiliumIdentModes, cfg.IdentityAllocationMode) {
+			verrs.Add(pathPrefix+".identityAllocationMode: invalid mode '"+cfg.IdentityAllocationMode+"', must be one of crd, kvstore, or empty")
 		}
 	}
 
-	// The case where cfg.HubbleUI is true and cfg.EnableHubble is false
-	// is handled by SetDefaults_CiliumConfig, which will set cfg.EnableHubble to true.
-	// Therefore, this specific inconsistent state check is not strictly needed here
-	// if defaults are always applied before validation.
+	// Check for logical inconsistencies
+	if cfg.HubbleUI && !cfg.EnableHubble {
+		verrs.Add(pathPrefix+".hubbleUI", "cannot be true if enableHubble is false")
+	}
 }

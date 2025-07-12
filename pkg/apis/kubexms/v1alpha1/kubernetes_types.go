@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	"fmt"
 	"strings"
 	"net" // Added for isValidCIDR
 	"k8s.io/apimachinery/pkg/runtime" // Added for RawExtension
@@ -231,7 +232,7 @@ func SetDefaults_KubeletConfig(cfg *KubeletConfig, parentContainerManager string
 
 func Validate_KubernetesConfig(cfg *KubernetesConfig, verrs *ValidationErrors, pathPrefix string) {
 	if cfg == nil {
-		verrs.Add("%s: kubernetes configuration section cannot be nil", pathPrefix)
+		verrs.Add(pathPrefix + ": kubernetes configuration section cannot be nil")
 		return
 	}
 	// Type is now top-level
@@ -241,15 +242,15 @@ func Validate_KubernetesConfig(cfg *KubernetesConfig, verrs *ValidationErrors, p
 	// }
 
 	if strings.TrimSpace(cfg.Version) == "" {
-		verrs.Add("%s.version: cannot be empty", pathPrefix)
+		verrs.Add(pathPrefix + ".version: cannot be empty")
 	}
 	if strings.TrimSpace(cfg.DNSDomain) == "" {
-		verrs.Add("%s.dnsDomain: cannot be empty", pathPrefix)
+		verrs.Add(pathPrefix + ".dnsDomain: cannot be empty")
 	}
 
 	validProxyModes := []string{"iptables", "ipvs", ""}
 	if !containsString(validProxyModes, cfg.ProxyMode) {
-		verrs.Add("%s.proxyMode: invalid mode '%s', must be one of %v or empty for default", pathPrefix, cfg.ProxyMode, validProxyModes)
+		verrs.Add(pathPrefix + ".proxyMode: invalid mode '" + cfg.ProxyMode + "', must be one of " + fmt.Sprintf("%v", validProxyModes) + " or empty for default")
 	}
 
 	// ContainerRuntime is now top-level
@@ -266,13 +267,13 @@ func Validate_KubernetesConfig(cfg *KubernetesConfig, verrs *ValidationErrors, p
 	if cfg.KubeProxy != nil { Validate_KubeProxyConfig(cfg.KubeProxy, verrs, pathPrefix+".kubeProxy", cfg.ProxyMode) }
 
 	if cfg.ContainerManager != "" && cfg.ContainerManager != "cgroupfs" && cfg.ContainerManager != "systemd" {
-		verrs.Add("%s.containerManager: must be 'cgroupfs' or 'systemd', got '%s'", pathPrefix, cfg.ContainerManager)
+		verrs.Add(pathPrefix + ".containerManager: must be 'cgroupfs' or 'systemd', got '" + cfg.ContainerManager + "'")
 	}
 	if cfg.KubeletConfiguration != nil && len(cfg.KubeletConfiguration.Raw) == 0 {
-		verrs.Add("%s.kubeletConfiguration: raw data cannot be empty if section is present", pathPrefix)
+		verrs.Add(pathPrefix + ".kubeletConfiguration: raw data cannot be empty if section is present")
 	}
 	if cfg.KubeProxyConfiguration != nil && len(cfg.KubeProxyConfiguration.Raw) == 0 {
-		verrs.Add("%s.kubeProxyConfiguration: raw data cannot be empty if section is present", pathPrefix)
+		verrs.Add(pathPrefix + ".kubeProxyConfiguration: raw data cannot be empty if section is present")
 	}
 }
 
@@ -281,7 +282,7 @@ func Validate_APIServerConfig(cfg *APIServerConfig, verrs *ValidationErrors, pat
 	if cfg.ServiceNodePortRange != "" {
 	   parts := strings.Split(cfg.ServiceNodePortRange, "-")
 	   if len(parts) != 2 {
-		   verrs.Add("%s.serviceNodePortRange: invalid format '%s', expected 'min-max'", pathPrefix, cfg.ServiceNodePortRange)
+		   verrs.Add(pathPrefix + ".serviceNodePortRange: invalid format '" + cfg.ServiceNodePortRange + "', expected 'min-max'")
 	   }
 	}
 }
@@ -291,15 +292,15 @@ func Validate_SchedulerConfig(cfg *SchedulerConfig, verrs *ValidationErrors, pat
 func Validate_KubeletConfig(cfg *KubeletConfig, verrs *ValidationErrors, pathPrefix string) {
 	if cfg == nil { return }
 	if cfg.CgroupDriver != nil && *cfg.CgroupDriver != "cgroupfs" && *cfg.CgroupDriver != "systemd" {
-	   verrs.Add("%s.cgroupDriver: must be 'cgroupfs' or 'systemd' if specified, got '%s'", pathPrefix, *cfg.CgroupDriver)
+	   verrs.Add(pathPrefix + ".cgroupDriver: must be 'cgroupfs' or 'systemd' if specified, got '" + *cfg.CgroupDriver + "'")
 	}
 	validHairpinModes := []string{"promiscuous-bridge", "hairpin-veth", "none", ""}
 	if cfg.HairpinMode != nil && *cfg.HairpinMode != "" && !containsString(validHairpinModes, *cfg.HairpinMode) {
-		verrs.Add("%s.hairpinMode: invalid mode '%s'", pathPrefix, *cfg.HairpinMode)
+		verrs.Add(pathPrefix + ".hairpinMode: invalid mode '" + *cfg.HairpinMode + "'")
 	}
 
 	if cfg.PodPidsLimit != nil && *cfg.PodPidsLimit <= 0 && *cfg.PodPidsLimit != -1 {
-		verrs.Add("%s.podPidsLimit: must be positive or -1 (unlimited), got %d", pathPrefix, *cfg.PodPidsLimit)
+		verrs.Add(pathPrefix + ".podPidsLimit: must be positive or -1 (unlimited), got " + fmt.Sprintf("%d", *cfg.PodPidsLimit))
 	}
 }
 func Validate_KubeProxyConfig(cfg *KubeProxyConfig, verrs *ValidationErrors, pathPrefix string, parentProxyMode string) {
@@ -307,7 +308,7 @@ func Validate_KubeProxyConfig(cfg *KubeProxyConfig, verrs *ValidationErrors, pat
 	if parentProxyMode == "iptables" && cfg.IPTables == nil {}
 	if parentProxyMode == "ipvs" && cfg.IPVS == nil {}
 	if cfg.IPTables != nil && cfg.IPTables.MasqueradeBit != nil && (*cfg.IPTables.MasqueradeBit < 0 || *cfg.IPTables.MasqueradeBit > 31) {
-	   verrs.Add("%s.ipTables.masqueradeBit: must be between 0 and 31, got %d", pathPrefix, *cfg.IPTables.MasqueradeBit)
+	   verrs.Add(pathPrefix + ".ipTables.masqueradeBit: must be between 0 and 31, got " + fmt.Sprintf("%d", *cfg.IPTables.MasqueradeBit))
 	}
 }
 

@@ -97,9 +97,6 @@ func SetDefaults_InternalLoadBalancerConfig(cfg *InternalLoadBalancerConfig) {
 func Validate_HighAvailabilityConfig(cfg *HighAvailabilityConfig, verrs *ValidationErrors, pathPrefix string) {
 	if cfg == nil { return }
 	if cfg.Enabled != nil && *cfg.Enabled {
-		isExternalLBConfigured := cfg.External != nil && cfg.External.Enabled != nil && *cfg.External.Enabled
-		isInternalLBConfigured := cfg.Internal != nil && cfg.Internal.Enabled != nil && *cfg.Internal.Enabled
-
 		// If HA.Enabled is true, but ControlPlaneEndpoint does not specify any LB type,
 		// then one of the internal/external sections here must be enabled and configured.
 		// This cross-validation is complex and might be better handled at the ClusterSpec.Validate level.
@@ -127,7 +124,7 @@ func Validate_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig, verrs 
 	// These types are for the specific managed solutions within ExternalLoadBalancerConfig
 	validManagedTypes := []string{"ManagedKeepalivedHAProxy", "ManagedKeepalivedNginxLB", "UserProvided", ""}
 	if !containsString(validManagedTypes, cfg.Type) { // Assuming containsString is available
-		verrs.Add(pathPrefix+".type", "unknown or unsupported external LB type '%s' in HA config", cfg.Type)
+		verrs.Add(pathPrefix + ".type: unknown or unsupported external LB type '" + cfg.Type + "' in HA config")
 	}
 
 	if cfg.Type == "UserProvided" {
@@ -157,7 +154,7 @@ func Validate_InternalLoadBalancerConfig(cfg *InternalLoadBalancerConfig, verrs 
 	if cfg == nil || cfg.Enabled == nil || !*cfg.Enabled { return }
 	validInternalTypes := []string{"KubeVIP", "WorkerNodeHAProxy", ""}
 	if !containsString(validInternalTypes, cfg.Type) { // Assuming containsString is available
-		verrs.Add(pathPrefix+".type", "unknown or unsupported internal LB type '%s' in HA config", cfg.Type)
+		verrs.Add(pathPrefix + ".type: unknown or unsupported internal LB type '" + cfg.Type + "' in HA config")
 	}
 
 	if cfg.Type == "KubeVIP" {

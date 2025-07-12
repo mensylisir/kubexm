@@ -82,7 +82,7 @@ func (s *GenerateRootCAStep) Meta() *spec.StepMeta {
 func (s *GenerateRootCAStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) { // Changed to step.StepContext
 	// populateDefaults needs to be called first to ensure paths are set for check
 	// and logger uses the final step name.
-	s.populateDefaults(ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "populateDefaults.Precheck"))
+	s.populateDefaults(*ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "populateDefaults.Precheck"))
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 
 	runnerSvc := ctx.GetRunner()
@@ -120,7 +120,7 @@ func (s *GenerateRootCAStep) Precheck(ctx step.StepContext, host connector.Host)
 }
 
 func (s *GenerateRootCAStep) Run(ctx step.StepContext, host connector.Host) error { // Changed to step.StepContext
-	s.populateDefaults(ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "populateDefaults.Run"))
+	s.populateDefaults(*ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "populateDefaults.Run"))
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 
 	runnerSvc := ctx.GetRunner()
@@ -173,14 +173,14 @@ func (s *GenerateRootCAStep) Run(ctx step.StepContext, host connector.Host) erro
 
 	const clusterRootCACertPathKey = "ClusterRootCACertPath" // Consider moving to pkg/common
 	const clusterRootCAKeyPathKey = "ClusterRootCAKeyPath"
-	ctx.ModuleCache().Set(clusterRootCACertPathKey, s.CertPath)
-	ctx.ModuleCache().Set(clusterRootCAKeyPathKey, s.KeyPath)
+	ctx.GetModuleCache().Set(clusterRootCACertPathKey, s.CertPath)
+	ctx.GetModuleCache().Set(clusterRootCAKeyPathKey, s.KeyPath)
 	logger.Info("Root CA certificate and key generated and paths stored in ModuleCache.", "certPath", s.CertPath, "keyPath", s.KeyPath)
 	return nil
 }
 
 func (s *GenerateRootCAStep) Rollback(ctx step.StepContext, host connector.Host) error { // Changed to step.StepContext
-	s.populateDefaults(ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "populateDefaults.Rollback"))
+	s.populateDefaults(*ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "populateDefaults.Rollback"))
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 
 	runnerSvc := ctx.GetRunner()
@@ -201,8 +201,8 @@ func (s *GenerateRootCAStep) Rollback(ctx step.StepContext, host connector.Host)
 
 	const clusterRootCACertPathKey = "ClusterRootCACertPath"
 	const clusterRootCAKeyPathKey = "ClusterRootCAKeyPath"
-	ctx.ModuleCache().Delete(clusterRootCACertPathKey)
-	ctx.ModuleCache().Delete(clusterRootCAKeyPathKey)
+	ctx.GetModuleCache().Delete(clusterRootCACertPathKey)
+	ctx.GetModuleCache().Delete(clusterRootCAKeyPathKey)
 	logger.Debug("Cleaned up CA paths from ModuleCache.")
 
 	logger.Info("Rollback attempt for CA generation finished (files removed if existed, cache keys deleted).")

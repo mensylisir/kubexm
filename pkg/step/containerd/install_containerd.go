@@ -7,7 +7,6 @@ import (
 	// "time" // Not used for step.Result
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec" // Added for StepMeta
 	"github.com/mensylisir/kubexm/pkg/step"
 	// commonstep "github.com/mensylisir/kubexm/pkg/step/common" // Not used directly
@@ -85,7 +84,7 @@ func (s *InstallContainerdStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *InstallContainerdStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *InstallContainerdStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 
 	runnerSvc := ctx.GetRunner()
@@ -125,7 +124,7 @@ func (s *InstallContainerdStep) Precheck(ctx runtime.StepContext, host connector
 	return true, nil
 }
 
-func (s *InstallContainerdStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *InstallContainerdStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 
 	runnerSvc := ctx.GetRunner()
@@ -134,7 +133,7 @@ func (s *InstallContainerdStep) Run(ctx runtime.StepContext, host connector.Host
 		return fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.meta.Name, err)
 	}
 
-	extractedPathVal, found := ctx.TaskCache().Get(s.SourceExtractedPathSharedDataKey)
+	extractedPathVal, found := ctx.GetTaskCache().Get(s.SourceExtractedPathSharedDataKey)
 	if !found {
 		return fmt.Errorf("path to extracted containerd not found in Task Cache using key '%s' for step %s on host %s", s.SourceExtractedPathSharedDataKey, s.meta.Name, host.GetName())
 	}
@@ -143,9 +142,6 @@ func (s *InstallContainerdStep) Run(ctx runtime.StepContext, host connector.Host
 		return fmt.Errorf("invalid extracted containerd path in Task Cache (not a string or empty) for key '%s' for step %s on host %s", s.SourceExtractedPathSharedDataKey, s.meta.Name, host.GetName())
 	}
 	logger.Info("Using extracted containerd files from.", "path", extractedPath)
-
-	// Operations like mkdir, cp, chmod will use runnerSvc.Run with sudo if s.Sudo is true.
-	execOpts := &connector.ExecOptions{Sudo: s.Sudo}
 
 	for srcRelPath, targetSystemPath := range s.BinariesToCopy {
 		sourceBinaryPath := filepath.Join(extractedPath, srcRelPath)
@@ -215,7 +211,7 @@ func (s *InstallContainerdStep) Run(ctx runtime.StepContext, host connector.Host
 	return nil
 }
 
-func (s *InstallContainerdStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *InstallContainerdStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 
 	runnerSvc := ctx.GetRunner()

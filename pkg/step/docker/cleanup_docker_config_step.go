@@ -51,7 +51,7 @@ func (s *CleanupDockerConfigStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *CleanupDockerConfigStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *CleanupDockerConfigStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -91,7 +91,7 @@ func (s *CleanupDockerConfigStep) Precheck(ctx runtime.StepContext, host connect
 	return false, nil
 }
 
-func (s *CleanupDockerConfigStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *CleanupDockerConfigStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -132,7 +132,7 @@ func (s *CleanupDockerConfigStep) Run(ctx runtime.StepContext, host connector.Ho
 	return nil
 }
 
-func (s *CleanupDockerConfigStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *CleanupDockerConfigStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	logger.Info("Rollback for CleanupDockerConfigStep is not applicable.")
 	return nil

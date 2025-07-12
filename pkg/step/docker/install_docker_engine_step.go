@@ -46,7 +46,7 @@ func (s *InstallDockerEngineStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *InstallDockerEngineStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *InstallDockerEngineStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -80,7 +80,7 @@ func (s *InstallDockerEngineStep) Precheck(ctx runtime.StepContext, host connect
 	return false, nil
 }
 
-func (s *InstallDockerEngineStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *InstallDockerEngineStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -125,7 +125,7 @@ func (s *InstallDockerEngineStep) Run(ctx runtime.StepContext, host connector.Ho
 	return nil
 }
 
-func (s *InstallDockerEngineStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *InstallDockerEngineStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	logger.Info("Attempting to remove Docker Engine packages for rollback.")
 

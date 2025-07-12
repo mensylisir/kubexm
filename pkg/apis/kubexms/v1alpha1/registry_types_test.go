@@ -4,11 +4,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/mensylisir/kubexm/pkg/util/validation"
 	"github.com/mensylisir/kubexm/pkg/util" // Added import
 )
 
-// Local helper pstrRegistryTest removed, using global stringPtr from util package
+// Local helper pstrRegistryTest removed, using global util.StrPtr from util package
 
 func TestSetDefaults_RegistryConfig(t *testing.T) {
 	cfg := &RegistryConfig{}
@@ -169,7 +168,7 @@ func TestValidate_RegistryConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			SetDefaults_RegistryConfig(tt.cfg)
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			Validate_RegistryConfig(tt.cfg, verrs, "spec.registry")
 
 			if tt.expectErr {
@@ -227,7 +226,7 @@ func TestValidate_RegistryAuth(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			Validate_RegistryAuth(tt.auth, verrs, "spec.registry.auths[test.com]")
 
 			if tt.expectErr {

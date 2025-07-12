@@ -9,6 +9,7 @@ const (
 	DefaultConfigDir        = "configs"        // Default configuration directory
 	DefaultCacheDir         = "cache"          // Default cache directory
 	DefaultCertificatesDir  = "certificates"   // Default certificates directory
+	DefaultCertsDir         = "certs"          // Default certs directory (alias for certificates)
 	DefaultBinariesDir      = "binaries"       // Default binaries directory
 	DefaultTemplatesDir     = "templates"      // Default templates directory
 	DefaultManifestsDir     = "manifests"      // Default manifests directory
@@ -21,6 +22,7 @@ const (
 	DefaultTmpDirName       = ".kubexm_tmp"    // Default temporary directory name
 	DefaultWorkDirName      = ".kubexm"        // Default work directory name (for backward compatibility)
 	KubexmRootDirName      = ".kubexm"        // Root directory name (unified with DefaultLocalWorkDir)
+	KUBEXM                 = ".kubexm"        // Main kubexm directory name
 )
 
 // Component-specific artifact directories

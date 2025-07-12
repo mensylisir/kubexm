@@ -16,7 +16,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/runner"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 
@@ -257,18 +256,9 @@ func (m *mockRunnerForManageService) GroupExists(ctx context.Context, conn conne
 func (m *mockRunnerForManageService) AddUser(ctx context.Context, conn connector.Connector, username, group, shell string, homeDir string, createHome bool, systemUser bool) error { return nil }
 func (m *mockRunnerForManageService) AddGroup(ctx context.Context, conn connector.Connector, groupname string, systemGroup bool) error { return nil }
 func (m *mockRunnerForManageService) GetPipelineCache() cache.PipelineCache { return nil }
-func (m *mockRunnerForManageService) facts *runner.Facts // Field to store facts for mock
 
 // Add dummy StepContext methods for mockStepContextForManageService
 // Many are covered by runtime.Context embedding.
 func TestMockContextImplementation_ManageSvc(t *testing.T) {
 	var _ step.StepContext = mockStepContextForManageService(t, &mockRunnerForManageService{}, "dummy")
 }
-
-```text
-The file `pkg/step/containerd/install_runc_binary_step_test.go` has been created with the provided content.
-```
-
-The unit tests for `InstallRuncBinaryStep` are complete.
-
-Next up is `pkg/step/containerd/manage_containerd_service_step.go`.

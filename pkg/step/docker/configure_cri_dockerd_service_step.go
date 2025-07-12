@@ -111,7 +111,7 @@ func indexOf(slice []string, item string) int {
 }
 
 
-func (s *ConfigureCriDockerdServiceStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *ConfigureCriDockerdServiceStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	if len(s.ExecStartArgs) == 0 {
 		logger.Info("No ExecStart arguments to configure, precheck considered done.")
@@ -168,7 +168,7 @@ func (s *ConfigureCriDockerdServiceStep) Precheck(ctx runtime.StepContext, host 
 	return false, nil
 }
 
-func (s *ConfigureCriDockerdServiceStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *ConfigureCriDockerdServiceStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	if len(s.ExecStartArgs) == 0 {
 		logger.Info("No ExecStart arguments to configure.")
@@ -240,7 +240,7 @@ func (s *ConfigureCriDockerdServiceStep) Run(ctx runtime.StepContext, host conne
 	return nil
 }
 
-func (s *ConfigureCriDockerdServiceStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *ConfigureCriDockerdServiceStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	logger.Info("Rollback for ConfigureCriDockerdServiceStep is complex (would require storing original file content) and is not implemented. Manual restore or re-running install steps might be needed.")
 	return nil

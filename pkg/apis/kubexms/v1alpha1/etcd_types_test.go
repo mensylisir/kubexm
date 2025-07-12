@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/mensylisir/kubexm/pkg/util"
-	"github.com/mensylisir/kubexm/pkg/util/validation"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -393,7 +392,7 @@ func TestValidate_EtcdConfig(t *testing.T) {
 			}
 
 
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			Validate_EtcdConfig(inputToTest, verrs, "spec.etcd")
 			if tt.expectError {
 				assert.True(t, verrs.HasErrors(), "Expected error for test '%s', but got none. Input: %+v, DefaultedOrOriginal: %+v", tt.name, tt.input, inputToTest)

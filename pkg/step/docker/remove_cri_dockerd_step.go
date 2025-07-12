@@ -48,7 +48,7 @@ func (s *RemoveCriDockerdStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *RemoveCriDockerdStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *RemoveCriDockerdStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -82,7 +82,7 @@ func (s *RemoveCriDockerdStep) Precheck(ctx runtime.StepContext, host connector.
 	return false, nil
 }
 
-func (s *RemoveCriDockerdStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *RemoveCriDockerdStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -115,7 +115,7 @@ func (s *RemoveCriDockerdStep) Run(ctx runtime.StepContext, host connector.Host)
 	return nil
 }
 
-func (s *RemoveCriDockerdStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *RemoveCriDockerdStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	logger.Info("Rollback for RemoveCriDockerdStep is not applicable (would mean reinstalling).")
 	return nil

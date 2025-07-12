@@ -103,7 +103,7 @@ func (s *GenerateDockerDaemonJSONStep) renderExpectedConfig() (string, error) {
 	return string(jsonData), nil
 }
 
-func (s *GenerateDockerDaemonJSONStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *GenerateDockerDaemonJSONStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -149,7 +149,7 @@ func (s *GenerateDockerDaemonJSONStep) Precheck(ctx runtime.StepContext, host co
 	return false, nil
 }
 
-func (s *GenerateDockerDaemonJSONStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *GenerateDockerDaemonJSONStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 
 	configContent, err := s.renderExpectedConfig()
@@ -179,7 +179,7 @@ func (s *GenerateDockerDaemonJSONStep) Run(ctx runtime.StepContext, host connect
 	return nil
 }
 
-func (s *GenerateDockerDaemonJSONStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *GenerateDockerDaemonJSONStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	logger.Info("Attempting to remove Docker daemon.json file for rollback.", "path", s.ConfigFilePath)
 

@@ -1,0 +1,48 @@
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: {{.AdvertiseAddress}}
+  bindPort: {{.BindPort}}
+nodeRegistration:
+  criSocket: unix:///var/run/containerd/containerd.sock
+  kubeletExtraArgs:
+    pod-infra-container-image: {{.PauseImage}}
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+kubernetesVersion: {{.KubernetesVersion}}
+controlPlaneEndpoint: {{.ControlPlaneEndpoint}}
+imageRepository: {{.ImageRepository}}
+clusterName: {{.ClusterName}}
+networking:
+  serviceSubnet: {{.ServiceSubnet}}
+  podSubnet: {{.PodSubnet}}
+  dnsDomain: {{.DNSDomain}}
+etcd:
+  external:
+    endpoints:
+    {{- range .EtcdEndpoints}}
+    - {{.}}
+    {{- end}}
+    caFile: {{.EtcdCAFile}}
+    certFile: {{.EtcdCertFile}}
+    keyFile: {{.EtcdKeyFile}}
+apiServer:
+  extraArgs:
+    service-node-port-range: {{.ServiceNodePortRange}}
+  certSANs:
+  {{- range .CertSANs}}
+  - {{.}}
+  {{- end}}
+controllerManager:
+  extraArgs:
+    bind-address: "0.0.0.0"
+scheduler:
+  extraArgs:
+    bind-address: "0.0.0.0"
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: KubeletConfiguration
+cgroupDriver: systemd
+serverTLSBootstrap: true
+rotateCertificates: true

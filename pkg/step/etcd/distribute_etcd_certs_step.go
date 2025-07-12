@@ -57,7 +57,7 @@ func (s *DistributeEtcdCertsStep) Meta() *spec.StepMeta {
 }
 
 // getLocalCertPath constructs the path on the control node for a given certificate.
-func (s *DistributeEtcdCertsStep) getLocalCertPath(ctx runtime.StepContext, certFileName string) string {
+func (s *DistributeEtcdCertsStep) getLocalCertPath(ctx step.StepContext, certFileName string) string {
 	baseDir := s.CertBaseDirOnControlNode
 	if baseDir == "" {
 		// Derive using similar logic to LocalCertificateHandle.Path()
@@ -67,7 +67,7 @@ func (s *DistributeEtcdCertsStep) getLocalCertPath(ctx runtime.StepContext, cert
 	return filepath.Join(baseDir, certFileName)
 }
 
-func (s *DistributeEtcdCertsStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *DistributeEtcdCertsStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -131,7 +131,7 @@ func (s *DistributeEtcdCertsStep) getRequiredCertsForHost(host connector.Host) [
 	return certs
 }
 
-func (s *DistributeEtcdCertsStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *DistributeEtcdCertsStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
 
 	certsToDistribute := s.getRequiredCertsForHost(host)
@@ -199,7 +199,7 @@ func (s *DistributeEtcdCertsStep) Run(ctx runtime.StepContext, host connector.Ho
 	return nil
 }
 
-func (s *DistributeEtcdCertsStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *DistributeEtcdCertsStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 
 	certsToRemove := s.getRequiredCertsForHost(host)

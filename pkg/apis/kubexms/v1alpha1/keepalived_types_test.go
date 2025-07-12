@@ -5,11 +5,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/mensylisir/kubexm/pkg/util/validation"
 	"github.com/mensylisir/kubexm/pkg/util" // Added import
 )
 
-// Local helpers removed, using global ones from zz_helpers.go (e.g. intPtr, stringPtr, boolPtr)
+// Local helpers removed, using global ones from zz_helpers.go (e.g. util.IntPtr, util.StrPtr, util.BoolPtr)
 
 func TestSetDefaults_KeepalivedConfig(t *testing.T) {
 	cfg := &KeepalivedConfig{}
@@ -35,13 +34,13 @@ func TestValidate_KeepalivedConfig(t *testing.T) {
 	}
 	SetDefaults_KeepalivedConfig(&validCfg)
 
-	verrs := &validation.ValidationErrors{}
+	verrs := &ValidationErrors{}
 	Validate_KeepalivedConfig(&validCfg, verrs, "keepalived")
 	assert.False(t, verrs.HasErrors(), "Validation failed for valid config: %v", verrs.Error())
 
 	skipInstallCfg := KeepalivedConfig{SkipInstall: util.BoolPtr(true)}
 	SetDefaults_KeepalivedConfig(&skipInstallCfg)
-	verrsSkip := &validation.ValidationErrors{}
+	verrsSkip := &ValidationErrors{}
 	Validate_KeepalivedConfig(&skipInstallCfg, verrsSkip, "keepalived")
 	assert.False(t, verrsSkip.HasErrors(), "Validation should pass (mostly skipped) if SkipInstall is true: %v", verrsSkip.Error())
 
@@ -79,7 +78,7 @@ func TestValidate_KeepalivedConfig(t *testing.T) {
 			}
 			SetDefaults_KeepalivedConfig(&tt.cfg)
 
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			Validate_KeepalivedConfig(&tt.cfg, verrs, "keepalived")
 			assert.True(t, verrs.HasErrors(), "Validate_KeepalivedConfig expected error for %s, got none", tt.name)
 			if !strings.Contains(verrs.Error(), tt.wantErrMsg) {

@@ -45,7 +45,7 @@ func NewInstallContainerdTask(runOnRoles []string) task.Task {
 func (t *InstallContainerdTask) IsRequired(ctx task.TaskContext) (bool, error) {
 	clusterConfig := ctx.GetClusterConfig()
 	// Only run if containerd is the chosen runtime type
-	if clusterConfig.Spec.ContainerRuntime == nil || clusterConfig.Spec.ContainerRuntime.Type != v1alpha1.ContainerdRuntime {
+	if clusterConfig.Spec.ContainerRuntime == nil || clusterConfig.Spec.ContainerRuntime.Type != v1alpha1.ContainerRuntimeContainerd {
 		ctx.GetLogger().Info("Containerd installation is not required (runtime type is not containerd).")
 		return false, nil
 	}

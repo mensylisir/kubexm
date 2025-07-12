@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/mensylisir/kubexm/pkg/common"
-	"github.com/mensylisir/kubexm/pkg/util/validation"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -77,11 +76,11 @@ func TestSetDefaults_DNS(t *testing.T) {
 			name: "empty DNS config",
 			input: &DNS{},
 			expected: &DNS{
-				CoreDNS: CoreDNS{
+				CoreDNS: &CoreDNS{
 					UpstreamDNSServers: defaultUpstreams,
 					ExternalZones:      []ExternalZone{},
 				},
-				NodeLocalDNS: NodeLocalDNS{
+				NodeLocalDNS: &NodeLocalDNS{
 					ExternalZones: []ExternalZone{},
 				},
 			},
@@ -89,14 +88,14 @@ func TestSetDefaults_DNS(t *testing.T) {
 		{
 			name: "coredns upstream specified",
 			input: &DNS{
-				CoreDNS: CoreDNS{UpstreamDNSServers: []string{"9.9.9.9"}},
+				CoreDNS: &CoreDNS{UpstreamDNSServers: []string{"9.9.9.9"}},
 			},
 			expected: &DNS{
-				CoreDNS: CoreDNS{
+				CoreDNS: &CoreDNS{
 					UpstreamDNSServers: []string{"9.9.9.9"},
 					ExternalZones:      []ExternalZone{},
 				},
-				NodeLocalDNS: NodeLocalDNS{
+				NodeLocalDNS: &NodeLocalDNS{
 					ExternalZones: []ExternalZone{},
 				},
 			},
@@ -104,16 +103,16 @@ func TestSetDefaults_DNS(t *testing.T) {
 		{
 			name: "coredns with external zone",
 			input: &DNS{
-				CoreDNS: CoreDNS{ExternalZones: []ExternalZone{{}}}, // Input an empty ExternalZone to test its defaulting
+				CoreDNS: &CoreDNS{ExternalZones: []ExternalZone{{}}}, // Input an empty ExternalZone to test its defaulting
 			},
 			expected: &DNS{
-				CoreDNS: CoreDNS{
+				CoreDNS: &CoreDNS{
 					UpstreamDNSServers: defaultUpstreams,
 					ExternalZones: []ExternalZone{ // Expect the ExternalZone to be defaulted
 						{Zones: []string{}, Nameservers: []string{}, Cache: common.DefaultExternalZoneCacheSeconds, Rewrite: []RewriteRule{}},
 					},
 				},
-				NodeLocalDNS: NodeLocalDNS{
+				NodeLocalDNS: &NodeLocalDNS{
 					ExternalZones: []ExternalZone{},
 				},
 			},
@@ -121,14 +120,14 @@ func TestSetDefaults_DNS(t *testing.T) {
 		{
 			name: "nodelocaldns with external zone",
 			input: &DNS{
-				NodeLocalDNS: NodeLocalDNS{ExternalZones: []ExternalZone{{Cache: 0}}}, // Cache 0 to test defaulting of Cache
+				NodeLocalDNS: &NodeLocalDNS{ExternalZones: []ExternalZone{{Cache: 0}}}, // Cache 0 to test defaulting of Cache
 			},
 			expected: &DNS{
-				CoreDNS: CoreDNS{
+				CoreDNS: &CoreDNS{
 					UpstreamDNSServers: defaultUpstreams,
 					ExternalZones:      []ExternalZone{},
 				},
-				NodeLocalDNS: NodeLocalDNS{
+				NodeLocalDNS: &NodeLocalDNS{
 					ExternalZones: []ExternalZone{ // Expect the ExternalZone to be defaulted
 						{Zones: []string{}, Nameservers: []string{}, Cache: common.DefaultExternalZoneCacheSeconds, Rewrite: []RewriteRule{}},
 					},
@@ -253,7 +252,7 @@ func TestValidate_ExternalZone(t *testing.T) {
 			if tt.input != nil && tt.input.Cache == 0 {
 				SetDefaults_ExternalZone(tt.input)
 			}
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			Validate_ExternalZone(tt.input, verrs, "testPrefix")
 			if tt.expectError {
 				assert.True(t, verrs.HasErrors(), "Expected error for test '%s', but got none. Input: %+v", tt.name, tt.input)
@@ -282,7 +281,7 @@ func TestValidate_DNS(t *testing.T) {
 		{
 			name: "valid coredns with upstream and external zone",
 			input: &DNS{
-				CoreDNS: CoreDNS{
+				CoreDNS: &CoreDNS{
 					UpstreamDNSServers: []string{"1.1.1.1"},
 					ExternalZones: []ExternalZone{
 						{Zones: []string{"my.zone"}, Nameservers: []string{"10.0.0.1"}, Cache: 300},
@@ -294,7 +293,7 @@ func TestValidate_DNS(t *testing.T) {
 		{
 			name: "coredns empty upstream server",
 			input: &DNS{
-				CoreDNS: CoreDNS{UpstreamDNSServers: []string{""}},
+				CoreDNS: &CoreDNS{UpstreamDNSServers: []string{""}},
 			},
 			expectError: true,
 			errorMsg:    ".coredns.upstreamDNSServers[0]: server address cannot be empty",
@@ -302,7 +301,7 @@ func TestValidate_DNS(t *testing.T) {
 		{
 			name: "coredns invalid upstream server format",
 			input: &DNS{
-				CoreDNS: CoreDNS{UpstreamDNSServers: []string{"not-valid"}},
+				CoreDNS: &CoreDNS{UpstreamDNSServers: []string{"not-valid"}},
 			},
 			expectError: true,
 			errorMsg:    ".coredns.upstreamDNSServers[0]: invalid server address format 'not-valid'",
@@ -310,7 +309,7 @@ func TestValidate_DNS(t *testing.T) {
 		{
 			name: "coredns invalid external zone (no nameservers)",
 			input: &DNS{
-				CoreDNS: CoreDNS{ExternalZones: []ExternalZone{{Zones: []string{"bad.zone"}, Cache: 300}}},
+				CoreDNS: &CoreDNS{ExternalZones: []ExternalZone{{Zones: []string{"bad.zone"}, Cache: 300}}},
 			},
 			expectError: true,
 			errorMsg:    ".coredns.externalZones[0].nameservers: must contain at least one nameserver",
@@ -318,7 +317,7 @@ func TestValidate_DNS(t *testing.T) {
 		{
 			name: "nodelocaldns invalid external zone (no zones)",
 			input: &DNS{
-				NodeLocalDNS: NodeLocalDNS{ExternalZones: []ExternalZone{{Nameservers: []string{"1.2.3.4"}, Cache: 300}}},
+				NodeLocalDNS: &NodeLocalDNS{ExternalZones: []ExternalZone{{Nameservers: []string{"1.2.3.4"}, Cache: 300}}},
 			},
 			expectError: true,
 			errorMsg:    ".nodelocaldns.externalZones[0].zones: must contain at least one zone name",
@@ -349,7 +348,7 @@ func TestValidate_DNS(t *testing.T) {
 				SetDefaults_DNS(inputToTest) // This will also default nested ExternalZones
 			}
 
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			Validate_DNS(inputToTest, verrs, "spec.dns")
 			if tt.expectError {
 				assert.True(t, verrs.HasErrors(), "Expected error for test '%s', but got none. Input: %+v, Defaulted: %+v", tt.name, tt.input, inputToTest)

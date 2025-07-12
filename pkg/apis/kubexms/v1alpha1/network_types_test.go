@@ -5,12 +5,11 @@ import (
 	"testing"
 	// "net" // No longer needed here as TestNetworksOverlap was moved
 	"github.com/stretchr/testify/assert" // Ensure testify is imported
-	"github.com/mensylisir/kubexm/pkg/util/validation"
 	"github.com/mensylisir/kubexm/pkg/util" // For pointer helpers
 )
 
 // Helper functions (pboolNetworkTest, etc.) removed in favor of global helpers
-// from zz_helpers.go (e.g., boolPtr, int32Ptr, stringPtr, intPtr)
+// from zz_helpers.go (e.g., util.BoolPtr, int32Ptr, util.StrPtr, util.IntPtr)
 
 // --- Test SetDefaults_NetworkConfig & Sub-configs ---
 func TestSetDefaults_NetworkConfig_Overall(t *testing.T) {
@@ -185,7 +184,7 @@ func TestValidate_NetworkConfig_Valid(t *testing.T) {
 		Calico: &CalicoConfig{IPIPMode: "Always", VXLANMode: "Never"},
 	}
 	SetDefaults_NetworkConfig(cfg)
-	verrs := &validation.ValidationErrors{}
+	verrs := &ValidationErrors{}
 	Validate_NetworkConfig(cfg, verrs, "spec.network", k8sCfgMinimal) // Pass k8sCfgMinimal
 	if verrs.HasErrors() { // Updated
 		t.Errorf("Validate_NetworkConfig for valid Calico config failed: %v", verrs.Error()) // Updated
@@ -237,7 +236,7 @@ func TestValidate_NetworkConfig_Invalid(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.cfg != nil { SetDefaults_NetworkConfig(tt.cfg) }
 
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			Validate_NetworkConfig(tt.cfg, verrs, "spec.network", k8sCfgMinimal) // Pass k8sCfgMinimal
 
 			if tt.wantErrMsg == "" {
@@ -278,7 +277,7 @@ func TestValidate_FlannelConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			if tt.cfg != nil && tt.name == "valid_empty" {
 				SetDefaults_FlannelConfig(tt.cfg)
 			}
@@ -315,7 +314,7 @@ func TestValidate_KubeOvnConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			if tt.cfg != nil && tt.name == "valid_enabled_defaults" {
 				SetDefaults_KubeOvnConfig(tt.cfg)
 			}
@@ -349,7 +348,7 @@ func TestValidate_HybridnetConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			if tt.cfg != nil && tt.name == "valid_enabled_defaults" {
 				SetDefaults_HybridnetConfig(tt.cfg)
 			}
@@ -378,7 +377,7 @@ func TestValidate_IPPoolConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			Validate_IPPoolConfig(tt.cfg, verrs, "")
 			if tt.wantErrMsg == "" {
 				assert.False(t, verrs.HasErrors(), "Expected no error for %s, got %v", tt.name, verrs.Error())
@@ -395,7 +394,7 @@ func TestNetworkConfig_EnableMultusCNI(t *testing.T) {
    SetDefaults_NetworkConfig(cfg)
    if cfg.EnableMultusCNI() != false {t.Error("EnableMultusCNI default failed")}
 
-   cfg.Multus.Enabled = boolPtr(true)
+   cfg.Multus.Enabled = util.BoolPtr(true)
    if cfg.EnableMultusCNI() != true {t.Error("EnableMultusCNI true failed")}
 }
 
@@ -405,12 +404,12 @@ func TestCalicoConfig_TyphaHelpers(t *testing.T) {
    if cfg.IsTyphaEnabled() != false {t.Error("IsTyphaEnabled default failed")}
    if cfg.GetTyphaReplicas() != 0 {t.Error("GetTyphaReplicas default for disabled Typha failed")}
 
-   cfg.EnableTypha = boolPtr(true)
+   cfg.EnableTypha = util.BoolPtr(true)
    SetDefaults_CalicoConfig(cfg, "", nil)
    if cfg.IsTyphaEnabled() != true {t.Error("IsTyphaEnabled true failed")}
    if cfg.GetTyphaReplicas() != 2 {t.Errorf("GetTyphaReplicas default for enabled Typha failed, got %d", cfg.GetTyphaReplicas())}
 
-   cfg.TyphaReplicas = intPtr(5)
+   cfg.TyphaReplicas = util.IntPtr(5)
    if cfg.GetTyphaReplicas() != 5 {t.Errorf("GetTyphaReplicas custom failed, got %d", cfg.GetTyphaReplicas())}
 }
 
@@ -430,7 +429,7 @@ func TestValidate_NetworkConfig_Calls_Validate_CiliumConfig(t *testing.T) {
 	SetDefaults_NetworkConfig(cfg)
 
 
-	verrs := &validation.ValidationErrors{}
+	verrs := &ValidationErrors{}
 	Validate_NetworkConfig(cfg, verrs, "spec.network", k8sCfgMinimal) // Pass k8sCfgMinimal
 
 	if !verrs.HasErrors() {
@@ -507,7 +506,7 @@ func TestValidate_CalicoConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			verrs := &validation.ValidationErrors{}
+			verrs := &ValidationErrors{}
 			// Simulate defaults being applied if cfg is empty, for standalone validation
 			if tt.cfg != nil && tt.name == "valid_empty" {
 				SetDefaults_CalicoConfig(tt.cfg, "10.244.0.0/16", util.IntPtr(26))

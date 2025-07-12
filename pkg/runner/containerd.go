@@ -954,16 +954,22 @@ func (r *defaultRunner) ConfigureContainerd(ctx context.Context, conn connector.
 	return nil
 }
 
-// ConfigureCrictl writes the crictl configuration file (/etc/crictl.yaml).
-func (r *defaultRunner) ConfigureCrictl(ctx context.Context, conn connector.Connector, configFileContent string) error {
+// ConfigureCrictl writes the crictl configuration file.
+func (r *defaultRunner) ConfigureCrictl(ctx context.Context, conn connector.Connector, configFileContent string, configFilePath string) error {
 	if conn == nil { return errors.New("connector cannot be nil") }
 	if strings.TrimSpace(configFileContent) == "" { return errors.New("configFileContent cannot be empty") }
-
-	if err := r.Mkdirp(ctx, conn, filepath.Dir(crictlConfigPath), "0755", true); err != nil {
-		return errors.Wrapf(err, "failed to create dir for %s", crictlConfigPath)
+	
+	// Use provided path or default
+	filePath := configFilePath
+	if filePath == "" {
+		filePath = crictlConfigPath
 	}
-	if err := r.WriteFile(ctx, conn, []byte(configFileContent), crictlConfigPath, "0644", true); err != nil {
-		return errors.Wrapf(err, "failed to write crictl config to %s", crictlConfigPath)
+
+	if err := r.Mkdirp(ctx, conn, filepath.Dir(filePath), "0755", true); err != nil {
+		return errors.Wrapf(err, "failed to create dir for %s", filePath)
+	}
+	if err := r.WriteFile(ctx, conn, []byte(configFileContent), filePath, "0644", true); err != nil {
+		return errors.Wrapf(err, "failed to write crictl config to %s", filePath)
 	}
 	return nil
 }
@@ -1588,7 +1594,7 @@ debug: false
 pull-image-on-create: false
 `
 		// The ConfigureCrictl method handles Mkdirp and WriteFile.
-		if err := r.ConfigureCrictl(ctx, conn, defaultCrictlConfigContent); err != nil {
+		if err := r.ConfigureCrictl(ctx, conn, defaultCrictlConfigContent, ""); err != nil {
 			return errors.Wrap(err, "failed to apply default crictl configuration")
 		}
 	}

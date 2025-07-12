@@ -5,10 +5,12 @@ import (
 	"path/filepath"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 )
+
+// RuncBinaryRemotePathCacheKey is the default cache key for runc binary remote path
+const RuncBinaryRemotePathCacheKey = "runcBinaryRemotePath"
 
 // InstallRuncBinaryStep copies the distributed runc binary to a system path and makes it executable.
 type InstallRuncBinaryStep struct {
@@ -45,7 +47,7 @@ func (s *InstallRuncBinaryStep) Meta() *spec.StepMeta {
 	return &s.meta
 }
 
-func (s *InstallRuncBinaryStep) Precheck(ctx runtime.StepContext, host connector.Host) (bool, error) {
+func (s *InstallRuncBinaryStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetConnectorForHost(host)
@@ -67,9 +69,9 @@ func (s *InstallRuncBinaryStep) Precheck(ctx runtime.StepContext, host connector
 	return false, nil
 }
 
-func (s *InstallRuncBinaryStep) Run(ctx runtime.StepContext, host connector.Host) error {
+func (s *InstallRuncBinaryStep) Run(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
-	remoteBinaryPathVal, found := ctx.TaskCache().Get(s.RemoteBinaryPathCacheKey)
+	remoteBinaryPathVal, found := ctx.GetTaskCache().Get(s.RemoteBinaryPathCacheKey)
 	if !found {
 		return fmt.Errorf("remote runc binary path not found in task cache with key '%s'", s.RemoteBinaryPathCacheKey)
 	}
@@ -112,7 +114,7 @@ func (s *InstallRuncBinaryStep) Run(ctx runtime.StepContext, host connector.Host
 	return nil
 }
 
-func (s *InstallRuncBinaryStep) Rollback(ctx runtime.StepContext, host connector.Host) error {
+func (s *InstallRuncBinaryStep) Rollback(ctx step.StepContext, host connector.Host) error {
 	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
 	logger.Info("Attempting to remove installed runc binary for rollback.", "path", s.TargetSystemPath)
 	runnerSvc := ctx.GetRunner()

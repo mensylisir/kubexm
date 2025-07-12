@@ -108,7 +108,7 @@ func (h *RemoteImageHandle) ID() string {
 }
 
 // Path for an image handle might not be a filesystem path, but the full image reference string.
-func (h *RemoteImageHandle) Path(ctx runtime.TaskContext) (string, error) {
+func (h *RemoteImageHandle) Path(ctx task.TaskContext) (string, error) {
 	clusterCfg := ctx.GetClusterConfig()
 	if clusterCfg == nil {
 		return "", fmt.Errorf("cluster config is nil in TaskContext for image %s", h.ID())
@@ -121,7 +121,7 @@ func (h *RemoteImageHandle) Type() string {
 }
 
 // EnsurePlan generates an ExecutionFragment to pull the image on target hosts.
-func (h *RemoteImageHandle) EnsurePlan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
+func (h *RemoteImageHandle) EnsurePlan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("resource_id", h.ID(), "image_base_name", h.BaseImageName)
 	logger.Info("Planning resource assurance for remote image...")
 
