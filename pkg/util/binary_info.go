@@ -11,26 +11,24 @@ import (
 	"github.com/mensylisir/kubexm/pkg/common"
 )
 
-// BinaryType represents the type of binary component.
 type BinaryType string
 
-// Constants for BinaryType
 const (
 	ETCD       BinaryType = "etcd"
-	KUBE       BinaryType = "kubernetes" // For kubeadm, kubelet, kubectl, etc.
+	KUBE       BinaryType = "kubernetes"
 	CNI        BinaryType = "cni"
 	HELM       BinaryType = "helm"
 	DOCKER     BinaryType = "docker"
 	CRIDOCKERD BinaryType = "cri-dockerd"
 	CRICTL     BinaryType = "crictl"
-	K3S        BinaryType = "k3s"        // K3S is a KUBE type distribution
-	K8E        BinaryType = "k8e"        // K8E is a KUBE type distribution
-	REGISTRY   BinaryType = "registry"   // For local registry components like 'registry' or 'harbor'
-	BUILD      BinaryType = "build"      // For build tools like 'buildx'
-	CONTAINERD BinaryType = "containerd" // For containerd itself
-	RUNC       BinaryType = "runc"       // For runc
-	CALICOCTL  BinaryType = "calicoctl"  // For calicoctl CLI
-	UNKNOWN    BinaryType = "unknown"    // Fallback type
+	K3S        BinaryType = "k3s"
+	K8E        BinaryType = "k8e"
+	REGISTRY   BinaryType = "registry"
+	BUILD      BinaryType = "build"
+	CONTAINERD BinaryType = "containerd"
+	RUNC       BinaryType = "runc"
+	CALICOCTL  BinaryType = "calicoctl"
+	UNKNOWN    BinaryType = "unknown"
 )
 
 // Constants for component names, matching keys in knownBinaryDetails
@@ -43,49 +41,46 @@ const (
 	ComponentKubeScheduler         = "kube-scheduler"
 	ComponentKubeControllerManager = "kube-controller-manager"
 	ComponentKubeApiServer         = "kube-apiserver"
-	ComponentKubeCNI               = "kubecni" // Name for CNI plugins bundle
+	ComponentKubeCNI               = "kubecni"
 	ComponentHelm                  = "helm"
 	ComponentDocker                = "docker"
 	ComponentCriDockerd            = "cri-dockerd"
 	ComponentCriCtl                = "crictl"
 	ComponentK3s                   = "k3s"
 	ComponentK8e                   = "k8e"
-	ComponentRegistry              = "registry" // Generic name for the registry binary itself
+	ComponentRegistry              = "registry"
 	ComponentHarbor                = "harbor"
-	ComponentCompose               = "compose" // Docker Compose
+	ComponentCompose               = "compose"
 	ComponentContainerd            = "containerd"
 	ComponentRunc                  = "runc"
 	ComponentCalicoCtl             = "calicoctl"
 	ComponentBuildx                = "buildx"
 )
 
-// Directory name constants under CLUSTER_NAME path
 const (
 	DirNameCerts            = "certs"
-	DirNameEtcd             = common.DefaultEtcdDir             // "etcd"
-	DirNameContainerRuntime = common.DefaultContainerRuntimeDir // "container_runtime"
-	DirNameKubernetes       = common.DefaultKubernetesDir       // "kubernetes"
+	DirNameEtcd             = common.DefaultEtcdDir
+	DirNameContainerRuntime = common.DefaultContainerRuntimeDir
+	DirNameKubernetes       = common.DefaultKubernetesDir
 )
 
-// BinaryInfo holds information about a downloadable binary component.
 type BinaryInfo struct {
-	Component    string     // User-friendly name, e.g., "etcd", "kubeadm"
-	Type         BinaryType // Type of the component
-	Version      string
-	Arch         string
-	OS           string // Operating system, e.g., "linux"
-	Zone         string // Download zone, e.g., "cn" or "" for default
-	FileName     string // Filename of the download, e.g., "etcd-v3.5.9-linux-amd64.tar.gz"
-	URL          string // Download URL
-	IsArchive            bool   // True if the downloaded file is an archive (.tar.gz, .tgz, .zip)
-	BaseDir              string // Base directory for storing this binary type locally: ${WORK_DIR}/.kubexm/${CLUSTER_NAME}/${TypeDirName}/
-	ComponentDir         string // Specific directory for this component: ${BaseDir}/${ComponentSubDir}/${Version}/${Arch}/ or ${BaseDir}/${Version}/${Arch}/
-	FilePath             string // Full local path to the downloaded file: ${ComponentDir}/${FileName}
-	ExpectedChecksum     string // Expected checksum value (e.g., the hex string)
-	ExpectedChecksumType string // Type of the checksum (e.g., "sha256", "sha512")
+	Component            string
+	Type                 BinaryType
+	Version              string
+	Arch                 string
+	OS                   string
+	Zone                 string
+	FileName             string
+	URL                  string
+	IsArchive            bool
+	BaseDir              string
+	ComponentDir         string
+	FilePath             string
+	ExpectedChecksum     string
+	ExpectedChecksumType string
 }
 
-// BinaryDetailSpec holds the static configuration for a known binary component.
 type BinaryDetailSpec struct {
 	BinaryType           BinaryType
 	URLTemplate          string
@@ -93,28 +88,22 @@ type BinaryDetailSpec struct {
 	FileNameTemplate     string
 	IsArchive            bool
 	DefaultOS            string
-	ComponentNameForDir  string // Used for container_runtime subdirectories like "docker", "containerd"
-	ExpectedChecksum     string // Optional: Checksum string (e.g., "abc...def")
-	ExpectedChecksumType string // Optional: Checksum type (e.g., "sha256")
+	ComponentNameForDir  string
+	ExpectedChecksum     string
+	ExpectedChecksumType string
 }
 
-// BinaryProvider holds the configuration for known binaries and provides methods to get their info.
 type BinaryProvider struct {
 	details map[string]BinaryDetailSpec
-	// Potentially add fields for custom config paths or overrides here in the future
 }
 
-// NewBinaryProvider creates a new BinaryProvider with default known binary details.
 func NewBinaryProvider() *BinaryProvider {
 	return &BinaryProvider{
-		details: defaultKnownBinaryDetails, // Use a new var for default map
+		details: defaultKnownBinaryDetails,
 	}
 }
 
-// defaultKnownBinaryDetails is the internal default map of component names to their download attributes.
-// This will be assigned to BinaryProvider.details by default.
 var defaultKnownBinaryDetails = map[string]BinaryDetailSpec{
-	// Corrected field names to match BinaryDetailSpec struct
 	ComponentEtcd: {
 		BinaryType:           ETCD,
 		URLTemplate:          "https://github.com/coreos/etcd/releases/download/{{.Version}}/etcd-{{.Version}}-{{.OS}}-{{.Arch}}.tar.gz",
@@ -302,23 +291,16 @@ var defaultKnownBinaryDetails = map[string]BinaryDetailSpec{
 	},
 }
 
-// templateData is used for rendering URL and filename templates.
 type templateData struct {
-	Version         string // Full version string, e.g., "v1.2.3", "v1.2.3+k3s1"
-	VersionNoV      string // Version without 'v' prefix, e.g., "1.2.3", "1.2.3+k3s1"
-	VersionWithPlus string // Original version if it contains '+', used for k3s/k8e that include it directly in some URL parts
+	Version         string
+	VersionNoV      string
+	VersionWithPlus string
 	Arch            string
-	ArchAlias       string // e.g., x86_64 for amd64
-	ArchSuffix      string // e.g., -arm64 for k3s arm64, empty otherwise
+	ArchAlias       string
+	ArchSuffix      string
 	OS              string
 }
 
-// GetBinaryInfo returns information about a downloadable binary component.
-// componentName should be one of the Component* constants.
-// version should be like "v1.2.3" (for most) or "1.2.3" (for cri-dockerd, docker) or "v1.2.3+k3s1" (for k3s).
-// arch should be "amd64" or "arm64". If empty, defaults to runtime.GOARCH.
-// zone is "cn" for China region, otherwise uses default URLs.
-// workDir and clusterName are used to construct local storage paths.
 func (bp *BinaryProvider) GetBinaryInfo(componentName, version, arch, zone, workDir, clusterName string) (*BinaryInfo, error) {
 	if strings.TrimSpace(version) == "" {
 		return nil, fmt.Errorf("version cannot be empty for component %s", componentName)
@@ -330,33 +312,28 @@ func (bp *BinaryProvider) GetBinaryInfo(componentName, version, arch, zone, work
 
 	finalArch := arch
 	if finalArch == "" {
-		finalArch = runtime.GOARCH // Default to host architecture
+		finalArch = runtime.GOARCH
 	}
-	// Normalize architecture names
 	switch finalArch {
-	case "x86_64":
-		finalArch = "amd64"
-	case "aarch64":
-		finalArch = "arm64"
+	case common.ArchX8664:
+		finalArch = common.ArchAMD64
+	case common.ArchAarch64:
+		finalArch = common.ArchARM64
 	}
 
-	finalOS := details.DefaultOS // Corrected
+	finalOS := details.DefaultOS
 	if finalOS == "" {
-		finalOS = "linux" // Ultimate fallback
+		finalOS = common.OSLinux
 	}
 
-	// Prepare versions for template
 	versionNoV := strings.TrimPrefix(version, "v")
-	versionWithPlus := version // Default to original version string
+	versionWithPlus := version
 
-	// Specific handling for k3s/k8e naming
 	archSuffix := ""
 	if componentName == ComponentK3s || componentName == ComponentK8e {
 		if finalArch == "arm64" {
 			archSuffix = "-" + finalArch
 		}
-		// k3s/k8e versions in URLs often look like "v1.20.0+k3s1"
-		// The `version` param should already be in this format if needed.
 	}
 
 	td := templateData{
@@ -369,12 +346,12 @@ func (bp *BinaryProvider) GetBinaryInfo(componentName, version, arch, zone, work
 		OS:              finalOS,
 	}
 
-	urlTmplToUse := details.URLTemplate // Corrected
-	if strings.ToLower(zone) == "cn" && details.CNURLTemplate != "" { // Corrected
-		urlTmplToUse = details.CNURLTemplate // Corrected
+	urlTmplToUse := details.URLTemplate
+	if strings.ToLower(zone) == "cn" && details.CNURLTemplate != "" {
+		urlTmplToUse = details.CNURLTemplate
 	}
 
-	fileName, err := RenderTemplate(details.FileNameTemplate, td) // Corrected
+	fileName, err := RenderTemplate(details.FileNameTemplate, td)
 	if err != nil {
 		return nil, fmt.Errorf("failed to render filename for %s (template: '%s'): %w", componentName, details.FileNameTemplate, err) // Corrected
 	}
@@ -383,9 +360,6 @@ func (bp *BinaryProvider) GetBinaryInfo(componentName, version, arch, zone, work
 	if err != nil {
 		return nil, fmt.Errorf("failed to render download URL for %s (template: '%s'): %w", componentName, urlTmplToUse, err)
 	}
-
-	// Path construction based on 21-其他说明.md and 22-额外要求.md
-	// workdir/.kubexm/${cluster_name}/${type_dir_name}/${sub_path_parts...}
 	if workDir == "" {
 		return nil, fmt.Errorf("workDir cannot be empty for generating binary path")
 	}
@@ -393,62 +367,61 @@ func (bp *BinaryProvider) GetBinaryInfo(componentName, version, arch, zone, work
 		return nil, fmt.Errorf("clusterName cannot be empty for generating binary path")
 	}
 
-	kubexmRoot := filepath.Join(workDir, common.KubexmRootDirName) // Updated to KubexmRootDirName
+	kubexmRoot := filepath.Join(workDir, common.KubexmRootDirName)
 	clusterBaseDir := filepath.Join(kubexmRoot, clusterName)
 
 	var typeSpecificBaseDir string
 	var componentVersionSpecificDir string
 
-	switch details.BinaryType { // Corrected
+	switch details.BinaryType {
 	case ETCD:
 		typeSpecificBaseDir = filepath.Join(clusterBaseDir, DirNameEtcd)
 		componentVersionSpecificDir = filepath.Join(typeSpecificBaseDir, version, finalArch)
-	case KUBE, K3S, K8E: // Group all Kubernetes-like distributions here for pathing
+	case KUBE, K3S, K8E:
 		typeSpecificBaseDir = filepath.Join(clusterBaseDir, DirNameKubernetes)
 		componentVersionSpecificDir = filepath.Join(typeSpecificBaseDir, version, finalArch)
-	case CNI, CALICOCTL: // CNI plugins and related tools like calicoctl
-		typeSpecificBaseDir = filepath.Join(clusterBaseDir, DirNameKubernetes, "cni") // Store CNI under kubernetes/cni
+	case CNI, CALICOCTL:
+		typeSpecificBaseDir = filepath.Join(clusterBaseDir, DirNameKubernetes, common.DefaultCNIDir)
 		componentVersionSpecificDir = filepath.Join(typeSpecificBaseDir, componentName, version, finalArch)
 	case CONTAINERD, DOCKER, RUNC, CRIDOCKERD, CRICTL:
 		typeSpecificBaseDir = filepath.Join(clusterBaseDir, DirNameContainerRuntime)
-		compDirName := details.ComponentNameForDir // Corrected
+		compDirName := details.ComponentNameForDir
 		if compDirName == "" {
 			compDirName = componentName
 		}
 		componentVersionSpecificDir = filepath.Join(typeSpecificBaseDir, compDirName, version, finalArch)
-	case HELM, BUILD, REGISTRY: // Tools like Helm, buildx, registry, harbor, compose
-		typeSpecificBaseDir = filepath.Join(clusterBaseDir, string(details.BinaryType)) // Corrected
-		compDirName := details.ComponentNameForDir // Corrected
+	case HELM, BUILD, REGISTRY:
+		typeSpecificBaseDir = filepath.Join(clusterBaseDir, string(details.BinaryType))
+		compDirName := details.ComponentNameForDir
 		if compDirName == "" {
 			compDirName = componentName
 		}
 		componentVersionSpecificDir = filepath.Join(typeSpecificBaseDir, compDirName, version, finalArch)
 
 	default:
-		return nil, fmt.Errorf("unhandled binary type '%s' for path construction", details.BinaryType) // Corrected
+		return nil, fmt.Errorf("unhandled binary type '%s' for path construction", details.BinaryType)
 	}
 
 	filePath := filepath.Join(componentVersionSpecificDir, fileName)
 
 	return &BinaryInfo{
-		Component:    componentName,
-		Type:         details.BinaryType, // Corrected
-		Version:      version,
-		Arch:         finalArch,
-		OS:           finalOS,
-		Zone:         zone,
-		FileName:     fileName,
-		URL:          downloadURL,
-		IsArchive:    details.IsArchive, // Corrected
+		Component:            componentName,
+		Type:                 details.BinaryType,
+		Version:              version,
+		Arch:                 finalArch,
+		OS:                   finalOS,
+		Zone:                 zone,
+		FileName:             fileName,
+		URL:                  downloadURL,
+		IsArchive:            details.IsArchive,
 		BaseDir:              typeSpecificBaseDir,
 		ComponentDir:         componentVersionSpecificDir,
 		FilePath:             filePath,
-		ExpectedChecksum:     details.ExpectedChecksum,     // Corrected
-		ExpectedChecksumType: details.ExpectedChecksumType, // Corrected
+		ExpectedChecksum:     details.ExpectedChecksum,
+		ExpectedChecksumType: details.ExpectedChecksumType,
 	}, nil
 }
 
-// GetZone retrieves the download zone from the KXZONE environment variable.
 func GetZone() string {
 	if strings.ToLower(os.Getenv("KXZONE")) == "cn" {
 		return "cn"
@@ -456,53 +429,13 @@ func GetZone() string {
 	return ""
 }
 
-// ArchAlias returns the architecture alias typically used in download URLs.
 func ArchAlias(arch string) string {
 	switch strings.ToLower(arch) {
-	case "amd64":
-		return "x86_64"
-	case "arm64":
-		return "aarch64"
+	case common.ArchAMD64:
+		return common.ArchX8664
+	case common.ArchARM64:
+		return common.ArchAarch64
 	default:
 		return arch
-	}
-}
-
-// GetImageNames returns a predefined list of core Kubernetes image names.
-// This list is based on the markdown file "23-二进制下载地址.md".
-func GetImageNames() []string {
-	return []string{
-		"pause",
-		"kube-apiserver",
-		"kube-controller-manager",
-		"kube-scheduler",
-		"kube-proxy",
-		"conformance:v1.33.0", // Example version, actual version might vary
-		// Network
-		"coredns", // Usually coredns/coredns
-		"k8s-dns-node-cache",
-		"calico-kube-controllers",
-		"calico-cni",
-		"calico-node",
-		"calico-flexvol",
-		"calico-typha",
-		"flannel", // Usually flannelcni/flannel or quay.io/coreos/flannel
-		"flannel-cni-plugin",
-		"cilium", // Usually cilium/cilium
-		"cilium-operator-generic",
-		"hybridnet",
-		"kubeovn",
-		"multus", // Usually nfvpe/multus-cni
-		// Storage
-		"provisioner-localpv", // e.g., sig-storage/local-volume-provisioner
-		"linux-utils",         // Often used by storage plugins for formatting etc.
-		// Load Balancer
-		"haproxy",
-		"nginx",
-		"kubevip", // Usually an image like anthonytatowicz/kubevip
-		// Kata-deploy
-		"kata-deploy",
-		// Node-feature-discovery
-		"node-feature-discovery", // e.g., k8s.gcr.io/nfd/node-feature-discovery
 	}
 }

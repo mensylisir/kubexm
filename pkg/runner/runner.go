@@ -1,9 +1,9 @@
 package runner
 
 import (
+	"bytes" // For template rendering
 	"context"
 	"fmt"
-	"bytes" // For template rendering
 	"os"
 	"strconv"
 	"strings"
@@ -44,7 +44,7 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 	defer cancel()
 
 	g, gCtx := errgroup.WithContext(factCtx)
-	
+
 	// Set a reasonable limit on parallel operations to avoid overwhelming the connection
 	// Use a semaphore to limit concurrency
 	sem := make(chan struct{}, 5) // Max 5 concurrent operations
@@ -53,7 +53,7 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 	g.Go(func() error {
 		sem <- struct{}{}
 		defer func() { <-sem }()
-		
+
 		hostnameBytes, _, execErr := conn.Exec(gCtx, "hostname -f", nil)
 		if execErr != nil {
 			hostnameBytes, _, execErr = conn.Exec(gCtx, "hostname", nil)
@@ -72,7 +72,7 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 	g.Go(func() error {
 		sem <- struct{}{}
 		defer func() { <-sem }()
-		
+
 		var cpuCmd string
 		switch strings.ToLower(facts.OS.ID) {
 		case "linux", "ubuntu", "debian", "centos", "rhel", "fedora", "almalinux", "rocky", "raspbian", "linuxmint":
@@ -82,7 +82,7 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 		default:
 			cpuCmd = "nproc" // Common fallback
 		}
-		
+
 		if cpuCmd != "" {
 			cpuBytes, _, execErr := conn.Exec(gCtx, cpuCmd, nil)
 			if execErr == nil {
@@ -102,10 +102,10 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 	g.Go(func() error {
 		sem <- struct{}{}
 		defer func() { <-sem }()
-		
+
 		var memCmd string
 		var memIsKb bool
-		
+
 		switch strings.ToLower(facts.OS.ID) {
 		case "linux", "ubuntu", "debian", "centos", "rhel", "fedora", "almalinux", "rocky", "raspbian", "linuxmint":
 			memCmd = "awk '/MemTotal/ {print $2}' /proc/meminfo"
@@ -117,7 +117,7 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 			memCmd = "awk '/MemTotal/ {print $2}' /proc/meminfo" // Common fallback
 			memIsKb = true
 		}
-		
+
 		if memCmd != "" {
 			memBytes, _, execErr := conn.Exec(gCtx, memCmd, nil)
 			if execErr == nil {
@@ -141,7 +141,7 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 	g.Go(func() error {
 		sem <- struct{}{}
 		defer func() { <-sem }()
-		
+
 		var ip4Cmd string
 		switch strings.ToLower(facts.OS.ID) {
 		case "linux", "ubuntu", "debian", "centos", "rhel", "fedora", "almalinux", "rocky", "raspbian", "linuxmint":
@@ -149,7 +149,7 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 		case "darwin":
 			ip4Cmd = "route -n get default | awk '/interface:/ {iface=$2} /inet/ {ip=$2} END {if (iface) print ip}'"
 		}
-		
+
 		if ip4Cmd != "" {
 			ip4Bytes, _, execErr := conn.Exec(gCtx, ip4Cmd, nil)
 			if execErr != nil {
@@ -166,7 +166,7 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 	g.Go(func() error {
 		sem <- struct{}{}
 		defer func() { <-sem }()
-		
+
 		var ip6Cmd string
 		switch strings.ToLower(facts.OS.ID) {
 		case "linux", "ubuntu", "debian", "centos", "rhel", "fedora", "almalinux", "rocky", "raspbian", "linuxmint":
@@ -174,7 +174,7 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 		case "darwin":
 			ip6Cmd = "route -n get -inet6 default | awk '/interface:/ {iface=$2} /inet6/ {ip=$2} END {if (iface) print ip}'"
 		}
-		
+
 		if ip6Cmd != "" {
 			ip6Bytes, _, execErr := conn.Exec(gCtx, ip6Cmd, nil)
 			if execErr != nil {
@@ -251,7 +251,9 @@ func (r *defaultRunner) detectPackageManager(ctx context.Context, conn connector
 		}
 		return &yumDnfInfoBase, nil
 	default:
-		if _, err := r.LookPath(ctx, conn, "apt-get"); err == nil { return &aptInfo, nil }
+		if _, err := r.LookPath(ctx, conn, "apt-get"); err == nil {
+			return &aptInfo, nil
+		}
 		if _, err := r.LookPath(ctx, conn, "dnf"); err == nil {
 			// Apply multiline formatting for readability
 			dnfSpecificInfo := yumDnfInfoBase // Start with yum base
@@ -262,7 +264,9 @@ func (r *defaultRunner) detectPackageManager(ctx context.Context, conn connector
 			dnfSpecificInfo.CacheCleanCmd = "dnf clean all"
 			return &dnfSpecificInfo, nil
 		}
-		if _, err := r.LookPath(ctx, conn, "yum"); err == nil { return &yumDnfInfoBase, nil }
+		if _, err := r.LookPath(ctx, conn, "yum"); err == nil {
+			return &yumDnfInfoBase, nil
+		}
 		return nil, fmt.Errorf("unsupported OS or unable to detect package manager for OS ID: %s", facts.OS.ID)
 	}
 }
@@ -281,13 +285,18 @@ func (r *defaultRunner) detectInitSystem(ctx context.Context, conn connector.Con
 		EnableCmd: "chkconfig %s on", DisableCmd: "chkconfig %s off", RestartCmd: "service %s restart",
 		IsActiveCmd: "service %s status", DaemonReloadCmd: "",
 	}
-	if _, err := r.LookPath(ctx, conn, "systemctl"); err == nil { return &systemdInfo, nil }
-	if _, err := r.LookPath(ctx, conn, "service"); err == nil { return &sysvinitInfo, nil }
-	if exists, _ := r.Exists(ctx, conn, "/etc/init.d"); exists { return &sysvinitInfo, nil }
+	if _, err := r.LookPath(ctx, conn, "systemctl"); err == nil {
+		return &systemdInfo, nil
+	}
+	if _, err := r.LookPath(ctx, conn, "service"); err == nil {
+		return &sysvinitInfo, nil
+	}
+	if exists, _ := r.Exists(ctx, conn, "/etc/init.d"); exists {
+		return &sysvinitInfo, nil
+	}
 	return nil, fmt.Errorf("unable to detect a supported init system (systemd, sysvinit) on OS ID: %s", facts.OS.ID)
 }
 
-// Stubs for methods implemented in specialized files (command.go, archive.go, file.go, network.go, package.go, service.go, template.go, user.go, system.go)
 // are NOT duplicated here. Those files define these methods for defaultRunner.
 
 // Stubs ONLY for very high-level or miscellaneous "enriched interface" methods
@@ -420,7 +429,7 @@ func (r *defaultRunner) Reboot(ctx context.Context, conn connector.Connector, ti
 			// For now, we'll just try a simple check. If it fails, we assume host is not ready.
 			// If the original connection is truly dead, this check will always fail.
 			// This highlights a limitation of a stateless runner handling reboot-and-wait fully.
-			checkCmd := "uptime" // A simple command that should work on a booted system
+			checkCmd := "uptime"                                                                               // A simple command that should work on a booted system
 			_, _, checkErr := conn.Exec(rebootCtx, checkCmd, &connector.ExecOptions{Timeout: 5 * time.Second}) // Use rebootCtx for timeout of this check
 
 			if checkErr == nil {

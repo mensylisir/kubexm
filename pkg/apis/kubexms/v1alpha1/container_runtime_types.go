@@ -2,120 +2,136 @@ package v1alpha1
 
 import (
 	"fmt"
-	"strings"
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1/helpers"
+	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/errors/validation"
 )
 
-// Assuming ValidationErrors is in cluster_types.go or a shared util in this package
-// Assuming containsString is in cluster_types.go or a shared util in this package
-
-// ContainerRuntimeType defines the type of container runtime.
-type ContainerRuntimeType string
-
-const (
-	ContainerRuntimeDocker     ContainerRuntimeType = "docker"
-	ContainerRuntimeContainerd ContainerRuntimeType = "containerd"
-	// Add other runtimes like cri-o, isula if supported by YAML in the future
-)
-
-// ContainerRuntimeConfig is a wrapper for specific container runtime configurations.
-// It specifies the type of runtime and holds the specific configuration block.
-type ContainerRuntimeConfig struct {
-	// Type specifies the container runtime to use (e.g., "docker", "containerd").
-	// Defaults to "docker" if not specified.
-	Type ContainerRuntimeType `json:"type,omitempty" yaml:"type,omitempty"`
-
-	// Version of the container runtime. This is a general version, specific versions
-	// might also be present in DockerConfig or ContainerdConfig if needed for overrides.
-	Version string `json:"version,omitempty" yaml:"version,omitempty"`
-
-	// Docker holds Docker-specific configurations.
-	// Only applicable if Type is "docker".
-	Docker *DockerConfig `json:"docker,omitempty" yaml:"docker,omitempty"`
-
-	// Containerd holds Containerd-specific configurations.
-	// Only applicable if Type is "containerd".
-	Containerd *ContainerdConfig `json:"containerd,omitempty" yaml:"containerd,omitempty"`
+type ContainerRuntime struct {
+	Type       common.ContainerRuntimeType `json:"type,omitempty" yaml:"type,omitempty"`
+	Version    string                      `json:"version,omitempty" yaml:"version,omitempty"`
+	Docker     *Docker                     `json:"docker,omitempty" yaml:"docker,omitempty"`
+	Containerd *Containerd                 `json:"containerd,omitempty" yaml:"containerd,omitempty"`
+	Crio       *Crio                       `json:"crio,omitempty" yaml:"crio,omitempty"`
+	Isulad     *Isulad                     `json:"isulad,omitempty" yaml:"isulad,omitempty"`
 }
 
-// SetDefaults_ContainerRuntimeConfig sets default values for ContainerRuntimeConfig.
-func SetDefaults_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig) {
+func SetDefaults_ContainerRuntimeConfig(cfg *ContainerRuntime) {
 	if cfg == nil {
 		return
 	}
 	if cfg.Type == "" {
-		cfg.Type = ContainerRuntimeDocker // Default to Docker
+		cfg.Type = common.RuntimeTypeContainerd
 	}
 
-	// Initialize and set defaults for the chosen runtime type
-	if cfg.Type == ContainerRuntimeDocker {
+	switch cfg.Type {
+	case common.RuntimeTypeDocker:
 		if cfg.Docker == nil {
-			cfg.Docker = &DockerConfig{}
+			cfg.Docker = &Docker{}
 		}
-		SetDefaults_DockerConfig(cfg.Docker) // Assumes SetDefaults_DockerConfig is in docker_types.go
-	}
-
-	if cfg.Type == ContainerRuntimeContainerd {
+		SetDefaults_DockerConfig(cfg.Docker)
+	case common.RuntimeTypeContainerd:
 		if cfg.Containerd == nil {
-			cfg.Containerd = &ContainerdConfig{}
+			cfg.Containerd = &Containerd{}
 		}
-		SetDefaults_ContainerdConfig(cfg.Containerd) // Assumes SetDefaults_ContainerdConfig is in containerd_types.go
+		SetDefaults_ContainerdConfig(cfg.Containerd)
+	case common.RuntimeTypeCRIO:
+		if cfg.Crio == nil {
+			cfg.Crio = &Crio{}
+		}
+		SetDefaults_CrioConfig(cfg.Crio)
+	case common.RuntimeTypeIsula:
+		if cfg.Isulad == nil {
+			cfg.Isulad = &Isulad{}
+		}
+		SetDefaults_IsuladConfig(cfg.Isulad)
 	}
 }
 
-// Validate_ContainerRuntimeConfig validates ContainerRuntimeConfig.
-func Validate_ContainerRuntimeConfig(cfg *ContainerRuntimeConfig, verrs *ValidationErrors, pathPrefix string) {
+func Validate_ContainerRuntimeConfig(cfg *ContainerRuntime, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
-		// This case might be an error if ContainerRuntime section is mandatory in ClusterSpec.
-		// If it's optional and defaulted, this is fine. Assuming ClusterSpec defaults it.
 		verrs.Add(pathPrefix, "containerRuntime section cannot be nil (should be defaulted if not present)")
 		return
 	}
-
-	validTypes := []ContainerRuntimeType{ContainerRuntimeDocker, ContainerRuntimeContainerd, ""} // Allow empty for default
-	isValid := false
-	for _, vt := range validTypes {
-		// Check if cfg.Type matches a valid type, or if cfg.Type is empty and vt is the default type.
-		if cfg.Type == vt || (cfg.Type == "" && vt == ContainerRuntimeDocker) {
-			isValid = true
+	isValidType := false
+	for _, vt := range common.ValidContainerRuntimeTypes {
+		if cfg.Type == vt {
+			isValidType = true
 			break
 		}
 	}
-	if !isValid {
-		verrs.Add(pathPrefix + ".type: invalid container runtime type '" + string(cfg.Type) + "', must be one of " + fmt.Sprintf("%v", validTypes) + " or empty for default")
+	if !isValidType {
+		verrs.Add(pathPrefix+".type", fmt.Sprintf("invalid container runtime type '%s', must be one of %v", string(cfg.Type), common.ValidContainerRuntimeTypes))
+		return
 	}
 
-	// Validate specific config only if type matches
-	if cfg.Type == ContainerRuntimeDocker {
-		if cfg.Docker == nil {
-			// This should ideally be caught by defaulting logic which initializes cfg.Docker.
-			// If still nil, it's an issue or means Docker type was set without providing its config block.
-			verrs.Add(pathPrefix+".docker", "docker config must be defined if type is 'docker'")
-		} else {
-			Validate_DockerConfig(cfg.Docker, verrs, pathPrefix+".docker") // Function defined in docker_types.go
-		}
-	} else if cfg.Docker != nil { // Docker config provided but type is not docker
-		verrs.Add(pathPrefix+".docker", "docker config can only be set if type is 'docker'")
-	}
-
-	if cfg.Type == ContainerRuntimeContainerd {
-		if cfg.Containerd == nil {
-			verrs.Add(pathPrefix+".containerd", "containerd config must be defined if type is 'containerd'")
-		} else {
-			Validate_ContainerdConfig(cfg.Containerd, verrs, pathPrefix+".containerd") // Function defined in containerd_types.go
-		}
-	} else if cfg.Containerd != nil { // Containerd config provided but type is not containerd
-		verrs.Add(pathPrefix+".containerd", "containerd config can only be set if type is 'containerd'")
-	}
-
-	// Version can be validated for format if needed, e.g., semantic versioning.
-	if cfg.Version != "" && strings.TrimSpace(cfg.Version) == "" {
+	if cfg.Version != "" && !helpers.IsValidNonEmptyString(cfg.Version) {
 		verrs.Add(pathPrefix+".version", "version cannot be only whitespace if specified")
 	}
-}
+	if cfg.Version != "" && !helpers.IsValidSemanticVersion(cfg.Version) {
+		verrs.Add(pathPrefix+".version", "invalid version format")
+	}
 
-// NOTE: DeepCopy methods should be generated by controller-gen.
-// The DockerConfig and ContainerdConfig structs and their SetDefaults/Validate functions
-// are defined in docker_types.go and containerd_types.go respectively.
-// This file (container_runtime_types.go) now only defines the selector ContainerRuntimeConfig
-// and its associated ContainerRuntimeType.
-// Removed the local definitions of DockerConfig, ContainerdConfig and their methods.
+	switch cfg.Type {
+	case common.RuntimeTypeDocker:
+		if cfg.Docker == nil {
+			verrs.Add(pathPrefix+".docker", "must be configured when type is 'docker'")
+		} else {
+			Validate_DockerConfig(cfg.Docker, verrs, pathPrefix+".docker")
+		}
+		if cfg.Containerd != nil {
+			verrs.Add(pathPrefix+".containerd", "must not be set when type is 'docker'")
+		}
+		if cfg.Crio != nil {
+			verrs.Add(pathPrefix+".crio", "must not be set when type is 'docker'")
+		}
+		if cfg.Isulad != nil {
+			verrs.Add(pathPrefix+".isulad", "must not be set when type is 'docker'")
+		}
+	case common.RuntimeTypeContainerd:
+		if cfg.Containerd == nil {
+			verrs.Add(pathPrefix+".containerd", "must be configured when type is 'containerd'")
+		} else {
+			Validate_ContainerdConfig(cfg.Containerd, verrs, pathPrefix+".containerd")
+		}
+		if cfg.Docker != nil {
+			verrs.Add(pathPrefix+".docker", "must not be set when type is 'containerd'")
+		}
+		if cfg.Crio != nil {
+			verrs.Add(pathPrefix+".crio", "must not be set when type is 'containerd'")
+		}
+		if cfg.Isulad != nil {
+			verrs.Add(pathPrefix+".isulad", "must not be set when type is 'containerd'")
+		}
+	case common.RuntimeTypeCRIO:
+		if cfg.Crio == nil {
+			verrs.Add(pathPrefix+".crio", "must be configured when type is 'crio'")
+		} else {
+			Validate_CrioConfig(cfg.Crio, verrs, pathPrefix+".crio")
+		}
+		if cfg.Docker != nil {
+			verrs.Add(pathPrefix+".docker", "must not be set when type is 'crio'")
+		}
+		if cfg.Containerd != nil {
+			verrs.Add(pathPrefix+".containerd", "must not be set when type is 'crio'")
+		}
+		if cfg.Isulad != nil {
+			verrs.Add(pathPrefix+".isulad", "must not be set when type is 'crio'")
+		}
+	case common.RuntimeTypeIsula:
+		if cfg.Isulad == nil {
+			verrs.Add(pathPrefix+".isulad", "must be configured when type is 'isula'")
+		} else {
+			Validate_IsuladConfig(cfg.Isulad, verrs, pathPrefix+".isulad")
+		}
+		if cfg.Docker != nil {
+			verrs.Add(pathPrefix+".docker", "must not be set when type is 'isula'")
+		}
+		if cfg.Containerd != nil {
+			verrs.Add(pathPrefix+".containerd", "must not be set when type is 'isula'")
+		}
+		if cfg.Crio != nil {
+			verrs.Add(pathPrefix+".crio", "must not be set when type is 'isula'")
+		}
+	}
+}

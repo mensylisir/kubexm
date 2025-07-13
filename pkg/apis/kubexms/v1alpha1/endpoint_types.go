@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/common"
 	"regexp"
 	"strings"
 	// ValidationErrors is defined in cluster_types.go
@@ -9,13 +10,15 @@ import (
 
 // ControlPlaneEndpointSpec defines the configuration for the cluster's control plane endpoint.
 type ControlPlaneEndpointSpec struct {
-	Domain                   string `json:"domain,omitempty" yaml:"domain,omitempty"`
-	Address                  string `json:"address,omitempty" yaml:"lb_address,omitempty"` // Matches YAML lb_address
-	Port                     int    `json:"port,omitempty" yaml:"port,omitempty"`
-	ExternalDNS              bool   `json:"externalDNS,omitempty" yaml:"externalDNS,omitempty"` // Changed to bool
-	ExternalLoadBalancerType string `json:"externalLoadBalancerType,omitempty" yaml:"externalLoadBalancer,omitempty"`
-	InternalLoadBalancerType string `json:"internalLoadBalancerType,omitempty" yaml:"internalLoadbalancer,omitempty"` // Matches YAML internalLoadbalancer
+	Domain                   string                          `json:"domain,omitempty" yaml:"domain,omitempty"`
+	Address                  string                          `json:"address,omitempty" yaml:"lb_address,omitempty"` // Matches YAML lb_address
+	Port                     int                             `json:"port,omitempty" yaml:"port,omitempty"`
+	ExternalDNS              bool                            `json:"externalDNS,omitempty" yaml:"externalDNS,omitempty"` // Changed to bool
+	ExternalLoadBalancerType common.ExternalLoadBalancerType `json:"externalLoadBalancerType,omitempty" yaml:"externalLoadBalancer,omitempty"`
+	InternalLoadBalancerType common.InternalLoadBalancerType `json:"internalLoadBalancerType,omitempty" yaml:"internalLoadbalancer,omitempty"` // Matches YAML internalLoadbalancer
+	HighAvailability     *HighAvailability         `json:"highAvailability,omitempty" yaml:"highAvailability,omitempty"`
 }
+
 
 // SetDefaults_ControlPlaneEndpointSpec sets default values for ControlPlaneEndpointSpec.
 func SetDefaults_ControlPlaneEndpointSpec(cfg *ControlPlaneEndpointSpec) {
@@ -25,7 +28,15 @@ func SetDefaults_ControlPlaneEndpointSpec(cfg *ControlPlaneEndpointSpec) {
 	if cfg.Port == 0 {
 		cfg.Port = 6443
 	}
-	// ExternalDNS (bool) defaults to false (its zero value).
+	if len(cfg.ExternalLoadBalancerType) == 0 && len(cfg.InternalLoadBalancerType) == 0 {
+		cfg.InternalLoadBalancerType = common.InternalLBTypeHAProxy
+	}
+	if len(cfg.Domain) == 0 {
+		cfg.Domain = common.KubernetesDefaultDomain
+	}
+	if &cfg.ExternalDNS == nil {
+		cfg.ExternalDNS = false
+	}
 }
 
 // Validate_ControlPlaneEndpointSpec validates ControlPlaneEndpointSpec.
@@ -64,6 +75,8 @@ func Validate_ControlPlaneEndpointSpec(cfg *ControlPlaneEndpointSpec, verrs *Val
 			break
 		}
 	}
+
+	for _, vt := range common.V
 	if !found {
 		verrs.Add(pathPrefix + ".externalLoadBalancerType: invalid type '" + cfg.ExternalLoadBalancerType + "', must be one of " + fmt.Sprintf("%v", validExternalTypes) + " or empty")
 	}

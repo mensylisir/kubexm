@@ -2,13 +2,11 @@ package connector
 
 import (
 	"context"
-	// "fmt" // Removed as unused
-	"io/fs" // For fs.FileMode
-	"time"
-
-	"golang.org/x/crypto/ssh" // Added to resolve undefined: ssh
-
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
+	"github.com/mensylisir/kubexm/pkg/cache"
+	"golang.org/x/crypto/ssh"
+	"io/fs"
+	"time"
 )
 
 type Factory interface {
@@ -28,13 +26,13 @@ type OS struct {
 
 // BastionCfg defines configuration for a bastion/jump host.
 type BastionCfg struct {
-	Host           string        `json:"host,omitempty" yaml:"host,omitempty"`
-	Port           int           `json:"port,omitempty" yaml:"port,omitempty"`
-	User           string        `json:"user,omitempty" yaml:"user,omitempty"`
-	Password       string        `json:"password,omitempty" yaml:"password,omitempty"`
-	PrivateKey     []byte        `json:"-" yaml:"-"`
-	PrivateKeyPath string        `json:"privateKeyPath,omitempty" yaml:"privateKeyPath,omitempty"`
-	Timeout        time.Duration `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	Host            string              `json:"host,omitempty" yaml:"host,omitempty"`
+	Port            int                 `json:"port,omitempty" yaml:"port,omitempty"`
+	User            string              `json:"user,omitempty" yaml:"user,omitempty"`
+	Password        string              `json:"password,omitempty" yaml:"password,omitempty"`
+	PrivateKey      []byte              `json:"-" yaml:"-"`
+	PrivateKeyPath  string              `json:"privateKeyPath,omitempty" yaml:"privateKeyPath,omitempty"`
+	Timeout         time.Duration       `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 	HostKeyCallback ssh.HostKeyCallback `json:"-" yaml:"-"` // Callback for verifying bastion's server key
 }
 
@@ -45,15 +43,15 @@ type ProxyCfg struct {
 
 // ConnectionCfg holds all parameters needed to establish a connection.
 type ConnectionCfg struct {
-	Host           string
-	Port           int
-	User           string
-	Password       string
-	PrivateKey     []byte
-	PrivateKeyPath string
-	Timeout        time.Duration
-	BastionCfg     *BastionCfg // Renamed from Bastion in design doc to match existing code and be clearer
-	ProxyCfg       *ProxyCfg
+	Host            string
+	Port            int
+	User            string
+	Password        string
+	PrivateKey      []byte
+	PrivateKeyPath  string
+	Timeout         time.Duration
+	BastionCfg      *BastionCfg // Renamed from Bastion in design doc to match existing code and be clearer
+	ProxyCfg        *ProxyCfg
 	HostKeyCallback ssh.HostKeyCallback `json:"-" yaml:"-"` // Callback for verifying server keys
 }
 
@@ -91,14 +89,33 @@ type Connector interface {
 // Host represents a configured host in the cluster.
 type Host interface {
 	GetName() string
+	SetName(name string)
 	GetAddress() string
+	SetAddress(str string)
+	GetInternalAddress() string
+	GetInternalIPv4Address() string
+	GetInternalIPv6Address() string
+	SetInternalAddress(str string)
 	GetPort() int
+	SetPort(port int)
 	GetUser() string
-	GetRoles() []string
-	GetHostSpec() v1alpha1.HostSpec
+	SetUser(u string)
+	GetPassword() string
+	SetPassword(password string)
+	GetPrivateKey() string
+	SetPrivateKey(privateKey string)
+	GetPrivateKeyPath() string
+	SetPrivateKeyPath(path string)
 	GetArch() string
+	SetArch(arch string)
+	GetTimeout() int64
+	SetTimeout(timeout int64)
+	GetRoles() []string
+	SetRoles(roles []string)
+	IsRole(role string) bool
+	GetCache() *cache.StepCache
+	SetCache(c *cache.StepCache)
+	GetHostSpec() v1alpha1.HostSpec
 }
 
-// dialSSHFunc defines the signature for a function that can dial an SSH connection.
-// Used for allowing test overrides of the SSH dialing mechanism.
 type dialSSHFunc func(ctx context.Context, cfg ConnectionCfg, connectTimeout time.Duration) (*ssh.Client, *ssh.Client, error)

@@ -1,126 +1,147 @@
 package v1alpha1
 
 import (
-	"encoding/base64" // Added for DockerRegistryAuth validation
+	"encoding/base64"
 	"fmt"
-	"net/url" // Added for URL parsing
+	"net/url"
 	"strings"
 
-	"k8s.io/apimachinery/pkg/runtime" // Added for RawExtension
-	// Assuming isValidCIDR is available from kubernetes_types.go or similar
-	"github.com/mensylisir/kubexm/pkg/common" // Import the common package
-	"github.com/mensylisir/kubexm/pkg/util"   // Import the util package
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1/helpers"
+	"github.com/mensylisir/kubexm/pkg/common"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// DockerAddressPool defines a range of IP addresses for Docker networks.
 type DockerAddressPool struct {
-   Base string `json:"base" yaml:"base"` // Base IP address for the pool (e.g., "172.30.0.0/16")
-   Size int    `json:"size" yaml:"size"` // Size of the subnets to allocate from the base pool (e.g., 24 for /24 subnets)
+	Base string `json:"base" yaml:"base"` // Base IP address for the pool (e.g., "172.30.0.0/16")
+	Size int    `json:"size" yaml:"size"` // Size of the subnets to allocate from the base pool (e.g., 24 for /24 subnets)
 }
 
-// DockerConfig defines specific settings for the Docker runtime.
-// These settings are only applicable if ContainerRuntimeConfig.Type is "docker".
-// Corresponds to `kubernetes.containerRuntime.docker` in YAML.
-type DockerConfig struct {
-	// RegistryMirrors for Docker. Corresponds to `registryMirrors` in YAML.
-	RegistryMirrors     []string            `json:"registryMirrors,omitempty" yaml:"registryMirrors,omitempty"`
-	// InsecureRegistries for Docker. Corresponds to `insecureRegistries` in YAML.
-	InsecureRegistries  []string            `json:"insecureRegistries,omitempty" yaml:"insecureRegistries,omitempty"`
-	// DataRoot is Docker's root directory. Corresponds to `dataRoot` in YAML.
-	DataRoot            *string             `json:"dataRoot,omitempty" yaml:"dataRoot,omitempty"`
-	// ExecOpts for Docker daemon. Corresponds to `execOpts` in YAML.
-	ExecOpts            []string            `json:"execOpts,omitempty" yaml:"execOpts,omitempty"`
-	LogDriver           *string             `json:"logDriver,omitempty" yaml:"logDriver,omitempty"`
-	LogOpts             map[string]string   `json:"logOpts,omitempty" yaml:"logOpts,omitempty"`
-	BIP                 *string             `json:"bip,omitempty" yaml:"bip,omitempty"`
-	FixedCIDR           *string             `json:"fixedCIDR,omitempty" yaml:"fixedCIDR,omitempty"`
-	DefaultAddressPools []DockerAddressPool `json:"defaultAddressPools,omitempty" yaml:"defaultAddressPools,omitempty"`
-	Experimental        *bool               `json:"experimental,omitempty" yaml:"experimental,omitempty"`
-	IPTables            *bool               `json:"ipTables,omitempty" yaml:"ipTables,omitempty"` // YAML might use 'iptables'
-	IPMasq              *bool               `json:"ipMasq,omitempty" yaml:"ipMasq,omitempty"`    // YAML might use 'ip-masq'
-	StorageDriver       *string             `json:"storageDriver,omitempty" yaml:"storageDriver,omitempty"`
-	StorageOpts         []string            `json:"storageOpts,omitempty" yaml:"storageOpts,omitempty"`
-	DefaultRuntime      *string             `json:"defaultRuntime,omitempty" yaml:"defaultRuntime,omitempty"`
-	Runtimes            map[string]DockerRuntime `json:"runtimes,omitempty" yaml:"runtimes,omitempty"`
-	MaxConcurrentDownloads *int `json:"maxConcurrentDownloads,omitempty" yaml:"maxConcurrentDownloads,omitempty"`
-	MaxConcurrentUploads   *int `json:"maxConcurrentUploads,omitempty" yaml:"maxConcurrentUploads,omitempty"`
-	Bridge                 *string `json:"bridge,omitempty" yaml:"bridge,omitempty"`
+type Docker struct {
+	Endpoint string `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
 
-	// InstallCRIDockerd indicates whether to install cri-dockerd shim.
-	// Corresponds to `installCRIDockerd` in YAML.
+	Version                string                   `json:"version,omitempty" yaml:"version,omitempty"`
+	RegistryMirrors        []string                 `json:"registryMirrors,omitempty" yaml:"registryMirrors,omitempty"`
+	InsecureRegistries     []string                 `json:"insecureRegistries,omitempty" yaml:"insecureRegistries,omitempty"`
+	DataRoot               *string                  `json:"dataRoot,omitempty" yaml:"dataRoot,omitempty"`
+	ExecOpts               []string                 `json:"execOpts,omitempty" yaml:"execOpts,omitempty"`
+	LogDriver              *string                  `json:"logDriver,omitempty" yaml:"logDriver,omitempty"`
+	LogOpts                map[string]string        `json:"logOpts,omitempty" yaml:"logOpts,omitempty"`
+	BIP                    *string                  `json:"bip,omitempty" yaml:"bip,omitempty"`
+	FixedCIDR              *string                  `json:"fixedCIDR,omitempty" yaml:"fixedCIDR,omitempty"`
+	DefaultAddressPools    []DockerAddressPool      `json:"defaultAddressPools,omitempty" yaml:"defaultAddressPools,omitempty"`
+	Experimental           *bool                    `json:"experimental,omitempty" yaml:"experimental,omitempty"`
+	IPTables               *bool                    `json:"ipTables,omitempty" yaml:"ipTables,omitempty"`
+	IPMasq                 *bool                    `json:"ipMasq,omitempty" yaml:"ipMasq,omitempty"`
+	StorageDriver          *string                  `json:"storageDriver,omitempty" yaml:"storageDriver,omitempty"`
+	StorageOpts            []string                 `json:"storageOpts,omitempty" yaml:"storageOpts,omitempty"`
+	DefaultRuntime         *string                  `json:"defaultRuntime,omitempty" yaml:"defaultRuntime,omitempty"`
+	Runtimes               map[string]DockerRuntime `json:"runtimes,omitempty" yaml:"runtimes,omitempty"`
+	MaxConcurrentDownloads *int                     `json:"maxConcurrentDownloads,omitempty" yaml:"maxConcurrentDownloads,omitempty"`
+	MaxConcurrentUploads   *int                     `json:"maxConcurrentUploads,omitempty" yaml:"maxConcurrentUploads,omitempty"`
+	Bridge                 *string                  `json:"bridge,omitempty" yaml:"bridge,omitempty"`
+	CgroupDriver           *string                  `json:"cgroupDriver,omitempty" yaml:"cgroupDriver,omitempty"`
+	LiveRestore            *bool                    `json:"liveRestore,omitempty" yaml:"liveRestore,omitempty"`
+
 	InstallCRIDockerd *bool `json:"installCRIDockerd,omitempty" yaml:"installCRIDockerd,omitempty"`
 
-	// CRIDockerdVersion specifies the version of cri-dockerd to install.
-	// No direct YAML field, usually determined by installer based on K8s version or a default.
-	CRIDockerdVersion *string `json:"criDockerdVersion,omitempty" yaml:"criDockerdVersion,omitempty"`
-	// ExtraJSONConfig provides a passthrough for any daemon.json settings not
-	// explicitly defined in this struct. It will be merged with the generated
-	// configuration. In case of conflicts, settings from ExtraJSONConfig take precedence.
-	ExtraJSONConfig *runtime.RawExtension `json:"extraJsonConfig,omitempty" yaml:"extraJsonConfig,omitempty"`
-	// Auths provides authentication details for registries, keyed by registry FQDN.
-	// This allows Docker to pull images from private registries.
-	Auths map[string]DockerRegistryAuth `json:"auths,omitempty" yaml:"auths,omitempty"`
+	CRIDockerdVersion *string                              `json:"criDockerdVersion,omitempty" yaml:"criDockerdVersion,omitempty"`
+	ExtraJSONConfig   *runtime.RawExtension                `json:"extraJsonConfig,omitempty" yaml:"extraJsonConfig,omitempty"`
+	Auths             map[ServerAddress]DockerRegistryAuth `json:"auths,omitempty" yaml:"auths,omitempty"`
+
+	Pause string `json:"pause,omitempty" yaml:"pause,omitempty"`
 }
 
-// DockerRegistryAuth defines authentication credentials for a specific Docker registry.
+type ServerAddress string
+
 type DockerRegistryAuth struct {
-	// Username for the registry.
 	Username string `json:"username,omitempty" yaml:"username,omitempty"`
-	// Password for the registry.
 	Password string `json:"password,omitempty" yaml:"password,omitempty"`
-	// Auth is a base64 encoded string of "username:password".
-	// This is the format typically stored in .docker/config.json.
-	Auth string `json:"auth,omitempty" yaml:"auth,omitempty"`
-	// ServerAddress is the FQDN of the registry. While map key in DockerConfig.Auths serves this,
-	// having it here can be useful if this struct is used in a list elsewhere. Optional.
-	ServerAddress string `json:"serverAddress,omitempty" yaml:"serverAddress,omitempty"`
+	Auth     string `json:"auth,omitempty" yaml:"auth,omitempty"`
 }
 
-// DockerRuntime defines a custom runtime for Docker.
 type DockerRuntime struct {
-	Path string `json:"path" yaml:"path"`
+	Path        string   `json:"path" yaml:"path"`
 	RuntimeArgs []string `json:"runtimeArgs,omitempty" yaml:"runtimeArgs,omitempty"`
 }
 
-// SetDefaults_DockerConfig sets default values for DockerConfig.
-func SetDefaults_DockerConfig(cfg *DockerConfig) {
+func SetDefaults_DockerConfig(cfg *Docker) {
 	if cfg == nil {
 		return
 	}
-	if cfg.RegistryMirrors == nil { cfg.RegistryMirrors = []string{} }
-	if cfg.InsecureRegistries == nil { cfg.InsecureRegistries = []string{} }
-	if cfg.ExecOpts == nil { cfg.ExecOpts = []string{} }
+	if cfg.RegistryMirrors == nil {
+		cfg.RegistryMirrors = []string{}
+	}
+	if cfg.InsecureRegistries == nil {
+		cfg.InsecureRegistries = []string{}
+	}
+	if cfg.ExecOpts == nil {
+		cfg.ExecOpts = []string{}
+	}
 	if cfg.LogOpts == nil {
 		cfg.LogOpts = map[string]string{
 			"max-size": common.DockerLogOptMaxSizeDefault,
 			"max-file": common.DockerLogOptMaxFileDefault,
 		}
 	}
-	if cfg.DefaultAddressPools == nil { cfg.DefaultAddressPools = []DockerAddressPool{} }
-	if cfg.StorageOpts == nil { cfg.StorageOpts = []string{} }
-	if cfg.Runtimes == nil { cfg.Runtimes = make(map[string]DockerRuntime) }
-	if cfg.Auths == nil { cfg.Auths = make(map[string]DockerRegistryAuth) }
-	if cfg.MaxConcurrentDownloads == nil { cfg.MaxConcurrentDownloads = util.IntPtr(common.DockerMaxConcurrentDownloadsDefault) }
-	if cfg.MaxConcurrentUploads == nil { cfg.MaxConcurrentUploads = util.IntPtr(common.DockerMaxConcurrentUploadsDefault) }
-	if cfg.Bridge == nil { cfg.Bridge = util.StrPtr(common.DefaultDockerBridgeName) }
-	// DefaultRuntime: Docker's default is typically "runc". Let Docker handle if not specified.
-
-	if cfg.InstallCRIDockerd == nil {
-		cfg.InstallCRIDockerd = util.BoolPtr(true) // Default to installing cri-dockerd with Docker for Kubernetes
+	if cfg.DefaultAddressPools == nil {
+		cfg.DefaultAddressPools = []DockerAddressPool{}
 	}
-	// No default for CRIDockerdVersion, let install logic handle it or require user input if specific version needed.
+	if cfg.StorageOpts == nil {
+		cfg.StorageOpts = []string{}
+	}
+	if cfg.Runtimes == nil {
+		cfg.Runtimes = make(map[string]DockerRuntime)
+	}
+	if cfg.Auths == nil {
+		cfg.Auths = make(map[ServerAddress]DockerRegistryAuth)
+	}
+	if cfg.MaxConcurrentDownloads == nil {
+		cfg.MaxConcurrentDownloads = helpers.IntPtr(common.DockerMaxConcurrentDownloadsDefault)
+	}
+	if cfg.MaxConcurrentUploads == nil {
+		cfg.MaxConcurrentUploads = helpers.IntPtr(common.DockerMaxConcurrentUploadsDefault)
+	}
+	if cfg.Bridge == nil {
+		cfg.Bridge = helpers.StrPtr(common.DefaultDockerBridgeName)
+	}
+	if cfg.InstallCRIDockerd == nil {
+		cfg.InstallCRIDockerd = helpers.BoolPtr(true)
+		cfg.CRIDockerdVersion = helpers.StrPtr(common.DefaultCriDockerdVersion)
+	}
+	if cfg.LogDriver == nil {
+		cfg.LogDriver = helpers.StrPtr(common.DockerLogDriverJSONFile)
+	}
+	if cfg.DataRoot == nil {
+		cfg.DataRoot = helpers.StrPtr(common.DockerDefaultDataRoot)
+	}
 
-	if cfg.LogDriver == nil { cfg.LogDriver = util.StrPtr(common.DockerLogDriverJSONFile) }
-	// Default DataRoot depends on OS, often /var/lib/docker. Let Docker daemon handle its own default if not set.
-	// if cfg.DataRoot == nil { cfg.DataRoot = util.StrPtr("/var/lib/docker") } // Example if we wanted to enforce it
-
-	if cfg.IPTables == nil { cfg.IPTables = util.BoolPtr(true) } // Docker default is true
-	if cfg.IPMasq == nil { cfg.IPMasq = util.BoolPtr(true) }     // Docker default is true
-	if cfg.Experimental == nil { cfg.Experimental = util.BoolPtr(false) }
+	if cfg.IPTables == nil {
+		cfg.IPTables = helpers.BoolPtr(true)
+	}
+	if cfg.IPMasq == nil {
+		cfg.IPMasq = helpers.BoolPtr(true)
+	}
+	if cfg.Experimental == nil {
+		cfg.Experimental = helpers.BoolPtr(false)
+	}
+	if cfg.Version == "" {
+		cfg.Version = common.DefaultDockerVersion
+	}
+	if cfg.Endpoint == "" {
+		cfg.Endpoint = common.DefaultDockerEndpoint
+	}
+	if cfg.CgroupDriver == nil {
+		cfg.CgroupDriver = helpers.StrPtr(common.CgroupDriverSystemd)
+	}
+	if cfg.LiveRestore == nil {
+		cfg.LiveRestore = helpers.BoolPtr(true)
+	}
+	if cfg.Pause == "" {
+		cfg.Pause = common.DefaultPauseImage
+	}
 }
 
-// Validate_DockerConfig validates DockerConfig.
-func Validate_DockerConfig(cfg *DockerConfig, verrs *ValidationErrors, pathPrefix string) {
+func Validate_DockerConfig(cfg *Docker, verrs *ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
@@ -139,8 +160,8 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *ValidationErrors, pathPrefi
 		regPath := fmt.Sprintf("%s.insecureRegistries[%d]", pathPrefix, i)
 		if strings.TrimSpace(insecureReg) == "" {
 			verrs.Add(regPath, "registry host cannot be empty")
-		} else if !util.ValidateHostPortString(insecureReg) { // Use util.ValidateHostPortString
-			verrs.Add(regPath + ": invalid host:port format for insecure registry '" + insecureReg + "'")
+		} else if !helpers.ValidateHostPortString(insecureReg) && !helpers.IsValidDomainName(insecureReg) {
+			verrs.Add(regPath + ": invalid host:port or domain name format for insecure registry '" + insecureReg + "'")
 		}
 	}
 	if cfg.DataRoot != nil {
@@ -154,21 +175,30 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *ValidationErrors, pathPrefi
 	if cfg.LogDriver != nil {
 		validLogDrivers := []string{common.DockerLogDriverJSONFile, common.DockerLogDriverJournald, common.DockerLogDriverSyslog, common.DockerLogDriverFluentd, common.DockerLogDriverNone, ""}
 		isValid := false
-		for _, v := range validLogDrivers { if *cfg.LogDriver == v { isValid = true; break } }
+		for _, v := range validLogDrivers {
+			if *cfg.LogDriver == v {
+				isValid = true
+				break
+			}
+		}
 		if !isValid {
 			verrs.Add(pathPrefix + ".logDriver: invalid log driver '" + *cfg.LogDriver + "', must be one of " + fmt.Sprintf("%v", validLogDrivers) + " or empty for default")
 		}
 	}
-	if cfg.BIP != nil && !util.IsValidCIDR(*cfg.BIP) {
+	if cfg.BIP != nil && !helpers.IsValidCIDR(*cfg.BIP) {
 		verrs.Add(pathPrefix + ".bip: invalid CIDR format '" + *cfg.BIP + "'")
 	}
-	if cfg.FixedCIDR != nil && !util.IsValidCIDR(*cfg.FixedCIDR) {
+	if cfg.FixedCIDR != nil && !helpers.IsValidCIDR(*cfg.FixedCIDR) {
 		verrs.Add(pathPrefix + ".fixedCIDR: invalid CIDR format '" + *cfg.FixedCIDR + "'")
 	}
 	for i, pool := range cfg.DefaultAddressPools {
-	   poolPath := fmt.Sprintf("%s.defaultAddressPools[%d]", pathPrefix, i)
-	   if !util.IsValidCIDR(pool.Base) { verrs.Add(poolPath + ".base: invalid CIDR format '" + pool.Base + "'") }
-	   if pool.Size <= 0 || pool.Size > 32 { verrs.Add(poolPath + ".size: invalid subnet size " + fmt.Sprintf("%d", pool.Size) + ", must be > 0 and <= 32") }
+		poolPath := fmt.Sprintf("%s.defaultAddressPools[%d]", pathPrefix, i)
+		if !helpers.IsValidCIDR(pool.Base) {
+			verrs.Add(poolPath + ".base: invalid CIDR format '" + pool.Base + "'")
+		}
+		if pool.Size <= 0 || pool.Size > 32 {
+			verrs.Add(poolPath + ".size: invalid subnet size " + fmt.Sprintf("%d", pool.Size) + ", must be > 0 and <= 32")
+		}
 	}
 	if cfg.StorageDriver != nil && strings.TrimSpace(*cfg.StorageDriver) == "" {
 		verrs.Add(pathPrefix+".storageDriver", "cannot be empty if specified")
@@ -181,8 +211,12 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *ValidationErrors, pathPrefi
 	}
 	for name, rt := range cfg.Runtimes {
 		runtimePath := pathPrefix + ".runtimes['" + name + "']"
-		if strings.TrimSpace(name) == "" { verrs.Add(pathPrefix+".runtimes", "runtime name key cannot be empty")}
-		if strings.TrimSpace(rt.Path) == "" { verrs.Add(runtimePath+".path", "path cannot be empty")}
+		if strings.TrimSpace(name) == "" {
+			verrs.Add(pathPrefix+".runtimes", "runtime name key cannot be empty")
+		}
+		if strings.TrimSpace(rt.Path) == "" {
+			verrs.Add(runtimePath+".path", "path cannot be empty")
+		}
 	}
 	if cfg.Bridge != nil && strings.TrimSpace(*cfg.Bridge) == "" {
 		verrs.Add(pathPrefix+".bridge", "name cannot be empty if specified")
@@ -192,7 +226,7 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *ValidationErrors, pathPrefi
 		versionPath := pathPrefix + ".criDockerdVersion"
 		if strings.TrimSpace(*cfg.CRIDockerdVersion) == "" {
 			verrs.Add(versionPath, "cannot be only whitespace if specified")
-		} else if !util.IsValidRuntimeVersion(*cfg.CRIDockerdVersion) {
+		} else if !helpers.IsValidRuntimeVersion(*cfg.CRIDockerdVersion) {
 			verrs.Add(versionPath + ": '" + *cfg.CRIDockerdVersion + "' is not a recognized version format")
 		}
 	}
@@ -204,10 +238,10 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *ValidationErrors, pathPrefi
 	for regAddr, auth := range cfg.Auths {
 		authMapPath := pathPrefix + ".auths"
 		authEntryPath := fmt.Sprintf("%s[\"%s\"]", authMapPath, regAddr)
-		if strings.TrimSpace(regAddr) == "" {
+		if strings.TrimSpace(string(regAddr)) == "" {
 			verrs.Add(authMapPath, "registry address key cannot be empty")
-		} else if !util.ValidateHostPortString(regAddr) && !util.IsValidDomainName(regAddr) {
-			verrs.Add(authEntryPath + ": registry key '" + regAddr + "' is not a valid hostname or host:port")
+		} else if !helpers.ValidateHostPortString(string(regAddr)) && !helpers.IsValidDomainName(string(regAddr)) {
+			verrs.Add(authEntryPath + ": registry key '" + string(regAddr) + "' is not a valid hostname or host:port")
 		}
 
 		hasUserPass := auth.Username != "" && auth.Password != ""
@@ -223,6 +257,21 @@ func Validate_DockerConfig(cfg *DockerConfig, verrs *ValidationErrors, pathPrefi
 			} else if !strings.Contains(string(decoded), ":") {
 				verrs.Add(authEntryPath+".auth", "decoded auth string must be in 'username:password' format")
 			}
+		}
+	}
+	if cfg.CgroupDriver != nil {
+		driver := *cfg.CgroupDriver
+		if driver != common.CgroupDriverSystemd && driver != common.CgroupDriverCgroupfs {
+			verrs.Add(pathPrefix+".cgroupDriver", "must be 'systemd' or 'cgroupfs'")
+		}
+	}
+
+	if cfg.Pause != "" {
+		pausePath := pathPrefix + ".pause"
+		if strings.TrimSpace(cfg.Pause) == "" {
+			verrs.Add(pausePath, "cannot be only whitespace if specified")
+		} else if !helpers.IsValidImageReference(cfg.Pause) {
+			verrs.Add(pausePath, "invalid image reference format: '"+cfg.Pause+"'")
 		}
 	}
 }

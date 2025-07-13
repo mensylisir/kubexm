@@ -1,134 +1,195 @@
 package v1alpha1
 
 import (
+	"encoding/base64"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1/helpers"
+	"github.com/mensylisir/kubexm/pkg/common"
 	"net/url"
 	"strings"
-	"github.com/mensylisir/kubexm/pkg/common" // Import common package
-	"github.com/mensylisir/kubexm/pkg/util" // Import the util package
 )
 
-// ContainerdConfig defines specific settings for the Containerd runtime.
-// Corresponds to `kubernetes.containerRuntime.containerd` in YAML.
-type ContainerdConfig struct {
-	// Version of Containerd to install or manage.
-	// This can be different from ContainerRuntimeConfig.Version if user wants to specify explicitly here.
-	Version string `json:"version,omitempty" yaml:"version,omitempty"`
-
-	// RegistryMirrors maps registry hosts to their mirror URLs.
-	// Example: {"docker.io": ["https://mirror.example.com"]}
-	// Corresponds to `registryMirrors` in YAML.
-	RegistryMirrors map[string][]string `json:"registryMirrors,omitempty" yaml:"registryMirrors,omitempty"`
-
-	// InsecureRegistries is a list of registries that should be treated as insecure.
-	// Corresponds to `insecureRegistries` in YAML.
-	InsecureRegistries []string `json:"insecureRegistries,omitempty" yaml:"insecureRegistries,omitempty"`
-
-	// UseSystemdCgroup specifies whether to configure containerd to use systemd cgroup driver.
-	// Defaults to true.
-	// No direct YAML field, typically a best practice applied by the tool.
-	UseSystemdCgroup *bool `json:"useSystemdCgroup,omitempty" yaml:"useSystemdCgroup,omitempty"`
-
-	// ExtraTomlConfig allows appending custom TOML configuration to containerd's config.toml.
-	// Corresponds to `extraTomlConfig` in YAML.
-	ExtraTomlConfig string `json:"extraTomlConfig,omitempty" yaml:"extraTomlConfig,omitempty"`
-
-	// ConfigPath is the path to the main containerd configuration file.
-	// Defaults to "/etc/containerd/config.toml".
-	ConfigPath *string `json:"configPath,omitempty" yaml:"configPath,omitempty"`
-
-	// DisabledPlugins is a list of plugins to disable in containerd.
-	// Example: ["cri", "diff", "events"]
-	DisabledPlugins []string `json:"disabledPlugins,omitempty" yaml:"disabledPlugins,omitempty"`
-
-	// RequiredPlugins is a list of plugins that must be enabled. Useful for validation.
-	// Example: ["io.containerd.grpc.v1.cri"]
-	RequiredPlugins []string `json:"requiredPlugins,omitempty" yaml:"requiredPlugins,omitempty"`
-
-	// Imports are additional .toml files to import into the main config.
-	Imports []string `json:"imports,omitempty" yaml:"imports,omitempty"`
+type Containerd struct {
+	Endpoint         string              `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+	Version          string              `json:"version,omitempty" yaml:"version,omitempty"`
+	Registry         *ContainerdRegistry `json:"registry,omitempty" yaml:"registry,omitempty"`
+	UseSystemdCgroup *bool               `json:"useSystemdCgroup,omitempty" yaml:"useSystemdCgroup,omitempty"`
+	ExtraTomlConfig  string              `json:"extraTomlConfig,omitempty" yaml:"extraTomlConfig,omitempty"`
+	ConfigPath       *string             `json:"configPath,omitempty" yaml:"configPath,omitempty"`
+	DisabledPlugins  []string            `json:"disabledPlugins,omitempty" yaml:"disabledPlugins,omitempty"`
+	RequiredPlugins  []string            `json:"requiredPlugins,omitempty" yaml:"requiredPlugins,omitempty"`
+	Imports          []string            `json:"imports,omitempty" yaml:"imports,omitempty"`
+	Root             *string             `json:"root,omitempty" yaml:"root,omitempty"`
+	State            *string             `json:"state,omitempty" yaml:"state,omitempty"`
+	Pause            string              `json:"pause,omitempty" yaml:"pause,omitempty"`
 }
 
-// SetDefaults_ContainerdConfig sets default values for ContainerdConfig.
-func SetDefaults_ContainerdConfig(cfg *ContainerdConfig) {
+type ContainerdRegistry struct {
+	Mirrors map[ServerAddress]MirrorConfig `json:"mirrors,omitempty" yaml:"mirrors,omitempty"`
+	Configs map[ServerAddress]AuthConfig   `json:"configs,omitempty" yaml:"configs,omitempty"`
+}
+
+type MirrorConfig struct {
+	Endpoints []string `json:"endpoints" yaml:"endpoints"`
+}
+
+type ContainerdRegistryAuth struct {
+	Username      string `json:"username,omitempty" yaml:"username,omitempty"`
+	Password      string `json:"password,omitempty" yaml:"password,omitempty"`
+	Auth          string `json:"auth,omitempty" yaml:"auth,omitempty"`
+	IdentityToken string `json:"identityToken,omitempty" yaml:"identityToken,omitempty"`
+}
+
+type TLSConfig struct {
+	InsecureSkipVerify bool   `json:"insecureSkipVerify,omitempty" yaml:"insecureSkipVerify,omitempty"`
+	CAFile             string `json:"caFile,omitempty" yaml:"caFile,omitempty"`
+	CertFile           string `json:"certFile,omitempty" yaml:"certFile,omitempty"`
+	KeyFile            string `json:"keyFile,omitempty" yaml:"keyFile,omitempty"`
+}
+
+type AuthConfig struct {
+	Auth *ContainerdRegistryAuth `json:"auth,omitempty" yaml:"auth,omitempty"`
+	TLS  *TLSConfig              `json:"tls,omitempty" yaml:"tls,omitempty"`
+}
+
+func SetDefaults_ContainerdConfig(cfg *Containerd) {
 	if cfg == nil {
 		return
 	}
-	if cfg.RegistryMirrors == nil {
-		cfg.RegistryMirrors = make(map[string][]string)
+	if cfg.Registry == nil {
+		cfg.Registry = &ContainerdRegistry{}
 	}
-	if cfg.InsecureRegistries == nil {
-		cfg.InsecureRegistries = []string{}
+	if cfg.Registry.Mirrors == nil {
+		cfg.Registry.Mirrors = make(map[ServerAddress]MirrorConfig)
+	}
+	if cfg.Registry.Configs == nil {
+		cfg.Registry.Configs = make(map[ServerAddress]AuthConfig)
 	}
 	if cfg.UseSystemdCgroup == nil {
-		cfg.UseSystemdCgroup = util.BoolPtr(true)
+		cfg.UseSystemdCgroup = helpers.BoolPtr(true)
 	}
 	if cfg.ConfigPath == nil {
-		cfg.ConfigPath = util.StrPtr(common.ContainerdDefaultConfigFileTarget)
+		cfg.ConfigPath = helpers.StrPtr(common.ContainerdDefaultConfigFile)
 	}
 	if cfg.DisabledPlugins == nil {
 		cfg.DisabledPlugins = []string{}
 	}
 	if cfg.RequiredPlugins == nil {
-		// CRI plugin is essential for Kubernetes integration.
 		cfg.RequiredPlugins = []string{common.ContainerdPluginCRI}
 	}
 	if cfg.Imports == nil {
 		cfg.Imports = []string{}
 	}
-	// Version: No default here; should be inherited from ContainerRuntimeConfig.Version if empty,
-	// or explicitly set by user. The installer logic will handle this.
+	if cfg.Root == nil {
+		cfg.Root = helpers.StrPtr(common.ContainerdDefaultRoot)
+	}
+	if cfg.State == nil {
+		cfg.State = helpers.StrPtr(common.ContainerdDefaultState)
+	}
+	if cfg.Version == "" {
+		cfg.Version = common.DefaultContainerdVersion
+	}
+	if cfg.Endpoint == "" {
+		cfg.Endpoint = common.ContainerdDefaultEndpoint
+	}
+	if cfg.Pause == "" {
+		cfg.Pause = common.DefaultPauseImage
+	}
 }
 
-// Validate_ContainerdConfig validates ContainerdConfig.
-func Validate_ContainerdConfig(cfg *ContainerdConfig, verrs *ValidationErrors, pathPrefix string) {
+func Validate_ContainerdConfig(cfg *Containerd, verrs *ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
+
 	if cfg.Version != "" {
 		if strings.TrimSpace(cfg.Version) == "" {
 			verrs.Add(pathPrefix+".version", "cannot be only whitespace if specified")
-		} else if !util.IsValidRuntimeVersion(cfg.Version) { // Use util.IsValidRuntimeVersion
+		} else if !helpers.IsValidRuntimeVersion(cfg.Version) {
 			verrs.Add(pathPrefix + ".version: '" + cfg.Version + "' is not a recognized version format")
 		}
 	}
 
-	for reg, mirrors := range cfg.RegistryMirrors {
-		if strings.TrimSpace(reg) == "" {
-			verrs.Add(pathPrefix+".registryMirrors", "registry host key cannot be empty")
-		}
-		if len(mirrors) == 0 {
-			verrs.Add(fmt.Sprintf("%s.registryMirrors[\"%s\"]: must contain at least one mirror URL", pathPrefix, reg))
-		}
-		for i, mirrorURL := range mirrors {
-			if strings.TrimSpace(mirrorURL) == "" {
-				verrs.Add(fmt.Sprintf("%s.registryMirrors[\"%s\"][%d]: mirror URL cannot be empty", pathPrefix, reg, i))
-			} else {
-				u, err := url.ParseRequestURI(mirrorURL)
+	if cfg.Registry != nil {
+		registryPath := pathPrefix + ".registry"
+		for reg, mirrorCfg := range cfg.Registry.Mirrors {
+			mirrorMapPath := registryPath + ".mirrors"
+			mirrorEntryPath := fmt.Sprintf("%s[\"%s\"]", mirrorMapPath, reg)
+			if strings.TrimSpace(string(reg)) == "" {
+				verrs.Add(mirrorMapPath, "registry host key cannot be empty")
+			} else if !helpers.ValidateHostPortString(string(reg)) && !helpers.IsValidDomainName(string(reg)) {
+				verrs.Add(mirrorEntryPath, "registry key '"+string(reg)+"' is not a valid hostname or host:port")
+			}
+			if len(mirrorCfg.Endpoints) == 0 {
+				verrs.Add(mirrorEntryPath, "must contain at least one endpoint URL")
+			}
+			for i, endpointURL := range mirrorCfg.Endpoints {
+				endpointPath := fmt.Sprintf("%s.endpoints[%d]", mirrorEntryPath, i)
+				u, err := url.ParseRequestURI(endpointURL)
 				if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-					verrs.Add(fmt.Sprintf("%s.registryMirrors[\"%s\"][%d]: invalid URL format for mirror '%s' (must be http or https)", pathPrefix, reg, i, mirrorURL))
+					verrs.Add(endpointPath, "invalid URL format for endpoint '"+endpointURL+"' (must be http or https)")
 				}
 			}
 		}
-	}
-	for i, insecureReg := range cfg.InsecureRegistries {
-		if strings.TrimSpace(insecureReg) == "" {
-			verrs.Add(fmt.Sprintf("%s.insecureRegistries[%d]: registry host cannot be empty", pathPrefix, i))
-		} else if !util.ValidateHostPortString(insecureReg) { // Use util.ValidateHostPortString
-			verrs.Add(fmt.Sprintf("%s.insecureRegistries[%d]: invalid host:port format for insecure registry '%s'", pathPrefix, i, insecureReg))
+
+		for reg, authCfg := range cfg.Registry.Configs {
+			configMapPath := registryPath + ".configs"
+			configEntryPath := fmt.Sprintf("%s[\"%s\"]", configMapPath, reg)
+			if strings.TrimSpace(string(reg)) == "" {
+				verrs.Add(configMapPath, "registry host key cannot be empty")
+			} else if !helpers.ValidateHostPortString(string(reg)) && !helpers.IsValidDomainName(string(reg)) { // <-- 建议增加
+				verrs.Add(configEntryPath, "registry key '"+string(reg)+"' is not a valid hostname or host:port")
+			}
+			if authCfg.Auth != nil {
+				authPath := configEntryPath + ".auth"
+				auth := authCfg.Auth
+				hasUserPass := auth.Username != "" && auth.Password != ""
+				hasAuthStr := auth.Auth != ""
+				hasIdentityToken := auth.IdentityToken != ""
+				if !hasUserPass && !hasAuthStr && !hasIdentityToken {
+					verrs.Add(authPath, "one of username/password, auth string, or identityToken must be provided")
+				}
+				if hasAuthStr {
+					decoded, err := base64.StdEncoding.DecodeString(auth.Auth)
+					if err != nil {
+						verrs.Add(authPath+".auth", "failed to decode base64 auth string")
+					} else if !strings.Contains(string(decoded), ":") {
+						verrs.Add(authPath+".auth", "decoded auth string must be in 'username:password' format")
+					}
+				}
+			}
 		}
 	}
 	if cfg.ConfigPath != nil && strings.TrimSpace(*cfg.ConfigPath) == "" {
 		verrs.Add(pathPrefix+".configPath", "cannot be empty if specified")
 	}
+	disabledSet := make(map[string]struct{})
 	for i, plug := range cfg.DisabledPlugins {
 		if strings.TrimSpace(plug) == "" {
 			verrs.Add(fmt.Sprintf("%s.disabledPlugins[%d]: plugin name cannot be empty", pathPrefix, i))
 		}
+		disabledSet[plug] = struct{}{}
 	}
 	for i, plug := range cfg.RequiredPlugins {
 		if strings.TrimSpace(plug) == "" {
 			verrs.Add(fmt.Sprintf("%s.requiredPlugins[%d]: plugin name cannot be empty", pathPrefix, i))
+		}
+		if _, found := disabledSet[plug]; found {
+			verrs.Add(pathPrefix, fmt.Sprintf("plugin '%s' cannot be in both requiredPlugins and disabledPlugins", plug))
+		}
+	}
+	if cfg.Root != nil && strings.TrimSpace(*cfg.Root) == "" {
+		verrs.Add(pathPrefix+".root", "cannot be empty if specified")
+	}
+	if cfg.State != nil && strings.TrimSpace(*cfg.State) == "" {
+		verrs.Add(pathPrefix+".state", "cannot be empty if specified")
+	}
+	if cfg.Pause != "" {
+		pausePath := pathPrefix + ".pause"
+		if strings.TrimSpace(cfg.Pause) == "" {
+			verrs.Add(pausePath, "cannot be only whitespace if specified")
+		} else if !helpers.IsValidImageReference(cfg.Pause) {
+			verrs.Add(pausePath, "invalid image reference format: '"+cfg.Pause+"'")
 		}
 	}
 	for i, imp := range cfg.Imports {

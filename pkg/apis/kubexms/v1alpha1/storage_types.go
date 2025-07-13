@@ -1,12 +1,12 @@
 package v1alpha1
 
 import (
-	"strings"
 	"github.com/mensylisir/kubexm/pkg/util"
+	"strings"
 )
 
 // StorageConfig defines the storage configurations for the cluster.
-type StorageConfig struct {
+type Storage struct {
 	OpenEBS             *OpenEBSConfig `json:"openebs,omitempty" yaml:"openebs,omitempty"`
 	DefaultStorageClass *string        `json:"defaultStorageClass,omitempty" yaml:"defaultStorageClass,omitempty"`
 }
@@ -96,10 +96,18 @@ func SetDefaults_OpenEBSConfig(cfg *OpenEBSConfig) {
 		}
 	} else { // OpenEBS is explicitly disabled or not enabled by default
 		if cfg.Engines != nil {
-			if cfg.Engines.LocalHostPath != nil { cfg.Engines.LocalHostPath.Enabled = pboolStorage(false) }
-			if cfg.Engines.Mayastor != nil { cfg.Engines.Mayastor.Enabled = pboolStorage(false) }
-			if cfg.Engines.Jiva != nil { cfg.Engines.Jiva.Enabled = pboolStorage(false) }
-			if cfg.Engines.CStor != nil { cfg.Engines.CStor.Enabled = pboolStorage(false) }
+			if cfg.Engines.LocalHostPath != nil {
+				cfg.Engines.LocalHostPath.Enabled = pboolStorage(false)
+			}
+			if cfg.Engines.Mayastor != nil {
+				cfg.Engines.Mayastor.Enabled = pboolStorage(false)
+			}
+			if cfg.Engines.Jiva != nil {
+				cfg.Engines.Jiva.Enabled = pboolStorage(false)
+			}
+			if cfg.Engines.CStor != nil {
+				cfg.Engines.CStor.Enabled = pboolStorage(false)
+			}
 		}
 	}
 }
@@ -126,7 +134,7 @@ func Validate_OpenEBSConfig(cfg *OpenEBSConfig, verrs *ValidationErrors, pathPre
 		if strings.TrimSpace(cfg.BasePath) == "" {
 			verrs.Add(pathPrefix + ".basePath: cannot be empty if OpenEBS is enabled")
 		}
-		
+
 		// Validate version if specified when OpenEBS is enabled
 		if cfg.Version != nil {
 			if strings.TrimSpace(*cfg.Version) == "" {
@@ -135,7 +143,7 @@ func Validate_OpenEBSConfig(cfg *OpenEBSConfig, verrs *ValidationErrors, pathPre
 				verrs.Add(pathPrefix + ".version: '" + *cfg.Version + "' is not a recognized version format")
 			}
 		}
-		
+
 		// Further validation for Engines can be added here if specific rules apply
 		// e.g. if only one engine can be enabled at a time.
 		// if cfg.Engines != nil {

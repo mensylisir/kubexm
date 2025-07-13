@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mensylisir/kubexm/pkg/util" // Import util package
+	"github.com/mensylisir/kubexm/pkg/util"            // Import util package
 	"github.com/mensylisir/kubexm/pkg/util/validation" // Import validation package
 )
 
@@ -13,15 +13,15 @@ import (
 // potentially managed separately or through a dedicated 'addons' section in the cluster YAML
 // that allows for more than just enabling/disabling by name (as seen in ClusterSpec.Addons which is []string).
 // It allows specifying sources like Helm charts or YAML manifests, along with other parameters.
-type AddonConfig struct {
+type Addon struct {
 	Name    string `json:"name" yaml:"name"`
 	Enabled *bool  `json:"enabled,omitempty" yaml:"enabled,omitempty"` // Pointer for optionality, defaults to true or based on addon
 
-	Namespace   string   `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-	Retries     *int32   `json:"retries,omitempty" yaml:"retries,omitempty"`
-	Delay       *int32   `json:"delay,omitempty" yaml:"delay,omitempty"` // Delay in seconds between retries
+	Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+	Retries   *int32 `json:"retries,omitempty" yaml:"retries,omitempty"`
+	Delay     *int32 `json:"delay,omitempty" yaml:"delay,omitempty"` // Delay in seconds between retries
 
-	Sources     AddonSources `json:"sources,omitempty" yaml:"sources,omitempty"`
+	Sources AddonSources `json:"sources,omitempty" yaml:"sources,omitempty"`
 
 	// PreInstall and PostInstall scripts. For simplicity, these are string arrays.
 	PreInstall  []string `json:"preInstall,omitempty" yaml:"preInstall,omitempty"`
@@ -43,8 +43,8 @@ type ChartSource struct {
 	Path       string   `json:"path,omitempty" yaml:"path,omitempty"` // Path to chart in repo (if not just name) or local path
 	Version    string   `json:"version,omitempty" yaml:"version,omitempty"`
 	ValuesFile string   `json:"valuesFile,omitempty" yaml:"valuesFile,omitempty"` // Path to a custom values file
-	Values     []string `json:"values,omitempty" yaml:"values,omitempty"`     // Inline values (e.g., "key1=value1,key2.subkey=value2")
-	Wait       *bool    `json:"wait,omitempty" yaml:"wait,omitempty"`       // Whether to wait for chart resources to be ready
+	Values     []string `json:"values,omitempty" yaml:"values,omitempty"`         // Inline values (e.g., "key1=value1,key2.subkey=value2")
+	Wait       *bool    `json:"wait,omitempty" yaml:"wait,omitempty"`             // Whether to wait for chart resources to be ready
 }
 
 // YamlSource defines how to install an addon from YAML manifests.
@@ -89,8 +89,12 @@ func SetDefaults_AddonConfig(cfg *AddonConfig) {
 		cfg.Sources.Yaml.Path = []string{}
 	}
 
-	if cfg.PreInstall == nil { cfg.PreInstall = []string{} }
-	if cfg.PostInstall == nil { cfg.PostInstall = []string{} }
+	if cfg.PreInstall == nil {
+		cfg.PreInstall = []string{}
+	}
+	if cfg.PostInstall == nil {
+		cfg.PostInstall = []string{}
+	}
 
 	if cfg.TimeoutSeconds == nil {
 		cfg.TimeoutSeconds = util.Int32Ptr(300) // Default to 300 seconds (5 minutes)
@@ -175,13 +179,13 @@ func Validate_AddonConfig(cfg *AddonConfig, verrs *ValidationErrors, pathPrefix 
 	}
 
 	if cfg.Retries != nil && *cfg.Retries < 0 {
-		verrs.Add(pathPrefix+".retries: cannot be negative")
+		verrs.Add(pathPrefix + ".retries: cannot be negative")
 	}
 	if cfg.Delay != nil && *cfg.Delay < 0 {
-		verrs.Add(pathPrefix+".delay: cannot be negative")
+		verrs.Add(pathPrefix + ".delay: cannot be negative")
 	}
 
 	if cfg.TimeoutSeconds != nil && *cfg.TimeoutSeconds < 0 {
-		verrs.Add(pathPrefix+".timeoutSeconds: cannot be negative")
+		verrs.Add(pathPrefix + ".timeoutSeconds: cannot be negative")
 	}
 }
