@@ -3,19 +3,19 @@ package v1alpha1
 import (
 	"encoding/base64"
 	"fmt"
-	"strings"
 	"github.com/mensylisir/kubexm/pkg/util"
+	"strings"
 	// Assuming ValidationErrors is in cluster_types.go or a shared util in this package
 )
 
 // RegistryConfig defines configurations related to container image registries.
-type RegistryConfig struct {
+type Registry struct {
 	PrivateRegistry   string                  `json:"privateRegistry,omitempty" yaml:"privateRegistry,omitempty"`
 	NamespaceOverride string                  `json:"namespaceOverride,omitempty" yaml:"namespaceOverride,omitempty"`
 	Auths             map[string]RegistryAuth `json:"auths,omitempty" yaml:"auths,omitempty"`
 	Type              *string                 `json:"type,omitempty" yaml:"type,omitempty"`
 	DataRoot          *string                 `json:"dataRoot,omitempty" yaml:"registryDataDir,omitempty"` // Matches YAML registryDataDir
-	NamespaceRewrite  *NamespaceRewriteConfig `json:"namespaceRewrite,omitempty" yaml:"namespaceRewrite,omitempty"`
+	NamespaceRewrite  *NamespaceRewrite       `json:"namespaceRewrite,omitempty" yaml:"namespaceRewrite,omitempty"`
 }
 
 // RegistryAuth defines authentication credentials for a specific registry.
@@ -28,17 +28,11 @@ type RegistryAuth struct {
 	CertsPath     string `json:"certsPath,omitempty" yaml:"certsPath,omitempty"`
 }
 
-// NamespaceRewriteConfig defines rules for rewriting image namespaces.
-type NamespaceRewriteConfig struct {
-	Enabled bool                   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	Rules   []NamespaceRewriteRule `json:"rules,omitempty" yaml:"rules,omitempty"`
-}
-
-// NamespaceRewriteRule defines a single namespace rewrite rule.
-type NamespaceRewriteRule struct {
-	Registry     string `json:"registry,omitempty" yaml:"registry,omitempty"`
-	OldNamespace string `json:"oldNamespace" yaml:"oldNamespace"`
-	NewNamespace string `json:"newNamespace" yaml:"newNamespace"`
+type NamespaceRewritePolicy string
+type NamespaceRewrite struct {
+	Policy NamespaceRewritePolicy `yaml:"policy" json:"policy"`
+	Src    []string               `yaml:"src" json:"src"`
+	Dest   string                 `yaml:"dest" json:"dest"`
 }
 
 // SetDefaults_RegistryConfig sets default values for RegistryConfig.
@@ -176,7 +170,7 @@ func isValidRegistryAddress(addr string) bool {
 	if addr == "" {
 		return false
 	}
-	
+
 	// Check if it contains port
 	parts := strings.Split(addr, ":")
 	if len(parts) == 1 {

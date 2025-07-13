@@ -2,9 +2,19 @@ package common
 
 import "time"
 
-// Default SSH connection parameters.
 const (
-	// DefaultSSHPort is already defined in network_constants.go
-	// DefaultSSHPort = 22
+	DefaultSSHPort           = 22
 	DefaultConnectionTimeout = 30 * time.Second
+)
+
+type HostConnectionType string
+
+const (
+	HostConnectionTypeSSH   HostConnectionType = "ssh"
+	HostConnectionTypeLocal HostConnectionType = "local"
+)
+
+const (
+	HostTypeSSH   = HostConnectionTypeSSH
+	HostTypeLocal = HostConnectionTypeLocal
 )

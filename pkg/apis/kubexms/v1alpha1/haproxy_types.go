@@ -2,123 +2,90 @@ package v1alpha1
 
 import (
 	"fmt"
-	"strings"
-	"github.com/mensylisir/kubexm/pkg/util"
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1/helpers"
 	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/errors/validation"
 )
 
-const (
-	// HAProxyModeTCP is a valid mode for HAProxy.
-	HAProxyModeTCP = "tcp"
-	// HAProxyModeHTTP is a valid mode for HAProxy.
-	HAProxyModeHTTP = "http"
-)
-
-var (
-	// validHAProxyModes lists the supported HAProxy modes.
-	validHAProxyModes = []string{HAProxyModeTCP, HAProxyModeHTTP}
-	// validHAProxyBalanceAlgorithms lists the supported HAProxy balance algorithms.
-	validHAProxyBalanceAlgorithms = []string{"roundrobin", "static-rr", "leastconn", "first", "source", "uri", "url_param", "hdr", "rdp-cookie"}
-)
-
-// HAProxyBackendServer defines a backend server for HAProxy load balancing.
 type HAProxyBackendServer struct {
-	// Name is an identifier for the backend server.
-	Name string `json:"name" yaml:"name"`
-	// Address is the IP address or resolvable hostname of the backend server.
-	Address string `json:"address" yaml:"address"`
-	// Port is the port on which the backend server is listening.
-	Port int `json:"port" yaml:"port"`
-	// Weight for weighted load balancing algorithms (optional).
-	Weight *int `json:"weight,omitempty" yaml:"weight,omitempty"`
-	// TODO: Add other server options like 'check', 'inter', 'rise', 'fall' if needed.
+	Name        string              `json:"name" yaml:"name"`
+	Address     string              `json:"address" yaml:"address"`
+	Port        int                 `json:"port" yaml:"port"`
+	Weight      *int                `json:"weight,omitempty" yaml:"weight,omitempty"`
+	HealthCheck *HAProxyHealthCheck `json:"healthCheck,omitempty" yaml:"healthCheck,omitempty"`
 }
 
-// HAProxyConfig defines settings for HAProxy service used for HA load balancing.
+type HAProxyHealthCheck struct {
+	Enabled  *bool   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Interval *string `json:"interval,omitempty" yaml:"interval,omitempty"`
+	Rise     *int    `json:"rise,omitempty" yaml:"rise,omitempty"`
+	Fall     *int    `json:"fall,omitempty" yaml:"fall,omitempty"`
+}
+
 type HAProxyConfig struct {
-	// FrontendBindAddress is the address HAProxy should bind its frontend to.
-	// Defaults to "0.0.0.0" (all interfaces).
-	FrontendBindAddress *string `json:"frontendBindAddress,omitempty" yaml:"frontendBindAddress,omitempty"`
-
-	// FrontendPort is the port HAProxy listens on for the load-balanced service (e.g., Kubernetes API).
-	// Defaults to 6443 or a common load balancer port like 8443.
-	FrontendPort *int `json:"frontendPort,omitempty" yaml:"frontendPort,omitempty"`
-
-	// Mode for HAProxy (e.g., "tcp", "http"). Defaults to "tcp" for API server.
-	Mode *string `json:"mode,omitempty" yaml:"mode,omitempty"`
-
-	// BalanceAlgorithm for backend server selection.
-	// e.g., "roundrobin", "leastconn", "source". Defaults to "roundrobin".
-	BalanceAlgorithm *string `json:"balanceAlgorithm,omitempty" yaml:"balanceAlgorithm,omitempty"`
-
-	// BackendServers is a list of backend servers to load balance.
-	// Typically, these are the control-plane nodes for kube-apiserver.
-	BackendServers []HAProxyBackendServer `json:"backendServers,omitempty" yaml:"backendServers,omitempty"`
-
-	// ExtraGlobalConfig allows adding raw lines to the 'global' section of haproxy.cfg.
-	ExtraGlobalConfig []string `json:"extraGlobalConfig,omitempty" yaml:"extraGlobalConfig,omitempty"`
-	// ExtraDefaultsConfig allows adding raw lines to the 'defaults' section of haproxy.cfg.
-	ExtraDefaultsConfig []string `json:"extraDefaultsConfig,omitempty" yaml:"extraDefaultsConfig,omitempty"`
-	// ExtraFrontendConfig allows adding raw lines to the specific frontend section of haproxy.cfg.
-	ExtraFrontendConfig []string `json:"extraFrontendConfig,omitempty" yaml:"extraFrontendConfig,omitempty"`
-	// ExtraBackendConfig allows adding raw lines to the specific backend section of haproxy.cfg.
-	ExtraBackendConfig []string `json:"extraBackendConfig,omitempty" yaml:"extraBackendConfig,omitempty"`
-
-	// SkipInstall, if true, assumes HAProxy is already installed and configured externally.
-	SkipInstall *bool `json:"skipInstall,omitempty" yaml:"skipInstall,omitempty"`
+	FrontendBindAddress *string                `json:"frontendBindAddress,omitempty" yaml:"frontendBindAddress,omitempty"`
+	FrontendPort        *int                   `json:"frontendPort,omitempty" yaml:"frontendPort,omitempty"`
+	Mode                *string                `json:"mode,omitempty" yaml:"mode,omitempty"`
+	BalanceAlgorithm    *string                `json:"balanceAlgorithm,omitempty" yaml:"balanceAlgorithm,omitempty"`
+	BackendServers      []HAProxyBackendServer `json:"backendServers,omitempty" yaml:"backendServers,omitempty"`
+	ExtraGlobalConfig   []string               `json:"extraGlobalConfig,omitempty" yaml:"extraGlobalConfig,omitempty"`
+	ExtraDefaultsConfig []string               `json:"extraDefaultsConfig,omitempty" yaml:"extraDefaultsConfig,omitempty"`
+	ExtraFrontendConfig []string               `json:"extraFrontendConfig,omitempty" yaml:"extraFrontendConfig,omitempty"`
+	ExtraBackendConfig  []string               `json:"extraBackendConfig,omitempty" yaml:"extraBackendConfig,omitempty"`
+	SkipInstall         *bool                  `json:"skipInstall,omitempty" yaml:"skipInstall,omitempty"`
 }
 
-// --- Defaulting Functions ---
-
-// SetDefaults_HAProxyConfig sets default values for HAProxyConfig.
 func SetDefaults_HAProxyConfig(cfg *HAProxyConfig) {
 	if cfg == nil {
 		return
 	}
 	if cfg.FrontendBindAddress == nil {
-		cfg.FrontendBindAddress = util.StrPtr("0.0.0.0")
+		cfg.FrontendBindAddress = helpers.StrPtr("0.0.0.0")
 	}
 	if cfg.FrontendPort == nil {
-		cfg.FrontendPort = util.IntPtr(common.HAProxyDefaultFrontendPort)
+		cfg.FrontendPort = helpers.IntPtr(common.HAProxyDefaultFrontendPort)
 	}
 	if cfg.Mode == nil {
-		cfg.Mode = util.StrPtr(common.DefaultHAProxyMode)
+		cfg.Mode = helpers.StrPtr(common.DefaultHAProxyMode)
 	}
 	if cfg.BalanceAlgorithm == nil {
-		cfg.BalanceAlgorithm = util.StrPtr(common.DefaultHAProxyAlgorithm)
+		cfg.BalanceAlgorithm = helpers.StrPtr(common.DefaultHAProxyAlgorithm)
 	}
-	if cfg.BackendServers == nil {
-		cfg.BackendServers = []HAProxyBackendServer{}
-	}
-	for i := range cfg.BackendServers {
-		server := &cfg.BackendServers[i]
-		if server.Weight == nil {
-			server.Weight = util.IntPtr(1) // Default weight
-		}
-	}
-
-	if cfg.ExtraGlobalConfig == nil {
-		cfg.ExtraGlobalConfig = []string{}
-	}
-	if cfg.ExtraDefaultsConfig == nil {
-		cfg.ExtraDefaultsConfig = []string{}
-	}
-	if cfg.ExtraFrontendConfig == nil {
-		cfg.ExtraFrontendConfig = []string{}
-	}
-	if cfg.ExtraBackendConfig == nil {
-		cfg.ExtraBackendConfig = []string{}
-	}
-
 	if cfg.SkipInstall == nil {
-		cfg.SkipInstall = util.BoolPtr(false) // Default to managing HAProxy installation
+		cfg.SkipInstall = helpers.BoolPtr(false)
+	}
+
+	for i := range cfg.BackendServers {
+		SetDefaults_HAProxyBackendServer(&cfg.BackendServers[i])
 	}
 }
 
-// --- Validation Functions ---
+func SetDefaults_HAProxyBackendServer(server *HAProxyBackendServer) {
+	if server.Weight == nil {
+		server.Weight = helpers.IntPtr(common.DefaultHAProxyWeight)
+	}
+	if server.HealthCheck == nil {
+		server.HealthCheck = &HAProxyHealthCheck{}
+	}
+	SetDefaults_HAProxyHealthCheck(server.HealthCheck)
+}
 
-// Validate_HAProxyConfig validates HAProxyConfig.
-func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *ValidationErrors, pathPrefix string) {
+func SetDefaults_HAProxyHealthCheck(check *HAProxyHealthCheck) {
+	if check.Enabled == nil {
+		check.Enabled = helpers.BoolPtr(true)
+	}
+	if check.Interval == nil {
+		check.Interval = helpers.StrPtr(common.DefaultHaproxyHealthCheckInterval)
+	}
+	if check.Rise == nil {
+		check.Rise = helpers.IntPtr(common.DefaultHaproxyRise)
+	}
+	if check.Fall == nil {
+		check.Fall = helpers.IntPtr(common.DefaultHaproxyFall)
+	}
+}
+
+func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
@@ -127,50 +94,78 @@ func Validate_HAProxyConfig(cfg *HAProxyConfig, verrs *ValidationErrors, pathPre
 	}
 
 	if cfg.FrontendBindAddress != nil {
-		trimmedAddr := strings.TrimSpace(*cfg.FrontendBindAddress)
-		if trimmedAddr == "" {
-			verrs.Add(pathPrefix+".frontendBindAddress", "cannot be empty if specified")
-		} else if !util.IsValidIP(trimmedAddr) && trimmedAddr != "0.0.0.0" && trimmedAddr != "::" {
-			verrs.Add(pathPrefix + ".frontendBindAddress: invalid IP address format '" + trimmedAddr + "'")
+		addr := *cfg.FrontendBindAddress
+		if !helpers.IsValidIP(addr) {
+			verrs.Add(pathPrefix+".frontendBindAddress", fmt.Sprintf("invalid IP address format '%s'", addr))
 		}
 	}
 
-	if cfg.FrontendPort == nil {
-		verrs.Add(pathPrefix+".frontendPort", "is required and should have a default value")
-	} else if *cfg.FrontendPort <= 0 || *cfg.FrontendPort > 65535 {
-		verrs.Add(pathPrefix + ".frontendPort: invalid port " + fmt.Sprintf("%d", *cfg.FrontendPort))
+	if cfg.FrontendPort != nil {
+		if !helpers.IsValidPort(*cfg.FrontendPort) {
+			verrs.Add(pathPrefix+".frontendPort", fmt.Sprintf("invalid port %d, must be between 1 and 65535", *cfg.FrontendPort))
+		}
+	} else {
+		verrs.Add(pathPrefix+".frontendPort", "is a required field")
 	}
 
-	if cfg.Mode == nil {
-		verrs.Add(pathPrefix+".mode", "is required and should have a default value 'tcp'")
-	} else if *cfg.Mode != "" && !util.ContainsString(validHAProxyModes, *cfg.Mode) {
-		verrs.Add(pathPrefix + ".mode: invalid mode '" + *cfg.Mode + "', must be one of " + fmt.Sprintf("%v", validHAProxyModes) + " or empty for default")
+	if cfg.Mode != nil {
+		if !helpers.ContainsString(common.ValidHAProxyModes, *cfg.Mode) {
+			verrs.Add(pathPrefix+".mode", fmt.Sprintf("invalid mode '%s', must be one of %v", *cfg.Mode, common.ValidHAProxyModes))
+		}
 	}
 
-	if cfg.BalanceAlgorithm == nil {
-		verrs.Add(pathPrefix+".balanceAlgorithm", "is required and should have a default value 'roundrobin'")
-	} else if *cfg.BalanceAlgorithm != "" && !util.ContainsString(validHAProxyBalanceAlgorithms, *cfg.BalanceAlgorithm) {
-		verrs.Add(pathPrefix + ".balanceAlgorithm: invalid algorithm '" + *cfg.BalanceAlgorithm + "', must be one of " + fmt.Sprintf("%v", validHAProxyBalanceAlgorithms))
+	if cfg.BalanceAlgorithm != nil {
+		if !helpers.ContainsString(common.ValidHAProxyBalanceAlgorithms, *cfg.BalanceAlgorithm) {
+			verrs.Add(pathPrefix+".balanceAlgorithm", fmt.Sprintf("invalid algorithm '%s', must be one of %v", *cfg.BalanceAlgorithm, common.ValidHAProxyBalanceAlgorithms))
+		}
 	}
 
 	if len(cfg.BackendServers) == 0 {
 		verrs.Add(pathPrefix+".backendServers", "must specify at least one backend server")
 	}
 	for i, server := range cfg.BackendServers {
-		serverPath := fmt.Sprintf("%s.backendServers[%d:%s]", pathPrefix, i, server.Name)
-		if strings.TrimSpace(server.Name) == "" {
-			verrs.Add(serverPath+".name", "backend server name cannot be empty")
+		serverPath := fmt.Sprintf("%s.backendServers[%d]", pathPrefix, i)
+		Validate_HAProxyBackendServer(&server, verrs, serverPath)
+	}
+}
+
+func Validate_HAProxyBackendServer(server *HAProxyBackendServer, verrs *validation.ValidationErrors, path string) {
+	if !helpers.IsValidNonEmptyString(server.Name) {
+		verrs.Add(path+".name", "cannot be empty")
+	}
+	if helpers.IsValidNonEmptyString(server.Name) {
+		path = fmt.Sprintf("%s(name=%s)", path, server.Name)
+	}
+
+	if !helpers.IsValidIP(server.Address) && !helpers.IsValidDomainName(server.Address) {
+		verrs.Add(path+".address", fmt.Sprintf("invalid address format '%s'; must be a valid IP or domain name", server.Address))
+	}
+	if !helpers.IsValidPort(server.Port) {
+		verrs.Add(path+".port", fmt.Sprintf("invalid port %d; must be between 1 and 65535", server.Port))
+	}
+	if server.Weight != nil && !helpers.IsValidNonNegativeInteger(*server.Weight) {
+		verrs.Add(path+".weight", fmt.Sprintf("cannot be negative, got %d", *server.Weight))
+	}
+
+	if server.HealthCheck != nil {
+		Validate_HAProxyHealthCheck(server.HealthCheck, verrs, path+".healthCheck")
+	}
+}
+
+func Validate_HAProxyHealthCheck(check *HAProxyHealthCheck, verrs *validation.ValidationErrors, path string) {
+	if check.Interval != nil {
+		if !helpers.IsValidDuration(*check.Interval) {
+			verrs.Add(path+".interval", fmt.Sprintf("invalid duration format: '%s'", *check.Interval))
 		}
-		if strings.TrimSpace(server.Address) == "" {
-			verrs.Add(serverPath+".address", "backend server address cannot be empty")
-		} else if !util.ValidateHostPortString(server.Address) && !util.IsValidIP(server.Address) && !util.IsValidDomainName(server.Address) {
-			verrs.Add(serverPath + ".address: invalid backend server address format '" + server.Address + "'")
+	}
+	if check.Rise != nil {
+		if !helpers.IsValidPositiveInteger(*check.Rise) {
+			verrs.Add(path+".rise", fmt.Sprintf("must be a positive integer, got %d", *check.Rise))
 		}
-		if server.Port <= 0 || server.Port > 65535 {
-			verrs.Add(serverPath + ".port: invalid backend server port " + fmt.Sprintf("%d", server.Port))
-		}
-		if server.Weight != nil && *server.Weight < 0 {
-			verrs.Add(serverPath + ".weight: cannot be negative, got " + fmt.Sprintf("%d", *server.Weight))
+	}
+	if check.Fall != nil {
+		if !helpers.IsValidPositiveInteger(*check.Fall) {
+			verrs.Add(path+".fall", fmt.Sprintf("must be a positive integer, got %d", *check.Fall))
 		}
 	}
 }

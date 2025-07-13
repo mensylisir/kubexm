@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/cache"
 	"github.com/mensylisir/kubexm/pkg/common"
@@ -13,7 +14,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/runner"
 	"k8s.io/client-go/tools/record"
-	"github.com/google/uuid"
 )
 
 // Context holds all runtime information, services, and configurations.
@@ -66,23 +66,23 @@ func NewContextWithGoContext(goCtx context.Context, parent *Context) *Context {
 }
 
 // Basic context methods
-func (c *Context) GoContext() context.Context { return c.GoCtx }
-func (c *Context) GetLogger() *logger.Logger { return c.Logger }
+func (c *Context) GoContext() context.Context          { return c.GoCtx }
+func (c *Context) GetLogger() *logger.Logger           { return c.Logger }
 func (c *Context) GetClusterConfig() *v1alpha1.Cluster { return c.ClusterConfig }
-func (c *Context) GetRunner() runner.Runner { return c.Runner }
-func (c *Context) GetRecorder() record.EventRecorder { return c.Recorder }
+func (c *Context) GetRunner() runner.Runner            { return c.Runner }
+func (c *Context) GetRecorder() record.EventRecorder   { return c.Recorder }
 
 // Cache accessors
 func (c *Context) GetPipelineCache() cache.PipelineCache { return c.PipelineCache }
-func (c *Context) GetModuleCache() cache.ModuleCache { return c.ModuleCache }
-func (c *Context) GetTaskCache() cache.TaskCache { return c.TaskCache }
-func (c *Context) GetStepCache() cache.StepCache { return c.StepCache }
+func (c *Context) GetModuleCache() cache.ModuleCache     { return c.ModuleCache }
+func (c *Context) GetTaskCache() cache.TaskCache         { return c.TaskCache }
+func (c *Context) GetStepCache() cache.StepCache         { return c.StepCache }
 
 // Host information accessors
-func (c *Context) GetHostsByRole(role string) ([]connector.Host, error) {
+func (c *Context) GetHostsByRole(role string) []connector.Host {
 	var hosts []connector.Host
 	if c.hostInfoMap == nil {
-		return nil, fmt.Errorf("hostInfoMap is not initialized in Context")
+		return nil
 	}
 	for _, hri := range c.hostInfoMap {
 		for _, r := range hri.Host.GetRoles() {
@@ -92,7 +92,7 @@ func (c *Context) GetHostsByRole(role string) ([]connector.Host, error) {
 			}
 		}
 	}
-	return hosts, nil
+	return hosts
 }
 
 func (c *Context) GetHostFacts(host connector.Host) (*runner.Facts, error) {

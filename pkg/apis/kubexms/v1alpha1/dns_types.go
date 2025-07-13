@@ -58,6 +58,13 @@ type NodeLocalDNS struct {
 	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
 
+func (k *NodeLocalDNS) EnableNodelocaldns() bool {
+	if k.Enabled == nil {
+		return true
+	}
+	return *k.Enabled
+}
+
 // ExternalZone defines rules for an external DNS zone.
 type ExternalZone struct {
 	// Zones is a list of domain names this configuration applies to.
@@ -77,7 +84,6 @@ type RewriteRule struct {
 	// ToTemplate is the template to rewrite the query to.
 	ToTemplate string `json:"toTemplate" yaml:"toTemplate"`
 }
-
 
 // SetDefaults_DNS sets default values for DNS config.
 func SetDefaults_DNS(cfg *DNS) {
@@ -135,12 +141,18 @@ func SetDefaults_ExternalZone(cfg *ExternalZone) {
 	if cfg == nil {
 		return
 	}
-	if cfg.Zones == nil { cfg.Zones = []string{} }
-	if cfg.Nameservers == nil { cfg.Nameservers = []string{} }
+	if cfg.Zones == nil {
+		cfg.Zones = []string{}
+	}
+	if cfg.Nameservers == nil {
+		cfg.Nameservers = []string{}
+	}
 	if cfg.Cache == 0 { // 0 could mean "use CoreDNS default", or we set a specific default.
 		cfg.Cache = 300 // Default to 5 minutes (300 seconds)
 	}
-	if cfg.Rewrite == nil { cfg.Rewrite = []RewriteRule{} }
+	if cfg.Rewrite == nil {
+		cfg.Rewrite = []RewriteRule{}
+	}
 }
 
 // Validate_DNS validates DNS configurations.
@@ -171,7 +183,9 @@ func Validate_DNS(cfg *DNS, verrs *ValidationErrors, pathPrefix string) {
 
 // Validate_CoreDNS validates CoreDNS configurations.
 func Validate_CoreDNS(cfg *CoreDNS, verrs *ValidationErrors, pathPrefix string) {
-	if cfg == nil { return }
+	if cfg == nil {
+		return
+	}
 	for i, ez := range cfg.ExternalZones {
 		Validate_ExternalZone(&ez, verrs, fmt.Sprintf("%s.externalZones[%d]", pathPrefix, i))
 	}
@@ -185,7 +199,9 @@ func Validate_CoreDNS(cfg *CoreDNS, verrs *ValidationErrors, pathPrefix string) 
 
 // Validate_NodeLocalDNS validates NodeLocalDNS configurations.
 func Validate_NodeLocalDNS(cfg *NodeLocalDNS, verrs *ValidationErrors, pathPrefix string) {
-	if cfg == nil { return }
+	if cfg == nil {
+		return
+	}
 	// No specific validation for Enabled (*bool) other than type.
 	for i, ez := range cfg.ExternalZones {
 		Validate_ExternalZone(&ez, verrs, fmt.Sprintf("%s.externalZones[%d]", pathPrefix, i))
@@ -194,7 +210,9 @@ func Validate_NodeLocalDNS(cfg *NodeLocalDNS, verrs *ValidationErrors, pathPrefi
 
 // Validate_ExternalZone validates an ExternalZone configuration.
 func Validate_ExternalZone(cfg *ExternalZone, verrs *ValidationErrors, pathPrefix string) {
-	if cfg == nil { return }
+	if cfg == nil {
+		return
+	}
 	if len(cfg.Zones) == 0 {
 		verrs.Add(pathPrefix+".zones", "must specify at least one zone")
 	}

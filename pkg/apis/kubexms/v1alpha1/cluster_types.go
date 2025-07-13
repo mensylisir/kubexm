@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/cache"
 	"github.com/mensylisir/kubexm/pkg/common"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"net"
@@ -9,7 +10,6 @@ import (
 	"strings"
 	"time"
 )
-
 
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -26,32 +26,29 @@ type Cluster struct {
 	metav1.ObjectMeta `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 	Spec              ClusterSpec `json:"spec,omitempty" yaml:"spec,omitempty"`
 	// Status field can be added here if needed by Kubebuilder/controller-gen
-	// Status            ClusterStatus `json:"status,omitempty" yaml:"status,omitempty"`
+	//Status ClusterStatus `json:"status,omitempty" yaml:"status,omitempty"`
 }
 
 // ClusterSpec defines the desired state of the Kubernetes cluster.
 type ClusterSpec struct {
-	Type                 string                    `json:"type,omitempty" yaml:"type,omitempty"` // Added from design doc, was common.KubernetesDeploymentType
-	Hosts                []HostSpec                `json:"hosts" yaml:"hosts"`
-	RoleGroups           *RoleGroupsSpec           `json:"roleGroups,omitempty" yaml:"roleGroups,omitempty"`
-	Global               *GlobalSpec               `json:"global,omitempty" yaml:"global,omitempty"`
-	System               *SystemSpec               `json:"system,omitempty" yaml:"system,omitempty"`
-	Kubernetes           *KubernetesConfig         `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"`
-	Etcd                 *EtcdConfig               `json:"etcd,omitempty" yaml:"etcd,omitempty"`
-	DNS                  *DNS                      `json:"dns,omitempty" yaml:"dns,omitempty"`
-	ContainerRuntime     *ContainerRuntimeConfig   `json:"containerRuntime,omitempty" yaml:"containerRuntime,omitempty"`
-	Network              *NetworkConfig            `json:"network,omitempty" yaml:"network,omitempty"`
+	Hosts      []HostSpec      `json:"hosts" yaml:"hosts"`
+	RoleGroups *RoleGroupsSpec `json:"roleGroups,omitempty" yaml:"roleGroups,omitempty"`
+	Global     *GlobalSpec     `json:"global,omitempty" yaml:"global,omitempty"`
+	System     *SystemSpec     `json:"system,omitempty" yaml:"system,omitempty"`
+	Kubernetes *Kubernetes     `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"`
+	Etcd       *Etcd           `json:"etcd,omitempty" yaml:"etcd,omitempty"`
+	DNS        *DNS            `json:"dns,omitempty" yaml:"dns,omitempty"`
+
+	Network              *Network                  `json:"network,omitempty" yaml:"network,omitempty"`
 	ControlPlaneEndpoint *ControlPlaneEndpointSpec `json:"controlPlaneEndpoint,omitempty" yaml:"controlPlaneEndpoint,omitempty"`
-	HighAvailability     *HighAvailabilityConfig   `json:"highAvailability,omitempty" yaml:"highAvailability,omitempty"`
-	Storage              *StorageConfig            `json:"storage,omitempty" yaml:"storage,omitempty"`
-	Registry             *RegistryConfig           `json:"registry,omitempty" yaml:"registry,omitempty"`
-	Addons               []string                  `json:"addons,omitempty" yaml:"addons,omitempty"`
-	Preflight            *PreflightConfig          `json:"preflight,omitempty" yaml:"preflight,omitempty"`
-	// HostsFileContent from existing file is not in the design doc's ClusterSpec, assuming it's removed or handled differently.
-	// HostsCount from existing file is a helper, not part of spec.
+
+	Storage   *Storage   `json:"storage,omitempty" yaml:"storage,omitempty"`
+	Registry  *Registry  `json:"registry,omitempty" yaml:"registry,omitempty"`
+	Addons    []Addon    `json:"addons,omitempty" yaml:"addons,omitempty"`
+	Preflight *Preflight `json:"preflight,omitempty" yaml:"preflight,omitempty"`
+	Extra     *Extra     `json:"extra,omitempty" yaml:"extra,omitempty"`
 }
 
-// HostSpec defines the configuration for a single host.
 type HostSpec struct {
 	Name            string            `json:"name" yaml:"name"`
 	Address         string            `json:"address" yaml:"address"`
@@ -61,14 +58,16 @@ type HostSpec struct {
 	Password        string            `json:"password,omitempty" yaml:"password,omitempty"`
 	PrivateKey      string            `json:"privateKey,omitempty" yaml:"privateKey,omitempty"` // Added from design doc
 	PrivateKeyPath  string            `json:"privateKeyPath,omitempty" yaml:"privateKeyPath,omitempty"`
-	Roles           []string          `json:"roles,omitempty" yaml:"roles,omitempty"`
 	Labels          map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
 	Taints          []TaintSpec       `json:"taints,omitempty" yaml:"taints,omitempty"`
 	Type            string            `json:"type,omitempty" yaml:"type,omitempty"` // Was common.HostConnectionType
 	Arch            string            `json:"arch,omitempty" yaml:"arch,omitempty"`
+	Timeout         int64             `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	Roles           []string          `json:"-"`
+	RoleTable       map[string]bool   `json:"-"`
+	Cache           *cache.StepCache  `json:"-"`
 }
 
-// RoleGroupsSpec defines the different groups of nodes in the cluster.
 type RoleGroupsSpec struct {
 	Master       []string `json:"master,omitempty" yaml:"master,omitempty"`
 	Worker       []string `json:"worker,omitempty" yaml:"worker,omitempty"`
@@ -78,7 +77,6 @@ type RoleGroupsSpec struct {
 	Registry     []string `json:"registry,omitempty" yaml:"registry,omitempty"`
 }
 
-// MasterRoleSpec defines the configuration for master nodes.
 type MasterRoleSpec struct {
 	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
@@ -137,7 +135,7 @@ type GlobalSpec struct {
 	PrivateKeyPath    string        `json:"privateKeyPath,omitempty" yaml:"privateKeyPath,omitempty"`
 	ConnectionTimeout time.Duration `json:"connectionTimeout,omitempty" yaml:"connectionTimeout,omitempty"`
 	WorkDir           string        `json:"workDir,omitempty" yaml:"workDir,omitempty"`
-	// HostWorkDir from design doc is missing here, assuming WorkDir is for local and remote is defaulted/inferred.
+	HostWorkDir       string        `json:"hostWorkDir,omitempty" yaml:"hostWorkDir,omitempty"`
 	Verbose           bool          `json:"verbose,omitempty" yaml:"verbose,omitempty"`
 	IgnoreErr         bool          `json:"ignoreErr,omitempty" yaml:"ignoreErr,omitempty"`
 	SkipPreflight     bool          `json:"skipPreflight,omitempty" yaml:"skipPreflight,omitempty"`
@@ -371,10 +369,10 @@ func Validate_Cluster(cfg *Cluster) error {
 			verrs.Add(pathPrefix + ".port: " + fmt.Sprintf("%d", host.Port) + " is invalid, must be between 1 and 65535")
 		}
 		if host.User == "" && host.Type != string(common.HostConnectionTypeLocal) { // User can be empty for local type
-             // User can be defaulted from GlobalSpec as well. Actual check should be post-defaulting.
-             // This check is simplified here.
+			// User can be defaulted from GlobalSpec as well. Actual check should be post-defaulting.
+			// This check is simplified here.
 			verrs.Add(pathPrefix + ".user: cannot be empty (after defaults)")
-        }
+		}
 
 		if host.Type != string(common.HostConnectionTypeLocal) && host.Type != string(common.HostConnectionTypeSSH) && host.Type != "" {
 			verrs.Add(pathPrefix + ".type: invalid host type '" + host.Type + "', must be 'local', 'ssh' or empty for default")
@@ -393,7 +391,6 @@ func Validate_Cluster(cfg *Cluster) error {
 		verrs.Add("spec.containerRuntime: section is required")
 	}
 
-
 	if cfg.Spec.Etcd != nil {
 		Validate_EtcdConfig(cfg.Spec.Etcd, verrs, "spec.etcd")
 	} else {
@@ -402,7 +399,6 @@ func Validate_Cluster(cfg *Cluster) error {
 
 	// RoleGroups validation can be complex, ensuring hosts listed exist in spec.hosts
 	// Validate_RoleGroupsSpec(cfg.Spec.RoleGroups, verrs, "spec.roleGroups", hostNames)
-
 
 	if cfg.Spec.ControlPlaneEndpoint != nil {
 		Validate_ControlPlaneEndpointSpec(cfg.Spec.ControlPlaneEndpoint, verrs, "spec.controlPlaneEndpoint")
@@ -448,31 +444,6 @@ func Validate_Cluster(cfg *Cluster) error {
 	return nil
 }
 
-// ValidationErrors defines a type to collect multiple validation errors.
-type ValidationErrors struct{ Errors []string }
-
-// Add records an error.
-func (ve *ValidationErrors) Add(format string, args ...interface{}) {
-	ve.Errors = append(ve.Errors, fmt.Sprintf(format, args...))
-}
-
-// Error returns a concatenated string of all errors, or a default message if none.
-func (ve *ValidationErrors) Error() string {
-	if len(ve.Errors) == 0 {
-		return "no validation errors"
-	}
-	return strings.Join(ve.Errors, "; ")
-}
-
-// IsEmpty checks if any errors were recorded.
-func (ve *ValidationErrors) IsEmpty() bool { return len(ve.Errors) == 0 }
-
-// HasErrors checks if any errors were recorded.
-func (ve *ValidationErrors) HasErrors() bool { return len(ve.Errors) > 0 }
-
-// DeepCopy methods have been removed as per instruction.
-// They should be generated by controller-gen.
-
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type ClusterList struct {
 	metav1.TypeMeta `json:",inline"`
@@ -495,7 +466,7 @@ func Validate_SystemSpec(cfg *SystemSpec, verrs *ValidationErrors, pathPrefix st
 	if cfg == nil {
 		return
 	}
-	
+
 	// Validate timezone
 	if cfg.Timezone != "" {
 		if strings.TrimSpace(cfg.Timezone) == "" {
@@ -504,7 +475,7 @@ func Validate_SystemSpec(cfg *SystemSpec, verrs *ValidationErrors, pathPrefix st
 			verrs.Add(pathPrefix + ".timezone: '" + cfg.Timezone + "' may not be a valid timezone")
 		}
 	}
-	
+
 	// Validate package manager
 	if cfg.PackageManager != "" {
 		if strings.TrimSpace(cfg.PackageManager) == "" {
@@ -523,14 +494,14 @@ func Validate_SystemSpec(cfg *SystemSpec, verrs *ValidationErrors, pathPrefix st
 			}
 		}
 	}
-	
+
 	// Validate NTP servers
 	for i, server := range cfg.NTPServers {
 		if strings.TrimSpace(server) == "" {
 			verrs.Add(pathPrefix + ".ntpServers[" + fmt.Sprintf("%d", i) + "]: NTP server address cannot be empty")
 		}
 	}
-	
+
 	// Validate package lists
 	for i, pkg := range cfg.RPMs {
 		if strings.TrimSpace(pkg) == "" {
@@ -550,7 +521,7 @@ func Validate_SystemSpec(cfg *SystemSpec, verrs *ValidationErrors, pathPrefix st
 		}
 	}
 
-	// Validate post-install scripts  
+	// Validate post-install scripts
 	for i, script := range cfg.PostInstallScripts {
 		if strings.TrimSpace(script) == "" {
 			verrs.Add(pathPrefix + ".postInstallScripts[" + fmt.Sprintf("%d", i) + "]: post-install script cannot be empty")
@@ -567,10 +538,10 @@ func Validate_SystemSpec(cfg *SystemSpec, verrs *ValidationErrors, pathPrefix st
 	// Validate sysctl parameters
 	for key, value := range cfg.SysctlParams {
 		if strings.TrimSpace(key) == "" {
-			verrs.Add(pathPrefix+".sysctlParams: sysctl key cannot be empty")
+			verrs.Add(pathPrefix + ".sysctlParams: sysctl key cannot be empty")
 		}
 		if strings.TrimSpace(value) == "" {
-			verrs.Add(pathPrefix+".sysctlParams["+key+"]: value cannot be empty")
+			verrs.Add(pathPrefix + ".sysctlParams[" + key + "]: value cannot be empty")
 		}
 	}
 }

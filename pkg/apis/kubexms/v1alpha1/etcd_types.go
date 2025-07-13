@@ -12,30 +12,30 @@ const (
 )
 
 // EtcdConfig defines the configuration for the Etcd cluster.
-type EtcdConfig struct {
-	Type                string              `json:"type,omitempty" yaml:"type,omitempty"`
-	Version             string              `json:"version,omitempty" yaml:"version,omitempty"`
-	Arch                string              `json:"arch,omitempty" yaml:"arch,omitempty"`
-	External            *ExternalEtcdConfig `json:"external,omitempty" yaml:"external,omitempty"`
-	ClientPort          *int                `json:"clientPort,omitempty" yaml:"clientPort,omitempty"`
-	PeerPort            *int                `json:"peerPort,omitempty" yaml:"peerPort,omitempty"`
-	DataDir             *string             `json:"dataDir,omitempty" yaml:"dataDir,omitempty"`
-	ClusterToken        string              `json:"clusterToken,omitempty" yaml:"clusterToken,omitempty"`
-	ExtraArgs           []string            `json:"extraArgs,omitempty" yaml:"extraArgs,omitempty"`
-	BackupDir           *string             `json:"backupDir,omitempty" yaml:"backupDir,omitempty"`
-	BackupPeriodHours   *int                `json:"backupPeriodHours,omitempty" yaml:"backupPeriodHours,omitempty"`
-	KeepBackupNumber    *int                `json:"keepBackupNumber,omitempty" yaml:"keepBackupNumber,omitempty"`
-	BackupScriptPath    *string             `json:"backupScriptPath,omitempty" yaml:"backupScriptPath,omitempty"`
-	HeartbeatIntervalMillis      *int    `json:"heartbeatIntervalMillis,omitempty" yaml:"heartbeatInterval,omitempty"`
-	ElectionTimeoutMillis        *int    `json:"electionTimeoutMillis,omitempty" yaml:"electionTimeout,omitempty"`
-	SnapshotCount                *uint64 `json:"snapshotCount,omitempty" yaml:"snapshotCount,omitempty"`
-	AutoCompactionRetentionHours *int    `json:"autoCompactionRetentionHours,omitempty" yaml:"autoCompactionRetention,omitempty"`
-	QuotaBackendBytes *int64 `json:"quotaBackendBytes,omitempty" yaml:"quotaBackendBytes,omitempty"`
-	MaxRequestBytes   *uint  `json:"maxRequestBytes,omitempty" yaml:"maxRequestBytes,omitempty"`
-	Metrics            *string `json:"metrics,omitempty" yaml:"metrics,omitempty"`
-	LogLevel           *string `json:"logLevel,omitempty" yaml:"logLevel,omitempty"`
-	MaxSnapshotsToKeep *uint   `json:"maxSnapshotsToKeep,omitempty" yaml:"maxSnapshots,omitempty"`
-	MaxWALsToKeep      *uint   `json:"maxWALsToKeep,omitempty" yaml:"maxWals,omitempty"`
+type Etcd struct {
+	Type                         string              `json:"type,omitempty" yaml:"type,omitempty"`
+	Version                      string              `json:"version,omitempty" yaml:"version,omitempty"`
+	Arch                         string              `json:"arch,omitempty" yaml:"arch,omitempty"`
+	External                     *ExternalEtcdConfig `json:"external,omitempty" yaml:"external,omitempty"`
+	ClientPort                   *int                `json:"clientPort,omitempty" yaml:"clientPort,omitempty"`
+	PeerPort                     *int                `json:"peerPort,omitempty" yaml:"peerPort,omitempty"`
+	DataDir                      *string             `json:"dataDir,omitempty" yaml:"dataDir,omitempty"`
+	ClusterToken                 string              `json:"clusterToken,omitempty" yaml:"clusterToken,omitempty"`
+	ExtraArgs                    []string            `json:"extraArgs,omitempty" yaml:"extraArgs,omitempty"`
+	BackupDir                    *string             `json:"backupDir,omitempty" yaml:"backupDir,omitempty"`
+	BackupPeriodHours            *int                `json:"backupPeriodHours,omitempty" yaml:"backupPeriodHours,omitempty"`
+	KeepBackupNumber             *int                `json:"keepBackupNumber,omitempty" yaml:"keepBackupNumber,omitempty"`
+	BackupScriptPath             *string             `json:"backupScriptPath,omitempty" yaml:"backupScriptPath,omitempty"`
+	HeartbeatIntervalMillis      *int                `json:"heartbeatIntervalMillis,omitempty" yaml:"heartbeatInterval,omitempty"`
+	ElectionTimeoutMillis        *int                `json:"electionTimeoutMillis,omitempty" yaml:"electionTimeout,omitempty"`
+	SnapshotCount                *uint64             `json:"snapshotCount,omitempty" yaml:"snapshotCount,omitempty"`
+	AutoCompactionRetentionHours *int                `json:"autoCompactionRetentionHours,omitempty" yaml:"autoCompactionRetention,omitempty"`
+	QuotaBackendBytes            *int64              `json:"quotaBackendBytes,omitempty" yaml:"quotaBackendBytes,omitempty"`
+	MaxRequestBytes              *uint               `json:"maxRequestBytes,omitempty" yaml:"maxRequestBytes,omitempty"`
+	Metrics                      *string             `json:"metrics,omitempty" yaml:"metrics,omitempty"`
+	LogLevel                     *string             `json:"logLevel,omitempty" yaml:"logLevel,omitempty"`
+	MaxSnapshotsToKeep           *uint               `json:"maxSnapshotsToKeep,omitempty" yaml:"maxSnapshots,omitempty"`
+	MaxWALsToKeep                *uint               `json:"maxWALsToKeep,omitempty" yaml:"maxWals,omitempty"`
 	// TLS *ManagedEtcdTLSConfig `json:"tls,omitempty" yaml:"tls,omitempty"` // From suggested improvements
 }
 
@@ -74,22 +74,63 @@ func SetDefaults_EtcdConfig(cfg *EtcdConfig) {
 		cfg.External = &ExternalEtcdConfig{}
 	}
 	if cfg.External != nil && len(cfg.External.Endpoints) == 0 { // Fixed: check length of Endpoints
-	   cfg.External.Endpoints = []string{}
+		cfg.External.Endpoints = []string{}
 	}
-	if cfg.ExtraArgs == nil { cfg.ExtraArgs = []string{} }
-	if cfg.BackupDir == nil { defaultBackupDir := "/var/backups/etcd"; cfg.BackupDir = &defaultBackupDir }
-	if cfg.BackupPeriodHours == nil { defaultBackupPeriod := 24; cfg.BackupPeriodHours = &defaultBackupPeriod }
-	if cfg.KeepBackupNumber == nil { defaultKeepBackups := 7; cfg.KeepBackupNumber = &defaultKeepBackups }
-	if cfg.HeartbeatIntervalMillis == nil { hb := 250; cfg.HeartbeatIntervalMillis = &hb }
-	if cfg.ElectionTimeoutMillis == nil { et := 5000; cfg.ElectionTimeoutMillis = &et }
-	if cfg.SnapshotCount == nil { var sc uint64 = 10000; cfg.SnapshotCount = &sc }
-	if cfg.AutoCompactionRetentionHours == nil { acr := 8; cfg.AutoCompactionRetentionHours = &acr }
-	if cfg.QuotaBackendBytes == nil { var qbb int64 = 2147483648; cfg.QuotaBackendBytes = &qbb }
-	if cfg.MaxRequestBytes == nil { var mrb uint = 1572864; cfg.MaxRequestBytes = &mrb }
-	if cfg.Metrics == nil { m := "basic"; cfg.Metrics = &m }
-	if cfg.LogLevel == nil { l := "info"; cfg.LogLevel = &l }
-	if cfg.MaxSnapshotsToKeep == nil { var ms uint = 5; cfg.MaxSnapshotsToKeep = &ms }
-	if cfg.MaxWALsToKeep == nil { var mw uint = 5; cfg.MaxWALsToKeep = &mw }
+	if cfg.ExtraArgs == nil {
+		cfg.ExtraArgs = []string{}
+	}
+	if cfg.BackupDir == nil {
+		defaultBackupDir := "/var/backups/etcd"
+		cfg.BackupDir = &defaultBackupDir
+	}
+	if cfg.BackupPeriodHours == nil {
+		defaultBackupPeriod := 24
+		cfg.BackupPeriodHours = &defaultBackupPeriod
+	}
+	if cfg.KeepBackupNumber == nil {
+		defaultKeepBackups := 7
+		cfg.KeepBackupNumber = &defaultKeepBackups
+	}
+	if cfg.HeartbeatIntervalMillis == nil {
+		hb := 250
+		cfg.HeartbeatIntervalMillis = &hb
+	}
+	if cfg.ElectionTimeoutMillis == nil {
+		et := 5000
+		cfg.ElectionTimeoutMillis = &et
+	}
+	if cfg.SnapshotCount == nil {
+		var sc uint64 = 10000
+		cfg.SnapshotCount = &sc
+	}
+	if cfg.AutoCompactionRetentionHours == nil {
+		acr := 8
+		cfg.AutoCompactionRetentionHours = &acr
+	}
+	if cfg.QuotaBackendBytes == nil {
+		var qbb int64 = 2147483648
+		cfg.QuotaBackendBytes = &qbb
+	}
+	if cfg.MaxRequestBytes == nil {
+		var mrb uint = 1572864
+		cfg.MaxRequestBytes = &mrb
+	}
+	if cfg.Metrics == nil {
+		m := "basic"
+		cfg.Metrics = &m
+	}
+	if cfg.LogLevel == nil {
+		l := "info"
+		cfg.LogLevel = &l
+	}
+	if cfg.MaxSnapshotsToKeep == nil {
+		var ms uint = 5
+		cfg.MaxSnapshotsToKeep = &ms
+	}
+	if cfg.MaxWALsToKeep == nil {
+		var mw uint = 5
+		cfg.MaxWALsToKeep = &mw
+	}
 }
 
 // Validate_EtcdConfig validates EtcdConfig.
@@ -98,7 +139,7 @@ func Validate_EtcdConfig(cfg *EtcdConfig, verrs *ValidationErrors, pathPrefix st
 		return
 	}
 	validTypes := []string{EtcdTypeKubeXMSInternal, EtcdTypeExternal, EtcdTypeInternal, ""} // Allow empty for default
-	if !containsString(validTypes, cfg.Type) { // Using local containsString, assuming ValidationErrors is from cluster_types.go
+	if !containsString(validTypes, cfg.Type) {                                              // Using local containsString, assuming ValidationErrors is from cluster_types.go
 		verrs.Add(pathPrefix + ".type: invalid type '" + cfg.Type + "', must be one of " + fmt.Sprintf("%v", validTypes))
 	}
 	if cfg.Type == EtcdTypeExternal {
@@ -119,10 +160,10 @@ func Validate_EtcdConfig(cfg *EtcdConfig, verrs *ValidationErrors, pathPrefix st
 		}
 	}
 	if cfg.ClientPort != nil && (*cfg.ClientPort <= 0 || *cfg.ClientPort > 65535) {
-	   verrs.Add(pathPrefix + ".clientPort: invalid port " + fmt.Sprintf("%d", *cfg.ClientPort) + ", must be between 1-65535")
+		verrs.Add(pathPrefix + ".clientPort: invalid port " + fmt.Sprintf("%d", *cfg.ClientPort) + ", must be between 1-65535")
 	}
 	if cfg.PeerPort != nil && (*cfg.PeerPort <= 0 || *cfg.PeerPort > 65535) {
-	   verrs.Add(pathPrefix + ".peerPort: invalid port " + fmt.Sprintf("%d", *cfg.PeerPort) + ", must be between 1-65535")
+		verrs.Add(pathPrefix + ".peerPort: invalid port " + fmt.Sprintf("%d", *cfg.PeerPort) + ", must be between 1-65535")
 	}
 	if cfg.DataDir != nil && strings.TrimSpace(*cfg.DataDir) == "" {
 		verrs.Add(pathPrefix + ".dataDir: cannot be empty if specified")
@@ -166,16 +207,22 @@ func Validate_EtcdConfig(cfg *EtcdConfig, verrs *ValidationErrors, pathPrefix st
 }
 
 func (e *EtcdConfig) GetClientPort() int {
-	if e != nil && e.ClientPort != nil { return *e.ClientPort }
+	if e != nil && e.ClientPort != nil {
+		return *e.ClientPort
+	}
 	return 2379
 }
 func (e *EtcdConfig) GetPeerPort() int {
-	if e != nil && e.PeerPort != nil { return *e.PeerPort }
+	if e != nil && e.PeerPort != nil {
+		return *e.PeerPort
+	}
 	return 2380
 }
 func (e *EtcdConfig) GetDataDir() string {
-   if e != nil && e.DataDir != nil && *e.DataDir != "" { return *e.DataDir }
-   return "/var/lib/etcd"
+	if e != nil && e.DataDir != nil && *e.DataDir != "" {
+		return *e.DataDir
+	}
+	return "/var/lib/etcd"
 }
 
 // Assuming ValidationErrors and containsString are defined in cluster_types.go or a shared util.

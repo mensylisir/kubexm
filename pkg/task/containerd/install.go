@@ -2,6 +2,8 @@ package containerd
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/common"
+	"path/filepath"
 	"strings"
 
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
@@ -52,16 +54,16 @@ func (t *InstallContainerdTask) IsRequired(ctx task.TaskContext) (bool, error) {
 	return t.BaseTask.IsRequired(ctx)
 }
 
-func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
+func (t *InstallContainerdTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("task", t.Name(), "phase", "Plan")
 	cfg := ctx.GetClusterConfig()
 
 	// --- Populate task fields from ClusterConfiguration ---
 	// Default values for the task, can be overridden by ClusterConfig
-	t.UseSystemdCgroup = true // Default this, can be overridden
-	t.SandboxImage = "registry.k8s.io/pause:3.9" // Default sandbox image for the step if not found in config
+	t.UseSystemdCgroup = true                                         // Default this, can be overridden
+	t.SandboxImage = "registry.k8s.io/pause:3.9"                      // Default sandbox image for the step if not found in config
 	t.ContainerdConfigPath = common.ContainerdDefaultConfigFileTarget // Default from common paths
-	t.RegistryConfigPath = "/etc/containerd/certs.d" // Common default, consider making a common.Constant
+	t.RegistryConfigPath = "/etc/containerd/certs.d"                  // Common default, consider making a common.Constant
 
 	if cfg.Spec.ContainerRuntime != nil && cfg.Spec.ContainerRuntime.Type == v1alpha1.ContainerRuntimeContainerd && cfg.Spec.ContainerRuntime.Containerd != nil {
 		containerdApiCfg := cfg.Spec.ContainerRuntime.Containerd
@@ -95,7 +97,6 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 	//    t.SandboxImage = cfg.Spec.Kubernetes.Images.Pause
 	// }
 
-
 	// --- Determine target hosts ---
 	targetHosts, err := ctx.GetHostsByRole(t.BaseTask.RunOnRoles...)
 	if err != nil {
@@ -114,7 +115,7 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 	// TODO: These versions should ideally come from a resolved dependency spec, not hardcoded or simple config fields.
 	// For now, assume they are available in cfg.Spec.ContainerRuntime or a similar place.
 	containerdVersion := "1.7.13" // Example, replace with config lookup
-	runcVersion := "v1.1.12"    // Example
+	runcVersion := "v1.1.12"      // Example
 	cniPluginsVersion := "v1.4.0" // Example
 	if cfg.Spec.ContainerRuntime != nil && cfg.Spec.ContainerRuntime.Version != "" {
 		containerdVersion = cfg.Spec.ContainerRuntime.Version
@@ -133,12 +134,15 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 		"", // cfg.Spec.ContainerRuntime.GetContainerdChecksum(arch),
 		"sha256",
 	)
-	if err != nil { return nil, fmt.Errorf("failed to create containerd archive handle: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to create containerd archive handle: %w", err)
+	}
 	containerdArchivePrepFragment, err := containerdArchiveHandle.EnsurePlan(ctx)
-	if err != nil { return nil, fmt.Errorf("failed to plan containerd archive acquisition: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to plan containerd archive acquisition: %w", err)
+	}
 	allLocalResourcePrepFragments = append(allLocalResourcePrepFragments, containerdArchivePrepFragment)
 	localContainerdArchivePath := containerdArchiveHandle.(*resource.RemoteBinaryHandle).BinaryInfo().FilePath
-
 
 	// Runc Binary Handle
 	runcHandle, err := resource.NewRemoteBinaryHandle(ctx,
@@ -148,12 +152,15 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 		"", // cfg.Spec.ContainerRuntime.GetRuncChecksum(arch),
 		"sha256",
 	)
-	if err != nil { return nil, fmt.Errorf("failed to create runc binary handle: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to create runc binary handle: %w", err)
+	}
 	runcPrepFragment, err := runcHandle.EnsurePlan(ctx)
-	if err != nil { return nil, fmt.Errorf("failed to plan runc binary acquisition: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to plan runc binary acquisition: %w", err)
+	}
 	allLocalResourcePrepFragments = append(allLocalResourcePrepFragments, runcPrepFragment)
 	localRuncPath := runcHandle.(*resource.RemoteBinaryHandle).BinaryInfo().FilePath
-
 
 	// CNI Plugins Archive Handle
 	cniPluginsHandle, err := resource.NewRemoteBinaryHandle(ctx,
@@ -163,9 +170,13 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 		"", // cfg.Spec.ContainerRuntime.GetCNIChecksum(arch),
 		"sha256",
 	)
-	if err != nil { return nil, fmt.Errorf("failed to create CNI plugins archive handle: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to create CNI plugins archive handle: %w", err)
+	}
 	cniPluginsPrepFragment, err := cniPluginsHandle.EnsurePlan(ctx)
-	if err != nil { return nil, fmt.Errorf("failed to plan CNI plugins archive acquisition: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to plan CNI plugins archive acquisition: %w", err)
+	}
 	allLocalResourcePrepFragments = append(allLocalResourcePrepFragments, cniPluginsPrepFragment)
 	localCNIPluginsArchivePath := cniPluginsHandle.(*resource.RemoteBinaryHandle).BinaryInfo().FilePath
 
@@ -185,9 +196,10 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 	}
 	controlNodeOpsDoneDependencies := mergedLocalResourceFragment.ExitNodes
 	if len(controlNodeOpsDoneDependencies) == 0 && len(mergedLocalResourceFragment.Nodes) > 0 { // If merged fragment had nodes but no explicit exits
-		for id := range mergedLocalResourceFragment.Nodes { controlNodeOpsDoneDependencies = append(controlNodeOpsDoneDependencies, id)}
+		for id := range mergedLocalResourceFragment.Nodes {
+			controlNodeOpsDoneDependencies = append(controlNodeOpsDoneDependencies, id)
+		}
 	}
-
 
 	// --- 2. Pre-flight OS configuration on all target nodes (can run in parallel across hosts) ---
 	// These depend on nothing from the local resource prep.
@@ -219,7 +231,6 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 	}
 	// No explicit dependency between local resource prep and OS preflight, they can start together.
 
-
 	// --- 3. Distribution, Extraction, Installation per node ---
 	var allHostFinalNodes []plan.NodeID
 
@@ -232,7 +243,6 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 		perHostBaseDependencies = append(perHostBaseDependencies, plan.NodeID(fmt.Sprintf("preflight-set-sysctl-%s", host.GetName())))
 		currentHostLastOpNodeID := plan.NodeID("") // Will track the last operation for sequential steps on this host
 
-
 		// Upload and Install Containerd
 		remoteContainerdArchiveTempPath := filepath.Join("/tmp", filepath.Base(localContainerdArchivePath)) // Example remote temp path
 		uploadContainerdArchiveStep := common.NewUploadFileStep(nodePrefix+"UploadContainerdArchive", localContainerdArchivePath, remoteContainerdArchiveTempPath, "0644", true, false)
@@ -241,7 +251,7 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 		})
 		currentHostLastOpNodeID = uploadContainerdArchiveNodeID
 
-		remoteExtractedContainerdPath := "/opt/kubexm/containerd" // Standard extraction path on remote
+		remoteExtractedContainerdPath := "/opt/kubexm/containerd"                                                                                                                // Standard extraction path on remote
 		extractContainerdStep := common.NewExtractArchiveStep(nodePrefix+"ExtractContainerdArchive", remoteContainerdArchiveTempPath, remoteExtractedContainerdPath, true, true) // remove archive, sudo
 		extractContainerdNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
 			Name: extractContainerdStep.Meta().Name, Step: extractContainerdStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{currentHostLastOpNodeID},
@@ -249,7 +259,6 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 		currentHostLastOpNodeID = extractContainerdNodeID
 		// Task cache key for where InstallContainerdStep can find the extracted files on this host.
 		ctx.TaskCache().Set(fmt.Sprintf("%s.%s", stepContainerd.ContainerdExtractedDirCacheKey, host.GetName()), remoteExtractedContainerdPath)
-
 
 		installContainerdBinariesStep := stepContainerd.NewInstallContainerdStep(nodePrefix+"InstallContainerdBinaries", fmt.Sprintf("%s.%s", stepContainerd.ContainerdExtractedDirCacheKey, host.GetName()), nil, "", "", true)
 		installContainerdBinariesNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
@@ -289,7 +298,6 @@ func (t *InstallContainerdTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFr
 		// currentHostLastOpNodeID now depends on containerd, runc, AND CNI plugins being ready.
 		// This requires careful dependency management. For now, we'll make subsequent config steps depend on all three install/extract final nodes.
 		allBinariesReadyDependencies := []plan.NodeID{installContainerdBinariesNodeID, installRuncNodeID, extractCNINodeID}
-
 
 		// Configuration and Service Management
 		configureStep := stepContainerd.NewConfigureContainerdStep(nodePrefix+"ConfigureContainerd", t.SandboxImage, t.RegistryMirrors, t.InsecureRegistries, t.ContainerdConfigPath, t.RegistryConfigPath, t.ExtraTomlContent, t.UseSystemdCgroup, true)

@@ -1,0 +1,27 @@
+[Unit]
+Description=iSulad Container Engine
+Documentation=https://gitee.com/openeuler/iSulad
+# 表示在网络准备好之后再启动
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+# iSulad 守护进程的主程序路径
+ExecStart=/usr/bin/isulad
+# 当执行 systemctl reload isulad 时，会向主进程发送 HUP 信号来重新加载配置
+ExecReload=/bin/kill -s HUP $MAINPID
+
+# 提高打开文件的数量限制
+LimitNOFILE=1048576
+# 提高任务（线程/进程）的数量限制
+LimitTasks=infinity
+# 确保 systemctl stop isulad 会杀死所有相关的子进程
+KillMode=process
+# 在服务失败时自动重启
+Restart=on-failure
+RestartSec=5
+
+[Install]
+# 表示这个服务应该在多用户模式下启用 (即开机自启)
+WantedBy=multi-user.target
