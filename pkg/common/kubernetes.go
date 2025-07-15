@@ -1,9 +1,32 @@
 package common
 
+import "time"
+
 const (
-	DefaultK8sVersion       = "v1.28.2"
-	DefaultPauseImageName   = "pause"
-	KubernetesDefaultDomain = "local.kubexm.io"
+	DefaultAPIVersion           = "kubexm.io/v1alpha1"
+	DefaultKind                 = "Cluster"
+	DefaultK8sVersion           = "v1.28.2"
+	DefaultPauseImageName       = "pause"
+	KubernetesDefaultDomain     = "local.kubexm.io"
+	DefaultClusterLocal         = "cluster.local"
+	DefaultAutoRenewCerts       = true
+	DefaultDisableKubeProxy     = false
+	DefaultMasqueradeAll        = false
+	DefaultNodelocaldnsEnable   = true
+	DefaultKataEnable           = false
+	DefaultAuditEnable          = false
+	KubeProxyModeIPTables       = "iptables"
+	KubeProxyModeIPVS           = "ipvs"
+	KubeProxyEnable             = true
+	DefaultKubeProxyMode        = "ipvs"
+	DefaultKubeletHairpinMode   = "promiscuous-bridge"
+	CgroupDriverSystemd         = "systemd"
+	CgroupDriverCgroupfs        = "cgroupfs"
+	DefaultServiceNodePortRange = "30000-32767"
+	DefaultLocalDNS             = "169.254.25.10"
+	DefaultUser                 = "root"
+	DefaultPort                 = 22
+	DefaultTimeout              = 10 * time.Second
 )
 
 type KubernetesDeploymentType string
@@ -110,12 +133,4 @@ const (
 	KubeadmResetCommand     = "reset"
 	KubeadmJoinCommand      = "join"
 	KubeadmUpgradeCommand   = "upgrade"
-)
-
-const (
-	DefaultKubeletHairpinMode = "promiscuous-bridge"
-	KubeProxyModeIPTables     = "iptables"
-	KubeProxyModeIPVS         = "ipvs"
-	CgroupDriverSystemd       = "systemd"
-	CgroupDriverCgroupfs      = "cgroupfs"
 )

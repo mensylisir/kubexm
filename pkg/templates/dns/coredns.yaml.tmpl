@@ -1,0 +1,52 @@
+.:53 {
+    errors
+    health {
+       lameduck 5s
+    }
+    ready
+    {{- /* kubernetes 插件是必须的 */}}
+    kubernetes {{ .ClusterDNSDomain }} in-addr.arpa ip6.arpa {
+       pods insecure
+       fallthrough in-addr.arpa ip6.arpa
+       ttl 30
+    }
+    {{- /* prometheus 插件是必须的 */}}
+    prometheus :9153
+
+    {{- /* 核心的 forward 插件，根据我们的 API 配置生成 */}}
+    forward . {{ .ForwardTargets }} {
+       policy {{ .ForwardPolicy }}
+       max_concurrent {{ .ForwardMaxConcurrent }}
+    }
+
+    cache 30
+    loop
+    reload
+    loadbalance
+
+    {{- /* 渲染 ExternalZones */}}
+    {{- range .ExternalZones }}
+    {{ .ZoneName }}:53 {
+        forward . {{ .Nameservers | join " " }}
+        cache {{ .CacheTTL }}
+        {{- if .RewriteRules }}
+        rewrite {
+            {{- range .RewriteRules }}
+            name regex {{ .From }} {{ .To }}
+            {{- end }}
+        }
+        {{- end }}
+    }
+    {{- end }}
+
+    {{- /* 渲染原始配置块 */}}
+    {{- if .AdditionalConfigs }}
+    {{ .AdditionalConfigs }}
+    {{- end }}
+
+    {{- if .RewriteBlock }}
+    rewrite {
+        {{ .RewriteBlock }}
+    }
+    {{- end }}
+}

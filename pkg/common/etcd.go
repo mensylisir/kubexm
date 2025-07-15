@@ -3,9 +3,21 @@ package common
 type EtcdDeploymentType string
 
 const (
-	EtcdDeploymentTypeKubeadm  EtcdDeploymentType = "kubeadm"
-	EtcdDeploymentTypeKubexm   EtcdDeploymentType = "kubexm"
-	EtcdDeploymentTypeExternal EtcdDeploymentType = "external"
+	EtcdDeploymentTypeKubeadm          EtcdDeploymentType = "kubeadm"
+	EtcdDeploymentTypeKubexm           EtcdDeploymentType = "kubexm"
+	EtcdDeploymentTypeExternal         EtcdDeploymentType = "external"
+	DefaultEtcdClusterToken                               = "kubexm-etcd-default-token"
+	DefaultEtcdKeepBackups                                = 7
+	DefaultEtcdHeartbeatInterval                          = 250
+	DefaultEtcdElectionTimeout                            = 5000
+	DefaultEtcdSnapshotCount                              = 10000
+	DefaultEtcdAutoCompactionRetention                    = 8
+	DefaultEtcdQuotaBackendBytes                          = 2147483648
+	DefaultEtcdMaxRequestBytes                            = 1572864
+	DefaultEtcdMetrics                                    = "basic"
+	DefaultEtcdLogLevel                                   = "info"
+	DefaultEtcdMaxSnapshots                               = 5
+	DefaultEtcdMaxWALs                                    = 5
 )
 
 const (
@@ -23,6 +35,8 @@ const (
 	DefaultEtcdPKISSLPath       = "/etc/ssl/etcd/ssl"
 	DefaultEtcdPath             = "/var/lib/etcd"
 	DefaultEtcdConfig           = "/etc/etcd.conf"
+	DefaultEtcdBackupDir        = "/var/backups/etcd"
+	DefaultEtcdScriptPath       = "/usr/local/kubexm/bin/etcd.sh"
 )
 
 const (

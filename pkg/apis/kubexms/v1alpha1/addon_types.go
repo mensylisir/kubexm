@@ -2,93 +2,64 @@ package v1alpha1
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1/helpers"
+	"github.com/mensylisir/kubexm/pkg/errors/validation"
+	"path"
 	"strings"
-
-	"github.com/mensylisir/kubexm/pkg/util"            // Import util package
-	"github.com/mensylisir/kubexm/pkg/util/validation" // Import validation package
 )
 
-// AddonConfig defines the detailed configuration for a single addon.
-// This struct is typically used when a more fine-grained configuration for addons is needed,
-// potentially managed separately or through a dedicated 'addons' section in the cluster YAML
-// that allows for more than just enabling/disabling by name (as seen in ClusterSpec.Addons which is []string).
-// It allows specifying sources like Helm charts or YAML manifests, along with other parameters.
 type Addon struct {
-	Name    string `json:"name" yaml:"name"`
-	Enabled *bool  `json:"enabled,omitempty" yaml:"enabled,omitempty"` // Pointer for optionality, defaults to true or based on addon
-
-	Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-	Retries   *int32 `json:"retries,omitempty" yaml:"retries,omitempty"`
-	Delay     *int32 `json:"delay,omitempty" yaml:"delay,omitempty"` // Delay in seconds between retries
-
-	Sources AddonSources `json:"sources,omitempty" yaml:"sources,omitempty"`
-
-	// PreInstall and PostInstall scripts. For simplicity, these are string arrays.
-	PreInstall  []string `json:"preInstall,omitempty" yaml:"preInstall,omitempty"`
-	PostInstall []string `json:"postInstall,omitempty" yaml:"postInstall,omitempty"`
-
-	TimeoutSeconds *int32 `json:"timeoutSeconds,omitempty" yaml:"timeoutSeconds,omitempty"`
+	Name           string        `json:"name" yaml:"name"`
+	Enabled        *bool         `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Retries        *int32        `json:"retries,omitempty" yaml:"retries,omitempty"`
+	Delay          *int32        `json:"delay,omitempty" yaml:"delay,omitempty"`
+	Sources        []AddonSource `json:"sources,omitempty" yaml:"sources,omitempty"`
+	PreInstall     []string      `json:"preInstall,omitempty" yaml:"preInstall,omitempty"`
+	PostInstall    []string      `json:"postInstall,omitempty" yaml:"postInstall,omitempty"`
+	TimeoutSeconds *int32        `json:"timeoutSeconds,omitempty" yaml:"timeoutSeconds,omitempty"`
 }
 
-// AddonSources defines the sources for an addon's manifests or charts.
-type AddonSources struct {
-	Chart *ChartSource `json:"chart,omitempty" yaml:"chart,omitempty"`
-	Yaml  *YamlSource  `json:"yaml,omitempty" yaml:"yaml,omitempty"`
+type AddonSource struct {
+	Namespace string       `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+	Chart     *ChartSource `json:"chart,omitempty" yaml:"chart,omitempty"`
+	Yaml      *YamlSource  `json:"yaml,omitempty" yaml:"yaml,omitempty"`
 }
 
-// ChartSource defines how to install an addon from a Helm chart.
 type ChartSource struct {
-	Name       string   `json:"name,omitempty" yaml:"name,omitempty"` // Chart name
-	Repo       string   `json:"repo,omitempty" yaml:"repo,omitempty"` // Chart repository URL
-	Path       string   `json:"path,omitempty" yaml:"path,omitempty"` // Path to chart in repo (if not just name) or local path
+	Name       string   `json:"name,omitempty" yaml:"name,omitempty"`
+	Repo       string   `json:"repo,omitempty" yaml:"repo,omitempty"`
+	Path       string   `json:"path,omitempty" yaml:"path,omitempty"`
 	Version    string   `json:"version,omitempty" yaml:"version,omitempty"`
-	ValuesFile string   `json:"valuesFile,omitempty" yaml:"valuesFile,omitempty"` // Path to a custom values file
-	Values     []string `json:"values,omitempty" yaml:"values,omitempty"`         // Inline values (e.g., "key1=value1,key2.subkey=value2")
-	Wait       *bool    `json:"wait,omitempty" yaml:"wait,omitempty"`             // Whether to wait for chart resources to be ready
+	ValuesFile string   `json:"valuesFile,omitempty" yaml:"valuesFile,omitempty"`
+	Values     []string `json:"values,omitempty" yaml:"values,omitempty"`
+	Wait       *bool    `json:"wait,omitempty" yaml:"wait,omitempty"`
 }
 
-// YamlSource defines how to install an addon from YAML manifests.
 type YamlSource struct {
-	// Paths is a list of URLs or local file paths to YAML manifests.
 	Path []string `json:"path,omitempty" yaml:"path,omitempty"`
 }
 
-// SetDefaults_AddonConfig sets default values for AddonConfig.
-func SetDefaults_AddonConfig(cfg *AddonConfig) {
+func SetDefaults_Addon(cfg *Addon) {
 	if cfg == nil {
 		return
 	}
+
 	if cfg.Enabled == nil {
-		cfg.Enabled = util.BoolPtr(true) // Default most addons to enabled unless specified
+		cfg.Enabled = helpers.BoolPtr(false)
 	}
-
-	if cfg.Namespace == "" {
-		if strings.TrimSpace(cfg.Name) != "" {
-			cfg.Namespace = "addon-" + strings.ToLower(strings.ReplaceAll(strings.TrimSpace(cfg.Name), " ", "-"))
-		} else {
-			cfg.Namespace = "addon-" // Default namespace prefix even if name is empty
-		}
-	}
-
 	if cfg.Retries == nil {
-		cfg.Retries = util.Int32Ptr(0) // Default to 0 retries (1 attempt)
+		cfg.Retries = helpers.Int32Ptr(0)
 	}
 	if cfg.Delay == nil {
-		cfg.Delay = util.Int32Ptr(5) // Default delay 5s
+		cfg.Delay = helpers.Int32Ptr(5)
+	}
+	if cfg.TimeoutSeconds == nil {
+		cfg.TimeoutSeconds = helpers.Int32Ptr(300)
 	}
 
-	if cfg.Sources.Chart != nil {
-		if cfg.Sources.Chart.Wait == nil {
-			cfg.Sources.Chart.Wait = util.BoolPtr(true) // Default wait to true for charts
-		}
-		if cfg.Sources.Chart.Values == nil {
-			cfg.Sources.Chart.Values = []string{}
-		}
+	if cfg.Sources == nil {
+		cfg.Sources = []AddonSource{}
 	}
-	if cfg.Sources.Yaml != nil && cfg.Sources.Yaml.Path == nil {
-		cfg.Sources.Yaml.Path = []string{}
-	}
-
 	if cfg.PreInstall == nil {
 		cfg.PreInstall = []string{}
 	}
@@ -96,96 +67,149 @@ func SetDefaults_AddonConfig(cfg *AddonConfig) {
 		cfg.PostInstall = []string{}
 	}
 
-	if cfg.TimeoutSeconds == nil {
-		cfg.TimeoutSeconds = util.Int32Ptr(300) // Default to 300 seconds (5 minutes)
+	for i := range cfg.Sources {
+		SetDefaults_AddonSource(&cfg.Sources[i], cfg.Name, i)
 	}
 }
 
-// Validate_AddonConfig validates AddonConfig.
-func Validate_AddonConfig(cfg *AddonConfig, verrs *ValidationErrors, pathPrefix string) {
+func SetDefaults_AddonSource(cfg *AddonSource, addonName string, index int) {
 	if cfg == nil {
-		return // Should not happen if called from a loop over an initialized slice
+		return
 	}
+	if cfg.Namespace == "" && addonName != "" {
+		cleanName := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(addonName), " ", "-"))
+		cfg.Namespace = fmt.Sprintf("addon-%s-%d", cleanName, index)
+	} else if cfg.Namespace == "" {
+		cfg.Namespace = fmt.Sprintf("addon-unnamed-%d", index)
+	}
+
+	if cfg.Chart != nil {
+		if cfg.Chart.Wait == nil {
+			cfg.Chart.Wait = helpers.BoolPtr(true)
+		}
+		if cfg.Chart.Values == nil {
+			cfg.Chart.Values = []string{}
+		}
+	}
+
+	if cfg.Yaml != nil {
+		if cfg.Yaml.Path == nil {
+			cfg.Yaml.Path = []string{}
+		}
+	}
+}
+
+func Validate_Addon(cfg *Addon, verrs *validation.ValidationErrors, pathPrefix string) {
+	if cfg == nil {
+		return
+	}
+	p := path.Join(pathPrefix)
+
 	if strings.TrimSpace(cfg.Name) == "" {
-		verrs.Add(pathPrefix+".name", "addon name cannot be empty")
-	}
-
-	hasChartSource := cfg.Sources.Chart != nil
-	hasYamlSource := cfg.Sources.Yaml != nil
-
-	if hasChartSource {
-		csPath := pathPrefix + ".sources.chart"
-		chart := cfg.Sources.Chart
-
-		hasChartPath := strings.TrimSpace(chart.Path) != ""
-		hasChartName := strings.TrimSpace(chart.Name) != ""
-		hasChartRepo := strings.TrimSpace(chart.Repo) != ""
-
-		if hasChartPath && (hasChartName || hasChartRepo) {
-			verrs.Add(csPath, "chart.path ('"+chart.Path+"') cannot be set if chart.name ('"+chart.Name+"') or chart.repo ('"+chart.Repo+"') is also set")
-		}
-		if !hasChartPath && !hasChartName {
-			verrs.Add(csPath, "either chart.name (with chart.repo) or chart.path must be specified")
-		}
-		if hasChartRepo && !hasChartName {
-			verrs.Add(csPath+".name", "chart.name must be specified if chart.repo ('"+chart.Repo+"') is set")
-		}
-		if hasChartName && !hasChartRepo && !hasChartPath { // Name without repo implies local path, but path field is preferred for clarity
-			verrs.Add(csPath+".repo", "chart.repo must be specified if chart.name ('"+chart.Name+"') is set and chart.path is not set")
-		}
-
-		if hasChartRepo {
-			if !validation.IsValidURL(chart.Repo) {
-				verrs.Add(csPath+".repo", "invalid URL format for chart repo '"+chart.Repo+"'")
-			}
-		}
-
-		if chart.Version != "" {
-			if strings.TrimSpace(chart.Version) == "" {
-				verrs.Add(csPath+".version", "chart version cannot be only whitespace if specified")
-			} else if !validation.IsValidChartVersion(chart.Version) {
-				verrs.Add(csPath+".version", "chart version '"+chart.Version+"' is not a valid format (e.g., v1.2.3, 1.0.0, latest, stable)")
-			}
-		}
-
-		for i, val := range chart.Values {
-			if !strings.Contains(val, "=") {
-				verrs.Add(fmt.Sprintf("%s.values[%d]: invalid format '%s', expected key=value", csPath, i, val))
-			}
-		}
-	}
-
-	if hasYamlSource {
-		ysPath := pathPrefix + ".sources.yaml"
-		yamlSource := cfg.Sources.Yaml
-		if len(yamlSource.Path) == 0 {
-			verrs.Add(ysPath+".path", "must contain at least one YAML path or URL")
-		}
-		for i, p := range yamlSource.Path {
-			if strings.TrimSpace(p) == "" {
-				verrs.Add(fmt.Sprintf("%s.path[%d]: path/URL cannot be empty", ysPath, i))
-			}
-			// Basic check for http/https or local path (does not check existence)
-			// This check is indicative and not exhaustive.
-			// Consider using validation.IsValidURL for URL parts if strictness is needed.
-			// if !strings.HasPrefix(p, "http://") && !strings.HasPrefix(p, "https://") && !strings.HasPrefix(p, "/") && !strings.HasPrefix(p, "./") && !strings.HasPrefix(p, "../") {
-			// verrs.Add(ysPath+".path["+string(i)+"]", "path '"+p+"' does not appear to be a valid URL or recognizable local path pattern")
-			// }
-		}
-	}
-
-	if cfg.Enabled != nil && *cfg.Enabled && !hasChartSource && !hasYamlSource {
-		verrs.Add(pathPrefix, "addon '"+cfg.Name+"' is enabled but has no chart or yaml sources defined")
+		verrs.Add(p + ".name: cannot be empty")
+	} else if !helpers.IsValidK8sName(cfg.Name) {
+		verrs.Add(fmt.Sprintf("%s.name: '%s' is not a valid Kubernetes name (DNS-1123 compliant)", p, cfg.Name))
 	}
 
 	if cfg.Retries != nil && *cfg.Retries < 0 {
-		verrs.Add(pathPrefix + ".retries: cannot be negative")
+		verrs.Add(p + ".retries: cannot be negative")
 	}
 	if cfg.Delay != nil && *cfg.Delay < 0 {
-		verrs.Add(pathPrefix + ".delay: cannot be negative")
+		verrs.Add(p + ".delay: cannot be negative")
+	}
+	if cfg.TimeoutSeconds != nil && *cfg.TimeoutSeconds <= 0 {
+		verrs.Add(p + ".timeoutSeconds: must be positive")
 	}
 
-	if cfg.TimeoutSeconds != nil && *cfg.TimeoutSeconds < 0 {
-		verrs.Add(pathPrefix + ".timeoutSeconds: cannot be negative")
+	sourcesPath := path.Join(p, "sources")
+	if cfg.Enabled != nil && *cfg.Enabled && len(cfg.Sources) == 0 {
+		verrs.Add(sourcesPath + ": must contain at least one source when addon is enabled")
+	}
+
+	for i, source := range cfg.Sources {
+		sourcePath := fmt.Sprintf("%s[%d]", sourcesPath, i)
+		Validate_AddonSource(&source, verrs, sourcePath)
+	}
+}
+
+func Validate_AddonSource(cfg *AddonSource, verrs *validation.ValidationErrors, pathPrefix string) {
+	if cfg == nil {
+		return
+	}
+
+	if strings.TrimSpace(cfg.Namespace) == "" {
+		verrs.Add(pathPrefix + ".namespace: cannot be empty")
+	} else if !helpers.IsValidK8sName(cfg.Namespace) {
+		verrs.Add(fmt.Sprintf("%s.namespace: '%s' is not a valid Kubernetes namespace name", pathPrefix, cfg.Namespace))
+	}
+
+	hasChart := cfg.Chart != nil
+	hasYaml := cfg.Yaml != nil
+
+	if !hasChart && !hasYaml {
+		verrs.Add(pathPrefix + ": each source must have either a 'chart' or a 'yaml' definition")
+		return
+	}
+	if hasChart && hasYaml {
+		verrs.Add(pathPrefix + ": cannot define both 'chart' and 'yaml' in a single source element")
+		return
+	}
+
+	if hasChart {
+		Validate_ChartSource(cfg.Chart, verrs, path.Join(pathPrefix, "chart"))
+	}
+	if hasYaml {
+		Validate_YamlSource(cfg.Yaml, verrs, path.Join(pathPrefix, "yaml"))
+	}
+}
+
+func Validate_ChartSource(cfg *ChartSource, verrs *validation.ValidationErrors, pathPrefix string) {
+	if cfg == nil {
+		return
+	}
+	hasPath := strings.TrimSpace(cfg.Path) != ""
+	hasName := strings.TrimSpace(cfg.Name) != ""
+	hasRepo := strings.TrimSpace(cfg.Repo) != ""
+
+	if hasPath && (hasName || hasRepo) {
+		verrs.Add(fmt.Sprintf("%s: 'path' is mutually exclusive with 'name' and 'repo'", pathPrefix))
+	}
+	if !hasPath && !hasName {
+		verrs.Add(pathPrefix + ": either 'name' (with 'repo') or 'path' must be specified")
+	}
+	if hasName && !hasRepo && !hasPath {
+		verrs.Add(path.Join(pathPrefix, "repo") + ": must be specified when 'name' is set and 'path' is not")
+	}
+	if hasRepo && !hasName {
+		verrs.Add(path.Join(pathPrefix, "name") + ": must be specified when 'repo' is set")
+	}
+
+	if hasRepo && !helpers.IsValidURL(cfg.Repo) {
+		verrs.Add(fmt.Sprintf("%s.repo: invalid URL format for '%s'", pathPrefix, cfg.Repo))
+	}
+
+	if cfg.Version != "" && !helpers.IsValidChartVersion(cfg.Version) {
+		verrs.Add(fmt.Sprintf("%s.version: invalid chart version format for '%s'", pathPrefix, cfg.Version))
+	}
+
+	for i, val := range cfg.Values {
+		if !strings.Contains(val, "=") {
+			verrs.Add(fmt.Sprintf("%s.values[%d]: invalid format '%s', expected key=value", pathPrefix, i, val))
+		}
+	}
+}
+
+func Validate_YamlSource(cfg *YamlSource, verrs *validation.ValidationErrors, pathPrefix string) {
+	if cfg == nil {
+		return
+	}
+
+	if len(cfg.Path) == 0 {
+		verrs.Add(pathPrefix + ".path: must contain at least one YAML path or URL")
+	}
+	for i, p := range cfg.Path {
+		if strings.TrimSpace(p) == "" {
+			verrs.Add(fmt.Sprintf("%s.path[%d]: path/URL cannot be empty", pathPrefix, i))
+		}
 	}
 }

@@ -1,65 +1,134 @@
 package v1alpha1
 
-// Valid values for Cilium configuration
-var (
-	validCiliumTunnelModes = []string{"vxlan", "geneve", "disabled", ""}
-	validCiliumKPRModes    = []string{"probe", "strict", "disabled", ""}
-	validCiliumIdentModes  = []string{"crd", "kvstore", ""}
+import (
+	"fmt"
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1/helpers"
+	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/errors/validation"
+	"path"
+	"strings"
 )
 
-// SetDefaults_CiliumConfig provides default values for CiliumConfig.
-// The CiliumConfig struct itself is defined in network_types.go.
+type CiliumConfig struct {
+	Network     *CiliumNetworkConfig     `json:"network,omitempty" yaml:"network,omitempty"`
+	KubeProxy   *CiliumKubeProxyConfig   `json:"kubeProxy,omitempty" yaml:"kubeProxy,omitempty"`
+	Hubble      *CiliumHubbleConfig      `json:"hubble,omitempty" yaml:"hubble,omitempty"`
+	Security    *CiliumSecurityConfig    `json:"security,omitempty" yaml:"security,omitempty"`
+	Performance *CiliumPerformanceConfig `json:"performance,omitempty" yaml:"performance,omitempty"`
+}
+
+type CiliumNetworkConfig struct {
+	TunnelingMode         string `json:"tunnelingMode,omitempty" yaml:"tunnelingMode,omitempty"`
+	IPAMMode              string `json:"ipamMode,omitempty" yaml:"ipamMode,omitempty"`
+	EnableBGPControlPlane *bool  `json:"enableBGPControlPlane,omitempty" yaml:"enableBGPControlPlane,omitempty"`
+}
+
+type CiliumKubeProxyConfig struct {
+	ReplacementMode     string `json:"replacement,omitempty" yaml:"replacement,omitempty"`
+	EnableBPFMasquerade *bool  `json:"enableBPFMasquerade,omitempty" yaml:"enableBPFMasquerade,omitempty"`
+}
+
+type CiliumHubbleConfig struct {
+	Enable   bool `json:"enable,omitempty" yaml:"enable,omitempty"`
+	EnableUI bool `json:"enableUI,omitempty" yaml:"enableUI,omitempty"`
+}
+
+type CiliumSecurityConfig struct {
+	IdentityAllocationMode string `json:"identityAllocationMode,omitempty" yaml:"identityAllocationMode,omitempty"`
+	EnableEncryption       *bool  `json:"enableEncryption,omitempty" yaml:"enableEncryption,omitempty"`
+}
+
+type CiliumPerformanceConfig struct {
+	EnableBandwidthManager *bool `json:"enableBandwidthManager,omitempty" yaml:"enableBandwidthManager,omitempty"`
+}
+
 func SetDefaults_CiliumConfig(cfg *CiliumConfig) {
 	if cfg == nil {
 		return
 	}
-	if cfg.TunnelingMode == "" {
-		cfg.TunnelingMode = "vxlan"
+	if cfg.Network == nil {
+		cfg.Network = &CiliumNetworkConfig{}
 	}
-	if cfg.KubeProxyReplacement == "" {
-		cfg.KubeProxyReplacement = "strict"
+	if cfg.Network.TunnelingMode == "" {
+		cfg.Network.TunnelingMode = common.DefaultTunnelingMode
 	}
-	if cfg.IdentityAllocationMode == "" {
-		cfg.IdentityAllocationMode = "crd"
+	if cfg.Network.IPAMMode == "" {
+		cfg.Network.IPAMMode = common.DefaultCiliumIPAMsMode
 	}
-	// If HubbleUI is true, EnableHubble should also be true.
-	if cfg.HubbleUI && !cfg.EnableHubble {
-		cfg.EnableHubble = true
+	if cfg.Network.EnableBGPControlPlane == nil {
+		cfg.Network.EnableBGPControlPlane = helpers.BoolPtr(common.DefaultCiliumBGPControlPlaneEnable)
 	}
-	// EnableBPFMasquerade defaults to true if not explicitly set
-	if cfg.EnableBPFMasquerade == nil {
-		trueVal := true
-		cfg.EnableBPFMasquerade = &trueVal
+
+	if cfg.KubeProxy == nil {
+		cfg.KubeProxy = &CiliumKubeProxyConfig{}
+	}
+	if cfg.KubeProxy.ReplacementMode == "" {
+		cfg.KubeProxy.ReplacementMode = common.DefaultCiliumKPRModes
+	}
+	if cfg.KubeProxy.EnableBPFMasquerade == nil {
+		cfg.KubeProxy.EnableBPFMasquerade = helpers.BoolPtr(common.DefaultEnableBPFMasqueradeEnable)
+	}
+
+	if cfg.Hubble == nil {
+		cfg.Hubble = &CiliumHubbleConfig{}
+	}
+	if cfg.Hubble.EnableUI && !cfg.Hubble.Enable {
+		cfg.Hubble.Enable = common.DefaultCiliumHubbleConfigEnable
+	}
+
+	if cfg.Security == nil {
+		cfg.Security = &CiliumSecurityConfig{}
+	}
+	if cfg.Security.IdentityAllocationMode == "" {
+		cfg.Security.IdentityAllocationMode = common.DefaultIdentityAllocationMode
+	}
+	if cfg.Security.EnableEncryption == nil {
+		cfg.Security.EnableEncryption = helpers.BoolPtr(common.DefaultEnableEncryption)
+	}
+
+	if cfg.Performance == nil {
+		cfg.Performance = &CiliumPerformanceConfig{}
+	}
+	if cfg.Performance.EnableBandwidthManager == nil {
+		cfg.Performance.EnableBandwidthManager = helpers.BoolPtr(common.DefaultEnableBandwidthManager)
 	}
 }
 
-// Validate_CiliumConfig validates CiliumConfig.
-// The CiliumConfig struct itself is defined in network_types.go.
-func Validate_CiliumConfig(cfg *CiliumConfig, verrs *ValidationErrors, pathPrefix string) {
+func Validate_CiliumConfig(cfg *CiliumConfig, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
-
-	if cfg.TunnelingMode != "" {
-		if !containsString(validCiliumTunnelModes, cfg.TunnelingMode) {
-			verrs.Add(pathPrefix+".tunnelingMode: invalid mode '"+cfg.TunnelingMode+"', must be one of vxlan, geneve, disabled, or empty")
+	if cfg.Network != nil {
+		p := path.Join(pathPrefix, "network")
+		if !helpers.ContainsStringWithEmpty(common.ValidCiliumTunnelModes, cfg.Network.TunnelingMode) {
+			verrs.Add(fmt.Sprintf("%s.tunnelingMode: invalid mode '%s', must be one of [%s] or empty",
+				p, cfg.Network.TunnelingMode, strings.Join(common.ValidCiliumTunnelModes, ", ")))
+		}
+		if !helpers.ContainsStringWithEmpty(common.ValidCiliumIPAMModes, cfg.Network.IPAMMode) {
+			verrs.Add(fmt.Sprintf("%s.ipamMode: invalid mode '%s', must be one of [%s] or empty",
+				p, cfg.Network.IPAMMode, strings.Join(common.ValidCiliumIPAMModes, ", ")))
 		}
 	}
 
-	if cfg.KubeProxyReplacement != "" {
-		if !containsString(validCiliumKPRModes, cfg.KubeProxyReplacement) {
-			verrs.Add(pathPrefix+".kubeProxyReplacement: invalid mode '"+cfg.KubeProxyReplacement+"', must be one of probe, strict, disabled, or empty")
+	if cfg.KubeProxy != nil {
+		p := path.Join(pathPrefix, "kubeProxy")
+		if !helpers.ContainsStringWithEmpty(common.ValidCiliumKPRModes, cfg.KubeProxy.ReplacementMode) {
+			verrs.Add(fmt.Sprintf("%s.replacement: invalid mode '%s', must be one of [%s] or empty",
+				p, cfg.KubeProxy.ReplacementMode, strings.Join(common.ValidCiliumKPRModes, ", ")))
 		}
 	}
 
-	if cfg.IdentityAllocationMode != "" {
-		if !containsString(validCiliumIdentModes, cfg.IdentityAllocationMode) {
-			verrs.Add(pathPrefix+".identityAllocationMode: invalid mode '"+cfg.IdentityAllocationMode+"', must be one of crd, kvstore, or empty")
+	if cfg.Hubble != nil {
+		if cfg.Hubble.EnableUI && !cfg.Hubble.Enable {
+			verrs.Add(fmt.Sprintf("%s.hubble.enableUI: cannot be true if hubble.enable is false", pathPrefix))
 		}
 	}
 
-	// Check for logical inconsistencies
-	if cfg.HubbleUI && !cfg.EnableHubble {
-		verrs.Add(pathPrefix+".hubbleUI", "cannot be true if enableHubble is false")
+	if cfg.Security != nil {
+		p := path.Join(pathPrefix, "security")
+		if !helpers.ContainsStringWithEmpty(common.ValidCiliumIdentModes, cfg.Security.IdentityAllocationMode) {
+			verrs.Add(fmt.Sprintf("%s.identityAllocationMode: invalid mode '%s', must be one of [%s] or empty",
+				p, cfg.Security.IdentityAllocationMode, strings.Join(common.ValidCiliumIdentModes, ", ")))
+		}
 	}
 }

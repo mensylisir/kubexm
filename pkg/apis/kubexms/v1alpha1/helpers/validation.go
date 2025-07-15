@@ -16,6 +16,10 @@ import (
 )
 
 var (
+	k8sNameRegexStr           = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
+	validDomainNameRegexStr   = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?|[a-zA-Z0-9])(\.([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?|[a-zA-Z0-9]))*$`)
+	validHostnameRegex        = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
+	validHostPortRegex        = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*|\[::1\]|localhost|([0-9]{1,3}\.){3}[0-9]{1,3})(:([0-9]{1,5}))?$`)
 	validDomainNameRegex      = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?|[a-zA-Z0-9])(\.([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?|[a-zA-Z0-9]))*\.?$`)
 	validChartVersionRegex    = regexp.MustCompile(`^v?([0-9]+)(\.[0-9]+){0,2}$`)
 	validSemanticVersionRegex = regexp.MustCompile(`^v?([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$`)
@@ -24,6 +28,76 @@ var (
 	k8sLabelRegex             = regexp.MustCompile(`^[a-z0-9A-Z]([-a-z0-9A-Z_.]*[a-z0-9A-Z])?$`)
 	emailRegex                = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 )
+
+func IsValidK8sName(name string) bool {
+	if name == "" {
+		return false
+	}
+	if len(name) > 253 {
+		return false
+	}
+	return k8sNameRegexStr.MatchString(name)
+}
+
+func IsValidHostPort(hostport string) bool {
+	if hostport == "" {
+		return false
+	}
+
+	host, port, err := net.SplitHostPort(hostport)
+	if err != nil {
+		host = hostport
+		port = ""
+	}
+
+	isIP := net.ParseIP(host) != nil
+	isDomain := IsValidDomainName(host)
+
+	if !isIP && !isDomain {
+		return false
+	}
+
+	if port != "" {
+		portNum, err := strconv.Atoi(port)
+		if err != nil {
+			return false
+		}
+		if portNum < 1 || portNum > 65535 {
+			return false
+		}
+	}
+	return true
+}
+
+func ValidateHostPortStrict(hostport string) bool {
+	host, portStr, err := net.SplitHostPort(hostport)
+	if err != nil {
+		if addrErr, ok := err.(*net.AddrError); ok && addrErr.Err == "missing port in address" {
+			host = hostport
+			portStr = ""
+		} else {
+			return false
+		}
+	}
+
+	if net.ParseIP(host) == nil {
+		if !validHostnameRegex.MatchString(host) {
+			return false
+		}
+	}
+
+	if portStr != "" {
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			return false
+		}
+		if port < 1 || port > 65535 {
+			return false
+		}
+	}
+
+	return true
+}
 
 func IsValidRuntimeVersion(version string) bool {
 	if strings.TrimSpace(version) == "" {
@@ -349,24 +423,6 @@ func IsValidDuration(duration string) bool {
 func IsValidTimeFormat(timeStr, format string) bool {
 	_, err := time.Parse(format, timeStr)
 	return err == nil
-}
-
-func ContainsString(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
-func ContainsInt(slice []int, item int) bool {
-	for _, i := range slice {
-		if i == item {
-			return true
-		}
-	}
-	return false
 }
 
 func IsValidEmail(email string) bool {

@@ -1,21 +1,13 @@
-package util
+package helpers
 
 import (
 	"errors"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"net"
 	"regexp"
 	"strconv"
 	"strings"
 )
-
-func ShellEscape(s string) string {
-	if s == "" {
-		return "''"
-	}
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
-}
 
 func ContainsString(slice []string, s string) bool {
 	for _, item := range slice {
@@ -26,10 +18,34 @@ func ContainsString(slice []string, s string) bool {
 	return false
 }
 
+func ContainsStringWithEmpty(slice []string, s string) bool {
+	if s == "" {
+		return true
+	}
+	for _, item := range slice {
+		if item == s {
+			return true
+		}
+	}
+	return false
+}
+
+func ContainsInt(slice []int, item int) bool {
+	for _, i := range slice {
+		if i == item {
+			return true
+		}
+	}
+	return false
+}
+
 func NetworksOverlap(n1, n2 *net.IPNet) bool {
 	if n1 == nil || n2 == nil {
 		return false // Cannot overlap if one is nil
 	}
+	// Check if one network contains the other's network address.
+	// Also check if the network masks are valid because IPNet an represent a single IP address (/32 for IPv4 or /128 for IPv6)
+	// or a network. The IP field is the network address.
 	return (n1.Contains(n2.IP) && n2.Mask != nil) || (n2.Contains(n1.IP) && n1.Mask != nil)
 }
 
@@ -88,7 +104,7 @@ func ExpandHostRange(pattern string) ([]string, error) {
 
 	var hostnames []string
 	formatStr := "%s%0" + fmt.Sprintf("%dd", len(startStr)) + "%s"
-	if len(startStr) == 1 || (len(startStr) > 1 && startStr[0] != '0') { // No leading zero or not intended for padding
+	if len(startStr) == 1 || (len(startStr) > 1 && startStr[0] != '0') {
 		formatStr = "%s%d%s"
 	}
 
@@ -108,6 +124,7 @@ func ParseCPU(cpuStr string) (int64, error) {
 		return 0, fmt.Errorf("empty CPU string")
 	}
 
+	// Handle millicore notation (e.g., "500m")
 	if strings.HasSuffix(cpuStr, "m") {
 		milliStr := strings.TrimSuffix(cpuStr, "m")
 		milli, err := strconv.ParseFloat(milliStr, 64)
@@ -118,11 +135,13 @@ func ParseCPU(cpuStr string) (int64, error) {
 		return int64(milli * 1000000), nil
 	}
 
+	// Handle core notation (e.g., "1", "1.5")
 	cores, err := strconv.ParseFloat(cpuStr, 64)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse CPU cores '%s': %w", cpuStr, err)
 	}
 
+	// Convert cores to nanocores (1 core = 1,000,000,000 nanocores)
 	return int64(cores * 1000000000), nil
 }
 
@@ -157,51 +176,11 @@ func ParseMemory(memStr string) (int64, error) {
 		}
 	}
 
+	// No unit suffix, assume bytes
 	bytes, err := strconv.ParseInt(memStr, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse memory bytes '%s': %w", memStr, err)
 	}
 
 	return bytes, nil
-}
-
-// expandRoleGroupHosts processes a slice of host strings, expanding any ranges.
-func ExpandRoleGroupHosts(hosts []string) ([]string, error) {
-	if hosts == nil {
-		return nil, nil
-	}
-	expanded := make([]string, 0, len(hosts))
-	for _, h := range hosts {
-		currentHosts, err := ExpandHostRange(h)
-		if err != nil {
-			return nil, fmt.Errorf("error expanding host range '%s': %w", h, err)
-		}
-		expanded = append(expanded, currentHosts...)
-	}
-	return expanded, nil
-}
-
-// validateRoleGroupHosts validates that all hosts referenced in RoleGroups exist in the hosts spec
-func ValidateRoleGroupHosts(roleGroups *v1alpha1.RoleGroupsSpec, hosts []v1alpha1.HostSpec) error {
-	// Create a map of valid host names
-	validHosts := make(map[string]bool)
-	for _, host := range hosts {
-		validHosts[host.Name] = true
-	}
-
-	// Check each role group
-	allHosts := []string{}
-	allHosts = append(allHosts, roleGroups.Master...)
-	allHosts = append(allHosts, roleGroups.Worker...)
-	allHosts = append(allHosts, roleGroups.Etcd...)
-	allHosts = append(allHosts, roleGroups.LoadBalancer...)
-	allHosts = append(allHosts, roleGroups.Storage...)
-	allHosts = append(allHosts, roleGroups.Registry...)
-
-	for _, hostName := range allHosts {
-		if !validHosts[hostName] {
-			return fmt.Errorf("host '%s' referenced in roleGroups but not defined in hosts spec", hostName)
-		}
-	}
-	return nil
 }
