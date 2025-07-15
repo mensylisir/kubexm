@@ -1,154 +1,94 @@
 package cache
 
 import (
-	"fmt"
 	"sync"
 )
 
-// PipelineCache stores data scoped to a pipeline's execution.
-type PipelineCache interface {
+type parentCache interface {
 	Get(key string) (interface{}, bool)
-	Set(key string, value interface{})
-	Delete(key string)
-	Keys() []string // Returns keys present in this specific cache scope
 }
-
-// ModuleCache stores data scoped to a module's execution.
-type ModuleCache interface {
-	Get(key string) (interface{}, bool)
-	Set(key string, value interface{})
-	Delete(key string)
-	Keys() []string // Returns keys present in this specific cache scope
-}
-
-// TaskCache stores data scoped to a task's execution.
-type TaskCache interface {
-	Get(key string) (interface{}, bool)
-	Set(key string, value interface{})
-	Delete(key string)
-	Keys() []string // Returns keys present in this specific cache scope
-}
-
-// StepCache stores data scoped to a step's execution, including the current step's spec.
-type StepCache interface {
-	Get(key string) (interface{}, bool)
-	Set(key string, value interface{})
-	Delete(key string)
-	SetCurrentStepSpec(spec interface{}) // spec is of type spec.StepSpec, but use interface{} to avoid cycle
-	GetCurrentStepSpec() (interface{}, bool) // returns spec.StepSpec, but use interface{}
-	Keys() []string // Returns keys present in this specific cache scope
-}
-
-// genericCache provides a thread-safe key-value store with optional parent for fallback reads.
-type genericCache struct {
+type GenericCache struct {
 	store  sync.Map
-	parent *genericCache // Pointer to parent cache for inherited reads
+	parent parentCache
 }
 
-// NewGenericCache creates a new genericCache.
-// Parent can be nil for top-level caches (e.g., PipelineCache).
-func NewGenericCache(parent *genericCache) *genericCache {
-	return &genericCache{
+func NewGenericCache(parent parentCache) *GenericCache {
+	return &GenericCache{
 		parent: parent,
 	}
 }
 
-// Get retrieves a value from the cache.
-// It first checks the current cache, then falls back to the parent cache if the key is not found locally.
-func (c *genericCache) Get(key string) (interface{}, bool) {
+func (c *GenericCache) Get(key string) (interface{}, bool) {
 	if val, ok := c.store.Load(key); ok {
 		return val, true
 	}
 	if c.parent != nil {
-		return c.parent.Get(key) // Recursive call to parent's Get
+		return c.parent.Get(key)
 	}
 	return nil, false
 }
 
-// Set stores a value in the cache. Writes are always local to the current cache instance.
-func (c *genericCache) Set(key string, value interface{}) {
-	c.store.Store(key, value)
-}
-
-// SetParent sets the parent cache for the current cache.
-// This is intended to be used by the runtime to establish the cache hierarchy.
-func (c *genericCache) SetParent(parent *genericCache) {
-	c.parent = parent
-}
-
-// Delete removes a value from the cache.
-func (c *genericCache) Delete(key string) {
-	c.store.Delete(key)
-}
-
-// Keys returns a slice of keys present only in the current cache's local store.
-// The order of keys is not guaranteed.
-func (c *genericCache) Keys() []string {
+func (c *GenericCache) Keys() []string {
 	var keys []string
 	c.store.Range(func(key interface{}, value interface{}) bool {
 		if kStr, ok := key.(string); ok {
 			keys = append(keys, kStr)
 		}
-		// else: key is not a string, which shouldn't happen if Set always uses string keys.
-		// Consider logging this case if it's possible and unexpected.
-		return true // continue iteration
+		return true
 	})
 	return keys
 }
 
-const currentStepSpecKey = "_currentStepSpec"
-
-// SetCurrentStepSpec stores the current step's specification.
-func (c *genericCache) SetCurrentStepSpec(spec interface{}) {
-	c.store.Store(currentStepSpecKey, spec)
+func (c *GenericCache) Set(k string, v interface{}) {
+	c.store.Store(k, v)
 }
 
-// GetCurrentStepSpec retrieves the current step's specification.
-// The caller is responsible for type asserting the returned interface{}.
-func (c *genericCache) GetCurrentStepSpec() (interface{}, bool) {
-	return c.store.Load(currentStepSpecKey)
+func (c *GenericCache) Delete(k string) {
+	c.store.Delete(k)
 }
 
-// NewPipelineCache creates a new PipelineCache.
-func NewPipelineCache() PipelineCache {
-	return NewGenericCache(nil)
-}
-
-// NewModuleCache creates a new ModuleCache with the given PipelineCache as its parent.
-func NewModuleCache(parent PipelineCache) ModuleCache {
-	var parentGenericCache *genericCache
-	if parent != nil {
-		var ok bool
-		parentGenericCache, ok = parent.(*genericCache)
-		if !ok {
-			panic(fmt.Sprintf("NewModuleCache: parent is not of type *genericCache, got %T", parent))
-		}
+func (c *GenericCache) GetMustString(k string) (string, bool) {
+	v, ok := c.Get(k)
+	if !ok {
+		return "", false
 	}
-	return NewGenericCache(parentGenericCache)
+	res, assert := v.(string)
+	return res, assert
 }
 
-// NewTaskCache creates a new TaskCache with the given ModuleCache as its parent.
-func NewTaskCache(parent ModuleCache) TaskCache {
-	var parentGenericCache *genericCache
-	if parent != nil {
-		var ok bool
-		parentGenericCache, ok = parent.(*genericCache)
-		if !ok {
-			panic(fmt.Sprintf("NewTaskCache: parent is not of type *genericCache, got %T", parent))
-		}
-	}
-	return NewGenericCache(parentGenericCache)
+func (c *GenericCache) SetParent(parent *GenericCache) {
+	c.parent = parent
 }
 
-// NewStepCache creates a new StepCache with the given TaskCache as its parent.
-func NewStepCache(parent TaskCache) StepCache {
-	var parentGenericCache *genericCache
-	if parent != nil {
-		var ok bool
-		parentGenericCache, ok = parent.(*genericCache)
-		if !ok {
-			panic(fmt.Sprintf("NewStepCache: parent is not of type *genericCache, got %T", parent))
-		}
+func (c *GenericCache) GetOrSet(k string, v interface{}) (interface{}, bool) {
+	return c.store.LoadOrStore(k, v)
+}
+
+func (c *GenericCache) Range(f func(key, value interface{}) bool) {
+	c.store.Range(f)
+}
+
+func (c *GenericCache) Clean() {
+	c.store.Range(func(key, value interface{}) bool {
+		c.store.Delete(key)
+		return true
+	})
+}
+
+func (c *GenericCache) GetMustInt(k string) (int, bool) {
+	v, ok := c.Get(k)
+	res, assert := v.(int)
+	if !assert {
+		return res, false
 	}
-	return NewGenericCache(parentGenericCache)
+	return res, ok
+}
+
+func (c *GenericCache) GetMustBool(k string) (bool, bool) {
+	v, ok := c.Get(k)
+	res, assert := v.(bool)
+	if !assert {
+		return res, false
+	}
+	return res, ok
 }

@@ -5,7 +5,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1/helpers"
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/errors/validation"
-	"github.com/mensylisir/kubexm/pkg/util"
 	"net"
 	"strconv"
 	"strings"
@@ -107,7 +106,7 @@ func Validate_NginxLBConfig(cfg *NginxLBConfig, verrs *validation.ValidationErro
 	if cfg.Mode == nil {
 		verrs.Add(pathPrefix + ".mode: is required and should have a default value 'tcp'")
 	} else if *cfg.Mode != "" {
-		if !util.ContainsString(common.ValidNginxLBModes, *cfg.Mode) {
+		if !helpers.ContainsString(common.ValidNginxLBModes, *cfg.Mode) {
 			verrs.Add(pathPrefix + ".mode: invalid mode '" + *cfg.Mode + "', must be one of " + fmt.Sprintf("%v", common.ValidNginxLBModes))
 		}
 	}
@@ -115,7 +114,7 @@ func Validate_NginxLBConfig(cfg *NginxLBConfig, verrs *validation.ValidationErro
 	if cfg.BalanceAlgorithm == nil {
 		verrs.Add(pathPrefix + ".balanceAlgorithm: is required and should have a default value 'round_robin'")
 	} else if *cfg.BalanceAlgorithm != "" {
-		if !util.ContainsString(common.ValidNginxLBAlgorithms, *cfg.BalanceAlgorithm) {
+		if !helpers.ContainsString(common.ValidNginxLBAlgorithms, *cfg.BalanceAlgorithm) {
 			verrs.Add(pathPrefix + ".balanceAlgorithm: invalid algorithm '" + *cfg.BalanceAlgorithm + "', must be one of " + fmt.Sprintf("%v", common.ValidNginxLBAlgorithms) + " or empty for Nginx default")
 		}
 	}

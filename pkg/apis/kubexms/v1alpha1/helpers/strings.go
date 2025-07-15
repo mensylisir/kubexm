@@ -43,9 +43,6 @@ func NetworksOverlap(n1, n2 *net.IPNet) bool {
 	if n1 == nil || n2 == nil {
 		return false // Cannot overlap if one is nil
 	}
-	// Check if one network contains the other's network address.
-	// Also check if the network masks are valid because IPNet an represent a single IP address (/32 for IPv4 or /128 for IPv6)
-	// or a network. The IP field is the network address.
 	return (n1.Contains(n2.IP) && n2.Mask != nil) || (n2.Contains(n1.IP) && n1.Mask != nil)
 }
 
@@ -63,7 +60,7 @@ func EnsureExtraArgs(currentArgs []string, defaultArgs map[string]string) []stri
 	finalArgs := make([]string, len(currentArgs))
 	copy(finalArgs, currentArgs)
 
-	for defaultArgKey, defaultArgValue := range defaultArgs { // defaultArgKey is the prefix, defaultArgValue is the full string like "--prefix=value"
+	for defaultArgKey, defaultArgValue := range defaultArgs {
 		prefix := defaultArgKey
 		if _, exists := existingArgPrefixes[prefix]; !exists {
 			finalArgs = append(finalArgs, defaultArgValue)
@@ -77,7 +74,6 @@ func ExpandHostRange(pattern string) ([]string, error) {
 	matches := re.FindStringSubmatch(pattern)
 
 	if len(matches) == 0 {
-		// No range pattern, return the pattern itself as a single host
 		if strings.TrimSpace(pattern) == "" {
 			return nil, errors.New("host pattern cannot be empty")
 		}
@@ -112,7 +108,7 @@ func ExpandHostRange(pattern string) ([]string, error) {
 		hostnames = append(hostnames, fmt.Sprintf(formatStr, prefix, i, suffix))
 	}
 
-	if len(hostnames) == 0 { // Should not happen if start <= end, but as a safeguard
+	if len(hostnames) == 0 {
 		return nil, fmt.Errorf("expanded to zero hostnames for pattern '%s', check range", pattern)
 	}
 
@@ -124,24 +120,20 @@ func ParseCPU(cpuStr string) (int64, error) {
 		return 0, fmt.Errorf("empty CPU string")
 	}
 
-	// Handle millicore notation (e.g., "500m")
 	if strings.HasSuffix(cpuStr, "m") {
 		milliStr := strings.TrimSuffix(cpuStr, "m")
 		milli, err := strconv.ParseFloat(milliStr, 64)
 		if err != nil {
 			return 0, fmt.Errorf("failed to parse CPU millicores '%s': %w", cpuStr, err)
 		}
-		// Convert millicores to nanocores (1 millicore = 1,000,000 nanocores)
 		return int64(milli * 1000000), nil
 	}
 
-	// Handle core notation (e.g., "1", "1.5")
 	cores, err := strconv.ParseFloat(cpuStr, 64)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse CPU cores '%s': %w", cpuStr, err)
 	}
 
-	// Convert cores to nanocores (1 core = 1,000,000,000 nanocores)
 	return int64(cores * 1000000000), nil
 }
 
@@ -150,7 +142,6 @@ func ParseMemory(memStr string) (int64, error) {
 		return 0, fmt.Errorf("empty memory string")
 	}
 
-	// Define unit multipliers
 	units := map[string]int64{
 		"Ki": 1024,
 		"Mi": 1024 * 1024,
@@ -164,7 +155,6 @@ func ParseMemory(memStr string) (int64, error) {
 		"P":  1000 * 1000 * 1000 * 1000 * 1000,
 	}
 
-	// Check for unit suffix
 	for unit, multiplier := range units {
 		if strings.HasSuffix(memStr, unit) {
 			valueStr := strings.TrimSuffix(memStr, unit)
@@ -176,7 +166,6 @@ func ParseMemory(memStr string) (int64, error) {
 		}
 	}
 
-	// No unit suffix, assume bytes
 	bytes, err := strconv.ParseInt(memStr, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse memory bytes '%s': %w", memStr, err)

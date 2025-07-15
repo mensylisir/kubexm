@@ -28,12 +28,10 @@ func Uint32Ptr(u uint32) *uint32 {
 	return &u
 }
 
-// Uint64Ptr returns a pointer to the uint64 value u.
 func Uint64Ptr(u uint64) *uint64 {
 	return &u
 }
 
-// Int32Ptr returns a pointer to the int32 value i.
 func Int32Ptr(i int32) *int32 {
 	return &i
 }

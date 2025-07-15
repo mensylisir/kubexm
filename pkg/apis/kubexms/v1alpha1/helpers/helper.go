@@ -1,8 +1,8 @@
 package helpers
 
 import (
+	"fmt"
 	"github.com/mensylisir/kubexm/pkg/common"
-	"github.com/mensylisir/kubexm/pkg/util"
 	"github.com/pkg/errors"
 	"os"
 	"path/filepath"
@@ -24,7 +24,7 @@ func GenerateWorkDir() (string, error) {
 	}
 
 	rootPath := filepath.Join(currentDir, common.KUBEXM)
-	if err := util.CreateDir(rootPath); err != nil {
+	if err := CreateDir(rootPath); err != nil {
 		return "", errors.Wrap(err, "create work dir failed")
 	}
 	return rootPath, nil
@@ -32,14 +32,33 @@ func GenerateWorkDir() (string, error) {
 
 func GenerateHostWorkDir(clusterName string, workdir string, hostName string) (string, error) {
 	hostWorkDir := filepath.Join(workdir, clusterName, hostName)
-	if err := util.CreateDir(hostWorkDir); err != nil {
+	if err := CreateDir(hostWorkDir); err != nil {
 		return "", errors.Wrap(err, "create hostwork dir failed")
 	}
 
 	logDir := filepath.Join(workdir, clusterName, "logs")
-	if err := util.CreateDir(logDir); err != nil {
+	if err := CreateDir(logDir); err != nil {
 		return "", errors.Wrap(err, "create log dir failed")
 	}
 
 	return hostWorkDir, nil
+}
+
+func CreateDir(path string) error {
+	fileInfo, err := os.Stat(path)
+	if err == nil {
+		if fileInfo.IsDir() {
+			return nil // Already exists as a directory, success
+		}
+		return fmt.Errorf("path %s exists but is not a directory", path)
+	}
+
+	if os.IsNotExist(err) {
+		if mkdirErr := os.MkdirAll(path, 0755); mkdirErr != nil {
+			return fmt.Errorf("failed to create directory %s: %w", path, mkdirErr)
+		}
+		return nil
+	}
+
+	return fmt.Errorf("failed to stat path %s: %w", path, err)
 }
