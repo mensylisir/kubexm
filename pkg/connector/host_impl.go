@@ -2,20 +2,15 @@ package connector
 
 import (
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
-	"github.com/mensylisir/kubexm/pkg/cache"
 	"github.com/mensylisir/kubexm/pkg/common"
 
 	"strings"
 )
 
-// hostImpl implements the Host interface using v1alpha1.HostSpec.
 type hostImpl struct {
 	spec v1alpha1.HostSpec
 }
 
-// NewHostFromSpec creates a new Host object from its specification.
-// It's a constructor for hostImpl.
-// Assumes the input spec has already had defaults applied by the config/API layer.
 func NewHostFromSpec(spec v1alpha1.HostSpec) Host {
 	return &hostImpl{
 		spec: spec,
@@ -152,14 +147,6 @@ func (h *hostImpl) IsRole(role string) bool {
 	return false
 }
 
-func (h *hostImpl) GetCache() *cache.StepCache {
-	return h.spec.Cache
-}
-
-func (h *hostImpl) SetCache(c *cache.StepCache) {
-	h.spec.Cache = c
-}
-
 func (h *hostImpl) GetHostSpec() v1alpha1.HostSpec {
-	return h.spec // Returns a copy of the spec
+	return h.spec
 }

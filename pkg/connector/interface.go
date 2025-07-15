@@ -3,7 +3,6 @@ package connector
 import (
 	"context"
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
-	"github.com/mensylisir/kubexm/pkg/cache"
 	"golang.org/x/crypto/ssh"
 	"io/fs"
 	"time"
@@ -14,7 +13,6 @@ type Factory interface {
 	NewLocalConnector() Connector
 }
 
-// OS represents operating system details.
 type OS struct {
 	ID         string // e.g., "ubuntu", "centos", "windows"
 	VersionID  string // e.g., "20.04", "7", "10.0.19042"
@@ -24,7 +22,6 @@ type OS struct {
 	Kernel     string // e.g., "5.4.0-80-generic"
 }
 
-// BastionCfg defines configuration for a bastion/jump host.
 type BastionCfg struct {
 	Host            string              `json:"host,omitempty" yaml:"host,omitempty"`
 	Port            int                 `json:"port,omitempty" yaml:"port,omitempty"`
@@ -33,15 +30,13 @@ type BastionCfg struct {
 	PrivateKey      []byte              `json:"-" yaml:"-"`
 	PrivateKeyPath  string              `json:"privateKeyPath,omitempty" yaml:"privateKeyPath,omitempty"`
 	Timeout         time.Duration       `json:"timeout,omitempty" yaml:"timeout,omitempty"`
-	HostKeyCallback ssh.HostKeyCallback `json:"-" yaml:"-"` // Callback for verifying bastion's server key
+	HostKeyCallback ssh.HostKeyCallback `json:"-" yaml:"-"`
 }
 
-// ProxyCfg defines proxy configuration.
 type ProxyCfg struct {
 	URL string `json:"url,omitempty" yaml:"url,omitempty"`
 }
 
-// ConnectionCfg holds all parameters needed to establish a connection.
 type ConnectionCfg struct {
 	Host            string
 	Port            int
@@ -50,43 +45,38 @@ type ConnectionCfg struct {
 	PrivateKey      []byte
 	PrivateKeyPath  string
 	Timeout         time.Duration
-	BastionCfg      *BastionCfg // Renamed from Bastion in design doc to match existing code and be clearer
+	BastionCfg      *BastionCfg
 	ProxyCfg        *ProxyCfg
-	HostKeyCallback ssh.HostKeyCallback `json:"-" yaml:"-"` // Callback for verifying server keys
+	HostKeyCallback ssh.HostKeyCallback `json:"-" yaml:"-"`
 }
 
-// ExecOptions is defined in options.go
-// FileTransferOptions is defined in options.go
-
-// FileStat describes basic file metadata.
 type FileStat struct {
 	Name    string
 	Size    int64
-	Mode    fs.FileMode // Using fs.FileMode consistently as per existing code
+	Mode    fs.FileMode
 	ModTime time.Time
 	IsDir   bool
 	IsExist bool
 }
 
-// Connector defines the interface for connecting to and interacting with a host.
 type Connector interface {
 	Connect(ctx context.Context, cfg ConnectionCfg) error
 	Exec(ctx context.Context, cmd string, opts *ExecOptions) (stdout, stderr []byte, err error)
+	Upload(ctx context.Context, localPath, remotePath string, opts *FileTransferOptions) error
+	Download(ctx context.Context, remotePath, localPath string, opts *FileTransferOptions) error
 	CopyContent(ctx context.Context, content []byte, destPath string, options *FileTransferOptions) error
 	Stat(ctx context.Context, path string) (*FileStat, error)
 	LookPath(ctx context.Context, file string) (string, error)
-
 	Close() error
 	IsConnected() bool
 	GetOS(ctx context.Context) (*OS, error)
 	ReadFile(ctx context.Context, path string) ([]byte, error)
 	WriteFile(ctx context.Context, content []byte, destPath string, options *FileTransferOptions) error
 	Mkdir(ctx context.Context, path string, perm string) error
-	Remove(ctx context.Context, path string, opts RemoveOptions) error // RemoveOptions will now be resolved from options.go
+	Remove(ctx context.Context, path string, opts RemoveOptions) error
 	GetFileChecksum(ctx context.Context, path string, checksumType string) (string, error)
 }
 
-// Host represents a configured host in the cluster.
 type Host interface {
 	GetName() string
 	SetName(name string)
@@ -113,8 +103,6 @@ type Host interface {
 	GetRoles() []string
 	SetRoles(roles []string)
 	IsRole(role string) bool
-	GetCache() *cache.StepCache
-	SetCache(c *cache.StepCache)
 	GetHostSpec() v1alpha1.HostSpec
 }
 

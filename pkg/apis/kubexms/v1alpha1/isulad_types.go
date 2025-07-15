@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1/helpers"
 	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/errors/validation"
 	"k8s.io/apimachinery/pkg/runtime"
 	"strings"
 )
@@ -86,7 +87,7 @@ func SetDefaults_IsuladConfig(cfg *Isulad) {
 	}
 }
 
-func Validate_IsuladConfig(cfg *Isulad, verrs *ValidationErrors, pathPrefix string) {
+func Validate_IsuladConfig(cfg *Isulad, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
@@ -129,7 +130,7 @@ func Validate_IsuladConfig(cfg *Isulad, verrs *ValidationErrors, pathPrefix stri
 	Validate_RegistryAuths(cfg.Auths, verrs, pathPrefix+".auths")
 }
 
-func Validate_RegistryAuths(auths map[ServerAddress]RegistryAuth, verrs *ValidationErrors, pathPrefix string) {
+func Validate_RegistryAuths(auths map[ServerAddress]RegistryAuth, verrs *validation.ValidationErrors, pathPrefix string) {
 	for regAddr, auth := range auths {
 		authEntryPath := fmt.Sprintf("%s[\"%s\"]", pathPrefix, regAddr)
 		if strings.TrimSpace(string(regAddr)) == "" {

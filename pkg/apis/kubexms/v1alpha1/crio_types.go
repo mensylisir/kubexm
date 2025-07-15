@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1/helpers"
 	"github.com/mensylisir/kubexm/pkg/common"
-	"github.com/mensylisir/kubexm/pkg/util"
+	"github.com/mensylisir/kubexm/pkg/errors/validation"
 	"strings"
 )
 
@@ -107,7 +107,7 @@ func SetDefaults_CrioConfig(cfg *Crio) {
 	}
 }
 
-func Validate_CrioConfig(cfg *Crio, verrs *ValidationErrors, pathPrefix string) {
+func Validate_CrioConfig(cfg *Crio, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
@@ -123,7 +123,7 @@ func Validate_CrioConfig(cfg *Crio, verrs *ValidationErrors, pathPrefix string) 
 	}
 	if cfg.LogLevel != nil {
 		validLevels := []string{"fatal", "panic", "error", "warn", "info", "debug"}
-		if !util.IsInStringSlice(validLevels, *cfg.LogLevel) {
+		if !helpers.IsInStringSlice(validLevels, *cfg.LogLevel) {
 			verrs.Add(pathPrefix+".logLevel", "invalid log level")
 		}
 	}

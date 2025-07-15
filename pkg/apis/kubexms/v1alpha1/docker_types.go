@@ -3,6 +3,7 @@ package v1alpha1
 import (
 	"encoding/base64"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/errors/validation"
 	"net/url"
 	"strings"
 
@@ -141,7 +142,7 @@ func SetDefaults_DockerConfig(cfg *Docker) {
 	}
 }
 
-func Validate_DockerConfig(cfg *Docker, verrs *ValidationErrors, pathPrefix string) {
+func Validate_DockerConfig(cfg *Docker, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}

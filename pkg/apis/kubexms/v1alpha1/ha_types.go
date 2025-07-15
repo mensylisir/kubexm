@@ -139,6 +139,9 @@ func Validate_HighAvailabilityConfig(cfg *HighAvailability, verrs *validation.Va
 		(cfg.Internal == nil || cfg.Internal.Enabled == nil || !*cfg.Internal.Enabled) {
 		verrs.Add(pathPrefix+".enabled", "is true, but no internal or external load balancer is enabled")
 	}
+	if *cfg.External.Enabled && *cfg.Internal.Enabled {
+		verrs.Add(pathPrefix+".enabled", "is true, but no internal or external load balancer is enabled")
+	}
 
 }
 
