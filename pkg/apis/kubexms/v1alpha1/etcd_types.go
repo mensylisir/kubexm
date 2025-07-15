@@ -2,44 +2,22 @@ package v1alpha1
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1/helpers"
+	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/errors/validation"
+	"path"
 	"strings"
 )
 
-const (
-	EtcdTypeKubeXMSInternal = "kubexm"   // 表示要使用二进制部署etcd
-	EtcdTypeExternal        = "external" // 表示外部已经有现成的etcd
-	EtcdTypeInternal        = "kubeadm"  // 表示kubeadm部署etcd,即etcd是以静态pod的形式启动的
-)
-
-// EtcdConfig defines the configuration for the Etcd cluster.
 type Etcd struct {
-	Type                         string              `json:"type,omitempty" yaml:"type,omitempty"`
-	Version                      string              `json:"version,omitempty" yaml:"version,omitempty"`
-	Arch                         string              `json:"arch,omitempty" yaml:"arch,omitempty"`
-	External                     *ExternalEtcdConfig `json:"external,omitempty" yaml:"external,omitempty"`
-	ClientPort                   *int                `json:"clientPort,omitempty" yaml:"clientPort,omitempty"`
-	PeerPort                     *int                `json:"peerPort,omitempty" yaml:"peerPort,omitempty"`
-	DataDir                      *string             `json:"dataDir,omitempty" yaml:"dataDir,omitempty"`
-	ClusterToken                 string              `json:"clusterToken,omitempty" yaml:"clusterToken,omitempty"`
-	ExtraArgs                    []string            `json:"extraArgs,omitempty" yaml:"extraArgs,omitempty"`
-	BackupDir                    *string             `json:"backupDir,omitempty" yaml:"backupDir,omitempty"`
-	BackupPeriodHours            *int                `json:"backupPeriodHours,omitempty" yaml:"backupPeriodHours,omitempty"`
-	KeepBackupNumber             *int                `json:"keepBackupNumber,omitempty" yaml:"keepBackupNumber,omitempty"`
-	BackupScriptPath             *string             `json:"backupScriptPath,omitempty" yaml:"backupScriptPath,omitempty"`
-	HeartbeatIntervalMillis      *int                `json:"heartbeatIntervalMillis,omitempty" yaml:"heartbeatInterval,omitempty"`
-	ElectionTimeoutMillis        *int                `json:"electionTimeoutMillis,omitempty" yaml:"electionTimeout,omitempty"`
-	SnapshotCount                *uint64             `json:"snapshotCount,omitempty" yaml:"snapshotCount,omitempty"`
-	AutoCompactionRetentionHours *int                `json:"autoCompactionRetentionHours,omitempty" yaml:"autoCompactionRetention,omitempty"`
-	QuotaBackendBytes            *int64              `json:"quotaBackendBytes,omitempty" yaml:"quotaBackendBytes,omitempty"`
-	MaxRequestBytes              *uint               `json:"maxRequestBytes,omitempty" yaml:"maxRequestBytes,omitempty"`
-	Metrics                      *string             `json:"metrics,omitempty" yaml:"metrics,omitempty"`
-	LogLevel                     *string             `json:"logLevel,omitempty" yaml:"logLevel,omitempty"`
-	MaxSnapshotsToKeep           *uint               `json:"maxSnapshotsToKeep,omitempty" yaml:"maxSnapshots,omitempty"`
-	MaxWALsToKeep                *uint               `json:"maxWALsToKeep,omitempty" yaml:"maxWals,omitempty"`
-	// TLS *ManagedEtcdTLSConfig `json:"tls,omitempty" yaml:"tls,omitempty"` // From suggested improvements
+	Type              string                 `json:"type,omitempty" yaml:"type,omitempty"`
+	Version           string                 `json:"version,omitempty" yaml:"version,omitempty"`
+	External          *ExternalEtcdConfig    `json:"external,omitempty" yaml:"external,omitempty"`
+	ClusterConfig     *EtcdClusterConfig     `json:"cluster,omitempty" yaml:"cluster,omitempty"`
+	BackupConfig      *EtcdBackupConfig      `json:"backup,omitempty" yaml:"backup,omitempty"`
+	PerformanceTuning *EtcdPerformanceTuning `json:"performance,omitempty" yaml:"performance,omitempty"`
 }
 
-// ExternalEtcdConfig describes how to connect to an external etcd cluster.
 type ExternalEtcdConfig struct {
 	Endpoints []string `json:"endpoints" yaml:"endpoints"`
 	CAFile    string   `json:"caFile,omitempty" yaml:"caFile,omitempty"`
@@ -47,123 +25,191 @@ type ExternalEtcdConfig struct {
 	KeyFile   string   `json:"keyFile,omitempty" yaml:"keyFile,omitempty"`
 }
 
-// SetDefaults_EtcdConfig sets default values for EtcdConfig.
-func SetDefaults_EtcdConfig(cfg *EtcdConfig) {
+type EtcdClusterConfig struct {
+	ClientPort   *int              `json:"clientPort,omitempty" yaml:"clientPort,omitempty"`
+	PeerPort     *int              `json:"peerPort,omitempty" yaml:"peerPort,omitempty"`
+	DataDir      *string           `json:"dataDir,omitempty" yaml:"dataDir,omitempty"`
+	ClusterToken string            `json:"clusterToken,omitempty" yaml:"clusterToken,omitempty"`
+	ExtraArgs    map[string]string `json:"extraArgs,omitempty" yaml:"extraArgs,omitempty"`
+}
+
+type EtcdBackupConfig struct {
+	BackupDir   *string `json:"dir,omitempty" yaml:"dir,omitempty"`
+	PeriodHours *int    `json:"periodHours,omitempty" yaml:"periodHours,omitempty"`
+	KeepNumber  *int    `json:"keepNumber,omitempty" yaml:"keepNumber,omitempty"`
+	ScriptPath  *string `json:"scriptPath,omitempty" yaml:"scriptPath,omitempty"`
+}
+
+type EtcdPerformanceTuning struct {
+	HeartbeatIntervalMillis *int    `json:"heartbeatIntervalMillis,omitempty" yaml:"heartbeatIntervalMillis,omitempty"`
+	ElectionTimeoutMillis   *int    `json:"electionTimeoutMillis,omitempty" yaml:"electionTimeoutMillis,omitempty"`
+	SnapshotCount           *uint64 `json:"snapshotCount,omitempty" yaml:"snapshotCount,omitempty"`
+	AutoCompactionRetention *int    `json:"autoCompactionRetention,omitempty" yaml:"autoCompactionRetention,omitempty"`
+	QuotaBackendBytes       *int64  `json:"quotaBackendBytes,omitempty" yaml:"quotaBackendBytes,omitempty"`
+	MaxRequestBytes         *uint   `json:"maxRequestBytes,omitempty" yaml:"maxRequestBytes,omitempty"`
+	MaxSnapshots            *uint   `json:"maxSnapshots,omitempty" yaml:"maxSnapshots,omitempty"`
+	MaxWALs                 *uint   `json:"maxWals,omitempty" yaml:"maxWals,omitempty"`
+	Metrics                 *string `json:"metrics,omitempty" yaml:"metrics,omitempty"`
+	LogLevel                *string `json:"logLevel,omitempty" yaml:"logLevel,omitempty"`
+}
+
+func SetDefaults_Etcd(cfg *Etcd) {
 	if cfg == nil {
 		return
 	}
+
 	if cfg.Type == "" {
-		cfg.Type = EtcdTypeKubeXMSInternal
+		cfg.Type = string(common.EtcdDeploymentTypeKubexm)
 	}
-	if cfg.ClientPort == nil {
-		defaultPort := 2379
-		cfg.ClientPort = &defaultPort
+
+	if cfg.Type == string(common.EtcdDeploymentTypeKubexm) {
+		if cfg.ClusterConfig == nil {
+			cfg.ClusterConfig = &EtcdClusterConfig{}
+		}
+		SetDefaults_EtcdClusterConfig(cfg.ClusterConfig)
+
+		if cfg.BackupConfig == nil {
+			cfg.BackupConfig = &EtcdBackupConfig{}
+		}
+		SetDefaults_EtcdBackupConfig(cfg.BackupConfig)
+
+		if cfg.PerformanceTuning == nil {
+			cfg.PerformanceTuning = &EtcdPerformanceTuning{}
+		}
+		SetDefaults_EtcdPerformanceTuning(cfg.PerformanceTuning)
 	}
-	if cfg.PeerPort == nil {
-		defaultPort := 2380
-		cfg.PeerPort = &defaultPort
-	}
-	if cfg.DataDir == nil {
-		defaultDataDir := "/var/lib/etcd"
-		cfg.DataDir = &defaultDataDir
-	}
-	if cfg.ClusterToken == "" {
-		cfg.ClusterToken = "kubexm-etcd-default-token"
-	}
-	if cfg.Type == EtcdTypeExternal && cfg.External == nil {
+
+	if cfg.Type == string(common.EtcdDeploymentTypeExternal) && cfg.External == nil {
 		cfg.External = &ExternalEtcdConfig{}
-	}
-	if cfg.External != nil && len(cfg.External.Endpoints) == 0 { // Fixed: check length of Endpoints
-		cfg.External.Endpoints = []string{}
-	}
-	if cfg.ExtraArgs == nil {
-		cfg.ExtraArgs = []string{}
-	}
-	if cfg.BackupDir == nil {
-		defaultBackupDir := "/var/backups/etcd"
-		cfg.BackupDir = &defaultBackupDir
-	}
-	if cfg.BackupPeriodHours == nil {
-		defaultBackupPeriod := 24
-		cfg.BackupPeriodHours = &defaultBackupPeriod
-	}
-	if cfg.KeepBackupNumber == nil {
-		defaultKeepBackups := 7
-		cfg.KeepBackupNumber = &defaultKeepBackups
-	}
-	if cfg.HeartbeatIntervalMillis == nil {
-		hb := 250
-		cfg.HeartbeatIntervalMillis = &hb
-	}
-	if cfg.ElectionTimeoutMillis == nil {
-		et := 5000
-		cfg.ElectionTimeoutMillis = &et
-	}
-	if cfg.SnapshotCount == nil {
-		var sc uint64 = 10000
-		cfg.SnapshotCount = &sc
-	}
-	if cfg.AutoCompactionRetentionHours == nil {
-		acr := 8
-		cfg.AutoCompactionRetentionHours = &acr
-	}
-	if cfg.QuotaBackendBytes == nil {
-		var qbb int64 = 2147483648
-		cfg.QuotaBackendBytes = &qbb
-	}
-	if cfg.MaxRequestBytes == nil {
-		var mrb uint = 1572864
-		cfg.MaxRequestBytes = &mrb
-	}
-	if cfg.Metrics == nil {
-		m := "basic"
-		cfg.Metrics = &m
-	}
-	if cfg.LogLevel == nil {
-		l := "info"
-		cfg.LogLevel = &l
-	}
-	if cfg.MaxSnapshotsToKeep == nil {
-		var ms uint = 5
-		cfg.MaxSnapshotsToKeep = &ms
-	}
-	if cfg.MaxWALsToKeep == nil {
-		var mw uint = 5
-		cfg.MaxWALsToKeep = &mw
 	}
 }
 
-// Validate_EtcdConfig validates EtcdConfig.
-func Validate_EtcdConfig(cfg *EtcdConfig, verrs *ValidationErrors, pathPrefix string) {
+func SetDefaults_EtcdClusterConfig(cfg *EtcdClusterConfig) {
+	if cfg.ClientPort == nil {
+		cfg.ClientPort = helpers.IntPtr(common.DefaultEtcdClientPort)
+	}
+	if cfg.PeerPort == nil {
+		cfg.PeerPort = helpers.IntPtr(common.DefaultEtcdPeerPort)
+	}
+	if cfg.DataDir == nil {
+		cfg.DataDir = helpers.StrPtr(common.EtcdDefaultDataDirTarget)
+	}
+	if cfg.ClusterToken == "" {
+		cfg.ClusterToken = common.DefaultEtcdClusterToken
+	}
+}
+
+func SetDefaults_EtcdBackupConfig(cfg *EtcdBackupConfig) {
+	if cfg.BackupDir == nil {
+		cfg.BackupDir = helpers.StrPtr(common.DefaultEtcdBackupDir)
+	}
+	if cfg.PeriodHours == nil {
+		cfg.PeriodHours = helpers.IntPtr(common.DefaultBackupInterval)
+	}
+	if cfg.KeepNumber == nil {
+		cfg.KeepNumber = helpers.IntPtr(common.DefaultEtcdKeepBackups)
+	}
+	if cfg.ScriptPath == nil {
+		cfg.ScriptPath = helpers.StrPtr(common.DefaultEtcdScriptPath)
+	}
+}
+
+func SetDefaults_EtcdPerformanceTuning(cfg *EtcdPerformanceTuning) {
+	if cfg.HeartbeatIntervalMillis == nil {
+		cfg.HeartbeatIntervalMillis = helpers.IntPtr(common.DefaultEtcdHeartbeatInterval)
+	}
+	if cfg.ElectionTimeoutMillis == nil {
+		cfg.ElectionTimeoutMillis = helpers.IntPtr(common.DefaultEtcdElectionTimeout)
+	}
+	if cfg.SnapshotCount == nil {
+		cfg.SnapshotCount = helpers.Uint64Ptr(common.DefaultEtcdSnapshotCount)
+	}
+	if cfg.AutoCompactionRetention == nil {
+		cfg.AutoCompactionRetention = helpers.IntPtr(common.DefaultEtcdAutoCompactionRetention)
+	}
+	if cfg.QuotaBackendBytes == nil {
+		cfg.QuotaBackendBytes = helpers.Int64Ptr(common.DefaultEtcdQuotaBackendBytes)
+	}
+	if cfg.MaxRequestBytes == nil {
+		cfg.MaxRequestBytes = helpers.UintPtr(common.DefaultEtcdMaxRequestBytes)
+	}
+	if cfg.Metrics == nil {
+		cfg.Metrics = helpers.StrPtr(common.DefaultEtcdMetrics)
+	}
+	if cfg.LogLevel == nil {
+		cfg.LogLevel = helpers.StrPtr(common.DefaultEtcdLogLevel)
+	}
+	if cfg.MaxSnapshots == nil {
+		cfg.MaxSnapshots = helpers.UintPtr(common.DefaultEtcdMaxSnapshots)
+	}
+	if cfg.MaxWALs == nil {
+		cfg.MaxWALs = helpers.UintPtr(common.DefaultEtcdMaxWALs)
+	}
+}
+
+func Validate_Etcd(cfg *Etcd, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
-	validTypes := []string{EtcdTypeKubeXMSInternal, EtcdTypeExternal, EtcdTypeInternal, ""} // Allow empty for default
-	if !containsString(validTypes, cfg.Type) {                                              // Using local containsString, assuming ValidationErrors is from cluster_types.go
-		verrs.Add(pathPrefix + ".type: invalid type '" + cfg.Type + "', must be one of " + fmt.Sprintf("%v", validTypes))
+	p := path.Join(pathPrefix)
+
+	if !helpers.ContainsString(common.SupportedEtcdDeploymentTypes, cfg.Type) {
+		verrs.Add(fmt.Sprintf("%s.type: invalid type '%s', must be one of %v",
+			p, cfg.Type, common.SupportedEtcdDeploymentTypes))
 	}
-	if cfg.Type == EtcdTypeExternal {
+
+	if cfg.Type == string(common.EtcdDeploymentTypeExternal) {
 		if cfg.External == nil {
-			verrs.Add(pathPrefix + ".external: must be defined if etcd.type is '" + EtcdTypeExternal + "'")
+			verrs.Add(path.Join(p, "external") + ": must be defined if etcd.type is 'external'")
 		} else {
-			if len(cfg.External.Endpoints) == 0 {
-				verrs.Add(pathPrefix + ".external.endpoints: must contain at least one endpoint if etcd.type is '" + EtcdTypeExternal + "'")
-			}
-			for i, ep := range cfg.External.Endpoints {
-				if strings.TrimSpace(ep) == "" {
-					verrs.Add(pathPrefix + ".external.endpoints[" + fmt.Sprintf("%d", i) + "]: endpoint cannot be empty")
-				}
-			}
-			if (cfg.External.CertFile != "" && cfg.External.KeyFile == "") || (cfg.External.CertFile == "" && cfg.External.KeyFile != "") {
-				verrs.Add(pathPrefix + ".external: certFile and keyFile must be specified together for mTLS")
-			}
+			Validate_ExternalEtcdConfig(cfg.External, verrs, path.Join(p, "external"))
+		}
+		if cfg.ClusterConfig != nil {
+			verrs.Add(path.Join(p, "cluster") + ": cannot be set when etcd.type is 'external'")
+		}
+		if cfg.BackupConfig != nil {
+			verrs.Add(path.Join(p, "backup") + ": cannot be set when etcd.type is 'external'")
+		}
+		if cfg.PerformanceTuning != nil {
+			verrs.Add(path.Join(p, "performance") + ": cannot be set when etcd.type is 'external'")
+		}
+
+	} else if cfg.Type == string(common.EtcdDeploymentTypeKubexm) {
+		if cfg.External != nil {
+			verrs.Add(path.Join(p, "external") + ": cannot be set when etcd.type is not 'external'")
+		}
+		if cfg.ClusterConfig != nil {
+			Validate_EtcdClusterConfig(cfg.ClusterConfig, verrs, path.Join(p, "cluster"))
+		}
+		if cfg.BackupConfig != nil {
+			Validate_EtcdBackupConfig(cfg.BackupConfig, verrs, path.Join(p, "backup"))
+		}
+		if cfg.PerformanceTuning != nil {
+			Validate_EtcdPerformanceTuning(cfg.PerformanceTuning, verrs, path.Join(p, "performance"))
 		}
 	}
+}
+
+func Validate_ExternalEtcdConfig(cfg *ExternalEtcdConfig, verrs *validation.ValidationErrors, pathPrefix string) {
+	if len(cfg.Endpoints) == 0 {
+		verrs.Add(pathPrefix + ".endpoints: must contain at least one endpoint")
+	}
+	for i, ep := range cfg.Endpoints {
+		if strings.TrimSpace(ep) == "" {
+			verrs.Add(fmt.Sprintf("%s.endpoints[%d]: endpoint cannot be empty", pathPrefix, i))
+		}
+	}
+	if (cfg.CertFile != "" && cfg.KeyFile == "") || (cfg.CertFile == "" && cfg.KeyFile != "") {
+		verrs.Add(pathPrefix + ": certFile and keyFile must be specified together for mTLS")
+	}
+}
+
+func Validate_EtcdClusterConfig(cfg *EtcdClusterConfig, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg.ClientPort != nil && (*cfg.ClientPort <= 0 || *cfg.ClientPort > 65535) {
-		verrs.Add(pathPrefix + ".clientPort: invalid port " + fmt.Sprintf("%d", *cfg.ClientPort) + ", must be between 1-65535")
+		verrs.Add(fmt.Sprintf("%s.clientPort: invalid port %d, must be between 1-65535", pathPrefix, *cfg.ClientPort))
 	}
 	if cfg.PeerPort != nil && (*cfg.PeerPort <= 0 || *cfg.PeerPort > 65535) {
-		verrs.Add(pathPrefix + ".peerPort: invalid port " + fmt.Sprintf("%d", *cfg.PeerPort) + ", must be between 1-65535")
+		verrs.Add(fmt.Sprintf("%s.peerPort: invalid port %d, must be between 1-65535", pathPrefix, *cfg.PeerPort))
 	}
 	if cfg.DataDir != nil && strings.TrimSpace(*cfg.DataDir) == "" {
 		verrs.Add(pathPrefix + ".dataDir: cannot be empty if specified")
@@ -171,69 +217,69 @@ func Validate_EtcdConfig(cfg *EtcdConfig, verrs *ValidationErrors, pathPrefix st
 	if strings.TrimSpace(cfg.ClusterToken) == "" {
 		verrs.Add(pathPrefix + ".clusterToken: cannot be empty")
 	}
-	if cfg.BackupPeriodHours != nil && *cfg.BackupPeriodHours < 0 {
-		verrs.Add(pathPrefix + ".backupPeriodHours: cannot be negative, got " + fmt.Sprintf("%d", *cfg.BackupPeriodHours))
+}
+
+func Validate_EtcdBackupConfig(cfg *EtcdBackupConfig, verrs *validation.ValidationErrors, pathPrefix string) {
+	if cfg.PeriodHours != nil && *cfg.PeriodHours < 0 {
+		verrs.Add(fmt.Sprintf("%s.periodHours: cannot be negative, got %d", pathPrefix, *cfg.PeriodHours))
 	}
-	if cfg.KeepBackupNumber != nil && *cfg.KeepBackupNumber < 0 {
-		verrs.Add(pathPrefix + ".keepBackupNumber: cannot be negative, got " + fmt.Sprintf("%d", *cfg.KeepBackupNumber))
+	if cfg.KeepNumber != nil && *cfg.KeepNumber < 0 {
+		verrs.Add(fmt.Sprintf("%s.keepNumber: cannot be negative, got %d", pathPrefix, *cfg.KeepNumber))
 	}
+}
+
+func Validate_EtcdPerformanceTuning(cfg *EtcdPerformanceTuning, verrs *validation.ValidationErrors, pathPrefix string) {
+	if cfg == nil {
+		return
+	}
+
 	if cfg.HeartbeatIntervalMillis != nil && *cfg.HeartbeatIntervalMillis <= 0 {
-		verrs.Add(pathPrefix + ".heartbeatIntervalMillis: must be positive, got " + fmt.Sprintf("%d", *cfg.HeartbeatIntervalMillis))
+		verrs.Add(fmt.Sprintf("%s.heartbeatIntervalMillis: must be positive, got %d",
+			pathPrefix, *cfg.HeartbeatIntervalMillis))
 	}
+
 	if cfg.ElectionTimeoutMillis != nil && *cfg.ElectionTimeoutMillis <= 0 {
-		verrs.Add(pathPrefix + ".electionTimeoutMillis: must be positive, got " + fmt.Sprintf("%d", *cfg.ElectionTimeoutMillis))
+		verrs.Add(fmt.Sprintf("%s.electionTimeoutMillis: must be positive, got %d",
+			pathPrefix, *cfg.ElectionTimeoutMillis))
 	}
-	if cfg.AutoCompactionRetentionHours != nil && *cfg.AutoCompactionRetentionHours < 0 {
-		verrs.Add(pathPrefix + ".autoCompactionRetentionHours: cannot be negative, got " + fmt.Sprintf("%d", *cfg.AutoCompactionRetentionHours))
+
+	if cfg.SnapshotCount != nil && *cfg.SnapshotCount == 0 {
+		verrs.Add(fmt.Sprintf("%s.snapshotCount: must be a positive value if set, got %d",
+			pathPrefix, *cfg.SnapshotCount))
 	}
+
+	if cfg.AutoCompactionRetention != nil && *cfg.AutoCompactionRetention < 0 {
+		verrs.Add(fmt.Sprintf("%s.autoCompactionRetention: cannot be negative, got %d",
+			pathPrefix, *cfg.AutoCompactionRetention))
+	}
+
 	if cfg.QuotaBackendBytes != nil && *cfg.QuotaBackendBytes < 0 {
-		verrs.Add(pathPrefix + ".quotaBackendBytes: cannot be negative, got " + fmt.Sprintf("%d", *cfg.QuotaBackendBytes))
+		verrs.Add(fmt.Sprintf("%s.quotaBackendBytes: cannot be negative, got %d",
+			pathPrefix, *cfg.QuotaBackendBytes))
 	}
+
 	if cfg.MaxRequestBytes != nil && *cfg.MaxRequestBytes == 0 {
-		verrs.Add(pathPrefix + ".maxRequestBytes: must be positive if set, got " + fmt.Sprintf("%d", *cfg.MaxRequestBytes))
+		verrs.Add(fmt.Sprintf("%s.maxRequestBytes: must be positive if set, got %d",
+			pathPrefix, *cfg.MaxRequestBytes))
 	}
-	if cfg.Metrics != nil && *cfg.Metrics != "" {
-		validMetrics := []string{"basic", "extensive"}
-		if !containsString(validMetrics, *cfg.Metrics) {
-			verrs.Add(pathPrefix + ".metrics: invalid value '" + *cfg.Metrics + "', must be 'basic' or 'extensive'")
-		}
-	}
-	if cfg.LogLevel != nil && *cfg.LogLevel != "" {
-		validLogLevels := []string{"debug", "info", "warn", "error", "panic", "fatal"}
-		if !containsString(validLogLevels, *cfg.LogLevel) {
-			verrs.Add(pathPrefix + ".logLevel: invalid value '" + *cfg.LogLevel + "'")
-		}
-	}
-}
 
-func (e *EtcdConfig) GetClientPort() int {
-	if e != nil && e.ClientPort != nil {
-		return *e.ClientPort
+	if cfg.MaxSnapshots != nil && *cfg.MaxSnapshots == 0 {
+		verrs.Add(fmt.Sprintf("%s.maxSnapshots: must be positive if set, got %d",
+			pathPrefix, *cfg.MaxSnapshots))
 	}
-	return 2379
-}
-func (e *EtcdConfig) GetPeerPort() int {
-	if e != nil && e.PeerPort != nil {
-		return *e.PeerPort
-	}
-	return 2380
-}
-func (e *EtcdConfig) GetDataDir() string {
-	if e != nil && e.DataDir != nil && *e.DataDir != "" {
-		return *e.DataDir
-	}
-	return "/var/lib/etcd"
-}
 
-// Assuming ValidationErrors and containsString are defined in cluster_types.go or a shared util.
-// type ValidationErrors struct{ Errors []string }
-// func (ve *ValidationErrors) Add(format string, args ...interface{}) { ve.Errors = append(ve.Errors, fmt.Sprintf(format, args...)) }
-// func containsString(slice []string, item string) bool { for _, s := range slice { if s == item { return true } }; return false }
-// NOTE: DeepCopy methods should be generated by controller-gen.
-// Removed ManagedEtcdTLSConfig from struct for now as it was a suggested improvement.
-// Fixed SetDefaults_EtcdConfig: length check for External.Endpoints.
-// Updated Validate_EtcdConfig to use local containsString if ValidationErrors is defined in cluster_types.go
-// and ensure pathPrefix is used in Add calls.
-// Corrected containsString usage in Validate_EtcdConfig.
-// Removed local stubs for ValidationErrors and containsString.
-// Added import "strings".
+	if cfg.MaxWALs != nil && *cfg.MaxWALs == 0 {
+		verrs.Add(fmt.Sprintf("%s.maxWals: must be positive if set, got %d",
+			pathPrefix, *cfg.MaxWALs))
+	}
+
+	if cfg.Metrics != nil && *cfg.Metrics != "" && !helpers.ContainsString(common.ValidEtcdMetricsLevels, *cfg.Metrics) {
+		verrs.Add(fmt.Sprintf("%s.metrics: invalid value '%s', must be one of %v",
+			pathPrefix, *cfg.Metrics, common.ValidEtcdMetricsLevels))
+	}
+
+	if cfg.LogLevel != nil && *cfg.LogLevel != "" && !helpers.ContainsString(common.ValidEtcdLogLevels, *cfg.LogLevel) {
+		verrs.Add(fmt.Sprintf("%s.logLevel: invalid value '%s', must be one of %v",
+			pathPrefix, *cfg.LogLevel, common.ValidEtcdLogLevels))
+	}
+}

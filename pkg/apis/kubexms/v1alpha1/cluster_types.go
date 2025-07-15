@@ -2,34 +2,24 @@ package v1alpha1
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1/helpers"
 	"github.com/mensylisir/kubexm/pkg/cache"
 	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/errors/validation"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"net"
+	"path"
 	"regexp"
 	"strings"
 	"time"
 )
 
-// +genclient
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// +kubebuilder:object:root=true
-// +kubebuilder:subresource:status
-// +kubebuilder:resource:path=clusters,scope=Namespaced,shortName=kc
-// +kubebuilder:printcolumn:name="Version",type="string",JSONPath=".spec.kubernetes.version",description="Kubernetes Version"
-// +kubebuilder:printcolumn:name="Hosts",type="integer",JSONPath=".spec.hostsCount",description="Number of hosts"
-// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
-
-// Cluster is the top-level configuration object.
 type Cluster struct {
 	metav1.TypeMeta   `json:",inline" yaml:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty" yaml:"metadata,omitempty"`
-	Spec              ClusterSpec `json:"spec,omitempty" yaml:"spec,omitempty"`
-	// Status field can be added here if needed by Kubebuilder/controller-gen
-	//Status ClusterStatus `json:"status,omitempty" yaml:"status,omitempty"`
+	Spec              *ClusterSpec `json:"spec,omitempty" yaml:"spec,omitempty"`
 }
 
-// ClusterSpec defines the desired state of the Kubernetes cluster.
 type ClusterSpec struct {
 	Hosts      []HostSpec      `json:"hosts" yaml:"hosts"`
 	RoleGroups *RoleGroupsSpec `json:"roleGroups,omitempty" yaml:"roleGroups,omitempty"`
@@ -56,11 +46,11 @@ type HostSpec struct {
 	Port            int               `json:"port,omitempty" yaml:"port,omitempty"`
 	User            string            `json:"user,omitempty" yaml:"user,omitempty"`
 	Password        string            `json:"password,omitempty" yaml:"password,omitempty"`
-	PrivateKey      string            `json:"privateKey,omitempty" yaml:"privateKey,omitempty"` // Added from design doc
+	PrivateKey      string            `json:"privateKey,omitempty" yaml:"privateKey,omitempty"`
 	PrivateKeyPath  string            `json:"privateKeyPath,omitempty" yaml:"privateKeyPath,omitempty"`
 	Labels          map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
 	Taints          []TaintSpec       `json:"taints,omitempty" yaml:"taints,omitempty"`
-	Type            string            `json:"type,omitempty" yaml:"type,omitempty"` // Was common.HostConnectionType
+	Type            string            `json:"type,omitempty" yaml:"type,omitempty"`
 	Arch            string            `json:"arch,omitempty" yaml:"arch,omitempty"`
 	Timeout         int64             `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	Roles           []string          `json:"-"`
@@ -81,38 +71,31 @@ type MasterRoleSpec struct {
 	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
-// WorkerRoleSpec defines the configuration for worker nodes.
 type WorkerRoleSpec struct {
 	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
-// EtcdRoleSpec defines the configuration for etcd nodes.
 type EtcdRoleSpec struct {
 	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
-// LoadBalancerRoleSpec defines the configuration for load balancer nodes.
 type LoadBalancerRoleSpec struct {
 	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
-// StorageRoleSpec defines the configuration for storage nodes.
 type StorageRoleSpec struct {
 	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
-// RegistryRoleSpec defines the configuration for registry nodes.
 type RegistryRoleSpec struct {
 	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
-// CustomRoleSpec defines a custom role group.
 type CustomRoleSpec struct {
 	Name  string   `json:"name" yaml:"name"`
 	Hosts []string `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 }
 
-// SystemSpec defines system-level configuration.
 type SystemSpec struct {
 	NTPServers         []string          `json:"ntpServers,omitempty" yaml:"ntpServers,omitempty"`
 	Timezone           string            `json:"timezone,omitempty" yaml:"timezone,omitempty"`
@@ -126,12 +109,11 @@ type SystemSpec struct {
 	SysctlParams       map[string]string `json:"sysctlParams,omitempty" yaml:"sysctlParams,omitempty"`
 }
 
-// GlobalSpec contains settings applicable to the entire cluster or as defaults for hosts.
 type GlobalSpec struct {
 	User              string        `json:"user,omitempty" yaml:"user,omitempty"`
 	Port              int           `json:"port,omitempty" yaml:"port,omitempty"`
 	Password          string        `json:"password,omitempty" yaml:"password,omitempty"`
-	PrivateKey        string        `json:"privateKey,omitempty" yaml:"privateKey,omitempty"` // Added from design doc
+	PrivateKey        string        `json:"privateKey,omitempty" yaml:"privateKey,omitempty"`
 	PrivateKeyPath    string        `json:"privateKeyPath,omitempty" yaml:"privateKeyPath,omitempty"`
 	ConnectionTimeout time.Duration `json:"connectionTimeout,omitempty" yaml:"connectionTimeout,omitempty"`
 	WorkDir           string        `json:"workDir,omitempty" yaml:"workDir,omitempty"`
@@ -141,407 +123,383 @@ type GlobalSpec struct {
 	SkipPreflight     bool          `json:"skipPreflight,omitempty" yaml:"skipPreflight,omitempty"`
 }
 
-// TaintSpec defines a Kubernetes node taint.
 type TaintSpec struct {
 	Key    string `json:"key" yaml:"key"`
 	Value  string `json:"value" yaml:"value"`
 	Effect string `json:"effect" yaml:"effect"`
 }
 
-// SetDefaults_Cluster sets default values for the Cluster configuration.
-func SetDefaults_Cluster(cfg *Cluster) {
-	if cfg == nil {
-		return
+func SetDefaults_Cluster(obj *Cluster) {
+	if obj.APIVersion == "" {
+		obj.APIVersion = common.DefaultAPIVersion
 	}
-	// Set TypeMeta defaults
-	if cfg.APIVersion == "" {
-		cfg.APIVersion = "kubexms.io/v1alpha1"
+	if obj.Kind == "" {
+		obj.Kind = common.DefaultKind
 	}
-	if cfg.Kind == "" {
-		cfg.Kind = "Cluster"
-	}
-	// cfg.SetGroupVersionKind(SchemeGroupVersion.WithKind("Cluster")) // Will be set by K8s machinery
-
-	if cfg.Spec.Type == "" {
-		cfg.Spec.Type = common.ClusterTypeKubeXM // Default to kubexm type
-	}
-
-	if cfg.Spec.Global == nil {
-		cfg.Spec.Global = &GlobalSpec{}
-	}
-	g := cfg.Spec.Global
-	if g.Port == 0 {
-		g.Port = common.DefaultSSHPort
-	}
-	if g.ConnectionTimeout == 0 {
-		g.ConnectionTimeout = common.DefaultConnectionTimeout
-	}
-	if g.WorkDir == "" {
-		g.WorkDir = common.DefaultRemoteWorkDir
-	}
-
-	for i := range cfg.Spec.Hosts {
-		host := &cfg.Spec.Hosts[i]
-		if host.Port == 0 && g != nil {
-			host.Port = g.Port
-		}
-		if host.User == "" && g != nil {
-			host.User = g.User
-		}
-		// Assuming PrivateKey takes precedence over PrivateKeyPath if both somehow set.
-		// Defaulting logic might need to be smarter if PrivateKey is directly provided.
-		if host.PrivateKeyPath == "" && host.PrivateKey == "" && g != nil {
-			host.PrivateKeyPath = g.PrivateKeyPath
-			host.PrivateKey = g.PrivateKey
-		}
-		if host.Type == "" {
-			host.Type = string(common.HostConnectionTypeSSH)
-		}
-		if host.Arch == "" {
-			host.Arch = common.DefaultArch
-		}
-		if host.Labels == nil {
-			host.Labels = make(map[string]string)
-		}
-		if host.Taints == nil {
-			host.Taints = []TaintSpec{}
-		}
-		if host.Roles == nil {
-			host.Roles = []string{}
-		}
-	}
-
-	if cfg.Spec.ContainerRuntime == nil {
-		cfg.Spec.ContainerRuntime = &ContainerRuntimeConfig{}
-	}
-	SetDefaults_ContainerRuntimeConfig(cfg.Spec.ContainerRuntime)
-	// Specific defaults for Docker/Containerd are called within SetDefaults_ContainerRuntimeConfig
-
-	if cfg.Spec.Etcd == nil {
-		cfg.Spec.Etcd = &EtcdConfig{}
-	}
-	SetDefaults_EtcdConfig(cfg.Spec.Etcd)
-
-	if cfg.Spec.RoleGroups == nil {
-		cfg.Spec.RoleGroups = &RoleGroupsSpec{}
-	}
-	// SetDefaults_RoleGroupsSpec might be needed if RoleGroupsSpec has defaults.
-
-	if cfg.Spec.ControlPlaneEndpoint == nil {
-		cfg.Spec.ControlPlaneEndpoint = &ControlPlaneEndpointSpec{}
-	}
-	SetDefaults_ControlPlaneEndpointSpec(cfg.Spec.ControlPlaneEndpoint)
-
-	if cfg.Spec.System == nil {
-		cfg.Spec.System = &SystemSpec{}
-	}
-	SetDefaults_SystemSpec(cfg.Spec.System)
-
-	if cfg.Spec.Kubernetes == nil {
-		cfg.Spec.Kubernetes = &KubernetesConfig{}
-	}
-	SetDefaults_KubernetesConfig(cfg.Spec.Kubernetes, cfg.ObjectMeta.Name)
-
-	if cfg.Spec.Network == nil {
-		cfg.Spec.Network = &NetworkConfig{}
-	}
-	SetDefaults_NetworkConfig(cfg.Spec.Network)
-
-	if cfg.Spec.HighAvailability == nil {
-		cfg.Spec.HighAvailability = &HighAvailabilityConfig{}
-	}
-	SetDefaults_HighAvailabilityConfig(cfg.Spec.HighAvailability)
-
-	if cfg.Spec.Preflight == nil {
-		cfg.Spec.Preflight = &PreflightConfig{}
-	}
-	SetDefaults_PreflightConfig(cfg.Spec.Preflight)
-
-	if cfg.Spec.Addons == nil {
-		cfg.Spec.Addons = []string{}
-	}
-
-	if cfg.Spec.Storage == nil {
-		cfg.Spec.Storage = &StorageConfig{}
-	}
-	SetDefaults_StorageConfig(cfg.Spec.Storage)
-
-	if cfg.Spec.Registry == nil {
-		cfg.Spec.Registry = &RegistryConfig{}
-	}
-	SetDefaults_RegistryConfig(cfg.Spec.Registry)
-
-	// Assuming DNS struct has a SetDefaults_DNS function if needed
-	SetDefaults_DNS(&cfg.Spec.DNS) // For non-pointer DNS field
+	SetDefaults_ClusterSpec(obj)
 }
 
-// SetDefaults_SystemSpec sets default values for SystemSpec.
-func SetDefaults_SystemSpec(cfg *SystemSpec) {
-	if cfg == nil {
+func SetDefaults_ClusterSpec(cluster *Cluster) {
+	if cluster.Spec == nil {
 		return
 	}
-	if cfg.NTPServers == nil {
-		cfg.NTPServers = []string{}
+
+	if cluster.Spec.Global == nil {
+		cluster.Spec.Global = &GlobalSpec{}
 	}
-	if cfg.RPMs == nil {
-		cfg.RPMs = []string{}
+	SetDefaults_GlobalSpec(cluster.Spec.Global)
+
+	for i := range cluster.Spec.Hosts {
+		SetDefaults_HostSpec(&cluster.Spec.Hosts[i], cluster)
 	}
-	if cfg.Debs == nil {
-		cfg.Debs = []string{}
+
+	if cluster.Spec.System == nil {
+		cluster.Spec.System = &SystemSpec{}
 	}
-	if cfg.Modules == nil {
-		cfg.Modules = []string{}
+	SetDefaults_SystemSpec(cluster.Spec.System)
+
+	if cluster.Spec.Kubernetes == nil {
+		cluster.Spec.Kubernetes = &Kubernetes{}
 	}
-	if cfg.SysctlParams == nil {
-		cfg.SysctlParams = make(map[string]string)
+	SetDefaults_Kubernetes(cluster.Spec.Kubernetes)
+
+	if cluster.Spec.Network == nil {
+		cluster.Spec.Network = &Network{}
 	}
-	// Set default sysctl parameters for Kubernetes
-	if len(cfg.SysctlParams) == 0 {
-		cfg.SysctlParams["net.bridge.bridge-nf-call-iptables"] = "1"
+	SetDefaults_Network(cluster.Spec.Network)
+
+	if cluster.Spec.ControlPlaneEndpoint == nil {
+		cluster.Spec.ControlPlaneEndpoint = &ControlPlaneEndpointSpec{}
 	}
-	if cfg.PreInstallScripts == nil {
-		cfg.PreInstallScripts = []string{}
+	SetDefaults_ControlPlaneEndpointSpec(cluster.Spec.ControlPlaneEndpoint)
+
+	if cluster.Spec.Storage == nil {
+		cluster.Spec.Storage = &Storage{}
 	}
-	if cfg.PostInstallScripts == nil {
-		cfg.PostInstallScripts = []string{}
+	SetDefaults_Storage(cluster.Spec.Storage)
+
+	if cluster.Spec.Registry == nil {
+		cluster.Spec.Registry = &Registry{}
+	}
+	SetDefaults_Registry(cluster.Spec.Registry)
+
+	if cluster.Spec.Etcd == nil {
+		cluster.Spec.Etcd = &Etcd{}
+	}
+	SetDefaults_Etcd(cluster.Spec.Etcd)
+	if cluster.Spec.DNS == nil {
+		cluster.Spec.DNS = &DNS{}
+	}
+	SetDefaults_DNS(cluster.Spec.DNS)
+	if cluster.Spec.Preflight == nil {
+		cluster.Spec.Preflight = &Preflight{}
+	}
+	SetDefaults_Preflight(cluster.Spec.Preflight)
+}
+
+func SetDefaults_GlobalSpec(spec *GlobalSpec) {
+	if spec.User == "" {
+		spec.User = common.DefaultUser
+	}
+	if spec.Port == 0 {
+		spec.Port = common.DefaultPort
+	}
+	if spec.ConnectionTimeout == 0 {
+		spec.ConnectionTimeout = common.DefaultTimeout
+	}
+	if spec.WorkDir == "" {
+		workDir, _ := helpers.GenerateWorkDir()
+		spec.WorkDir = workDir
 	}
 }
 
-// Validate_Cluster validates the Cluster configuration.
-func Validate_Cluster(cfg *Cluster) error {
-	verrs := &ValidationErrors{}
-	// GroupVersion and Kind are usually set by K8s API server or client libraries
-	// if cfg.APIVersion != SchemeGroupVersion.Group+"/"+SchemeGroupVersion.Version {
-	// 	verrs.Add("apiVersion: must be %s/%s, got %s", SchemeGroupVersion.Group, SchemeGroupVersion.Version, cfg.APIVersion)
-	// }
-	// if cfg.Kind != "Cluster" {
-	// 	verrs.Add("kind: must be Cluster, got %s", cfg.Kind)
-	// }
-	if strings.TrimSpace(cfg.ObjectMeta.Name) == "" {
+func SetDefaults_HostSpec(spec *HostSpec, cluster *Cluster) {
+	if spec.User == "" {
+		spec.User = cluster.Spec.Global.User
+	}
+	if spec.Port == 0 {
+		spec.Port = cluster.Spec.Global.Port
+	}
+	if spec.Password == "" && cluster.Spec.Global.Password != "" {
+		spec.Password = cluster.Spec.Global.Password
+	}
+	if spec.PrivateKey == "" && cluster.Spec.Global.PrivateKey != "" {
+		spec.PrivateKey = cluster.Spec.Global.PrivateKey
+	}
+	if spec.PrivateKeyPath == "" && cluster.Spec.Global.PrivateKeyPath != "" {
+		spec.PrivateKeyPath = cluster.Spec.Global.PrivateKeyPath
+	}
+	if spec.Arch == "" {
+		spec.Arch = common.ArchAMD64
+	}
+	_, _ = helpers.GenerateHostWorkDir(cluster.ObjectMeta.Name, cluster.Spec.Global.WorkDir, spec.Name)
+}
+
+func SetDefaults_SystemSpec(spec *SystemSpec) {
+	if spec.Timezone == "" {
+		spec.Timezone = "UTC"
+	}
+}
+
+func Validate_Cluster(obj *Cluster, verrs *validation.ValidationErrors) {
+	if obj.APIVersion != common.DefaultAPIVersion {
+		verrs.Add(fmt.Sprintf("apiVersion: must be '%s'", common.DefaultAPIVersion))
+	}
+	if obj.Kind != common.DefaultKind {
+		verrs.Add("kind: must be %s", common.DefaultKind)
+	}
+	if obj.Name == "" {
 		verrs.Add("metadata.name: cannot be empty")
 	}
+	Validate_ClusterSpec(obj.Spec, verrs, "spec")
+}
 
-	validClusterTypes := []string{common.ClusterTypeKubeXM, common.ClusterTypeKubeadm, ""} // Allow empty for default
-	isValidClusterType := false
-	for _, vt := range validClusterTypes {
-		if cfg.Spec.Type == vt {
-			isValidClusterType = true
-			break
-		}
+func Validate_ClusterSpec(spec *ClusterSpec, verrs *validation.ValidationErrors, pathPrefix string) {
+	if spec == nil {
+		verrs.Add(pathPrefix + ": spec section cannot be nil")
+		return
 	}
-	if !isValidClusterType {
-		verrs.Add("spec.type: invalid cluster type '" + cfg.Spec.Type + "', must be one of " + fmt.Sprintf("%v", validClusterTypes))
-	}
+	p := path.Join(pathPrefix)
 
-	if cfg.Spec.Global != nil {
-		g := cfg.Spec.Global
-		if g.Port != 0 && (g.Port <= 0 || g.Port > 65535) {
-			verrs.Add("spec.global.port: " + fmt.Sprintf("%d", g.Port) + " is invalid, must be between 1 and 65535 or 0 for default")
-		}
-	}
-	if len(cfg.Spec.Hosts) == 0 {
-		verrs.Add("spec.hosts: must contain at least one host")
+	if len(spec.Hosts) == 0 {
+		verrs.Add(p + ".hosts: at least one host must be defined")
 	}
 	hostNames := make(map[string]bool)
-	for i, host := range cfg.Spec.Hosts {
-		pathPrefix := fmt.Sprintf("spec.hosts[%d:%s]", i, host.Name)
-		if strings.TrimSpace(host.Name) == "" {
-			pathPrefix = fmt.Sprintf("spec.hosts[%d]", i)
-			verrs.Add(pathPrefix + ".name: cannot be empty")
-		} else {
-			if _, exists := hostNames[host.Name]; exists {
-				verrs.Add(pathPrefix + ".name: '" + host.Name + "' is duplicated")
+	hostAddresses := make(map[string]bool)
+	for i, host := range spec.Hosts {
+		hostPath := fmt.Sprintf("%s.hosts[%d]", p, i)
+		Validate_HostSpec(&host, verrs, hostPath)
+		if host.Name != "" {
+			if hostNames[host.Name] {
+				verrs.Add(fmt.Sprintf("%s.name: duplicate host name '%s'", hostPath, host.Name))
 			}
 			hostNames[host.Name] = true
 		}
-		if strings.TrimSpace(host.Address) == "" {
-			verrs.Add(pathPrefix + ".address: cannot be empty")
-		} else {
-			// Basic validation for IP or hostname
-			if net.ParseIP(host.Address) == nil { // Not an IP
-				// Check if it's a valid hostname (simple regex, can be more complex)
-				if matched, _ := regexp.MatchString(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`, host.Address); !matched {
-					verrs.Add(pathPrefix + ".address: '" + host.Address + "' is not a valid IP address or hostname")
+		if host.Address != "" {
+			if hostAddresses[host.Address] {
+				verrs.Add(fmt.Sprintf("%s.address: duplicate host address '%s'", hostPath, host.Address))
+			}
+			hostAddresses[host.Address] = true
+		}
+	}
+
+	if spec.RoleGroups == nil {
+		verrs.Add(p + ".roleGroups: is a required section")
+	} else {
+		allHostsInRoles := make(map[string]bool)
+		roleGroupsPath := path.Join(p, "roleGroups")
+		validateRoleGroup := func(roleHosts []string, roleName string) {
+			for _, hostName := range roleHosts {
+				if !hostNames[hostName] {
+					verrs.Add(fmt.Sprintf("%s.%s: host '%s' is not defined in the hosts list", roleGroupsPath, roleName, hostName))
 				}
+				allHostsInRoles[hostName] = true
 			}
 		}
-		if host.Port != 0 && (host.Port <= 0 || host.Port > 65535) { // Port 0 is defaulted
-			verrs.Add(pathPrefix + ".port: " + fmt.Sprintf("%d", host.Port) + " is invalid, must be between 1 and 65535")
-		}
-		if host.User == "" && host.Type != string(common.HostConnectionTypeLocal) { // User can be empty for local type
-			// User can be defaulted from GlobalSpec as well. Actual check should be post-defaulting.
-			// This check is simplified here.
-			verrs.Add(pathPrefix + ".user: cannot be empty (after defaults)")
-		}
-
-		if host.Type != string(common.HostConnectionTypeLocal) && host.Type != string(common.HostConnectionTypeSSH) && host.Type != "" {
-			verrs.Add(pathPrefix + ".type: invalid host type '" + host.Type + "', must be 'local', 'ssh' or empty for default")
-		}
-		if host.Type == string(common.HostConnectionTypeSSH) {
-			if host.Password == "" && host.PrivateKey == "" && host.PrivateKeyPath == "" {
-				verrs.Add(pathPrefix + ": no SSH authentication method provided for ssh host type")
+		validateRoleGroup(spec.RoleGroups.Master, "master")
+		validateRoleGroup(spec.RoleGroups.Worker, "worker")
+		validateRoleGroup(spec.RoleGroups.Etcd, "etcd")
+		validateRoleGroup(spec.RoleGroups.Registry, "registry")
+		validateRoleGroup(spec.RoleGroups.LoadBalancer, "loadbalancer")
+		validateRoleGroup(spec.RoleGroups.Storage, "storage")
+		for hostName := range hostNames {
+			if !allHostsInRoles[hostName] {
+				verrs.Add(fmt.Sprintf("%s: host '%s' is defined but not assigned to any role in roleGroups", p, hostName))
 			}
 		}
-		// Arch validation could use common.SupportedArches
+
+		if len(spec.RoleGroups.Master) == 0 {
+			verrs.Add(roleGroupsPath + ".master: at least one master host is required")
+		}
 	}
 
-	if cfg.Spec.ContainerRuntime != nil {
-		Validate_ContainerRuntimeConfig(cfg.Spec.ContainerRuntime, verrs, "spec.containerRuntime")
+	if spec.Global != nil {
+		Validate_GlobalSpec(spec.Global, verrs, path.Join(p, "global"))
+	}
+
+	if spec.Kubernetes != nil {
+		Validate_Kubernetes(spec.Kubernetes, verrs, path.Join(p, "kubernetes"))
 	} else {
-		verrs.Add("spec.containerRuntime: section is required")
+		verrs.Add(p + ".kubernetes: is a required section")
 	}
 
-	if cfg.Spec.Etcd != nil {
-		Validate_EtcdConfig(cfg.Spec.Etcd, verrs, "spec.etcd")
+	if spec.Etcd != nil {
+		Validate_Etcd(spec.Etcd, verrs, path.Join(p, "etcd"))
 	} else {
-		verrs.Add("spec.etcd: section is required")
+		verrs.Add(p + ".etcd: is a required section")
 	}
 
-	// RoleGroups validation can be complex, ensuring hosts listed exist in spec.hosts
-	// Validate_RoleGroupsSpec(cfg.Spec.RoleGroups, verrs, "spec.roleGroups", hostNames)
-
-	if cfg.Spec.ControlPlaneEndpoint != nil {
-		Validate_ControlPlaneEndpointSpec(cfg.Spec.ControlPlaneEndpoint, verrs, "spec.controlPlaneEndpoint")
+	if spec.Network != nil {
+		Validate_Network(spec.Network, verrs, path.Join(p, "network"))
 	} else {
-		verrs.Add("spec.controlPlaneEndpoint: section is required for HA or accessible clusters")
+		verrs.Add(p + ".network: is a required section")
 	}
 
-	if cfg.Spec.System != nil {
-		Validate_SystemSpec(cfg.Spec.System, verrs, "spec.system")
-	}
-
-	if cfg.Spec.Kubernetes != nil {
-		Validate_KubernetesConfig(cfg.Spec.Kubernetes, verrs, "spec.kubernetes")
+	if spec.ControlPlaneEndpoint != nil {
+		Validate_ControlPlaneEndpointSpec(spec.ControlPlaneEndpoint, verrs, path.Join(p, "controlPlaneEndpoint"))
 	} else {
-		verrs.Add("spec.kubernetes: section is required")
+		if spec.RoleGroups != nil && len(spec.RoleGroups.Master) > 1 {
+			verrs.Add(p + ".controlPlaneEndpoint: is a required section for multi-master setup")
+		}
 	}
 
-	if cfg.Spec.Network != nil {
-		Validate_NetworkConfig(cfg.Spec.Network, verrs, "spec.network", cfg.Spec.Kubernetes)
-	} else {
-		verrs.Add("spec.network: section is required")
+	if spec.System != nil {
+		Validate_SystemSpec(spec.System, verrs, path.Join(p, "system"))
 	}
 
-	if cfg.Spec.HighAvailability != nil {
-		Validate_HighAvailabilityConfig(cfg.Spec.HighAvailability, verrs, "spec.highAvailability")
-	}
-	if cfg.Spec.Preflight != nil {
-		Validate_PreflightConfig(cfg.Spec.Preflight, verrs, "spec.preflight")
+	if spec.DNS != nil {
+		Validate_DNS(spec.DNS, verrs, path.Join(p, "dns"))
 	}
 
-	if cfg.Spec.Storage != nil {
-		Validate_StorageConfig(cfg.Spec.Storage, verrs, "spec.storage")
+	if spec.Storage != nil {
+		Validate_Storage(spec.Storage, verrs, path.Join(p, "storage"))
 	}
-	if cfg.Spec.Registry != nil {
-		Validate_RegistryConfig(cfg.Spec.Registry, verrs, "spec.registry")
-	}
-	// Validate DNS
-	Validate_DNS(&cfg.Spec.DNS, verrs, "spec.dns") // For non-pointer DNS field
 
-	if !verrs.IsEmpty() {
-		return verrs
+	if spec.Registry != nil {
+		Validate_Registry(spec.Registry, verrs, path.Join(p, "registry"))
 	}
-	return nil
+
+	for i, addon := range spec.Addons {
+		Validate_Addon(&addon, verrs, fmt.Sprintf("%s.addons[%d]", p, i))
+	}
+
+	if spec.Preflight != nil {
+		Validate_Preflight(spec.Preflight, verrs, path.Join(p, "preflight"))
+	}
+
+	if spec.Extra != nil {
+		Validate_Extra(spec.Extra, verrs, path.Join(p, "extra"))
+	}
 }
 
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-type ClusterList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []Cluster `json:"items"`
+func Validate_HostSpec(spec *HostSpec, verrs *validation.ValidationErrors, pathPrefix string) {
+	if spec.Name == "" {
+		verrs.Add(pathPrefix + ".name: is a required field")
+	}
+	if spec.Address == "" {
+		verrs.Add(pathPrefix + ".address: is a required field")
+	} else if net.ParseIP(spec.Address) == nil {
+		verrs.Add(fmt.Sprintf("%s.address: invalid IP address format for '%s'", pathPrefix, spec.Address))
+	}
+
+	authMethods := 0
+	if spec.Password != "" {
+		authMethods++
+	}
+	if spec.PrivateKey != "" {
+		authMethods++
+	}
+	if spec.PrivateKeyPath != "" {
+		authMethods++
+	}
+	if authMethods > 1 {
+		verrs.Add(pathPrefix + ": only one of password, privateKey, or privateKeyPath can be set")
+	}
+	if authMethods == 0 {
+		verrs.Add(pathPrefix + ": one of password, privateKey, or privateKeyPath is required for SSH authentication")
+	}
+
+	for i, taint := range spec.Taints {
+		Validate_TaintSpec(&taint, verrs, fmt.Sprintf("%s.taints[%d]", pathPrefix, i))
+	}
 }
 
-// All placeholder types and functions below were causing redeclaration errors
-// and have been removed. The actual definitions reside in their respective
-// xxx_types.go files within the same package.
-// For example, KubernetesConfig, EtcdConfig, etc., and their SetDefaults/Validate functions
-// are expected to be in kubernetes_types.go, etcd_types.go etc.
-// The simplified DeepCopy methods from the prompt are also removed,
-// relying on controller-gen for correct generation.
-// SchemeGroupVersion needs to be defined, typically in groupversion_info.go
-var SchemeGroupVersion = metav1.GroupVersion{Group: "kubexms.io", Version: "v1alpha1"}
+func Validate_TaintSpec(spec *TaintSpec, verrs *validation.ValidationErrors, pathPrefix string) {
+	if spec.Key == "" {
+		verrs.Add(pathPrefix + ".key: cannot be empty")
+	}
+	validEffects := []string{"NoSchedule", "PreferNoSchedule", "NoExecute"}
+	if !helpers.ContainsString(validEffects, spec.Effect) {
+		verrs.Add(fmt.Sprintf("%s.effect: invalid effect '%s', must be one of [%s]",
+			pathPrefix, spec.Effect, strings.Join(validEffects, ", ")))
+	}
+}
 
-// Validate_SystemSpec validates system configuration
-func Validate_SystemSpec(cfg *SystemSpec, verrs *ValidationErrors, pathPrefix string) {
-	if cfg == nil {
+func Validate_GlobalSpec(spec *GlobalSpec, verrs *validation.ValidationErrors, pathPrefix string) {
+	if spec == nil {
 		return
 	}
+	p := path.Join(pathPrefix)
 
-	// Validate timezone
-	if cfg.Timezone != "" {
-		if strings.TrimSpace(cfg.Timezone) == "" {
-			verrs.Add(pathPrefix + ".timezone: cannot be only whitespace if specified")
-		} else if !strings.Contains(cfg.Timezone, "/") && cfg.Timezone != "UTC" {
-			verrs.Add(pathPrefix + ".timezone: '" + cfg.Timezone + "' may not be a valid timezone")
-		}
+	if strings.TrimSpace(spec.User) == "" {
+		verrs.Add(p + ".user: cannot be empty")
 	}
 
-	// Validate package manager
-	if cfg.PackageManager != "" {
-		if strings.TrimSpace(cfg.PackageManager) == "" {
-			verrs.Add(pathPrefix + ".packageManager: cannot be only whitespace if specified")
-		} else {
-			validManagers := []string{"yum", "apt", "dnf", "zypper"}
-			valid := false
-			for _, manager := range validManagers {
-				if cfg.PackageManager == manager {
-					valid = true
-					break
-				}
-			}
-			if !valid {
-				verrs.Add(pathPrefix + ".packageManager: '" + cfg.PackageManager + "' is not a valid package manager")
-			}
-		}
+	if spec.Port <= 0 || spec.Port > 65535 {
+		verrs.Add(fmt.Sprintf("%s.port: invalid port %d, must be between 1-65535", p, spec.Port))
 	}
 
-	// Validate NTP servers
-	for i, server := range cfg.NTPServers {
+	authMethods := 0
+	if spec.Password != "" {
+		authMethods++
+	}
+	if spec.PrivateKey != "" {
+		authMethods++
+	}
+	if spec.PrivateKeyPath != "" {
+		authMethods++
+	}
+	if authMethods > 1 {
+		verrs.Add(p + ": only one of password, privateKey, or privateKeyPath can be set at the global level")
+	}
+
+	if spec.ConnectionTimeout <= 0 {
+		verrs.Add(fmt.Sprintf("%s.connectionTimeout: must be a positive duration, got %v", p, spec.ConnectionTimeout))
+	}
+
+	if strings.TrimSpace(spec.WorkDir) == "" {
+		verrs.Add(p + ".workDir: cannot be empty")
+	} else if !path.IsAbs(spec.WorkDir) {
+		verrs.Add(fmt.Sprintf("%s.workDir: must be an absolute path, got '%s'", p, spec.WorkDir))
+	}
+}
+
+func Validate_SystemSpec(spec *SystemSpec, verrs *validation.ValidationErrors, pathPrefix string) {
+	if spec == nil {
+		return
+	}
+	p := path.Join(pathPrefix)
+	for i, server := range spec.NTPServers {
 		if strings.TrimSpace(server) == "" {
-			verrs.Add(pathPrefix + ".ntpServers[" + fmt.Sprintf("%d", i) + "]: NTP server address cannot be empty")
+			verrs.Add(fmt.Sprintf("%s.ntpServers[%d]: cannot be empty", p, i))
+		} else if !helpers.IsValidHostPort(server) && !helpers.IsValidDomainName(server) {
+			verrs.Add(fmt.Sprintf("%s.ntpServers[%d]: invalid format for '%s', must be a valid IP or hostname", p, i, server))
 		}
 	}
 
-	// Validate package lists
-	for i, pkg := range cfg.RPMs {
-		if strings.TrimSpace(pkg) == "" {
-			verrs.Add(pathPrefix + ".rpms[" + fmt.Sprintf("%d", i) + "]: RPM package name cannot be empty")
-		}
-	}
-	for i, pkg := range cfg.Debs {
-		if strings.TrimSpace(pkg) == "" {
-			verrs.Add(pathPrefix + ".debs[" + fmt.Sprintf("%d", i) + "]: DEB package name cannot be empty")
+	if spec.Timezone != "" {
+		if strings.TrimSpace(spec.Timezone) == "" {
+			verrs.Add(p + ".timezone: cannot be only whitespace if specified")
 		}
 	}
 
-	// Validate pre-install scripts
-	for i, script := range cfg.PreInstallScripts {
-		if strings.TrimSpace(script) == "" {
-			verrs.Add(pathPrefix + ".preInstallScripts[" + fmt.Sprintf("%d", i) + "]: pre-install script cannot be empty")
+	hasRPMs := len(spec.RPMs) > 0
+	hasDebs := len(spec.Debs) > 0
+
+	if spec.PackageManager != "" {
+		if !helpers.ContainsString(common.ValidPMs, spec.PackageManager) {
+			verrs.Add(fmt.Sprintf("%s.packageManager: invalid manager '%s', must be one of %v", p, spec.PackageManager, common.ValidPMs))
+		}
+
+		if (spec.PackageManager == "yum" || spec.PackageManager == "dnf") && hasDebs {
+			verrs.Add(fmt.Sprintf("%s: debs list cannot be used with packageManager '%s'", p, spec.PackageManager))
+		}
+		if spec.PackageManager == "apt" && hasRPMs {
+			verrs.Add(fmt.Sprintf("%s: rpms list cannot be used with packageManager 'apt'", p))
+		}
+	} else {
+		if hasRPMs && hasDebs {
+			verrs.Add(p + ": cannot specify both rpms and debs lists without a specific packageManager")
 		}
 	}
 
-	// Validate post-install scripts
-	for i, script := range cfg.PostInstallScripts {
-		if strings.TrimSpace(script) == "" {
-			verrs.Add(pathPrefix + ".postInstallScripts[" + fmt.Sprintf("%d", i) + "]: post-install script cannot be empty")
-		}
-	}
-
-	// Validate kernel modules
-	for i, module := range cfg.Modules {
-		if strings.TrimSpace(module) == "" {
-			verrs.Add(pathPrefix + ".modules[" + fmt.Sprintf("%d", i) + "]: kernel module name cannot be empty")
-		}
-	}
-
-	// Validate sysctl parameters
-	for key, value := range cfg.SysctlParams {
-		if strings.TrimSpace(key) == "" {
-			verrs.Add(pathPrefix + ".sysctlParams: sysctl key cannot be empty")
+	sysctlKeyRegex := regexp.MustCompile(`^[a-z0-9\._-]+$`)
+	for key, value := range spec.SysctlParams {
+		if !sysctlKeyRegex.MatchString(key) {
+			verrs.Add(fmt.Sprintf("%s.sysctlParams: invalid key format for '%s'", p, key))
 		}
 		if strings.TrimSpace(value) == "" {
-			verrs.Add(pathPrefix + ".sysctlParams[" + key + "]: value cannot be empty")
+			verrs.Add(fmt.Sprintf("%s.sysctlParams['%s']: value cannot be empty", p, key))
 		}
 	}
 }

@@ -45,6 +45,7 @@ const (
 const (
 	DefaultMinDiskGB        = 20
 	DefaultMaxPods          = 110
+	DefaultNodeCidrMaskSize = 24
 	DefaultMaxPodPidsLimit  = 4096
 	DefaultMaxOpenFiles     = 1000000
 	DefaultMaxMapCount      = 262144
@@ -111,23 +112,45 @@ var (
 		RuntimeTypeCRIO,
 		RuntimeTypeIsula,
 	}
-	ValidInternalLoadbalancerTypes = []string{string(InternalLBTypeKubeVIP), string(InternalLBTypeHAProxy), string(InternalLBTypeNginx)}
-	ValidKubeVIPModes              = []string{KubeVIPModeARP, KubeVIPModeBGP}
-	ValidNginxLBModes              = []string{NginxLBTCPModes, NginxLBHTTPModes}
-	ValidNginxLBAlgorithms         = []string{NginxLBRoundRobin, NginxLBLeastConn, NginxLBIPHash, NginxLBHash, NginxLBRandom, NginxLBLeastTime}
-	ValidHAProxyBalanceAlgorithms  = []string{HAProxyRoundrobin, HAProxyStaticRR, HAProxyLeastconn, HAProxyFirst, HAProxySource, HAProxyURI, HAProxyUrlParam, HAProxyHdr, HAProxyRdpCookie}
-	ValidHAProxyModes              = []string{HAProxyModeTCP, HAProxyModeHTTP}
-	ValidVRRPStates                = []string{DefaultKeepaliveMaster, DefaultKeepaliveBackup}
-	ValidLVSAlgos                  = []string{DefaultKeepalivedLVSRRcheduler, DefaultKeepalivedLVSWRRcheduler, DefaultKeepalivedLVSLCcheduler, DefaultKeepalivedLVSWLCcheduler, DefaultKeepalivedLVSLBLCcheduler, DefaultKeepalivedLVSSHcheduler, DefaultKeepalivedLVSDHcheduler}
-	ValidLVSKinds                  = []string{DefaultKeepalivedNAT, DefaultKeepalivedDR, DefaultKeepalivedTUN}
-	ValidProtocols                 = []string{DefaultKeepalivedTCPProtocol, DefaultKeepalivedUDPProtocol}
-	ValidKeepalivedAuthTypes       = []string{KeepalivedAuthTypePASS, KeepalivedAuthTypeAH}
-	ValidSELinuxModes              = []string{PermissiveSELinuxMode, EnforceSELinuxMode, DisabledSELinuxMode, ""}
-	ValidIPTablesModes             = []string{LegacyIPTablesMode, NftIPTablesMode, ""}
-	SupportedArches                = []string{ArchAMD64, ArchARM64}
-	SupportedArchitectures         = SupportedArches
-	SupportedOperatingSystems      = []string{OSLinux, OSDarwin, OSWindows}
-	SupportedLinuxDistributions    = []string{
+	ValidUpstreamPolicies = []string{
+		UpstreamForwardingConfigRandom,
+		UpstreamForwardingConfigRoundRobin,
+		UpstreamForwardingConfigSequential,
+	}
+	SupportedChecks                     = []string{"cpu", "memory", "swap", "firewalld", "selinux"}
+	ValidPMs                            = []string{"yum", "dnf", "apt"}
+	ValidRegistryTypes                  = []string{RegistryTypeHarbor, RegistryTypeDockerRegistry, RegistryTypeRegistry}
+	ValidEtcdMetricsLevels              = []string{"basic", "extensive"}
+	ValidEtcdLogLevels                  = []string{"debug", "info", "warn", "error", "panic", "fatal"}
+	ValidKubeProxyModes                 = []string{KubeProxyModeIPTables, KubeProxyModeIPVS}
+	ValidCgroupDrivers                  = []string{CgroupDriverSystemd, CgroupDriverCgroupfs}
+	ValidHybridnetNetworkTypes          = []string{HybridnetDefaultNetworkConfigTypeUnderlay, HybridnetDefaultNetworkConfigTypeOverlay}
+	ValidKubeOvnTunnelTypes             = []string{KubeOvnNetworkingTunnelTypeGeneve, KubeOvnNetworkingTunnelVXLAN}
+	ValidFlannelBackendTypes            = []string{FlannelBackendConfigTypeVxlan, FlannelBackendConfigTypeHostGw, FlannelBackendConfigTypeUdp, FlannelBackendConfigTypeIpsec}
+	ValidCalicoEncapsulationModes       = []string{CalicoIPIPModeAlways, CalicoIPIPModeCrossSubnet, CalicoIPIPModeNever}
+	ValidCalicoIPPoolEncapsulationModes = []string{CalicoIPPoolEncapsulationIPIP, CalicoIPPoolEncapsulationIPIPCrossSubnet, CalicoIPPoolEncapsulationVXLAN, CalicoIPPoolEncapsulationVXLANCrossSubnet, CalicoIPPoolEncapsulationNone}
+	ValidCalicoLogSeverities            = []string{CalicoFelixConfigurationLogSeverityScreenDebug, CalicoFelixConfigurationLogSeverityScreenInfo, CalicoFelixConfigurationLogSeverityScreenWarning, CalicoFelixConfigurationLogSeverityScreenError, CalicoFelixConfigurationLogSeverityScreenFatal}
+	ValidCiliumTunnelModes              = []string{CiliumTunnelVxlanModes, CiliumTunnelGeneveModes, CiliumTunnelDisabledModes}
+	ValidCiliumIPAMModes                = []string{CiliumIPAMClusterPoolsMode, CiliumIPAMKubernetesMode}
+	ValidCiliumKPRModes                 = []string{CiliumKPRProbeModes, CiliumKPRStrictModes, CiliumKPRDisabledModes}
+	ValidCiliumIdentModes               = []string{CiliumIdentCrdModes, CiliumIdentKvstoreModes}
+	ValidInternalLoadbalancerTypes      = []string{string(InternalLBTypeKubeVIP), string(InternalLBTypeHAProxy), string(InternalLBTypeNginx)}
+	ValidKubeVIPModes                   = []string{KubeVIPModeARP, KubeVIPModeBGP}
+	ValidNginxLBModes                   = []string{NginxLBTCPModes, NginxLBHTTPModes}
+	ValidNginxLBAlgorithms              = []string{NginxLBRoundRobin, NginxLBLeastConn, NginxLBIPHash, NginxLBHash, NginxLBRandom, NginxLBLeastTime}
+	ValidHAProxyBalanceAlgorithms       = []string{HAProxyRoundrobin, HAProxyStaticRR, HAProxyLeastconn, HAProxyFirst, HAProxySource, HAProxyURI, HAProxyUrlParam, HAProxyHdr, HAProxyRdpCookie}
+	ValidHAProxyModes                   = []string{HAProxyModeTCP, HAProxyModeHTTP}
+	ValidVRRPStates                     = []string{DefaultKeepaliveMaster, DefaultKeepaliveBackup}
+	ValidLVSAlgos                       = []string{DefaultKeepalivedLVSRRcheduler, DefaultKeepalivedLVSWRRcheduler, DefaultKeepalivedLVSLCcheduler, DefaultKeepalivedLVSWLCcheduler, DefaultKeepalivedLVSLBLCcheduler, DefaultKeepalivedLVSSHcheduler, DefaultKeepalivedLVSDHcheduler}
+	ValidLVSKinds                       = []string{DefaultKeepalivedNAT, DefaultKeepalivedDR, DefaultKeepalivedTUN}
+	ValidProtocols                      = []string{DefaultKeepalivedTCPProtocol, DefaultKeepalivedUDPProtocol}
+	ValidKeepalivedAuthTypes            = []string{KeepalivedAuthTypePASS, KeepalivedAuthTypeAH}
+	ValidSELinuxModes                   = []string{PermissiveSELinuxMode, EnforceSELinuxMode, DisabledSELinuxMode, ""}
+	ValidIPTablesModes                  = []string{LegacyIPTablesMode, NftIPTablesMode, ""}
+	SupportedArches                     = []string{ArchAMD64, ArchARM64}
+	SupportedArchitectures              = SupportedArches
+	SupportedOperatingSystems           = []string{OSLinux, OSDarwin, OSWindows}
+	SupportedLinuxDistributions         = []string{
 		DistroUbuntu, DistroDebian, DistroCentOS, DistroRHEL, DistroRocky, DistroAlmalinux, DistroFedora,
 		DistroSUSE, DistroAmazonLinux, DistroOracle, DistroPhoton, DistroFlatcar, DistroCoreos, DistroKylin, DistroUOS,
 	}
@@ -137,6 +160,14 @@ var (
 		string(RuntimeTypeContainerd),
 		string(RuntimeTypeCRIO),
 		string(RuntimeTypeIsula),
+	}
+
+	SupportedCNIPlugins = []string{
+		string(CNITypeCalico),
+		string(CNITypeFlannel),
+		string(CNITypeCilium),
+		string(CNITypeKubeOvn),
+		string(CNITypeHybridnet),
 	}
 
 	SupportedCNITypes = []string{
@@ -170,5 +201,12 @@ var (
 		string(EtcdDeploymentTypeKubeadm),
 		string(EtcdDeploymentTypeKubexm),
 		string(EtcdDeploymentTypeExternal),
+	}
+
+	SupportedStorageTypes = []string{
+		StorageComponentOpenEBS,
+		StorageComponentNFS,
+		StorageComponentRookCeph,
+		StorageComponentLonghorn,
 	}
 )

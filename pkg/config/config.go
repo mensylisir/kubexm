@@ -1,8 +1,4 @@
-// Package config provides functions for loading, validating,
-// and setting default values for Kubexm cluster configurations.
-// The primary entry point is ParseFromFile, which handles the
-// lifecycle of configuration processing from a YAML file.
-package config
+
 
 import (
 	"fmt"
@@ -12,56 +8,13 @@ import (
 
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/logger"
-	"github.com/mensylisir/kubexm/pkg/util" // Added import for host range expansion
+	"github.com/mensylisir/kubexm/pkg/util"
 )
 
-// expandRoleGroupHosts processes a slice of host strings, expanding any ranges.
-func expandRoleGroupHosts(hosts []string) ([]string, error) {
-	if hosts == nil {
-		return nil, nil
-	}
-	expanded := make([]string, 0, len(hosts))
-	for _, h := range hosts {
-		currentHosts, err := util.ExpandHostRange(h)
-		if err != nil {
-			return nil, fmt.Errorf("error expanding host range '%s': %w", h, err)
-		}
-		expanded = append(expanded, currentHosts...)
-	}
-	return expanded, nil
-}
 
-// validateRoleGroupHosts validates that all hosts referenced in RoleGroups exist in the hosts spec
-func validateRoleGroupHosts(roleGroups *v1alpha1.RoleGroupsSpec, hosts []v1alpha1.HostSpec) error {
-	// Create a map of valid host names
-	validHosts := make(map[string]bool)
-	for _, host := range hosts {
-		validHosts[host.Name] = true
-	}
 
-	// Check each role group
-	allHosts := []string{}
-	allHosts = append(allHosts, roleGroups.Master...)
-	allHosts = append(allHosts, roleGroups.Worker...)
-	allHosts = append(allHosts, roleGroups.Etcd...)
-	allHosts = append(allHosts, roleGroups.LoadBalancer...)
-	allHosts = append(allHosts, roleGroups.Storage...)
-	allHosts = append(allHosts, roleGroups.Registry...)
-
-	for _, hostName := range allHosts {
-		if !validHosts[hostName] {
-			return fmt.Errorf("host '%s' referenced in roleGroups but not defined in hosts spec", hostName)
-		}
-	}
-	return nil
-}
-
-// ParseFromFile reads a YAML configuration file from the given path,
-// unmarshals it into a v1alpha1.Cluster object, sets default values,
-// and validates the configuration.
 func ParseFromFile(filePath string) (*v1alpha1.Cluster, error) {
-	log := logger.Get() // Get a logger instance
-
+	log := logger.Get()
 	log.Infof("Reading configuration file from: %s", filePath)
 	data, err := os.ReadFile(filePath)
 	if err != nil {

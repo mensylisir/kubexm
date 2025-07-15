@@ -2,25 +2,22 @@ package v1alpha1
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1/helpers"
 	"github.com/mensylisir/kubexm/pkg/common"
-	"regexp"
+	"github.com/mensylisir/kubexm/pkg/errors/validation"
 	"strings"
-	// ValidationErrors is defined in cluster_types.go
 )
 
-// ControlPlaneEndpointSpec defines the configuration for the cluster's control plane endpoint.
 type ControlPlaneEndpointSpec struct {
 	Domain                   string                          `json:"domain,omitempty" yaml:"domain,omitempty"`
-	Address                  string                          `json:"address,omitempty" yaml:"lb_address,omitempty"` // Matches YAML lb_address
+	Address                  string                          `json:"address,omitempty" yaml:"lb_address,omitempty"`
 	Port                     int                             `json:"port,omitempty" yaml:"port,omitempty"`
-	ExternalDNS              bool                            `json:"externalDNS,omitempty" yaml:"externalDNS,omitempty"` // Changed to bool
+	ExternalDNS              *bool                           `json:"externalDNS,omitempty" yaml:"externalDNS,omitempty"`
 	ExternalLoadBalancerType common.ExternalLoadBalancerType `json:"externalLoadBalancerType,omitempty" yaml:"externalLoadBalancer,omitempty"`
-	InternalLoadBalancerType common.InternalLoadBalancerType `json:"internalLoadBalancerType,omitempty" yaml:"internalLoadbalancer,omitempty"` // Matches YAML internalLoadbalancer
-	HighAvailability     *HighAvailability         `json:"highAvailability,omitempty" yaml:"highAvailability,omitempty"`
+	InternalLoadBalancerType common.InternalLoadBalancerType `json:"internalLoadBalancerType,omitempty" yaml:"internalLoadbalancer,omitempty"`
+	HighAvailability         *HighAvailability               `json:"highAvailability,omitempty" yaml:"highAvailability,omitempty"`
 }
 
-
-// SetDefaults_ControlPlaneEndpointSpec sets default values for ControlPlaneEndpointSpec.
 func SetDefaults_ControlPlaneEndpointSpec(cfg *ControlPlaneEndpointSpec) {
 	if cfg == nil {
 		return
@@ -28,80 +25,76 @@ func SetDefaults_ControlPlaneEndpointSpec(cfg *ControlPlaneEndpointSpec) {
 	if cfg.Port == 0 {
 		cfg.Port = 6443
 	}
-	if len(cfg.ExternalLoadBalancerType) == 0 && len(cfg.InternalLoadBalancerType) == 0 {
+	if cfg.ExternalLoadBalancerType == "" && cfg.InternalLoadBalancerType == "" {
 		cfg.InternalLoadBalancerType = common.InternalLBTypeHAProxy
 	}
-	if len(cfg.Domain) == 0 {
+	if cfg.Domain == "" {
 		cfg.Domain = common.KubernetesDefaultDomain
 	}
 	if &cfg.ExternalDNS == nil {
-		cfg.ExternalDNS = false
+		cfg.ExternalDNS = helpers.BoolPtr(false)
+	}
+	if cfg.Address != "" && helpers.IsValidIP(cfg.Address) && cfg.ExternalLoadBalancerType != "" {
+		cfg.HighAvailability.Enabled = helpers.BoolPtr(true)
+		cfg.HighAvailability.External.Enabled = helpers.BoolPtr(true)
+		cfg.HighAvailability.External.Type = string(cfg.ExternalLoadBalancerType)
+		cfg.HighAvailability.External.Keepalived.VRRPInstances[0].VirtualIPs[0] = cfg.Address
+	}
+	if cfg.InternalLoadBalancerType != "" {
+		cfg.HighAvailability.Enabled = helpers.BoolPtr(true)
+		cfg.HighAvailability.Internal.Enabled = helpers.BoolPtr(true)
+		cfg.HighAvailability.Internal.Type = string(cfg.InternalLoadBalancerType)
+	}
+	if cfg.HighAvailability != nil {
+		SetDefaults_HighAvailabilityConfig(cfg.HighAvailability)
 	}
 }
 
-// Validate_ControlPlaneEndpointSpec validates ControlPlaneEndpointSpec.
-func Validate_ControlPlaneEndpointSpec(cfg *ControlPlaneEndpointSpec, verrs *ValidationErrors, pathPrefix string) {
+func Validate_ControlPlaneEndpointSpec(cfg *ControlPlaneEndpointSpec, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		// If this section is optional and not provided, it's valid.
 		// If it's mandatory, the caller (e.g. Validate_ClusterSpec) should check for nil.
 		return
 	}
-	if strings.TrimSpace(cfg.Domain) == "" && strings.TrimSpace(cfg.Address) == "" {
-		verrs.Add(pathPrefix + ": either domain or address (lb_address in YAML) must be specified")
+	if strings.TrimSpace(cfg.Domain) == "" {
+		verrs.Add(pathPrefix + ": domain must be specified")
+	}
+	if cfg.ExternalLoadBalancerType != "" && strings.TrimSpace(cfg.Address) == "" {
+		verrs.Add(pathPrefix + ": address must be specified when external-loadbalancer is enabled")
+	}
+	if cfg.ExternalLoadBalancerType == "" && strings.TrimSpace(cfg.Address) != "" {
+		verrs.Add(pathPrefix + ": address must be empty when external-loadbalancer is not enabled")
+	}
+	if cfg.ExternalLoadBalancerType != "" && cfg.InternalLoadBalancerType != "" {
+		verrs.Add(pathPrefix + ": internal-loadbalancer must be empty when external-loadbalancer is enabled")
 	}
 	if cfg.Domain != "" {
-		// Standard domain validation regex
-		if matched, _ := regexp.MatchString(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`, cfg.Domain); !matched {
-			verrs.Add(pathPrefix + ".domain: '" + cfg.Domain + "' is not a valid domain name")
+		if helpers.IsValidDomainName(cfg.Domain) {
+			verrs.Add(fmt.Sprintf("%s.domain: '%s' is not a valid domain name", pathPrefix, cfg.Domain))
 		}
 	}
 	if cfg.Address != "" {
-		// Use net.ParseIP for IP validation since net is available in cluster_types.go
-		// For now, we'll use a simple validation pattern
-		if matched, _ := regexp.MatchString(`^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`, cfg.Address); !matched {
-			verrs.Add(pathPrefix + ".address (lb_address): invalid IP address format for '" + cfg.Address + "'")
+		if helpers.IsValidIP(cfg.Address) {
+			verrs.Add(fmt.Sprintf("%s.address (lb_address): invalid IP address format for '%s'", pathPrefix, cfg.Address))
 		}
 	}
-
-	if cfg.Port != 0 && (cfg.Port <= 0 || cfg.Port > 65535) { // Port 0 is defaulted
-		verrs.Add(pathPrefix + ".port: invalid port " + fmt.Sprintf("%d", cfg.Port) + ", must be between 1-65535")
+	if cfg.Port != 0 && (cfg.Port <= 0 || cfg.Port > 65535) {
+		verrs.Add(fmt.Sprintf("%s.port: invalid port %d, must be between 1-65535", pathPrefix, cfg.Port))
+	}
+	if cfg.ExternalLoadBalancerType != "" && !helpers.ContainsString(common.SupportedExternalLoadBalancerTypes, string(cfg.ExternalLoadBalancerType)) {
+		verrs.Add(fmt.Sprintf("%s.externalLoadBalancerType: invalid type '%s', must be one of %v or empty",
+			pathPrefix, cfg.ExternalLoadBalancerType, common.SupportedExternalLoadBalancerTypes))
 	}
 
-	validExternalTypes := []string{"kubexm", "external", ""} // "" means not specified/use default or inferred
-	found := false
-	for _, vt := range validExternalTypes {
-		if cfg.ExternalLoadBalancerType == vt {
-			found = true
-			break
-		}
+	if cfg.InternalLoadBalancerType != "" && !helpers.ContainsString(common.SupportedInternalLoadBalancerTypes, string(cfg.InternalLoadBalancerType)) {
+		verrs.Add(fmt.Sprintf("%s.internalLoadBalancerType (internalLoadbalancer): invalid type '%s', must be one of %v or empty",
+			pathPrefix, cfg.InternalLoadBalancerType, common.SupportedInternalLoadBalancerTypes))
 	}
 
-	for _, vt := range common.V
-	if !found {
-		verrs.Add(pathPrefix + ".externalLoadBalancerType: invalid type '" + cfg.ExternalLoadBalancerType + "', must be one of " + fmt.Sprintf("%v", validExternalTypes) + " or empty")
+	if *cfg.HighAvailability.Enabled && *cfg.HighAvailability.External.Enabled && cfg.Address == "" {
+		verrs.Add(fmt.Sprintf("%s.highAvailability.external.enabled and address cannot be empty", pathPrefix))
 	}
-
-	validInternalTypes := []string{"haproxy", "nginx", "kube-vip", ""} // "" means not specified/use default or inferred
-	found = false
-	for _, vt := range validInternalTypes {
-		if cfg.InternalLoadBalancerType == vt {
-			found = true
-			break
-		}
-	}
-	if !found {
-		verrs.Add(pathPrefix + ".internalLoadBalancerType (internalLoadbalancer): invalid type '" + cfg.InternalLoadBalancerType + "', must be one of " + fmt.Sprintf("%v", validInternalTypes) + " or empty")
+	if cfg.ExternalDNS == helpers.BoolPtr(true) && cfg.Address != "" {
+		verrs.Add(fmt.Sprintf("%s.externalDNS: cannot be true when address is provided", pathPrefix))
 	}
 }
-
-// isValidIP and containsString are expected to be defined in cluster_types.go or a shared util.
-// For self-containedness, if they were local:
-// func isValidIP(ip string) bool { return net.ParseIP(ip) != nil }
-// func containsString(slice []string, item string) bool { for _, s := range slice { if s == item { return true } }; return false }
-// NOTE: DeepCopy methods should be generated by controller-gen.
-// Changed ExternalDNS to bool from *bool as per latest interpretation of the prompt.
-// Updated YAML tags to match prompt: lb_address, externalLoadBalancer, internalLoadbalancer.
-// Imported "net" and "regexp".
-// Assumed ValidationErrors is defined in cluster_types.go.
-// Added containsString from cluster_types.go (if it's not there, it needs to be added or imported).
-// Added isValidIP from cluster_types.go (if it's not there, it needs to be added or imported).
