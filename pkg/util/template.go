@@ -2,26 +2,23 @@ package util
 
 import (
 	"bytes"
-	"text/template"
-
+	"fmt"
 	"github.com/Masterminds/sprig/v3"
+	"text/template"
 )
 
-// RenderTemplate executes a Go template with the given data.
-// It includes Sprig functions and sets "missingkey=error".
 func RenderTemplate(tmplStr string, data interface{}) (string, error) {
 	tmpl, err := template.New("utiltemplate").
 		Funcs(sprig.TxtFuncMap()).
 		Option("missingkey=error").
 		Parse(tmplStr)
 	if err != nil {
-		return "", err // Error during parse (e.g., syntax error in template)
+		return "", fmt.Errorf("failed to parse template: %w", err)
 	}
 
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
-		// Error during execution (e.g., missingkey=error triggered, or type mismatch if template expects specific field types)
-		return "", err
+		return "", fmt.Errorf("failed to execute template: %w", err)
 	}
 
 	return buf.String(), nil

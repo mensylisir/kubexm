@@ -19,8 +19,6 @@ import (
 	// "github.com/mensylisir/kubexm/pkg/step" // Not directly used
 	// "github.com/mensylisir/kubexm/pkg/task"
 
-	connectormocks "github.com/mensylisir/kubexm/pkg/connector/mocks"
-	runnermocks "github.com/mensylisir/kubexm/pkg/runner/mocks"
 	// loggermocks "github.com/mensylisir/kubexm/pkg/logger/mocks" // Temporarily commented out
 	// stepmocks "github.com/mensylisir/kubexm/pkg/step/mocks" // Temporarily commented out
 )
@@ -65,8 +63,8 @@ func TestDisableSelinuxStep_Precheck(t *testing.T) {
 			expectedIsDone:   false,
 		},
 		{
-			name:          "getenforce fails (e.g., not installed)",
-			getenforceErr: errors.New("getenforce command failed"),
+			name:           "getenforce fails (e.g., not installed)",
+			getenforceErr:  errors.New("getenforce command failed"),
 			expectedIsDone: true,
 		},
 		{
@@ -111,12 +109,11 @@ func TestDisableSelinuxStep_Precheck(t *testing.T) {
 				GoCtx:         context.Background(),
 				Runner:        mockRunner,
 				ClusterConfig: &v1alpha1.Cluster{ObjectMeta: v1alpha1.ObjectMeta{Name: "test-cluster"}},
-				hostInfoMap:   map[string]*runtime.HostRuntimeInfo{
-					"test-host": {Host: mockHost, Conn: mockConnector, Facts: &runner.Facts{OS: &connector.OS{ID:"linux"}}},
+				hostInfoMap: map[string]*runtime.HostRuntimeInfo{
+					"test-host": {Host: mockHost, Conn: mockConnector, Facts: &runner.Facts{OS: &connector.OS{ID: "linux"}}},
 				},
 			}
 			dummyCtx.SetCurrentHost(mockHost)
-
 
 			s := NewDisableSelinuxStep("", true).(*DisableSelinuxStep)
 			isDone, err := s.Precheck(dummyCtx, mockHost)
@@ -133,7 +130,6 @@ func TestDisableSelinuxStep_Precheck(t *testing.T) {
 	}
 }
 
-
 func TestDisableSelinuxStep_Run(t *testing.T) {
 	mockRunner := new(runnermocks.MockRunner)
 	mockConnector := new(connectormocks.MockConnector)
@@ -145,8 +141,8 @@ func TestDisableSelinuxStep_Run(t *testing.T) {
 		GoCtx:         context.Background(),
 		Runner:        mockRunner,
 		ClusterConfig: &v1alpha1.Cluster{ObjectMeta: v1alpha1.ObjectMeta{Name: "test-cluster"}},
-		hostInfoMap:   map[string]*runtime.HostRuntimeInfo{
-			"test-host": {Host: mockHost, Conn: mockConnector, Facts: &runner.Facts{OS: &connector.OS{ID:"linux"}}},
+		hostInfoMap: map[string]*runtime.HostRuntimeInfo{
+			"test-host": {Host: mockHost, Conn: mockConnector, Facts: &runner.Facts{OS: &connector.OS{ID: "linux"}}},
 		},
 	}
 	dummyCtx.SetCurrentHost(mockHost)
@@ -168,34 +164,33 @@ func TestDisableSelinuxStep_Run(t *testing.T) {
 	mockRunner.AssertExpectations(t)
 }
 
-
 func TestDisableSelinuxStep_Rollback_RestoresFromBackup(t *testing.T) {
-    mockRunner := new(runnermocks.MockRunner)
-    mockConnector := new(connectormocks.MockConnector)
-    mockHost := new(connectormocks.MockHost)
+	mockRunner := new(runnermocks.MockRunner)
+	mockConnector := new(connectormocks.MockConnector)
+	mockHost := new(connectormocks.MockHost)
 
-    mockHost.On("GetName").Return("test-host")
+	mockHost.On("GetName").Return("test-host")
 
 	dummyCtx := &runtime.Context{
 		GoCtx:         context.Background(),
 		Runner:        mockRunner,
 		ClusterConfig: &v1alpha1.Cluster{ObjectMeta: v1alpha1.ObjectMeta{Name: "test-cluster"}},
-		hostInfoMap:   map[string]*runtime.HostRuntimeInfo{
-			"test-host": {Host: mockHost, Conn: mockConnector, Facts: &runner.Facts{OS: &connector.OS{ID:"linux"}}},
+		hostInfoMap: map[string]*runtime.HostRuntimeInfo{
+			"test-host": {Host: mockHost, Conn: mockConnector, Facts: &runner.Facts{OS: &connector.OS{ID: "linux"}}},
 		},
 	}
 	dummyCtx.SetCurrentHost(mockHost)
 
-    s := NewDisableSelinuxStep("", true).(*DisableSelinuxStep)
-    s.originalSelinuxValue = "enforcing"
-    s.fstabBackupPath = selinuxConfigFile + ".bak"
+	s := NewDisableSelinuxStep("", true).(*DisableSelinuxStep)
+	s.originalSelinuxValue = "enforcing"
+	s.fstabBackupPath = selinuxConfigFile + ".bak"
 
-    mockRunner.On("Exists", mock.Anything, mockConnector, s.fstabBackupPath).Return(true, nil).Once()
-    restoreCmd := fmt.Sprintf("mv %s %s", s.fstabBackupPath, selinuxConfigFile)
-    mockRunner.On("RunWithOptions", mock.Anything, mockConnector, restoreCmd, mock.AnythingOfType("*connector.ExecOptions")).Return([]byte{}, []byte{}, nil).Once()
-    mockRunner.On("RunWithOptions", mock.Anything, mockConnector, "setenforce 1", mock.AnythingOfType("*connector.ExecOptions")).Return([]byte{}, []byte{}, nil).Once()
+	mockRunner.On("Exists", mock.Anything, mockConnector, s.fstabBackupPath).Return(true, nil).Once()
+	restoreCmd := fmt.Sprintf("mv %s %s", s.fstabBackupPath, selinuxConfigFile)
+	mockRunner.On("RunWithOptions", mock.Anything, mockConnector, restoreCmd, mock.AnythingOfType("*connector.ExecOptions")).Return([]byte{}, []byte{}, nil).Once()
+	mockRunner.On("RunWithOptions", mock.Anything, mockConnector, "setenforce 1", mock.AnythingOfType("*connector.ExecOptions")).Return([]byte{}, []byte{}, nil).Once()
 
-    err := s.Rollback(dummyCtx, mockHost)
-    assert.NoError(t, err)
-    mockRunner.AssertExpectations(t)
+	err := s.Rollback(dummyCtx, mockHost)
+	assert.NoError(t, err)
+	mockRunner.AssertExpectations(t)
 }

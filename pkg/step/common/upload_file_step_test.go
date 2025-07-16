@@ -9,19 +9,17 @@ import (
 	"testing"
 	"time"
 
-	"go.uber.org/mock/gomock" // Changed gomock import
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"                     // Changed gomock import
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1" // Added import
 
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/cache"
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/connector"
-	mock_connector "github.com/mensylisir/kubexm/pkg/connector/mocks"
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/runner"
-	mock_runner "github.com/mensylisir/kubexm/pkg/runner/mocks"
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 
@@ -70,7 +68,6 @@ func newMockUploadContext(t *testing.T, currentHostName string) *mockUploadConte
 		clusterCfg.Spec.Hosts = append(clusterCfg.Spec.Hosts, hostSpecCopy) // Removed .DeepCopy()
 	}
 
-
 	return &mockUploadContext{
 		ctrl:          ctrl,
 		logger:        l,
@@ -85,49 +82,58 @@ func newMockUploadContext(t *testing.T, currentHostName string) *mockUploadConte
 }
 
 // Implement step.StepContext
-func (m *mockUploadContext) GoContext() context.Context    { return m.goCtx }
-func (m *mockUploadContext) GetLogger() *logger.Logger     { return m.logger }
-func (m *mockUploadContext) GetHost() connector.Host       { return m.currentHost }
-func (m *mockUploadContext) GetRunner() runner.Runner      { return m.mockRunner }
-func (m *mockUploadContext) GetControlNode() (connector.Host, error)    { return m.controlNode, nil }
+func (m *mockUploadContext) GoContext() context.Context              { return m.goCtx }
+func (m *mockUploadContext) GetLogger() *logger.Logger               { return m.logger }
+func (m *mockUploadContext) GetHost() connector.Host                 { return m.currentHost }
+func (m *mockUploadContext) GetRunner() runner.Runner                { return m.mockRunner }
+func (m *mockUploadContext) GetControlNode() (connector.Host, error) { return m.controlNode, nil }
 func (m *mockUploadContext) GetConnectorForHost(h connector.Host) (connector.Connector, error) {
 	return m.mockConnector, nil
 }
-func (m *mockUploadContext) GetCurrentHostConnector() (connector.Connector, error) { return m.mockConnector, nil }
+func (m *mockUploadContext) GetCurrentHostConnector() (connector.Connector, error) {
+	return m.mockConnector, nil
+}
 func (m *mockUploadContext) GetHostFacts(h connector.Host) (*runner.Facts, error) {
 	return &runner.Facts{OS: &connector.OS{Arch: "amd64", ID: "linux"}}, nil
 }
 func (m *mockUploadContext) GetCurrentHostFacts() (*runner.Facts, error) {
 	return &runner.Facts{OS: &connector.OS{Arch: "amd64", ID: "linux"}}, nil
 }
-func (m *mockUploadContext) GetStepCache() cache.StepCache          { return cache.NewStepCache() }
-func (m *mockUploadContext) GetTaskCache() cache.TaskCache          { return cache.NewTaskCache() }
-func (m *mockUploadContext) GetModuleCache() cache.ModuleCache      { return cache.NewModuleCache() }
-func (m *mockUploadContext) GetPipelineCache() cache.PipelineCache  { return cache.NewPipelineCache() }
-func (m *mockUploadContext) GetClusterConfig() *v1alpha1.Cluster { return m.clusterConfig }
+func (m *mockUploadContext) GetStepCache() cache.StepCache                        { return cache.NewStepCache() }
+func (m *mockUploadContext) GetTaskCache() cache.TaskCache                        { return cache.NewTaskCache() }
+func (m *mockUploadContext) GetModuleCache() cache.ModuleCache                    { return cache.NewModuleCache() }
+func (m *mockUploadContext) GetPipelineCache() cache.PipelineCache                { return cache.NewPipelineCache() }
+func (m *mockUploadContext) GetClusterConfig() *v1alpha1.Cluster                  { return m.clusterConfig }
 func (m *mockUploadContext) GetHostsByRole(role string) ([]connector.Host, error) { return nil, nil }
-func (m *mockUploadContext) GetGlobalWorkDir() string         { return m.globalWorkDir }
-func (m *mockUploadContext) IsVerbose() bool                  { return false }
-func (m *mockUploadContext) ShouldIgnoreErr() bool            { return false }
-func (m *mockUploadContext) GetGlobalConnectionTimeout() time.Duration { return 30 * time.Second }
-func (m *mockUploadContext) GetClusterArtifactsDir() string       { return m.globalWorkDir } // globalWorkDir is already cluster specific
-func (m *mockUploadContext) GetCertsDir() string                  { return filepath.Join(m.GetClusterArtifactsDir(), "certs") }
-func (m *mockUploadContext) GetEtcdCertsDir() string              { return filepath.Join(m.GetCertsDir(), "etcd") }
+func (m *mockUploadContext) GetGlobalWorkDir() string                             { return m.globalWorkDir }
+func (m *mockUploadContext) IsVerbose() bool                                      { return false }
+func (m *mockUploadContext) ShouldIgnoreErr() bool                                { return false }
+func (m *mockUploadContext) GetGlobalConnectionTimeout() time.Duration            { return 30 * time.Second }
+func (m *mockUploadContext) GetClusterArtifactsDir() string                       { return m.globalWorkDir } // globalWorkDir is already cluster specific
+func (m *mockUploadContext) GetCertsDir() string {
+	return filepath.Join(m.GetClusterArtifactsDir(), "certs")
+}
+func (m *mockUploadContext) GetEtcdCertsDir() string { return filepath.Join(m.GetCertsDir(), "etcd") }
 func (m *mockUploadContext) GetComponentArtifactsDir(componentName string) string {
 	return filepath.Join(m.GetClusterArtifactsDir(), componentName)
 }
-func (m *mockUploadContext) GetEtcdArtifactsDir() string          { return m.GetComponentArtifactsDir("etcd") }
-func (m *mockUploadContext) GetContainerRuntimeArtifactsDir() string { return m.GetComponentArtifactsDir("container_runtime") }
-func (m *mockUploadContext) GetKubernetesArtifactsDir() string    { return m.GetComponentArtifactsDir("kubernetes") }
+func (m *mockUploadContext) GetEtcdArtifactsDir() string { return m.GetComponentArtifactsDir("etcd") }
+func (m *mockUploadContext) GetContainerRuntimeArtifactsDir() string {
+	return m.GetComponentArtifactsDir("container_runtime")
+}
+func (m *mockUploadContext) GetKubernetesArtifactsDir() string {
+	return m.GetComponentArtifactsDir("kubernetes")
+}
 func (m *mockUploadContext) GetFileDownloadPath(cn, v, a, fn string) string { return "" }
-func (m *mockUploadContext) GetHostDir(hostname string) string    { return filepath.Join(m.GetClusterArtifactsDir(), hostname) }
+func (m *mockUploadContext) GetHostDir(hostname string) string {
+	return filepath.Join(m.GetClusterArtifactsDir(), hostname)
+}
 func (m *mockUploadContext) WithGoContext(goCtx context.Context) step.StepContext {
 	m.goCtx = goCtx
 	return m
 }
 
 var _ step.StepContext = (*mockUploadContext)(nil)
-
 
 func TestUploadFileStep_NewUploadFileStep(t *testing.T) {
 	src := "/tmp/local.txt"
@@ -186,7 +192,6 @@ func TestUploadFileStep_Precheck_RemoteExists(t *testing.T) {
 	defer mockCtx.ctrl.Finish()
 	defer os.RemoveAll(filepath.Dir(filepath.Dir(mockCtx.globalWorkDir)))
 
-
 	localSrc := filepath.Join(mockCtx.globalWorkDir, "local_src_for_remote_exists.txt")
 	err := ioutil.WriteFile(localSrc, []byte("content"), 0644)
 	require.NoError(t, err)
@@ -224,7 +229,6 @@ func TestUploadFileStep_Run_Success(t *testing.T) {
 	mockCtx := newMockUploadContext(t, "remote-host-run")
 	defer mockCtx.ctrl.Finish()
 	defer os.RemoveAll(filepath.Dir(filepath.Dir(mockCtx.globalWorkDir)))
-
 
 	localSrcContent := "upload this content"
 	localSrc := filepath.Join(mockCtx.globalWorkDir, "local_to_upload.txt")

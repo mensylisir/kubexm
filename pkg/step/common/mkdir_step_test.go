@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"go.uber.org/mock/gomock" // Changed gomock import
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock" // Changed gomock import
 
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/cache"
@@ -22,9 +22,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runner"
 	// "github.com/mensylisir/kubexm/pkg/spec" // Removed unused import
 	"github.com/mensylisir/kubexm/pkg/step"
-
-	mock_connector "github.com/mensylisir/kubexm/pkg/connector/mocks"
-	mock_runner "github.com/mensylisir/kubexm/pkg/runner/mocks"
 )
 
 // mockStepContextForMkdir provides a mockable implementation of step.StepContext for MkdirStep tests.
@@ -65,11 +62,11 @@ func newMockStepContextForMkdir(t *testing.T, hostName string, isControlNode boo
 }
 
 // Implement step.StepContext interface
-func (m *mockStepContextForMkdir) GoContext() context.Context                 { return m.goCtx }
-func (m *mockStepContextForMkdir) GetLogger() *logger.Logger                  { return m.mockLogger }
-func (m *mockStepContextForMkdir) GetHost() connector.Host                    { return m.currentHost }
-func (m *mockStepContextForMkdir) GetRunner() runner.Runner                   { return m.mockRunner }
-func (m *mockStepContextForMkdir) GetControlNode() (connector.Host, error)    { return m.controlNode, nil }
+func (m *mockStepContextForMkdir) GoContext() context.Context              { return m.goCtx }
+func (m *mockStepContextForMkdir) GetLogger() *logger.Logger               { return m.mockLogger }
+func (m *mockStepContextForMkdir) GetHost() connector.Host                 { return m.currentHost }
+func (m *mockStepContextForMkdir) GetRunner() runner.Runner                { return m.mockRunner }
+func (m *mockStepContextForMkdir) GetControlNode() (connector.Host, error) { return m.controlNode, nil }
 func (m *mockStepContextForMkdir) GetConnectorForHost(host connector.Host) (connector.Connector, error) {
 	return m.mockConnector, nil
 }
@@ -78,34 +75,43 @@ func (m *mockStepContextForMkdir) GetCurrentHostConnector() (connector.Connector
 }
 
 // Add other StepContext methods with dummy implementations as needed by the step
-func (m *mockStepContextForMkdir) GetClusterConfig() *v1alpha1.Cluster  { return &v1alpha1.Cluster{} }
-func (m *mockStepContextForMkdir) GetStepCache() cache.StepCache        { return nil }
-func (m *mockStepContextForMkdir) GetTaskCache() cache.TaskCache        { return nil }
-func (m *mockStepContextForMkdir) GetModuleCache() cache.ModuleCache    { return nil }
+func (m *mockStepContextForMkdir) GetClusterConfig() *v1alpha1.Cluster   { return &v1alpha1.Cluster{} }
+func (m *mockStepContextForMkdir) GetStepCache() cache.StepCache         { return nil }
+func (m *mockStepContextForMkdir) GetTaskCache() cache.TaskCache         { return nil }
+func (m *mockStepContextForMkdir) GetModuleCache() cache.ModuleCache     { return nil }
 func (m *mockStepContextForMkdir) GetPipelineCache() cache.PipelineCache { return nil }
-func (m *mockStepContextForMkdir) GetHostsByRole(role string) ([]connector.Host, error) { return nil, nil }
-func (m *mockStepContextForMkdir) GetHostFacts(host connector.Host) (*runner.Facts, error) { return &runner.Facts{}, nil }
-func (m *mockStepContextForMkdir) GetCurrentHostFacts() (*runner.Facts, error) { return &runner.Facts{}, nil }
-func (m *mockStepContextForMkdir) GetGlobalWorkDir() string             { return "/tmp/kubexm_workdir" }
-func (m *mockStepContextForMkdir) IsVerbose() bool                      { return false }
-func (m *mockStepContextForMkdir) ShouldIgnoreErr() bool                { return false }
+func (m *mockStepContextForMkdir) GetHostsByRole(role string) ([]connector.Host, error) {
+	return nil, nil
+}
+func (m *mockStepContextForMkdir) GetHostFacts(host connector.Host) (*runner.Facts, error) {
+	return &runner.Facts{}, nil
+}
+func (m *mockStepContextForMkdir) GetCurrentHostFacts() (*runner.Facts, error) {
+	return &runner.Facts{}, nil
+}
+func (m *mockStepContextForMkdir) GetGlobalWorkDir() string                  { return "/tmp/kubexm_workdir" }
+func (m *mockStepContextForMkdir) IsVerbose() bool                           { return false }
+func (m *mockStepContextForMkdir) ShouldIgnoreErr() bool                     { return false }
 func (m *mockStepContextForMkdir) GetGlobalConnectionTimeout() time.Duration { return 30 * time.Second }
-func (m *mockStepContextForMkdir) GetClusterArtifactsDir() string       { return "/tmp/kubexm_workdir/.kubexm/testcluster" }
-func (m *mockStepContextForMkdir) GetCertsDir() string                  { return "" }
-func (m *mockStepContextForMkdir) GetEtcdCertsDir() string              { return "" }
+func (m *mockStepContextForMkdir) GetClusterArtifactsDir() string {
+	return "/tmp/kubexm_workdir/.kubexm/testcluster"
+}
+func (m *mockStepContextForMkdir) GetCertsDir() string                                  { return "" }
+func (m *mockStepContextForMkdir) GetEtcdCertsDir() string                              { return "" }
 func (m *mockStepContextForMkdir) GetComponentArtifactsDir(componentName string) string { return "" }
-func (m *mockStepContextForMkdir) GetEtcdArtifactsDir() string          { return "" }
-func (m *mockStepContextForMkdir) GetContainerRuntimeArtifactsDir() string { return "" }
-func (m *mockStepContextForMkdir) GetKubernetesArtifactsDir() string    { return "" }
-func (m *mockStepContextForMkdir) GetFileDownloadPath(componentName, version, arch, fileName string) string { return "" }
-func (m *mockStepContextForMkdir) GetHostDir(hostname string) string    { return "" }
+func (m *mockStepContextForMkdir) GetEtcdArtifactsDir() string                          { return "" }
+func (m *mockStepContextForMkdir) GetContainerRuntimeArtifactsDir() string              { return "" }
+func (m *mockStepContextForMkdir) GetKubernetesArtifactsDir() string                    { return "" }
+func (m *mockStepContextForMkdir) GetFileDownloadPath(componentName, version, arch, fileName string) string {
+	return ""
+}
+func (m *mockStepContextForMkdir) GetHostDir(hostname string) string { return "" }
 func (m *mockStepContextForMkdir) WithGoContext(goCtx context.Context) step.StepContext {
 	m.goCtx = goCtx
 	return m
 }
 
 var _ step.StepContext = (*mockStepContextForMkdir)(nil)
-
 
 func TestMkdirStep_Meta(t *testing.T) {
 	testPath := "/test/dir"
@@ -153,7 +159,6 @@ func TestMkdirStep_Precheck_Local_FileExists(t *testing.T) {
 	assert.False(t, done, "Precheck should return false if path exists but is a file")
 }
 
-
 func TestMkdirStep_Precheck_Remote_Exists(t *testing.T) {
 	mockCtx := newMockStepContextForMkdir(t, "remote-host-1", false)
 	testPath := "/remote/test/dir"
@@ -190,7 +195,6 @@ func TestMkdirStep_Precheck_Remote_RunnerError(t *testing.T) {
 	assert.NoError(t, err, "Precheck itself shouldn't error on runner IsDir error, but return false for done")
 	assert.False(t, done)
 }
-
 
 func TestMkdirStep_Run_Local(t *testing.T) {
 	mockCtx := newMockStepContextForMkdir(t, common.ControlNodeHostName, true)
@@ -251,7 +255,6 @@ func TestMkdirStep_Rollback_Local_Success(t *testing.T) {
 	_, statErr := os.Stat(testPath)
 	assert.True(t, os.IsNotExist(statErr), "Directory should have been removed by rollback")
 }
-
 
 func TestMkdirStep_Rollback_Remote_Success(t *testing.T) {
 	mockCtx := newMockStepContextForMkdir(t, "remote-host-rollback", false)
