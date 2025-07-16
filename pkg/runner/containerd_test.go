@@ -5,7 +5,7 @@ import (
 	"encoding/json" // Added for Crictl tests
 	"fmt"
 	"path/filepath" // Added for config tests
-	"regexp"      // Added for CtrContainerInfo test
+	"regexp"        // Added for CtrContainerInfo test
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/connector/mocks" // Assuming this is the correct path for mocks
 )
 
 func TestDefaultRunner_CtrListNamespaces(t *testing.T) {
@@ -142,66 +141,66 @@ func TestDefaultRunner_CtrRemoveImage(t *testing.T) {
 }
 
 func TestDefaultRunner_CtrTagImage(t *testing.T) {
-    ctrl := gomock.NewController(t)
-    defer ctrl.Finish()
-    mockConn := mocks.NewMockConnector(ctrl)
-    runner := NewDefaultRunner()
-    ctx := context.Background()
-    namespace := "default"
-    sourceImage := "docker.io/library/alpine:latest"
-    targetImage := "myalpine:custom"
-    cmd := fmt.Sprintf("ctr -n %s images tag %s %s", shellEscape(namespace), shellEscape(sourceImage), shellEscape(targetImage))
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	namespace := "default"
+	sourceImage := "docker.io/library/alpine:latest"
+	targetImage := "myalpine:custom"
+	cmd := fmt.Sprintf("ctr -n %s images tag %s %s", shellEscape(namespace), shellEscape(sourceImage), shellEscape(targetImage))
 
-    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
-    err := runner.CtrTagImage(ctx, mockConn, namespace, sourceImage, targetImage)
-    assert.NoError(t, err)
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+	err := runner.CtrTagImage(ctx, mockConn, namespace, sourceImage, targetImage)
+	assert.NoError(t, err)
 
-    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).
-        Return(nil, []byte("tagging error"), fmt.Errorf("exec tag error")).Times(1)
-    err = runner.CtrTagImage(ctx, mockConn, namespace, sourceImage, targetImage)
-    assert.Error(t, err)
-    assert.Contains(t, err.Error(), "failed to tag image")
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).
+		Return(nil, []byte("tagging error"), fmt.Errorf("exec tag error")).Times(1)
+	err = runner.CtrTagImage(ctx, mockConn, namespace, sourceImage, targetImage)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to tag image")
 }
 
 func TestDefaultRunner_CtrRunContainer(t *testing.T) {
-    ctrl := gomock.NewController(t)
-    defer ctrl.Finish()
-    mockConn := mocks.NewMockConnector(ctrl)
-    runner := NewDefaultRunner()
-    ctx := context.Background()
-    namespace := "test-ns"
-    opts := ContainerdContainerCreateOptions{
-        ImageName:   "docker.io/library/nginx:latest",
-        ContainerID: "test-nginx-ctr",
-        NetHost:     true,
-        TTY:         true,
-        Env:         []string{"FOO=bar", "BAZ=qux"},
-        Command:     []string{"nginx", "-g", "daemon off;"},
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	namespace := "test-ns"
+	opts := ContainerdContainerCreateOptions{
+		ImageName:      "docker.io/library/nginx:latest",
+		ContainerID:    "test-nginx-ctr",
+		NetHost:        true,
+		TTY:            true,
+		Env:            []string{"FOO=bar", "BAZ=qux"},
+		Command:        []string{"nginx", "-g", "daemon off;"},
 		RemoveExisting: true,
-    }
+	}
 	rmCmd := fmt.Sprintf("ctr -n %s containers rm %s", shellEscape(namespace), shellEscape(opts.ContainerID))
 	mockConn.EXPECT().Exec(ctx, rmCmd, gomock.Any()).Return(nil, []byte{}, nil).AnyTimes()
 	stopCmdTerm := fmt.Sprintf("ctr -n %s task kill -s SIGTERM %s", shellEscape(namespace), shellEscape(opts.ContainerID))
 	stopCmdKill := fmt.Sprintf("ctr -n %s task kill -s SIGKILL %s", shellEscape(namespace), shellEscape(opts.ContainerID))
 	mockConn.EXPECT().Exec(ctx, stopCmdTerm, gomock.Any()).Return(nil, []byte("no such process"), &connector.CommandError{ExitCode: 1}).AnyTimes()
 	mockConn.EXPECT().Exec(ctx, stopCmdKill, gomock.Any()).Return(nil, []byte("no such process"), &connector.CommandError{ExitCode: 1}).AnyTimes()
-    expectedCmdParts := []string{
-        "ctr", "-n", shellEscape(namespace), "run", "--net-host", "--tty",
-        "--env", shellEscape("FOO=bar"), "--env", shellEscape("BAZ=qux"), "--rm",
-        shellEscape(opts.ImageName), shellEscape(opts.ContainerID), shellEscape("nginx"), shellEscape("-g"), shellEscape("daemon off;"),
-    }
-    mockConn.EXPECT().Exec(ctx, gomock.AssignableToTypeOf("string"), gomock.Any()).
-        DoAndReturn(func(_ context.Context, cmd string, _ *connector.ExecOptions) ([]byte, []byte, error) {
-            for _, part := range expectedCmdParts {
-                if !strings.Contains(cmd, part) {
-                     return nil, nil, fmt.Errorf("expected cmd part '%s' not found in '%s'", part, cmd)
-                }
-            }
-            return []byte(opts.ContainerID), []byte{}, nil
-        }).Times(1)
-    id, err := runner.CtrRunContainer(ctx, mockConn, namespace, opts)
-    assert.NoError(t, err)
-    assert.Equal(t, opts.ContainerID, id)
+	expectedCmdParts := []string{
+		"ctr", "-n", shellEscape(namespace), "run", "--net-host", "--tty",
+		"--env", shellEscape("FOO=bar"), "--env", shellEscape("BAZ=qux"), "--rm",
+		shellEscape(opts.ImageName), shellEscape(opts.ContainerID), shellEscape("nginx"), shellEscape("-g"), shellEscape("daemon off;"),
+	}
+	mockConn.EXPECT().Exec(ctx, gomock.AssignableToTypeOf("string"), gomock.Any()).
+		DoAndReturn(func(_ context.Context, cmd string, _ *connector.ExecOptions) ([]byte, []byte, error) {
+			for _, part := range expectedCmdParts {
+				if !strings.Contains(cmd, part) {
+					return nil, nil, fmt.Errorf("expected cmd part '%s' not found in '%s'", part, cmd)
+				}
+			}
+			return []byte(opts.ContainerID), []byte{}, nil
+		}).Times(1)
+	id, err := runner.CtrRunContainer(ctx, mockConn, namespace, opts)
+	assert.NoError(t, err)
+	assert.Equal(t, opts.ContainerID, id)
 }
 
 func TestDefaultRunner_CtrListContainers(t *testing.T) {
@@ -260,79 +259,79 @@ func TestDefaultRunner_CtrStopContainer(t *testing.T) {
 		Return(nil, []byte("sigkill general error"), fmt.Errorf("sigkill general error")).Times(1)
 	err = runner.CtrStopContainer(ctx, mockConn, namespace, containerID, 0*time.Second)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(),"failed to SIGKILL task")
+	assert.Contains(t, err.Error(), "failed to SIGKILL task")
 
 	mockConn.EXPECT().Exec(ctx, killCmdTerm, gomock.Any()).
-		Return(nil, []byte("no such process"), &connector.CommandError{ExitCode:1}).Times(1)
+		Return(nil, []byte("no such process"), &connector.CommandError{ExitCode: 1}).Times(1)
 	mockConn.EXPECT().Exec(ctx, killCmdKill, gomock.Any()).
-		Return(nil, []byte("no such process"), &connector.CommandError{ExitCode:1}).Times(1)
+		Return(nil, []byte("no such process"), &connector.CommandError{ExitCode: 1}).Times(1)
 	err = runner.CtrStopContainer(ctx, mockConn, namespace, containerID, 0*time.Second)
 	assert.NoError(t, err)
 }
 
 func TestDefaultRunner_CtrRemoveContainer(t *testing.T) {
-    ctrl := gomock.NewController(t)
-    defer ctrl.Finish()
-    mockConn := mocks.NewMockConnector(ctrl)
-    runner := NewDefaultRunner()
-    ctx := context.Background()
-    namespace := "test-ns"
-    containerID := "test-container-rm"
-    rmCmd := fmt.Sprintf("ctr -n %s containers rm %s", shellEscape(namespace), shellEscape(containerID))
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	namespace := "test-ns"
+	containerID := "test-container-rm"
+	rmCmd := fmt.Sprintf("ctr -n %s containers rm %s", shellEscape(namespace), shellEscape(containerID))
 
-    mockConn.EXPECT().Exec(ctx, rmCmd, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
-    err := runner.CtrRemoveContainer(ctx, mockConn, namespace, containerID)
-    assert.NoError(t, err)
+	mockConn.EXPECT().Exec(ctx, rmCmd, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+	err := runner.CtrRemoveContainer(ctx, mockConn, namespace, containerID)
+	assert.NoError(t, err)
 
-    mockConn.EXPECT().Exec(ctx, rmCmd, gomock.Any()).
-        Return(nil, []byte("ctr: container \"test-container-rm\": not found"), &connector.CommandError{ExitCode: 1}).Times(1)
-    err = runner.CtrRemoveContainer(ctx, mockConn, namespace, containerID)
-    assert.NoError(t, err)
+	mockConn.EXPECT().Exec(ctx, rmCmd, gomock.Any()).
+		Return(nil, []byte("ctr: container \"test-container-rm\": not found"), &connector.CommandError{ExitCode: 1}).Times(1)
+	err = runner.CtrRemoveContainer(ctx, mockConn, namespace, containerID)
+	assert.NoError(t, err)
 
-    killCmdTerm := fmt.Sprintf("ctr -n %s task kill -s SIGTERM %s", shellEscape(namespace), shellEscape(containerID))
-    killCmdKill := fmt.Sprintf("ctr -n %s task kill -s SIGKILL %s", shellEscape(namespace), shellEscape(containerID))
-    mockConn.EXPECT().Exec(ctx, rmCmd, gomock.Any()).
-        Return(nil, []byte("ctr: container has active task, please stop task before removing container or use --force"), &connector.CommandError{ExitCode: 1}).Times(1)
-    mockConn.EXPECT().Exec(ctx, killCmdTerm, gomock.Any()).
-        Return(nil, []byte("no such process"), &connector.CommandError{ExitCode:1}).Times(1)
-    mockConn.EXPECT().Exec(ctx, killCmdKill, gomock.Any()).
-        Return(nil, []byte("no such process"), &connector.CommandError{ExitCode:1}).Times(1)
-    mockConn.EXPECT().Exec(ctx, rmCmd, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
-    err = runner.CtrRemoveContainer(ctx, mockConn, namespace, containerID)
-    assert.NoError(t, err)
+	killCmdTerm := fmt.Sprintf("ctr -n %s task kill -s SIGTERM %s", shellEscape(namespace), shellEscape(containerID))
+	killCmdKill := fmt.Sprintf("ctr -n %s task kill -s SIGKILL %s", shellEscape(namespace), shellEscape(containerID))
+	mockConn.EXPECT().Exec(ctx, rmCmd, gomock.Any()).
+		Return(nil, []byte("ctr: container has active task, please stop task before removing container or use --force"), &connector.CommandError{ExitCode: 1}).Times(1)
+	mockConn.EXPECT().Exec(ctx, killCmdTerm, gomock.Any()).
+		Return(nil, []byte("no such process"), &connector.CommandError{ExitCode: 1}).Times(1)
+	mockConn.EXPECT().Exec(ctx, killCmdKill, gomock.Any()).
+		Return(nil, []byte("no such process"), &connector.CommandError{ExitCode: 1}).Times(1)
+	mockConn.EXPECT().Exec(ctx, rmCmd, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
+	err = runner.CtrRemoveContainer(ctx, mockConn, namespace, containerID)
+	assert.NoError(t, err)
 }
 
 func TestDefaultRunner_CtrExecInContainer(t *testing.T) {
-    ctrl := gomock.NewController(t)
-    defer ctrl.Finish()
-    mockConn := mocks.NewMockConnector(ctrl)
-    runner := NewDefaultRunner()
-    ctx := context.Background()
-    namespace := "test-ns"
-    containerID := "test-exec-ctr"
-    cmdToExec := []string{"/bin/echo", "hello"}
-    opts := CtrExecOptions{TTY: true, User: "testuser", Cwd: "/tmp"}
-    expectedCmdPattern := fmt.Sprintf("ctr -n %s task exec --tty --user %s --cwd %s --exec-id kubexm-exec-\\d+ %s %s %s",
-        shellEscape(namespace), shellEscape(opts.User), shellEscape(opts.Cwd),
-        shellEscape(containerID), shellEscape(cmdToExec[0]), shellEscape(cmdToExec[1]))
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	namespace := "test-ns"
+	containerID := "test-exec-ctr"
+	cmdToExec := []string{"/bin/echo", "hello"}
+	opts := CtrExecOptions{TTY: true, User: "testuser", Cwd: "/tmp"}
+	expectedCmdPattern := fmt.Sprintf("ctr -n %s task exec --tty --user %s --cwd %s --exec-id kubexm-exec-\\d+ %s %s %s",
+		shellEscape(namespace), shellEscape(opts.User), shellEscape(opts.Cwd),
+		shellEscape(containerID), shellEscape(cmdToExec[0]), shellEscape(cmdToExec[1]))
 
-    mockConn.EXPECT().Exec(ctx, gomock.That(func(cmd string) bool {
-        match, _ := regexp.MatchString(expectedCmdPattern, cmd)
-        return match
-    }), gomock.Any()).Return([]byte("hello\n"), []byte{}, nil).Times(1)
-    output, err := runner.CtrExecInContainer(ctx, mockConn, namespace, containerID, opts, cmdToExec)
-    assert.NoError(t, err)
-    assert.Equal(t, "hello\n", output)
+	mockConn.EXPECT().Exec(ctx, gomock.That(func(cmd string) bool {
+		match, _ := regexp.MatchString(expectedCmdPattern, cmd)
+		return match
+	}), gomock.Any()).Return([]byte("hello\n"), []byte{}, nil).Times(1)
+	output, err := runner.CtrExecInContainer(ctx, mockConn, namespace, containerID, opts, cmdToExec)
+	assert.NoError(t, err)
+	assert.Equal(t, "hello\n", output)
 
-    mockConn.EXPECT().Exec(ctx, gomock.That(func(cmd string) bool {
-        match, _ := regexp.MatchString(expectedCmdPattern, cmd)
-        return match
-    }), gomock.Any()).
-        Return([]byte(""), []byte("Error: command failed with exit code 1"), &connector.CommandError{ExitCode: 1}).Times(1)
-    output, err = runner.CtrExecInContainer(ctx, mockConn, namespace, containerID, opts, cmdToExec)
-    assert.Error(t, err)
-    assert.Contains(t, output, "Error: command failed with exit code 1")
-    assert.Contains(t, err.Error(), "failed to exec in container")
+	mockConn.EXPECT().Exec(ctx, gomock.That(func(cmd string) bool {
+		match, _ := regexp.MatchString(expectedCmdPattern, cmd)
+		return match
+	}), gomock.Any()).
+		Return([]byte(""), []byte("Error: command failed with exit code 1"), &connector.CommandError{ExitCode: 1}).Times(1)
+	output, err = runner.CtrExecInContainer(ctx, mockConn, namespace, containerID, opts, cmdToExec)
+	assert.Error(t, err)
+	assert.Contains(t, output, "Error: command failed with exit code 1")
+	assert.Contains(t, err.Error(), "failed to exec in container")
 }
 
 func TestDefaultRunner_CtrImportImage(t *testing.T) {
@@ -482,7 +481,7 @@ func TestDefaultRunner_ConfigureContainerd_RegistryMirrorsOnly(t *testing.T) {
 	ctx := context.Background()
 	opts := ContainerdConfigOptions{
 		RegistryMirrors: map[string][]string{
-			"docker.io": {"https://dockerhub.mirror.example.com"},
+			"docker.io":  {"https://dockerhub.mirror.example.com"},
 			"k8s.gcr.io": {"https://k8s.mirror.example.com"},
 		},
 	}
@@ -547,7 +546,7 @@ func TestDefaultRunner_CrictlInspectImage(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, &expectedDetails, details)
 
-	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return(nil, []byte("FATA[0000] image \"docker.io/library/alpine:latest\" not found"), &connector.CommandError{ExitCode:1}).Times(1)
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return(nil, []byte("FATA[0000] image \"docker.io/library/alpine:latest\" not found"), &connector.CommandError{ExitCode: 1}).Times(1)
 	details, err = runner.CrictlInspectImage(ctx, mockConn, imageName)
 	assert.NoError(t, err)
 	assert.Nil(t, details)
@@ -570,7 +569,9 @@ func TestDefaultRunner_CrictlImageFSInfo(t *testing.T) {
     ]
 }`
 	expectedFsInfo := []CrictlFSInfo{
-		{Timestamp: 1670000000, FsID: struct{Mountpoint string `json:"mountpoint"`}{Mountpoint: "/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs"}, UsedBytes: "10GB", InodesUsed: "1000"},
+		{Timestamp: 1670000000, FsID: struct {
+			Mountpoint string `json:"mountpoint"`
+		}{Mountpoint: "/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs"}, UsedBytes: "10GB", InodesUsed: "1000"},
 	}
 	cmd := "crictl imagefsinfo -o json"
 	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte(sampleFsInfoJSON), []byte{}, nil).Times(1)
@@ -595,7 +596,7 @@ func TestDefaultRunner_CrictlListPods(t *testing.T) {
 ]
 }`
 	expectedPods := []CrictlPodInfo{
-		{ID: "podid1", Name: "pod1-name", Namespace: "default", Attempt: 0, State: "SANDBOX_READY", CreatedAt: "2023-01-01T12:00:00Z", Labels: map[string]string{"app":"nginx"}, Annotations: map[string]string{"note":"test"}, RuntimeHandler: "runc"},
+		{ID: "podid1", Name: "pod1-name", Namespace: "default", Attempt: 0, State: "SANDBOX_READY", CreatedAt: "2023-01-01T12:00:00Z", Labels: map[string]string{"app": "nginx"}, Annotations: map[string]string{"note": "test"}, RuntimeHandler: "runc"},
 	}
 	cmd := "crictl pods -o json"
 	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte(samplePodsJSON), []byte{}, nil).Times(1)
@@ -668,10 +669,10 @@ func TestDefaultRunner_CrictlStopContainerInPod(t *testing.T) {
 	mockConn.EXPECT().Exec(ctx, cmdWithoutTimeout, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
 	err = runner.CrictlStopContainerInPod(ctx, mockConn, containerID, 0)
 	assert.NoError(t, err)
-    mockConn.EXPECT().Exec(ctx, cmdWithoutTimeout, gomock.Any()).
-        Return(nil, []byte("Container \"test-container-stop-id\" not found"), &connector.CommandError{ExitCode:1}).Times(1)
-    err = runner.CrictlStopContainerInPod(ctx, mockConn, containerID, 0)
-    assert.NoError(t, err)
+	mockConn.EXPECT().Exec(ctx, cmdWithoutTimeout, gomock.Any()).
+		Return(nil, []byte("Container \"test-container-stop-id\" not found"), &connector.CommandError{ExitCode: 1}).Times(1)
+	err = runner.CrictlStopContainerInPod(ctx, mockConn, containerID, 0)
+	assert.NoError(t, err)
 	mockConn.EXPECT().Exec(ctx, cmdWithoutTimeout, gomock.Any()).
 		Return(nil, []byte("some stop error"), fmt.Errorf("exec error")).Times(1)
 	err = runner.CrictlStopContainerInPod(ctx, mockConn, containerID, 0)
@@ -693,10 +694,10 @@ func TestDefaultRunner_CrictlRemoveContainerInPod(t *testing.T) {
 	mockConn.EXPECT().Exec(ctx, cmdWithForce, gomock.Any()).Return(nil, []byte{}, nil).Times(1)
 	err = runner.CrictlRemoveContainerInPod(ctx, mockConn, containerID, true)
 	assert.NoError(t, err)
-    mockConn.EXPECT().Exec(ctx, cmdNoForce, gomock.Any()).
-        Return(nil, []byte("Container \"test-container-rm-id\" not found"), &connector.CommandError{ExitCode:1}).Times(1)
-    err = runner.CrictlRemoveContainerInPod(ctx, mockConn, containerID, false)
-    assert.NoError(t, err)
+	mockConn.EXPECT().Exec(ctx, cmdNoForce, gomock.Any()).
+		Return(nil, []byte("Container \"test-container-rm-id\" not found"), &connector.CommandError{ExitCode: 1}).Times(1)
+	err = runner.CrictlRemoveContainerInPod(ctx, mockConn, containerID, false)
+	assert.NoError(t, err)
 	mockConn.EXPECT().Exec(ctx, cmdNoForce, gomock.Any()).
 		Return(nil, []byte("some rm error"), fmt.Errorf("exec error")).Times(1)
 	err = runner.CrictlRemoveContainerInPod(ctx, mockConn, containerID, false)
@@ -720,7 +721,7 @@ func TestDefaultRunner_CrictlInspectContainerInPod(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, &expectedDetails, details)
 	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).
-		Return(nil, []byte("Container \"test-inspect-container-id\" not found"), &connector.CommandError{ExitCode:1}).Times(1)
+		Return(nil, []byte("Container \"test-inspect-container-id\" not found"), &connector.CommandError{ExitCode: 1}).Times(1)
 	details, err = runner.CrictlInspectContainerInPod(ctx, mockConn, containerID)
 	assert.NoError(t, err)
 	assert.Nil(t, details)
@@ -1033,109 +1034,108 @@ func TestDefaultRunner_CrictlRunPodSandbox(t *testing.T) {
 }
 
 func TestDefaultRunner_CrictlStopPodSandbox(t *testing.T) {
-    ctrl := gomock.NewController(t)
-    defer ctrl.Finish()
-    mockConn := mocks.NewMockConnector(ctrl)
-    runner := NewDefaultRunner()
-    ctx := context.Background()
-    podID := "test-pod-stop-id"
-    cmd := fmt.Sprintf("crictl stopp %s", shellEscape(podID))
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	podID := "test-pod-stop-id"
+	cmd := fmt.Sprintf("crictl stopp %s", shellEscape(podID))
 
-    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte("Stopped sandbox "+podID), []byte{}, nil).Times(1)
-    err := runner.CrictlStopPodSandbox(ctx, mockConn, podID)
-    assert.NoError(t, err)
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte("Stopped sandbox "+podID), []byte{}, nil).Times(1)
+	err := runner.CrictlStopPodSandbox(ctx, mockConn, podID)
+	assert.NoError(t, err)
 
-    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).
-        Return(nil, []byte("WARN[0000] StopPodSandbox Request for ID \"test-pod-stop-id\" failed: rpc error: code = NotFound desc = PodSandbox with ID \"test-pod-stop-id\" not found"), &connector.CommandError{ExitCode:1}).Times(1)
-    err = runner.CrictlStopPodSandbox(ctx, mockConn, podID)
-    assert.NoError(t, err)
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).
+		Return(nil, []byte("WARN[0000] StopPodSandbox Request for ID \"test-pod-stop-id\" failed: rpc error: code = NotFound desc = PodSandbox with ID \"test-pod-stop-id\" not found"), &connector.CommandError{ExitCode: 1}).Times(1)
+	err = runner.CrictlStopPodSandbox(ctx, mockConn, podID)
+	assert.NoError(t, err)
 
-    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).
-        Return(nil, []byte("some other error"), fmt.Errorf("exec error")).Times(1)
-    err = runner.CrictlStopPodSandbox(ctx, mockConn, podID)
-    assert.Error(t, err)
-    assert.Contains(t, err.Error(), "crictl stopp test-pod-stop-id failed")
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).
+		Return(nil, []byte("some other error"), fmt.Errorf("exec error")).Times(1)
+	err = runner.CrictlStopPodSandbox(ctx, mockConn, podID)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "crictl stopp test-pod-stop-id failed")
 }
 
-
 func TestDefaultRunner_CrictlRemovePodSandbox(t *testing.T) {
-    ctrl := gomock.NewController(t)
-    defer ctrl.Finish()
-    mockConn := mocks.NewMockConnector(ctrl)
-    runner := NewDefaultRunner()
-    ctx := context.Background()
-    podID := "test-pod-rm-id"
-    cmd := fmt.Sprintf("crictl rmp %s", shellEscape(podID))
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	podID := "test-pod-rm-id"
+	cmd := fmt.Sprintf("crictl rmp %s", shellEscape(podID))
 
-    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte("Removed sandbox "+podID), []byte{}, nil).Times(1)
-    err := runner.CrictlRemovePodSandbox(ctx, mockConn, podID)
-    assert.NoError(t, err)
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte("Removed sandbox "+podID), []byte{}, nil).Times(1)
+	err := runner.CrictlRemovePodSandbox(ctx, mockConn, podID)
+	assert.NoError(t, err)
 
-     mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).
-        Return(nil, []byte("WARN[0000] RemovePodSandbox Request for ID \"test-pod-rm-id\" failed: rpc error: code = NotFound desc = PodSandbox with ID \"test-pod-rm-id\" not found"), &connector.CommandError{ExitCode:1}).Times(1)
-    err = runner.CrictlRemovePodSandbox(ctx, mockConn, podID)
-    assert.NoError(t, err)
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).
+		Return(nil, []byte("WARN[0000] RemovePodSandbox Request for ID \"test-pod-rm-id\" failed: rpc error: code = NotFound desc = PodSandbox with ID \"test-pod-rm-id\" not found"), &connector.CommandError{ExitCode: 1}).Times(1)
+	err = runner.CrictlRemovePodSandbox(ctx, mockConn, podID)
+	assert.NoError(t, err)
 
-    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).
-        Return(nil, []byte("some other rmp error"), fmt.Errorf("exec error")).Times(1)
-    err = runner.CrictlRemovePodSandbox(ctx, mockConn, podID)
-    assert.Error(t, err)
-    assert.Contains(t, err.Error(), "crictl rmp test-pod-rm-id failed")
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).
+		Return(nil, []byte("some other rmp error"), fmt.Errorf("exec error")).Times(1)
+	err = runner.CrictlRemovePodSandbox(ctx, mockConn, podID)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "crictl rmp test-pod-rm-id failed")
 }
 
 func TestDefaultRunner_CrictlInspectPod(t *testing.T) {
-    ctrl := gomock.NewController(t)
-    defer ctrl.Finish()
-    mockConn := mocks.NewMockConnector(ctrl)
-    runner := NewDefaultRunner()
-    ctx := context.Background()
-    podID := "test-inspect-pod"
-    cmd := fmt.Sprintf("crictl inspectp %s -o json", shellEscape(podID))
-    sampleInspectPJSON := `{"status": {"id": "test-inspect-pod", "metadata": {"name": "my-pod"}, "state": "SANDBOX_READY"}, "info": {}}`
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	podID := "test-inspect-pod"
+	cmd := fmt.Sprintf("crictl inspectp %s -o json", shellEscape(podID))
+	sampleInspectPJSON := `{"status": {"id": "test-inspect-pod", "metadata": {"name": "my-pod"}, "state": "SANDBOX_READY"}, "info": {}}`
 	var expectedDetails CrictlPodDetails
 	err := json.Unmarshal([]byte(sampleInspectPJSON), &expectedDetails)
 	assert.NoError(t, err, "Test setup: failed to unmarshal sample inspectp JSON")
-    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte(sampleInspectPJSON), []byte{}, nil).Times(1)
-    details, err := runner.CrictlInspectPod(ctx, mockConn, podID)
-    assert.NoError(t, err)
-    assert.Equal(t, &expectedDetails, details)
-    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).
-        Return(nil, []byte("pod sandbox \"test-inspect-pod\" not found"), &connector.CommandError{ExitCode:1}).Times(1)
-    details, err = runner.CrictlInspectPod(ctx, mockConn, podID)
-    assert.NoError(t, err)
-    assert.Nil(t, details)
-    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte("this is not json"), []byte{}, nil).Times(1)
-    details, err = runner.CrictlInspectPod(ctx, mockConn, podID)
-    assert.Error(t, err)
-    assert.Nil(t, details)
-    assert.Contains(t, err.Error(), "failed to parse crictl inspectp JSON")
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte(sampleInspectPJSON), []byte{}, nil).Times(1)
+	details, err := runner.CrictlInspectPod(ctx, mockConn, podID)
+	assert.NoError(t, err)
+	assert.Equal(t, &expectedDetails, details)
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).
+		Return(nil, []byte("pod sandbox \"test-inspect-pod\" not found"), &connector.CommandError{ExitCode: 1}).Times(1)
+	details, err = runner.CrictlInspectPod(ctx, mockConn, podID)
+	assert.NoError(t, err)
+	assert.Nil(t, details)
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte("this is not json"), []byte{}, nil).Times(1)
+	details, err = runner.CrictlInspectPod(ctx, mockConn, podID)
+	assert.Error(t, err)
+	assert.Nil(t, details)
+	assert.Contains(t, err.Error(), "failed to parse crictl inspectp JSON")
 }
 
 func TestDefaultRunner_CrictlCreateContainerInPod(t *testing.T) {
-    ctrl := gomock.NewController(t)
-    defer ctrl.Finish()
-    mockConn := mocks.NewMockConnector(ctrl)
-    runner := NewDefaultRunner()
-    ctx := context.Background()
-    podID := "test-pod-for-container"
-    containerConfigFile := "/tmp/container-config.json"
-    podSandboxConfigFile := "/tmp/pod-sandbox-config.json"
-    expectedContainerID := "new-container-id-456"
-    cmd := fmt.Sprintf("crictl create %s %s %s", shellEscape(podID), shellEscape(containerConfigFile), shellEscape(podSandboxConfigFile))
-    mockConn.EXPECT().Exists(ctx, mockConn, containerConfigFile).Return(true, nil).Times(1)
-    mockConn.EXPECT().Exists(ctx, mockConn, podSandboxConfigFile).Return(true, nil).Times(1)
-    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte(expectedContainerID+"\n"), []byte{}, nil).Times(1)
-    containerID, err := runner.CrictlCreateContainerInPod(ctx, mockConn, podID, containerConfigFile, podSandboxConfigFile)
-    assert.NoError(t, err)
-    assert.Equal(t, expectedContainerID, containerID)
-    mockConn.EXPECT().Exists(ctx, mockConn, containerConfigFile).Return(false, nil).Times(1)
-    _, err = runner.CrictlCreateContainerInPod(ctx, mockConn, podID, containerConfigFile, podSandboxConfigFile)
-    assert.Error(t, err)
-    assert.Contains(t, err.Error(), "does not exist")
-    mockConn.EXPECT().Exists(ctx, mockConn, containerConfigFile).Return(true, nil).Times(1)
-    mockConn.EXPECT().Exists(ctx, mockConn, podSandboxConfigFile).Return(true, nil).Times(1)
-    mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return(nil, []byte("error creating container"), fmt.Errorf("exec error")).Times(1)
-    _, err = runner.CrictlCreateContainerInPod(ctx, mockConn, podID, containerConfigFile, podSandboxConfigFile)
-    assert.Error(t, err)
-    assert.Contains(t, err.Error(), "crictl create container in pod")
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockConn := mocks.NewMockConnector(ctrl)
+	runner := NewDefaultRunner()
+	ctx := context.Background()
+	podID := "test-pod-for-container"
+	containerConfigFile := "/tmp/container-config.json"
+	podSandboxConfigFile := "/tmp/pod-sandbox-config.json"
+	expectedContainerID := "new-container-id-456"
+	cmd := fmt.Sprintf("crictl create %s %s %s", shellEscape(podID), shellEscape(containerConfigFile), shellEscape(podSandboxConfigFile))
+	mockConn.EXPECT().Exists(ctx, mockConn, containerConfigFile).Return(true, nil).Times(1)
+	mockConn.EXPECT().Exists(ctx, mockConn, podSandboxConfigFile).Return(true, nil).Times(1)
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return([]byte(expectedContainerID+"\n"), []byte{}, nil).Times(1)
+	containerID, err := runner.CrictlCreateContainerInPod(ctx, mockConn, podID, containerConfigFile, podSandboxConfigFile)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedContainerID, containerID)
+	mockConn.EXPECT().Exists(ctx, mockConn, containerConfigFile).Return(false, nil).Times(1)
+	_, err = runner.CrictlCreateContainerInPod(ctx, mockConn, podID, containerConfigFile, podSandboxConfigFile)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "does not exist")
+	mockConn.EXPECT().Exists(ctx, mockConn, containerConfigFile).Return(true, nil).Times(1)
+	mockConn.EXPECT().Exists(ctx, mockConn, podSandboxConfigFile).Return(true, nil).Times(1)
+	mockConn.EXPECT().Exec(ctx, cmd, gomock.Any()).Return(nil, []byte("error creating container"), fmt.Errorf("exec error")).Times(1)
+	_, err = runner.CrictlCreateContainerInPod(ctx, mockConn, podID, containerConfigFile, podSandboxConfigFile)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "crictl create container in pod")
 }

@@ -9,18 +9,16 @@ import (
 	"testing"
 	"time"
 
-	"go.uber.org/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/cache"
 	"github.com/mensylisir/kubexm/pkg/connector"
-	mock_connector "github.com/mensylisir/kubexm/pkg/connector/mocks"
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/runner"
-	mock_runner "github.com/mensylisir/kubexm/pkg/runner/mocks"
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 
@@ -55,43 +53,61 @@ func newMockIPSContext(t *testing.T) *mockIPSContext {
 }
 
 // Implement step.StepContext
-func (m *mockIPSContext) GoContext() context.Context                 { return m.goCtx }
-func (m *mockIPSContext) GetLogger() *logger.Logger                  { return m.logger }
-func (m *mockIPSContext) GetHost() connector.Host                    { return m.mockHost }
-func (m *mockIPSContext) GetRunner() runner.Runner                   { return m.mockRunner }
+func (m *mockIPSContext) GoContext() context.Context { return m.goCtx }
+func (m *mockIPSContext) GetLogger() *logger.Logger  { return m.logger }
+func (m *mockIPSContext) GetHost() connector.Host    { return m.mockHost }
+func (m *mockIPSContext) GetRunner() runner.Runner   { return m.mockRunner }
 func (m *mockIPSContext) GetControlNode() (connector.Host, error) {
 	dummyControlSpec := &v1alpha1.HostSpec{Name: "control-node", Type: "local", Address: "127.0.0.1", Arch: "amd64"}
 	return connector.NewHostFromSpec(*dummyControlSpec), nil
 }
-func (m *mockIPSContext) GetConnectorForHost(h connector.Host) (connector.Connector, error) { return m.mockConn, nil }
-func (m *mockIPSContext) GetCurrentHostConnector() (connector.Connector, error)        { return m.mockConn, nil }
-func (m *mockIPSContext) GetHostFacts(h connector.Host) (*runner.Facts, error)           { return m.hostFacts, nil }
-func (m *mockIPSContext) GetCurrentHostFacts() (*runner.Facts, error)                  { return m.hostFacts, nil }
+func (m *mockIPSContext) GetConnectorForHost(h connector.Host) (connector.Connector, error) {
+	return m.mockConn, nil
+}
+func (m *mockIPSContext) GetCurrentHostConnector() (connector.Connector, error) {
+	return m.mockConn, nil
+}
+func (m *mockIPSContext) GetHostFacts(h connector.Host) (*runner.Facts, error) {
+	return m.hostFacts, nil
+}
+func (m *mockIPSContext) GetCurrentHostFacts() (*runner.Facts, error) { return m.hostFacts, nil }
 
-func (m *mockIPSContext) GetStepCache() cache.StepCache          { return cache.NewStepCache() }
-func (m *mockIPSContext) GetTaskCache() cache.TaskCache          { return cache.NewTaskCache() }
-func (m *mockIPSContext) GetModuleCache() cache.ModuleCache      { return cache.NewModuleCache() }
-func (m *mockIPSContext) GetPipelineCache() cache.PipelineCache  { return cache.NewPipelineCache() }
+func (m *mockIPSContext) GetStepCache() cache.StepCache         { return cache.NewStepCache() }
+func (m *mockIPSContext) GetTaskCache() cache.TaskCache         { return cache.NewTaskCache() }
+func (m *mockIPSContext) GetModuleCache() cache.ModuleCache     { return cache.NewModuleCache() }
+func (m *mockIPSContext) GetPipelineCache() cache.PipelineCache { return cache.NewPipelineCache() }
 
-func (m *mockIPSContext) GetClusterConfig() *v1alpha1.Cluster { return &v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "testcluster"}} }
+func (m *mockIPSContext) GetClusterConfig() *v1alpha1.Cluster {
+	return &v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "testcluster"}}
+}
 func (m *mockIPSContext) GetHostsByRole(role string) ([]connector.Host, error) { return nil, nil }
 
-func (m *mockIPSContext) GetGlobalWorkDir() string         { return "/tmp/kubexm_workdir" }
-func (m *mockIPSContext) IsVerbose() bool                  { return false }
-func (m *mockIPSContext) ShouldIgnoreErr() bool            { return false }
+func (m *mockIPSContext) GetGlobalWorkDir() string                  { return "/tmp/kubexm_workdir" }
+func (m *mockIPSContext) IsVerbose() bool                           { return false }
+func (m *mockIPSContext) ShouldIgnoreErr() bool                     { return false }
 func (m *mockIPSContext) GetGlobalConnectionTimeout() time.Duration { return 30 * time.Second }
 
-func (m *mockIPSContext) GetClusterArtifactsDir() string       { return filepath.Join(m.GetGlobalWorkDir(), ".kubexm", m.GetClusterConfig().Name) }
-func (m *mockIPSContext) GetCertsDir() string                  { return filepath.Join(m.GetClusterArtifactsDir(), "certs") }
-func (m *mockIPSContext) GetEtcdCertsDir() string              { return filepath.Join(m.GetCertsDir(), "etcd") }
+func (m *mockIPSContext) GetClusterArtifactsDir() string {
+	return filepath.Join(m.GetGlobalWorkDir(), ".kubexm", m.GetClusterConfig().Name)
+}
+func (m *mockIPSContext) GetCertsDir() string {
+	return filepath.Join(m.GetClusterArtifactsDir(), "certs")
+}
+func (m *mockIPSContext) GetEtcdCertsDir() string { return filepath.Join(m.GetCertsDir(), "etcd") }
 func (m *mockIPSContext) GetComponentArtifactsDir(componentName string) string {
 	return filepath.Join(m.GetClusterArtifactsDir(), componentName)
 }
-func (m *mockIPSContext) GetEtcdArtifactsDir() string          { return m.GetComponentArtifactsDir("etcd") }
-func (m *mockIPSContext) GetContainerRuntimeArtifactsDir() string { return m.GetComponentArtifactsDir("container_runtime") }
-func (m *mockIPSContext) GetKubernetesArtifactsDir() string    { return m.GetComponentArtifactsDir("kubernetes") }
+func (m *mockIPSContext) GetEtcdArtifactsDir() string                    { return m.GetComponentArtifactsDir("etcd") }
+func (m *mockIPSContext) GetContainerRuntimeArtifactsDir() string {
+	return m.GetComponentArtifactsDir("container_runtime")
+}
+func (m *mockIPSContext) GetKubernetesArtifactsDir() string {
+	return m.GetComponentArtifactsDir("kubernetes")
+}
 func (m *mockIPSContext) GetFileDownloadPath(cn, v, a, fn string) string { return "" }
-func (m *mockIPSContext) GetHostDir(hostname string) string    { return filepath.Join(m.GetClusterArtifactsDir(), hostname) }
+func (m *mockIPSContext) GetHostDir(hostname string) string {
+	return filepath.Join(m.GetClusterArtifactsDir(), hostname)
+}
 
 func (m *mockIPSContext) WithGoContext(goCtx context.Context) step.StepContext {
 	m.goCtx = goCtx
@@ -99,7 +115,6 @@ func (m *mockIPSContext) WithGoContext(goCtx context.Context) step.StepContext {
 }
 
 var _ step.StepContext = (*mockIPSContext)(nil)
-
 
 func TestInstallPackagesStep_NewInstallPackagesStep(t *testing.T) {
 	pkgs := []string{"nginx", "vim"}

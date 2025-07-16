@@ -209,4 +209,12 @@ var (
 		StorageComponentRookCeph,
 		StorageComponentLonghorn,
 	}
+
+	HostUnitMap = map[string]string{
+		"K": "Ki",
+		"M": "Mi",
+		"G": "Gi",
+		"T": "Ti",
+		"P": "Pi",
+	}
 )

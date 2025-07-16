@@ -11,13 +11,11 @@ import (
 
 	"github.com/docker/docker/api/types/image"
 	//lint:ignore SA1019 we need to use this for now
-	"github.com/docker/docker/api/types/container"
 	"github.com/golang/mock/gomock"
-	"github.com/stretchr/testify/assert"
 	"github.com/pkg/errors"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/connector/mocks"
 )
 
 func TestDefaultRunner_PullImage(t *testing.T) {
@@ -219,16 +217,32 @@ func TestDefaultRunner_CreateContainer(t *testing.T) {
 	mockConn.EXPECT().Exec(ctx, gomock.All(
 		gomock.Cond(func(x interface{}) bool { return strings.HasPrefix(x.(string), "docker create") }),
 		gomock.Cond(func(x interface{}) bool { return strings.Contains(x.(string), shellEscape(opts.ImageName)) }),
-		gomock.Cond(func(x interface{}) bool { return strings.Contains(x.(string), fmt.Sprintf("--name %s", shellEscape(opts.ContainerName))) }),
-		gomock.Cond(func(x interface{}) bool { return strings.Contains(x.(string), fmt.Sprintf("-p %s", shellEscape("8080:80/tcp"))) }),
-		gomock.Cond(func(x interface{}) bool { return strings.Contains(x.(string), fmt.Sprintf("-v %s", shellEscape("/tmp:/data:ro"))) }),
-		gomock.Cond(func(x interface{}) bool { return strings.Contains(x.(string), fmt.Sprintf("-e %s", shellEscape("MODE=test"))) }),
-		gomock.Cond(func(x interface{}) bool { return strings.Contains(x.(string), fmt.Sprintf("-e %s", shellEscape("DEBUG="))) }),
-		gomock.Cond(func(x interface{}) bool { return strings.Contains(x.(string), fmt.Sprintf("--entrypoint %s", shellEscape("/bin/sh"))) }),
-		gomock.Cond(func(x interface{}) bool { return strings.Contains(x.(string), fmt.Sprintf("--restart %s", shellEscape("on-failure:3"))) }),
+		gomock.Cond(func(x interface{}) bool {
+			return strings.Contains(x.(string), fmt.Sprintf("--name %s", shellEscape(opts.ContainerName)))
+		}),
+		gomock.Cond(func(x interface{}) bool {
+			return strings.Contains(x.(string), fmt.Sprintf("-p %s", shellEscape("8080:80/tcp")))
+		}),
+		gomock.Cond(func(x interface{}) bool {
+			return strings.Contains(x.(string), fmt.Sprintf("-v %s", shellEscape("/tmp:/data:ro")))
+		}),
+		gomock.Cond(func(x interface{}) bool {
+			return strings.Contains(x.(string), fmt.Sprintf("-e %s", shellEscape("MODE=test")))
+		}),
+		gomock.Cond(func(x interface{}) bool {
+			return strings.Contains(x.(string), fmt.Sprintf("-e %s", shellEscape("DEBUG=")))
+		}),
+		gomock.Cond(func(x interface{}) bool {
+			return strings.Contains(x.(string), fmt.Sprintf("--entrypoint %s", shellEscape("/bin/sh")))
+		}),
+		gomock.Cond(func(x interface{}) bool {
+			return strings.Contains(x.(string), fmt.Sprintf("--restart %s", shellEscape("on-failure:3")))
+		}),
 		gomock.Cond(func(x interface{}) bool { return strings.Contains(x.(string), "--privileged") }),
 		gomock.Cond(func(x interface{}) bool { return strings.Contains(x.(string), "--rm") }),
-		gomock.Cond(func(x interface{}) bool { return strings.HasSuffix(x.(string), fmt.Sprintf("%s %s", shellEscape("-c"), shellEscape("echo hello"))) }),
+		gomock.Cond(func(x interface{}) bool {
+			return strings.HasSuffix(x.(string), fmt.Sprintf("%s %s", shellEscape("-c"), shellEscape("echo hello")))
+		}),
 	), gomock.Any()).Return([]byte(expectedContainerID), []byte{}, nil).Times(1)
 
 	id, err := runner.CreateContainer(ctx, mockConn, opts)
@@ -394,19 +408,19 @@ func TestDefaultRunner_ListContainers(t *testing.T) {
 	sampleContainer2JSON := `{"ID":"id2","Image":"image2","Command":"cmd2","CreatedAt":"2023-01-02 12:00:00 +0000 UTC","Names":"name2,altName2","Labels":"k3=v3","Mounts":"","Networks":"net2","Ports":"0.0.0.0:8080->80/tcp","Status":"Exited (0) 1 day ago"}`
 
 	expectedContainer1 := ContainerInfo{
-		ID:      "id1", Image: "image1", Command: "cmd1",
+		ID: "id1", Image: "image1", Command: "cmd1",
 		Created: time.Date(2023, 1, 1, 10, 0, 0, 0, time.UTC).Unix(),
 		Names:   []string{"name1"}, Labels: map[string]string{"k1": "v1", "k2": "v2"},
-		Mounts:  []ContainerMount{{Source: "/mnt1"}, {Source: "/mnt2"}},
-		Ports:   []ContainerPortMapping{{ContainerPort: "80", Protocol: "tcp"}},
-		State:   "running", Status: "Up 2 hours",
+		Mounts: []ContainerMount{{Source: "/mnt1"}, {Source: "/mnt2"}},
+		Ports:  []ContainerPortMapping{{ContainerPort: "80", Protocol: "tcp"}},
+		State:  "running", Status: "Up 2 hours",
 	}
 	expectedContainer2 := ContainerInfo{
-		ID:      "id2", Image: "image2", Command: "cmd2",
+		ID: "id2", Image: "image2", Command: "cmd2",
 		Created: time.Date(2023, 1, 2, 12, 0, 0, 0, time.UTC).Unix(),
 		Names:   []string{"name2", "altName2"}, Labels: map[string]string{"k3": "v3"},
-		Ports:   []ContainerPortMapping{{HostIP: "0.0.0.0", HostPort: "8080", ContainerPort: "80", Protocol: "tcp"}},
-		State:   "exited", Status: "Exited (0) 1 day ago",
+		Ports: []ContainerPortMapping{{HostIP: "0.0.0.0", HostPort: "8080", ContainerPort: "80", Protocol: "tcp"}},
+		State: "exited", Status: "Exited (0) 1 day ago",
 	}
 
 	mockConn.EXPECT().Exec(ctx, "docker ps --format {{json .}}", gomock.Any()).
@@ -416,7 +430,6 @@ func TestDefaultRunner_ListContainers(t *testing.T) {
 	assert.Len(t, containers, 2)
 	assert.Equal(t, expectedContainer1, containers[0])
 	assert.Equal(t, expectedContainer2, containers[1])
-
 
 	filters := map[string]string{"status": "running"}
 	expectedCmdWithFilters := "docker ps --all --filter 'status=running' --format {{json .}}"
@@ -500,7 +513,6 @@ func TestDefaultRunner_InspectContainer(t *testing.T) {
 	assert.NoError(t, errUn)
 	expectedDetails := expectedDetailsArray[0]
 
-
 	mockConn.EXPECT().Exec(ctx, fmt.Sprintf("docker inspect %s", shellEscape(containerID)), gomock.Any()).
 		Return([]byte(sampleInspectJSON), []byte{}, nil).Times(1)
 	details, err := runner.InspectContainer(ctx, mockConn, containerID)
@@ -569,7 +581,8 @@ func TestDefaultRunner_ExecInContainer(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "stdout content"+"stderr content", output)
 
-	user := "testuser"; workDir := "/app"
+	user := "testuser"
+	workDir := "/app"
 	expectedCmdWithUserWorkdirTTY := fmt.Sprintf("docker exec -t --user %s --workdir %s %s %s %s %s", shellEscape(user), shellEscape(workDir), shellEscape(containerID), shellEscape(cmdToExec[0]), shellEscape(cmdToExec[1]), shellEscape(cmdToExec[2]))
 	mockConn.EXPECT().Exec(ctx, expectedCmdWithUserWorkdirTTY, gomock.Any()).Return([]byte("tty output"), []byte{}, nil).Times(1)
 	output, err = runner.ExecInContainer(ctx, mockConn, containerID, cmdToExec, user, workDir, true)
@@ -613,11 +626,11 @@ func TestDefaultRunner_GetContainerStats_NoStream(t *testing.T) {
 		if assert.True(t, ok, "Channel should be open and receive one stat") {
 			assert.NoError(t, stats.Error, "Stats error should be nil")
 			assert.Equal(t, 1.23, stats.CPUPercentage)
-			assert.Equal(t, uint64(10*1024*1024), stats.MemoryUsageBytes) // 10MiB
+			assert.Equal(t, uint64(10*1024*1024), stats.MemoryUsageBytes)   // 10MiB
 			assert.Equal(t, uint64(1024*1024*1024), stats.MemoryLimitBytes) // 1GiB
 			assert.Equal(t, uint64(100), stats.NetworkRxBytes)
 			assert.Equal(t, uint64(200), stats.NetworkTxBytes)
-			assert.Equal(t, uint64(1000), stats.BlockReadBytes) // 1kB
+			assert.Equal(t, uint64(1000), stats.BlockReadBytes)  // 1kB
 			assert.Equal(t, uint64(2000), stats.BlockWriteBytes) // 2kB
 			assert.Equal(t, uint64(5), stats.PidsCurrent)
 			receivedStats = true
@@ -637,7 +650,6 @@ func TestDefaultRunner_GetContainerStats_NoStream(t *testing.T) {
 	}
 }
 
-
 func TestDefaultRunner_CreateDockerNetwork(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -646,7 +658,10 @@ func TestDefaultRunner_CreateDockerNetwork(t *testing.T) {
 	runner := NewDefaultRunner()
 	ctx := context.Background()
 
-	netName := "test-network"; driver := "bridge"; subnet := "172.20.0.0/16"; gateway := "172.20.0.1"
+	netName := "test-network"
+	driver := "bridge"
+	subnet := "172.20.0.0/16"
+	gateway := "172.20.0.1"
 	optsMap := map[string]string{"com.docker.network.bridge.name": "testbridge0"}
 
 	expectedCmd := fmt.Sprintf("docker network create --driver %s --subnet %s --gateway %s --opt %s %s",
@@ -692,7 +707,8 @@ func TestDefaultRunner_CreateDockerVolume(t *testing.T) {
 	runner := NewDefaultRunner()
 	ctx := context.Background()
 
-	volName := "test-volume"; driver := "local"
+	volName := "test-volume"
+	driver := "local"
 	driverOpts := map[string]string{"type": "nfs", "o": "addr=192.168.1.1,rw"}
 	labels := map[string]string{"env": "dev", "project": "kubexm"}
 
@@ -813,7 +829,8 @@ func TestDefaultRunner_ConfigureDockerDaemon(t *testing.T) {
 
 	t.Run("ConfigureNewOptionsNoRestart", func(t *testing.T) {
 		mockReadFileForEmpty()
-		newLogDriver := "journald"; newMirrors := []string{"https://mirror1.example.com"}
+		newLogDriver := "journald"
+		newMirrors := []string{"https://mirror1.example.com"}
 		opts1 := DockerDaemonOptions{LogDriver: &newLogDriver, RegistryMirrors: &newMirrors}
 		expectedJSON1, _ := json.MarshalIndent(opts1, "", "  ")
 
@@ -824,11 +841,13 @@ func TestDefaultRunner_ConfigureDockerDaemon(t *testing.T) {
 	})
 
 	t.Run("MergeWithExistingAndRestart", func(t *testing.T) {
-		existingLogDriver := "json-file"; existingJSON := fmt.Sprintf(`{"log-driver": "%s"}`, existingLogDriver)
+		existingLogDriver := "json-file"
+		existingJSON := fmt.Sprintf(`{"log-driver": "%s"}`, existingLogDriver)
 		mockConn.EXPECT().ReadFile(ctx, mockConn, dockerDaemonConfigPath).Return([]byte(existingJSON), nil).Times(1)
 		mockConn.EXPECT().Exists(ctx, mockConn, dockerDaemonConfigPath).Return(true, nil).AnyTimes()
 
-		newExecOpts := []string{"native.cgroupdriver=systemd"}; newDataRoot := "/mnt/docker-data"
+		newExecOpts := []string{"native.cgroupdriver=systemd"}
+		newDataRoot := "/mnt/docker-data"
 		opts2 := DockerDaemonOptions{ExecOpts: &newExecOpts, DataRoot: &newDataRoot}
 		expectedMergedOpts := DockerDaemonOptions{LogDriver: &existingLogDriver, ExecOpts: &newExecOpts, DataRoot: &newDataRoot}
 		expectedJSON2, _ := json.MarshalIndent(expectedMergedOpts, "", "  ")
@@ -884,7 +903,8 @@ func TestDefaultRunner_EnsureDefaultDockerConfig(t *testing.T) {
 		mockConn.EXPECT().Mkdirp(ctx, mockConn, filepath.Dir(dockerDaemonConfigPath), "0755", true).Return(nil).Times(1)
 		mockConn.EXPECT().WriteFile(ctx, mockConn, gomock.Any(), dockerDaemonConfigPath, "0644", true).
 			DoAndReturn(func(_ context.Context, _ connector.Connector, content []byte, _ string, _ string, _ bool) error {
-				var opts DockerDaemonOptions; json.Unmarshal(content, &opts)
+				var opts DockerDaemonOptions
+				json.Unmarshal(content, &opts)
 				assert.Equal(t, "systemd", (*opts.ExecOpts)[0])
 				assert.Equal(t, "json-file", *opts.LogDriver)
 				return nil
@@ -903,7 +923,8 @@ func TestDefaultRunner_EnsureDefaultDockerConfig(t *testing.T) {
 		mockConn.EXPECT().Mkdirp(ctx, mockConn, filepath.Dir(dockerDaemonConfigPath), "0755", true).Return(nil).Times(1)
 		mockConn.EXPECT().WriteFile(ctx, mockConn, gomock.Any(), dockerDaemonConfigPath, "0644", true).
 			DoAndReturn(func(_ context.Context, _ connector.Connector, content []byte, _ string, _ string, _ bool) error {
-				var opts DockerDaemonOptions; json.Unmarshal(content, &opts)
+				var opts DockerDaemonOptions
+				json.Unmarshal(content, &opts)
 				assert.Equal(t, "systemd", (*opts.ExecOpts)[0])
 				return nil
 			}).Times(1)
