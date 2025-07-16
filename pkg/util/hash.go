@@ -2,6 +2,7 @@ package util
 
 import (
 	"crypto/md5"
+	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
@@ -12,9 +13,6 @@ import (
 	"strings"
 )
 
-// ComputeFileChecksum calculates the checksum of a file using the specified algorithm.
-// Supported algorithms: "md5", "sha256", "sha512".
-// Returns the hex-encoded checksum string.
 func ComputeFileChecksum(filePath string, algo string) (string, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -30,9 +28,8 @@ func ComputeFileChecksum(filePath string, algo string) (string, error) {
 		h = sha256.New()
 	case "sha512":
 		h = sha512.New()
-	// Add other hash algorithms here if needed, e.g., sha1
-	// case "sha1":
-	//  h = sha1.New()
+	case "sha1":
+		h = sha1.New()
 	default:
 		return "", fmt.Errorf("unsupported checksum algorithm: %s. Supported: md5, sha256, sha512", algo)
 	}

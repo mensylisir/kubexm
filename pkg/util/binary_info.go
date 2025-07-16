@@ -31,7 +31,6 @@ const (
 	UNKNOWN    BinaryType = "unknown"
 )
 
-// Constants for component names, matching keys in knownBinaryDetails
 const (
 	ComponentEtcd                  = "etcd"
 	ComponentKubeadm               = "kubeadm"
