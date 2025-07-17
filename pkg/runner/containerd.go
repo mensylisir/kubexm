@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath" // Required for filepath.Dir
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -14,9 +14,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/util" // Added import for util
-	// Note: For a production-grade TOML manipulation, a library like "github.com/BurntSushi/toml" would be used.
-	// As it's not available in this environment, TOML handling will be simplified or string-based.
 )
 
 const (
@@ -61,7 +58,7 @@ func (r *defaultRunner) CtrListImages(ctx context.Context, conn connector.Connec
 	if strings.TrimSpace(namespace) == "" {
 		return nil, errors.New("namespace cannot be empty for CtrListImages")
 	}
-	cmd := fmt.Sprintf("ctr -n %s images ls", util.ShellEscape(namespace))
+	cmd := fmt.Sprintf("ctr -n %s images ls", namespace)
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: DefaultCtrTimeout}
 	stdout, stderr, err := conn.Exec(ctx, cmd, execOptions)
 	if err != nil {
@@ -70,18 +67,28 @@ func (r *defaultRunner) CtrListImages(ctx context.Context, conn connector.Connec
 
 	var images []CtrImageInfo
 	lines := strings.Split(string(stdout), "\n")
-	if len(lines) <= 1 { return images, nil }
+	if len(lines) <= 1 {
+		return images, nil
+	}
 
 	reSpaces := regexp.MustCompile(`\s{2,}`)
 	for _, line := range lines[1:] {
 		trimmedLine := strings.TrimSpace(line)
-		if trimmedLine == "" { continue }
+		if trimmedLine == "" {
+			continue
+		}
 		parts := reSpaces.Split(trimmedLine, -1)
-		if len(parts) < 3 { continue }
+		if len(parts) < 3 {
+			continue
+		}
 
 		imageInfo := CtrImageInfo{Name: parts[0], Digest: parts[2]}
-		if len(parts) > 3 { imageInfo.Size = parts[3] }
-		if len(parts) > 4 { imageInfo.OSArch = parts[4] }
+		if len(parts) > 3 {
+			imageInfo.Size = parts[3]
+		}
+		if len(parts) > 4 {
+			imageInfo.OSArch = parts[4]
+		}
 		images = append(images, imageInfo)
 	}
 	return images, nil
@@ -89,15 +96,25 @@ func (r *defaultRunner) CtrListImages(ctx context.Context, conn connector.Connec
 
 // CtrPullImage pulls an image into a given containerd namespace.
 func (r *defaultRunner) CtrPullImage(ctx context.Context, conn connector.Connector, namespace, imageName string, allPlatforms bool, user string) error {
-	if conn == nil { return errors.New("connector cannot be nil") }
-	if namespace == "" { return errors.New("namespace cannot be empty for CtrPullImage") }
-	if imageName == "" { return errors.New("imageName cannot be empty for CtrPullImage") }
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if namespace == "" {
+		return errors.New("namespace cannot be empty for CtrPullImage")
+	}
+	if imageName == "" {
+		return errors.New("imageName cannot be empty for CtrPullImage")
+	}
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "ctr", "-n", util.ShellEscape(namespace), "images", "pull")
-	if allPlatforms { cmdArgs = append(cmdArgs, "--all-platforms") }
-	if user != "" { cmdArgs = append(cmdArgs, "--user", util.ShellEscape(user)) }
-	cmdArgs = append(cmdArgs, util.ShellEscape(imageName))
+	cmdArgs = append(cmdArgs, "ctr", "-n", namespace, "images", "pull")
+	if allPlatforms {
+		cmdArgs = append(cmdArgs, "--all-platforms")
+	}
+	if user != "" {
+		cmdArgs = append(cmdArgs, "--user", user)
+	}
+	cmdArgs = append(cmdArgs, imageName)
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 15 * time.Minute})
 	if err != nil {
@@ -108,14 +125,22 @@ func (r *defaultRunner) CtrPullImage(ctx context.Context, conn connector.Connect
 
 // CtrRemoveImage removes an image from a given containerd namespace.
 func (r *defaultRunner) CtrRemoveImage(ctx context.Context, conn connector.Connector, namespace, imageName string) error {
-	if conn == nil { return errors.New("connector cannot be nil") }
-	if namespace == "" { return errors.New("namespace cannot be empty for CtrRemoveImage") }
-	if imageName == "" { return errors.New("imageName cannot be empty for CtrRemoveImage") }
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if namespace == "" {
+		return errors.New("namespace cannot be empty for CtrRemoveImage")
+	}
+	if imageName == "" {
+		return errors.New("imageName cannot be empty for CtrRemoveImage")
+	}
 
-	cmd := fmt.Sprintf("ctr -n %s images rm %s", util.ShellEscape(namespace), util.ShellEscape(imageName))
+	cmd := fmt.Sprintf("ctr -n %s images rm %s", namespace, imageName)
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCtrTimeout})
 	if err != nil {
-		if strings.Contains(string(stderr), "not found") { return nil }
+		if strings.Contains(string(stderr), "not found") {
+			return nil
+		}
 		return errors.Wrapf(err, "failed to remove image %s from namespace %s. Stderr: %s", imageName, namespace, string(stderr))
 	}
 	return nil
@@ -123,11 +148,13 @@ func (r *defaultRunner) CtrRemoveImage(ctx context.Context, conn connector.Conne
 
 // CtrTagImage tags an image in a given containerd namespace.
 func (r *defaultRunner) CtrTagImage(ctx context.Context, conn connector.Connector, namespace, sourceImage, targetImage string) error {
-	if conn == nil { return errors.New("connector cannot be nil") }
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
 	if namespace == "" || sourceImage == "" || targetImage == "" {
 		return errors.New("namespace, sourceImage, and targetImage are required for CtrTagImage")
 	}
-	cmd := fmt.Sprintf("ctr -n %s images tag %s %s", util.ShellEscape(namespace), util.ShellEscape(sourceImage), util.ShellEscape(targetImage))
+	cmd := fmt.Sprintf("ctr -n %s images tag %s %s", namespace, sourceImage, targetImage)
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCtrTimeout})
 	if err != nil {
 		return errors.Wrapf(err, "failed to tag image %s to %s in namespace %s. Stderr: %s", sourceImage, targetImage, namespace, string(stderr))
@@ -137,13 +164,19 @@ func (r *defaultRunner) CtrTagImage(ctx context.Context, conn connector.Connecto
 
 // CtrImportImage imports an image from a tar archive.
 func (r *defaultRunner) CtrImportImage(ctx context.Context, conn connector.Connector, namespace, filePath string, allPlatforms bool) error {
-	if conn == nil { return errors.New("connector cannot be nil") }
-	if namespace == "" || filePath == "" { return errors.New("namespace and filePath are required") }
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if namespace == "" || filePath == "" {
+		return errors.New("namespace and filePath are required")
+	}
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "ctr", "-n", util.ShellEscape(namespace), "images", "import")
-	if allPlatforms { cmdArgs = append(cmdArgs, "--all-platforms") }
-	cmdArgs = append(cmdArgs, util.ShellEscape(filePath))
+	cmdArgs = append(cmdArgs, "ctr", "-n", namespace, "images", "import")
+	if allPlatforms {
+		cmdArgs = append(cmdArgs, "--all-platforms")
+	}
+	cmdArgs = append(cmdArgs, filePath)
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 15 * time.Minute})
 	if err != nil {
@@ -154,13 +187,19 @@ func (r *defaultRunner) CtrImportImage(ctx context.Context, conn connector.Conne
 
 // CtrExportImage exports an image to a tar archive.
 func (r *defaultRunner) CtrExportImage(ctx context.Context, conn connector.Connector, namespace, imageName, outputFilePath string, allPlatforms bool) error {
-	if conn == nil { return errors.New("connector cannot be nil") }
-	if namespace == "" || imageName == "" || outputFilePath == "" { return errors.New("namespace, imageName, and outputFilePath are required") }
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if namespace == "" || imageName == "" || outputFilePath == "" {
+		return errors.New("namespace, imageName, and outputFilePath are required")
+	}
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "ctr", "-n", util.ShellEscape(namespace), "images", "export")
-	if allPlatforms { cmdArgs = append(cmdArgs, "--all-platforms") }
-	cmdArgs = append(cmdArgs, util.ShellEscape(outputFilePath), util.ShellEscape(imageName))
+	cmdArgs = append(cmdArgs, "ctr", "-n", namespace, "images", "export")
+	if allPlatforms {
+		cmdArgs = append(cmdArgs, "--all-platforms")
+	}
+	cmdArgs = append(cmdArgs, outputFilePath, imageName)
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 15 * time.Minute})
 	if err != nil {
@@ -171,10 +210,14 @@ func (r *defaultRunner) CtrExportImage(ctx context.Context, conn connector.Conne
 
 // CtrListContainers lists containers in a given containerd namespace.
 func (r *defaultRunner) CtrListContainers(ctx context.Context, conn connector.Connector, namespace string) ([]CtrContainerInfo, error) {
-	if conn == nil { return nil, errors.New("connector cannot be nil") }
-	if namespace == "" { return nil, errors.New("namespace cannot be empty") }
+	if conn == nil {
+		return nil, errors.New("connector cannot be nil")
+	}
+	if namespace == "" {
+		return nil, errors.New("namespace cannot be empty")
+	}
 
-	cmd := fmt.Sprintf("ctr -n %s containers ls", util.ShellEscape(namespace))
+	cmd := fmt.Sprintf("ctr -n %s containers ls", namespace)
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCtrTimeout})
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to list containers in %s. Stderr: %s", namespace, string(stderr))
@@ -182,17 +225,27 @@ func (r *defaultRunner) CtrListContainers(ctx context.Context, conn connector.Co
 
 	var containers []CtrContainerInfo
 	lines := strings.Split(string(stdout), "\n")
-	if len(lines) <= 1 { return containers, nil }
+	if len(lines) <= 1 {
+		return containers, nil
+	}
 
 	reSpaces := regexp.MustCompile(`\s{2,}`)
 	for _, line := range lines[1:] {
 		trimmedLine := strings.TrimSpace(line)
-		if trimmedLine == "" { continue }
+		if trimmedLine == "" {
+			continue
+		}
 		parts := reSpaces.Split(trimmedLine, -1)
-		if len(parts) < 1 { continue }
+		if len(parts) < 1 {
+			continue
+		}
 		cInfo := CtrContainerInfo{ID: parts[0]}
-		if len(parts) > 1 { cInfo.Image = parts[1] }
-		if len(parts) > 2 { cInfo.Runtime = parts[2] }
+		if len(parts) > 1 {
+			cInfo.Image = parts[1]
+		}
+		if len(parts) > 2 {
+			cInfo.Runtime = parts[2]
+		}
 		containers = append(containers, cInfo)
 	}
 	return containers, nil
@@ -200,7 +253,9 @@ func (r *defaultRunner) CtrListContainers(ctx context.Context, conn connector.Co
 
 // CtrRunContainer creates and starts a new container.
 func (r *defaultRunner) CtrRunContainer(ctx context.Context, conn connector.Connector, namespace string, opts ContainerdContainerCreateOptions) (string, error) {
-	if conn == nil { return "", errors.New("connector cannot be nil") }
+	if conn == nil {
+		return "", errors.New("connector cannot be nil")
+	}
 	if namespace == "" || opts.ImageName == "" || opts.ContainerID == "" {
 		return "", errors.New("namespace, imageName, and containerID are required")
 	}
@@ -211,22 +266,48 @@ func (r *defaultRunner) CtrRunContainer(ctx context.Context, conn connector.Conn
 	}
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "ctr", "-n", util.ShellEscape(namespace), "run")
-	if opts.Snapshotter != "" { cmdArgs = append(cmdArgs, "--snapshotter", util.ShellEscape(opts.Snapshotter)) }
-	if opts.ConfigPath != "" { cmdArgs = append(cmdArgs, "--config", util.ShellEscape(opts.ConfigPath)) }
-	if opts.Runtime != "" { cmdArgs = append(cmdArgs, "--runtime", util.ShellEscape(opts.Runtime)) }
-	if opts.NetHost { cmdArgs = append(cmdArgs, "--net-host") }
-	if opts.TTY { cmdArgs = append(cmdArgs, "--tty") }
-	if opts.Privileged { cmdArgs = append(cmdArgs, "--privileged") }
-	if opts.ReadOnlyRootFS { cmdArgs = append(cmdArgs, "--rootfs-readonly") }
-	if opts.User != "" { cmdArgs = append(cmdArgs, "--user", util.ShellEscape(opts.User)) }
-	if opts.Cwd != "" { cmdArgs = append(cmdArgs, "--cwd", util.ShellEscape(opts.Cwd)) }
-	for _, envVar := range opts.Env { cmdArgs = append(cmdArgs, "--env", util.ShellEscape(envVar)) }
-	for _, mount := range opts.Mounts { cmdArgs = append(cmdArgs, "--mount", util.ShellEscape(mount)) }
-	if len(opts.Platforms) > 0 { cmdArgs = append(cmdArgs, "--platform", strings.Join(opts.Platforms, ",")) }
-	cmdArgs = append(cmdArgs, "--rm", util.ShellEscape(opts.ImageName), util.ShellEscape(opts.ContainerID))
+	cmdArgs = append(cmdArgs, "ctr", "-n", namespace, "run")
+	if opts.Snapshotter != "" {
+		cmdArgs = append(cmdArgs, "--snapshotter", opts.Snapshotter)
+	}
+	if opts.ConfigPath != "" {
+		cmdArgs = append(cmdArgs, "--config", opts.ConfigPath)
+	}
+	if opts.Runtime != "" {
+		cmdArgs = append(cmdArgs, "--runtime", opts.Runtime)
+	}
+	if opts.NetHost {
+		cmdArgs = append(cmdArgs, "--net-host")
+	}
+	if opts.TTY {
+		cmdArgs = append(cmdArgs, "--tty")
+	}
+	if opts.Privileged {
+		cmdArgs = append(cmdArgs, "--privileged")
+	}
+	if opts.ReadOnlyRootFS {
+		cmdArgs = append(cmdArgs, "--rootfs-readonly")
+	}
+	if opts.User != "" {
+		cmdArgs = append(cmdArgs, "--user", opts.User)
+	}
+	if opts.Cwd != "" {
+		cmdArgs = append(cmdArgs, "--cwd", opts.Cwd)
+	}
+	for _, envVar := range opts.Env {
+		cmdArgs = append(cmdArgs, "--env", envVar)
+	}
+	for _, mount := range opts.Mounts {
+		cmdArgs = append(cmdArgs, "--mount", mount)
+	}
+	if len(opts.Platforms) > 0 {
+		cmdArgs = append(cmdArgs, "--platform", strings.Join(opts.Platforms, ","))
+	}
+	cmdArgs = append(cmdArgs, "--rm", opts.ImageName, opts.ContainerID)
 	if len(opts.Command) > 0 {
-		for _, arg := range opts.Command { cmdArgs = append(cmdArgs, util.ShellEscape(arg)) }
+		for _, arg := range opts.Command {
+			cmdArgs = append(cmdArgs, arg)
+		}
 	}
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 5 * time.Minute})
@@ -238,10 +319,14 @@ func (r *defaultRunner) CtrRunContainer(ctx context.Context, conn connector.Conn
 
 // CtrStopContainer stops/kills a container's task.
 func (r *defaultRunner) CtrStopContainer(ctx context.Context, conn connector.Connector, namespace, containerID string, timeout time.Duration) error {
-	if conn == nil { return errors.New("connector cannot be nil") }
-	if namespace == "" || containerID == "" { return errors.New("namespace and containerID are required") }
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if namespace == "" || containerID == "" {
+		return errors.New("namespace and containerID are required")
+	}
 
-	killCmdTerm := fmt.Sprintf("ctr -n %s task kill -s SIGTERM %s", util.ShellEscape(namespace), util.ShellEscape(containerID))
+	killCmdTerm := fmt.Sprintf("ctr -n %s task kill -s SIGTERM %s", namespace, containerID)
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: DefaultCtrTimeout}
 	_, stderrTerm, errTerm := conn.Exec(ctx, killCmdTerm, execOptions)
 
@@ -250,13 +335,19 @@ func (r *defaultRunner) CtrStopContainer(ctx context.Context, conn connector.Con
 			return nil
 		}
 	}
-	if timeout > 0 { time.Sleep(timeout) }
+	if timeout > 0 {
+		time.Sleep(timeout)
+	}
 
-	killCmdKill := fmt.Sprintf("ctr -n %s task kill -s SIGKILL %s", util.ShellEscape(namespace), util.ShellEscape(containerID))
+	killCmdKill := fmt.Sprintf("ctr -n %s task kill -s SIGKILL %s", namespace, containerID)
 	_, stderrKill, errKill := conn.Exec(ctx, killCmdKill, execOptions)
 	if errKill != nil {
-		if strings.Contains(string(stderrKill), "no such process") || strings.Contains(string(stderrKill), "not found") { return nil }
-		if errTerm == nil { return nil } // SIGTERM was ok, SIGKILL finding it gone is ok.
+		if strings.Contains(string(stderrKill), "no such process") || strings.Contains(string(stderrKill), "not found") {
+			return nil
+		}
+		if errTerm == nil {
+			return nil
+		} // SIGTERM was ok, SIGKILL finding it gone is ok.
 		return errors.Wrapf(errKill, "failed to SIGKILL task for %s. Stderr: %s", containerID, string(stderrKill))
 	}
 	return nil
@@ -264,19 +355,27 @@ func (r *defaultRunner) CtrStopContainer(ctx context.Context, conn connector.Con
 
 // CtrRemoveContainer removes container metadata.
 func (r *defaultRunner) CtrRemoveContainer(ctx context.Context, conn connector.Connector, namespace, containerID string) error {
-	if conn == nil { return errors.New("connector cannot be nil") }
-	if namespace == "" || containerID == "" { return errors.New("namespace and containerID are required") }
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if namespace == "" || containerID == "" {
+		return errors.New("namespace and containerID are required")
+	}
 
-	cmd := fmt.Sprintf("ctr -n %s containers rm %s", util.ShellEscape(namespace), util.ShellEscape(containerID))
+	cmd := fmt.Sprintf("ctr -n %s containers rm %s", namespace, containerID)
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: DefaultCtrTimeout}
 	_, stderr, err := conn.Exec(ctx, cmd, execOptions)
 	if err != nil {
-		if strings.Contains(string(stderr), "No such container") || strings.Contains(string(stderr), "not found") { return nil }
+		if strings.Contains(string(stderr), "No such container") || strings.Contains(string(stderr), "not found") {
+			return nil
+		}
 		if strings.Contains(string(stderr), "has active task") {
 			if stopErr := r.CtrStopContainer(ctx, conn, namespace, containerID, 0); stopErr == nil {
 				_, stderrRetry, errRetry := conn.Exec(ctx, cmd, execOptions)
 				if errRetry != nil {
-					if strings.Contains(string(stderrRetry), "No such container") || strings.Contains(string(stderrRetry), "not found") { return nil }
+					if strings.Contains(string(stderrRetry), "No such container") || strings.Contains(string(stderrRetry), "not found") {
+						return nil
+					}
 					return errors.Wrapf(errRetry, "failed to rm container %s after task kill. Stderr: %s", containerID, string(stderrRetry))
 				}
 				return nil
@@ -289,21 +388,31 @@ func (r *defaultRunner) CtrRemoveContainer(ctx context.Context, conn connector.C
 
 // CtrExecInContainer executes a command in a running container.
 func (r *defaultRunner) CtrExecInContainer(ctx context.Context, conn connector.Connector, namespace, containerID string, opts CtrExecOptions, cmdToExec []string) (string, error) {
-	if conn == nil { return "", errors.New("connector cannot be nil") }
+	if conn == nil {
+		return "", errors.New("connector cannot be nil")
+	}
 	if namespace == "" || containerID == "" || len(cmdToExec) == 0 {
 		return "", errors.New("namespace, containerID, and command are required")
 	}
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "ctr", "-n", util.ShellEscape(namespace), "task", "exec")
-	if opts.TTY { cmdArgs = append(cmdArgs, "--tty") }
-	if opts.User != "" { cmdArgs = append(cmdArgs, "--user", util.ShellEscape(opts.User)) }
-	if opts.Cwd != "" { cmdArgs = append(cmdArgs, "--cwd", util.ShellEscape(opts.Cwd)) }
+	cmdArgs = append(cmdArgs, "ctr", "-n", namespace, "task", "exec")
+	if opts.TTY {
+		cmdArgs = append(cmdArgs, "--tty")
+	}
+	if opts.User != "" {
+		cmdArgs = append(cmdArgs, "--user", opts.User)
+	}
+	if opts.Cwd != "" {
+		cmdArgs = append(cmdArgs, "--cwd", opts.Cwd)
+	}
 
 	execID := fmt.Sprintf("kubexm-exec-%d", time.Now().UnixNano())
-	cmdArgs = append(cmdArgs, "--exec-id", util.ShellEscape(execID))
-	cmdArgs = append(cmdArgs, util.ShellEscape(containerID))
-	for _, arg := range cmdToExec { cmdArgs = append(cmdArgs, util.ShellEscape(arg)) }
+	cmdArgs = append(cmdArgs, "--exec-id", execID)
+	cmdArgs = append(cmdArgs, containerID)
+	for _, arg := range cmdToExec {
+		cmdArgs = append(cmdArgs, arg)
+	}
 
 	execTimeout := 5 * time.Minute
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: execTimeout}
@@ -318,11 +427,17 @@ func (r *defaultRunner) CtrExecInContainer(ctx context.Context, conn connector.C
 // CtrContainerInfo retrieves information about a specific container using ctr.
 // Corresponds to `ctr -n <namespace> container info <containerID>`.
 func (r *defaultRunner) CtrContainerInfo(ctx context.Context, conn connector.Connector, namespace, containerID string) (*CtrContainerInfo, error) {
-	if conn == nil { return nil, errors.New("connector cannot be nil for CtrContainerInfo") }
-	if namespace == "" { return nil, errors.New("namespace is required for CtrContainerInfo") }
-	if containerID == "" { return nil, errors.New("containerID is required for CtrContainerInfo") }
+	if conn == nil {
+		return nil, errors.New("connector cannot be nil for CtrContainerInfo")
+	}
+	if namespace == "" {
+		return nil, errors.New("namespace is required for CtrContainerInfo")
+	}
+	if containerID == "" {
+		return nil, errors.New("containerID is required for CtrContainerInfo")
+	}
 
-	cmd := fmt.Sprintf("ctr -n %s container info %s", util.ShellEscape(namespace), util.ShellEscape(containerID))
+	cmd := fmt.Sprintf("ctr -n %s container info %s", namespace, containerID)
 	// ctr container info output is not JSON by default, it's a custom format.
 	// We need to parse it. Example:
 	// Image: docker.io/library/alpine:latest
@@ -385,7 +500,7 @@ func (r *defaultRunner) CtrContainerInfo(ctx context.Context, conn connector.Con
 	// It needs to be fetched from `ctr task info` or `ctr task ls`.
 	// For now, status will remain empty or be set by a separate call if needed.
 	// We can attempt a `ctr task ps <containerID>` to see if a task is running.
-	taskPsCmd := fmt.Sprintf("ctr -n %s task ps %s", util.ShellEscape(namespace), util.ShellEscape(containerID))
+	taskPsCmd := fmt.Sprintf("ctr -n %s task ps %s", namespace, containerID)
 	_, _, taskErr := conn.Exec(ctx, taskPsCmd, &connector.ExecOptions{Sudo: true, Timeout: 5 * time.Second}) // Short timeout for status check
 	if taskErr == nil {
 		info.Status = "RUNNING" // If `task ps` succeeds, assume running.
@@ -401,17 +516,17 @@ func (r *defaultRunner) CtrContainerInfo(ctx context.Context, conn connector.Con
 		}
 	}
 
-
 	return &info, nil
 }
-
 
 // --- Containerd Configuration ---
 
 // GetContainerdConfig attempts to read and heuristically parse parts of containerd's config.toml.
 // Due to the lack of a TOML parser, this is a best-effort extraction of common simple values.
 func (r *defaultRunner) GetContainerdConfig(ctx context.Context, conn connector.Connector) (*ContainerdConfigOptions, error) {
-	if conn == nil { return nil, errors.New("connector cannot be nil for GetContainerdConfig") }
+	if conn == nil {
+		return nil, errors.New("connector cannot be nil for GetContainerdConfig")
+	}
 
 	configContentBytes, err := r.ReadFile(ctx, conn, containerdConfigPath)
 	if err != nil {
@@ -485,7 +600,6 @@ func (r *defaultRunner) GetContainerdConfig(ctx context.Context, conn connector.
 			opts.OOMScore = &oomVal
 		}
 	}
-
 
 	// [grpc] section - find the section first
 	grpcSectionRegex := regexp.MustCompile(`(?s)\[grpc\](.*?)(\n\s*\[|\z)`)
@@ -662,7 +776,6 @@ oom_score = -999
 			defaultConfigContent = strings.Replace(defaultConfigContent, "SystemdCgroup = true", "SystemdCgroup = false", 1)
 		}
 
-
 		if errMkdir := r.Mkdirp(ctx, conn, filepath.Dir(containerdConfigPath), "0755", true); errMkdir != nil {
 			return errors.Wrapf(errMkdir, "failed to create directory for %s", containerdConfigPath)
 		}
@@ -694,7 +807,9 @@ oom_score = -999
 // It focuses on setting simple top-level values and appending registry mirrors.
 // More complex structural changes to the TOML are not reliably supported.
 func (r *defaultRunner) ConfigureContainerd(ctx context.Context, conn connector.Connector, facts *Facts, opts ContainerdConfigOptions, restartService bool) error {
-	if conn == nil { return errors.New("connector cannot be nil for ConfigureContainerd") }
+	if conn == nil {
+		return errors.New("connector cannot be nil for ConfigureContainerd")
+	}
 
 	if err := r.Mkdirp(ctx, conn, filepath.Dir(containerdConfigPath), "0755", true); err != nil {
 		return errors.Wrapf(err, "failed to create dir for %s", containerdConfigPath)
@@ -724,17 +839,23 @@ func (r *defaultRunner) ConfigureContainerd(ctx context.Context, conn connector.
 		case string:
 			valueStr = fmt.Sprintf("%q", v)
 		case *string:
-			if v == nil { return currentLines, false }
+			if v == nil {
+				return currentLines, false
+			}
 			valueStr = fmt.Sprintf("%q", *v)
 		case int:
 			valueStr = strconv.Itoa(v)
 		case *int:
-			if v == nil { return currentLines, false }
+			if v == nil {
+				return currentLines, false
+			}
 			valueStr = strconv.Itoa(*v)
 		case bool:
 			valueStr = strconv.FormatBool(v)
 		case *bool:
-			if v == nil { return currentLines, false }
+			if v == nil {
+				return currentLines, false
+			}
 			valueStr = strconv.FormatBool(*v)
 		default:
 			return currentLines, false // Unsupported type
@@ -777,7 +898,7 @@ func (r *defaultRunner) ConfigureContainerd(ctx context.Context, conn connector.
 			}
 		}
 		if !addedOrReplaced { // If not found anywhere (or section not found), append at the end (or create section and append)
-			if sectionHeader != "" && !strings.Contains(strings.Join(resultLines,"\n"), sectionHeader) {
+			if sectionHeader != "" && !strings.Contains(strings.Join(resultLines, "\n"), sectionHeader) {
 				resultLines = append(resultLines, "", sectionHeader) // Add section header
 			}
 			resultLines = append(resultLines, newLine)
@@ -787,17 +908,37 @@ func (r *defaultRunner) ConfigureContainerd(ctx context.Context, conn connector.
 	}
 
 	// Apply top-level config changes
-	if opts.Root != nil { lines, modified = replaceOrAppendValue(lines, "", "root", opts.Root); modified = true }
-	if opts.State != nil { lines, modified = replaceOrAppendValue(lines, "", "state", opts.State); modified = true }
-	if opts.OOMScore != nil { lines, modified = replaceOrAppendValue(lines, "", "oom_score", opts.OOMScore); modified = true }
-	if opts.Version != nil { lines, modified = replaceOrAppendValue(lines, "", "version", opts.Version); modified = true}
-
+	if opts.Root != nil {
+		lines, modified = replaceOrAppendValue(lines, "", "root", opts.Root)
+		modified = true
+	}
+	if opts.State != nil {
+		lines, modified = replaceOrAppendValue(lines, "", "state", opts.State)
+		modified = true
+	}
+	if opts.OOMScore != nil {
+		lines, modified = replaceOrAppendValue(lines, "", "oom_score", opts.OOMScore)
+		modified = true
+	}
+	if opts.Version != nil {
+		lines, modified = replaceOrAppendValue(lines, "", "version", opts.Version)
+		modified = true
+	}
 
 	// Apply [grpc] config changes
 	if opts.GRPC != nil {
-		if opts.GRPC.Address != nil { lines, modified = replaceOrAppendValue(lines, "[grpc]", "address", opts.GRPC.Address); modified = true }
-		if opts.GRPC.UID != nil { lines, modified = replaceOrAppendValue(lines, "[grpc]", "uid", opts.GRPC.UID); modified = true }
-		if opts.GRPC.GID != nil { lines, modified = replaceOrAppendValue(lines, "[grpc]", "gid", opts.GRPC.GID); modified = true }
+		if opts.GRPC.Address != nil {
+			lines, modified = replaceOrAppendValue(lines, "[grpc]", "address", opts.GRPC.Address)
+			modified = true
+		}
+		if opts.GRPC.UID != nil {
+			lines, modified = replaceOrAppendValue(lines, "[grpc]", "uid", opts.GRPC.UID)
+			modified = true
+		}
+		if opts.GRPC.GID != nil {
+			lines, modified = replaceOrAppendValue(lines, "[grpc]", "gid", opts.GRPC.GID)
+			modified = true
+		}
 	}
 
 	// Apply specific plugin values if present in opts.PluginConfigs (very simplified)
@@ -805,14 +946,16 @@ func (r *defaultRunner) ConfigureContainerd(ctx context.Context, conn connector.
 		pluginConfigsMap := *opts.PluginConfigs // Dereference the pointer to map
 		if criPluginMap, ok := pluginConfigsMap["io.containerd.grpc.v1.cri"].(map[string]interface{}); ok {
 			if sandboxImage, ok := criPluginMap["sandbox_image"].(string); ok {
-				lines, modified = replaceOrAppendValue(lines, `[plugins."io.containerd.grpc.v1.cri"]`, "sandbox_image", sandboxImage); modified = true
+				lines, modified = replaceOrAppendValue(lines, `[plugins."io.containerd.grpc.v1.cri"]`, "sandbox_image", sandboxImage)
+				modified = true
 			}
 			if containerdMap, ok := criPluginMap["containerd"].(map[string]interface{}); ok {
 				if runtimesMap, ok := containerdMap["runtimes"].(map[string]interface{}); ok {
 					if runcMap, ok := runtimesMap["runc"].(map[string]interface{}); ok {
 						if optionsMap, ok := runcMap["options"].(map[string]interface{}); ok {
 							if systemdCgroup, ok := optionsMap["SystemdCgroup"].(bool); ok {
-								lines, modified = replaceOrAppendValue(lines, `[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]`, "SystemdCgroup", systemdCgroup); modified = true
+								lines, modified = replaceOrAppendValue(lines, `[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]`, "SystemdCgroup", systemdCgroup)
+								modified = true
 							}
 						}
 					}
@@ -873,7 +1016,9 @@ func (r *defaultRunner) ConfigureContainerd(ctx context.Context, conn connector.
 		for registry, endpoints := range opts.RegistryMirrors {
 			if len(endpoints) > 0 {
 				escapedEndpoints := make([]string, len(endpoints))
-				for i, ep := range endpoints { escapedEndpoints[i] = fmt.Sprintf("%q", ep) }
+				for i, ep := range endpoints {
+					escapedEndpoints[i] = fmt.Sprintf("%q", ep)
+				}
 
 				mirrorBlockHeader := fmt.Sprintf(`[plugins."io.containerd.grpc.v1.cri".registry.mirrors."%s"]`, registry)
 				mirrorBlockContent := fmt.Sprintf("  endpoint = [%s]", strings.Join(escapedEndpoints, ", "))
@@ -890,7 +1035,7 @@ func (r *defaultRunner) ConfigureContainerd(ctx context.Context, conn connector.
 					// For now, if the mirror for `registry` already exists, we skip adding it again to avoid simple duplicates.
 					// This means it won't *update* existing mirror endpoints for a given registry, only add new ones.
 					if !strings.Contains(currentFullContent, fmt.Sprintf("%s\n%s", mirrorBlockHeader, mirrorBlockContent)) &&
-					   !strings.Contains(currentFullContent, fmt.Sprintf("%s\r\n%s", mirrorBlockHeader, mirrorBlockContent)) { // also check windows newlines
+						!strings.Contains(currentFullContent, fmt.Sprintf("%s\r\n%s", mirrorBlockHeader, mirrorBlockContent)) { // also check windows newlines
 						// If the exact content isn't there, append. This is still not perfect.
 						mirrorSnippets = append(mirrorSnippets, "", mirrorBlockHeader, mirrorBlockContent)
 						modified = true
@@ -956,9 +1101,13 @@ func (r *defaultRunner) ConfigureContainerd(ctx context.Context, conn connector.
 
 // ConfigureCrictl writes the crictl configuration file.
 func (r *defaultRunner) ConfigureCrictl(ctx context.Context, conn connector.Connector, configFileContent string, configFilePath string) error {
-	if conn == nil { return errors.New("connector cannot be nil") }
-	if strings.TrimSpace(configFileContent) == "" { return errors.New("configFileContent cannot be empty") }
-	
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if strings.TrimSpace(configFileContent) == "" {
+		return errors.New("configFileContent cannot be empty")
+	}
+
 	// Use provided path or default
 	filePath := configFilePath
 	if filePath == "" {
@@ -974,20 +1123,21 @@ func (r *defaultRunner) ConfigureCrictl(ctx context.Context, conn connector.Conn
 	return nil
 }
 
-
 // --- crictl Methods (Continued) ---
 
 // CrictlListImages lists images visible to the CRI runtime.
 func (r *defaultRunner) CrictlListImages(ctx context.Context, conn connector.Connector, filters map[string]string) ([]CrictlImageInfo, error) {
-	if conn == nil { return nil, errors.New("connector cannot be nil") }
+	if conn == nil {
+		return nil, errors.New("connector cannot be nil")
+	}
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "crictl", "images")
 	if filters != nil {
 		for key, value := range filters {
 			if key == "image" || key == "digest" {
-				cmdArgs = append(cmdArgs, fmt.Sprintf("--%s",key), util.ShellEscape(value))
+				cmdArgs = append(cmdArgs, fmt.Sprintf("--%s", key), value)
 			} else {
-				cmdArgs = append(cmdArgs, "--label", util.ShellEscape(fmt.Sprintf("%s=%s", key, value)))
+				cmdArgs = append(cmdArgs, "--label", fmt.Sprintf("%s=%s", key, value))
 			}
 		}
 	}
@@ -997,9 +1147,13 @@ func (r *defaultRunner) CrictlListImages(ctx context.Context, conn connector.Con
 	if err != nil {
 		return nil, errors.Wrapf(err, "crictl images failed. Stderr: %s", string(stderr))
 	}
-	var result struct { Images []CrictlImageInfo `json:"images"` }
+	var result struct {
+		Images []CrictlImageInfo `json:"images"`
+	}
 	if err := json.Unmarshal(stdout, &result); err != nil {
-		if strings.TrimSpace(string(stdout)) == "[]" || strings.TrimSpace(string(stdout)) == "" { return []CrictlImageInfo{}, nil }
+		if strings.TrimSpace(string(stdout)) == "[]" || strings.TrimSpace(string(stdout)) == "" {
+			return []CrictlImageInfo{}, nil
+		}
 		return nil, errors.Wrapf(err, "failed to parse crictl images JSON. Output: %s", string(stdout))
 	}
 	return result.Images, nil
@@ -1007,14 +1161,20 @@ func (r *defaultRunner) CrictlListImages(ctx context.Context, conn connector.Con
 
 // CrictlPullImage pulls an image using crictl.
 func (r *defaultRunner) CrictlPullImage(ctx context.Context, conn connector.Connector, imageName string, authCreds string, sandboxConfigPath string) error {
-	if conn == nil { return errors.New("connector cannot be nil") }
-	if imageName == "" { return errors.New("imageName cannot be empty") }
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if imageName == "" {
+		return errors.New("imageName cannot be empty")
+	}
 
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "crictl", "pull")
-	if authCreds != "" { cmdArgs = append(cmdArgs, "--auth", util.ShellEscape(authCreds)) }
+	if authCreds != "" {
+		cmdArgs = append(cmdArgs, "--auth", authCreds)
+	}
 	// sandboxConfigPath is not directly used by `crictl pull` flags. crictl uses /etc/crictl.yaml.
-	cmdArgs = append(cmdArgs, util.ShellEscape(imageName))
+	cmdArgs = append(cmdArgs, imageName)
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 15 * time.Minute})
 	if err != nil {
@@ -1025,26 +1185,38 @@ func (r *defaultRunner) CrictlPullImage(ctx context.Context, conn connector.Conn
 
 // CrictlRemoveImage removes an image using crictl.
 func (r *defaultRunner) CrictlRemoveImage(ctx context.Context, conn connector.Connector, imageName string) error {
-	if conn == nil { return errors.New("connector cannot be nil") }
-	if imageName == "" { return errors.New("imageName cannot be empty") }
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if imageName == "" {
+		return errors.New("imageName cannot be empty")
+	}
 
-	cmd := fmt.Sprintf("crictl rmi %s", util.ShellEscape(imageName))
+	cmd := fmt.Sprintf("crictl rmi %s", imageName)
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
 	if err != nil {
-		if strings.Contains(string(stderr), "not found") { return nil }
+		if strings.Contains(string(stderr), "not found") {
+			return nil
+		}
 		return errors.Wrapf(err, "crictl rmi %s failed. Stderr: %s", imageName, string(stderr))
 	}
 	return nil
 }
 
 func (r *defaultRunner) CrictlInspectImage(ctx context.Context, conn connector.Connector, imageName string) (*CrictlImageDetails, error) {
-	if conn == nil { return nil, errors.New("connector cannot be nil") }
-	if imageName == "" { return nil, errors.New("imageName cannot be empty") }
+	if conn == nil {
+		return nil, errors.New("connector cannot be nil")
+	}
+	if imageName == "" {
+		return nil, errors.New("imageName cannot be empty")
+	}
 
-	cmd := fmt.Sprintf("crictl inspecti %s -o json", util.ShellEscape(imageName))
+	cmd := fmt.Sprintf("crictl inspecti %s -o json", imageName)
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
 	if err != nil {
-		if strings.Contains(string(stderr), "not found") { return nil, nil } // Not found is not an application error here
+		if strings.Contains(string(stderr), "not found") {
+			return nil, nil
+		} // Not found is not an application error here
 		return nil, errors.Wrapf(err, "crictl inspecti %s failed. Stderr: %s", imageName, string(stderr))
 	}
 	var details CrictlImageDetails
@@ -1055,7 +1227,9 @@ func (r *defaultRunner) CrictlInspectImage(ctx context.Context, conn connector.C
 }
 
 func (r *defaultRunner) CrictlImageFSInfo(ctx context.Context, conn connector.Connector) ([]CrictlFSInfo, error) {
-	if conn == nil { return nil, errors.New("connector cannot be nil") }
+	if conn == nil {
+		return nil, errors.New("connector cannot be nil")
+	}
 	cmd := "crictl imagefsinfo -o json"
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
 	if err != nil {
@@ -1072,14 +1246,16 @@ func (r *defaultRunner) CrictlImageFSInfo(ctx context.Context, conn connector.Co
 }
 
 func (r *defaultRunner) CrictlListPods(ctx context.Context, conn connector.Connector, filters map[string]string) ([]CrictlPodInfo, error) {
-	if conn == nil { return nil, errors.New("connector cannot be nil") }
+	if conn == nil {
+		return nil, errors.New("connector cannot be nil")
+	}
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "crictl", "pods")
 	if filters != nil {
 		for key, value := range filters {
 			// Common filters: --label, --name, --namespace, --state
 			if key == "label" || key == "name" || key == "namespace" || key == "state" || key == "id" {
-				cmdArgs = append(cmdArgs, fmt.Sprintf("--%s",key), util.ShellEscape(value))
+				cmdArgs = append(cmdArgs, fmt.Sprintf("--%s", key), value)
 			}
 		}
 	}
@@ -1088,9 +1264,13 @@ func (r *defaultRunner) CrictlListPods(ctx context.Context, conn connector.Conne
 	if err != nil {
 		return nil, errors.Wrapf(err, "crictl pods failed. Stderr: %s", string(stderr))
 	}
-	var result struct { Pods []CrictlPodInfo `json:"items"` } // crictl pods -o json uses "items"
+	var result struct {
+		Pods []CrictlPodInfo `json:"items"`
+	} // crictl pods -o json uses "items"
 	if err := json.Unmarshal(stdout, &result); err != nil {
-		if strings.TrimSpace(string(stdout)) == "[]" || strings.TrimSpace(string(stdout)) == "" || strings.TrimSpace(string(stdout)) == "null" { return []CrictlPodInfo{}, nil }
+		if strings.TrimSpace(string(stdout)) == "[]" || strings.TrimSpace(string(stdout)) == "" || strings.TrimSpace(string(stdout)) == "null" {
+			return []CrictlPodInfo{}, nil
+		}
 		return nil, errors.Wrapf(err, "failed to parse crictl pods JSON. Output: %s", string(stdout))
 	}
 	return result.Pods, nil
@@ -1099,19 +1279,27 @@ func (r *defaultRunner) CrictlListPods(ctx context.Context, conn connector.Conne
 // CrictlRunPodSandbox runs a pod sandbox.
 // Corresponds to `crictl runp [--runtime <runtime>] <pod-config.json>`.
 func (r *defaultRunner) CrictlRunPodSandbox(ctx context.Context, conn connector.Connector, podSandboxConfigFile string, runtimeHandler string) (string, error) {
-	if conn == nil { return "", errors.New("connector cannot be nil for CrictlRunPodSandbox") }
-	if podSandboxConfigFile == "" { return "", errors.New("podSandboxConfigFile is required for CrictlRunPodSandbox") }
+	if conn == nil {
+		return "", errors.New("connector cannot be nil for CrictlRunPodSandbox")
+	}
+	if podSandboxConfigFile == "" {
+		return "", errors.New("podSandboxConfigFile is required for CrictlRunPodSandbox")
+	}
 
 	exists, err := r.Exists(ctx, conn, podSandboxConfigFile)
-	if err != nil { return "", errors.Wrapf(err, "failed to check existence of pod sandbox config %s", podSandboxConfigFile) }
-	if !exists { return "", errors.Errorf("pod sandbox config file %s does not exist", podSandboxConfigFile) }
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to check existence of pod sandbox config %s", podSandboxConfigFile)
+	}
+	if !exists {
+		return "", errors.Errorf("pod sandbox config file %s does not exist", podSandboxConfigFile)
+	}
 
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "crictl", "runp")
 	if strings.TrimSpace(runtimeHandler) != "" {
-		cmdArgs = append(cmdArgs, "--runtime", util.ShellEscape(runtimeHandler))
+		cmdArgs = append(cmdArgs, "--runtime", runtimeHandler)
 	}
-	cmdArgs = append(cmdArgs, util.ShellEscape(podSandboxConfigFile))
+	cmdArgs = append(cmdArgs, podSandboxConfigFile)
 
 	cmd := strings.Join(cmdArgs, " ")
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
@@ -1124,10 +1312,14 @@ func (r *defaultRunner) CrictlRunPodSandbox(ctx context.Context, conn connector.
 // CrictlStopPodSandbox stops a running pod sandbox.
 // Corresponds to `crictl stopp <pod-id>`.
 func (r *defaultRunner) CrictlStopPodSandbox(ctx context.Context, conn connector.Connector, podID string) error {
-	if conn == nil { return errors.New("connector cannot be nil for CrictlStopPodSandbox") }
-	if podID == "" { return errors.New("podID is required for CrictlStopPodSandbox") }
+	if conn == nil {
+		return errors.New("connector cannot be nil for CrictlStopPodSandbox")
+	}
+	if podID == "" {
+		return errors.New("podID is required for CrictlStopPodSandbox")
+	}
 
-	cmd := fmt.Sprintf("crictl stopp %s", util.ShellEscape(podID))
+	cmd := fmt.Sprintf("crictl stopp %s", podID)
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
 	if err != nil {
 		// Idempotency: if already stopped or not found, crictl might return error but it's effectively stopped.
@@ -1146,10 +1338,14 @@ func (r *defaultRunner) CrictlStopPodSandbox(ctx context.Context, conn connector
 // CrictlRemovePodSandbox removes a pod sandbox.
 // Corresponds to `crictl rmp <pod-id>`.
 func (r *defaultRunner) CrictlRemovePodSandbox(ctx context.Context, conn connector.Connector, podID string) error {
-	if conn == nil { return errors.New("connector cannot be nil for CrictlRemovePodSandbox") }
-	if podID == "" { return errors.New("podID is required for CrictlRemovePodSandbox") }
+	if conn == nil {
+		return errors.New("connector cannot be nil for CrictlRemovePodSandbox")
+	}
+	if podID == "" {
+		return errors.New("podID is required for CrictlRemovePodSandbox")
+	}
 
-	cmd := fmt.Sprintf("crictl rmp %s", util.ShellEscape(podID))
+	cmd := fmt.Sprintf("crictl rmp %s", podID)
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
 	if err != nil {
 		if strings.Contains(string(stderr), "not found") { // Idempotency
@@ -1163,10 +1359,14 @@ func (r *defaultRunner) CrictlRemovePodSandbox(ctx context.Context, conn connect
 // CrictlInspectPod retrieves information about a specific pod sandbox.
 // Corresponds to `crictl inspectp <pod-id> -o json`.
 func (r *defaultRunner) CrictlInspectPod(ctx context.Context, conn connector.Connector, podID string) (*CrictlPodDetails, error) {
-	if conn == nil { return nil, errors.New("connector cannot be nil for CrictlInspectPod") }
-	if podID == "" { return nil, errors.New("podID is required for CrictlInspectPod") }
+	if conn == nil {
+		return nil, errors.New("connector cannot be nil for CrictlInspectPod")
+	}
+	if podID == "" {
+		return nil, errors.New("podID is required for CrictlInspectPod")
+	}
 
-	cmd := fmt.Sprintf("crictl inspectp %s -o json", util.ShellEscape(podID))
+	cmd := fmt.Sprintf("crictl inspectp %s -o json", podID)
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
 	if err != nil {
 		if strings.Contains(string(stderr), "not found") {
@@ -1200,25 +1400,36 @@ func (r *defaultRunner) CrictlPodSandboxStatus(ctx context.Context, conn connect
 	return r.CrictlInspectPod(ctx, conn, podID)
 }
 
-
 // CrictlCreateContainerInPod creates a container within an existing pod sandbox.
 // Corresponds to `crictl create <pod-id> <container-config.json> <pod-config.json>`.
 func (r *defaultRunner) CrictlCreateContainerInPod(ctx context.Context, conn connector.Connector, podID string, containerConfigFile string, podSandboxConfigFile string) (string, error) {
-	if conn == nil { return "", errors.New("connector cannot be nil for CrictlCreateContainerInPod") }
-	if podID == "" { return "", errors.New("podID is required for CrictlCreateContainerInPod") }
-	if containerConfigFile == "" { return "", errors.New("containerConfigFile is required for CrictlCreateContainerInPod") }
-	if podSandboxConfigFile == "" { return "", errors.New("podSandboxConfigFile is required for CrictlCreateContainerInPod") }
+	if conn == nil {
+		return "", errors.New("connector cannot be nil for CrictlCreateContainerInPod")
+	}
+	if podID == "" {
+		return "", errors.New("podID is required for CrictlCreateContainerInPod")
+	}
+	if containerConfigFile == "" {
+		return "", errors.New("containerConfigFile is required for CrictlCreateContainerInPod")
+	}
+	if podSandboxConfigFile == "" {
+		return "", errors.New("podSandboxConfigFile is required for CrictlCreateContainerInPod")
+	}
 
 	for _, p := range []string{containerConfigFile, podSandboxConfigFile} {
 		exists, err := r.Exists(ctx, conn, p)
-		if err != nil { return "", errors.Wrapf(err, "failed to check existence of config file %s", p) }
-		if !exists { return "", errors.Errorf("config file %s does not exist", p) }
+		if err != nil {
+			return "", errors.Wrapf(err, "failed to check existence of config file %s", p)
+		}
+		if !exists {
+			return "", errors.Errorf("config file %s does not exist", p)
+		}
 	}
 
 	cmd := fmt.Sprintf("crictl create %s %s %s",
-		util.ShellEscape(podID),
-		util.ShellEscape(containerConfigFile),
-		util.ShellEscape(podSandboxConfigFile))
+		podID,
+		containerConfigFile,
+		podSandboxConfigFile)
 
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
 	if err != nil {
@@ -1231,10 +1442,14 @@ func (r *defaultRunner) CrictlCreateContainerInPod(ctx context.Context, conn con
 // CrictlStartContainerInPod starts a created container within a pod.
 // Corresponds to `crictl start <container-id>`.
 func (r *defaultRunner) CrictlStartContainerInPod(ctx context.Context, conn connector.Connector, containerID string) error {
-	if conn == nil { return errors.New("connector cannot be nil for CrictlStartContainerInPod") }
-	if containerID == "" { return errors.New("containerID is required for CrictlStartContainerInPod") }
+	if conn == nil {
+		return errors.New("connector cannot be nil for CrictlStartContainerInPod")
+	}
+	if containerID == "" {
+		return errors.New("containerID is required for CrictlStartContainerInPod")
+	}
 
-	cmd := fmt.Sprintf("crictl start %s", util.ShellEscape(containerID))
+	cmd := fmt.Sprintf("crictl start %s", containerID)
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
 	if err != nil {
 		// crictl start can fail if already started.
@@ -1249,8 +1464,12 @@ func (r *defaultRunner) CrictlStartContainerInPod(ctx context.Context, conn conn
 // CrictlStopContainerInPod stops a running container in a pod.
 // Corresponds to `crictl stop [--timeout <sec>] <container-id>`.
 func (r *defaultRunner) CrictlStopContainerInPod(ctx context.Context, conn connector.Connector, containerID string, timeout int64) error {
-	if conn == nil { return errors.New("connector cannot be nil for CrictlStopContainerInPod") }
-	if containerID == "" { return errors.New("containerID is required for CrictlStopContainerInPod") }
+	if conn == nil {
+		return errors.New("connector cannot be nil for CrictlStopContainerInPod")
+	}
+	if containerID == "" {
+		return errors.New("containerID is required for CrictlStopContainerInPod")
+	}
 
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "crictl", "stop")
@@ -1261,7 +1480,7 @@ func (r *defaultRunner) CrictlStopContainerInPod(ctx context.Context, conn conne
 		// crictl's --timeout flag: "Seconds to wait for stop before killing the container"
 		cmdArgs = append(cmdArgs, "--timeout", fmt.Sprintf("%d", timeout))
 	}
-	cmdArgs = append(cmdArgs, util.ShellEscape(containerID))
+	cmdArgs = append(cmdArgs, containerID)
 	cmd := strings.Join(cmdArgs, " ")
 
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout + time.Duration(timeout)*time.Second})
@@ -1277,15 +1496,19 @@ func (r *defaultRunner) CrictlStopContainerInPod(ctx context.Context, conn conne
 // CrictlRemoveContainerInPod removes a container from a pod.
 // Corresponds to `crictl rm [-f] <container-id>`.
 func (r *defaultRunner) CrictlRemoveContainerInPod(ctx context.Context, conn connector.Connector, containerID string, force bool) error {
-	if conn == nil { return errors.New("connector cannot be nil for CrictlRemoveContainerInPod") }
-	if containerID == "" { return errors.New("containerID is required for CrictlRemoveContainerInPod") }
+	if conn == nil {
+		return errors.New("connector cannot be nil for CrictlRemoveContainerInPod")
+	}
+	if containerID == "" {
+		return errors.New("containerID is required for CrictlRemoveContainerInPod")
+	}
 
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "crictl", "rm")
 	if force {
 		cmdArgs = append(cmdArgs, "-f") // or --force
 	}
-	cmdArgs = append(cmdArgs, util.ShellEscape(containerID))
+	cmdArgs = append(cmdArgs, containerID)
 	cmd := strings.Join(cmdArgs, " ")
 
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
@@ -1301,10 +1524,14 @@ func (r *defaultRunner) CrictlRemoveContainerInPod(ctx context.Context, conn con
 // CrictlInspectContainerInPod retrieves information about a specific container in a pod.
 // Corresponds to `crictl inspect <container-id> -o json`.
 func (r *defaultRunner) CrictlInspectContainerInPod(ctx context.Context, conn connector.Connector, containerID string) (*CrictlContainerDetails, error) {
-	if conn == nil { return nil, errors.New("connector cannot be nil for CrictlInspectContainerInPod") }
-	if containerID == "" { return nil, errors.New("containerID is required for CrictlInspectContainerInPod") }
+	if conn == nil {
+		return nil, errors.New("connector cannot be nil for CrictlInspectContainerInPod")
+	}
+	if containerID == "" {
+		return nil, errors.New("containerID is required for CrictlInspectContainerInPod")
+	}
 
-	cmd := fmt.Sprintf("crictl inspect %s -o json", util.ShellEscape(containerID))
+	cmd := fmt.Sprintf("crictl inspect %s -o json", containerID)
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
 	if err != nil {
 		if strings.Contains(string(stderr), "not found") {
@@ -1329,18 +1556,27 @@ func (r *defaultRunner) CrictlContainerStatus(ctx context.Context, conn connecto
 	return r.CrictlInspectContainerInPod(ctx, conn, containerID)
 }
 
-
 // CrictlLogsForContainer retrieves logs for a specific container.
 // Corresponds to `crictl logs <container-id> [options]`.
 func (r *defaultRunner) CrictlLogsForContainer(ctx context.Context, conn connector.Connector, containerID string, opts CrictlLogOptions) (string, error) {
-	if conn == nil { return "", errors.New("connector cannot be nil for CrictlLogsForContainer") }
-	if containerID == "" { return "", errors.New("containerID is required for CrictlLogsForContainer") }
+	if conn == nil {
+		return "", errors.New("connector cannot be nil for CrictlLogsForContainer")
+	}
+	if containerID == "" {
+		return "", errors.New("containerID is required for CrictlLogsForContainer")
+	}
 
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "crictl", "logs")
-	if opts.Follow { cmdArgs = append(cmdArgs, "-f") }
-	if opts.Timestamps { cmdArgs = append(cmdArgs, "--timestamps") }
-	if opts.Since != "" { cmdArgs = append(cmdArgs, "--since", util.ShellEscape(opts.Since)) }
+	if opts.Follow {
+		cmdArgs = append(cmdArgs, "-f")
+	}
+	if opts.Timestamps {
+		cmdArgs = append(cmdArgs, "--timestamps")
+	}
+	if opts.Since != "" {
+		cmdArgs = append(cmdArgs, "--since", opts.Since)
+	}
 	if opts.TailLines != nil && *opts.TailLines > 0 {
 		cmdArgs = append(cmdArgs, "--tail", fmt.Sprintf("%d", *opts.TailLines))
 	} else if opts.NumLines != nil && *opts.NumLines > 0 { // Support for older --lines
@@ -1348,13 +1584,15 @@ func (r *defaultRunner) CrictlLogsForContainer(ctx context.Context, conn connect
 	}
 	// No --latest in modern crictl, handled by tail or since.
 
-	cmdArgs = append(cmdArgs, util.ShellEscape(containerID))
+	cmdArgs = append(cmdArgs, containerID)
 	cmd := strings.Join(cmdArgs, " ")
 
 	// Timeout for logs can be longer, especially if not following.
 	// If following, the command might run for a long time, relying on context for cancellation.
 	logTimeout := DefaultCrictlTimeout
-	if opts.Follow { logTimeout = 10 * time.Minute } // Longer timeout for follow, but context should cancel.
+	if opts.Follow {
+		logTimeout = 10 * time.Minute
+	} // Longer timeout for follow, but context should cancel.
 
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: logTimeout})
 	output := string(stdout) + string(stderr)
@@ -1371,18 +1609,24 @@ func (r *defaultRunner) CrictlLogsForContainer(ctx context.Context, conn connect
 // CrictlExecInContainerSync executes a command synchronously inside a container.
 // Corresponds to `crictl exec -s <container-id> <cmd> [args...]`.
 func (r *defaultRunner) CrictlExecInContainerSync(ctx context.Context, conn connector.Connector, containerID string, timeout time.Duration, cmdToExec []string) (string, string, error) {
-	if conn == nil { return "", "", errors.New("connector cannot be nil for CrictlExecInContainerSync") }
-	if containerID == "" { return "", "", errors.New("containerID is required for CrictlExecInContainerSync") }
-	if len(cmdToExec) == 0 { return "", "", errors.New("command to exec is required") }
+	if conn == nil {
+		return "", "", errors.New("connector cannot be nil for CrictlExecInContainerSync")
+	}
+	if containerID == "" {
+		return "", "", errors.New("containerID is required for CrictlExecInContainerSync")
+	}
+	if len(cmdToExec) == 0 {
+		return "", "", errors.New("command to exec is required")
+	}
 
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "crictl", "exec", "-s") // -s for sync
 	if timeout > 0 {
 		cmdArgs = append(cmdArgs, "--timeout", fmt.Sprintf("%ds", int(timeout.Seconds())))
 	}
-	cmdArgs = append(cmdArgs, util.ShellEscape(containerID))
+	cmdArgs = append(cmdArgs, containerID)
 	for _, arg := range cmdToExec {
-		cmdArgs = append(cmdArgs, util.ShellEscape(arg))
+		cmdArgs = append(cmdArgs, arg)
 	}
 	cmd := strings.Join(cmdArgs, " ")
 
@@ -1390,7 +1634,6 @@ func (r *defaultRunner) CrictlExecInContainerSync(ctx context.Context, conn conn
 	if timeout > 0 {
 		execCmdTimeout += timeout // Add the user-specified timeout to the command's own execution timeout
 	}
-
 
 	stdoutBytes, stderrBytes, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: execCmdTimeout})
 	stdout := string(stdoutBytes)
@@ -1409,19 +1652,24 @@ func (r *defaultRunner) CrictlExecInContainerAsync(ctx context.Context, conn con
 	return "", errors.New("not implemented: CrictlExecInContainerAsync (crictl does not have a direct async exec that returns a request ID; typically uses attach for async-like behavior)")
 }
 
-
 // CrictlPortForward forwards ports from the host to a pod. Placeholder.
 func (r *defaultRunner) CrictlPortForward(ctx context.Context, conn connector.Connector, podID string, ports []string) (string, error) {
 	// crictl port-forward <pod-id> [port:port ...]
 	// This command is typically long-running.
-	if conn == nil { return "", errors.New("connector cannot be nil for CrictlPortForward") }
-	if podID == "" { return "", errors.New("podID is required for CrictlPortForward") }
-	if len(ports) == 0 { return "", errors.New("at least one port mapping is required for CrictlPortForward") }
+	if conn == nil {
+		return "", errors.New("connector cannot be nil for CrictlPortForward")
+	}
+	if podID == "" {
+		return "", errors.New("podID is required for CrictlPortForward")
+	}
+	if len(ports) == 0 {
+		return "", errors.New("at least one port mapping is required for CrictlPortForward")
+	}
 
 	var cmdArgs []string
-	cmdArgs = append(cmdArgs, "crictl", "port-forward", util.ShellEscape(podID))
+	cmdArgs = append(cmdArgs, "crictl", "port-forward", podID)
 	for _, p := range ports {
-		cmdArgs = append(cmdArgs, util.ShellEscape(p))
+		cmdArgs = append(cmdArgs, p)
 	}
 	cmd := strings.Join(cmdArgs, " ")
 
@@ -1447,7 +1695,9 @@ func (r *defaultRunner) CrictlPortForward(ctx context.Context, conn connector.Co
 // CrictlVersion retrieves crictl and runtime version information.
 // Corresponds to `crictl version -o json`.
 func (r *defaultRunner) CrictlVersion(ctx context.Context, conn connector.Connector) (*CrictlVersionInfo, error) {
-	if conn == nil { return nil, errors.New("connector cannot be nil for CrictlVersion") }
+	if conn == nil {
+		return nil, errors.New("connector cannot be nil for CrictlVersion")
+	}
 
 	cmd := "crictl version -o json"
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
@@ -1465,7 +1715,9 @@ func (r *defaultRunner) CrictlVersion(ctx context.Context, conn connector.Connec
 // CrictlInfo retrieves information about the CRI runtime.
 // Corresponds to `crictl info -o json`.
 func (r *defaultRunner) CrictlInfo(ctx context.Context, conn connector.Connector) (*CrictlRuntimeInfo, error) {
-	if conn == nil { return nil, errors.New("connector cannot be nil for CrictlInfo") }
+	if conn == nil {
+		return nil, errors.New("connector cannot be nil for CrictlInfo")
+	}
 
 	cmd := "crictl info -o json"
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCrictlTimeout})
@@ -1481,7 +1733,6 @@ func (r *defaultRunner) CrictlInfo(ctx context.Context, conn connector.Connector
 	}
 	return &runtimeInfo, nil
 }
-
 
 // CrictlRuntimeConfig retrieves the runtime configuration.
 // Corresponds to `crictl runtime-config -o json` (though crictl runtime-config is more for testing specific handlers).
@@ -1505,7 +1756,9 @@ func (r *defaultRunner) CrictlRuntimeConfig(ctx context.Context, conn connector.
 // CrictlStats retrieves resource usage statistics for pods or containers.
 // `crictl stats [-o json] [<pod-id>|<container-id>]`
 func (r *defaultRunner) CrictlStats(ctx context.Context, conn connector.Connector, resourceID string, outputFormat string) (string, error) {
-	if conn == nil { return "", errors.New("connector cannot be nil for CrictlStats") }
+	if conn == nil {
+		return "", errors.New("connector cannot be nil for CrictlStats")
+	}
 
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "crictl", "stats")
@@ -1513,7 +1766,7 @@ func (r *defaultRunner) CrictlStats(ctx context.Context, conn connector.Connecto
 		cmdArgs = append(cmdArgs, "-o", "json")
 	}
 	if strings.TrimSpace(resourceID) != "" {
-		cmdArgs = append(cmdArgs, util.ShellEscape(resourceID))
+		cmdArgs = append(cmdArgs, resourceID)
 	}
 	// Note: crictl stats -o json output is a stream of JSON objects if resourceID is empty or for multiple items.
 	// If resourceID is given, it's a single JSON object (or stream if it's a pod and it has multiple containers).
@@ -1528,11 +1781,12 @@ func (r *defaultRunner) CrictlStats(ctx context.Context, conn connector.Connecto
 	return string(stdout), nil
 }
 
-
 // CrictlPodStats retrieves resource usage statistics for all containers in one or more pods.
 // `crictl ps -o json [--pod <pod-id>]`
 func (r *defaultRunner) CrictlPodStats(ctx context.Context, conn connector.Connector, outputFormat string, podID string) (string, error) {
-	if conn == nil { return "", errors.New("connector cannot be nil for CrictlPodStats") }
+	if conn == nil {
+		return "", errors.New("connector cannot be nil for CrictlPodStats")
+	}
 
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "crictl", "stats") // `crictl stats` is the command for this
@@ -1540,7 +1794,7 @@ func (r *defaultRunner) CrictlPodStats(ctx context.Context, conn connector.Conne
 		cmdArgs = append(cmdArgs, "-o", "json")
 	}
 	if strings.TrimSpace(podID) != "" {
-		cmdArgs = append(cmdArgs, util.ShellEscape(podID)) // If podID is given, it filters stats for that pod.
+		cmdArgs = append(cmdArgs, podID) // If podID is given, it filters stats for that pod.
 	}
 	// If podID is empty, it lists stats for all pods/containers.
 	// The JSON output structure can be complex (streaming JSON objects).
