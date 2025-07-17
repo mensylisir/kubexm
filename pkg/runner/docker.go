@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1/helpers"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -15,7 +16,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/util"
 )
 
 const (
@@ -41,7 +41,7 @@ const (
 	DefaultDockerRestartGracePeriod = 10 * time.Second
 	// DefaultDockerRestartExecTimeout is the timeout for the Exec call running 'docker restart'.
 	DefaultDockerRestartExecTimeout = DefaultDockerRestartGracePeriod + (10 * time.Second)
-	dockerDaemonConfigPath        = "/etc/docker/daemon.json"
+	dockerDaemonConfigPath          = "/etc/docker/daemon.json"
 )
 
 var (
@@ -85,7 +85,7 @@ func (r *defaultRunner) PullImage(ctx context.Context, c connector.Connector, im
 		return errors.New("imageName cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker pull %s", util.ShellEscape(imageName))
+	cmd := fmt.Sprintf("docker pull %s", imageName)
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
 		Timeout: DefaultDockerPullTimeout,
@@ -139,33 +139,87 @@ func (r *defaultRunner) ConfigureDockerDaemon(ctx context.Context, conn connecto
 	}
 
 	// Merge Strategy: newOpts fields overwrite currentOpts fields if newOpts field is not nil.
-	if newOpts.LogDriver != nil { currentOpts.LogDriver = newOpts.LogDriver }
-	if newOpts.LogOpts != nil { currentOpts.LogOpts = newOpts.LogOpts }
-	if newOpts.StorageDriver != nil { currentOpts.StorageDriver = newOpts.StorageDriver }
-	if newOpts.StorageOpts != nil { currentOpts.StorageOpts = newOpts.StorageOpts }
-	if newOpts.RegistryMirrors != nil { currentOpts.RegistryMirrors = newOpts.RegistryMirrors }
-	if newOpts.InsecureRegistries != nil { currentOpts.InsecureRegistries = newOpts.InsecureRegistries }
-	if newOpts.ExecOpts != nil { currentOpts.ExecOpts = newOpts.ExecOpts }
-	if newOpts.Bridge != nil { currentOpts.Bridge = newOpts.Bridge }
-	if newOpts.Bip != nil { currentOpts.Bip = newOpts.Bip }
-	if newOpts.FixedCIDR != nil { currentOpts.FixedCIDR = newOpts.FixedCIDR }
-	if newOpts.DefaultGateway != nil { currentOpts.DefaultGateway = newOpts.DefaultGateway }
-	if newOpts.DNS != nil { currentOpts.DNS = newOpts.DNS }
-	if newOpts.IPTables != nil { currentOpts.IPTables = newOpts.IPTables }
-	if newOpts.Experimental != nil { currentOpts.Experimental = newOpts.Experimental }
-	if newOpts.Debug != nil { currentOpts.Debug = newOpts.Debug }
-	if newOpts.APICorsHeader != nil { currentOpts.APICorsHeader = newOpts.APICorsHeader }
-	if newOpts.Hosts != nil { currentOpts.Hosts = newOpts.Hosts }
-	if newOpts.UserlandProxy != nil { currentOpts.UserlandProxy = newOpts.UserlandProxy }
-	if newOpts.LiveRestore != nil { currentOpts.LiveRestore = newOpts.LiveRestore }
-	if newOpts.CgroupParent != nil { currentOpts.CgroupParent = newOpts.CgroupParent }
-	if newOpts.DefaultRuntime != nil { currentOpts.DefaultRuntime = newOpts.DefaultRuntime }
-	if newOpts.Runtimes != nil { currentOpts.Runtimes = newOpts.Runtimes }
-	if newOpts.Graph != nil { currentOpts.Graph = newOpts.Graph }
-	if newOpts.DataRoot != nil { currentOpts.DataRoot = newOpts.DataRoot }
-	if newOpts.MaxConcurrentDownloads != nil { currentOpts.MaxConcurrentDownloads = newOpts.MaxConcurrentDownloads }
-	if newOpts.MaxConcurrentUploads != nil { currentOpts.MaxConcurrentUploads = newOpts.MaxConcurrentUploads }
-	if newOpts.ShutdownTimeout != nil { currentOpts.ShutdownTimeout = newOpts.ShutdownTimeout }
+	if newOpts.LogDriver != nil {
+		currentOpts.LogDriver = newOpts.LogDriver
+	}
+	if newOpts.LogOpts != nil {
+		currentOpts.LogOpts = newOpts.LogOpts
+	}
+	if newOpts.StorageDriver != nil {
+		currentOpts.StorageDriver = newOpts.StorageDriver
+	}
+	if newOpts.StorageOpts != nil {
+		currentOpts.StorageOpts = newOpts.StorageOpts
+	}
+	if newOpts.RegistryMirrors != nil {
+		currentOpts.RegistryMirrors = newOpts.RegistryMirrors
+	}
+	if newOpts.InsecureRegistries != nil {
+		currentOpts.InsecureRegistries = newOpts.InsecureRegistries
+	}
+	if newOpts.ExecOpts != nil {
+		currentOpts.ExecOpts = newOpts.ExecOpts
+	}
+	if newOpts.Bridge != nil {
+		currentOpts.Bridge = newOpts.Bridge
+	}
+	if newOpts.Bip != nil {
+		currentOpts.Bip = newOpts.Bip
+	}
+	if newOpts.FixedCIDR != nil {
+		currentOpts.FixedCIDR = newOpts.FixedCIDR
+	}
+	if newOpts.DefaultGateway != nil {
+		currentOpts.DefaultGateway = newOpts.DefaultGateway
+	}
+	if newOpts.DNS != nil {
+		currentOpts.DNS = newOpts.DNS
+	}
+	if newOpts.IPTables != nil {
+		currentOpts.IPTables = newOpts.IPTables
+	}
+	if newOpts.Experimental != nil {
+		currentOpts.Experimental = newOpts.Experimental
+	}
+	if newOpts.Debug != nil {
+		currentOpts.Debug = newOpts.Debug
+	}
+	if newOpts.APICorsHeader != nil {
+		currentOpts.APICorsHeader = newOpts.APICorsHeader
+	}
+	if newOpts.Hosts != nil {
+		currentOpts.Hosts = newOpts.Hosts
+	}
+	if newOpts.UserlandProxy != nil {
+		currentOpts.UserlandProxy = newOpts.UserlandProxy
+	}
+	if newOpts.LiveRestore != nil {
+		currentOpts.LiveRestore = newOpts.LiveRestore
+	}
+	if newOpts.CgroupParent != nil {
+		currentOpts.CgroupParent = newOpts.CgroupParent
+	}
+	if newOpts.DefaultRuntime != nil {
+		currentOpts.DefaultRuntime = newOpts.DefaultRuntime
+	}
+	if newOpts.Runtimes != nil {
+		currentOpts.Runtimes = newOpts.Runtimes
+	}
+	if newOpts.Graph != nil {
+		currentOpts.Graph = newOpts.Graph
+	}
+	if newOpts.DataRoot != nil {
+		currentOpts.DataRoot = newOpts.DataRoot
+	}
+	if newOpts.MaxConcurrentDownloads != nil {
+		currentOpts.MaxConcurrentDownloads = newOpts.MaxConcurrentDownloads
+	}
+	if newOpts.MaxConcurrentUploads != nil {
+		currentOpts.MaxConcurrentUploads = newOpts.MaxConcurrentUploads
+	}
+	if newOpts.ShutdownTimeout != nil {
+		currentOpts.ShutdownTimeout = newOpts.ShutdownTimeout
+	}
 
 	mergedConfigBytes, err := json.MarshalIndent(currentOpts, "", "  ")
 	if err != nil {
@@ -227,7 +281,7 @@ func (r *defaultRunner) EnsureDefaultDockerConfig(ctx context.Context, conn conn
 
 		defaultOpts := DockerDaemonOptions{
 			ExecOpts:      &execOptsSlice,
-			LogDriver:     util.StrPtr("json-file"),
+			LogDriver:     helpers.StrPtr("json-file"),
 			LogOpts:       &logOptsMap,
 			StorageDriver: &storageDriverVal,
 		}
@@ -261,7 +315,7 @@ func (r *defaultRunner) ImageExists(ctx context.Context, c connector.Connector, 
 		return false, errors.New("imageName cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker image inspect %s > /dev/null 2>&1", util.ShellEscape(imageName))
+	cmd := fmt.Sprintf("docker image inspect %s > /dev/null 2>&1", imageName)
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
 		Timeout: DefaultDockerInspectTimeout,
@@ -366,7 +420,7 @@ func (r *defaultRunner) RemoveImage(ctx context.Context, c connector.Connector, 
 	if force {
 		cmd += " -f"
 	}
-	cmd += " " + util.ShellEscape(imageName)
+	cmd += " " + imageName
 
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
@@ -395,21 +449,21 @@ func (r *defaultRunner) BuildImage(ctx context.Context, c connector.Connector, d
 	cmdArgs = append(cmdArgs, "docker", "build")
 
 	if strings.TrimSpace(dockerfilePath) != "" {
-		cmdArgs = append(cmdArgs, "-f", util.ShellEscape(dockerfilePath))
+		cmdArgs = append(cmdArgs, "-f", dockerfilePath)
 	}
 
-	cmdArgs = append(cmdArgs, "-t", util.ShellEscape(imageNameAndTag))
+	cmdArgs = append(cmdArgs, "-t", imageNameAndTag)
 
 	if buildArgs != nil {
 		for key, value := range buildArgs {
 			if strings.TrimSpace(key) == "" {
 				return errors.New("buildArg key cannot be empty")
 			}
-			cmdArgs = append(cmdArgs, "--build-arg", util.ShellEscape(fmt.Sprintf("%s=%s", key, value)))
+			cmdArgs = append(cmdArgs, "--build-arg", fmt.Sprintf("%s=%s", key, value))
 		}
 	}
 
-	cmdArgs = append(cmdArgs, util.ShellEscape(contextPath))
+	cmdArgs = append(cmdArgs, contextPath)
 	cmd := strings.Join(cmdArgs, " ")
 
 	execOptions := &connector.ExecOptions{
@@ -437,7 +491,7 @@ func (r *defaultRunner) CreateContainer(ctx context.Context, c connector.Connect
 	cmdArgs = append(cmdArgs, "docker", "create")
 
 	if strings.TrimSpace(options.ContainerName) != "" {
-		cmdArgs = append(cmdArgs, "--name", util.ShellEscape(options.ContainerName))
+		cmdArgs = append(cmdArgs, "--name", options.ContainerName)
 	}
 
 	for _, portMapping := range options.Ports {
@@ -452,7 +506,7 @@ func (r *defaultRunner) CreateContainer(ctx context.Context, c connector.Connect
 		if strings.TrimSpace(portMapping.Protocol) != "" {
 			p += "/" + portMapping.Protocol
 		}
-		cmdArgs = append(cmdArgs, "-p", util.ShellEscape(p))
+		cmdArgs = append(cmdArgs, "-p", p)
 	}
 
 	for _, volumeMount := range options.Volumes {
@@ -464,21 +518,21 @@ func (r *defaultRunner) CreateContainer(ctx context.Context, c connector.Connect
 		if strings.TrimSpace(volumeMount.Mode) != "" {
 			v += ":" + volumeMount.Mode
 		}
-		cmdArgs = append(cmdArgs, "-v", util.ShellEscape(v))
+		cmdArgs = append(cmdArgs, "-v", v)
 	}
 
 	for _, envVar := range options.EnvVars {
 		if strings.TrimSpace(envVar) != "" {
-			cmdArgs = append(cmdArgs, "-e", util.ShellEscape(envVar))
+			cmdArgs = append(cmdArgs, "-e", envVar)
 		}
 	}
 
 	if len(options.Entrypoint) > 0 {
-		cmdArgs = append(cmdArgs, "--entrypoint", util.ShellEscape(options.Entrypoint[0]))
+		cmdArgs = append(cmdArgs, "--entrypoint", options.Entrypoint[0])
 	}
 
 	if strings.TrimSpace(options.RestartPolicy) != "" {
-		cmdArgs = append(cmdArgs, "--restart", util.ShellEscape(options.RestartPolicy))
+		cmdArgs = append(cmdArgs, "--restart", options.RestartPolicy)
 	}
 	if options.Privileged {
 		cmdArgs = append(cmdArgs, "--privileged")
@@ -487,11 +541,11 @@ func (r *defaultRunner) CreateContainer(ctx context.Context, c connector.Connect
 		cmdArgs = append(cmdArgs, "--rm")
 	}
 
-	cmdArgs = append(cmdArgs, util.ShellEscape(options.ImageName))
+	cmdArgs = append(cmdArgs, options.ImageName)
 
 	if len(options.Command) > 0 {
 		for _, cmdPart := range options.Command {
-			cmdArgs = append(cmdArgs, util.ShellEscape(cmdPart))
+			cmdArgs = append(cmdArgs, cmdPart)
 		}
 	}
 
@@ -522,7 +576,7 @@ func (r *defaultRunner) ContainerExists(ctx context.Context, c connector.Connect
 		return false, errors.New("containerNameOrID cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker inspect %s > /dev/null 2>&1", util.ShellEscape(containerNameOrID))
+	cmd := fmt.Sprintf("docker inspect %s > /dev/null 2>&1", containerNameOrID)
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
 		Timeout: DefaultDockerInspectTimeout,
@@ -551,7 +605,7 @@ func (r *defaultRunner) StartContainer(ctx context.Context, c connector.Connecto
 		return errors.New("containerNameOrID cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker start %s", util.ShellEscape(containerNameOrID))
+	cmd := fmt.Sprintf("docker start %s", containerNameOrID)
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
 		Timeout: DefaultDockerStartTimeout,
@@ -585,7 +639,7 @@ func (r *defaultRunner) StopContainer(ctx context.Context, c connector.Connector
 		execTimeout = (*timeout) + (30 * time.Second)
 	}
 
-	cmdArgs = append(cmdArgs, util.ShellEscape(containerNameOrID))
+	cmdArgs = append(cmdArgs, containerNameOrID)
 	cmd := strings.Join(cmdArgs, " ")
 
 	execOptions := &connector.ExecOptions{
@@ -621,7 +675,7 @@ func (r *defaultRunner) RestartContainer(ctx context.Context, c connector.Connec
 		execTimeout = (*timeout) + (10 * time.Second)
 	}
 
-	cmdArgs = append(cmdArgs, util.ShellEscape(containerNameOrID))
+	cmdArgs = append(cmdArgs, containerNameOrID)
 	cmd := strings.Join(cmdArgs, " ")
 
 	execOptions := &connector.ExecOptions{
@@ -652,7 +706,7 @@ func (r *defaultRunner) RemoveContainer(ctx context.Context, c connector.Connect
 	if removeVolumes {
 		cmdArgs = append(cmdArgs, "-v")
 	}
-	cmdArgs = append(cmdArgs, util.ShellEscape(containerNameOrID))
+	cmdArgs = append(cmdArgs, containerNameOrID)
 	cmd := strings.Join(cmdArgs, " ")
 
 	execOptions := &connector.ExecOptions{
@@ -686,7 +740,7 @@ func (r *defaultRunner) ListContainers(ctx context.Context, c connector.Connecto
 			if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
 				return nil, errors.New("filter key and value cannot be empty")
 			}
-			cmdArgs = append(cmdArgs, "--filter", util.ShellEscape(fmt.Sprintf("%s=%s", key, value)))
+			cmdArgs = append(cmdArgs, "--filter", fmt.Sprintf("%s=%s", key, value))
 		}
 	}
 	cmdArgs = append(cmdArgs, "--format", "{{json .}}")
@@ -818,16 +872,16 @@ func (r *defaultRunner) ListContainers(ctx context.Context, c connector.Connecto
 		}
 
 		containers = append(containers, ContainerInfo{
-			ID:        cliContainer.ID,
-			Names:     namesList,
-			Image:     cliContainer.Image,
-			Command:   cliContainer.Command,
-			Created:   createdTimestamp,
-			State:     state,
-			Status:    cliContainer.Status,
-			Ports:     portMappings,
-			Labels:    labelsMap,
-			Mounts:    mountsList,
+			ID:      cliContainer.ID,
+			Names:   namesList,
+			Image:   cliContainer.Image,
+			Command: cliContainer.Command,
+			Created: createdTimestamp,
+			State:   state,
+			Status:  cliContainer.Status,
+			Ports:   portMappings,
+			Labels:  labelsMap,
+			Mounts:  mountsList,
 		})
 	}
 
@@ -854,19 +908,19 @@ func (r *defaultRunner) GetContainerLogs(ctx context.Context, c connector.Connec
 		cmdArgs = append(cmdArgs, "--timestamps")
 	}
 	if strings.TrimSpace(options.Since) != "" {
-		cmdArgs = append(cmdArgs, "--since", util.ShellEscape(options.Since))
+		cmdArgs = append(cmdArgs, "--since", options.Since)
 	}
 	if strings.TrimSpace(options.Until) != "" {
-		cmdArgs = append(cmdArgs, "--until", util.ShellEscape(options.Until))
+		cmdArgs = append(cmdArgs, "--until", options.Until)
 	}
 	if strings.TrimSpace(options.Tail) != "" {
-		cmdArgs = append(cmdArgs, "--tail", util.ShellEscape(options.Tail))
+		cmdArgs = append(cmdArgs, "--tail", options.Tail)
 	}
 	if options.Details {
 		cmdArgs = append(cmdArgs, "--details")
 	}
 
-	cmdArgs = append(cmdArgs, util.ShellEscape(containerNameOrID))
+	cmdArgs = append(cmdArgs, containerNameOrID)
 	cmd := strings.Join(cmdArgs, " ")
 
 	execTimeout := 2 * time.Minute
@@ -900,7 +954,7 @@ func (r *defaultRunner) GetContainerStats(ctx context.Context, c connector.Conne
 		if !stream {
 			cmdArgs = append(cmdArgs, "--no-stream")
 		}
-		cmdArgs = append(cmdArgs, "--format", "{{json .}}", util.ShellEscape(containerNameOrID))
+		cmdArgs = append(cmdArgs, "--format", "{{json .}}", containerNameOrID)
 		cmd := strings.Join(cmdArgs, " ")
 
 		execTimeout := 30 * time.Second
@@ -936,14 +990,14 @@ func (r *defaultRunner) GetContainerStats(ctx context.Context, c connector.Conne
 				continue
 			}
 			var statData struct {
-				Name      string
-				ID        string
-				CPUPerc   string
-				MemUsage  string
-				MemPerc   string
-				NetIO     string
-				BlockIO   string
-				PIDs      string
+				Name     string
+				ID       string
+				CPUPerc  string
+				MemUsage string
+				MemPerc  string
+				NetIO    string
+				BlockIO  string
+				PIDs     string
 			}
 			if err := json.Unmarshal([]byte(line), &statData); err != nil {
 				statsChan <- ContainerStats{Error: errors.Wrapf(err, "failed to parse streaming stats line: %s. Line: %s", err, line)}
@@ -1007,7 +1061,7 @@ func (r *defaultRunner) InspectContainer(ctx context.Context, c connector.Connec
 		return nil, errors.New("containerNameOrID cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker inspect %s", util.ShellEscape(containerNameOrID))
+	cmd := fmt.Sprintf("docker inspect %s", containerNameOrID)
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
 		Timeout: DefaultDockerInspectTimeout,
@@ -1055,7 +1109,7 @@ func (r *defaultRunner) PauseContainer(ctx context.Context, c connector.Connecto
 		return errors.New("containerNameOrID cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker pause %s", util.ShellEscape(containerNameOrID))
+	cmd := fmt.Sprintf("docker pause %s", containerNameOrID)
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
 		Timeout: DefaultDockerStartTimeout,
@@ -1077,7 +1131,7 @@ func (r *defaultRunner) UnpauseContainer(ctx context.Context, c connector.Connec
 		return errors.New("containerNameOrID cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker unpause %s", util.ShellEscape(containerNameOrID))
+	cmd := fmt.Sprintf("docker unpause %s", containerNameOrID)
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
 		Timeout: DefaultDockerStartTimeout,
@@ -1109,15 +1163,15 @@ func (r *defaultRunner) ExecInContainer(ctx context.Context, c connector.Connect
 		cmdArgs = append(cmdArgs, "-t")
 	}
 	if strings.TrimSpace(user) != "" {
-		cmdArgs = append(cmdArgs, "--user", util.ShellEscape(user))
+		cmdArgs = append(cmdArgs, "--user", user)
 	}
 	if strings.TrimSpace(workDir) != "" {
-		cmdArgs = append(cmdArgs, "--workdir", util.ShellEscape(workDir))
+		cmdArgs = append(cmdArgs, "--workdir", workDir)
 	}
 
-	cmdArgs = append(cmdArgs, util.ShellEscape(containerNameOrID))
+	cmdArgs = append(cmdArgs, containerNameOrID)
 	for _, arg := range cmdArgsToExec {
-		cmdArgs = append(cmdArgs, util.ShellEscape(arg))
+		cmdArgs = append(cmdArgs, arg)
 	}
 	cmd := strings.Join(cmdArgs, " ")
 
@@ -1150,21 +1204,21 @@ func (r *defaultRunner) CreateDockerNetwork(ctx context.Context, c connector.Con
 	cmdArgs = append(cmdArgs, "docker", "network", "create")
 
 	if strings.TrimSpace(driver) != "" {
-		cmdArgs = append(cmdArgs, "--driver", util.ShellEscape(driver))
+		cmdArgs = append(cmdArgs, "--driver", driver)
 	}
 	if strings.TrimSpace(subnet) != "" {
-		cmdArgs = append(cmdArgs, "--subnet", util.ShellEscape(subnet))
+		cmdArgs = append(cmdArgs, "--subnet", subnet)
 	}
 	if strings.TrimSpace(gateway) != "" {
-		cmdArgs = append(cmdArgs, "--gateway", util.ShellEscape(gateway))
+		cmdArgs = append(cmdArgs, "--gateway", gateway)
 	}
 	if options != nil {
 		for k, v := range options {
-			cmdArgs = append(cmdArgs, "--opt", util.ShellEscape(fmt.Sprintf("%s=%s", k, v)))
+			cmdArgs = append(cmdArgs, "--opt", fmt.Sprintf("%s=%s", k, v))
 		}
 	}
 
-	cmdArgs = append(cmdArgs, util.ShellEscape(name))
+	cmdArgs = append(cmdArgs, name)
 	cmd := strings.Join(cmdArgs, " ")
 
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute}
@@ -1184,7 +1238,7 @@ func (r *defaultRunner) RemoveDockerNetwork(ctx context.Context, c connector.Con
 		return errors.New("networkNameOrID cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker network rm %s", util.ShellEscape(networkNameOrID))
+	cmd := fmt.Sprintf("docker network rm %s", networkNameOrID)
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute}
 	_, stderr, err := c.Exec(ctx, cmd, execOptions)
 	if err != nil {
@@ -1206,7 +1260,7 @@ func (r *defaultRunner) ListDockerNetworks(ctx context.Context, c connector.Conn
 	cmdArgs = append(cmdArgs, "docker", "network", "ls")
 	if filters != nil {
 		for key, value := range filters {
-			cmdArgs = append(cmdArgs, "--filter", util.ShellEscape(fmt.Sprintf("%s=%s", key, value)))
+			cmdArgs = append(cmdArgs, "--filter", fmt.Sprintf("%s=%s", key, value))
 		}
 	}
 	cmdArgs = append(cmdArgs, "--format", "{{json .}}")
@@ -1269,9 +1323,9 @@ func (r *defaultRunner) ConnectContainerToNetwork(ctx context.Context, c connect
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "docker", "network", "connect")
 	if strings.TrimSpace(ipAddress) != "" {
-		cmdArgs = append(cmdArgs, "--ip", util.ShellEscape(ipAddress))
+		cmdArgs = append(cmdArgs, "--ip", ipAddress)
 	}
-	cmdArgs = append(cmdArgs, util.ShellEscape(networkNameOrID), util.ShellEscape(containerNameOrID))
+	cmdArgs = append(cmdArgs, networkNameOrID, containerNameOrID)
 	cmd := strings.Join(cmdArgs, " ")
 
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute}
@@ -1302,7 +1356,7 @@ func (r *defaultRunner) DisconnectContainerFromNetwork(ctx context.Context, c co
 	if force {
 		cmdArgs = append(cmdArgs, "-f")
 	}
-	cmdArgs = append(cmdArgs, util.ShellEscape(networkNameOrID), util.ShellEscape(containerNameOrID))
+	cmdArgs = append(cmdArgs, networkNameOrID, containerNameOrID)
 	cmd := strings.Join(cmdArgs, " ")
 
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute}
@@ -1327,20 +1381,20 @@ func (r *defaultRunner) CreateDockerVolume(ctx context.Context, c connector.Conn
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "docker", "volume", "create")
 	if strings.TrimSpace(driver) != "" {
-		cmdArgs = append(cmdArgs, "--driver", util.ShellEscape(driver))
+		cmdArgs = append(cmdArgs, "--driver", driver)
 	}
 	if driverOpts != nil {
 		for k, v := range driverOpts {
-			cmdArgs = append(cmdArgs, "--opt", util.ShellEscape(fmt.Sprintf("%s=%s", k, v)))
+			cmdArgs = append(cmdArgs, "--opt", fmt.Sprintf("%s=%s", k, v))
 		}
 	}
 	if labels != nil {
 		for k, v := range labels {
-			cmdArgs = append(cmdArgs, "--label", util.ShellEscape(fmt.Sprintf("%s=%s", k, v)))
+			cmdArgs = append(cmdArgs, "--label", fmt.Sprintf("%s=%s", k, v))
 		}
 	}
 	if strings.TrimSpace(name) != "" {
-		cmdArgs = append(cmdArgs, util.ShellEscape(name))
+		cmdArgs = append(cmdArgs, name)
 	}
 	cmd := strings.Join(cmdArgs, " ")
 
@@ -1369,7 +1423,7 @@ func (r *defaultRunner) RemoveDockerVolume(ctx context.Context, c connector.Conn
 	if force {
 		cmdArgs = append(cmdArgs, "-f")
 	}
-	cmdArgs = append(cmdArgs, util.ShellEscape(volumeName))
+	cmdArgs = append(cmdArgs, volumeName)
 	cmd := strings.Join(cmdArgs, " ")
 
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute}
@@ -1393,7 +1447,7 @@ func (r *defaultRunner) ListDockerVolumes(ctx context.Context, c connector.Conne
 	cmdArgs = append(cmdArgs, "docker", "volume", "ls")
 	if filters != nil {
 		for key, value := range filters {
-			cmdArgs = append(cmdArgs, "--filter", util.ShellEscape(fmt.Sprintf("%s=%s", key, value)))
+			cmdArgs = append(cmdArgs, "--filter", fmt.Sprintf("%s=%s", key, value))
 		}
 	}
 	cmdArgs = append(cmdArgs, "--format", "{{json .}}")
@@ -1461,7 +1515,7 @@ func (r *defaultRunner) InspectDockerVolume(ctx context.Context, c connector.Con
 		return nil, errors.New("volumeName cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker volume inspect %s", util.ShellEscape(volumeName))
+	cmd := fmt.Sprintf("docker volume inspect %s", volumeName)
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: DefaultDockerInspectTimeout}
 	stdout, stderr, err := c.Exec(ctx, cmd, execOptions)
 	if err != nil {
@@ -1526,8 +1580,8 @@ func (r *defaultRunner) DockerPrune(ctx context.Context, c connector.Connector, 
 	cmdArgs = append(cmdArgs, "docker")
 
 	validPruneTypes := map[string]bool{
-		"system":    true, "builder": true, "container": true,
-		"image":     true, "network": true, "volume": true,
+		"system": true, "builder": true, "container": true,
+		"image": true, "network": true, "volume": true,
 	}
 	if !validPruneTypes[pruneType] {
 		return "", errors.Errorf("invalid pruneType: %s", pruneType)
@@ -1544,7 +1598,7 @@ func (r *defaultRunner) DockerPrune(ctx context.Context, c connector.Connector, 
 	}
 	if filters != nil {
 		for key, value := range filters {
-			cmdArgs = append(cmdArgs, "--filter", util.ShellEscape(fmt.Sprintf("%s=%s", key, value)))
+			cmdArgs = append(cmdArgs, "--filter", fmt.Sprintf("%s=%s", key, value))
 		}
 	}
 	cmd := strings.Join(cmdArgs, " ")
@@ -1616,7 +1670,6 @@ func (r *defaultRunner) EnsureDockerService(ctx context.Context, c connector.Con
 		return errors.New("unknown init system, cannot ensure docker service state")
 	}
 
-
 	isActiveCmd := fmt.Sprintf("%s %s", facts.InitSystem.IsActiveCmd, "docker")
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 10 * time.Second}
 	stdoutActive, _, errActive := c.Exec(ctx, isActiveCmd, execOptions)
@@ -1663,7 +1716,6 @@ func (r *defaultRunner) EnsureDockerService(ctx context.Context, c connector.Con
 	return nil
 }
 
-
 // ResolveDockerImage resolves a Docker image name to its digest.
 func (r *defaultRunner) ResolveDockerImage(ctx context.Context, c connector.Connector, imageName string) (string, error) {
 	if c == nil {
@@ -1673,7 +1725,7 @@ func (r *defaultRunner) ResolveDockerImage(ctx context.Context, c connector.Conn
 		return "", errors.New("imageName cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker image inspect --format '{{range .RepoDigests}}{{.}}{{println}}{{end}}' %s", util.ShellEscape(imageName))
+	cmd := fmt.Sprintf("docker image inspect --format '{{range .RepoDigests}}{{.}}{{println}}{{end}}' %s", imageName)
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: DefaultDockerInspectTimeout}
 
 	stdout, stderr, err := c.Exec(ctx, cmd, execOptions)
@@ -1683,7 +1735,7 @@ func (r *defaultRunner) ResolveDockerImage(ctx context.Context, c connector.Conn
 
 	output := strings.TrimSpace(string(stdout))
 	if output == "" {
-		cmdID := fmt.Sprintf("docker image inspect --format '{{.ID}}' %s", util.ShellEscape(imageName))
+		cmdID := fmt.Sprintf("docker image inspect --format '{{.ID}}' %s", imageName)
 		stdoutID, stderrID, errID := c.Exec(ctx, cmdID, execOptions)
 		if errID != nil {
 			return "", errors.Wrapf(errID, "failed to get ImageID for %s. Stderr: %s", imageName, string(stderrID))
@@ -1720,10 +1772,10 @@ func (r *defaultRunner) DockerSave(ctx context.Context, c connector.Connector, o
 		if strings.TrimSpace(name) == "" {
 			return errors.Errorf("image name at index %d cannot be empty", i)
 		}
-		escapedImageNames[i] = util.ShellEscape(name)
+		escapedImageNames[i] = name
 	}
 
-	cmd := fmt.Sprintf("docker save -o %s %s", util.ShellEscape(outputFilePath), strings.Join(escapedImageNames, " "))
+	cmd := fmt.Sprintf("docker save -o %s %s", outputFilePath, strings.Join(escapedImageNames, " "))
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
 		Timeout: DefaultDockerBuildTimeout,
@@ -1745,7 +1797,7 @@ func (r *defaultRunner) DockerLoad(ctx context.Context, c connector.Connector, i
 		return errors.New("inputFilePath cannot be empty")
 	}
 
-	cmd := fmt.Sprintf("docker load -i %s", util.ShellEscape(inputFilePath))
+	cmd := fmt.Sprintf("docker load -i %s", inputFilePath)
 	execOptions := &connector.ExecOptions{
 		Sudo:    true,
 		Timeout: DefaultDockerBuildTimeout,

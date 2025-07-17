@@ -7,7 +7,6 @@ import (
 	"time" // For temporary filename generation
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/util"
 )
 
 // UserExists checks if a user exists on the remote system.
@@ -203,7 +202,7 @@ func (r *defaultRunner) ModifyUser(ctx context.Context, conn connector.Connector
 	if modifications.NewComment != nil {
 		// If the comment contains spaces or shell-sensitive characters, it should be quoted
 		// to be treated as a single argument by the shell that `conn.Exec` might invoke.
-		cmdParts = append(cmdParts, "-c", util.ShellEscape(*modifications.NewComment))
+		cmdParts = append(cmdParts, "-c", *modifications.NewComment)
 		modifiedSomething = true
 	}
 
@@ -302,7 +301,7 @@ func (r *defaultRunner) ConfigureSudoer(ctx context.Context, conn connector.Conn
 	// visudo needs to read the temp file. It doesn't need sudo to read a /tmp file.
 	// However, `visudo` itself often requires sudo to run, even in check mode, depending on system config.
 	// Let's assume visudo -cf needs sudo to operate correctly or to access its own required files.
-	visudoCmd := fmt.Sprintf("visudo -cf %s", util.ShellEscape(remoteTempPath))
+	visudoCmd := fmt.Sprintf("visudo -cf %s", remoteTempPath)
 	_, visudoStderr, visudoErr := r.RunWithOptions(ctx, conn, visudoCmd, &connector.ExecOptions{Sudo: true})
 	if visudoErr != nil {
 		// If visudo fails, the content is bad. Temp file will be cleaned by defer.
@@ -316,7 +315,7 @@ func (r *defaultRunner) ConfigureSudoer(ctx context.Context, conn connector.Conn
 	}
 
 	// 4. Move temporary file to final destination with sudo
-	mvCmd := fmt.Sprintf("mv %s %s", util.ShellEscape(remoteTempPath), util.ShellEscape(finalSudoerPath))
+	mvCmd := fmt.Sprintf("mv %s %s", remoteTempPath, finalSudoerPath)
 	_, mvStderr, mvErr := r.RunWithOptions(ctx, conn, mvCmd, &connector.ExecOptions{Sudo: true})
 	if mvErr != nil {
 		// Attempt to clean up finalSudoerPath if mv failed but left a partial/incorrect file,
@@ -359,12 +358,11 @@ func (r *defaultRunner) SetUserPassword(ctx context.Context, conn connector.Conn
 	// Construct the input for chpasswd
 	chpasswdInput := fmt.Sprintf("%s:%s", username, hashedPassword)
 	// Escape the input for the echo command to handle special characters in username or hash safely
-	escapedInput := util.ShellEscape(chpasswdInput) // util.ShellEscape is from file.go
+	escapedInput := chpasswdInput // util.ShellEscape is from file.go
 
 	// Command: echo 'username:hashed_password' | chpasswd
 	// The sudo applies to chpasswd.
 	cmd := fmt.Sprintf("echo %s | chpasswd", escapedInput)
-
 
 	opts := &connector.ExecOptions{
 		Sudo:   true,
@@ -398,24 +396,34 @@ func (r *defaultRunner) GetUserInfo(ctx context.Context, conn connector.Connecto
 	info := &UserInfo{Username: username}
 
 	uidStr, err := r.Run(ctx, conn, fmt.Sprintf("id -u %s", username), false)
-	if err != nil { return nil, fmt.Errorf("failed to get UID for user %s: %w", username, err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to get UID for user %s: %w", username, err)
+	}
 	info.UID = strings.TrimSpace(uidStr)
 
 	gidStr, err := r.Run(ctx, conn, fmt.Sprintf("id -g %s", username), false)
-	if err != nil { return nil, fmt.Errorf("failed to get GID for user %s: %w", username, err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to get GID for user %s: %w", username, err)
+	}
 	info.GID = strings.TrimSpace(gidStr)
 
 	getentOut, err := r.Run(ctx, conn, fmt.Sprintf("getent passwd %s", username), false)
-	if err != nil { return nil, fmt.Errorf("failed to get passwd entry for user %s: %w", username, err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to get passwd entry for user %s: %w", username, err)
+	}
 	passwdFields := strings.Split(strings.TrimSpace(getentOut), ":")
 	if len(passwdFields) >= 7 {
 		info.Comment = passwdFields[4]
 		info.HomeDir = passwdFields[5]
 		info.Shell = passwdFields[6]
-	} else { return nil, fmt.Errorf("unexpected format from 'getent passwd %s': %s", username, getentOut) }
+	} else {
+		return nil, fmt.Errorf("unexpected format from 'getent passwd %s': %s", username, getentOut)
+	}
 
 	groupsStr, err := r.Run(ctx, conn, fmt.Sprintf("id -Gn %s", username), false)
-	if err != nil { return nil, fmt.Errorf("failed to get group names for user %s using 'id -Gn': %w", username, err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to get group names for user %s using 'id -Gn': %w", username, err)
+	}
 	info.Groups = strings.Fields(strings.TrimSpace(groupsStr))
 
 	return info, nil

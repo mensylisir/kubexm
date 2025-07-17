@@ -7,7 +7,6 @@ import (
 	// "time" // May be needed later
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/util"
 )
 
 // --- System & Kernel Methods ---
@@ -182,13 +181,13 @@ func (r *defaultRunner) SetSysctl(ctx context.Context, conn connector.Connector,
 
 		// Idempotency: Check if the exact line exists.
 		// Grep for exact line match. -x means whole line, -F means fixed string.
-		checkCmd := fmt.Sprintf("grep -Fxq -- %s %s", util.ShellEscape(lineToAdd), util.ShellEscape(sysctlConfFile))
+		checkCmd := fmt.Sprintf("grep -Fxq -- %s %s", lineToAdd, sysctlConfFile)
 		exists, _ := r.Check(ctx, conn, checkCmd, false) // Ignore error from Check, if grep fails, assume not found or file doesn't exist.
 
 		if !exists {
 			// Append the setting. Use `tee -a` for robustness with sudo.
 			// Need to escape lineToAdd for the echo command.
-			echoCmd := fmt.Sprintf("echo %s | tee -a %s", util.ShellEscape(lineToAdd), util.ShellEscape(sysctlConfFile))
+			echoCmd := fmt.Sprintf("echo %s | tee -a %s", lineToAdd, sysctlConfFile)
 			_, stderrPersist, errPersist := r.RunWithOptions(ctx, conn, echoCmd, &connector.ExecOptions{Sudo: true})
 			if errPersist != nil {
 				return fmt.Errorf("failed to persist sysctl setting '%s' to %s: %w (stderr: %s)", lineToAdd, sysctlConfFile, errPersist, string(stderrPersist))
@@ -231,7 +230,7 @@ func (r *defaultRunner) SetTimezone(ctx context.Context, conn connector.Connecto
 
 	// Prefer timedatectl if available (common on systemd systems)
 	if _, err := r.LookPath(ctx, conn, "timedatectl"); err == nil {
-		cmd := fmt.Sprintf("timedatectl set-timezone %s", util.ShellEscape(timezone))
+		cmd := fmt.Sprintf("timedatectl set-timezone %s", timezone)
 		_, stderr, execErr := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true})
 		if execErr != nil {
 			return fmt.Errorf("failed to set timezone to %s using timedatectl: %w (stderr: %s)", timezone, execErr, string(stderr))
@@ -325,7 +324,9 @@ func (r *defaultRunner) IsSwapEnabled(ctx context.Context, conn connector.Connec
 	if len(lines) > 1 {
 		// Further check: ensure the lines after header are not empty or just comments
 		for i, line := range lines {
-			if i == 0 { continue } // Skip header
+			if i == 0 {
+				continue
+			} // Skip header
 			if strings.TrimSpace(line) != "" {
 				return true, nil // Found an actual swap entry
 			}

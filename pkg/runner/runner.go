@@ -1,16 +1,15 @@
 package runner
 
 import (
-	"bytes" // For template rendering
+	"bytes"
 	"context"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/util"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
-	"text/template" // For template rendering
+	"text/template"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
@@ -80,7 +79,7 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 		if execErr != nil {
 			return fmt.Errorf("failed to exec CPU command '%s' on OS %s: %w", cpuCmd, facts.OS.ID, execErr)
 		}
-		cpuQuantity, parseErr := util.ParseCPU(string(cpuBytes))
+		cpuQuantity, parseErr := ParseCPU(string(cpuBytes))
 		if parseErr != nil {
 			return fmt.Errorf("failed to parse CPU output '%s': %w", string(cpuBytes), parseErr)
 		}
@@ -111,7 +110,7 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 		if memIsKb {
 			memStr += "Ki"
 		}
-		memQuantity, parseErr := util.ParseMemory(memStr)
+		memQuantity, parseErr := ParseMemory(memStr)
 		if parseErr != nil {
 			return fmt.Errorf("failed to parse Memory output '%s': %w", memStr, parseErr)
 		}
