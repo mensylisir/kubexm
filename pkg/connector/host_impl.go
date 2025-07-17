@@ -55,9 +55,6 @@ func (h *hostImpl) SetInternalAddress(address string) {
 }
 
 func (h *hostImpl) GetPort() int {
-	// Assumes h.spec.Port has been defaulted by API layer (e.g., to 22) if it was originally 0.
-	// If it's still 0 here, it implies an intentional configuration or an issue upstream in defaulting.
-	// The connector should use the value as provided in the spec.
 	return h.spec.Port
 }
 
@@ -66,7 +63,6 @@ func (h *hostImpl) SetPort(port int) {
 }
 
 func (h *hostImpl) GetUser() string {
-	// Assumes h.spec.User has been defaulted by API layer if it was originally empty.
 	return h.spec.User
 }
 

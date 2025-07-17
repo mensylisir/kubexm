@@ -8,11 +8,6 @@ import (
 	"time"
 )
 
-type Factory interface {
-	NewSSHConnector(pool *ConnectionPool) Connector
-	NewLocalConnector() Connector
-}
-
 type OS struct {
 	ID         string // e.g., "ubuntu", "centos", "windows"
 	VersionID  string // e.g., "20.04", "7", "10.0.19042"
