@@ -2,31 +2,49 @@ package runner
 
 import (
 	"context"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"text/template"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 )
 
-// Facts, PackageInfo, ServiceInfo etc. structure definitions
+type DiskInfo struct {
+	Name       string
+	Size       resource.Quantity
+	Type       string
+	MountPoint string
+	Partitions []PartitionInfo
+}
+
+type PartitionInfo struct {
+	Name       string
+	Size       resource.Quantity
+	MountPoint string
+}
+
 type Facts struct {
 	OS             *connector.OS
 	Hostname       string
 	Kernel         string
-	TotalMemory    uint64 // in MiB
-	TotalCPU       int
+	TotalMemory    resource.Quantity
+	TotalCPU       resource.Quantity
+	Disks          []DiskInfo
+	TotalDisk      resource.Quantity
 	IPv4Default    string
 	IPv6Default    string
 	PackageManager *PackageInfo
 	InitSystem     *ServiceInfo
 }
 type PackageManagerType string
+
 const (
 	PackageManagerUnknown PackageManagerType = "unknown"
 	PackageManagerApt     PackageManagerType = "apt"
 	PackageManagerYum     PackageManagerType = "yum"
 	PackageManagerDnf     PackageManagerType = "dnf"
 )
+
 type PackageInfo struct {
 	Type          PackageManagerType
 	UpdateCmd     string
@@ -36,11 +54,13 @@ type PackageInfo struct {
 	CacheCleanCmd string
 }
 type InitSystemType string
+
 const (
 	InitSystemUnknown InitSystemType = "unknown"
 	InitSystemSystemd InitSystemType = "systemd"
 	InitSystemSysV    InitSystemType = "sysvinit"
 )
+
 type ServiceInfo struct {
 	Type            InitSystemType
 	StartCmd        string
@@ -52,7 +72,6 @@ type ServiceInfo struct {
 	DaemonReloadCmd string
 }
 
-// Runner interface defines a complete, stateless host operation service library.
 type Runner interface {
 	GatherFacts(ctx context.Context, conn connector.Connector) (*Facts, error)
 	Run(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (string, error)
@@ -344,19 +363,18 @@ type HelmListOptions struct {
 }
 
 type HelmReleaseInfo struct {
-	Name         string `json:"name"`
-	Namespace    string `json:"namespace"`
-	Revision     string `json:"revision"`
-	Updated      string `json:"updated"`
-	Status       string `json:"status"`
-	Chart        string `json:"chart"`
-	AppVersion   string `json:"app_version"`
-	Notes        string `json:"notes,omitempty"`
-	Config       map[string]interface{} `json:"config,omitempty"`
-	Manifest     string `json:"manifest,omitempty"`
-	Version      int    `json:"version"`
+	Name       string                 `json:"name"`
+	Namespace  string                 `json:"namespace"`
+	Revision   string                 `json:"revision"`
+	Updated    string                 `json:"updated"`
+	Status     string                 `json:"status"`
+	Chart      string                 `json:"chart"`
+	AppVersion string                 `json:"app_version"`
+	Notes      string                 `json:"notes,omitempty"`
+	Config     map[string]interface{} `json:"config,omitempty"`
+	Manifest   string                 `json:"manifest,omitempty"`
+	Version    int                    `json:"version"`
 }
-
 
 type HelmStatusOptions struct {
 	Namespace      string
@@ -367,24 +385,24 @@ type HelmStatusOptions struct {
 }
 
 type HelmRepoAddOptions struct {
-	Username       string
-	Password       string
-	CAFile         string
-	CertFile       string
-	KeyFile        string
-	Insecure       bool
-	ForceUpdate    bool
+	Username        string
+	Password        string
+	CAFile          string
+	CertFile        string
+	KeyFile         string
+	Insecure        bool
+	ForceUpdate     bool
 	PassCredentials bool
-	Sudo           bool
+	Sudo            bool
 }
 
 type HelmSearchOptions struct {
-	Regexp      bool
-	Devel       bool
-	Version     string
-	Versions    bool
+	Regexp       bool
+	Devel        bool
+	Version      string
+	Versions     bool
 	OutputFormat string
-	Sudo        bool
+	Sudo         bool
 }
 
 type HelmChartInfo struct {
@@ -395,44 +413,44 @@ type HelmChartInfo struct {
 }
 
 type HelmPullOptions struct {
-	Destination    string
-	Prov           bool
-	Untar          bool
-	UntarDir       string
-	Verify         bool
-	Keyring        string
-	Version        string
-	CAFile         string
-	CertFile       string
-	KeyFile        string
-	Insecure       bool
-	Devel          bool
+	Destination     string
+	Prov            bool
+	Untar           bool
+	UntarDir        string
+	Verify          bool
+	Keyring         string
+	Version         string
+	CAFile          string
+	CertFile        string
+	KeyFile         string
+	Insecure        bool
+	Devel           bool
 	PassCredentials bool
-	Username       string
-	Password       string
-	Sudo           bool
+	Username        string
+	Password        string
+	Sudo            bool
 }
 
 type HelmPackageOptions struct {
-	Destination  string
-	Sign         bool
-	Key          string
-	Keyring      string
-	PassphraseFile string
-	Version      string
-	AppVersion   string
+	Destination      string
+	Sign             bool
+	Key              string
+	Keyring          string
+	PassphraseFile   string
+	Version          string
+	AppVersion       string
 	DependencyUpdate bool
-	Sudo         bool
+	Sudo             bool
 }
 
 type HelmUpgradeOptions struct {
 	HelmInstallOptions
-	Install          bool
-	Force            bool
-	ResetValues      bool
-	ReuseValues      bool
-	CleanupOnFail    bool
-	MaxHistory       int
+	Install       bool
+	Force         bool
+	ResetValues   bool
+	ReuseValues   bool
+	CleanupOnFail bool
+	MaxHistory    int
 }
 
 type HelmRollbackOptions struct {
@@ -489,29 +507,28 @@ type HelmTemplateOptions struct {
 }
 
 type HelmDependencyOptions struct {
-	Keyring        string
-	SkipRefresh    bool
-	Verify         bool
-	Sudo           bool
+	Keyring     string
+	SkipRefresh bool
+	Verify      bool
+	Sudo        bool
 }
 
 type HelmLintOptions struct {
-	Strict         bool
-	ValuesFiles    []string
-	SetValues      []string
-	Quiet          bool
-	WithSubcharts  bool
-	Namespace      string
-	KubeVersion    string
-	Sudo           bool
+	Strict        bool
+	ValuesFiles   []string
+	SetValues     []string
+	Quiet         bool
+	WithSubcharts bool
+	Namespace     string
+	KubeVersion   string
+	Sudo          bool
 }
-
 
 type HelmVersionInfo struct {
 	Version      string `json:"version"`
-	GitCommit  string `json:"gitCommit"`
+	GitCommit    string `json:"gitCommit"`
 	GitTreeState string `json:"gitTreeState"`
-	GoVersion  string `json:"goVersion"`
+	GoVersion    string `json:"goVersion"`
 }
 
 type KubectlApplyOptions struct {
@@ -627,9 +644,9 @@ type KubectlNodeInfo struct {
 		Annotations       map[string]string `json:"annotations"`
 	} `json:"metadata"`
 	Spec struct {
-		PodCIDR           string `json:"podCIDR"`
-		ProviderID        string `json:"providerID"`
-		Unschedulable     bool   `json:"unschedulable,omitempty"`
+		PodCIDR       string `json:"podCIDR"`
+		ProviderID    string `json:"providerID"`
+		Unschedulable bool   `json:"unschedulable,omitempty"`
 	} `json:"spec"`
 	Status struct {
 		Capacity    map[string]string `json:"capacity"`
@@ -689,14 +706,14 @@ type KubectlPodInfo struct {
 		PodIP             string `json:"podIP"`
 		StartTime         string `json:"startTime,omitempty"`
 		ContainerStatuses []struct {
-			Name        string `json:"name"`
-			State       map[string]interface{} `json:"state"`
-			LastState   map[string]interface{} `json:"lastState,omitempty"`
-			Ready       bool   `json:"ready"`
-			RestartCount int32  `json:"restartCount"`
-			Image       string `json:"image"`
-			ImageID     string `json:"imageID"`
-			ContainerID string `json:"containerID"`
+			Name         string                 `json:"name"`
+			State        map[string]interface{} `json:"state"`
+			LastState    map[string]interface{} `json:"lastState,omitempty"`
+			Ready        bool                   `json:"ready"`
+			RestartCount int32                  `json:"restartCount"`
+			Image        string                 `json:"image"`
+			ImageID      string                 `json:"imageID"`
+			ContainerID  string                 `json:"containerID"`
 		} `json:"containerStatuses,omitempty"`
 		Conditions []struct {
 			Type   string `json:"type"`
@@ -724,13 +741,13 @@ type KubectlServiceInfo struct {
 			TargetPort any    `json:"targetPort"`
 			NodePort   int32  `json:"nodePort,omitempty"`
 		} `json:"ports"`
-		Selector      map[string]string `json:"selector,omitempty"`
-		ClusterIP     string            `json:"clusterIP"`
-		ClusterIPs    []string          `json:"clusterIPs,omitempty"`
-		Type          string            `json:"type"`
-		SessionAffinity string          `json:"sessionAffinity"`
-		ExternalIPs   []string          `json:"externalIPs,omitempty"`
-		LoadBalancerIP string           `json:"loadBalancerIP,omitempty"`
+		Selector        map[string]string `json:"selector,omitempty"`
+		ClusterIP       string            `json:"clusterIP"`
+		ClusterIPs      []string          `json:"clusterIPs,omitempty"`
+		Type            string            `json:"type"`
+		SessionAffinity string            `json:"sessionAffinity"`
+		ExternalIPs     []string          `json:"externalIPs,omitempty"`
+		LoadBalancerIP  string            `json:"loadBalancerIP,omitempty"`
 	} `json:"spec"`
 	Status struct {
 		LoadBalancer struct {
@@ -762,15 +779,15 @@ type KubectlDeploymentInfo struct {
 		Template struct {
 		} `json:"template"`
 		Strategy struct {
-			Type    string `json:"type"`
+			Type          string `json:"type"`
 			RollingUpdate *struct {
 				MaxUnavailable any `json:"maxUnavailable,omitempty"`
 				MaxSurge       any `json:"maxSurge,omitempty"`
 			} `json:"rollingUpdate,omitempty"`
 		} `json:"strategy"`
-		MinReadySeconds      int32 `json:"minReadySeconds,omitempty"`
-		RevisionHistoryLimit *int32 `json:"revisionHistoryLimit,omitempty"`
-		Paused               bool   `json:"paused,omitempty"`
+		MinReadySeconds         int32  `json:"minReadySeconds,omitempty"`
+		RevisionHistoryLimit    *int32 `json:"revisionHistoryLimit,omitempty"`
+		Paused                  bool   `json:"paused,omitempty"`
 		ProgressDeadlineSeconds *int32 `json:"progressDeadlineSeconds,omitempty"`
 	} `json:"spec"`
 	Status struct {
@@ -780,7 +797,7 @@ type KubectlDeploymentInfo struct {
 		ReadyReplicas       int32 `json:"readyReplicas,omitempty"`
 		AvailableReplicas   int32 `json:"availableReplicas,omitempty"`
 		UnavailableReplicas int32 `json:"unavailableReplicas,omitempty"`
-		Conditions []struct {
+		Conditions          []struct {
 			Type   string `json:"type"`
 			Status string `json:"status"`
 		} `json:"conditions,omitempty"`
@@ -788,8 +805,8 @@ type KubectlDeploymentInfo struct {
 }
 
 type KubectlConfigInfo struct {
-	APIVersion     string `json:"apiVersion"`
-	Clusters       []struct {
+	APIVersion string `json:"apiVersion"`
+	Clusters   []struct {
 		Name    string `json:"name"`
 		Cluster struct {
 			Server                   string `json:"server"`
@@ -804,10 +821,10 @@ type KubectlConfigInfo struct {
 			Namespace string `json:"namespace,omitempty"`
 		} `json:"context"`
 	} `json:"contexts"`
-	CurrentContext string `json:"current-context"`
-	Kind           string `json:"kind"`
+	CurrentContext string                 `json:"current-context"`
+	Kind           string                 `json:"kind"`
 	Preferences    map[string]interface{} `json:"preferences"`
-	Users []struct {
+	Users          []struct {
 		Name string `json:"name"`
 		User struct {
 			ClientCertificateData string `json:"client-certificate-data,omitempty"`
@@ -818,11 +835,11 @@ type KubectlConfigInfo struct {
 }
 
 type KubectlContextInfo struct {
-	Name    string `json:"name"`
-	Cluster string `json:"cluster"`
-	AuthInfo string `json:"user"`
+	Name      string `json:"name"`
+	Cluster   string `json:"cluster"`
+	AuthInfo  string `json:"user"`
 	Namespace string `json:"namespace,omitempty"`
-	Current bool
+	Current   bool
 }
 
 type KubectlMetricsInfo struct {
@@ -830,41 +847,41 @@ type KubectlMetricsInfo struct {
 		Name              string    `json:"name"`
 		CreationTimestamp time.Time `json:"timestamp"`
 	} `json:"metadata"`
-	Timestamp string `json:"timestamp"`
-	Window    string `json:"window"`
+	Timestamp  string                        `json:"timestamp"`
+	Window     string                        `json:"window"`
 	Containers []KubectlContainerMetricsInfo `json:"containers,omitempty"`
-	CPU struct {
+	CPU        struct {
 		UsageNanoCores string `json:"usageNanoCores,omitempty"`
 		UsageCoreNanos *int64 `json:"-"`
 	} `json:"cpu,omitempty"`
 	Memory struct {
-		UsageBytes string `json:"usageBytes,omitempty"`
+		UsageBytes       string `json:"usageBytes,omitempty"`
 		UsageBytesParsed *int64 `json:"-"`
 	} `json:"memory,omitempty"`
 }
 
 type KubectlContainerMetricsInfo struct {
 	Name string `json:"name"`
-	CPU struct {
+	CPU  struct {
 		UsageNanoCores string `json:"usageNanoCores,omitempty"`
 		UsageCoreNanos *int64 `json:"-"`
 	} `json:"cpu"`
 	Memory struct {
-		UsageBytes string `json:"usageBytes,omitempty"`
+		UsageBytes       string `json:"usageBytes,omitempty"`
 		UsageBytesParsed *int64 `json:"-"`
 	} `json:"memory"`
 }
 
 type ContainerdConfigOptions struct {
-	Version      *int    `toml:"version,omitempty" json:"version,omitempty"`
-	Root         *string `toml:"root,omitempty" json:"root,omitempty"`
-	State        *string `toml:"state,omitempty" json:"state,omitempty"`
-	OOMScore     *int    `toml:"oom_score,omitempty" json:"oom_score,omitempty"`
-	GRPC         *ContainerdGRPCConfig `toml:"grpc,omitempty" json:"grpc,omitempty"`
-	Metrics      *ContainerdMetricsConfig `toml:"metrics,omitempty" json:"metrics,omitempty"`
-	DisabledPlugins *[]string `toml:"disabled_plugins,omitempty" json:"disabled_plugins,omitempty"`
-	PluginConfigs *map[string]interface{} `toml:"plugins,omitempty" json:"plugins,omitempty"`
-	RegistryMirrors map[string][]string `toml:"-" json:"-"`
+	Version         *int                     `toml:"version,omitempty" json:"version,omitempty"`
+	Root            *string                  `toml:"root,omitempty" json:"root,omitempty"`
+	State           *string                  `toml:"state,omitempty" json:"state,omitempty"`
+	OOMScore        *int                     `toml:"oom_score,omitempty" json:"oom_score,omitempty"`
+	GRPC            *ContainerdGRPCConfig    `toml:"grpc,omitempty" json:"grpc,omitempty"`
+	Metrics         *ContainerdMetricsConfig `toml:"metrics,omitempty" json:"metrics,omitempty"`
+	DisabledPlugins *[]string                `toml:"disabled_plugins,omitempty" json:"disabled_plugins,omitempty"`
+	PluginConfigs   *map[string]interface{}  `toml:"plugins,omitempty" json:"plugins,omitempty"`
+	RegistryMirrors map[string][]string      `toml:"-" json:"-"`
 }
 
 type ContainerdGRPCConfig struct {
@@ -897,23 +914,23 @@ type CtrContainerInfo struct {
 }
 
 type ContainerdContainerCreateOptions struct {
-	ImageName     string
-	ContainerID   string
-	Snapshotter   string
-	ConfigPath    string
-	Runtime       string
-	NetHost       bool
-	TTY           bool
-	Env           []string
-	Mounts        []string
-	Command       []string
-	Labels        map[string]string
+	ImageName      string
+	ContainerID    string
+	Snapshotter    string
+	ConfigPath     string
+	Runtime        string
+	NetHost        bool
+	TTY            bool
+	Env            []string
+	Mounts         []string
+	Command        []string
+	Labels         map[string]string
 	RemoveExisting bool
-	Privileged    bool
+	Privileged     bool
 	ReadOnlyRootFS bool
-	User          string
-	Cwd           string
-	Platforms     []string
+	User           string
+	Cwd            string
+	Platforms      []string
 }
 
 type CtrExecOptions struct {
@@ -945,7 +962,7 @@ type CrictlImageDetails struct {
 
 type CrictlFSInfo struct {
 	Timestamp int64 `json:"timestamp"`
-	FsID struct {
+	FsID      struct {
 		Mountpoint string `json:"mountpoint"`
 	} `json:"fsId"`
 	UsedBytes  string `json:"usedBytes"`
@@ -966,17 +983,17 @@ type CrictlPodInfo struct {
 
 type CrictlPodDetails struct {
 	Status struct {
-		ID             string            `json:"id"`
+		ID       string `json:"id"`
 		Metadata struct {
 			Name      string `json:"name"`
 			Namespace string `json:"namespace"`
 			Attempt   uint32 `json:"attempt"`
 			UID       string `json:"uid"`
 		} `json:"metadata"`
-		State          string            `json:"state"`
-		CreatedAt      string            `json:"createdAt"`
-		Network struct {
-			IP       string `json:"ip"`
+		State     string `json:"state"`
+		CreatedAt string `json:"createdAt"`
+		Network   struct {
+			IP string `json:"ip"`
 		} `json:"network"`
 		Linux struct {
 			Namespaces struct {
@@ -994,7 +1011,6 @@ type CrictlPodDetails struct {
 	Info map[string]interface{} `json:"info"`
 }
 
-
 type CrictlContainerDetails struct {
 	Status struct {
 		ID       string `json:"id"`
@@ -1002,12 +1018,12 @@ type CrictlContainerDetails struct {
 			Name    string `json:"name"`
 			Attempt uint32 `json:"attempt"`
 		} `json:"metadata"`
-		State       string            `json:"state"`
-		CreatedAt   string            `json:"createdAt"`
-		StartedAt   string            `json:"startedAt"`
-		FinishedAt  string            `json:"finishedAt"`
-		ExitCode    int32             `json:"exitCode"`
-		Image struct {
+		State      string `json:"state"`
+		CreatedAt  string `json:"createdAt"`
+		StartedAt  string `json:"startedAt"`
+		FinishedAt string `json:"finishedAt"`
+		ExitCode   int32  `json:"exitCode"`
+		Image      struct {
 			Image string `json:"image"`
 			ID    string `json:"id"`
 		} `json:"image"`
@@ -1023,12 +1039,11 @@ type CrictlContainerDetails struct {
 			Propagation    string `json:"propagation"`
 			SelinuxRelabel bool   `json:"selinuxRelabel"`
 		} `json:"mounts"`
-		LogPath     string `json:"logPath"`
+		LogPath string `json:"logPath"`
 	} `json:"status"`
 	Pid  int                    `json:"pid"`
 	Info map[string]interface{} `json:"info"`
 }
-
 
 type CrictlLogOptions struct {
 	Follow     bool
@@ -1047,37 +1062,37 @@ type CrictlVersionInfo struct {
 }
 
 type DockerDaemonOptions struct {
-	LogDriver         *string            `json:"log-driver,omitempty"`
-	LogOpts           *map[string]string `json:"log-opts,omitempty"`
-	StorageDriver     *string            `json:"storage-driver,omitempty"`
-	StorageOpts       *[]string          `json:"storage-opts,omitempty"`
-	RegistryMirrors   *[]string          `json:"registry-mirrors,omitempty"`
-	InsecureRegistries *[]string          `json:"insecure-registries,omitempty"`
-	ExecOpts          *[]string          `json:"exec-opts,omitempty"`
-	Bridge            *string            `json:"bridge,omitempty"`
-	Bip               *string            `json:"bip,omitempty"`
-	FixedCIDR         *string            `json:"fixed-cidr,omitempty"`
-	DefaultGateway    *string            `json:"default-gateway,omitempty"`
-	DNS               *[]string          `json:"dns,omitempty"`
-	IPTables          *bool              `json:"iptables,omitempty"`
-	Experimental      *bool              `json:"experimental,omitempty"`
-	Debug             *bool              `json:"debug,omitempty"`
-	APICorsHeader     *string            `json:"api-cors-header,omitempty"`
-	Hosts             *[]string          `json:"hosts,omitempty"`
-	UserlandProxy     *bool              `json:"userland-proxy,omitempty"`
-	LiveRestore       *bool              `json:"live-restore,omitempty"`
-	CgroupParent      *string            `json:"cgroup-parent,omitempty"`
-	DefaultRuntime    *string            `json:"default-runtime,omitempty"`
-	Runtimes          *map[string]DockerRuntime `json:"runtimes,omitempty"`
-	Graph             *string            `json:"graph,omitempty"`
-	DataRoot          *string            `json:"data-root,omitempty"`
-	MaxConcurrentDownloads *int          `json:"max-concurrent-downloads,omitempty"`
-	MaxConcurrentUploads   *int          `json:"max-concurrent-uploads,omitempty"`
-	ShutdownTimeout        *int          `json:"shutdown-timeout,omitempty"`
+	LogDriver              *string                   `json:"log-driver,omitempty"`
+	LogOpts                *map[string]string        `json:"log-opts,omitempty"`
+	StorageDriver          *string                   `json:"storage-driver,omitempty"`
+	StorageOpts            *[]string                 `json:"storage-opts,omitempty"`
+	RegistryMirrors        *[]string                 `json:"registry-mirrors,omitempty"`
+	InsecureRegistries     *[]string                 `json:"insecure-registries,omitempty"`
+	ExecOpts               *[]string                 `json:"exec-opts,omitempty"`
+	Bridge                 *string                   `json:"bridge,omitempty"`
+	Bip                    *string                   `json:"bip,omitempty"`
+	FixedCIDR              *string                   `json:"fixed-cidr,omitempty"`
+	DefaultGateway         *string                   `json:"default-gateway,omitempty"`
+	DNS                    *[]string                 `json:"dns,omitempty"`
+	IPTables               *bool                     `json:"iptables,omitempty"`
+	Experimental           *bool                     `json:"experimental,omitempty"`
+	Debug                  *bool                     `json:"debug,omitempty"`
+	APICorsHeader          *string                   `json:"api-cors-header,omitempty"`
+	Hosts                  *[]string                 `json:"hosts,omitempty"`
+	UserlandProxy          *bool                     `json:"userland-proxy,omitempty"`
+	LiveRestore            *bool                     `json:"live-restore,omitempty"`
+	CgroupParent           *string                   `json:"cgroup-parent,omitempty"`
+	DefaultRuntime         *string                   `json:"default-runtime,omitempty"`
+	Runtimes               *map[string]DockerRuntime `json:"runtimes,omitempty"`
+	Graph                  *string                   `json:"graph,omitempty"`
+	DataRoot               *string                   `json:"data-root,omitempty"`
+	MaxConcurrentDownloads *int                      `json:"max-concurrent-downloads,omitempty"`
+	MaxConcurrentUploads   *int                      `json:"max-concurrent-uploads,omitempty"`
+	ShutdownTimeout        *int                      `json:"shutdown-timeout,omitempty"`
 }
 
 type DockerRuntime struct {
-	Path string `json:"path"`
+	Path        string   `json:"path"`
 	RuntimeArgs []string `json:"runtimeArgs,omitempty"`
 }
 
@@ -1347,35 +1362,35 @@ type DockerSystemInfo struct {
 		Volume  []string
 		Network []string
 	}
-	MemoryLimit       bool
-	SwapLimit         bool
-	KernelMemory      bool
-	CPUCfsPeriod      bool
-	CPUCfsQuota       bool
-	CPUShares         bool
-	CPUSet            bool
-	PidsLimit         bool
-	IPv4Forwarding    bool
-	BridgeNfIptables  bool
-	BridgeNfIp6tables bool
-	Debug             bool
-	NFd               int
-	OomKillDisable    bool
-	NGoroutines       int
-	SystemTime        string
-	LoggingDriver     string
-	CgroupDriver      string
-	CgroupVersion     string
-	NEventsListener   int
-	KernelVersion     string
-	OperatingSystem   string
-	OSType            string
-	Architecture      string
+	MemoryLimit        bool
+	SwapLimit          bool
+	KernelMemory       bool
+	CPUCfsPeriod       bool
+	CPUCfsQuota        bool
+	CPUShares          bool
+	CPUSet             bool
+	PidsLimit          bool
+	IPv4Forwarding     bool
+	BridgeNfIptables   bool
+	BridgeNfIp6tables  bool
+	Debug              bool
+	NFd                int
+	OomKillDisable     bool
+	NGoroutines        int
+	SystemTime         string
+	LoggingDriver      string
+	CgroupDriver       string
+	CgroupVersion      string
+	NEventsListener    int
+	KernelVersion      string
+	OperatingSystem    string
+	OSType             string
+	Architecture       string
 	IndexServerAddress string
-	RegistryConfig    *RegistryConfig
-	NCPU              int
-	MemTotal          int64
-	ServerVersion     string
+	RegistryConfig     *RegistryConfig
+	NCPU               int
+	MemTotal           int64
+	ServerVersion      string
 }
 
 type RegistryConfig struct {
@@ -1419,13 +1434,13 @@ type UserModifications struct {
 }
 
 type UserInfo struct {
-	Username string
-	UID      string
-	GID      string
-	Comment  string
-	HomeDir  string
-	Shell    string
-	Groups   []string
+	Username       string
+	UID            string
+	GID            string
+	Comment        string
+	HomeDir        string
+	Shell          string
+	Groups         []string
 	PasswordStatus string
 }
 
@@ -1453,15 +1468,15 @@ type VMSnapshotInfo struct {
 }
 
 type VMInterfaceAddress struct {
-	Addr    string `json:"addr"`
-	Prefix  int    `json:"prefix"`
+	Addr   string `json:"addr"`
+	Prefix int    `json:"prefix"`
 }
 
 type VMInterfaceInfo struct {
-	Name          string               `json:"name"`
-	MAC           string               `json:"mac"`
-	Source        string               `json:"source,omitempty"`
-	IPAddresses   []VMInterfaceAddress `json:"ip-addresses,omitempty"`
+	Name        string               `json:"name"`
+	MAC         string               `json:"mac"`
+	Source      string               `json:"source,omitempty"`
+	IPAddresses []VMInterfaceAddress `json:"ip-addresses,omitempty"`
 }
 
 type VMBlockDeviceInfo struct {
@@ -1473,21 +1488,20 @@ type VMBlockDeviceInfo struct {
 	Size       uint64 `json:"size-bytes,omitempty"`
 }
 
-
 type VMDetails struct {
 	VMInfo
-	OSVariant          string
-	DomainType         string
-	Architecture       string
-	EmulatorPath       string
-	Graphics           []VMGraphicsInfo
-	Disks              []VMBlockDeviceInfo
-	NetworkInterfaces  []VMInterfaceInfo
-	PersistentConfig   bool
-	Autostart          bool
-	EffectiveMemory    uint
-	EffectiveVCPUs     uint
-	RawXML             string
+	OSVariant         string
+	DomainType        string
+	Architecture      string
+	EmulatorPath      string
+	Graphics          []VMGraphicsInfo
+	Disks             []VMBlockDeviceInfo
+	NetworkInterfaces []VMInterfaceInfo
+	PersistentConfig  bool
+	Autostart         bool
+	EffectiveMemory   uint
+	EffectiveVCPUs    uint
+	RawXML            string
 }
 
 type VMGraphicsInfo struct {
@@ -1503,10 +1517,10 @@ type CrictlRuntimeInfo struct {
 		Containerd struct {
 			Snapshotter string `json:"snapshotter"`
 			Runtimes    map[string]struct {
-				Type          string `json:"runtimeType"`
-				Engine        string `json:"runtimeEngine"`
-				Root          string `json:"runtimeRoot"`
-				SandboxMode   string `json:"sandboxMode"`
+				Type        string `json:"runtimeType"`
+				Engine      string `json:"runtimeEngine"`
+				Root        string `json:"runtimeRoot"`
+				SandboxMode string `json:"sandboxMode"`
 			} `json:"runtimes"`
 		} `json:"containerd"`
 	} `json:"config"`
@@ -1532,16 +1546,16 @@ type KubectlExplainOptions struct {
 }
 
 type KubectlDrainOptions struct {
-	KubeconfigPath      string
-	Force               bool
-	GracePeriod         int
-	IgnoreDaemonSets    bool
-	DeleteLocalData     bool
-	Selector            string
-	Timeout             time.Duration
-	DisableEviction     bool
+	KubeconfigPath           string
+	Force                    bool
+	GracePeriod              int
+	IgnoreDaemonSets         bool
+	DeleteLocalData          bool
+	Selector                 string
+	Timeout                  time.Duration
+	DisableEviction          bool
 	SkipWaitForDeleteTimeout int
-	Sudo                bool
+	Sudo                     bool
 }
 
 type KubectlCordonUncordonOptions struct {
@@ -1650,16 +1664,16 @@ type KubectlLabelOptions struct {
 }
 
 type KubectlAnnotateOptions struct {
-	KubeconfigPath string
-	Namespace      string
-	AllNamespaces  bool
-	Selector       string
-	Overwrite      bool
-	Local          bool
-	DryRun         string
+	KubeconfigPath  string
+	Namespace       string
+	AllNamespaces   bool
+	Selector        string
+	Overwrite       bool
+	Local           bool
+	DryRun          string
 	ListAnnotations bool
-	Timeout        time.Duration
-	Sudo           bool
+	Timeout         time.Duration
+	Sudo            bool
 }
 
 type KubectlPatchOptions struct {

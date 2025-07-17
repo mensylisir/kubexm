@@ -11,28 +11,26 @@ import (
 	"github.com/mensylisir/kubexm/pkg/connector"
 )
 
-// Download a file from a URL to a specified destination on the remote host.
 func (r *defaultRunner) Download(ctx context.Context, conn connector.Connector, facts *Facts, url, destPath string, sudo bool) error {
 	if conn == nil {
 		return fmt.Errorf("connector cannot be nil")
 	}
 
-	// Prefer curl, fallback to wget.
 	cmd := fmt.Sprintf("curl -sSL -o %s %s", destPath, url)
-	curlPath, errLookPathCurl := r.LookPath(ctx, conn, "curl") // Use r.LookPath
+	curlPath, errLookPathCurl := r.LookPath(ctx, conn, "curl")
 
-	if errLookPathCurl != nil { // curl not found, try wget
-		wgetPath, errLookPathWget := r.LookPath(ctx, conn, "wget") // Use r.LookPath
+	if errLookPathCurl != nil {
+		wgetPath, errLookPathWget := r.LookPath(ctx, conn, "wget")
 		if errLookPathWget != nil {
 			return fmt.Errorf("neither curl nor wget found on the remote host: curl_err=%v, wget_err=%v", errLookPathCurl, errLookPathWget)
 		}
 		cmd = fmt.Sprintf("wget -qO %s %s", destPath, url)
-		_ = wgetPath // Suppress unused variable warning if not further used
+		_ = wgetPath
 	} else {
-		_ = curlPath // Suppress unused variable warning
+		_ = curlPath
 	}
 
-	_, _, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: sudo}) // Use r.RunWithOptions
+	_, _, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: sudo})
 	if err != nil {
 		// Stderr is included in the error by RunWithOptions if it's a CommandError
 		return fmt.Errorf("failed to download %s to %s using command '%s': %w", url, destPath, cmd, err)
@@ -40,7 +38,6 @@ func (r *defaultRunner) Download(ctx context.Context, conn connector.Connector, 
 	return nil
 }
 
-// Extract an archive file on the remote host to a destination directory.
 func (r *defaultRunner) Extract(ctx context.Context, conn connector.Connector, facts *Facts, archivePath, destDir string, sudo bool) error {
 	if conn == nil {
 		return fmt.Errorf("connector cannot be nil")
@@ -74,7 +71,6 @@ func (r *defaultRunner) Extract(ctx context.Context, conn connector.Connector, f
 	return nil
 }
 
-// DownloadAndExtract combines downloading a file and then extracting it.
 func (r *defaultRunner) DownloadAndExtract(ctx context.Context, conn connector.Connector, facts *Facts, url, destDir string, sudo bool) error {
 	if conn == nil {
 		return fmt.Errorf("connector cannot be nil")
@@ -84,13 +80,8 @@ func (r *defaultRunner) DownloadAndExtract(ctx context.Context, conn connector.C
 	safeArchiveName := strings.ReplaceAll(archiveName, "/", "_")
 	safeArchiveName = strings.ReplaceAll(safeArchiveName, "..", "_")
 
-	// Determine temp path based on facts if possible, otherwise default to /tmp
-	// This requires facts to be non-nil. The interface implies facts would be passed.
-	// If facts or facts.OS is nil, a sensible default like /tmp is used.
-	// This part is simplified; a real implementation might use a more specific temp dir from facts or config.
 	remoteTempPath := filepath.Join("/tmp", safeArchiveName)
 	if facts != nil && facts.OS != nil {
-		// Could use OS-specific temp dirs if needed, e.g. facts.OS.TempDir
 	}
 
 	if err := r.Download(ctx, conn, facts, url, remoteTempPath, sudo); err != nil { // Pass facts
@@ -101,7 +92,6 @@ func (r *defaultRunner) DownloadAndExtract(ctx context.Context, conn connector.C
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := r.Remove(cleanupCtx, conn, remoteTempPath, sudo); err != nil { // Use r.Remove
-			// Consider logging this error if a logger is available via ctx or r.
 			fmt.Fprintf(os.Stderr, "Warning: failed to cleanup temporary archive %s: %v\n", remoteTempPath, err)
 		}
 	}()
@@ -117,8 +107,6 @@ func (r *defaultRunner) DownloadAndExtract(ctx context.Context, conn connector.C
 	return nil
 }
 
-// Compress creates an archive from a list of source paths.
-// supported formats: .tar.gz, .tgz, .zip
 func (r *defaultRunner) Compress(ctx context.Context, conn connector.Connector, facts *Facts, archivePath string, sources []string, sudo bool) error {
 	if conn == nil {
 		return fmt.Errorf("connector cannot be nil")
@@ -130,11 +118,6 @@ func (r *defaultRunner) Compress(ctx context.Context, conn connector.Connector, 
 	archiveFilename := filepath.Base(archivePath)
 	var cmd string
 	sourcePaths := strings.Join(sources, " ")
-
-	// Determine the parent directory of the first source to use as -C for tar if sources are not absolute
-	// This helps in creating archives with relative paths inside.
-	// For zip, it typically archives paths as given.
-	// baseDir was here, removed as it's unused.
 	if len(sources) > 0 {
 		isAbsolute := filepath.IsAbs(sources[0])
 		if !isAbsolute {
@@ -155,7 +138,6 @@ func (r *defaultRunner) Compress(ctx context.Context, conn connector.Connector, 
 		// or handle common base directory logic.
 		// For this initial implementation, we'll keep it simpler and might require sources to be in the CWD or specified with appropriate relative/absolute paths.
 	}
-
 
 	switch {
 	case strings.HasSuffix(archiveFilename, ".tar.gz") || strings.HasSuffix(archiveFilename, ".tgz"):
@@ -212,7 +194,6 @@ func (r *defaultRunner) Compress(ctx context.Context, conn connector.Connector, 
 		return fmt.Errorf("failed to create parent directory %s for archive: %w", archiveDir, err)
 	}
 
-
 	_, _, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: sudo})
 	if err != nil {
 		return fmt.Errorf("failed to compress sources to %s using command '%s': %w", archivePath, cmd, err)
@@ -268,7 +249,6 @@ func (r *defaultRunner) ListArchiveContents(ctx context.Context, conn connector.
 		// Let's stick to a common `unzip -l` parsing strategy.
 		// The command `unzip -l %s | awk 'NR>3 {for(i=4;i<=NF;i++) printf $i (i==NF?"":" ")} {if (NF>=4) print ""}' | head -n -2` attempts to grab all parts of filename
 		cmd = fmt.Sprintf("unzip -l %s", archivePath)
-
 
 	default:
 		return nil, fmt.Errorf("unsupported archive format for listing contents: %s", archiveFilename)
