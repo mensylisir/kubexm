@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1/helpers"
 	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/errors/validation"
 	"net/url"
 	"strings"
 )
@@ -97,7 +98,7 @@ func SetDefaults_ContainerdConfig(cfg *Containerd) {
 	}
 }
 
-func Validate_ContainerdConfig(cfg *Containerd, verrs *ValidationErrors, pathPrefix string) {
+func Validate_ContainerdConfig(cfg *Containerd, verrs *validation.ValidationErrors, pathPrefix string) {
 	if cfg == nil {
 		return
 	}
