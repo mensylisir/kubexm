@@ -16,7 +16,6 @@ const (
 	DefaultHelmTimeout = 5 * time.Minute
 )
 
-// HelmInstall installs a Helm chart.
 func (r *defaultRunner) HelmInstall(ctx context.Context, conn connector.Connector, releaseName, chartPath string, opts HelmInstallOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -77,7 +76,6 @@ func (r *defaultRunner) HelmInstall(ctx context.Context, conn connector.Connecto
 	return nil
 }
 
-// HelmUninstall uninstalls a Helm release.
 func (r *defaultRunner) HelmUninstall(ctx context.Context, conn connector.Connector, releaseName string, opts HelmUninstallOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -119,7 +117,6 @@ func (r *defaultRunner) HelmUninstall(ctx context.Context, conn connector.Connec
 	return nil
 }
 
-// HelmList lists Helm releases.
 func (r *defaultRunner) HelmList(ctx context.Context, conn connector.Connector, opts HelmListOptions) ([]HelmReleaseInfo, error) {
 	if conn == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -183,7 +180,6 @@ func (r *defaultRunner) HelmList(ctx context.Context, conn connector.Connector, 
 	return releases, nil
 }
 
-// HelmStatus gets the status of a Helm release.
 func (r *defaultRunner) HelmStatus(ctx context.Context, conn connector.Connector, releaseName string, opts HelmStatusOptions) (*HelmReleaseInfo, error) {
 	if conn == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -217,7 +213,6 @@ func (r *defaultRunner) HelmStatus(ctx context.Context, conn connector.Connector
 	return &status, nil
 }
 
-// HelmRepoAdd adds a chart repository.
 func (r *defaultRunner) HelmRepoAdd(ctx context.Context, conn connector.Connector, name, url string, opts HelmRepoAddOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -278,7 +273,6 @@ func (r *defaultRunner) HelmRepoUpdate(ctx context.Context, conn connector.Conne
 	return nil
 }
 
-// HelmVersion gets the Helm client version information.
 func (r *defaultRunner) HelmVersion(ctx context.Context, conn connector.Connector) (*HelmVersionInfo, error) {
 	if conn == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -294,7 +288,6 @@ func (r *defaultRunner) HelmVersion(ctx context.Context, conn connector.Connecto
 	return &versionInfo, nil
 }
 
-// HelmSearchRepo searches repositories for a keyword.
 func (r *defaultRunner) HelmSearchRepo(ctx context.Context, conn connector.Connector, keyword string, opts HelmSearchOptions) ([]HelmChartInfo, error) {
 	if conn == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -331,7 +324,6 @@ func (r *defaultRunner) HelmSearchRepo(ctx context.Context, conn connector.Conne
 	return charts, nil
 }
 
-// HelmPull downloads a chart from a repository.
 func (r *defaultRunner) HelmPull(ctx context.Context, conn connector.Connector, chartPath string, opts HelmPullOptions) (string, error) {
 	if conn == nil {
 		return "", errors.New("connector cannot be nil")
@@ -394,7 +386,6 @@ func (r *defaultRunner) HelmPull(ctx context.Context, conn connector.Connector, 
 	return strings.TrimSpace(string(stdout)), nil
 }
 
-// HelmPackage packages a chart directory into a chart archive.
 func (r *defaultRunner) HelmPackage(ctx context.Context, conn connector.Connector, chartPath string, opts HelmPackageOptions) (string, error) {
 	if conn == nil {
 		return "", errors.New("connector cannot be nil")
@@ -438,10 +429,9 @@ func (r *defaultRunner) HelmPackage(ctx context.Context, conn connector.Connecto
 	if strings.HasPrefix(outputStr, prefix) {
 		return strings.TrimSpace(strings.TrimPrefix(outputStr, prefix)), nil
 	}
-	return outputStr, nil // Return raw output if parsing fails
+	return outputStr, nil
 }
 
-// HelmUpgrade upgrades a release.
 func (r *defaultRunner) HelmUpgrade(ctx context.Context, conn connector.Connector, releaseName, chartPath string, opts HelmUpgradeOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -506,7 +496,6 @@ func (r *defaultRunner) HelmUpgrade(ctx context.Context, conn connector.Connecto
 	return nil
 }
 
-// HelmRollback rolls back a release to a previous version.
 func (r *defaultRunner) HelmRollback(ctx context.Context, conn connector.Connector, releaseName string, revision int, opts HelmRollbackOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -514,7 +503,6 @@ func (r *defaultRunner) HelmRollback(ctx context.Context, conn connector.Connect
 	if releaseName == "" {
 		return errors.New("releaseName is required")
 	}
-	// revision 0 means rollback to previous version
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "helm", "rollback", releaseName, fmt.Sprintf("%d", revision))
 	if opts.Namespace != "" {
@@ -552,7 +540,6 @@ func (r *defaultRunner) HelmRollback(ctx context.Context, conn connector.Connect
 	return nil
 }
 
-// HelmHistory displays the revision history of a release.
 func (r *defaultRunner) HelmHistory(ctx context.Context, conn connector.Connector, releaseName string, opts HelmHistoryOptions) ([]HelmReleaseRevisionInfo, error) {
 	if conn == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -586,7 +573,6 @@ func (r *defaultRunner) HelmHistory(ctx context.Context, conn connector.Connecto
 	return history, nil
 }
 
-// HelmGetValues gets the values for a release.
 func (r *defaultRunner) HelmGetValues(ctx context.Context, conn connector.Connector, releaseName string, opts HelmGetOptions) (string, error) {
 	if conn == nil {
 		return "", errors.New("connector cannot be nil")
@@ -607,8 +593,8 @@ func (r *defaultRunner) HelmGetValues(ctx context.Context, conn connector.Connec
 	}
 	if opts.AllValues {
 		cmdArgs = append(cmdArgs, "--all")
-	} // -a or --all
-	cmdArgs = append(cmdArgs, "-o", "yaml") // Typically users want YAML for values
+	}
+	cmdArgs = append(cmdArgs, "-o", "yaml")
 
 	stdout, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultHelmTimeout})
 	if err != nil {
@@ -617,7 +603,6 @@ func (r *defaultRunner) HelmGetValues(ctx context.Context, conn connector.Connec
 	return string(stdout), nil
 }
 
-// HelmGetManifest gets the manifest for a release.
 func (r *defaultRunner) HelmGetManifest(ctx context.Context, conn connector.Connector, releaseName string, opts HelmGetOptions) (string, error) {
 	if conn == nil {
 		return "", errors.New("connector cannot be nil")
@@ -644,7 +629,6 @@ func (r *defaultRunner) HelmGetManifest(ctx context.Context, conn connector.Conn
 	return string(stdout), nil
 }
 
-// HelmGetHooks gets the hooks for a release.
 func (r *defaultRunner) HelmGetHooks(ctx context.Context, conn connector.Connector, releaseName string, opts HelmGetOptions) (string, error) {
 	if conn == nil {
 		return "", errors.New("connector cannot be nil")
@@ -668,10 +652,9 @@ func (r *defaultRunner) HelmGetHooks(ctx context.Context, conn connector.Connect
 	if err != nil {
 		return "", errors.Wrapf(err, "helm get hooks for '%s' failed. Stderr: %s", releaseName, string(stderr))
 	}
-	return string(stdout), nil // Hooks output is also YAML usually
+	return string(stdout), nil
 }
 
-// HelmTemplate renders chart templates locally.
 func (r *defaultRunner) HelmTemplate(ctx context.Context, conn connector.Connector, releaseName, chartPath string, opts HelmTemplateOptions) (string, error) {
 	if conn == nil {
 		return "", errors.New("connector cannot be nil")
@@ -700,7 +683,7 @@ func (r *defaultRunner) HelmTemplate(ctx context.Context, conn connector.Connect
 	}
 	if opts.CreateNamespace {
 		cmdArgs = append(cmdArgs, "--create-namespace")
-	} // May not be applicable to template, but included for consistency
+	}
 	if opts.SkipCrds {
 		cmdArgs = append(cmdArgs, "--skip-crds")
 	}
@@ -724,7 +707,6 @@ func (r *defaultRunner) HelmTemplate(ctx context.Context, conn connector.Connect
 	return string(stdout), nil
 }
 
-// HelmDependencyUpdate updates chart dependencies.
 func (r *defaultRunner) HelmDependencyUpdate(ctx context.Context, conn connector.Connector, chartPath string, opts HelmDependencyOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -751,7 +733,6 @@ func (r *defaultRunner) HelmDependencyUpdate(ctx context.Context, conn connector
 	return nil
 }
 
-// HelmLint examines a chart for possible issues.
 func (r *defaultRunner) HelmLint(ctx context.Context, conn connector.Connector, chartPath string, opts HelmLintOptions) (string, error) {
 	if conn == nil {
 		return "", errors.New("connector cannot be nil")
@@ -779,18 +760,11 @@ func (r *defaultRunner) HelmLint(ctx context.Context, conn connector.Connector, 
 	if opts.Namespace != "" {
 		cmdArgs = append(cmdArgs, "--namespace", opts.Namespace)
 	}
-	// Helm lint -o json is not standard, output is usually text.
-	// We will return the raw output.
 
 	stdout, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultHelmTimeout})
-	// Helm lint returns non-zero exit code if linting errors are found.
-	// The output (stdout/stderr) contains the linting messages.
-	// We should return the output even if there's an error, as it's informative.
+
 	output := string(stdout) + string(stderr)
 	if err != nil {
-		// Don't wrap the error if it's just linting issues (non-zero exit from helm lint).
-		// The output itself is the "result".
-		// However, if it's an execution error of the helm command itself, then wrap.
 		var cmdErr *connector.CommandError
 		if errors.As(err, &cmdErr) {
 			// It's a linting error, return output and the specific command error

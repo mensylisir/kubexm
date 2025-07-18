@@ -2,14 +2,20 @@ package runner
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1/helpers"
+	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/logger"
+	"github.com/mensylisir/kubexm/pkg/runner/helpers"
+	"github.com/mensylisir/kubexm/pkg/templates"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/Masterminds/semver/v3"
@@ -19,33 +25,20 @@ import (
 )
 
 const (
-	// DefaultDockerInspectTimeout is the default timeout for docker inspect commands.
-	DefaultDockerInspectTimeout = 30 * time.Second
-	// DefaultDockerPullTimeout is the default timeout for docker pull commands.
-	DefaultDockerPullTimeout = 15 * time.Minute
-	// DefaultDockerBuildTimeout is the default timeout for docker build commands.
-	DefaultDockerBuildTimeout = 60 * time.Minute
-	// DefaultDockerRMTimeout is the default timeout for docker rmi/rm commands.
-	DefaultDockerRMTimeout = 5 * time.Minute
-	// DefaultDockerCreateTimeout is the default timeout for docker create commands.
-	DefaultDockerCreateTimeout = 1 * time.Minute
-	// DefaultDockerStartTimeout is the default timeout for docker start commands.
-	DefaultDockerStartTimeout = 1 * time.Minute
-	// DefaultDockerStopTimeout is the default timeout for docker stop commands.
-	// This is the timeout for the 'docker stop' command itself to wait for graceful shutdown.
-	DefaultDockerStopGracePeriod = 10 * time.Second
-	// DefaultDockerStopExecTimeout is the timeout for the Exec call running 'docker stop'.
-	// It should be greater than the grace period.
-	DefaultDockerStopExecTimeout = DefaultDockerStopGracePeriod + (30 * time.Second)
-	// DefaultDockerRestartTimeout is the default timeout for 'docker restart' command itself to wait for graceful shutdown.
+	DefaultDockerInspectTimeout     = 30 * time.Second
+	DefaultDockerPullTimeout        = 15 * time.Minute
+	DefaultDockerBuildTimeout       = 60 * time.Minute
+	DefaultDockerRMTimeout          = 5 * time.Minute
+	DefaultDockerCreateTimeout      = 1 * time.Minute
+	DefaultDockerStartTimeout       = 1 * time.Minute
+	DefaultDockerStopGracePeriod    = 10 * time.Second
+	DefaultDockerStopExecTimeout    = DefaultDockerStopGracePeriod + (30 * time.Second)
 	DefaultDockerRestartGracePeriod = 10 * time.Second
-	// DefaultDockerRestartExecTimeout is the timeout for the Exec call running 'docker restart'.
 	DefaultDockerRestartExecTimeout = DefaultDockerRestartGracePeriod + (10 * time.Second)
-	dockerDaemonConfigPath          = "/etc/docker/daemon.json"
+	dockerDaemonConfigPath          = common.DockerDefaultConfigFileTarget
 )
 
 var (
-	// sizeRegex helps parse human-readable sizes from Docker commands (e.g., "1.23GB", "500MB").
 	sizeRegex = regexp.MustCompile(`^(\d+(?:\.\d+)?)\s*([KMGT]?B)$`)
 	sizeUnits = map[string]int64{
 		"B":  1,
@@ -56,7 +49,6 @@ var (
 	}
 )
 
-// parseDockerSize converts a Docker size string (e.g., "100MB") to bytes.
 func parseDockerSize(sizeStr string) (int64, error) {
 	matches := sizeRegex.FindStringSubmatch(strings.ToUpper(sizeStr))
 	if len(matches) != 3 {
@@ -76,7 +68,6 @@ func parseDockerSize(sizeStr string) (int64, error) {
 	return int64(value * float64(unit)), nil
 }
 
-// PullImage pulls a Docker image from a registry.
 func (r *defaultRunner) PullImage(ctx context.Context, c connector.Connector, imageName string) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -98,7 +89,6 @@ func (r *defaultRunner) PullImage(ctx context.Context, c connector.Connector, im
 	return nil
 }
 
-// GetDockerDaemonConfig retrieves the current Docker daemon configuration.
 func (r *defaultRunner) GetDockerDaemonConfig(ctx context.Context, conn connector.Connector) (*DockerDaemonOptions, error) {
 	if conn == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -124,189 +114,139 @@ func (r *defaultRunner) GetDockerDaemonConfig(ctx context.Context, conn connecto
 	return &opts, nil
 }
 
-// ConfigureDockerDaemon applies new daemon configurations.
 func (r *defaultRunner) ConfigureDockerDaemon(ctx context.Context, conn connector.Connector, newOpts DockerDaemonOptions, restartService bool) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
 	}
 
-	currentOpts, err := r.GetDockerDaemonConfig(ctx, conn)
+	if err := r.EnsureDefaultDockerConfig(ctx, conn, nil, false); err != nil {
+		return errors.Wrap(err, "failed to ensure base docker daemon config exists before configuring")
+	}
+
+	currentContentBytes, err := r.ReadFile(ctx, conn, dockerDaemonConfigPath)
 	if err != nil {
-		return errors.Wrap(err, "failed to get current Docker daemon config before applying new settings")
-	}
-	if currentOpts == nil {
-		currentOpts = &DockerDaemonOptions{}
+		return errors.Wrapf(err, "failed to read docker daemon config at %s for merging", dockerDaemonConfigPath)
 	}
 
-	// Merge Strategy: newOpts fields overwrite currentOpts fields if newOpts field is not nil.
-	if newOpts.LogDriver != nil {
-		currentOpts.LogDriver = newOpts.LogDriver
-	}
-	if newOpts.LogOpts != nil {
-		currentOpts.LogOpts = newOpts.LogOpts
-	}
-	if newOpts.StorageDriver != nil {
-		currentOpts.StorageDriver = newOpts.StorageDriver
-	}
-	if newOpts.StorageOpts != nil {
-		currentOpts.StorageOpts = newOpts.StorageOpts
-	}
-	if newOpts.RegistryMirrors != nil {
-		currentOpts.RegistryMirrors = newOpts.RegistryMirrors
-	}
-	if newOpts.InsecureRegistries != nil {
-		currentOpts.InsecureRegistries = newOpts.InsecureRegistries
-	}
-	if newOpts.ExecOpts != nil {
-		currentOpts.ExecOpts = newOpts.ExecOpts
-	}
-	if newOpts.Bridge != nil {
-		currentOpts.Bridge = newOpts.Bridge
-	}
-	if newOpts.Bip != nil {
-		currentOpts.Bip = newOpts.Bip
-	}
-	if newOpts.FixedCIDR != nil {
-		currentOpts.FixedCIDR = newOpts.FixedCIDR
-	}
-	if newOpts.DefaultGateway != nil {
-		currentOpts.DefaultGateway = newOpts.DefaultGateway
-	}
-	if newOpts.DNS != nil {
-		currentOpts.DNS = newOpts.DNS
-	}
-	if newOpts.IPTables != nil {
-		currentOpts.IPTables = newOpts.IPTables
-	}
-	if newOpts.Experimental != nil {
-		currentOpts.Experimental = newOpts.Experimental
-	}
-	if newOpts.Debug != nil {
-		currentOpts.Debug = newOpts.Debug
-	}
-	if newOpts.APICorsHeader != nil {
-		currentOpts.APICorsHeader = newOpts.APICorsHeader
-	}
-	if newOpts.Hosts != nil {
-		currentOpts.Hosts = newOpts.Hosts
-	}
-	if newOpts.UserlandProxy != nil {
-		currentOpts.UserlandProxy = newOpts.UserlandProxy
-	}
-	if newOpts.LiveRestore != nil {
-		currentOpts.LiveRestore = newOpts.LiveRestore
-	}
-	if newOpts.CgroupParent != nil {
-		currentOpts.CgroupParent = newOpts.CgroupParent
-	}
-	if newOpts.DefaultRuntime != nil {
-		currentOpts.DefaultRuntime = newOpts.DefaultRuntime
-	}
-	if newOpts.Runtimes != nil {
-		currentOpts.Runtimes = newOpts.Runtimes
-	}
-	if newOpts.Graph != nil {
-		currentOpts.Graph = newOpts.Graph
-	}
-	if newOpts.DataRoot != nil {
-		currentOpts.DataRoot = newOpts.DataRoot
-	}
-	if newOpts.MaxConcurrentDownloads != nil {
-		currentOpts.MaxConcurrentDownloads = newOpts.MaxConcurrentDownloads
-	}
-	if newOpts.MaxConcurrentUploads != nil {
-		currentOpts.MaxConcurrentUploads = newOpts.MaxConcurrentUploads
-	}
-	if newOpts.ShutdownTimeout != nil {
-		currentOpts.ShutdownTimeout = newOpts.ShutdownTimeout
+	var modifiedContentBytes = currentContentBytes
+
+	newOptsBytes, _ := json.Marshal(newOpts)
+	newOptsMap, _ := helpers.JsonToMap(newOptsBytes)
+
+	if len(newOptsMap) == 0 {
+		return nil
 	}
 
-	mergedConfigBytes, err := json.MarshalIndent(currentOpts, "", "  ")
-	if err != nil {
-		return errors.Wrap(err, "failed to marshal merged Docker daemon config to JSON")
-	}
-
-	if err := r.Mkdirp(ctx, conn, filepath.Dir(dockerDaemonConfigPath), "0755", true); err != nil {
-		return errors.Wrapf(err, "failed to create directory for %s", dockerDaemonConfigPath)
-	}
-	if err := r.WriteFile(ctx, conn, mergedConfigBytes, dockerDaemonConfigPath, "0644", true); err != nil {
-		return errors.Wrapf(err, "failed to write Docker daemon config to %s", dockerDaemonConfigPath)
-	}
-
-	if restartService {
-		facts, errFacts := r.GatherFacts(ctx, conn)
-		if errFacts != nil {
-			return errors.Wrap(errFacts, "failed to gather facts for restarting Docker service")
+	for key, value := range newOptsMap {
+		newBytes, err := helpers.SetJsonValue(modifiedContentBytes, key, value)
+		if err != nil {
+			return errors.Wrapf(err, "failed to set docker daemon config value for key '%s'", key)
 		}
-		if err := r.RestartService(ctx, conn, facts, "docker"); err != nil {
-			return errors.Wrap(err, "failed to restart Docker service after configuration change")
+		modifiedContentBytes = newBytes
+	}
+
+	if !bytes.Equal(currentContentBytes, modifiedContentBytes) {
+		var prettyJSON bytes.Buffer
+		if err := json.Indent(&prettyJSON, modifiedContentBytes, "", "  "); err == nil {
+			modifiedContentBytes = prettyJSON.Bytes()
+		}
+
+		if err := r.WriteFile(ctx, conn, modifiedContentBytes, dockerDaemonConfigPath, "0644", true); err != nil {
+			return errors.Wrapf(err, "failed to write merged docker daemon config to %s", dockerDaemonConfigPath)
+		}
+
+		if restartService {
+			facts, errFacts := r.GatherFacts(ctx, conn)
+			if errFacts != nil {
+				return errors.Wrap(errFacts, "failed to gather facts for docker restart")
+			}
+
+			if err := r.RestartService(ctx, conn, facts, "docker"); err != nil {
+				return errors.Wrap(err, "failed to restart Docker service after configuration change")
+			}
 		}
 	}
+
 	return nil
 }
 
-// EnsureDefaultDockerConfig ensures that a default Docker daemon configuration exists.
 func (r *defaultRunner) EnsureDefaultDockerConfig(ctx context.Context, conn connector.Connector, facts *Facts, restartService bool) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
 	}
 
-	exists, err := r.Exists(ctx, conn, dockerDaemonConfigPath)
+	content, err := r.ReadFile(ctx, conn, dockerDaemonConfigPath)
+	if err == nil && len(strings.TrimSpace(string(content))) > 0 {
+		return nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return errors.Wrapf(err, "failed to read existing config at %s", dockerDaemonConfigPath)
+	}
+
+	log := logger.Get()
+	log.Info("Default docker config not found or is empty, creating a new one...", "host", conn.GetConnectionConfig().Host)
+
+	templateContent, err := templates.Get("docker/daemon.json.tmpl")
 	if err != nil {
-		return errors.Wrapf(err, "failed to check existence of %s", dockerDaemonConfigPath)
+		return errors.Wrap(err, "critical: failed to load embedded docker daemon.json template")
 	}
 
-	createDefaults := false
-	if !exists {
-		createDefaults = true
-	} else {
-		content, errRead := r.ReadFile(ctx, conn, dockerDaemonConfigPath)
-		if errRead != nil {
-			return errors.Wrapf(errRead, "failed to read existing %s to check if empty", dockerDaemonConfigPath)
-		}
-		trimmedContent := strings.TrimSpace(string(content))
-		if len(trimmedContent) == 0 || trimmedContent == "{}" {
-			createDefaults = true
+	tmpl, err := template.New("docker-daemon-config").Parse(templateContent)
+	if err != nil {
+		return errors.Wrap(err, "critical: failed to parse embedded docker daemon.json template")
+	}
+
+	currentFacts := facts
+	if currentFacts == nil {
+		var errFacts error
+		currentFacts, errFacts = r.GatherFacts(ctx, conn)
+		if errFacts != nil {
+			return errors.Wrap(errFacts, "failed to gather facts to determine default docker config")
 		}
 	}
 
-	if createDefaults {
-		logOptsMap := map[string]string{"max-size": "100m"}
-		execOptsSlice := []string{"native.cgroupdriver=systemd"}
-		storageDriverVal := "overlay2"
-		// Example of fact-based adjustment (simplified)
-		// if facts != nil && facts.OS != nil && facts.OS.Family == "rhel" && facts.OS.Major < 8 {
-		// storageDriverVal = "devicemapper" // Or another appropriate driver
+	storageDriver := common.StorageDriverOverlay2
+	cgroupDriver := common.CgroupDriverSystemd
+	if currentFacts.OS != nil {
+		// 示例：如果未来发现某个老的 OS 不支持 overlay2，可以在这里调整
+		// if currentFacts.OS.ID == "centos" && strings.HasPrefix(currentFacts.OS.VersionID, "7") {
+		//     storageDriver = "devicemapper"
 		// }
+	}
 
-		defaultOpts := DockerDaemonOptions{
-			ExecOpts:      &execOptsSlice,
-			LogDriver:     helpers.StrPtr("json-file"),
-			LogOpts:       &logOptsMap,
-			StorageDriver: &storageDriverVal,
-		}
+	if currentFacts.InitSystem != nil && currentFacts.InitSystem.Type != InitSystemSystemd {
+		cgroupDriver = common.CgroupDriverCgroupfs
+	}
 
-		if err := r.ConfigureDockerDaemon(ctx, conn, defaultOpts, false); err != nil { // Restart handled below if requested for this specific action
-			return errors.Wrap(err, "failed to apply default Docker daemon configuration")
-		}
+	templateData := struct {
+		CgroupDriver  string
+		StorageDriver string
+	}{
+		CgroupDriver:  cgroupDriver,
+		StorageDriver: storageDriver,
+	}
 
-		if restartService {
-			var currentFacts *Facts = facts
-			if currentFacts == nil {
-				currentFacts, err = r.GatherFacts(ctx, conn)
-				if err != nil {
-					return errors.Wrap(err, "failed to gather facts for restarting Docker service after ensuring default config")
-				}
-			}
-			if err := r.RestartService(ctx, conn, currentFacts, "docker"); err != nil {
-				return errors.Wrap(err, "failed to restart Docker service after ensuring default config")
-			}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, &templateData); err != nil {
+		return errors.Wrap(err, "failed to render docker daemon.json template")
+	}
+
+	if err := r.Mkdirp(ctx, conn, filepath.Dir(dockerDaemonConfigPath), "0755", true); err != nil {
+		return errors.Wrapf(err, "failed to create directory for %s", dockerDaemonConfigPath)
+	}
+	if err := r.WriteFile(ctx, conn, buf.Bytes(), dockerDaemonConfigPath, "0644", true); err != nil {
+		return errors.Wrapf(err, "failed to write default docker daemon config to %s", dockerDaemonConfigPath)
+	}
+
+	if restartService {
+		if err := r.RestartService(ctx, conn, currentFacts, "docker"); err != nil {
+			return errors.Wrap(err, "failed to restart Docker service after ensuring default config")
 		}
 	}
+
 	return nil
 }
 
-// ImageExists checks if a Docker image exists locally.
 func (r *defaultRunner) ImageExists(ctx context.Context, c connector.Connector, imageName string) (bool, error) {
 	if c == nil {
 		return false, errors.New("connector cannot be nil")
@@ -335,7 +275,6 @@ func (r *defaultRunner) ImageExists(ctx context.Context, c connector.Connector, 
 	return false, errors.Wrapf(err, "failed to check if image %s exists", imageName)
 }
 
-// ListImages lists Docker images on the host.
 func (r *defaultRunner) ListImages(ctx context.Context, c connector.Connector, all bool) ([]ImageInfo, error) {
 	if c == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -407,7 +346,6 @@ func (r *defaultRunner) ListImages(ctx context.Context, c connector.Connector, a
 	return images, nil
 }
 
-// RemoveImage removes a Docker image.
 func (r *defaultRunner) RemoveImage(ctx context.Context, c connector.Connector, imageName string, force bool) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -433,7 +371,6 @@ func (r *defaultRunner) RemoveImage(ctx context.Context, c connector.Connector, 
 	return nil
 }
 
-// BuildImage builds a Docker image from a Dockerfile.
 func (r *defaultRunner) BuildImage(ctx context.Context, c connector.Connector, dockerfilePath, imageNameAndTag, contextPath string, buildArgs map[string]string) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -478,7 +415,6 @@ func (r *defaultRunner) BuildImage(ctx context.Context, c connector.Connector, d
 	return nil
 }
 
-// CreateContainer creates a new Docker container.
 func (r *defaultRunner) CreateContainer(ctx context.Context, c connector.Connector, options ContainerCreateOptions) (string, error) {
 	if c == nil {
 		return "", errors.New("connector cannot be nil")
@@ -567,7 +503,6 @@ func (r *defaultRunner) CreateContainer(ctx context.Context, c connector.Connect
 	return containerID, nil
 }
 
-// ContainerExists checks if a container (by name or ID) exists.
 func (r *defaultRunner) ContainerExists(ctx context.Context, c connector.Connector, containerNameOrID string) (bool, error) {
 	if c == nil {
 		return false, errors.New("connector cannot be nil")
@@ -596,7 +531,6 @@ func (r *defaultRunner) ContainerExists(ctx context.Context, c connector.Connect
 	return false, errors.Wrapf(err, "failed to check if container %s exists", containerNameOrID)
 }
 
-// StartContainer starts an existing Docker container.
 func (r *defaultRunner) StartContainer(ctx context.Context, c connector.Connector, containerNameOrID string) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -618,7 +552,6 @@ func (r *defaultRunner) StartContainer(ctx context.Context, c connector.Connecto
 	return nil
 }
 
-// StopContainer stops a running Docker container.
 func (r *defaultRunner) StopContainer(ctx context.Context, c connector.Connector, containerNameOrID string, timeout *time.Duration) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -654,7 +587,6 @@ func (r *defaultRunner) StopContainer(ctx context.Context, c connector.Connector
 	return nil
 }
 
-// RestartContainer restarts a Docker container.
 func (r *defaultRunner) RestartContainer(ctx context.Context, c connector.Connector, containerNameOrID string, timeout *time.Duration) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -690,7 +622,6 @@ func (r *defaultRunner) RestartContainer(ctx context.Context, c connector.Connec
 	return nil
 }
 
-// RemoveContainer removes a Docker container.
 func (r *defaultRunner) RemoveContainer(ctx context.Context, c connector.Connector, containerNameOrID string, force, removeVolumes bool) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -724,7 +655,6 @@ func (r *defaultRunner) RemoveContainer(ctx context.Context, c connector.Connect
 	return nil
 }
 
-// ListContainers lists Docker containers.
 func (r *defaultRunner) ListContainers(ctx context.Context, c connector.Connector, all bool, filters map[string]string) ([]ContainerInfo, error) {
 	if c == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -892,7 +822,6 @@ func (r *defaultRunner) ListContainers(ctx context.Context, c connector.Connecto
 	return containers, nil
 }
 
-// GetContainerLogs retrieves logs from a container.
 func (r *defaultRunner) GetContainerLogs(ctx context.Context, c connector.Connector, containerNameOrID string, options ContainerLogOptions) (string, error) {
 	if c == nil {
 		return "", errors.New("connector cannot be nil")
@@ -936,7 +865,6 @@ func (r *defaultRunner) GetContainerLogs(ctx context.Context, c connector.Connec
 	return string(stdout), nil
 }
 
-// GetContainerStats retrieves live resource usage statistics for a container.
 func (r *defaultRunner) GetContainerStats(ctx context.Context, c connector.Connector, containerNameOrID string, stream bool) (<-chan ContainerStats, error) {
 	if c == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -970,7 +898,6 @@ func (r *defaultRunner) GetContainerStats(ctx context.Context, c connector.Conne
 		stdout, stderr, err := c.Exec(ctx, cmd, execOptions)
 		if err != nil {
 			if ctx.Err() != nil && (errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(ctx.Err(), context.Canceled)) {
-				// Expected termination for streaming
 			} else {
 				statsChan <- ContainerStats{Error: errors.Wrapf(err, "stats for container %s failed. Stderr: %s", containerNameOrID, string(stderr))}
 			}
@@ -980,7 +907,7 @@ func (r *defaultRunner) GetContainerStats(ctx context.Context, c connector.Conne
 		scanner := bufio.NewScanner(strings.NewReader(string(stdout)))
 		for scanner.Scan() {
 			select {
-			case <-ctx.Done(): // Check context cancellation at the start of each iteration
+			case <-ctx.Done():
 				return
 			default:
 			}
@@ -1052,7 +979,6 @@ func (r *defaultRunner) GetContainerStats(ctx context.Context, c connector.Conne
 	return statsChan, nil
 }
 
-// InspectContainer returns low-level information on a Docker container.
 func (r *defaultRunner) InspectContainer(ctx context.Context, c connector.Connector, containerNameOrID string) (*ContainerDetails, error) {
 	if c == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -1100,7 +1026,6 @@ func (r *defaultRunner) InspectContainer(ctx context.Context, c connector.Connec
 	return &details[0], nil
 }
 
-// PauseContainer pauses all processes within a running container.
 func (r *defaultRunner) PauseContainer(ctx context.Context, c connector.Connector, containerNameOrID string) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -1122,7 +1047,6 @@ func (r *defaultRunner) PauseContainer(ctx context.Context, c connector.Connecto
 	return nil
 }
 
-// UnpauseContainer unpauses all processes within a paused container.
 func (r *defaultRunner) UnpauseContainer(ctx context.Context, c connector.Connector, containerNameOrID string) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -1144,7 +1068,6 @@ func (r *defaultRunner) UnpauseContainer(ctx context.Context, c connector.Connec
 	return nil
 }
 
-// ExecInContainer executes a command inside a running container.
 func (r *defaultRunner) ExecInContainer(ctx context.Context, c connector.Connector, containerNameOrID string, cmdArgsToExec []string, user, workDir string, tty bool) (string, error) {
 	if c == nil {
 		return "", errors.New("connector cannot be nil")
@@ -1189,9 +1112,6 @@ func (r *defaultRunner) ExecInContainer(ctx context.Context, c connector.Connect
 	return string(stdout) + string(stderr), nil
 }
 
-// --- Docker Network Methods ---
-
-// CreateDockerNetwork creates a new Docker network.
 func (r *defaultRunner) CreateDockerNetwork(ctx context.Context, c connector.Connector, name, driver, subnet, gateway string, options map[string]string) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -1229,7 +1149,6 @@ func (r *defaultRunner) CreateDockerNetwork(ctx context.Context, c connector.Con
 	return nil
 }
 
-// RemoveDockerNetwork removes a Docker network.
 func (r *defaultRunner) RemoveDockerNetwork(ctx context.Context, c connector.Connector, networkNameOrID string) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -1250,7 +1169,6 @@ func (r *defaultRunner) RemoveDockerNetwork(ctx context.Context, c connector.Con
 	return nil
 }
 
-// ListDockerNetworks lists Docker networks.
 func (r *defaultRunner) ListDockerNetworks(ctx context.Context, c connector.Connector, filters map[string]string) ([]DockerNetworkInfo, error) {
 	if c == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -1308,7 +1226,6 @@ func (r *defaultRunner) ListDockerNetworks(ctx context.Context, c connector.Conn
 	return networks, nil
 }
 
-// ConnectContainerToNetwork connects a container to a Docker network.
 func (r *defaultRunner) ConnectContainerToNetwork(ctx context.Context, c connector.Connector, containerNameOrID string, networkNameOrID string, ipAddress string) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -1339,7 +1256,6 @@ func (r *defaultRunner) ConnectContainerToNetwork(ctx context.Context, c connect
 	return nil
 }
 
-// DisconnectContainerFromNetwork disconnects a container from a Docker network.
 func (r *defaultRunner) DisconnectContainerFromNetwork(ctx context.Context, c connector.Connector, containerNameOrID string, networkNameOrID string, force bool) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -1370,9 +1286,6 @@ func (r *defaultRunner) DisconnectContainerFromNetwork(ctx context.Context, c co
 	return nil
 }
 
-// --- Docker Volume Methods ---
-
-// CreateDockerVolume creates a new Docker volume.
 func (r *defaultRunner) CreateDockerVolume(ctx context.Context, c connector.Connector, name string, driver string, driverOpts map[string]string, labels map[string]string) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -1409,7 +1322,6 @@ func (r *defaultRunner) CreateDockerVolume(ctx context.Context, c connector.Conn
 	return nil
 }
 
-// RemoveDockerVolume removes a Docker volume.
 func (r *defaultRunner) RemoveDockerVolume(ctx context.Context, c connector.Connector, volumeName string, force bool) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -1437,7 +1349,6 @@ func (r *defaultRunner) RemoveDockerVolume(ctx context.Context, c connector.Conn
 	return nil
 }
 
-// ListDockerVolumes lists Docker volumes.
 func (r *defaultRunner) ListDockerVolumes(ctx context.Context, c connector.Connector, filters map[string]string) ([]DockerVolumeInfo, error) {
 	if c == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -1506,7 +1417,6 @@ func (r *defaultRunner) ListDockerVolumes(ctx context.Context, c connector.Conne
 	return volumes, nil
 }
 
-// InspectDockerVolume returns information about a Docker volume.
 func (r *defaultRunner) InspectDockerVolume(ctx context.Context, c connector.Connector, volumeName string) (*DockerVolumeDetails, error) {
 	if c == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -1545,9 +1455,6 @@ func (r *defaultRunner) InspectDockerVolume(ctx context.Context, c connector.Con
 	return &detail, nil
 }
 
-// --- Docker System Methods ---
-
-// DockerInfo displays system-wide information about Docker.
 func (r *defaultRunner) DockerInfo(ctx context.Context, c connector.Connector) (*DockerSystemInfo, error) {
 	if c == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -1567,7 +1474,6 @@ func (r *defaultRunner) DockerInfo(ctx context.Context, c connector.Connector) (
 	return &info, nil
 }
 
-// DockerPrune removes unused Docker data.
 func (r *defaultRunner) DockerPrune(ctx context.Context, c connector.Connector, pruneType string, filters map[string]string, all bool) (string, error) {
 	if c == nil {
 		return "", errors.New("connector cannot be nil")
@@ -1611,7 +1517,6 @@ func (r *defaultRunner) DockerPrune(ctx context.Context, c connector.Connector, 
 	return string(stdout), nil
 }
 
-// GetDockerServerVersion returns the version of the Docker server.
 func (r *defaultRunner) GetDockerServerVersion(ctx context.Context, c connector.Connector) (*semver.Version, error) {
 	if c == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -1643,7 +1548,6 @@ func (r *defaultRunner) GetDockerServerVersion(ctx context.Context, c connector.
 	return v, nil
 }
 
-// CheckDockerInstalled checks if Docker is installed and accessible.
 func (r *defaultRunner) CheckDockerInstalled(ctx context.Context, c connector.Connector) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -1657,12 +1561,11 @@ func (r *defaultRunner) CheckDockerInstalled(ctx context.Context, c connector.Co
 	return nil
 }
 
-// EnsureDockerService ensures the Docker service is running and enabled.
 func (r *defaultRunner) EnsureDockerService(ctx context.Context, c connector.Connector) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
 	}
-	facts, err := r.GatherFacts(ctx, c) // Gather facts to determine init system
+	facts, err := r.GatherFacts(ctx, c)
 	if err != nil {
 		return errors.Wrap(err, "failed to gather facts to ensure docker service")
 	}
@@ -1674,21 +1577,15 @@ func (r *defaultRunner) EnsureDockerService(ctx context.Context, c connector.Con
 	execOptions := &connector.ExecOptions{Sudo: true, Timeout: 10 * time.Second}
 	stdoutActive, _, errActive := c.Exec(ctx, isActiveCmd, execOptions)
 
-	if errActive == nil && strings.TrimSpace(string(stdoutActive)) == "active" { // systemctl is-active returns "active"
-		// Check if enabled
-		isEnabledCmd := fmt.Sprintf("%s %s", facts.InitSystem.EnableCmd, "docker") // This is not is-enabled, but enable itself
-		// For systemd, `systemctl is-enabled docker` is better.
-		// This part needs to be adapted based on actual ServiceInfo content.
-		// Assuming EnableCmd is idempotent or we have IsEnabledCmd.
-		// For now, let's assume if it's active, we try to enable it to be sure.
+	if errActive == nil && strings.TrimSpace(string(stdoutActive)) == "active" {
+		isEnabledCmd := fmt.Sprintf("%s %s", facts.InitSystem.EnableCmd, "docker")
 		if facts.InitSystem.Type == InitSystemSystemd {
 			isEnabledCmd = fmt.Sprintf("systemctl is-enabled docker")
 			stdoutEnabled, _, errEnabled := c.Exec(ctx, isEnabledCmd, execOptions)
 			if errEnabled == nil && (strings.TrimSpace(string(stdoutEnabled)) == "enabled" || strings.TrimSpace(string(stdoutEnabled)) == "static") {
-				return nil // Active and enabled.
+				return nil
 			}
 		}
-		// If not systemd or not enabled, try to enable
 		enableCmd := fmt.Sprintf("%s %s", facts.InitSystem.EnableCmd, "docker")
 		_, stderrEnable, errEnableCmd := c.Exec(ctx, enableCmd, execOptions)
 		if errEnableCmd != nil {
@@ -1697,7 +1594,6 @@ func (r *defaultRunner) EnsureDockerService(ctx context.Context, c connector.Con
 		return nil
 	}
 
-	// Not active or check failed, try to start
 	startCmd := fmt.Sprintf("%s %s", facts.InitSystem.StartCmd, "docker")
 	_, stderrStart, errStart := c.Exec(ctx, startCmd, execOptions)
 	if errStart != nil {
@@ -1707,7 +1603,6 @@ func (r *defaultRunner) EnsureDockerService(ctx context.Context, c connector.Con
 		return errors.Wrapf(errStart, "failed to start docker service. Stderr: %s", string(stderrStart))
 	}
 
-	// Started, now enable
 	enableCmd := fmt.Sprintf("%s %s", facts.InitSystem.EnableCmd, "docker")
 	_, stderrEnable, errEnable := c.Exec(ctx, enableCmd, execOptions)
 	if errEnable != nil {
@@ -1716,7 +1611,6 @@ func (r *defaultRunner) EnsureDockerService(ctx context.Context, c connector.Con
 	return nil
 }
 
-// ResolveDockerImage resolves a Docker image name to its digest.
 func (r *defaultRunner) ResolveDockerImage(ctx context.Context, c connector.Connector, imageName string) (string, error) {
 	if c == nil {
 		return "", errors.New("connector cannot be nil")
@@ -1755,7 +1649,6 @@ func (r *defaultRunner) ResolveDockerImage(ctx context.Context, c connector.Conn
 	return "", errors.Errorf("could not resolve image %s to a RepoDigest (output was: '%s')", imageName, output)
 }
 
-// DockerSave saves one or more images to a tar archive.
 func (r *defaultRunner) DockerSave(ctx context.Context, c connector.Connector, outputFilePath string, imageNames []string) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -1788,7 +1681,6 @@ func (r *defaultRunner) DockerSave(ctx context.Context, c connector.Connector, o
 	return nil
 }
 
-// DockerLoad loads an image or repository from a tar archive.
 func (r *defaultRunner) DockerLoad(ctx context.Context, c connector.Connector, inputFilePath string) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -1810,7 +1702,6 @@ func (r *defaultRunner) DockerLoad(ctx context.Context, c connector.Connector, i
 	return nil
 }
 
-// PruneDockerBuildCache prunes the Docker build cache.
 func (r *defaultRunner) PruneDockerBuildCache(ctx context.Context, c connector.Connector) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -1824,7 +1715,6 @@ func (r *defaultRunner) PruneDockerBuildCache(ctx context.Context, c connector.C
 	return nil
 }
 
-// GetHostArchitecture retrieves the host architecture using Docker.
 func (r *defaultRunner) GetHostArchitecture(ctx context.Context, c connector.Connector) (string, error) {
 	if c == nil {
 		return "", errors.New("connector cannot be nil")
@@ -1842,7 +1732,6 @@ func (r *defaultRunner) GetHostArchitecture(ctx context.Context, c connector.Con
 	return arch, nil
 }
 
-// CheckDockerRequirement checks if the Docker version meets a minimum requirement.
 func (r *defaultRunner) CheckDockerRequirement(ctx context.Context, c connector.Connector, versionConstraint string) error {
 	if c == nil {
 		return errors.New("connector cannot be nil")
@@ -1864,5 +1753,83 @@ func (r *defaultRunner) CheckDockerRequirement(ctx context.Context, c connector.
 	if !constraint.Check(serverVersion) {
 		return fmt.Errorf("docker version %s does not meet requirement %s", serverVersion.String(), versionConstraint)
 	}
+	return nil
+}
+
+func (r *defaultRunner) EnsureDockerServiceFiles(ctx context.Context, conn connector.Connector, facts *Facts) error {
+	if facts == nil || facts.InitSystem == nil || facts.InitSystem.Type != InitSystemSystemd {
+		return nil
+	}
+
+	exists, err := r.Exists(ctx, conn, common.DockerDefaultSystemdFile)
+	if err != nil {
+		return errors.Wrapf(err, "failed to check for existing docker service file at %s", common.DockerDefaultSystemdFile)
+	}
+
+	if !exists {
+		content, err := templates.Get("docker/docker.service.tmpl")
+		if err != nil {
+			return errors.Wrap(err, "critical: failed to load embedded docker.service template")
+		}
+
+		if err := r.WriteFile(ctx, conn, []byte(content), common.DockerDefaultSystemdFile, "0644", true); err != nil {
+			return errors.Wrapf(err, "failed to write docker systemd service file")
+		}
+
+		if err := r.DaemonReload(ctx, conn, facts); err != nil {
+			return errors.Wrap(err, "failed to run daemon-reload after creating docker service file")
+		}
+	}
+
+	return nil
+}
+
+func (r *defaultRunner) EnsureCriDockerdService(ctx context.Context, conn connector.Connector, facts *Facts) error {
+	if facts == nil || facts.InitSystem == nil || facts.InitSystem.Type != InitSystemSystemd {
+		return nil
+	}
+
+	exists, err := r.Exists(ctx, conn, common.CniDockerdSystemdFile)
+	if err != nil {
+		return errors.Wrapf(err, "failed to check for existing cri-dockerd service file at %s", common.CniDockerdSystemdFile)
+	}
+
+	if !exists {
+		content, err := templates.Get("docker/cri-dockerd.service.tmpl")
+		if err != nil {
+			return errors.Wrap(err, "critical: failed to load embedded cri-dockerd.service template")
+		}
+
+		if err := r.WriteFile(ctx, conn, []byte(content), common.CniDockerdSystemdFile, "0644", true); err != nil {
+			return errors.Wrapf(err, "failed to write cri-dockerd systemd service file")
+		}
+		if err := r.DaemonReload(ctx, conn, facts); err != nil {
+			return errors.Wrap(err, "failed to run daemon-reload after creating cri-dockerd service file")
+		}
+	}
+
+	return nil
+}
+
+func (r *defaultRunner) ConfigureDockerDropIn(ctx context.Context, conn connector.Connector, facts *Facts, content string) error {
+	if facts == nil || facts.InitSystem == nil || facts.InitSystem.Type != InitSystemSystemd {
+		return nil
+	}
+	if strings.TrimSpace(content) == "" {
+		return nil
+	}
+
+	if err := r.Mkdirp(ctx, conn, filepath.Dir(common.DockerDefaultDropInFile), "0755", true); err != nil {
+		return errors.Wrapf(err, "failed to create directory for docker drop-in file")
+	}
+
+	if err := r.WriteFile(ctx, conn, []byte(content), common.DockerDefaultDropInFile, "0644", true); err != nil {
+		return errors.Wrapf(err, "failed to write docker drop-in file")
+	}
+
+	if err := r.DaemonReload(ctx, conn, facts); err != nil {
+		return errors.Wrap(err, "failed to run daemon-reload after creating drop-in file")
+	}
+
 	return nil
 }

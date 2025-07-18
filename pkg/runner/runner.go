@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/logger"
+	"github.com/mensylisir/kubexm/pkg/runner/helpers"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
@@ -16,10 +20,14 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-type defaultRunner struct{}
+type defaultRunner struct {
+	logger *logger.Logger
+}
 
 func NewRunner() Runner {
-	return &defaultRunner{}
+	return &defaultRunner{
+		logger: logger.Get(),
+	}
 }
 
 func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connector) (*Facts, error) {
@@ -79,7 +87,7 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 		if execErr != nil {
 			return fmt.Errorf("failed to exec CPU command '%s' on OS %s: %w", cpuCmd, facts.OS.ID, execErr)
 		}
-		cpuQuantity, parseErr := ParseCPU(string(cpuBytes))
+		cpuQuantity, parseErr := helpers.ParseCPU(string(cpuBytes))
 		if parseErr != nil {
 			return fmt.Errorf("failed to parse CPU output '%s': %w", string(cpuBytes), parseErr)
 		}
@@ -110,7 +118,7 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 		if memIsKb {
 			memStr += "Ki"
 		}
-		memQuantity, parseErr := ParseMemory(memStr)
+		memQuantity, parseErr := helpers.ParseMemory(memStr)
 		if parseErr != nil {
 			return fmt.Errorf("failed to parse Memory output '%s': %w", memStr, parseErr)
 		}
@@ -355,7 +363,7 @@ func (r *defaultRunner) Reboot(ctx context.Context, conn connector.Connector, ti
 		if !(strings.Contains(execErr.Error(), "context deadline exceeded") ||
 			strings.Contains(execErr.Error(), "session channel closed") ||
 			strings.Contains(execErr.Error(), "connection lost") ||
-			strings.Contains(execErr.Error(), "EOF")) { // common for abrupt closes
+			strings.Contains(execErr.Error(), "EOF")) {
 			return fmt.Errorf("failed to issue reboot command: %w", execErr)
 		}
 		fmt.Fprintf(os.Stderr, "Reboot command initiated, connection may have dropped as expected: %v\n", execErr)
@@ -455,4 +463,40 @@ func getParentDisk(partitionName string) string {
 	}
 
 	return parent
+}
+
+var (
+	sudoCache   = make(map[string]bool)
+	sudoCacheMu sync.RWMutex
+)
+
+func (r *defaultRunner) DetermineSudo(ctx context.Context, conn connector.Connector, path string) (bool, error) {
+	cfg := conn.GetConnectionConfig()
+
+	if cfg.User == "root" {
+		return false, nil
+	}
+
+	dir := filepath.Dir(path)
+	sudoCacheMu.RLock()
+	needsSudo, found := sudoCache[dir]
+	sudoCacheMu.RUnlock()
+	if found {
+		return needsSudo, nil
+	}
+	testCmd := fmt.Sprintf("test -w %s", dir)
+	_, _, err := r.RunWithOptions(ctx, conn, testCmd, &connector.ExecOptions{Sudo: false})
+
+	if err == nil {
+
+		needsSudo = false
+	} else {
+		needsSudo = true
+	}
+
+	sudoCacheMu.Lock()
+	sudoCache[dir] = needsSudo
+	sudoCacheMu.Unlock()
+
+	return needsSudo, nil
 }

@@ -643,4 +643,8 @@ func getHasher(checksumType string) (hash, bool) {
 	}
 }
 
+func (l *LocalConnector) GetConnectionConfig() ConnectionCfg {
+	return l.connCfg
+}
+
 var _ Connector = &LocalConnector{}

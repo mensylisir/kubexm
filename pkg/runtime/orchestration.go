@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/engine"
 )
 
@@ -23,4 +24,5 @@ type ModuleContext interface {
 
 type TaskContext interface {
 	OrchestrationContext
+	GetCurrentHostConnector() (connector.Connector, error)
 }

@@ -6,13 +6,12 @@ import (
 	"fmt"
 	"text/template"
 
-	"github.com/mensylisir/kubexm/pkg/connector" // Ensure this import is correct
+	"github.com/mensylisir/kubexm/pkg/connector"
 )
 
-// Render a Go template with data and write the result to a remote file.
 func (r *defaultRunner) Render(
 	ctx context.Context,
-	conn connector.Connector, // Added conn parameter
+	conn connector.Connector,
 	tmpl *template.Template,
 	data interface{},
 	destPath string,
@@ -31,14 +30,10 @@ func (r *defaultRunner) Render(
 		return fmt.Errorf("failed to execute template: %w", err)
 	}
 
-	// Use r.WriteFile, passing the conn
 	return r.WriteFile(ctx, conn, buf.Bytes(), destPath, permissions, sudo)
 }
 
-// RenderToString renders a Go template with data and returns the result as a string.
 func (r *defaultRunner) RenderToString(ctx context.Context, tmpl *template.Template, data interface{}) (string, error) {
-	// This method does not use conn or sudo, it's a local operation on the template.
-	// ctx is included for interface consistency but not strictly used here.
 	if tmpl == nil {
 		return "", fmt.Errorf("template cannot be nil for RenderToString")
 	}

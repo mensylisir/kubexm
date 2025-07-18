@@ -70,6 +70,7 @@ type Connector interface {
 	Mkdir(ctx context.Context, path string, perm string) error
 	Remove(ctx context.Context, path string, opts RemoveOptions) error
 	GetFileChecksum(ctx context.Context, path string, checksumType string) (string, error)
+	GetConnectionConfig() ConnectionCfg
 }
 
 type Host interface {

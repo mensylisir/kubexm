@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1/helpers"
+	"os"
 	"strings"
 	"time"
 
@@ -15,7 +17,6 @@ const (
 	DefaultKubectlTimeout = 2 * time.Minute
 )
 
-// KubectlApply applies a configuration to a resource by filename or stdin.
 func (r *defaultRunner) KubectlApply(ctx context.Context, conn connector.Connector, opts KubectlApplyOptions) (string, error) {
 	if conn == nil {
 		return "", errors.New("connector cannot be nil")
@@ -23,14 +24,36 @@ func (r *defaultRunner) KubectlApply(ctx context.Context, conn connector.Connect
 	if len(opts.Filenames) == 0 && opts.FileContent == "" {
 		return "", errors.New("Filenames or FileContent must be provided")
 	}
-	if util.ContainsString(opts.Filenames, "-") && opts.FileContent == "" {
+	if helpers.ContainsString(opts.Filenames, "-") && opts.FileContent == "" {
 		return "", errors.New("FileContent must be provided with filename '-'")
+	}
+
+	needsStdin := helpers.ContainsString(opts.Filenames, "-")
+	var remoteTempPath string
+
+	if needsStdin {
+		remoteTempPath = fmt.Sprintf("/tmp/kubexm-apply-%d.yaml", time.Now().UnixNano())
+		if err := r.WriteFile(ctx, conn, []byte(opts.FileContent), remoteTempPath, "0600", opts.Sudo); err != nil {
+			return "", errors.Wrapf(err, "failed to upload manifest to temporary file %s", remoteTempPath)
+		}
+
+		defer func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := r.Remove(cleanupCtx, conn, remoteTempPath, opts.Sudo, false); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to clean up temporary file %s: %v\n", remoteTempPath, err)
+			}
+		}()
 	}
 
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "kubectl", "apply")
 	for _, filename := range opts.Filenames {
-		cmdArgs = append(cmdArgs, "-f", filename)
+		if needsStdin && filename == "-" {
+			cmdArgs = append(cmdArgs, "-f", remoteTempPath)
+		} else {
+			cmdArgs = append(cmdArgs, "-f", filename)
+		}
 	}
 	if opts.Recursive {
 		cmdArgs = append(cmdArgs, "--recursive")
@@ -59,10 +82,6 @@ func (r *defaultRunner) KubectlApply(ctx context.Context, conn connector.Connect
 
 	cmd := strings.Join(cmdArgs, " ")
 	execOptions := &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultKubectlTimeout}
-	if util.ContainsString(opts.Filenames, "-") { // Corrected from utils.ContainsString
-		execOptions.Stdin = []byte(opts.FileContent)
-	}
-
 	stdout, stderr, err := conn.Exec(ctx, cmd, execOptions)
 	if err != nil {
 		return "", errors.Wrapf(err, "kubectl apply failed. Stdout: %s, Stderr: %s", string(stdout), string(stderr))
@@ -70,7 +89,6 @@ func (r *defaultRunner) KubectlApply(ctx context.Context, conn connector.Connect
 	return string(stdout), nil
 }
 
-// KubectlGet retrieves information about one or more resources.
 func (r *defaultRunner) KubectlGet(ctx context.Context, conn connector.Connector, resourceType, resourceName string, opts KubectlGetOptions) (string, error) {
 	if conn == nil {
 		return "", errors.New("connector cannot be nil")
@@ -133,7 +151,6 @@ func (r *defaultRunner) KubectlGet(ctx context.Context, conn connector.Connector
 	return string(stdout), nil
 }
 
-// KubectlDelete deletes resources.
 func (r *defaultRunner) KubectlDelete(ctx context.Context, conn connector.Connector, resourceType, resourceName string, opts KubectlDeleteOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -142,8 +159,25 @@ func (r *defaultRunner) KubectlDelete(ctx context.Context, conn connector.Connec
 	if !hasTarget {
 		return errors.New("resources to delete must be specified")
 	}
-	if util.ContainsString(opts.Filenames, "-") && opts.FileContent == "" {
+	if helpers.ContainsString(opts.Filenames, "-") && opts.FileContent == "" {
 		return errors.New("FileContent must be provided with filename '-'")
+	}
+
+	needsStdin := helpers.ContainsString(opts.Filenames, "-")
+	var remoteTempPath string
+
+	if needsStdin {
+		remoteTempPath = fmt.Sprintf("/tmp/kubexm-delete-%d.yaml", time.Now().UnixNano())
+		if err := r.WriteFile(ctx, conn, []byte(opts.FileContent), remoteTempPath, "0600", opts.Sudo); err != nil {
+			return errors.Wrapf(err, "failed to upload manifest to temporary file %s for delete", remoteTempPath)
+		}
+		defer func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := r.Remove(cleanupCtx, conn, remoteTempPath, opts.Sudo, false); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to clean up temporary file %s: %v\n", remoteTempPath, err)
+			}
+		}()
 	}
 
 	var cmdArgs []string
@@ -155,7 +189,11 @@ func (r *defaultRunner) KubectlDelete(ctx context.Context, conn connector.Connec
 		}
 	}
 	for _, filename := range opts.Filenames {
-		cmdArgs = append(cmdArgs, "-f", filename)
+		if needsStdin && filename == "-" {
+			cmdArgs = append(cmdArgs, "-f", remoteTempPath)
+		} else {
+			cmdArgs = append(cmdArgs, "-f", filename)
+		}
 	}
 	if opts.Recursive {
 		cmdArgs = append(cmdArgs, "--recursive")
@@ -193,21 +231,16 @@ func (r *defaultRunner) KubectlDelete(ctx context.Context, conn connector.Connec
 	if opts.Timeout > 0 && opts.Wait {
 		execOpt.Timeout = opts.Timeout + (1 * time.Minute)
 	}
-	if util.ContainsString(opts.Filenames, "-") {
-		execOpt.Stdin = []byte(opts.FileContent)
-	}
-
-	stdout, stderr, err := conn.Exec(ctx, cmd, execOpt)
+	_, stderr, err := conn.Exec(ctx, cmd, execOpt)
 	if err != nil {
 		if opts.IgnoreNotFound && (strings.Contains(string(stderr), "NotFound") || strings.Contains(string(stderr), "not found")) {
 			return nil
 		}
-		return errors.Wrapf(err, "kubectl delete failed. Stdout: %s, Stderr: %s", string(stdout), string(stderr))
+		return errors.Wrapf(err, "kubectl delete failed. Stderr: %s", string(stderr))
 	}
 	return nil
 }
 
-// KubectlVersion gets client and server Kubernetes versions.
 func (r *defaultRunner) KubectlVersion(ctx context.Context, conn connector.Connector) (*KubectlVersionInfo, error) {
 	if conn == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -227,7 +260,6 @@ func (r *defaultRunner) KubectlVersion(ctx context.Context, conn connector.Conne
 	return &versionInfo, nil
 }
 
-// KubectlDescribe displays detailed information about resources.
 func (r *defaultRunner) KubectlDescribe(ctx context.Context, conn connector.Connector, resourceType, resourceName string, opts KubectlDescribeOptions) (string, error) {
 	if conn == nil {
 		return "", errors.New("connector cannot be nil")
@@ -258,7 +290,6 @@ func (r *defaultRunner) KubectlDescribe(ctx context.Context, conn connector.Conn
 	return string(stdout), nil
 }
 
-// KubectlLogs prints logs for a container in a pod.
 func (r *defaultRunner) KubectlLogs(ctx context.Context, conn connector.Connector, podName string, opts KubectlLogOptions) (string, error) {
 	if conn == nil {
 		return "", errors.New("connector cannot be nil")
@@ -310,7 +341,6 @@ func (r *defaultRunner) KubectlLogs(ctx context.Context, conn connector.Connecto
 	return string(stdout), nil
 }
 
-// KubectlExec executes a command in a container.
 func (r *defaultRunner) KubectlExec(ctx context.Context, conn connector.Connector, podName string, opts KubectlExecOptions, command ...string) (string, error) {
 	if conn == nil {
 		return "", errors.New("connector cannot be nil")
@@ -355,7 +385,6 @@ func (r *defaultRunner) KubectlExec(ctx context.Context, conn connector.Connecto
 	return output, nil
 }
 
-// KubectlClusterInfo displays cluster information.
 func (r *defaultRunner) KubectlClusterInfo(ctx context.Context, conn connector.Connector, kubeconfigPath string) (string, error) {
 	if conn == nil {
 		return "", errors.New("connector cannot be nil")
@@ -376,7 +405,6 @@ func (r *defaultRunner) KubectlClusterInfo(ctx context.Context, conn connector.C
 	return string(stdout), nil
 }
 
-// KubectlGetNodes retrieves a list of nodes.
 func (r *defaultRunner) KubectlGetNodes(ctx context.Context, conn connector.Connector, opts KubectlGetOptions) ([]KubectlNodeInfo, error) {
 	opts.OutputFormat = "json"
 	rawJSON, err := r.KubectlGet(ctx, conn, "nodes", "", opts)
@@ -395,7 +423,6 @@ func (r *defaultRunner) KubectlGetNodes(ctx context.Context, conn connector.Conn
 	return list.Items, nil
 }
 
-// KubectlGetPods retrieves a list of pods.
 func (r *defaultRunner) KubectlGetPods(ctx context.Context, conn connector.Connector, opts KubectlGetOptions) ([]KubectlPodInfo, error) {
 	opts.OutputFormat = "json"
 	rawJSON, err := r.KubectlGet(ctx, conn, "pods", "", opts)
@@ -414,7 +441,6 @@ func (r *defaultRunner) KubectlGetPods(ctx context.Context, conn connector.Conne
 	return list.Items, nil
 }
 
-// KubectlGetServices retrieves a list of services.
 func (r *defaultRunner) KubectlGetServices(ctx context.Context, conn connector.Connector, opts KubectlGetOptions) ([]KubectlServiceInfo, error) {
 	opts.OutputFormat = "json"
 	rawJSON, err := r.KubectlGet(ctx, conn, "services", "", opts)
@@ -433,7 +459,6 @@ func (r *defaultRunner) KubectlGetServices(ctx context.Context, conn connector.C
 	return list.Items, nil
 }
 
-// KubectlGetDeployments retrieves a list of deployments.
 func (r *defaultRunner) KubectlGetDeployments(ctx context.Context, conn connector.Connector, opts KubectlGetOptions) ([]KubectlDeploymentInfo, error) {
 	opts.OutputFormat = "json"
 	rawJSON, err := r.KubectlGet(ctx, conn, "deployments", "", opts)
@@ -452,7 +477,6 @@ func (r *defaultRunner) KubectlGetDeployments(ctx context.Context, conn connecto
 	return list.Items, nil
 }
 
-// KubectlGetResourceList retrieves a generic list of resources.
 func (r *defaultRunner) KubectlGetResourceList(ctx context.Context, conn connector.Connector, resourceType string, opts KubectlGetOptions) ([]map[string]interface{}, error) {
 	if conn == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -479,7 +503,6 @@ func (r *defaultRunner) KubectlGetResourceList(ctx context.Context, conn connect
 	return list.Items, nil
 }
 
-// KubectlRolloutStatus checks the status of a rollout.
 func (r *defaultRunner) KubectlRolloutStatus(ctx context.Context, conn connector.Connector, resourceType, resourceName string, opts KubectlRolloutOptions) (string, error) {
 	if conn == nil {
 		return "", errors.New("connector cannot be nil")
@@ -516,7 +539,6 @@ func (r *defaultRunner) KubectlRolloutStatus(ctx context.Context, conn connector
 	return output, nil
 }
 
-// KubectlRolloutHistory displays rollout history.
 func (r *defaultRunner) KubectlRolloutHistory(ctx context.Context, conn connector.Connector, resourceType, resourceName string, opts KubectlRolloutOptions) (string, error) {
 	if conn == nil {
 		return "", errors.New("connector cannot be nil")
@@ -547,7 +569,6 @@ func (r *defaultRunner) KubectlRolloutHistory(ctx context.Context, conn connecto
 	return output, nil
 }
 
-// KubectlRolloutUndo performs a rollback to a previous revision.
 func (r *defaultRunner) KubectlRolloutUndo(ctx context.Context, conn connector.Connector, resourceType, resourceName string, toRevision int, opts KubectlRolloutOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -580,7 +601,6 @@ func (r *defaultRunner) KubectlRolloutUndo(ctx context.Context, conn connector.C
 	return nil
 }
 
-// KubectlScale scales a resource.
 func (r *defaultRunner) KubectlScale(ctx context.Context, conn connector.Connector, resourceType, resourceName string, replicas int32, opts KubectlScaleOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -620,7 +640,6 @@ func (r *defaultRunner) KubectlScale(ctx context.Context, conn connector.Connect
 	return nil
 }
 
-// KubectlConfigView displays merged kubeconfig settings.
 func (r *defaultRunner) KubectlConfigView(ctx context.Context, conn connector.Connector, opts KubectlConfigViewOptions) (*KubectlConfigInfo, error) {
 	if conn == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -648,7 +667,6 @@ func (r *defaultRunner) KubectlConfigView(ctx context.Context, conn connector.Co
 	return &cfgInfo, nil
 }
 
-// KubectlConfigGetContexts displays one or many contexts.
 func (r *defaultRunner) KubectlConfigGetContexts(ctx context.Context, conn connector.Connector, kubeconfigPath string) ([]KubectlContextInfo, error) {
 	if conn == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -676,7 +694,6 @@ func (r *defaultRunner) KubectlConfigGetContexts(ctx context.Context, conn conne
 	return contexts, nil
 }
 
-// KubectlConfigUseContext sets the current-context in a kubeconfig file.
 func (r *defaultRunner) KubectlConfigUseContext(ctx context.Context, conn connector.Connector, contextName string, kubeconfigPath string) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -699,7 +716,6 @@ func (r *defaultRunner) KubectlConfigUseContext(ctx context.Context, conn connec
 	return nil
 }
 
-// KubectlConfigCurrentContext displays the current context.
 func (r *defaultRunner) KubectlConfigCurrentContext(ctx context.Context, conn connector.Connector, kubeconfigPath string) (string, error) {
 	if conn == nil {
 		return "", errors.New("connector cannot be nil")
@@ -719,7 +735,6 @@ func (r *defaultRunner) KubectlConfigCurrentContext(ctx context.Context, conn co
 	return strings.TrimSpace(string(stdout)), nil
 }
 
-// KubectlTopNodes displays resource (CPU/Memory) usage for nodes.
 func (r *defaultRunner) KubectlTopNodes(ctx context.Context, conn connector.Connector, opts KubectlTopOptions) ([]KubectlMetricsInfo, error) {
 	if conn == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -737,7 +752,7 @@ func (r *defaultRunner) KubectlTopNodes(ctx context.Context, conn connector.Conn
 	}
 	if opts.UseHeapster {
 		cmdArgs = append(cmdArgs, "--heapster-namespace", "kube-system")
-	} // Example, actual flags may vary
+	}
 	cmdArgs = append(cmdArgs, "-o", "json")
 
 	stdout, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: DefaultKubectlTimeout})
@@ -753,18 +768,17 @@ func (r *defaultRunner) KubectlTopNodes(ctx context.Context, conn connector.Conn
 	}
 	for i := range result.Items {
 		if result.Items[i].CPU.UsageNanoCores != "" {
-			parsed, _ := util.ParseCPU(result.Items[i].CPU.UsageNanoCores)
+			parsed, _ := helpers.ParseCPU(result.Items[i].CPU.UsageNanoCores)
 			result.Items[i].CPU.UsageCoreNanos = &parsed
 		}
 		if result.Items[i].Memory.UsageBytes != "" {
-			parsed, _ := util.ParseMemory(result.Items[i].Memory.UsageBytes)
+			parsed, _ := helpers.ParseMemory(result.Items[i].Memory.UsageBytes)
 			result.Items[i].Memory.UsageBytesParsed = &parsed
 		}
 	}
 	return result.Items, nil
 }
 
-// KubectlTopPods displays resource (CPU/Memory) usage for pods.
 func (r *defaultRunner) KubectlTopPods(ctx context.Context, conn connector.Connector, opts KubectlTopOptions) ([]KubectlMetricsInfo, error) {
 	if conn == nil {
 		return nil, errors.New("connector cannot be nil")
@@ -803,23 +817,21 @@ func (r *defaultRunner) KubectlTopPods(ctx context.Context, conn connector.Conne
 		return nil, errors.Wrapf(err, "failed to parse top pods JSON. Output: %s", string(stdout))
 	}
 	for i := range result.Items {
-		// Pod level metrics (if not --containers)
 		if result.Items[i].CPU.UsageNanoCores != "" {
-			parsed, _ := util.ParseCPU(result.Items[i].CPU.UsageNanoCores)
+			parsed, _ := helpers.ParseCPU(result.Items[i].CPU.UsageNanoCores)
 			result.Items[i].CPU.UsageCoreNanos = &parsed
 		}
 		if result.Items[i].Memory.UsageBytes != "" {
-			parsed, _ := util.ParseMemory(result.Items[i].Memory.UsageBytes)
+			parsed, _ := helpers.ParseMemory(result.Items[i].Memory.UsageBytes)
 			result.Items[i].Memory.UsageBytesParsed = &parsed
 		}
-		// Container level metrics
 		for j := range result.Items[i].Containers {
 			if result.Items[i].Containers[j].CPU.UsageNanoCores != "" {
-				parsed, _ := util.ParseCPU(result.Items[i].Containers[j].CPU.UsageNanoCores)
+				parsed, _ := helpers.ParseCPU(result.Items[i].Containers[j].CPU.UsageNanoCores)
 				result.Items[i].Containers[j].CPU.UsageCoreNanos = &parsed
 			}
 			if result.Items[i].Containers[j].Memory.UsageBytes != "" {
-				parsed, _ := util.ParseMemory(result.Items[i].Containers[j].Memory.UsageBytes)
+				parsed, _ := helpers.ParseMemory(result.Items[i].Containers[j].Memory.UsageBytes)
 				result.Items[i].Containers[j].Memory.UsageBytesParsed = &parsed
 			}
 		}
@@ -827,13 +839,10 @@ func (r *defaultRunner) KubectlTopPods(ctx context.Context, conn connector.Conne
 	return result.Items, nil
 }
 
-// KubectlPortForward forwards one or more local ports to a pod.
-// This is a placeholder as true port-forwarding is complex for a simple runner.
 func (r *defaultRunner) KubectlPortForward(ctx context.Context, conn connector.Connector, resourceTypeOrPodName string, resourceNameIfType string, ports []string, opts KubectlPortForwardOptions) error {
 	return errors.New("KubectlPortForward is not fully implemented in this runner due to its long-running nature")
 }
 
-// KubectlExplain gets documentation for a resource.
 func (r *defaultRunner) KubectlExplain(ctx context.Context, conn connector.Connector, resourceType string, opts KubectlExplainOptions) (string, error) {
 	if conn == nil {
 		return "", errors.New("connector cannot be nil")
@@ -860,7 +869,6 @@ func (r *defaultRunner) KubectlExplain(ctx context.Context, conn connector.Conne
 	return string(stdout), nil
 }
 
-// KubectlDrainNode drains a node in preparation for maintenance.
 func (r *defaultRunner) KubectlDrainNode(ctx context.Context, conn connector.Connector, nodeName string, opts KubectlDrainOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -878,16 +886,16 @@ func (r *defaultRunner) KubectlDrainNode(ctx context.Context, conn connector.Con
 	}
 	if opts.GracePeriod >= 0 {
 		cmdArgs = append(cmdArgs, fmt.Sprintf("--grace-period=%d", opts.GracePeriod))
-	} // -1 is default
+	}
 	if opts.IgnoreDaemonSets {
 		cmdArgs = append(cmdArgs, "--ignore-daemonsets")
 	}
 	if opts.DeleteLocalData {
 		cmdArgs = append(cmdArgs, "--delete-emptydir-data")
-	} // Newer kubectl, was --delete-local-data
+	}
 	if opts.Selector != "" {
 		cmdArgs = append(cmdArgs, "--pod-selector", opts.Selector)
-	} // Drains only pods matching selector
+	}
 	if opts.Timeout > 0 {
 		cmdArgs = append(cmdArgs, "--timeout", opts.Timeout.String())
 	}
@@ -905,7 +913,6 @@ func (r *defaultRunner) KubectlDrainNode(ctx context.Context, conn connector.Con
 	return nil
 }
 
-// KubectlCordonNode marks a node as unschedulable.
 func (r *defaultRunner) KubectlCordonNode(ctx context.Context, conn connector.Connector, nodeName string, opts KubectlCordonUncordonOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -928,7 +935,6 @@ func (r *defaultRunner) KubectlCordonNode(ctx context.Context, conn connector.Co
 	return nil
 }
 
-// KubectlUncordonNode marks a node as schedulable.
 func (r *defaultRunner) KubectlUncordonNode(ctx context.Context, conn connector.Connector, nodeName string, opts KubectlCordonUncordonOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -951,7 +957,6 @@ func (r *defaultRunner) KubectlUncordonNode(ctx context.Context, conn connector.
 	return nil
 }
 
-// KubectlTaintNode updates taints on one or more nodes.
 func (r *defaultRunner) KubectlTaintNode(ctx context.Context, conn connector.Connector, nodeName string, taints []string, opts KubectlTaintOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -989,7 +994,6 @@ func (r *defaultRunner) KubectlTaintNode(ctx context.Context, conn connector.Con
 	return nil
 }
 
-// KubectlCreateSecretGeneric creates a generic secret.
 func (r *defaultRunner) KubectlCreateSecretGeneric(ctx context.Context, conn connector.Connector, namespace, name string, fromLiterals map[string]string, fromFiles map[string]string, opts KubectlCreateOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -1025,7 +1029,6 @@ func (r *defaultRunner) KubectlCreateSecretGeneric(ctx context.Context, conn con
 	return nil
 }
 
-// KubectlCreateSecretDockerRegistry creates a docker-registry secret.
 func (r *defaultRunner) KubectlCreateSecretDockerRegistry(ctx context.Context, conn connector.Connector, namespace, name, dockerServer, dockerUsername, dockerPassword, dockerEmail string, opts KubectlCreateOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -1061,7 +1064,6 @@ func (r *defaultRunner) KubectlCreateSecretDockerRegistry(ctx context.Context, c
 	return nil
 }
 
-// KubectlCreateSecretTLS creates a TLS secret.
 func (r *defaultRunner) KubectlCreateSecretTLS(ctx context.Context, conn connector.Connector, namespace, name, certPath, keyPath string, opts KubectlCreateOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -1093,7 +1095,6 @@ func (r *defaultRunner) KubectlCreateSecretTLS(ctx context.Context, conn connect
 	return nil
 }
 
-// KubectlCreateConfigMap creates a configmap.
 func (r *defaultRunner) KubectlCreateConfigMap(ctx context.Context, conn connector.Connector, namespace, name string, fromLiterals map[string]string, fromFiles map[string]string, fromEnvFile string, opts KubectlCreateOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -1132,7 +1133,6 @@ func (r *defaultRunner) KubectlCreateConfigMap(ctx context.Context, conn connect
 	return nil
 }
 
-// KubectlCreateServiceAccount creates a service account.
 func (r *defaultRunner) KubectlCreateServiceAccount(ctx context.Context, conn connector.Connector, namespace, name string, opts KubectlCreateOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -1162,7 +1162,6 @@ func (r *defaultRunner) KubectlCreateServiceAccount(ctx context.Context, conn co
 	return nil
 }
 
-// KubectlCreateRole creates a role.
 func (r *defaultRunner) KubectlCreateRole(ctx context.Context, conn connector.Connector, namespace, name string, verbs, resources, resourceNames []string, opts KubectlCreateOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -1197,7 +1196,6 @@ func (r *defaultRunner) KubectlCreateRole(ctx context.Context, conn connector.Co
 	return nil
 }
 
-// KubectlCreateClusterRole creates a clusterrole.
 func (r *defaultRunner) KubectlCreateClusterRole(ctx context.Context, conn connector.Connector, name string, verbs, resources, resourceNames []string, aggregationRule string, opts KubectlCreateOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -1232,7 +1230,6 @@ func (r *defaultRunner) KubectlCreateClusterRole(ctx context.Context, conn conne
 	return nil
 }
 
-// KubectlCreateRoleBinding creates a rolebinding.
 func (r *defaultRunner) KubectlCreateRoleBinding(ctx context.Context, conn connector.Connector, namespace, name, role, serviceAccount string, users, groups []string, opts KubectlCreateOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -1248,7 +1245,7 @@ func (r *defaultRunner) KubectlCreateRoleBinding(ctx context.Context, conn conne
 	cmdArgs = append(cmdArgs, fmt.Sprintf("--role=%s", role))
 	if serviceAccount != "" {
 		cmdArgs = append(cmdArgs, fmt.Sprintf("--serviceaccount=%s:%s", namespace, serviceAccount))
-	} // Assume SA is in same namespace
+	}
 	for _, u := range users {
 		cmdArgs = append(cmdArgs, fmt.Sprintf("--user=%s", u))
 	}
@@ -1275,7 +1272,6 @@ func (r *defaultRunner) KubectlCreateRoleBinding(ctx context.Context, conn conne
 	return nil
 }
 
-// KubectlCreateClusterRoleBinding creates a clusterrolebinding.
 func (r *defaultRunner) KubectlCreateClusterRoleBinding(ctx context.Context, conn connector.Connector, name, clusterRole, serviceAccount string, users, groups []string, opts KubectlCreateOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -1319,7 +1315,6 @@ func (r *defaultRunner) KubectlCreateClusterRoleBinding(ctx context.Context, con
 	return nil
 }
 
-// KubectlSetImage updates the image of a pod template.
 func (r *defaultRunner) KubectlSetImage(ctx context.Context, conn connector.Connector, resourceType, resourceName, containerName, newImage string, opts KubectlSetOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -1338,7 +1333,7 @@ func (r *defaultRunner) KubectlSetImage(ctx context.Context, conn connector.Conn
 		containerSpec = fmt.Sprintf("%s=%s", containerName, newImage)
 	} else {
 		containerSpec = fmt.Sprintf("*=%s", newImage)
-	} // Wildcard for all containers if name not specified
+	}
 	cmdArgs = append(cmdArgs, containerSpec)
 
 	if opts.Namespace != "" {
@@ -1367,7 +1362,6 @@ func (r *defaultRunner) KubectlSetImage(ctx context.Context, conn connector.Conn
 	return nil
 }
 
-// KubectlSetEnv updates environment variables on a pod template.
 func (r *defaultRunner) KubectlSetEnv(ctx context.Context, conn connector.Connector, resourceType, resourceName, containerName string, envVars map[string]string, removeEnvVars []string, fromSecret, fromConfigMap string, opts KubectlSetOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -1382,13 +1376,13 @@ func (r *defaultRunner) KubectlSetEnv(ctx context.Context, conn connector.Connec
 	}
 	if containerName != "" {
 		cmdArgs = append(cmdArgs, fmt.Sprintf("--containers=%s", containerName))
-	} // or -c
+	}
 	for k, v := range envVars {
 		cmdArgs = append(cmdArgs, fmt.Sprintf("%s=%s", k, v))
 	}
 	for _, k := range removeEnvVars {
 		cmdArgs = append(cmdArgs, fmt.Sprintf("%s-", k))
-	} // Suffix with '-' to remove
+	}
 	if fromSecret != "" {
 		cmdArgs = append(cmdArgs, fmt.Sprintf("--from=secret/%s", fromSecret))
 	}
@@ -1422,7 +1416,6 @@ func (r *defaultRunner) KubectlSetEnv(ctx context.Context, conn connector.Connec
 	return nil
 }
 
-// KubectlSetResources updates resource requests/limits on a pod template.
 func (r *defaultRunner) KubectlSetResources(ctx context.Context, conn connector.Connector, resourceType, resourceName, containerName string, limits, requests map[string]string, opts KubectlSetOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -1479,7 +1472,6 @@ func (r *defaultRunner) KubectlSetResources(ctx context.Context, conn connector.
 	return nil
 }
 
-// KubectlAutoscale creates an HPA that automatically PDB.
 func (r *defaultRunner) KubectlAutoscale(ctx context.Context, conn connector.Connector, resourceType, resourceName string, minReplicas, maxReplicas int32, cpuPercent int32, opts KubectlAutoscaleOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -1514,7 +1506,6 @@ func (r *defaultRunner) KubectlAutoscale(ctx context.Context, conn connector.Con
 	return nil
 }
 
-// KubectlCompletion outputs shell completion code.
 func (r *defaultRunner) KubectlCompletion(ctx context.Context, conn connector.Connector, shell string) (string, error) {
 	if conn == nil {
 		return "", errors.New("connector cannot be nil")
@@ -1530,7 +1521,6 @@ func (r *defaultRunner) KubectlCompletion(ctx context.Context, conn connector.Co
 	return string(stdout), nil
 }
 
-// KubectlWait waits for a specific condition on one or many resources.
 func (r *defaultRunner) KubectlWait(ctx context.Context, conn connector.Connector, resourceType, resourceName string, condition string, opts KubectlWaitOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -1570,7 +1560,7 @@ func (r *defaultRunner) KubectlWait(ctx context.Context, conn connector.Connecto
 		execTimeout = opts.Timeout + 1*time.Minute
 	} else {
 		execTimeout = 30 * time.Minute
-	} // Default long timeout for wait
+	}
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: opts.Sudo, Timeout: execTimeout})
 	if err != nil {
 		return errors.Wrapf(err, "kubectl wait failed. Stderr: %s", string(stderr))
@@ -1578,7 +1568,6 @@ func (r *defaultRunner) KubectlWait(ctx context.Context, conn connector.Connecto
 	return nil
 }
 
-// KubectlLabel adds or updates labels for a resource.
 func (r *defaultRunner) KubectlLabel(ctx context.Context, conn connector.Connector, resourceType, resourceName string, labels map[string]string, overwrite bool, opts KubectlLabelOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -1607,7 +1596,7 @@ func (r *defaultRunner) KubectlLabel(ctx context.Context, conn connector.Connect
 	}
 	if opts.AllNamespaces && resourceName == "" && opts.Selector == "" {
 		cmdArgs = append(cmdArgs, "--all")
-	} // --all is usually for all resources of a type
+	}
 	if opts.KubeconfigPath != "" {
 		cmdArgs = append(cmdArgs, "--kubeconfig", opts.KubeconfigPath)
 	}
@@ -1631,7 +1620,6 @@ func (r *defaultRunner) KubectlLabel(ctx context.Context, conn connector.Connect
 	return nil
 }
 
-// KubectlAnnotate adds or updates annotations for a resource.
 func (r *defaultRunner) KubectlAnnotate(ctx context.Context, conn connector.Connector, resourceType, resourceName string, annotations map[string]string, overwrite bool, opts KubectlAnnotateOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -1684,7 +1672,6 @@ func (r *defaultRunner) KubectlAnnotate(ctx context.Context, conn connector.Conn
 	return nil
 }
 
-// KubectlPatch updates fields of a resource using a patch.
 func (r *defaultRunner) KubectlPatch(ctx context.Context, conn connector.Connector, resourceType, resourceName string, patchType, patchContent string, opts KubectlPatchOptions) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -1694,7 +1681,7 @@ func (r *defaultRunner) KubectlPatch(ctx context.Context, conn connector.Connect
 	}
 	if patchType == "" {
 		patchType = "strategic"
-	} // Default patch type
+	}
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "kubectl", "patch", resourceType, resourceName)
 	cmdArgs = append(cmdArgs, "--type", patchType)
@@ -1717,4 +1704,22 @@ func (r *defaultRunner) KubectlPatch(ctx context.Context, conn connector.Connect
 		return errors.Wrapf(err, "kubectl patch failed. Stderr: %s", string(stderr))
 	}
 	return nil
+}
+
+func KubectlGetResources[T any](r *defaultRunner, ctx context.Context, conn connector.Connector, resourceType string, opts KubectlGetOptions) ([]T, error) {
+	opts.OutputFormat = "json"
+	rawJSON, err := r.KubectlGet(ctx, conn, resourceType, "", opts)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get %s raw JSON", resourceType)
+	}
+	if rawJSON == "" {
+		return []T{}, nil
+	}
+	var list struct {
+		Items []T `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(rawJSON), &list); err != nil {
+		return nil, errors.Wrapf(err, "failed to unmarshal %s. Raw: %s", resourceType, rawJSON)
+	}
+	return list.Items, nil
 }

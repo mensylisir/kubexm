@@ -1,0 +1,45 @@
+[Unit]
+Description=Docker Application Container Engine
+Documentation=https://docs.docker.com
+After=network-online.target firewalld.service containerd.service
+Wants=network-online.target
+Requires=containerd.service
+
+[Service]
+Type=notify
+# the default is not to use systemd for cgroups because the delegate issues still
+# exists and systemd currently does not support the cgroup feature set required
+# for containers run by docker
+ExecStart=/usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ExecReload=/bin/kill -s HUP $MAINPID
+TimeoutSec=0
+RestartSec=2
+Restart=always
+
+# Note that StartLimit* options were moved from "Service" to "Unit" in systemd 229.
+# Both the old, and new location are accepted by systemd 229 and up, so using the old location
+# is backwardly compatible.
+StartLimitBurst=3
+
+# Note that StartLimitInterval was renamed to StartLimitIntervalSec in systemd 230.
+# Both the old, and new name are accepted by systemd 230 and up, so using the old name is
+# backwardly compatible.
+StartLimitInterval=60s
+
+# Have Docker wait until REST API is ready
+LimitNOFILE=infinity
+LimitNPROC=infinity
+LimitCORE=infinity
+
+# Having a kill signal mapped to SIGTERM, ensures that docker will be shutdown gracefully
+KillSignal=SIGTERM
+
+# Delegate builds on top of KillMode=control-group, so we explicitly set it here
+# to make sure it's not overridden by user configurations.
+KillMode=process
+
+TasksMax=infinity
+OOMScoreAdjust=-500
+
+[Install]
+WantedBy=multi-user.target
