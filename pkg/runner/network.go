@@ -2,16 +2,15 @@ package runner
 
 import (
 	"context"
-	"errors" // For errors.As
+	"errors"
 	"fmt"
-	"regexp" // Added for GetInterfaceAddresses
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 )
 
-// IsPortOpen checks if a TCP port is listening on the remote host.
 func (r *defaultRunner) IsPortOpen(ctx context.Context, conn connector.Connector, facts *Facts, port int) (bool, error) {
 	if conn == nil {
 		return false, fmt.Errorf("connector cannot be nil")
@@ -33,7 +32,6 @@ func (r *defaultRunner) IsPortOpen(ctx context.Context, conn connector.Connector
 	return r.Check(ctx, conn, cmdToRun, false)
 }
 
-// WaitForPort waits for a TCP port to become open on the remote host, with a timeout.
 func (r *defaultRunner) WaitForPort(ctx context.Context, conn connector.Connector, facts *Facts, port int, timeout time.Duration) error {
 	if conn == nil {
 		return fmt.Errorf("connector cannot be nil")
@@ -72,7 +70,6 @@ func (r *defaultRunner) WaitForPort(ctx context.Context, conn connector.Connecto
 	}
 }
 
-// SetHostname sets the hostname of the remote machine.
 func (r *defaultRunner) SetHostname(ctx context.Context, conn connector.Connector, facts *Facts, hostname string) error {
 	if conn == nil {
 		return fmt.Errorf("connector cannot be nil")
@@ -99,7 +96,6 @@ func (r *defaultRunner) SetHostname(ctx context.Context, conn connector.Connecto
 	return nil
 }
 
-// AddHostEntry adds an entry to /etc/hosts, ensuring it doesn't already exist (idempotent).
 func (r *defaultRunner) AddHostEntry(ctx context.Context, conn connector.Connector, ip, fqdn string, hostnames ...string) error {
 	if conn == nil {
 		return fmt.Errorf("connector cannot be nil")
@@ -127,9 +123,6 @@ func (r *defaultRunner) AddHostEntry(ctx context.Context, conn connector.Connect
 	return nil
 }
 
-// --- Stubs for new network methods from enriched interface ---
-
-// GetInterfaceAddresses retrieves IPv4 and IPv6 addresses for a specific network interface.
 func (r *defaultRunner) GetInterfaceAddresses(ctx context.Context, conn connector.Connector, interfaceName string) (map[string][]string, error) {
 	if conn == nil {
 		return nil, fmt.Errorf("connector cannot be nil for GetInterfaceAddresses")
@@ -149,19 +142,12 @@ func (r *defaultRunner) GetInterfaceAddresses(ctx context.Context, conn connecto
 	var cmdStr string
 	var outputParser func(output string) map[string][]string
 
-	// Regexps pre-compiled for efficiency if this were a hot path, but fine here for clarity.
-	// Linux: `ip addr show dev <interfaceName>`
-	// Example inet line: "    inet 192.168.1.100/24 brd 192.168.1.255 scope global dynamic eth0"
-	// Example inet6 line: "   inet6 fe80::211:22ff:fe33:4455/64 scope link "
 	linuxInetRegex := regexp.MustCompile(`^\s*inet\s+([0-9a-fA-F:.]+)/`)
 	linuxInet6Regex := regexp.MustCompile(`^\s*inet6\s+([0-9a-fA-F:.]+)/`)
 
-	// Darwin: `ifconfig <interfaceName>`
-	// Example inet line: "	inet 192.168.1.150 netmask 0xffffff00 broadcast 192.168.1.255"
-	// Example inet6 line: "	inet6 fe80::abc:def:ghi:jkl%en0 prefixlen 64 secured scopeid 0x5 "
 	darwinInetRegex := regexp.MustCompile(`^\s*inet\s+([0-9a-fA-F:.]+)\s+netmask`)
-	darwinInet6Regex := regexp.MustCompile(`^\s*inet6\s+([0-9a-fA-F:.]+)%[a-zA-Z0-9]+\s+prefixlen`) // Capture IP before %
-	darwinInet6SimpleRegex := regexp.MustCompile(`^\s*inet6\s+([0-9a-fA-F:.]+)\s+prefixlen`)      // For IPs without scope ID in the middle
+	darwinInet6Regex := regexp.MustCompile(`^\s*inet6\s+([0-9a-fA-F:.]+)%[a-zA-Z0-9]+\s+prefixlen`)
+	darwinInet6SimpleRegex := regexp.MustCompile(`^\s*inet6\s+([0-9a-fA-F:.]+)\s+prefixlen`)
 
 	switch strings.ToLower(osInfo.ID) {
 	case "linux", "ubuntu", "debian", "centos", "rhel", "fedora", "almalinux", "rocky", "raspbian", "linuxmint":
@@ -188,9 +174,8 @@ func (r *defaultRunner) GetInterfaceAddresses(ctx context.Context, conn connecto
 				if matches := darwinInetRegex.FindStringSubmatch(trimmedLine); len(matches) > 1 {
 					res["ipv4"] = append(res["ipv4"], matches[1])
 				} else if matches := darwinInet6Regex.FindStringSubmatch(trimmedLine); len(matches) > 1 {
-					res["ipv6"] = append(res["ipv6"], matches[1]) // Regex captures IP before %
+					res["ipv6"] = append(res["ipv6"], matches[1])
 				} else if matches := darwinInet6SimpleRegex.FindStringSubmatch(trimmedLine); len(matches) > 1 {
-					// Handles cases like "inet6 dead:beef::1 prefixlen 64" (no scope in middle)
 					res["ipv6"] = append(res["ipv6"], matches[1])
 				}
 			}
@@ -200,15 +185,11 @@ func (r *defaultRunner) GetInterfaceAddresses(ctx context.Context, conn connecto
 		return nil, fmt.Errorf("GetInterfaceAddresses not supported for OS ID: %s", osInfo.ID)
 	}
 
-	// Execute command (no sudo usually needed for these show commands)
 	stdout, stderr, execErr := r.RunWithOptions(ctx, conn, cmdStr, &connector.ExecOptions{Sudo: false})
 	if execErr != nil {
-		// Check if the error is because the interface does not exist.
-		// For `ip addr show dev <iface>` on Linux, if iface doesn't exist: "Device "<iface>" does not exist." exit code 1.
-		// For `ifconfig <iface>` on macOS, if iface doesn't exist: "ifconfig: interface <iface> does not exist" exit code 1.
 		errStr := strings.ToLower(string(stderr))
 		if strings.Contains(errStr, "does not exist") || strings.Contains(errStr, "no such device") {
-			return map[string][]string{"ipv4": {}, "ipv6": {}}, nil // Interface not found, return empty map, not an error.
+			return map[string][]string{"ipv4": {}, "ipv6": {}}, nil
 		}
 		return nil, fmt.Errorf("failed to execute command '%s' for interface %s: %w (stderr: %s)", cmdStr, interfaceName, execErr, string(stderr))
 	}
@@ -224,24 +205,16 @@ func (r *defaultRunner) DisableFirewall(ctx context.Context, conn connector.Conn
 		return fmt.Errorf("OS facts not available, cannot determine how to disable firewall")
 	}
 	if facts.InitSystem == nil {
-		// InitSystem facts are needed for systemd checks, though some tools might be checked via LookPath alone.
-		// However, for firewalld, InitSystem.Type is important.
-		// We can proceed with LookPath checks but might not be able to disable firewalld service reliably.
 		fmt.Printf("Warning: InitSystem facts not available for DisableFirewall. Will rely on LookPath only for some checks.\n")
 	}
 
-	// 1. Check for firewalld
-	// Prefer checking for 'firewall-cmd' as 'firewalld-cmd' might be a typo in my earlier thought process.
-	// 'firewall-cmd' is the command-line client for firewalld.
 	if _, err := r.LookPath(ctx, conn, "firewall-cmd"); err == nil {
 		if facts.InitSystem != nil && facts.InitSystem.Type == InitSystemSystemd {
 			stopCmd := fmt.Sprintf(facts.InitSystem.StopCmd, "firewalld")
-			disableServiceCmd := fmt.Sprintf(facts.InitSystem.DisableCmd, "firewalld") // Corrected from EnableCmd
+			disableServiceCmd := fmt.Sprintf(facts.InitSystem.DisableCmd, "firewalld")
 
 			_, _, errStop := r.RunWithOptions(ctx, conn, stopCmd, &connector.ExecOptions{Sudo: true})
 			if errStop != nil {
-				// Log error but continue; disabling might still work or it was already stopped.
-				// Consider using a logger if available instead of fmt.Printf to stderr.
 				fmt.Printf("Warning: command '%s' failed during DisableFirewall: %v. Attempting to disable service.\n", stopCmd, errStop)
 			}
 			_, _, errDisable := r.RunWithOptions(ctx, conn, disableServiceCmd, &connector.ExecOptions{Sudo: true})
@@ -251,29 +224,18 @@ func (r *defaultRunner) DisableFirewall(ctx context.Context, conn connector.Conn
 			fmt.Println("firewalld service stopped and disabled.")
 			return nil
 		} else {
-			// If not systemd, but firewall-cmd exists, it's an unusual setup.
-			// We might try `firewall-cmd --permanent --remove-service=ssh` (example) then `firewall-cmd --reload`
-			// but "disabling" it without systemd is less standard.
-			// For now, indicate this specific scenario is not fully handled.
 			return fmt.Errorf("firewall-cmd found but not on a recognized systemd system for service management; automatic disable not fully supported")
 		}
 	}
 
-	// 2. Check for ufw
 	if _, err := r.LookPath(ctx, conn, "ufw"); err == nil {
-		// `ufw disable` is generally idempotent.
-		// It might output "Firewall stopped and disabled on system startup"
 		cmd := "ufw disable"
 		_, stderr, errExec := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true})
 		if errExec != nil {
-			// ufw might return non-zero if it's already disabled, depending on version/config.
-			// "Firewall not enabled" is common output for already disabled.
-			// We should check stderr or error type if possible.
-			// For now, if a CommandError occurs, check its Stderr.
 			var cmdErr *connector.CommandError
 			if errors.As(errExec, &cmdErr) && strings.Contains(strings.ToLower(string(stderr)), "firewall not enabled") {
 				fmt.Println("ufw is already disabled.")
-				return nil // Already disabled, consider it success
+				return nil
 			}
 			return fmt.Errorf("failed to execute 'ufw disable': %w (stderr: %s)", errExec, string(stderr))
 		}
@@ -281,7 +243,6 @@ func (r *defaultRunner) DisableFirewall(ctx context.Context, conn connector.Conn
 		return nil
 	}
 
-	// 3. Fallback to trying to flush iptables
 	if _, err := r.LookPath(ctx, conn, "iptables"); err == nil {
 		fmt.Println("Attempting to disable firewall by flushing iptables rules and setting default policies to ACCEPT.")
 		commands := []string{
@@ -292,7 +253,6 @@ func (r *defaultRunner) DisableFirewall(ctx context.Context, conn connector.Conn
 			"iptables -X",
 			"iptables -Z",
 		}
-		// Also for ip6tables if present
 		if _, errIp6 := r.LookPath(ctx, conn, "ip6tables"); errIp6 == nil {
 			commands = append(commands,
 				"ip6tables -P INPUT ACCEPT",
@@ -312,8 +272,6 @@ func (r *defaultRunner) DisableFirewall(ctx context.Context, conn connector.Conn
 				encounteredError = true
 			}
 		}
-		// Note: This doesn't handle persistent iptables rules services like iptables-persistent or netfilter-persistent.
-		// A true "disable" might involve stopping and disabling such services.
 		if encounteredError {
 			return fmt.Errorf("one or more iptables commands failed; firewall may not be fully open. Check warnings.")
 		}
@@ -322,4 +280,70 @@ func (r *defaultRunner) DisableFirewall(ctx context.Context, conn connector.Conn
 	}
 
 	return fmt.Errorf("no known firewall management tool (firewalld, ufw, iptables) found. Cannot automatically disable firewall.")
+}
+
+func (r *defaultRunner) EnsureHostEntry(ctx context.Context, conn connector.Connector, ip, fqdn string, hostnames ...string) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil")
+	}
+	if strings.TrimSpace(ip) == "" || strings.TrimSpace(fqdn) == "" {
+		return fmt.Errorf("IP and FQDN cannot be empty")
+	}
+
+	allNewHostnames := append([]string{fqdn}, hostnames...)
+	uniqueNewHostnames := []string{}
+	seen := make(map[string]bool)
+	for _, h := range allNewHostnames {
+		if !seen[h] {
+			seen[h] = true
+			uniqueNewHostnames = append(uniqueNewHostnames, h)
+		}
+	}
+	newLine := fmt.Sprintf("%s %s", ip, strings.Join(uniqueNewHostnames, " "))
+
+	checkCmdExact := fmt.Sprintf("grep -Fxq %s /etc/hosts", newLine)
+	if exists, _ := r.Check(ctx, conn, checkCmdExact, false); exists {
+		return nil
+	}
+
+	checkCmdIP := fmt.Sprintf("grep -w %s /etc/hosts", ip)
+	stdout, _, err := r.RunWithOptions(ctx, conn, checkCmdIP, &connector.ExecOptions{Sudo: false})
+
+	var finalCmd string
+
+	if err != nil {
+		finalCmd = fmt.Sprintf("echo %s >> /etc/hosts", newLine)
+	} else {
+		oldLine := strings.TrimSpace(string(stdout))
+		oldFields := strings.Fields(oldLine)
+		existingHostnames := make(map[string]bool)
+		if len(oldFields) > 1 {
+			for _, h := range oldFields[1:] {
+				existingHostnames[h] = true
+			}
+		}
+
+		hostnamesToAppend := []string{}
+		for _, newHost := range uniqueNewHostnames {
+			if !existingHostnames[newHost] {
+				hostnamesToAppend = append(hostnamesToAppend, newHost)
+			}
+		}
+
+		if len(hostnamesToAppend) > 0 {
+			updatedLine := fmt.Sprintf("%s %s", oldLine, strings.Join(hostnamesToAppend, " "))
+			escapedOldLine := strings.ReplaceAll(oldLine, "/", "\\/")
+			escapedUpdatedLine := strings.ReplaceAll(updatedLine, "/", "\\/")
+			finalCmd = fmt.Sprintf("sed -i 's/%s/%s/g' /etc/hosts", escapedOldLine, escapedUpdatedLine)
+		} else {
+			return nil
+		}
+	}
+
+	_, _, execErr := r.RunWithOptions(ctx, conn, finalCmd, &connector.ExecOptions{Sudo: true})
+	if execErr != nil {
+		return fmt.Errorf("failed to ensure host entry '%s': %w", newLine, execErr)
+	}
+
+	return nil
 }

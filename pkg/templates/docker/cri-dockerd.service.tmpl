@@ -1,0 +1,33 @@
+[Unit]
+Description=CRI Interface for Docker Application Container Engine
+Documentation=https://docs.mirantis.com
+After=network-online.target firewalld.service docker.service
+Wants=network-online.target
+Requires=docker.socket
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/cri-dockerd --container-runtime-endpoint fd://
+ExecReload=/bin/kill -s HUP $MAINPID
+TimeoutSec=0
+RestartSec=2
+Restart=always
+
+# Having a kill signal mapped to SIGTERM, ensures that cri-dockerd will be shutdown gracefully
+KillSignal=SIGTERM
+
+# Delegate builds on top of KillMode=control-group, so we explicitly set it here
+# to make sure it's not overridden by user configurations.
+KillMode=process
+
+# Having a kill signal mapped to SIGTERM, ensures that docker will be shutdown gracefully
+KillSignal=SIGTERM
+
+# The following values are recommended for production environments:
+# LimitNOFILE=infinity
+# LimitNPROC=infinity
+# LimitCORE=infinity
+TasksMax=infinity
+
+[Install]
+WantedBy=multi-user.target

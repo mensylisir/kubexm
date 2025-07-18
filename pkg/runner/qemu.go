@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"crypto/rand"
+	"encoding/xml"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -17,6 +18,229 @@ import (
 var (
 	memRegex = regexp.MustCompile(`(\d+)\s*(KiB|MiB|GiB|TiB)`)
 )
+
+type OSVariant struct {
+	ID string `xml:"id,attr"`
+}
+
+type Domain struct {
+	XMLName       xml.Name       `xml:"domain"`
+	Type          string         `xml:"type,attr"`
+	Name          string         `xml:"name"`
+	UUID          string         `xml:"uuid"`
+	Memory        DomainMemory   `xml:"memory"`
+	CurrentMemory DomainMemory   `xml:"currentMemory"`
+	VCPU          DomainVCPU     `xml:"vcpu"`
+	OS            DomainOS       `xml:"os"`
+	Features      DomainFeatures `xml:"features"`
+	CPU           DomainCPU      `xml:"cpu"`
+	Clock         DomainClock    `xml:"clock"`
+	OnPoweroff    string         `xml:"on_poweroff"`
+	OnReboot      string         `xml:"on_reboot"`
+	OnCrash       string         `xml:"on_crash"`
+	PM            DomainPM       `xml:"pm"`
+	Devices       DomainDevices  `xml:"devices"`
+}
+type DomainMemory struct {
+	Unit  string `xml:"unit,attr"`
+	Value uint   `xml:",chardata"`
+}
+type DomainVCPU struct {
+	Placement string `xml:"placement,attr"`
+	Value     uint   `xml:",chardata"`
+}
+type DomainOS struct {
+	Type    DomainOSType `xml:"type"`
+	Boot    []DomainBoot `xml:"boot"`
+	Variant OSVariant    `xml:"os_variant"`
+}
+type DomainOSType struct {
+	Arch    string `xml:"arch,attr"`
+	Machine string `xml:"machine,attr,omitempty"`
+	Value   string `xml:",chardata"`
+}
+type DomainBoot struct {
+	Dev string `xml:"dev,attr"`
+}
+type DomainFeatures struct {
+	ACPI   *struct{}     `xml:"acpi"`
+	APIC   *struct{}     `xml:"apic"`
+	VMPort *DomainVMPort `xml:"vmport"`
+}
+
+type DomainVMPort struct {
+	State string `xml:"state,attr"`
+}
+
+type DomainCPU struct {
+	Mode  string `xml:"mode,attr"`
+	Check string `xml:"check,attr"`
+}
+type DomainClock struct {
+	Offset string        `xml:"offset,attr"`
+	Timer  []DomainTimer `xml:"timer"`
+}
+type DomainTimer struct {
+	Name       string `xml:"name,attr"`
+	TickPolicy string `xml:"tickpolicy,attr,omitempty"`
+	Present    string `xml:"present,attr,omitempty"`
+}
+type DomainPM struct {
+	SuspendToMem  DomainSuspend `xml:"suspend-to-mem"`
+	SuspendToDisk DomainSuspend `xml:"suspend-to-disk"`
+}
+type DomainSuspend struct {
+	Enabled string `xml:"enabled,attr"`
+}
+type DomainDevices struct {
+	Emulator   string            `xml:"emulator"`
+	Disks      []DomainDisk      `xml:"disk"`
+	Interfaces []DomainInterface `xml:"interface"`
+	Serials    []DomainSerial    `xml:"serial"`
+	Consoles   []DomainConsole   `xml:"console"`
+	Channels   []DomainChannel   `xml:"channel"`
+	Inputs     []DomainInput     `xml:"input"`
+	Graphics   []DomainGraphic   `xml:"graphics"`
+	Videos     []DomainVideo     `xml:"video"`
+	MemBalloon *DomainMemBalloon `xml:"memballoon"`
+}
+type DomainDisk struct {
+	Type     string           `xml:"type,attr"`
+	Device   string           `xml:"device,attr"`
+	Driver   DomainDiskDriver `xml:"driver"`
+	Source   DomainSource     `xml:"source"`
+	Target   DomainTarget     `xml:"target"`
+	ReadOnly *struct{}        `xml:"readonly,omitempty"`
+	Address  *DomainAddress   `xml:"address"`
+}
+type DomainDiskDriver struct {
+	Name  string `xml:"name,attr"`
+	Type  string `xml:"type,attr"`
+	Cache string `xml:"cache,attr,omitempty"`
+	IO    string `xml:"io,attr,omitempty"`
+}
+type DomainSource struct {
+	File    string `xml:"file,attr,omitempty"`
+	Network string `xml:"network,attr,omitempty"`
+	Bridge  string `xml:"bridge,attr,omitempty"`
+}
+type DomainTarget struct {
+	Dev string `xml:"dev,attr"`
+	Bus string `xml:"bus,attr"`
+}
+type DomainAddress struct {
+	Type       string `xml:"type,attr"`
+	Controller string `xml:"controller,attr,omitempty"`
+	Bus        string `xml:"bus,attr"`
+	Target     string `xml:"target,attr,omitempty"`
+	Unit       string `xml:"unit,attr,omitempty"`
+	Port       string `xml:"port,attr,omitempty"`
+	Slot       string `xml:"slot,attr"`
+	Function   string `xml:"function,attr"`
+	Domain     string `xml:"domain,attr,omitempty"`
+}
+type DomainInterface struct {
+	Type    string         `xml:"type,attr"`
+	Source  DomainSource   `xml:"source"`
+	MAC     *DomainMAC     `xml:"mac,omitempty"`
+	Model   DomainModel    `xml:"model"`
+	Address *DomainAddress `xml:"address"`
+	Target  *DomainTarget  `xml:"target,omitempty"`
+	XMLName xml.Name       `xml:"interface"`
+}
+
+type DomainMAC struct {
+	Address string `xml:"address,attr"`
+}
+type DomainModel struct {
+	Type string `xml:"type,attr"`
+}
+type DomainSerial struct {
+	Type   string              `xml:"type,attr"`
+	Target *DomainTargetSerial `xml:"target"`
+}
+type DomainTargetSerial struct {
+	Type  string       `xml:"type,attr,omitempty"`
+	Port  *int         `xml:"port,attr"`
+	Model *DomainModel `xml:"model,omitempty"`
+}
+type DomainConsole struct {
+	Type   string               `xml:"type,attr"`
+	Target *DomainTargetConsole `xml:"target"`
+}
+type DomainTargetConsole struct {
+	Type string `xml:"type,attr,omitempty"`
+	Port *int   `xml:"port,attr"`
+}
+type DomainChannel struct {
+	Type    string               `xml:"type,attr"`
+	Target  *DomainTargetChannel `xml:"target"`
+	Address *DomainAddress       `xml:"address"`
+}
+type DomainTargetChannel struct {
+	Type string `xml:"type,attr,omitempty"`
+	Name string `xml:"name,attr,omitempty"`
+}
+type DomainInput struct {
+	Type string `xml:"type,attr"`
+	Bus  string `xml:"bus,attr"`
+}
+type DomainGraphic struct {
+	Type     string         `xml:"type,attr"`
+	Port     string         `xml:"port,attr"`
+	Autoport string         `xml:"autoport,attr"`
+	Listen   []DomainListen `xml:"listen"`
+	Password string         `xml:"passwd,attr,omitempty"`
+	Keymap   string         `xml:"keymap,attr,omitempty"`
+}
+type DomainListen struct {
+	Type    string `xml:"type,attr"`
+	Address string `xml:"address,attr,omitempty"`
+	Network string `xml:"network,attr,omitempty"`
+}
+type DomainVideo struct {
+	Model DomainVideoModel `xml:"model"`
+}
+type DomainVideoModel struct {
+	Type    string `xml:"type,attr"`
+	VRAM    int    `xml:"vram,attr"`
+	Heads   int    `xml:"heads,attr"`
+	Primary string `xml:"primary,attr"`
+}
+type DomainMemBalloon struct {
+	Model   string         `xml:"model,attr"`
+	Address *DomainAddress `xml:"address"`
+}
+
+type VMSnapshots struct {
+	XMLName  xml.Name     `xml:"domainsnapshots"`
+	Snapshot []VMSnapshot `xml:"domainsnapshot"`
+}
+type VMSnapshot struct {
+	XMLName      xml.Name          `xml:"domainsnapshot"`
+	Name         string            `xml:"name"`
+	Description  string            `xml:"description"`
+	State        string            `xml:"state"`
+	Parent       *VMSnapshotParent `xml:"parent"`
+	CreationTime int64             `xml:"creationTime"`
+	Disks        *VMSnapshotDisks  `xml:"disks"`
+	Children     []VMSnapshot      `xml:"children>domainsnapshot"`
+}
+type VMSnapshotParent struct {
+	Name string `xml:"name"`
+}
+type VMSnapshotDisks struct {
+	Disks []VMSnapshotDisk `xml:"disk"`
+}
+type VMSnapshotDisk struct {
+	Name     string               `xml:"name,attr"`
+	Snapshot string               `xml:"snapshot,attr"`
+	Source   VMSnapshotDiskSource `xml:"source"`
+}
+
+type VMSnapshotDiskSource struct {
+	File string `xml:"file,attr"`
+}
 
 func generateUUID() string {
 	uuid := make([]byte, 16)
@@ -34,7 +258,6 @@ func parseIntFromString(s string) (int, error) {
 func parseMemStringToKB(memStr string) (uint64, error) {
 	matches := memRegex.FindStringSubmatch(memStr)
 	if len(matches) != 3 {
-		// Fallback for plain numbers, assume KiB
 		val, err := strconv.ParseUint(strings.TrimSpace(memStr), 10, 64)
 		if err == nil {
 			return val, nil
@@ -62,10 +285,6 @@ func parseMemStringToKB(memStr string) (uint64, error) {
 	}
 }
 
-// CreateVMTemplate defines a new virtual machine configuration that can serve as a template.
-// For now, this will be a placeholder as generating complex libvirt XML via shell commands is error-prone.
-// A real implementation might use a Go libvirt library or pre-defined XML templates.
-// This function will primarily focus on creating the disk if it doesn't exist.
 func (r *defaultRunner) CreateVMTemplate(ctx context.Context, conn connector.Connector, name string, osVariant string, memoryMB uint, vcpus uint, diskPath string, diskSizeGB uint, network string, graphicsType string, cloudInitISOPath string) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -74,15 +293,12 @@ func (r *defaultRunner) CreateVMTemplate(ctx context.Context, conn connector.Con
 		return errors.New("name, osVariant, memoryMB, vcpus, diskPath and diskSizeGB are required for VM template")
 	}
 
-	// 1. Check if disk image exists
 	exists, err := r.Exists(ctx, conn, diskPath)
 	if err != nil {
 		return errors.Wrapf(err, "failed to check if disk %s exists", diskPath)
 	}
 
 	if !exists {
-		// Create the disk image using qemu-img
-		// Ensure parent directory exists
 		diskDir := filepath.Dir(diskPath)
 		if err := r.Mkdirp(ctx, conn, diskDir, "0755", true); err != nil {
 			return errors.Wrapf(err, "failed to create directory %s for disk image", diskDir)
@@ -94,18 +310,9 @@ func (r *defaultRunner) CreateVMTemplate(ctx context.Context, conn connector.Con
 			return errors.Wrapf(err, "failed to create disk image %s with qemu-img. Stderr: %s", diskPath, string(stderr))
 		}
 	}
-	// Placeholder for actual VM definition logic using virsh define
-	// A proper implementation would involve generating or using an XML template, then:
-	// tempXMLPath := fmt.Sprintf("/tmp/vm_template_%s.xml", name)
-	// err = r.WriteFile(ctx, conn, []byte(generatedOrTemplateXML), tempXMLPath, "0600", true)
-	// defineCmd := fmt.Sprintf("virsh define %s", tempXMLPath)
-	// _, _, err = conn.Exec(ctx, defineCmd, &connector.ExecOptions{Sudo: true})
-	// r.Remove(ctx, conn, tempXMLPath, true) // Cleanup
-	// if err != nil { return errors.Wrap(err, "failed to define VM template") }
 	return errors.New("CreateVMTemplate: virsh define from generated XML is not fully implemented via CLI runner; disk creation part is present")
 }
 
-// VMExists checks if a virtual machine with the given name is defined in libvirt.
 func (r *defaultRunner) VMExists(ctx context.Context, conn connector.Connector, vmName string) (bool, error) {
 	if conn == nil {
 		return false, errors.New("connector cannot be nil")
@@ -113,24 +320,19 @@ func (r *defaultRunner) VMExists(ctx context.Context, conn connector.Connector, 
 	if strings.TrimSpace(vmName) == "" {
 		return false, errors.New("vmName cannot be empty")
 	}
-	// `virsh dominfo <domain>` exits 0 if domain exists, non-zero otherwise (e.g. 1 if not found)
 	cmd := fmt.Sprintf("virsh dominfo %s > /dev/null 2>&1", vmName)
 	_, _, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
 	if err == nil {
 		return true, nil
-	} // Exit code 0 means domain exists
-
-	// Check if the error is due to the domain not being found
+	}
 	var cmdErr *connector.CommandError
 	if errors.As(err, &cmdErr) && cmdErr.ExitCode != 0 { // Any non-zero exit code from dominfo likely means not found or other error
 		// More specific check could parse stderr for "Domain not found" or "error: failed to get domain"
 		return false, nil // Treat non-zero exit as "does not exist" for simplicity of this check
 	}
-	// For other types of errors (e.g., connection issue), propagate the error
 	return false, errors.Wrapf(err, "failed to check if VM %s exists", vmName)
 }
 
-// StartVM starts a defined (but not running) virtual machine.
 func (r *defaultRunner) StartVM(ctx context.Context, conn connector.Connector, vmName string) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -138,8 +340,6 @@ func (r *defaultRunner) StartVM(ctx context.Context, conn connector.Connector, v
 	if strings.TrimSpace(vmName) == "" {
 		return errors.New("vmName cannot be empty")
 	}
-
-	// Check current state first to make it idempotent
 	state, errState := r.GetVMState(ctx, conn, vmName)
 	if errState != nil {
 		return errors.Wrapf(errState, "failed to get current state of VM %s before starting", vmName)
@@ -147,7 +347,7 @@ func (r *defaultRunner) StartVM(ctx context.Context, conn connector.Connector, v
 	if state == "running" {
 		return nil // Already running
 	}
-	if state != "shut off" && state != "pmsuspended" { // Add other valid pre-start states if needed
+	if state != "shut off" && state != "pmsuspended" {
 		return errors.Errorf("VM %s is in state '%s', cannot start", vmName, state)
 	}
 
@@ -159,7 +359,6 @@ func (r *defaultRunner) StartVM(ctx context.Context, conn connector.Connector, v
 	return nil
 }
 
-// ShutdownVM attempts a graceful shutdown of a virtual machine.
 func (r *defaultRunner) ShutdownVM(ctx context.Context, conn connector.Connector, vmName string, force bool, timeout time.Duration) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -170,7 +369,6 @@ func (r *defaultRunner) ShutdownVM(ctx context.Context, conn connector.Connector
 
 	state, errState := r.GetVMState(ctx, conn, vmName)
 	if errState != nil {
-		// If domain not found, consider it already shut down for idempotency.
 		if strings.Contains(errState.Error(), "Domain not found") || strings.Contains(errState.Error(), "failed to get domain") {
 			return nil
 		}
@@ -179,14 +377,14 @@ func (r *defaultRunner) ShutdownVM(ctx context.Context, conn connector.Connector
 	if state == "shut off" {
 		return nil // Already shut off
 	}
-	if state != "running" && state != "paused" { // Can only shutdown running or paused VMs
+	if state != "running" && state != "paused" {
 		return errors.Errorf("VM %s is in state '%s', cannot initiate shutdown", vmName, state)
 	}
 
 	shutdownCmd := fmt.Sprintf("virsh shutdown %s", vmName)
 	_, stderrShutdown, errShutdown := conn.Exec(ctx, shutdownCmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 
-	if errShutdown == nil { // Graceful shutdown initiated
+	if errShutdown == nil {
 		waitCtx, cancelWait := context.WithTimeout(ctx, timeout)
 		defer cancelWait()
 		ticker := time.NewTicker(5 * time.Second)
@@ -194,7 +392,7 @@ func (r *defaultRunner) ShutdownVM(ctx context.Context, conn connector.Connector
 
 		for {
 			select {
-			case <-waitCtx.Done(): // Timeout reached
+			case <-waitCtx.Done():
 				if force {
 					return r.DestroyVM(ctx, conn, vmName) // Use original ctx for DestroyVM
 				}
@@ -212,14 +410,12 @@ func (r *defaultRunner) ShutdownVM(ctx context.Context, conn connector.Connector
 		}
 	}
 
-	// Graceful shutdown command failed
 	if force {
 		return r.DestroyVM(ctx, conn, vmName)
 	}
 	return errors.Wrapf(errShutdown, "failed to issue graceful shutdown for VM %s. Stderr: %s", vmName, string(stderrShutdown))
 }
 
-// DestroyVM forcefully stops (powers off) a virtual machine.
 func (r *defaultRunner) DestroyVM(ctx context.Context, conn connector.Connector, vmName string) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -228,13 +424,11 @@ func (r *defaultRunner) DestroyVM(ctx context.Context, conn connector.Connector,
 		return errors.New("vmName cannot be empty")
 	}
 
-	// Check if already off or non-existent for idempotency
 	state, errState := r.GetVMState(ctx, conn, vmName)
 	if errState != nil {
 		if strings.Contains(errState.Error(), "Domain not found") || strings.Contains(errState.Error(), "failed to get domain") {
-			return nil // Effectively destroyed if not found
+			return nil
 		}
-		// For other errors getting state, proceed with destroy as a best effort.
 	} else if state == "shut off" {
 		return nil // Already off
 	}
@@ -242,7 +436,6 @@ func (r *defaultRunner) DestroyVM(ctx context.Context, conn connector.Connector,
 	cmd := fmt.Sprintf("virsh destroy %s", vmName)
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if err != nil {
-		// Idempotency: if already not running or not found, virsh destroy might error but that's okay.
 		if strings.Contains(string(stderr), "Domain not found") || strings.Contains(string(stderr), "domain is not running") {
 			return nil
 		}
@@ -251,7 +444,6 @@ func (r *defaultRunner) DestroyVM(ctx context.Context, conn connector.Connector,
 	return nil
 }
 
-// UndefineVM removes the definition of a virtual machine from libvirt.
 func (r *defaultRunner) UndefineVM(ctx context.Context, conn connector.Connector, vmName string, deleteSnapshots bool, deleteStorage bool, storagePools []string) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -260,13 +452,11 @@ func (r *defaultRunner) UndefineVM(ctx context.Context, conn connector.Connector
 		return errors.New("vmName cannot be empty")
 	}
 
-	// Ensure VM is off
 	state, errState := r.GetVMState(ctx, conn, vmName)
 	if errState == nil && (state == "running" || state == "paused") {
 		if errDestroy := r.DestroyVM(ctx, conn, vmName); errDestroy != nil {
 			return errors.Wrapf(errDestroy, "failed to destroy VM %s prior to undefine", vmName)
 		}
-		// Wait a moment for destroy to complete before undefining
 		select {
 		case <-time.After(2 * time.Second):
 		case <-ctx.Done():
@@ -275,18 +465,14 @@ func (r *defaultRunner) UndefineVM(ctx context.Context, conn connector.Connector
 	} else if errState != nil && !(strings.Contains(errState.Error(), "Domain not found") || strings.Contains(errState.Error(), "failed to get domain")) {
 		return errors.Wrapf(errState, "failed to get state of VM %s before undefine", vmName)
 	}
-	// If state is "shut off" or domain not found, proceed.
 
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "virsh", "undefine", vmName)
 	if deleteSnapshots {
-		cmdArgs = append(cmdArgs, "--snapshots-metadata") // Deletes snapshot metadata
+		cmdArgs = append(cmdArgs, "--snapshots-metadata")
 	}
 	if deleteStorage {
-		cmdArgs = append(cmdArgs, "--remove-all-storage") // Attempts to remove storage volumes
-		// --storage-pools <pool_name>[,<pool_name>...] can be added if storagePools is not empty
-		// However, the exact syntax and support for this with --remove-all-storage needs careful checking.
-		// For now, --remove-all-storage is a broad attempt.
+		cmdArgs = append(cmdArgs, "--remove-all-storage")
 	}
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute})
@@ -299,7 +485,6 @@ func (r *defaultRunner) UndefineVM(ctx context.Context, conn connector.Connector
 	return nil
 }
 
-// GetVMState retrieves the current state of a virtual machine.
 func (r *defaultRunner) GetVMState(ctx context.Context, conn connector.Connector, vmName string) (string, error) {
 	if conn == nil {
 		return "", errors.New("connector cannot be nil")
@@ -316,12 +501,11 @@ func (r *defaultRunner) GetVMState(ctx context.Context, conn connector.Connector
 	return strings.TrimSpace(string(stdout)), nil
 }
 
-// ListVMs lists virtual machines known to libvirt.
 func (r *defaultRunner) ListVMs(ctx context.Context, conn connector.Connector, all bool) ([]VMInfo, error) {
 	if conn == nil {
 		return nil, errors.New("connector cannot be nil")
 	}
-	listCmdArgs := []string{"virsh", "list", "--name"} // Get names first
+	listCmdArgs := []string{"virsh", "list", "--name"}
 	if all {
 		listCmdArgs = append(listCmdArgs, "--all")
 	}
@@ -346,53 +530,13 @@ func (r *defaultRunner) ListVMs(ctx context.Context, conn connector.Connector, a
 
 	var vms []VMInfo
 	for _, vmName := range vmNames {
-		// Get state for each VM
-		state, errState := r.GetVMState(ctx, conn, vmName)
-		if errState != nil {
-			// If we can't get the state, we might still list the VM with unknown state or skip it.
-			// For now, let's include it with an error state or empty state.
-			// Or, more simply, skip if state cannot be determined for robustness.
-			// Let's try to get dominfo anyway.
-		}
-
-		dominfoCmd := fmt.Sprintf("virsh dominfo %s", vmName)
-		infoStdout, _, errInfo := conn.Exec(ctx, dominfoCmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
-		if errInfo != nil {
-			// If dominfo fails, we might have a problem with this VM.
-			// Add with available info or log a warning.
-			vms = append(vms, VMInfo{Name: vmName, State: state}) // Add with what we have
+		details, err := r.GetVMInfo(ctx, conn, vmName)
+		if err != nil {
+			state, _ := r.GetVMState(ctx, conn, vmName)
+			vms = append(vms, VMInfo{Name: vmName, State: state, Error: err.Error()})
 			continue
 		}
-
-		vmInfo := VMInfo{Name: vmName, State: state}
-		infoLines := strings.Split(string(infoStdout), "\n")
-		for _, line := range infoLines {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			key := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
-
-			switch key {
-			case "UUID":
-				vmInfo.UUID = value
-			case "CPU(s)":
-				vmInfo.CPUs, _ = parseIntFromString(value)
-			case "Max memory", "Current memory", "Memory": // Prefer Max memory, fallback to Current memory then Memory
-				if vmInfo.Memory == 0 { // Only set if not already set by a preferred key
-					memKB, parseErr := parseMemStringToKB(value)
-					if parseErr == nil {
-						vmInfo.Memory = uint(memKB / 1024) // Convert KiB to MiB
-					}
-				}
-			case "State": // If GetVMState failed earlier, try to get it from dominfo
-				if vmInfo.State == "" {
-					vmInfo.State = value
-				}
-			}
-		}
-		vms = append(vms, vmInfo)
+		vms = append(vms, details.VMInfo)
 	}
 	return vms, nil
 }
@@ -420,7 +564,7 @@ func (r *defaultRunner) RefreshStoragePool(ctx context.Context, conn connector.C
 		return errors.New("poolName cannot be empty")
 	}
 	cmd := fmt.Sprintf("virsh pool-refresh %s", poolName)
-	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute}) // Refresh can take time
+	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute})
 	if err != nil {
 		return errors.Wrapf(err, "failed to refresh storage pool %s. Stderr: %s", poolName, string(stderr))
 	}
@@ -435,16 +579,15 @@ func (r *defaultRunner) CreateStoragePool(ctx context.Context, conn connector.Co
 		return errors.New("name, poolType, and targetPath are required")
 	}
 
-	// Idempotency: Check if pool already exists
 	exists, errExists := r.StoragePoolExists(ctx, conn, name)
 	if errExists != nil {
 		return errors.Wrapf(errExists, "failed to check if storage pool %s exists", name)
 	}
 	if exists {
 		return nil
-	} // Already exists
+	}
 
-	if poolType == "dir" { // Ensure directory exists for dir-type pools
+	if poolType == "dir" {
 		if err := r.Mkdirp(ctx, conn, targetPath, "0755", true); err != nil {
 			return errors.Wrapf(err, "failed to create directory %s for pool %s", targetPath, name)
 		}
@@ -454,14 +597,12 @@ func (r *defaultRunner) CreateStoragePool(ctx context.Context, conn connector.Co
 	switch poolType {
 	case "dir":
 		defineCmd = fmt.Sprintf("virsh pool-define-as %s dir --target %s", name, targetPath)
-	// Add other pool types (logical, iscsi, etc.) as needed
 	default:
 		return errors.Errorf("unsupported poolType: %s", poolType)
 	}
 
 	_, stderrDefine, errDefine := conn.Exec(ctx, defineCmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if errDefine != nil {
-		// If it already defined but we missed in exists check (race or other issue), that's fine.
 		if !(strings.Contains(string(stderrDefine), "already defined") || strings.Contains(string(stderrDefine), "already exists")) {
 			return errors.Wrapf(errDefine, "failed to define pool %s. Stderr: %s", name, string(stderrDefine))
 		}
@@ -483,8 +624,6 @@ func (r *defaultRunner) CreateStoragePool(ctx context.Context, conn connector.Co
 
 	autostartCmd := fmt.Sprintf("virsh pool-autostart %s", name)
 	if _, _, errAutostart := conn.Exec(ctx, autostartCmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second}); errAutostart != nil {
-		// Log as warning, not a critical failure if pool is otherwise operational
-		// fmt.Printf("Warning: failed to set autostart for pool %s: %v\n", name, errAutostart)
 	}
 	return nil
 }
@@ -500,7 +639,7 @@ func (r *defaultRunner) StoragePoolExists(ctx context.Context, conn connector.Co
 	_, _, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
 	if err == nil {
 		return true, nil
-	} // Exit 0 means pool exists
+	}
 	if cmdErr, ok := err.(*connector.CommandError); ok && cmdErr.ExitCode != 0 {
 		// Non-zero exit usually means not found (e.g. "error: failed to get pool '...'")
 		return false, nil
@@ -516,23 +655,20 @@ func (r *defaultRunner) DeleteStoragePool(ctx context.Context, conn connector.Co
 		return errors.New("poolName cannot be empty")
 	}
 
-	// Attempt to destroy (stop) the pool first. This is idempotent.
 	destroyCmd := fmt.Sprintf("virsh pool-destroy %s", poolName)
 	_, stderrDestroy, errDestroy := conn.Exec(ctx, destroyCmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if errDestroy != nil {
-		// Ignore errors if pool not found or not active, as that's fine for deletion.
 		if !(strings.Contains(string(stderrDestroy), "not found") ||
 			strings.Contains(string(stderrDestroy), "not active") ||
-			strings.Contains(string(stderrDestroy), "not running")) { // "not running" for some virsh versions
+			strings.Contains(string(stderrDestroy), "not running")) {
 			return errors.Wrapf(errDestroy, "failed to destroy pool %s. Stderr: %s", poolName, string(stderrDestroy))
 		}
 	}
 
-	// Undefine the pool. This is also idempotent.
 	undefineCmd := fmt.Sprintf("virsh pool-undefine %s", poolName)
 	_, stderrUndefine, errUndefine := conn.Exec(ctx, undefineCmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if errUndefine != nil {
-		if !strings.Contains(string(stderrUndefine), "not found") { // Ignore "not found" for undefine
+		if !strings.Contains(string(stderrUndefine), "not found") {
 			return errors.Wrapf(errUndefine, "failed to undefine pool %s. Stderr: %s", poolName, string(stderrUndefine))
 		}
 	}
@@ -566,14 +702,10 @@ func (r *defaultRunner) CloneVolume(ctx context.Context, conn connector.Connecto
 		return errors.New("poolName, origVolName, and newVolName are required")
 	}
 
-	// virsh vol-clone [--pool <string>] <vol> <newname> [--new-format <string>] [--new-capacity <bytes>]
 	cloneCmdArgs := []string{"virsh", "vol-clone", "--pool", poolName, origVolName, newVolName}
-	if format != "" { // Assuming format here refers to new-format for clone, not capacity format.
+	if format != "" {
 		cloneCmdArgs = append(cloneCmdArgs, "--new-format", format)
 	}
-	// Note: vol-clone can also take --new-capacity. If newSizeGB is for the final state after potential resize,
-	// it might be better to clone first, then resize. Or, if libvirt supports it well, use --new-capacity here.
-	// For simplicity and explicit control, we'll clone then resize if newSizeGB > 0.
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cloneCmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 5 * time.Minute}) // Cloning can take time
 	if err != nil {
@@ -581,8 +713,6 @@ func (r *defaultRunner) CloneVolume(ctx context.Context, conn connector.Connecto
 	}
 
 	if newSizeGB > 0 {
-		// Check current size first? Or just attempt resize.
-		// For simplicity, just attempt resize.
 		if errResize := r.ResizeVolume(ctx, conn, poolName, newVolName, newSizeGB); errResize != nil {
 			return errors.Wrapf(errResize, "volume %s cloned successfully, but failed to resize to %dGB", newVolName, newSizeGB)
 		}
@@ -597,7 +727,7 @@ func (r *defaultRunner) ResizeVolume(ctx context.Context, conn connector.Connect
 	if poolName == "" || volName == "" || newSizeGB == 0 {
 		return errors.New("poolName, volName, and non-zero newSizeGB are required")
 	}
-	capacityStr := fmt.Sprintf("%dG", newSizeGB) // virsh vol-resize takes size like "10G"
+	capacityStr := fmt.Sprintf("%dG", newSizeGB)
 	cmd := fmt.Sprintf("virsh vol-resize --pool %s %s %s", poolName, volName, capacityStr)
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute})
 	if err != nil {
@@ -616,7 +746,6 @@ func (r *defaultRunner) DeleteVolume(ctx context.Context, conn connector.Connect
 	cmd := fmt.Sprintf("virsh vol-delete --pool %s %s", poolName, volName)
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if err != nil {
-		// Idempotency: if volume not found, it's okay.
 		if strings.Contains(string(stderr), "Failed to get volume") || strings.Contains(string(stderr), "Storage volume not found") {
 			return nil
 		}
@@ -633,14 +762,13 @@ func (r *defaultRunner) CreateVolume(ctx context.Context, conn connector.Connect
 		return errors.New("poolName, volName, and non-zero sizeGB are required")
 	}
 
-	// Idempotency: Check if volume already exists
 	exists, errExists := r.VolumeExists(ctx, conn, poolName, volName)
 	if errExists != nil {
 		return errors.Wrapf(errExists, "failed to check if volume %s in pool %s exists", volName, poolName)
 	}
 	if exists {
 		return nil
-	} // Already exists
+	}
 
 	var cmdArgs []string
 	cmdArgs = append(cmdArgs, "virsh", "vol-create-as", poolName, volName, fmt.Sprintf("%dG", sizeGB))
@@ -657,7 +785,6 @@ func (r *defaultRunner) CreateVolume(ctx context.Context, conn connector.Connect
 
 	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute})
 	if err != nil {
-		// Double check for already exists, in case of race or if Exists check failed silently
 		if strings.Contains(string(stderr), "already exists") {
 			return nil
 		}
@@ -674,17 +801,14 @@ func (r *defaultRunner) CreateCloudInitISO(ctx context.Context, conn connector.C
 		return errors.New("vmName, isoDestPath, userData, and metaData are required")
 	}
 
-	remoteBaseTmpDir := "/tmp" // Standard temporary directory on Linux
+	remoteBaseTmpDir := "/tmp"
 	tmpDirName := fmt.Sprintf("kubexm-cloud-init-tmp-%s-%d", vmName, time.Now().UnixNano())
 	tmpDirPath := filepath.Join(remoteBaseTmpDir, tmpDirName)
 
-	// Ensure the base temp directory exists (usually /tmp does, but good practice)
-	// r.Mkdirp(ctx, conn, remoteBaseTmpDir, "0777", true) // /tmp should exist and be writable
-
-	if err := r.Mkdirp(ctx, conn, tmpDirPath, "0700", true); err != nil { // 0700 for restricted access
+	if err := r.Mkdirp(ctx, conn, tmpDirPath, "0700", true); err != nil {
 		return errors.Wrapf(err, "failed to create temporary directory %s on remote host", tmpDirPath)
 	}
-	defer r.Remove(ctx, conn, tmpDirPath, true) // Cleanup temporary directory
+	defer r.Remove(ctx, conn, tmpDirPath, true, true)
 
 	if err := r.WriteFile(ctx, conn, []byte(userData), filepath.Join(tmpDirPath, "user-data"), "0644", true); err != nil {
 		return errors.Wrapf(err, "failed to write user-data to %s", tmpDirPath)
@@ -698,16 +822,13 @@ func (r *defaultRunner) CreateCloudInitISO(ctx context.Context, conn connector.C
 		}
 	}
 
-	// Ensure destination directory for ISO exists
 	isoDir := filepath.Dir(isoDestPath)
 	if err := r.Mkdirp(ctx, conn, isoDir, "0755", true); err != nil {
 		return errors.Wrapf(err, "failed to create directory %s for ISO image", isoDir)
 	}
 
-	// Determine which ISO creation tool to use
-	isoCmdTool := "genisoimage" // Default
+	isoCmdTool := "genisoimage"
 	if _, err := r.LookPath(ctx, conn, "genisoimage"); err != nil {
-		// genisoimage not found, try mkisofs
 		if _, errMkisofs := r.LookPath(ctx, conn, "mkisofs"); errMkisofs == nil {
 			isoCmdTool = "mkisofs"
 		} else {
@@ -715,8 +836,6 @@ func (r *defaultRunner) CreateCloudInitISO(ctx context.Context, conn connector.C
 		}
 	}
 
-	// Command to create ISO: genisoimage -o <output.iso> -V cidata -r -J <path_to_cloud_init_files_dir>
-	// or: mkisofs -o <output.iso> -V cidata -r -J <path_to_cloud_init_files_dir>
 	isoCmd := fmt.Sprintf("%s -o %s -V cidata -r -J %s",
 		isoCmdTool,
 		isoDestPath,
@@ -730,15 +849,29 @@ func (r *defaultRunner) CreateCloudInitISO(ctx context.Context, conn connector.C
 	return nil
 }
 
-func (r *defaultRunner) CreateVM(ctx context.Context, conn connector.Connector, vmName string, memoryMB uint, vcpus uint, osVariant string, diskPaths []string, networkInterfaces []VMNetworkInterface, graphicsType string, cloudInitISOPath string, bootOrder []string, extraArgs []string) error {
+func (r *defaultRunner) CreateVM(
+	ctx context.Context,
+	conn connector.Connector,
+	facts *Facts,
+	vmName string,
+	memoryMB uint,
+	vcpus uint,
+	osVariant string,
+	diskPaths []string,
+	networkInterfaces []VMNetworkInterface,
+	graphicsType string,
+	cloudInitISOPath string,
+	bootOrder []string,
+	extraArgs []string,
+) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
 	}
 	if vmName == "" || memoryMB == 0 || vcpus == 0 || len(diskPaths) == 0 || diskPaths[0] == "" {
 		return errors.New("vmName, memoryMB, vcpus, and at least one diskPath are required")
 	}
-	if len(networkInterfaces) == 0 {
-		return errors.New("at least one networkInterface is required")
+	if facts == nil || facts.OS == nil {
+		return errors.New("facts (including OS) are required to create a VM")
 	}
 
 	exists, err := r.VMExists(ctx, conn, vmName)
@@ -749,20 +882,42 @@ func (r *defaultRunner) CreateVM(ctx context.Context, conn connector.Connector, 
 		return errors.Errorf("VM %s already exists", vmName)
 	}
 
-	var xmlBuilder strings.Builder
-	xmlBuilder.WriteString(fmt.Sprintf("<domain type='kvm'>\n"))
-	xmlBuilder.WriteString(fmt.Sprintf("  <name>%s</name>\n", vmName))
-	xmlBuilder.WriteString(fmt.Sprintf("  <uuid>%s</uuid>\n", generateUUID())) // Generate a UUID
-	xmlBuilder.WriteString(fmt.Sprintf("  <memory unit='MiB'>%d</memory>\n", memoryMB))
-	xmlBuilder.WriteString(fmt.Sprintf("  <currentMemory unit='MiB'>%d</currentMemory>\n", memoryMB))
-	xmlBuilder.WriteString(fmt.Sprintf("  <vcpu placement='static'>%d</vcpu>\n", vcpus))
-	xmlBuilder.WriteString("  <os>\n")
-	if osVariant == "" {
-		osVariant = "generic"
-	} // Default OS variant if not specified
-	xmlBuilder.WriteString(fmt.Sprintf("    <type arch='x86_64' machine='pc-q35-rhel8.6.0'>hvm</type>\n")) // Machine type might need to be more generic or detected
-	// Add os-variant if provided, or a loader for UEFI if needed
-	// <smbios mode='sysinfo'/> might be useful
+	emulatorPath, err := r.LookPath(ctx, conn, "qemu-system-"+facts.OS.Arch)
+	if err != nil {
+		emulatorPath, err = r.LookPath(ctx, conn, "qemu-kvm")
+		if err != nil {
+			return errors.New("could not find a valid QEMU emulator (qemu-system-<arch> or qemu-kvm) on the host")
+		}
+	}
+
+	port0 := 0
+	domain := Domain{
+		Type:          "kvm",
+		Name:          vmName,
+		UUID:          generateUUID(),
+		Memory:        DomainMemory{Unit: "MiB", Value: memoryMB},
+		CurrentMemory: DomainMemory{Unit: "MiB", Value: memoryMB},
+		VCPU:          DomainVCPU{Placement: "static", Value: vcpus},
+		OS: DomainOS{
+			Type:    DomainOSType{Arch: facts.OS.Arch, Value: "hvm"},
+			Variant: OSVariant{ID: osVariant},
+		},
+		Features: DomainFeatures{
+			ACPI:   &struct{}{},
+			APIC:   &struct{}{},
+			VMPort: &DomainVMPort{State: "off"},
+		},
+		CPU:        DomainCPU{Mode: "host-passthrough", Check: "none"},
+		Clock:      DomainClock{Offset: "utc", Timer: []DomainTimer{{Name: "rtc", TickPolicy: "catchup"}, {Name: "pit", TickPolicy: "delay"}, {Name: "hpet", Present: "no"}}},
+		OnPoweroff: "destroy",
+		OnReboot:   "restart",
+		OnCrash:    "destroy",
+		PM:         DomainPM{SuspendToMem: DomainSuspend{Enabled: "no"}, SuspendToDisk: DomainSuspend{Enabled: "no"}},
+		Devices: DomainDevices{
+			Emulator: emulatorPath,
+		},
+	}
+
 	if len(bootOrder) == 0 {
 		bootOrder = []string{"hd"}
 		if cloudInitISOPath != "" {
@@ -770,89 +925,116 @@ func (r *defaultRunner) CreateVM(ctx context.Context, conn connector.Connector, 
 		}
 	}
 	for _, dev := range bootOrder {
-		xmlBuilder.WriteString(fmt.Sprintf("    <boot dev='%s'/>\n", dev))
+		domain.OS.Boot = append(domain.OS.Boot, DomainBoot{Dev: dev})
 	}
-	xmlBuilder.WriteString("  </os>\n")
 
-	xmlBuilder.WriteString("  <features><acpi/><apic/><vmport state='off'/></features>\n")
-	xmlBuilder.WriteString("  <cpu mode='host-passthrough' check='none'/>\n") // host-passthrough for better perf, or host-model
-	xmlBuilder.WriteString("  <clock offset='utc'><timer name='rtc' tickpolicy='catchup'/><timer name='pit' tickpolicy='delay'/><timer name='hpet' present='no'/></clock>\n")
-	xmlBuilder.WriteString("  <on_poweroff>destroy</on_poweroff>\n  <on_reboot>restart</on_reboot>\n  <on_crash>destroy</on_crash>\n")
-	xmlBuilder.WriteString("  <pm><suspend-to-mem enabled='no'/><suspend-to-disk enabled='no'/></pm>\n")
-	xmlBuilder.WriteString("  <devices>\n    <emulator>/usr/libexec/qemu-kvm</emulator>\n") // Path might vary based on distro
-
+	pciSlot := 4
 	diskTargetLetter := 'a'
-	pciSlot := 0x04 // Starting PCI slot for disks
 	for _, diskPath := range diskPaths {
-		if diskPath == "" {
-			continue
-		}
-		xmlBuilder.WriteString("    <disk type='file' device='disk'>\n")
-		xmlBuilder.WriteString("      <driver name='qemu' type='qcow2' cache='none' io='native'/>\n") // Common settings
-		xmlBuilder.WriteString(fmt.Sprintf("      <source file='%s'/>\n", diskPath))
-		xmlBuilder.WriteString(fmt.Sprintf("      <target dev='vd%c' bus='virtio'/>\n", diskTargetLetter))
-		// Assign unique PCI address
-		xmlBuilder.WriteString(fmt.Sprintf("      <address type='pci' domain='0x0000' bus='0x00' slot='0x%02x' function='0x0'/>\n", pciSlot))
-		xmlBuilder.WriteString("    </disk>\n")
+		domain.Devices.Disks = append(domain.Devices.Disks, DomainDisk{
+			Type:    "file",
+			Device:  "disk",
+			Driver:  DomainDiskDriver{Name: "qemu", Type: "qcow2", Cache: "none", IO: "native"},
+			Source:  DomainSource{File: diskPath},
+			Target:  DomainTarget{Dev: fmt.Sprintf("vd%c", diskTargetLetter), Bus: "virtio"},
+			Address: &DomainAddress{Type: "pci", Bus: "0x01", Slot: fmt.Sprintf("0x%02x", pciSlot), Function: "0x0", Domain: "0x0000"},
+		})
 		diskTargetLetter++
 		pciSlot++
 	}
 
 	if cloudInitISOPath != "" {
-		xmlBuilder.WriteString("    <disk type='file' device='cdrom'>\n")
-		xmlBuilder.WriteString("      <driver name='qemu' type='raw'/>\n")
-		xmlBuilder.WriteString(fmt.Sprintf("      <source file='%s'/>\n", cloudInitISOPath))
-		xmlBuilder.WriteString("      <target dev='sda' bus='sata'/>\n") // Use a common bus like sata for cdrom
-		xmlBuilder.WriteString("      <readonly/>\n")
-		xmlBuilder.WriteString(fmt.Sprintf("      <address type='drive' controller='0' bus='0' target='0' unit='%d'/>\n", 0)) // Unit 0 for first SATA CD-ROM
-		xmlBuilder.WriteString("    </disk>\n")
+		domain.Devices.Disks = append(domain.Devices.Disks, DomainDisk{
+			Type:     "file",
+			Device:   "cdrom",
+			Driver:   DomainDiskDriver{Name: "qemu", Type: "raw"},
+			Source:   DomainSource{File: cloudInitISOPath},
+			Target:   DomainTarget{Dev: "sda", Bus: "sata"},
+			ReadOnly: &struct{}{},
+			Address:  &DomainAddress{Type: "drive", Controller: "0", Bus: "0", Target: "0", Unit: "0"},
+		})
 	}
 
-	networkPCISlot := pciSlot // Continue PCI slot numbering for NICs
 	for _, nic := range networkInterfaces {
-		xmlBuilder.WriteString(fmt.Sprintf("    <interface type='%s'>\n", nic.Type))           // e.g. network, bridge
-		xmlBuilder.WriteString(fmt.Sprintf("      <source %s='%s'/>\n", nic.Type, nic.Source)) // e.g. <source network='default'/> or <source bridge='br0'/>
+
+		var domainSource DomainSource
+		if nic.Type == "network" {
+			domainSource.Network = nic.Source
+		} else if nic.Type == "bridge" {
+			domainSource.Bridge = nic.Source
+		}
+
+		iface := DomainInterface{
+			Type:    nic.Type,
+			Source:  domainSource,
+			Model:   DomainModel{Type: "virtio"},
+			Address: &DomainAddress{Type: "pci", Bus: "0x01", Slot: fmt.Sprintf("0x%02x", pciSlot), Function: "0x0", Domain: "0x0000"},
+		}
 		if nic.MACAddress != "" {
-			xmlBuilder.WriteString(fmt.Sprintf("      <mac address='%s'/>\n", nic.MACAddress))
+			iface.MAC = &DomainMAC{Address: nic.MACAddress}
 		}
-		if nic.Model == "" {
-			nic.Model = "virtio"
-		}
-		xmlBuilder.WriteString(fmt.Sprintf("      <model type='%s'/>\n", nic.Model))
-		xmlBuilder.WriteString(fmt.Sprintf("      <address type='pci' domain='0x0000' bus='0x00' slot='0x%02x' function='0x0'/>\n", networkPCISlot))
-		xmlBuilder.WriteString("    </interface>\n")
-		networkPCISlot++
+		domain.Devices.Interfaces = append(domain.Devices.Interfaces, iface)
+		pciSlot++
+	}
+
+	domain.Devices.Serials = []DomainSerial{
+		{Type: "pty", Target: &DomainTargetSerial{Port: &port0, Model: &DomainModel{Type: "isa-serial"}}},
+	}
+	domain.Devices.Consoles = []DomainConsole{
+		{Type: "pty", Target: &DomainTargetConsole{Type: "serial", Port: &port0}},
+	}
+	domain.Devices.Channels = []DomainChannel{
+		{
+			Type:    "unix",
+			Target:  &DomainTargetChannel{Type: "virtio", Name: "org.qemu.guest_agent.0"},
+			Address: &DomainAddress{Type: "virtio-serial", Controller: "0", Bus: "0", Port: "1"},
+		},
+	}
+	domain.Devices.Inputs = []DomainInput{
+		{Type: "tablet", Bus: "usb"},
+		{Type: "mouse", Bus: "ps2"},
+		{Type: "keyboard", Bus: "ps2"},
 	}
 
 	if graphicsType == "" {
 		graphicsType = "vnc"
 	}
 	if graphicsType != "none" {
-		xmlBuilder.WriteString(fmt.Sprintf("    <graphics type='%s' port='-1' autoport='yes' listen='0.0.0.0'>\n", graphicsType))
-		xmlBuilder.WriteString("      <listen type='address' address='0.0.0.0'/>\n    </graphics>\n")
-		xmlBuilder.WriteString("    <video>\n      <model type='qxl' ram='65536' vram='65536' vgamem='16384' heads='1' primary='yes'/>\n    </video>\n") // qxl is a good default
+		domain.Devices.Graphics = []DomainGraphic{
+			{
+				Type:     graphicsType,
+				Port:     "-1",
+				Autoport: "yes",
+				Listen:   []DomainListen{{Type: "address", Address: "0.0.0.0"}},
+			},
+		}
+		domain.Devices.Videos = []DomainVideo{
+			{Model: DomainVideoModel{Type: "qxl", VRAM: 65536, Heads: 1, Primary: "yes"}},
+		}
 	}
 
-	xmlBuilder.WriteString("    <serial type='pty'><target type='isa-serial' port='0'><model name='isa-serial'/></target></serial>\n")
-	xmlBuilder.WriteString("    <console type='pty'><target type='serial' port='0'/></console>\n")
-	xmlBuilder.WriteString("    <channel type='unix'>\n      <target type='virtio' name='org.qemu.guest_agent.0'/>\n") // QEMU guest agent channel
-	xmlBuilder.WriteString(fmt.Sprintf("      <address type='virtio-serial' controller='0' bus='0' port='%d'/>\n", 1)) // Port 1 for guest agent
-	xmlBuilder.WriteString("    </channel>\n")
-	xmlBuilder.WriteString("    <input type='tablet' bus='usb'/><input type='mouse' bus='ps2'/><input type='keyboard' bus='ps2'/>\n")
-	xmlBuilder.WriteString(fmt.Sprintf("    <memballoon model='virtio'><address type='pci' domain='0x0000' bus='0x00' slot='0x%02x' function='0x0'/></memballoon>\n", networkPCISlot)) // Next available PCI slot
-	xmlBuilder.WriteString("  </devices>\n</domain>\n")
+	domain.Devices.MemBalloon = &DomainMemBalloon{
+		Model:   "virtio",
+		Address: &DomainAddress{Type: "pci", Bus: "0x01", Slot: fmt.Sprintf("0x%02x", pciSlot), Function: "0x0", Domain: "0x0000"},
+	}
 
-	vmXML := xmlBuilder.String()
+	xmlHeader := `<?xml version="1.0" encoding="UTF-8"?>`
+	xmlBytes, err := xml.MarshalIndent(domain, "  ", "    ")
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal VM domain to XML")
+	}
+	vmXML := xmlHeader + "\n" + string(xmlBytes)
+
 	tempXMLPath := fmt.Sprintf("/tmp/kubexm-vmdef-%s-%d.xml", vmName, time.Now().UnixNano())
 	if err = r.WriteFile(ctx, conn, []byte(vmXML), tempXMLPath, "0600", true); err != nil {
 		return errors.Wrapf(err, "failed to write temp VM XML to %s", tempXMLPath)
 	}
-	defer r.Remove(ctx, conn, tempXMLPath, true)
+	defer r.Remove(ctx, conn, tempXMLPath, true, true)
 
 	defineCmd := fmt.Sprintf("virsh define %s", tempXMLPath)
 	_, stderrDefine, errDefine := conn.Exec(ctx, defineCmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if errDefine != nil {
-		return errors.Wrapf(errDefine, "failed to define VM %s. Stderr: %s\nXML:\n%s", vmName, string(stderrDefine), vmXML)
+		return errors.Wrapf(errDefine, "failed to define VM %s. Stderr: %s\n--- XML DEFINITION ---\n%s", vmName, string(stderrDefine), vmXML)
 	}
 
 	if errStart := r.StartVM(ctx, conn, vmName); errStart != nil {
@@ -873,9 +1055,7 @@ func (r *defaultRunner) AttachDisk(ctx context.Context, conn connector.Connector
 	if driverType != "" {
 		cmdArgs = append(cmdArgs, "--driver", "qemu", "--subdriver", driverType)
 	}
-	// diskType for attach-disk usually means 'cdrom', 'floppy', 'disk', 'lun'. 'file' or 'block' are source types.
-	// For simplicity, we'll assume it's a regular disk and not set --type unless explicitly needed.
-	cmdArgs = append(cmdArgs, "--config", "--live") // Make persistent and apply live
+	cmdArgs = append(cmdArgs, "--config", "--live")
 
 	cmd := strings.Join(cmdArgs, " ")
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
@@ -896,7 +1076,7 @@ func (r *defaultRunner) DetachDisk(ctx context.Context, conn connector.Connector
 	_, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
 	if err != nil {
 		if strings.Contains(string(stderr), "No disk found for target") || strings.Contains(string(stderr), "no target device found") || strings.Contains(string(stderr), "not found") {
-			return nil // Idempotent
+			return nil
 		}
 		return errors.Wrapf(err, "failed to detach disk %s from VM %s. Stderr: %s", targetDeviceOrPath, vmName, string(stderr))
 	}
@@ -950,7 +1130,6 @@ func (r *defaultRunner) SetVMCPUs(ctx context.Context, conn connector.Connector,
 	return nil
 }
 
-// EnsureLibvirtDaemonRunning checks and ensures libvirtd is running.
 func (r *defaultRunner) EnsureLibvirtDaemonRunning(ctx context.Context, conn connector.Connector, facts *Facts) error {
 	if conn == nil {
 		return errors.New("connector cannot be nil")
@@ -959,74 +1138,428 @@ func (r *defaultRunner) EnsureLibvirtDaemonRunning(ctx context.Context, conn con
 		return errors.New("cannot ensure libvirtd state without init system info from facts")
 	}
 
-	serviceName := "libvirtd" // Common name for libvirtd service
+	serviceName := "libvirtd"
 
 	isActive, err := r.IsServiceActive(ctx, conn, facts, serviceName)
 	if err != nil {
-		// If IsServiceActive fails (e.g. service not found), try starting it anyway
-		// as IsServiceActive might be restrictive.
 	}
 	if isActive {
-		// If active, ensure it's enabled
 		if errEnable := r.EnableService(ctx, conn, facts, serviceName); errEnable != nil {
-			// Log warning or return error? For "Ensure", probably error.
 			return errors.Wrapf(errEnable, "libvirtd service is active but failed to enable")
 		}
-		return nil // Active and enabled
+		return nil
 	}
 
-	// Not active, try to start
 	if errStart := r.StartService(ctx, conn, facts, serviceName); errStart != nil {
 		return errors.Wrapf(errStart, "failed to start libvirtd service")
 	}
-	// Started, now enable
 	if errEnable := r.EnableService(ctx, conn, facts, serviceName); errEnable != nil {
 		return errors.Wrapf(errEnable, "libvirtd service started but failed to enable")
 	}
 	return nil
 }
 
-// Placeholder for AttachNetInterface - requires complex XML manipulation or specific virsh commands
 func (r *defaultRunner) AttachNetInterface(ctx context.Context, conn connector.Connector, vmName string, iface VMNetworkInterface, persistent bool) error {
-	return errors.New("AttachNetInterface not fully implemented via CLI runner")
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if vmName == "" || iface.Type == "" || iface.Source == "" {
+		return errors.New("vmName, interface type, and source are required")
+	}
+
+	ifaceModel := iface.Model
+	if ifaceModel == "" {
+		ifaceModel = "virtio"
+	}
+
+	newIface := DomainInterface{
+		XMLName: xml.Name{Local: "interface"},
+		Type:    iface.Type,
+		Model:   DomainModel{Type: ifaceModel},
+	}
+	if iface.Type == "network" {
+		newIface.Source.Network = iface.Source
+	} else if iface.Type == "bridge" {
+		newIface.Source.Bridge = iface.Source
+	} else {
+		return errors.Errorf("unsupported interface type: %s", iface.Type)
+	}
+	if iface.MACAddress != "" {
+		newIface.MAC = &DomainMAC{Address: iface.MACAddress}
+	}
+
+	xmlBytes, err := xml.Marshal(newIface)
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal interface to XML")
+	}
+
+	tempXMLPath := fmt.Sprintf("/tmp/kubexm-iface-attach-%d.xml", time.Now().UnixNano())
+	if err := r.WriteFile(ctx, conn, xmlBytes, tempXMLPath, "0600", true); err != nil {
+		return errors.Wrapf(err, "failed to write temp interface XML to %s", tempXMLPath)
+	}
+	defer r.Remove(ctx, conn, tempXMLPath, true, true)
+
+	cmdArgs := []string{"virsh", "attach-device", vmName, tempXMLPath}
+	if persistent {
+		cmdArgs = append(cmdArgs, "--config")
+	}
+
+	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
+	if err != nil {
+		return errors.Wrapf(err, "failed to attach network interface to %s. Stderr: %s", vmName, string(stderr))
+	}
+	return nil
 }
 
-// Placeholder for DetachNetInterface
 func (r *defaultRunner) DetachNetInterface(ctx context.Context, conn connector.Connector, vmName string, macAddress string, persistent bool) error {
-	return errors.New("DetachNetInterface not fully implemented via CLI runner")
+	if conn == nil {
+		return errors.New("connector cannot be nil")
+	}
+	if vmName == "" || macAddress == "" {
+		return errors.New("vmName and macAddress are required")
+	}
+
+	cmdArgs := []string{"virsh", "detach-interface", vmName, "--type", "network", "--mac", macAddress}
+	if persistent {
+		cmdArgs = append(cmdArgs, "--config", "--live")
+	} else {
+		cmdArgs = append(cmdArgs, "--live")
+	}
+
+	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
+	if err != nil {
+		if strings.Contains(string(stderr), "no interface found with matching mac address") || strings.Contains(string(stderr), "not found") {
+			return nil
+		}
+		return errors.Wrapf(err, "failed to detach network interface %s from %s. Stderr: %s", macAddress, vmName, string(stderr))
+	}
+	return nil
 }
 
-// Placeholder for ListNetInterfaces
 func (r *defaultRunner) ListNetInterfaces(ctx context.Context, conn connector.Connector, vmName string) ([]VMNetworkInterfaceDetail, error) {
-	return nil, errors.New("ListNetInterfaces not fully implemented via CLI runner")
+	details, err := r.GetVMInfo(ctx, conn, vmName)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get VM details for listing interfaces")
+	}
+
+	var domain Domain
+	if err := xml.Unmarshal([]byte(details.RawXML), &domain); err != nil {
+		return nil, errors.Wrap(err, "failed to parse RawXML from VMDetails")
+	}
+
+	var result []VMNetworkInterfaceDetail
+	for _, ifaceInfo := range details.NetworkInterfaces {
+		var ifaceType string
+		var ifaceModel string
+		for _, xmlIface := range domain.Devices.Interfaces {
+			if xmlIface.MAC != nil && xmlIface.MAC.Address == ifaceInfo.MAC {
+				ifaceType = xmlIface.Type
+				ifaceModel = xmlIface.Model.Type
+				break
+			}
+		}
+
+		result = append(result, VMNetworkInterfaceDetail{
+			VMNetworkInterface: VMNetworkInterface{
+				Type:       ifaceType,
+				Source:     ifaceInfo.Source,
+				MACAddress: ifaceInfo.MAC,
+				Model:      ifaceModel,
+			},
+			InterfaceName: ifaceInfo.Name,
+			State:         "active",
+		})
+	}
+	return result, nil
 }
 
-// Placeholder for CreateSnapshot
 func (r *defaultRunner) CreateSnapshot(ctx context.Context, conn connector.Connector, vmName, snapshotName, description string, diskSpecs []VMSnapshotDiskSpec, noMetadata, halt, diskOnly, reuseExisting, quiesce, atomic bool) error {
-	return errors.New("CreateSnapshot not fully implemented via CLI runner")
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "virsh", "snapshot-create-as", vmName)
+
+	if snapshotName != "" {
+		cmdArgs = append(cmdArgs, snapshotName)
+	}
+	if description != "" {
+		cmdArgs = append(cmdArgs, fmt.Sprintf("'%s'", description))
+	}
+	if noMetadata {
+		cmdArgs = append(cmdArgs, "--no-metadata")
+	}
+	if halt {
+		cmdArgs = append(cmdArgs, "--halt")
+	}
+	if diskOnly {
+		cmdArgs = append(cmdArgs, "--disk-only")
+	}
+	if reuseExisting {
+		cmdArgs = append(cmdArgs, "--reuse-external")
+	}
+	if quiesce {
+		cmdArgs = append(cmdArgs, "--quiesce")
+	}
+	if atomic {
+		cmdArgs = append(cmdArgs, "--atomic")
+	}
+
+	for _, spec := range diskSpecs {
+		arg := fmt.Sprintf("--diskspec %s,snapshot=%s", spec.Name, spec.Snapshot)
+		if spec.Snapshot == "external" {
+			if spec.File == "" || spec.DriverType == "" {
+				return errors.New("external snapshot spec requires file and driverType")
+			}
+			arg += fmt.Sprintf(",file=%s,driver=%s", spec.File, spec.DriverType)
+		}
+		cmdArgs = append(cmdArgs, arg)
+	}
+
+	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 5 * time.Minute})
+	if err != nil {
+		return errors.Wrapf(err, "failed to create snapshot '%s' for vm '%s'. Stderr: %s", snapshotName, vmName, string(stderr))
+	}
+	return nil
 }
 
-// Placeholder for DeleteSnapshot
 func (r *defaultRunner) DeleteSnapshot(ctx context.Context, conn connector.Connector, vmName, snapshotName string, children, metadata bool) error {
-	return errors.New("DeleteSnapshot not fully implemented via CLI runner")
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "virsh", "snapshot-delete", vmName, snapshotName)
+
+	if children {
+		cmdArgs = append(cmdArgs, "--children")
+	}
+	if metadata {
+		cmdArgs = append(cmdArgs, "--metadata")
+	}
+
+	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute})
+	if err != nil {
+		if strings.Contains(string(stderr), "snapshot not found") {
+			return nil
+		}
+		return errors.Wrapf(err, "failed to delete snapshot '%s' from vm '%s'. Stderr: %s", snapshotName, vmName, string(stderr))
+	}
+	return nil
 }
 
-// Placeholder for ListSnapshots
 func (r *defaultRunner) ListSnapshots(ctx context.Context, conn connector.Connector, vmName string) ([]VMSnapshotInfo, error) {
-	return nil, errors.New("ListSnapshots not fully implemented via CLI runner")
+	listCmd := fmt.Sprintf("virsh snapshot-list %s --name", vmName)
+	stdout, stderr, err := conn.Exec(ctx, listCmd, &connector.ExecOptions{Sudo: true, Timeout: 1 * time.Minute})
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to list snapshot names for vm '%s'. Stderr: %s", vmName, string(stderr))
+	}
+
+	snapshotNames := strings.Fields(string(stdout))
+	if len(snapshotNames) == 0 {
+		return []VMSnapshotInfo{}, nil
+	}
+
+	var infos []VMSnapshotInfo
+	for _, snapName := range snapshotNames {
+		infoCmd := fmt.Sprintf("virsh snapshot-info %s %s --xml", vmName, snapName)
+		xmlBytes, _, err := conn.Exec(ctx, infoCmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
+		if err != nil {
+			fmt.Printf("Warning: could not get info for snapshot %s: %v\n", snapName, err)
+			continue
+		}
+
+		var snap VMSnapshot
+		if err := xml.Unmarshal(xmlBytes, &snap); err != nil {
+			fmt.Printf("Warning: could not parse xml for snapshot %s: %v\n", snapName, err)
+			continue
+		}
+
+		info := VMSnapshotInfo{
+			Name:        snap.Name,
+			Description: snap.Description,
+			CreatedAt:   time.Unix(snap.CreationTime, 0).Format(time.RFC3339),
+			State:       snap.State,
+			HasParent:   snap.Parent != nil && snap.Parent.Name != "",
+		}
+		if snap.Children != nil {
+			for _, child := range snap.Children {
+				info.Children = append(info.Children, child.Name)
+			}
+		}
+		if snap.Disks != nil {
+			info.Disks = make(map[string]string)
+			for _, disk := range snap.Disks.Disks {
+				info.Disks[disk.Name] = disk.Source.File
+			}
+		}
+		infos = append(infos, info)
+	}
+	return infos, nil
 }
 
-// Placeholder for RevertToSnapshot
 func (r *defaultRunner) RevertToSnapshot(ctx context.Context, conn connector.Connector, vmName, snapshotName string, force, running bool) error {
-	return errors.New("RevertToSnapshot not fully implemented via CLI runner")
+	var cmdArgs []string
+	cmdArgs = append(cmdArgs, "virsh", "snapshot-revert", vmName, snapshotName)
+
+	if force {
+		cmdArgs = append(cmdArgs, "--force")
+	}
+	if running {
+		cmdArgs = append(cmdArgs, "--running")
+	} else {
+		cmdArgs = append(cmdArgs, "--paused")
+	}
+
+	_, stderr, err := conn.Exec(ctx, strings.Join(cmdArgs, " "), &connector.ExecOptions{Sudo: true, Timeout: 2 * time.Minute})
+	if err != nil {
+		return errors.Wrapf(err, "failed to revert vm '%s' to snapshot '%s'. Stderr: %s", vmName, snapshotName, string(stderr))
+	}
+	return nil
 }
 
-// Placeholder for GetVMInfo (more detailed than dominfo)
 func (r *defaultRunner) GetVMInfo(ctx context.Context, conn connector.Connector, vmName string) (*VMDetails, error) {
-	return nil, errors.New("GetVMInfo (detailed XML parsing) not fully implemented via CLI runner")
+	if conn == nil {
+		return nil, errors.New("connector cannot be nil")
+	}
+	if vmName == "" {
+		return nil, errors.New("vmName cannot be empty")
+	}
+
+	dumpxmlCmd := fmt.Sprintf("virsh dumpxml %s", vmName)
+	xmlBytes, stderr, err := conn.Exec(ctx, dumpxmlCmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get XML for VM %s. Stderr: %s", vmName, string(stderr))
+	}
+	rawXML := string(xmlBytes)
+
+	var domain Domain
+	if err := xml.Unmarshal(xmlBytes, &domain); err != nil {
+		return nil, errors.Wrap(err, "failed to parse VM XML")
+	}
+
+	state, err := r.GetVMState(ctx, conn, vmName)
+	if err != nil {
+		state = "unknown"
+	}
+
+	dominfoCmd := fmt.Sprintf("virsh dominfo %s", vmName)
+	infoStdout, _, _ := conn.Exec(ctx, dominfoCmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
+	autostart := strings.Contains(string(infoStdout), "Autostart:      enable")
+	persistent := strings.Contains(string(infoStdout), "Persistent:     yes")
+
+	memMB := domain.Memory.Value
+	unit := strings.ToLower(domain.Memory.Unit)
+	if unit == "kib" {
+		memMB /= 1024
+	} else if unit == "gib" {
+		memMB *= 1024
+	}
+
+	details := &VMDetails{
+		VMInfo: VMInfo{
+			Name:   domain.Name,
+			State:  state,
+			CPUs:   int(domain.VCPU.Value),
+			Memory: memMB,
+			UUID:   domain.UUID,
+		},
+		OSVariant:        domain.OS.Variant.ID,
+		DomainType:       domain.Type,
+		Architecture:     domain.OS.Type.Arch,
+		EmulatorPath:     domain.Devices.Emulator,
+		PersistentConfig: persistent,
+		Autostart:        autostart,
+		EffectiveMemory:  domain.CurrentMemory.Value,
+		EffectiveVCPUs:   domain.VCPU.Value,
+		RawXML:           rawXML,
+	}
+
+	for _, g := range domain.Devices.Graphics {
+		gi := VMGraphicsInfo{
+			Type:     g.Type,
+			Port:     g.Port,
+			Password: g.Password,
+			Keymap:   g.Keymap,
+		}
+		if len(g.Listen) > 0 {
+			gi.Listen = g.Listen[0].Address
+		}
+		details.Graphics = append(details.Graphics, gi)
+	}
+
+	for _, d := range domain.Devices.Disks {
+		bdi := VMBlockDeviceInfo{
+			Device:     d.Target.Dev,
+			Type:       d.Device,
+			SourceFile: d.Source.File,
+			DriverType: d.Driver.Type,
+			TargetBus:  d.Target.Bus,
+		}
+		details.Disks = append(details.Disks, bdi)
+	}
+
+	for _, iface := range domain.Devices.Interfaces {
+		if iface.MAC == nil {
+			continue
+		}
+		vii := VMInterfaceInfo{
+			Name:       iface.Target.Dev,
+			MAC:        iface.MAC.Address,
+			DeviceName: iface.Target.Dev,
+		}
+		if iface.Source.Network != "" {
+			vii.Source = iface.Source.Network
+		} else if iface.Source.Bridge != "" {
+			vii.Source = iface.Source.Bridge
+		}
+
+		domifaddrCmd := fmt.Sprintf("virsh domifaddr %s %s", vmName, vii.MAC)
+		ipStdout, _, err := conn.Exec(ctx, domifaddrCmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
+		if err == nil {
+			lines := strings.Split(string(ipStdout), "\n")
+			for _, line := range lines {
+				parts := strings.Fields(line)
+				if len(parts) >= 4 && (parts[2] == "ipv4" || parts[2] == "ipv6") {
+					ipParts := strings.Split(parts[3], "/")
+					if len(ipParts) == 2 {
+						prefix, _ := strconv.Atoi(ipParts[1])
+						vii.IPAddresses = append(vii.IPAddresses, VMInterfaceAddress{
+							Addr:   ipParts[0],
+							Prefix: prefix,
+						})
+					}
+				}
+			}
+		}
+		details.NetworkInterfaces = append(details.NetworkInterfaces, vii)
+	}
+
+	return details, nil
 }
 
-// Placeholder for GetVNCPort
 func (r *defaultRunner) GetVNCPort(ctx context.Context, conn connector.Connector, vmName string) (string, error) {
-	return "", errors.New("GetVNCPort not fully implemented via CLI runner (requires XML parsing)")
+	details, err := r.GetVMInfo(ctx, conn, vmName)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to get VM details for VNC port lookup")
+	}
+
+	for _, graphic := range details.Graphics {
+		if strings.ToLower(graphic.Type) == "vnc" {
+			if graphic.Port != "-1" && graphic.Port != "" {
+				return graphic.Port, nil
+			}
+			cmd := fmt.Sprintf("virsh vncdisplay %s", vmName)
+			stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: 30 * time.Second})
+			if err != nil {
+				return "", errors.Wrapf(err, "failed to get VNC display for vm %s. Stderr: %s", vmName, string(stderr))
+			}
+
+			displayStr := strings.TrimSpace(string(stdout))
+			parts := strings.Split(displayStr, ":")
+			if len(parts) < 2 {
+				return "", errors.Errorf("unexpected output from 'virsh vncdisplay': %s", displayStr)
+			}
+			displayNum, err := strconv.Atoi(parts[len(parts)-1])
+			if err != nil {
+				return "", errors.Wrapf(err, "failed to parse VNC display number from '%s'", displayStr)
+			}
+			return strconv.Itoa(5900 + displayNum), nil
+		}
+	}
+
+	return "", errors.New("no VNC graphics device found for VM")
 }

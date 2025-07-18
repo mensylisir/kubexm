@@ -8,15 +8,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/connector"
 )
 
-// Constants for PackageInfo, already defined in interface.go and runner.go (via interface embedding)
-// They are good here for reference or if this file were to be used more independently.
-// However, to avoid re-declaration if these files are part of the same package build,
-// these might be removed if they are truly identical to those in interface.go's type block.
-// For this refactor, assuming the type definitions in interface.go are canonical for the package.
-
-// detectPackageManager is now a private method of defaultRunner, located in runner.go
-
-// InstallPackages installs one or more packages.
 func (r *defaultRunner) InstallPackages(ctx context.Context, conn connector.Connector, facts *Facts, packages ...string) error {
 	if conn == nil {
 		return fmt.Errorf("connector cannot be nil")
@@ -28,8 +19,19 @@ func (r *defaultRunner) InstallPackages(ctx context.Context, conn connector.Conn
 		return fmt.Errorf("no packages specified for installation")
 	}
 
+	packagesToInstall := []string{}
+	for _, pkg := range packages {
+		installed, _ := r.IsPackageInstalled(ctx, conn, facts, pkg)
+		if !installed {
+			packagesToInstall = append(packagesToInstall, pkg)
+		}
+	}
+	if len(packagesToInstall) == 0 {
+		return nil
+	}
+
 	pmInfo := facts.PackageManager
-	packageStr := strings.Join(packages, " ")
+	packageStr := strings.Join(packagesToInstall, " ")
 	cmd := fmt.Sprintf(pmInfo.InstallCmd, packageStr)
 
 	_, _, execErr := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: true})
@@ -39,7 +41,6 @@ func (r *defaultRunner) InstallPackages(ctx context.Context, conn connector.Conn
 	return nil
 }
 
-// RemovePackages removes one or more packages.
 func (r *defaultRunner) RemovePackages(ctx context.Context, conn connector.Connector, facts *Facts, packages ...string) error {
 	if conn == nil {
 		return fmt.Errorf("connector cannot be nil")
@@ -62,7 +63,6 @@ func (r *defaultRunner) RemovePackages(ctx context.Context, conn connector.Conne
 	return nil
 }
 
-// UpdatePackageCache updates the local package cache (e.g., apt-get update).
 func (r *defaultRunner) UpdatePackageCache(ctx context.Context, conn connector.Connector, facts *Facts) error {
 	if conn == nil {
 		return fmt.Errorf("connector cannot be nil")
@@ -80,7 +80,6 @@ func (r *defaultRunner) UpdatePackageCache(ctx context.Context, conn connector.C
 	return nil
 }
 
-// IsPackageInstalled checks if a single package is installed.
 func (r *defaultRunner) IsPackageInstalled(ctx context.Context, conn connector.Connector, facts *Facts, packageName string) (bool, error) {
 	if conn == nil {
 		return false, fmt.Errorf("connector cannot be nil")
@@ -111,7 +110,6 @@ func (r *defaultRunner) IsPackageInstalled(ctx context.Context, conn connector.C
 	return false, fmt.Errorf("package installed check not fully implemented for %s or query failed: %v", pmInfo.Type, execErr)
 }
 
-// AddRepository adds a software repository.
 func (r *defaultRunner) AddRepository(ctx context.Context, conn connector.Connector, facts *Facts, repoConfig string, isFilePath bool) error {
 	if conn == nil {
 		return fmt.Errorf("connector cannot be nil")
@@ -124,7 +122,6 @@ func (r *defaultRunner) AddRepository(ctx context.Context, conn connector.Connec
 	if pmInfo.Type == PackageManagerApt {
 		if !isFilePath {
 			if _, err := r.LookPath(ctx, conn, "add-apt-repository"); err != nil {
-				// Pass facts to InstallPackages
 				if installErr := r.InstallPackages(ctx, conn, facts, "software-properties-common"); installErr != nil {
 					return fmt.Errorf("failed to install software-properties-common (for add-apt-repository): %w", installErr)
 				}
@@ -134,20 +131,20 @@ func (r *defaultRunner) AddRepository(ctx context.Context, conn connector.Connec
 			if execErr != nil {
 				return fmt.Errorf("failed to add apt repository '%s': %w", repoConfig, execErr)
 			}
-			return r.UpdatePackageCache(ctx, conn, facts) // Pass facts
+			return r.UpdatePackageCache(ctx, conn, facts)
 		}
 		return fmt.Errorf("AddRepository for apt with file path not yet implemented")
 
 	} else if pmInfo.Type == PackageManagerYum || pmInfo.Type == PackageManagerDnf {
 		if isFilePath {
-			return fmt.Errorf("AddRepository for yum/dnf with file content not fully implemented (needs dest path)")
+			destRepoPath := "/etc/yum.repos.d/kubexm.repo"
+			return r.WriteFile(ctx, conn, []byte(repoConfig), destRepoPath, "0644", true)
 		} else {
 			cmd := ""
 			if pmInfo.Type == PackageManagerDnf {
 				cmd = fmt.Sprintf("dnf config-manager --add-repo %s", repoConfig)
 			} else {
 				if _, err := r.LookPath(ctx, conn, "yum-config-manager"); err != nil {
-					// Pass facts to InstallPackages
 					if installErr := r.InstallPackages(ctx, conn, facts, "yum-utils"); installErr != nil {
 						return fmt.Errorf("failed to install yum-utils (for yum-config-manager): %w", installErr)
 					}

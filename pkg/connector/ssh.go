@@ -345,7 +345,7 @@ func (s *SSHConnector) sudoWrite(ctx context.Context, content io.Reader, dstPath
 	}
 
 	if opts.Permissions != "" {
-		if _, err := strconv.ParseUint(opts.Permissions, 8, 32); err != nil { // Validate format
+		if _, err := strconv.ParseUint(opts.Permissions, 8, 32); err != nil {
 			return fmt.Errorf("invalid permissions format '%s': %w", opts.Permissions, err)
 		}
 		chmodCmd := fmt.Sprintf("chmod %s %s", shellEscape(opts.Permissions), shellEscape(dstPath))
@@ -959,4 +959,8 @@ func (s *SSHConnector) copyDirViaTar(ctx context.Context, srcDir, dstDir string,
 	}
 
 	return nil
+}
+
+func (s *SSHConnector) GetConnectionConfig() ConnectionCfg {
+	return s.connCfg
 }

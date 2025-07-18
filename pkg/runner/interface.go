@@ -74,6 +74,7 @@ type ServiceInfo struct {
 
 type Runner interface {
 	GatherFacts(ctx context.Context, conn connector.Connector) (*Facts, error)
+	DetermineSudo(ctx context.Context, conn connector.Connector, path string) (bool, error)
 	Run(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (string, error)
 	MustRun(ctx context.Context, conn connector.Connector, cmd string, sudo bool) string
 	Check(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (bool, error)
@@ -90,7 +91,7 @@ type Runner interface {
 	ReadFile(ctx context.Context, conn connector.Connector, path string) ([]byte, error)
 	WriteFile(ctx context.Context, conn connector.Connector, content []byte, destPath, permissions string, sudo bool) error
 	Mkdirp(ctx context.Context, conn connector.Connector, path, permissions string, sudo bool) error
-	Remove(ctx context.Context, conn connector.Connector, path string, sudo bool) error
+	Remove(ctx context.Context, conn connector.Connector, path string, sudo bool, recursive bool) error
 	Chmod(ctx context.Context, conn connector.Connector, path, permissions string, sudo bool) error
 	Chown(ctx context.Context, conn connector.Connector, path, owner, group string, recursive bool) error
 	GetSHA256(ctx context.Context, conn connector.Connector, path string) (string, error)
@@ -99,6 +100,7 @@ type Runner interface {
 	WaitForPort(ctx context.Context, conn connector.Connector, facts *Facts, port int, timeout time.Duration) error
 	SetHostname(ctx context.Context, conn connector.Connector, facts *Facts, hostname string) error
 	AddHostEntry(ctx context.Context, conn connector.Connector, ip, fqdn string, hostnames ...string) error
+	EnsureHostEntry(ctx context.Context, conn connector.Connector, ip, fqdn string, hostnames ...string) error
 	InstallPackages(ctx context.Context, conn connector.Connector, facts *Facts, packages ...string) error
 	RemovePackages(ctx context.Context, conn connector.Connector, facts *Facts, packages ...string) error
 	UpdatePackageCache(ctx context.Context, conn connector.Connector, facts *Facts) error
@@ -141,9 +143,6 @@ type Runner interface {
 	Reboot(ctx context.Context, conn connector.Connector, timeout time.Duration) error
 	RenderToString(ctx context.Context, tmpl *template.Template, data interface{}) (string, error)
 	CreateVMTemplate(ctx context.Context, conn connector.Connector, name string, osVariant string, memoryMB uint, vcpus uint, diskPath string, diskSizeGB uint, network string, graphicsType string, cloudInitISOPath string) error
-	ImportVMTemplate(ctx context.Context, conn connector.Connector, name string, filePath string) error
-	RefreshStoragePool(ctx context.Context, conn connector.Connector, poolName string) error
-	CreateStoragePool(ctx context.Context, conn connector.Connector, name string, poolType string, targetPath string) error
 	StoragePoolExists(ctx context.Context, conn connector.Connector, poolName string) (bool, error)
 	DeleteStoragePool(ctx context.Context, conn connector.Connector, poolName string) error
 	VolumeExists(ctx context.Context, conn connector.Connector, poolName string, volName string) (bool, error)
@@ -152,7 +151,7 @@ type Runner interface {
 	DeleteVolume(ctx context.Context, conn connector.Connector, poolName string, volName string) error
 	CreateVolume(ctx context.Context, conn connector.Connector, poolName string, volName string, sizeGB uint, format string, backingVolName string, backingVolFormat string) error
 	CreateCloudInitISO(ctx context.Context, conn connector.Connector, vmName string, isoDestPath string, userData string, metaData string, networkConfig string) error
-	CreateVM(ctx context.Context, conn connector.Connector, vmName string, memoryMB uint, vcpus uint, osVariant string, diskPaths []string, networkInterfaces []VMNetworkInterface, graphicsType string, cloudInitISOPath string, bootOrder []string, extraArgs []string) error
+	CreateVM(ctx context.Context, conn connector.Connector, facts *Facts, vmName string, memoryMB uint, vcpus uint, osVariant string, diskPaths []string, networkInterfaces []VMNetworkInterface, graphicsType string, cloudInitISOPath string, bootOrder []string, extraArgs []string) error
 	VMExists(ctx context.Context, conn connector.Connector, vmName string) (bool, error)
 	StartVM(ctx context.Context, conn connector.Connector, vmName string) error
 	ShutdownVM(ctx context.Context, conn connector.Connector, vmName string, force bool, timeout time.Duration) error
@@ -160,6 +159,9 @@ type Runner interface {
 	UndefineVM(ctx context.Context, conn connector.Connector, vmName string, deleteSnapshots bool, deleteStorage bool, storagePools []string) error
 	GetVMState(ctx context.Context, conn connector.Connector, vmName string) (string, error)
 	ListVMs(ctx context.Context, conn connector.Connector, all bool) ([]VMInfo, error)
+	ImportVMTemplate(ctx context.Context, conn connector.Connector, name string, filePath string) error
+	RefreshStoragePool(ctx context.Context, conn connector.Connector, poolName string) error
+	CreateStoragePool(ctx context.Context, conn connector.Connector, name string, poolType string, targetPath string) error
 	AttachDisk(ctx context.Context, conn connector.Connector, vmName string, diskPath string, targetDevice string, diskType string, driverType string) error
 	DetachDisk(ctx context.Context, conn connector.Connector, vmName string, targetDeviceOrPath string) error
 	SetVMMemory(ctx context.Context, conn connector.Connector, vmName string, memoryMB uint, current bool) error
@@ -206,6 +208,10 @@ type Runner interface {
 	GetDockerDaemonConfig(ctx context.Context, conn connector.Connector) (*DockerDaemonOptions, error)
 	ConfigureDockerDaemon(ctx context.Context, conn connector.Connector, opts DockerDaemonOptions, restartService bool) error
 	EnsureDefaultDockerConfig(ctx context.Context, conn connector.Connector, facts *Facts, restartService bool) error
+	EnsureDockerServiceFiles(ctx context.Context, conn connector.Connector, facts *Facts) error
+	ConfigureDockerDropIn(ctx context.Context, conn connector.Connector, facts *Facts, content string) error
+	EnsureCriDockerdService(ctx context.Context, conn connector.Connector, facts *Facts) error
+	EnsureDockerService(ctx context.Context, c connector.Connector) error
 	CtrListNamespaces(ctx context.Context, conn connector.Connector) ([]string, error)
 	CtrListImages(ctx context.Context, conn connector.Connector, namespace string) ([]CtrImageInfo, error)
 	CtrPullImage(ctx context.Context, conn connector.Connector, namespace, imageName string, allPlatforms bool, user string) error
@@ -245,10 +251,12 @@ type Runner interface {
 	CrictlRuntimeConfig(ctx context.Context, conn connector.Connector) (string, error)
 	CrictlStats(ctx context.Context, conn connector.Connector, resourceID string, outputFormat string) (string, error)
 	CrictlPodStats(ctx context.Context, conn connector.Connector, outputFormat string, podID string) (string, error)
-	ConfigureCrictl(ctx context.Context, conn connector.Connector, configFileContent string, configFilePath string) error
+	ConfigureCrictl(ctx context.Context, conn connector.Connector, opts CrictlConfigOptions, configFilePath string) error
 	EnsureDefaultContainerdConfig(ctx context.Context, conn connector.Connector, facts *Facts) error
 	GetContainerdConfig(ctx context.Context, conn connector.Connector) (*ContainerdConfigOptions, error)
 	ConfigureContainerd(ctx context.Context, conn connector.Connector, facts *Facts, opts ContainerdConfigOptions, restartService bool) error
+	EnsureContainerdService(ctx context.Context, conn connector.Connector, facts *Facts) error
+	ConfigureContainerdDropIn(ctx context.Context, conn connector.Connector, facts *Facts, content string) error
 	HelmInstall(ctx context.Context, conn connector.Connector, releaseName, chartPath string, opts HelmInstallOptions) error
 	HelmUninstall(ctx context.Context, conn connector.Connector, releaseName string, opts HelmUninstallOptions) error
 	HelmList(ctx context.Context, conn connector.Connector, opts HelmListOptions) ([]HelmReleaseInfo, error)
@@ -1404,21 +1412,6 @@ type IndexInfo struct {
 	Official bool
 }
 
-type VMNetworkInterface struct {
-	Type       string
-	Source     string
-	Model      string
-	MACAddress string
-}
-
-type VMInfo struct {
-	Name   string
-	State  string
-	CPUs   int
-	Memory uint
-	UUID   string
-}
-
 type UserModifications struct {
 	NewUsername         *string
 	NewPrimaryGroup     *string
@@ -1442,6 +1435,22 @@ type UserInfo struct {
 	Shell          string
 	Groups         []string
 	PasswordStatus string
+}
+
+type VMNetworkInterface struct {
+	Type       string
+	Source     string
+	Model      string
+	MACAddress string
+}
+
+type VMInfo struct {
+	Name   string
+	State  string
+	CPUs   int
+	Memory uint
+	UUID   string
+	Error  string `json:"error,omitempty"`
 }
 
 type VMNetworkInterfaceDetail struct {
@@ -1477,6 +1486,7 @@ type VMInterfaceInfo struct {
 	MAC         string               `json:"mac"`
 	Source      string               `json:"source,omitempty"`
 	IPAddresses []VMInterfaceAddress `json:"ip-addresses,omitempty"`
+	DeviceName  string               `json:"deviceName"`
 }
 
 type VMBlockDeviceInfo struct {
@@ -1682,4 +1692,12 @@ type KubectlPatchOptions struct {
 	Local          bool
 	DryRun         string
 	Sudo           bool
+}
+
+type CrictlConfigOptions struct {
+	RuntimeEndpoint   string `yaml:"runtime-endpoint,omitempty" json:"runtime-endpoint,omitempty"`
+	ImageEndpoint     string `yaml:"image-endpoint,omitempty" json:"image-endpoint,omitempty"`
+	Timeout           *int   `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	Debug             *bool  `yaml:"debug,omitempty" json:"debug,omitempty"`
+	PullImageOnCreate *bool  `yaml:"pull-image-on-create,omitempty" json:"pull-image-on-create,omitempty"`
 }
