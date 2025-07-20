@@ -3,8 +3,7 @@ package runner
 import (
 	"context"
 	"fmt"
-	"strings" // Needed for TrimSpace
-	// "time" // May be needed later
+	"strings"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 )

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 )
@@ -442,4 +443,113 @@ func (r *defaultRunner) CreateSymlink(ctx context.Context, conn connector.Connec
 		return fmt.Errorf("failed to create symlink from %s to %s: %w (stderr: %s)", target, linkPath, err, string(stderr))
 	}
 	return nil
+}
+
+func (r *defaultRunner) VerifyChecksum(ctx context.Context, conn connector.Connector, filePath, expectedChecksum, checksumType string, sudo bool) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil")
+	}
+	if filePath == "" || expectedChecksum == "" || checksumType == "" {
+		return fmt.Errorf("filePath, expectedChecksum, and checksumType must not be empty")
+	}
+
+	var cmd string
+	var checksumTool string
+
+	switch strings.ToLower(checksumType) {
+	case "sha256":
+		if _, err := r.LookPath(ctx, conn, "sha256sum"); err == nil {
+			checksumTool = "sha256sum"
+			cmd = fmt.Sprintf("sha256sum %s | awk '{print $1}'", filePath)
+		} else if _, err := r.LookPath(ctx, conn, "shasum"); err == nil {
+			checksumTool = "shasum -a 256"
+			cmd = fmt.Sprintf("shasum -a 256 %s | awk '{print $1}'", filePath)
+		} else {
+			return fmt.Errorf("no sha256sum or shasum command found on the remote host")
+		}
+
+	case "sha512":
+		if _, err := r.LookPath(ctx, conn, "sha512sum"); err == nil {
+			checksumTool = "sha512sum"
+			cmd = fmt.Sprintf("sha512sum %s | awk '{print $1}'", filePath)
+		} else if _, err := r.LookPath(ctx, conn, "shasum"); err == nil {
+			checksumTool = "shasum -a 512"
+			cmd = fmt.Sprintf("shasum -a 512 %s | awk '{print $1}'", filePath)
+		} else {
+			return fmt.Errorf("no sha512sum or shasum command found on the remote host")
+		}
+
+	case "md5":
+		if _, err := r.LookPath(ctx, conn, "md5sum"); err == nil {
+			checksumTool = "md5sum"
+			cmd = fmt.Sprintf("md5sum %s | awk '{print $1}'", filePath)
+		} else if _, err := r.LookPath(ctx, conn, "md5"); err == nil {
+			checksumTool = "md5"
+			cmd = fmt.Sprintf("md5 -r %s | awk '{print $1}'", filePath)
+		} else {
+			return fmt.Errorf("no md5sum or md5 command found on the remote host")
+		}
+	default:
+		return fmt.Errorf("unsupported checksum type: %s", checksumType)
+	}
+	r.logger.Debug("Executing remote checksum command", "tool", checksumTool, "path", filePath)
+	stdoutBytes, stderrBytes, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: sudo})
+	if err != nil {
+		return fmt.Errorf("failed to calculate remote checksum for %s: %w. Stderr: %s", filePath, err, string(stderrBytes))
+	}
+	calculatedChecksum := strings.TrimSpace(string(stdoutBytes))
+	expectedChecksum = strings.ToLower(strings.TrimSpace(expectedChecksum))
+	calculatedChecksum = strings.ToLower(calculatedChecksum)
+
+	if calculatedChecksum != expectedChecksum {
+		return fmt.Errorf("checksum mismatch for %s: expected %s, got %s", filePath, expectedChecksum, calculatedChecksum)
+	}
+	r.logger.Debug("Remote checksum verified successfully", "path", filePath)
+	return nil
+}
+
+type remoteFileInfo struct {
+	name  string
+	mode  os.FileMode
+	isDir bool
+}
+
+func (rfi *remoteFileInfo) Name() string       { return rfi.name }
+func (rfi *remoteFileInfo) Size() int64        { return 0 }
+func (rfi *remoteFileInfo) Mode() os.FileMode  { return rfi.mode }
+func (rfi *remoteFileInfo) ModTime() time.Time { return time.Time{} }
+func (rfi *remoteFileInfo) IsDir() bool        { return rfi.isDir }
+func (rfi *remoteFileInfo) Sys() interface{}   { return nil }
+
+func (r *defaultRunner) Stat(ctx context.Context, conn connector.Connector, path string) (os.FileInfo, error) {
+	cmd := fmt.Sprintf("stat -c \"%%a %%F\" %s", path)
+	output, err := r.Run(ctx, conn, cmd, false)
+
+	if err != nil {
+		if strings.Contains(strings.ToLower(output), "no such file or directory") {
+			return nil, fmt.Errorf("stat failed for %s: %w", path, os.ErrNotExist)
+		}
+		return nil, fmt.Errorf("failed to run remote stat on %s: %w. Output: %s", path, err, output)
+	}
+
+	parts := strings.Split(strings.TrimSpace(output), " ")
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("unexpected output from remote stat: %q", output)
+	}
+
+	perm, err := strconv.ParseUint(parts[0], 8, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse permissions from stat output %q: %w", output, err)
+	}
+
+	fileType := parts[1]
+	isDir := fileType == "directory"
+
+	info := &remoteFileInfo{
+		name:  path,
+		mode:  os.FileMode(perm),
+		isDir: isDir,
+	}
+
+	return info, nil
 }

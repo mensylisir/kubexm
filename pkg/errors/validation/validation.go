@@ -36,14 +36,10 @@ func (v *ValidationErrors) Count() int {
 	return len(v.errors)
 }
 
-// Clear removes all  errors.
 func (v *ValidationErrors) Clear() {
 	v.errors = nil
 }
 
-// GetErrors returns all validation errors as a slice.
 func (v *ValidationErrors) GetErrors() []string {
 	return v.errors
 }
-
-// Network validation functions

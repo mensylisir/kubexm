@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/logger"
 	"net"
 	"sort"
 	"strconv"
@@ -93,7 +94,8 @@ func SplitCIDR(n *net.IPNet) ([]*net.IPNet, error) {
 }
 
 func Summarize(networks []*net.IPNet) []*net.IPNet {
-	fmt.Println("Summarize is an advanced function. A robust implementation requires a dedicated library.")
+	log := logger.Get()
+	log.Info("Summarize is an advanced function. A robust implementation requires a dedicated library.")
 	return networks
 }
 

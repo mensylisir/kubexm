@@ -2,9 +2,9 @@ package plan
 
 // This file is intentionally left sparse.
 // Core graph types (NodeID, ExecutionGraph, ExecutionNode) and their methods
-// are defined in graph_plan.go.
+// are defined in graph.go.
 // Result types (Status, GraphExecutionResult, NodeResult, HostResult)
-// are defined in graph_result.go.
+// are defined in result.go.
 
 // It can be used for future high-level planning interfaces or concepts
 // not directly tied to graph structure or results.

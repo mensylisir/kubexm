@@ -8,12 +8,11 @@ import (
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/resource"
 	"github.com/mensylisir/kubexm/pkg/runtime"
-	"github.com/mensylisir/kubexm/pkg/step/docker" // Import new docker steps
+	containerdSteps "github.com/mensylisir/kubexm/pkg/step/containerd" // For ServiceAction type
+	"github.com/mensylisir/kubexm/pkg/step/docker"                     // Import new docker steps
 	"github.com/mensylisir/kubexm/pkg/step/preflight"
 	"github.com/mensylisir/kubexm/pkg/task"
-	containerdSteps "github.com/mensylisir/kubexm/pkg/step/containerd" // For ServiceAction type
 )
 
 // InstallDockerTask installs Docker and cri-dockerd.
@@ -72,7 +71,7 @@ func (t *InstallDockerTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragme
 			t.DockerDaemonConfig.CgroupDriver = dockerCfg.CgroupDriver
 			// Ensure exec-opts is cleared or reconciled if CgroupDriver is set
 			if dockerCfg.CgroupDriver == "systemd" && !contains(t.DockerDaemonConfig.ExecOpts, "native.cgroupdriver=systemd") {
-				 t.DockerDaemonConfig.ExecOpts = append(t.DockerDaemonConfig.ExecOpts, "native.cgroupdriver=systemd")
+				t.DockerDaemonConfig.ExecOpts = append(t.DockerDaemonConfig.ExecOpts, "native.cgroupdriver=systemd")
 			} else if dockerCfg.CgroupDriver != "systemd" {
 				// remove native.cgroupdriver=systemd from execOpts if user specified other
 				var newExecOpts []string
@@ -84,9 +83,15 @@ func (t *InstallDockerTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragme
 				t.DockerDaemonConfig.ExecOpts = newExecOpts
 			}
 		}
-		if dockerCfg.LogDriver != "" { t.DockerDaemonConfig.LogDriver = dockerCfg.LogDriver }
-		if len(dockerCfg.LogOpts) > 0 { t.DockerDaemonConfig.LogOpts = dockerCfg.LogOpts }
-		if dockerCfg.StorageDriver != "" { t.DockerDaemonConfig.StorageDriver = dockerCfg.StorageDriver }
+		if dockerCfg.LogDriver != "" {
+			t.DockerDaemonConfig.LogDriver = dockerCfg.LogDriver
+		}
+		if len(dockerCfg.LogOpts) > 0 {
+			t.DockerDaemonConfig.LogOpts = dockerCfg.LogOpts
+		}
+		if dockerCfg.StorageDriver != "" {
+			t.DockerDaemonConfig.StorageDriver = dockerCfg.StorageDriver
+		}
 
 		// Populate cri-dockerd args if specified in config
 		if cfg.Spec.ContainerRuntime.Docker.CriDockerd != nil {
@@ -94,9 +99,10 @@ func (t *InstallDockerTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragme
 		}
 	}
 
-
 	targetHosts, err := ctx.GetHostsByRole(t.BaseTask.RunOnRoles...)
-	if err != nil { return nil, fmt.Errorf("failed to get hosts for task %s: %w", t.Name(), err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to get hosts for task %s: %w", t.Name(), err)
+	}
 	if len(targetHosts) == 0 {
 		logger.Info("No target hosts found, returning empty fragment.")
 		return task.NewEmptyFragment(), nil
@@ -108,7 +114,7 @@ func (t *InstallDockerTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragme
 	// Docker engine itself is installed via package manager, so no direct binary resource handle for it.
 	criDockerdVersion := "0.3.10" // Example, should come from cfg.Spec.ContainerRuntime.Docker.CriDockerdVersion or similar
 	cniPluginsVersion := "v1.4.0" // Example, consistent with containerd task, should come from config
-	arch := "" // Auto-detect
+	arch := ""                    // Auto-detect
 
 	allLocalResourcePrepFragments := []*task.ExecutionFragment{}
 
@@ -119,12 +125,15 @@ func (t *InstallDockerTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragme
 		cfg.Spec.ContainerRuntime.GetCriDockerdChecksum(arch),
 		"sha256",
 	)
-	if err != nil { return nil, fmt.Errorf("failed to create cri-dockerd archive handle: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cri-dockerd archive handle: %w", err)
+	}
 	criDockerdPrepFragment, err := criDockerdHandle.EnsurePlan(ctx)
-	if err != nil { return nil, fmt.Errorf("failed to plan cri-dockerd archive acquisition: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to plan cri-dockerd archive acquisition: %w", err)
+	}
 	allLocalResourcePrepFragments = append(allLocalResourcePrepFragments, criDockerdPrepFragment)
 	localCriDockerdArchivePath := criDockerdHandle.(*resource.RemoteBinaryHandle).BinaryInfo().FilePath
-
 
 	// CNI Plugins Archive Handle (same as in containerd task)
 	cniPluginsHandle, err := resource.NewRemoteBinaryHandle(ctx,
@@ -133,9 +142,13 @@ func (t *InstallDockerTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragme
 		cfg.Spec.ContainerRuntime.GetCNIChecksum(arch),
 		"sha256",
 	)
-	if err != nil { return nil, fmt.Errorf("failed to create CNI plugins archive handle: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to create CNI plugins archive handle: %w", err)
+	}
 	cniPluginsPrepFragment, err := cniPluginsHandle.EnsurePlan(ctx)
-	if err != nil { return nil, fmt.Errorf("failed to plan CNI plugins archive acquisition: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to plan CNI plugins archive acquisition: %w", err)
+	}
 	allLocalResourcePrepFragments = append(allLocalResourcePrepFragments, cniPluginsPrepFragment)
 	localCNIPluginsArchivePath := cniPluginsHandle.(*resource.RemoteBinaryHandle).BinaryInfo().FilePath
 
@@ -154,7 +167,9 @@ func (t *InstallDockerTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragme
 	}
 	controlNodeOpsDoneDependencies := mergedLocalResourceFragment.ExitNodes
 	if len(controlNodeOpsDoneDependencies) == 0 && len(mergedLocalResourceFragment.Nodes) > 0 {
-		for id := range mergedLocalResourceFragment.Nodes { controlNodeOpsDoneDependencies = append(controlNodeOpsDoneDependencies, id)}
+		for id := range mergedLocalResourceFragment.Nodes {
+			controlNodeOpsDoneDependencies = append(controlNodeOpsDoneDependencies, id)
+		}
 	}
 
 	// --- 2. Pre-flight OS configuration on all target nodes ---
@@ -194,10 +209,9 @@ func (t *InstallDockerTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragme
 		perHostBaseDependencies = append(perHostBaseDependencies, plan.NodeID(fmt.Sprintf("preflight-set-sysctl-docker-%s", host.GetName())))
 		currentHostLastOpNodeID := plan.NodeID("")
 
-
 		// Install Docker Engine (package based)
 		dockerPackages := cfg.Spec.ContainerRuntime.Docker.Packages // Assuming this field exists in v1alpha1.DockerConfig
-		if len(dockerPackages) == 0 { // Provide defaults if not specified
+		if len(dockerPackages) == 0 {                               // Provide defaults if not specified
 			dockerPackages = []string{"docker-ce", "docker-ce-cli", "containerd.io"} // Note: containerd.io is often a dep for docker-ce
 		}
 		// TODO: ExtraRepoSetupCmds might be OS-dependent, determined from facts or a more detailed config.
@@ -261,13 +275,11 @@ func (t *InstallDockerTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragme
 		// Assume docker.CriDockerdExtractedDirCacheKey is the key used.
 		ctx.TaskCache().Set(fmt.Sprintf("%s.%s", docker.CriDockerdExtractedDirCacheKey, host.GetName()), extractCriDockerdStep.(*docker.ExtractCriDockerdArchiveStep).DefaultExtractionDir)
 
-
 		installCriDockerdStep := docker.NewInstallCriDockerdBinaryStep(nodePrefix+"InstallCriDockerdBinaries", fmt.Sprintf("%s.%s", docker.CriDockerdExtractedDirCacheKey, host.GetName()), "", "", true)
 		installCriDockerdNodeID, _ := taskPlanFragment.AddNode(&plan.ExecutionNode{
 			Name: installCriDockerdStep.Meta().Name, Step: installCriDockerdStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{extractCriDockerdNodeID},
 		})
 		currentHostLastOpNodeID = installCriDockerdNodeID
-
 
 		// Configure cri-dockerd service if needed
 		if len(t.CriDockerdExecStartArgs) > 0 {

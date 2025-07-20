@@ -10,4 +10,5 @@ type Step interface {
 	Precheck(ctx runtime.ExecutionContext) (isDone bool, err error)
 	Run(ctx runtime.ExecutionContext) error
 	Rollback(ctx runtime.ExecutionContext) error
+	GetBase() *Base
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/mensylisir/kubexm/pkg/cache"
 	"github.com/mensylisir/kubexm/pkg/connector"
+	"net/http"
 	"time"
 )
 
@@ -19,4 +20,6 @@ type ExecutionContext interface {
 	GetStepExecutionID() string
 	GetExecutionStartTime() time.Time
 	WithGoContext(goCtx context.Context) ExecutionContext
+	GetHttpClient() *http.Client
+	GetFromRuntimeConfig(key string) (value interface{}, ok bool)
 }

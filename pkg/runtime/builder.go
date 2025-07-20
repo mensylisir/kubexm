@@ -8,7 +8,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/config"
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/engine"
 	"github.com/mensylisir/kubexm/pkg/errors/validation"
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/runner"
@@ -16,12 +15,38 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
+	"net/http"
 	"sync"
+	"time"
 )
 
 type Builder struct {
-	configFilepath string
-	clusterConfig  *v1alpha1.Cluster
+	configFilepath         string
+	clusterConfig          *v1alpha1.Cluster
+	httpClientOverride     *http.Client
+	loggerOverride         *logger.Logger
+	connectionPoolOverride *connector.ConnectionPool
+	poolConfigOverride     *connector.PoolConfig
+}
+
+func (b *Builder) WithHttpClient(client *http.Client) *Builder {
+	b.httpClientOverride = client
+	return b
+}
+
+func (b *Builder) WithLogger(log *logger.Logger) *Builder {
+	b.loggerOverride = log
+	return b
+}
+
+func (b *Builder) WithConnectionPool(connectionPool *connector.ConnectionPool) *Builder {
+	b.connectionPoolOverride = connectionPool
+	return b
+}
+
+func (b *Builder) WithPoolConfig(poolConfig *connector.PoolConfig) *Builder {
+	b.poolConfigOverride = poolConfig
+	return b
 }
 
 func NewBuilder(configFilepath string) *Builder {
@@ -33,22 +58,55 @@ func NewBuilderFromConfig(cfg *v1alpha1.Cluster) *Builder {
 }
 
 func (b *Builder) Build(ctx context.Context) (*Context, func(), error) {
-	log := logger.Get()
+	var log *logger.Logger
+	if b.loggerOverride != nil {
+		log = b.loggerOverride
+	} else {
+		log = logger.Get()
+	}
+
+	var httpClient *http.Client
+	if b.httpClientOverride != nil {
+		log.Info("Using user-provided http.Client.")
+		httpClient = b.httpClientOverride
+	} else {
+		log.Info("Creating default http.Client.")
+		httpClient = &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 10,
+			},
+		}
+	}
 
 	currentClusterConfig, err := b.getOrParseConfig()
 	if err != nil {
 		return nil, nil, err
 	}
-	log.Info("Initializing internal services...")
-	poolConfig := connector.DefaultPoolConfig()
-	if currentClusterConfig.Spec.Global.ConnectionTimeout > 0 {
-		poolConfig.ConnectTimeout = currentClusterConfig.Spec.Global.ConnectionTimeout
+
+	var poolConfig *connector.PoolConfig
+	if b.poolConfigOverride != nil {
+		poolConfig = b.poolConfigOverride
+	} else {
+		poolConfig = connector.DefaultPoolConfig()
+		if currentClusterConfig.Spec.Global.ConnectionTimeout > 0 {
+			poolConfig.ConnectTimeout = currentClusterConfig.Spec.Global.ConnectionTimeout
+		}
 	}
-	connectionPool := connector.NewConnectionPool(poolConfig)
+
+	var connectionPool *connector.ConnectionPool
+	if b.connectionPoolOverride != nil {
+		connectionPool = b.connectionPoolOverride
+	} else {
+		log.Info("Initializing internal services...")
+
+		connectionPool = connector.NewConnectionPool(poolConfig)
+	}
+
 	connectorFactory := connector.NewFactory()
 	runnerSvc := runner.NewRunner()
-	execEngine := engine.NewExecutor()
-
+	//execEngine := engine.NewExecutor()
 	cleanupFunc := func() {
 		log.Info("Shutting down connection pool...")
 		connectionPool.Shutdown()
@@ -59,10 +117,10 @@ func (b *Builder) Build(ctx context.Context) (*Context, func(), error) {
 	stepCache := cache.NewStepCache(taskCache)
 
 	runtimeCtx := &Context{
-		GoCtx:                   ctx,
-		Logger:                  log,
-		Runner:                  runnerSvc,
-		Engine:                  execEngine,
+		GoCtx:  ctx,
+		Logger: log,
+		Runner: runnerSvc,
+		//Engine:                  execEngine,
 		ClusterConfig:           currentClusterConfig,
 		hostInfoMap:             make(map[string]*HostRuntimeInfo),
 		GlobalVerbose:           currentClusterConfig.Spec.Global.Verbose,
@@ -73,6 +131,7 @@ func (b *Builder) Build(ctx context.Context) (*Context, func(), error) {
 		ModuleCache:             moduleCache,
 		TaskCache:               taskCache,
 		StepCache:               stepCache,
+		httpClient:              httpClient,
 	}
 
 	eventBroadcaster := record.NewBroadcaster()

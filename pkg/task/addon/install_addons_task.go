@@ -2,6 +2,7 @@ package addon
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/runtime"
 	"path/filepath"
 	"strings"
 
@@ -39,14 +40,14 @@ func NewInstallAddonsTask(addonName string, config map[string]interface{}) task.
 	}
 }
 
-func (t *InstallAddonsTask) IsRequired(ctx task.TaskContext) (bool, error) {
+func (t *InstallAddonsTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 	// Required if ClusterConfig.Spec.Addons is not empty and contains enabled addons.
 	// clusterCfg := ctx.GetClusterConfig()
 	// return len(clusterCfg.Spec.Addons) > 0, nil // Assuming Addons is []string of names
 	return true, nil // Placeholder
 }
 
-func (t *InstallAddonsTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
+func (t *InstallAddonsTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("task", t.Name(), "addon", t.AddonName)
 	addonFragment := task.NewExecutionFragment(t.Name())
 
@@ -111,7 +112,6 @@ func (t *InstallAddonsTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment,
 		return task.NewEmptyFragment(), nil
 	}
 
-
 	var lastStepID plan.NodeID = ""
 
 	if addonType == "yaml" {
@@ -172,7 +172,9 @@ func (t *InstallAddonsTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment,
 		// For simplicity, assume ValuesFiles contains paths already accessible on execHost or are not used.
 
 		kubeconfigPath := "/etc/kubernetes/admin.conf"
-		if execHost.GetName() == controlNode.GetName() { kubeconfigPath = "" }
+		if execHost.GetName() == controlNode.GetName() {
+			kubeconfigPath = ""
+		}
 
 		installStep := helmsteps.NewHelmInstallStep(
 			t.AddonName, // Instance name for step, use addon name as release name
@@ -196,7 +198,7 @@ func (t *InstallAddonsTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment,
 
 		// Re-creating with all params for clarity based on NewHelmInstallStep signature:
 		// NewHelmInstallStep(instanceName, releaseName, chartPath, namespace, version string, valuesFiles, setValues []string, createNamespace, sudo bool, retries, retryDelay int)
-		 finalHelmInstallStep := helmsteps.NewHelmInstallStep(
+		finalHelmInstallStep := helmsteps.NewHelmInstallStep(
 			fmt.Sprintf("HelmInstall-%s", t.AddonName),
 			t.AddonName, // Release Name
 			chartName,   // Chart Path
@@ -206,13 +208,12 @@ func (t *InstallAddonsTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment,
 			helmSetValues,
 			true, // createNamespace
 			true, // Sudo (for helm binary itself, if needed)
-			2, 5,  // retries, retryDelay
+			2, 5, // retries, retryDelay
 		)
 		// Manually set KubeconfigPath on the struct if New constructor doesn't take it
-		 if typedStep, ok := finalHelmInstallStep.(*helmsteps.HelmInstallStep); ok {
+		if typedStep, ok := finalHelmInstallStep.(*helmsteps.HelmInstallStep); ok {
 			typedStep.KubeconfigPath = kubeconfigPath
-		 }
-
+		}
 
 		installNodeID, _ := addonFragment.AddNode(&plan.ExecutionNode{
 			Name: finalHelmInstallStep.Meta().Name, Step: finalHelmInstallStep, Hosts: []connector.Host{execHost}, Dependencies: []plan.NodeID{lastStepID},

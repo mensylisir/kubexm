@@ -32,6 +32,27 @@ func (r *defaultRunner) Run(ctx context.Context, conn connector.Connector, cmd s
 	return output, nil
 }
 
+func (r *defaultRunner) OriginRun(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (string, string, error) {
+	if conn == nil {
+		return "", "", fmt.Errorf("connector cannot be nil")
+	}
+
+	opts := &connector.ExecOptions{
+		Sudo: sudo,
+	}
+
+	stdout, stderr, err := conn.Exec(ctx, cmd, opts)
+
+	if err != nil {
+		if len(stderr) > 0 {
+			return string(stdout), string(stderr), fmt.Errorf("command '%s' failed: %w, stderr: %s", cmd, err, string(stderr))
+		}
+		return string(stdout), string(stderr), fmt.Errorf("command '%s' failed: %w", cmd, err)
+	}
+
+	return string(stdout), string(stderr), nil
+}
+
 func (r *defaultRunner) MustRun(ctx context.Context, conn connector.Connector, cmd string, sudo bool) string {
 	output, err := r.Run(ctx, conn, cmd, sudo)
 	if err != nil {

@@ -1,4 +1,3 @@
-// Package util provides utility functions for the kubexm project.
 package util
 
 import (

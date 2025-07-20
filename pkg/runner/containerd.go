@@ -433,7 +433,7 @@ func (r *defaultRunner) CtrContainerInfo(ctx context.Context, conn connector.Con
 	stdout, stderr, err := conn.Exec(ctx, cmd, &connector.ExecOptions{Sudo: true, Timeout: DefaultCtrTimeout})
 	if err != nil {
 		if strings.Contains(string(stderr), "No such container") || strings.Contains(string(stderr), "not found") {
-			return nil, nil // Not found, return nil, nil
+			return nil, nil
 		}
 		return nil, errors.Wrapf(err, "ctr container info for %s in namespace %s failed. Stderr: %s", containerID, namespace, string(stderr))
 	}
@@ -569,7 +569,7 @@ func (r *defaultRunner) EnsureDefaultContainerdConfig(ctx context.Context, conn 
 	log.Info("Default containerd config written, restarting service...", "host", conn.GetConnectionConfig().Host)
 
 	if err := r.DaemonReload(ctx, conn, currentFacts); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to daemon-reload: %v\n", err)
+		r.logger.Errorf("%v Warning: failed to daemon-reload: %v\n", os.Stderr, err)
 	}
 
 	if err := r.RestartService(ctx, conn, currentFacts, "containerd"); err != nil {
@@ -706,7 +706,7 @@ func (r *defaultRunner) ConfigureContainerd(ctx context.Context, conn connector.
 			}
 
 			if err := r.DaemonReload(ctx, conn, currentFacts); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to daemon-reload: %v\n", err)
+				r.logger.Errorf("%v Warning: failed to daemon-reload: %v\n", os.Stderr, err)
 			}
 
 			if err := r.RestartService(ctx, conn, currentFacts, "containerd"); err != nil {

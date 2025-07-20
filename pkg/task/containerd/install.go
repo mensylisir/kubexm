@@ -9,7 +9,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/resource"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	stepContainerd "github.com/mensylisir/kubexm/pkg/step/containerd"
 	"github.com/mensylisir/kubexm/pkg/step/preflight"

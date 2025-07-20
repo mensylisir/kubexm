@@ -56,8 +56,8 @@ type PoolConfig struct {
 	ConnectTimeout      time.Duration
 }
 
-func DefaultPoolConfig() PoolConfig {
-	return PoolConfig{
+func DefaultPoolConfig() *PoolConfig {
+	return &PoolConfig{
 		MaxPerKey:           10,
 		MaxIdlePerKey:       5,
 		MaxConnectionAge:    1 * time.Hour,
@@ -83,7 +83,7 @@ type ConnectionPool struct {
 
 var currentDialer dialSSHFunc = dialSSH
 
-func NewConnectionPool(config PoolConfig) *ConnectionPool {
+func NewConnectionPool(config *PoolConfig) *ConnectionPool {
 	if config.ConnectTimeout == 0 {
 		config.ConnectTimeout = DefaultPoolConfig().ConnectTimeout
 	}
@@ -102,7 +102,7 @@ func NewConnectionPool(config PoolConfig) *ConnectionPool {
 
 	cp := &ConnectionPool{
 		pools:  make(map[string]*hostConnectionPool),
-		config: config,
+		config: *config,
 		stopCh: make(chan struct{}),
 	}
 
