@@ -85,11 +85,11 @@ func (s *SSHConnector) IsConnected() bool {
 func (s *SSHConnector) Close() error {
 	s.isConnected = false
 	var firstErr error
-
+	log := logger.Get()
 	if s.sftpClient != nil {
 		if err := s.sftpClient.Close(); err != nil {
 			firstErr = fmt.Errorf("failed to close SFTP client for %s: %w", s.connCfg.Host, err)
-			fmt.Fprintln(os.Stderr, firstErr)
+			log.Errorf("%v %v", os.Stderr, firstErr)
 		}
 		s.sftpClient = nil
 	}
@@ -103,14 +103,14 @@ func (s *SSHConnector) Close() error {
 				if firstErr == nil {
 					firstErr = err
 				}
-				fmt.Fprintf(os.Stderr, "SSHConnector: Error closing direct client for %s: %v\n", s.connCfg.Host, err)
+				log.Errorf("%v SSHConnector: Error closing direct client for %s: %v\n", os.Stderr, s.connCfg.Host, err)
 			}
 			if s.bastionClient != nil {
 				if err := s.bastionClient.Close(); err != nil {
 					if firstErr == nil {
 						firstErr = err
 					}
-					fmt.Fprintf(os.Stderr, "SSHConnector: Error closing direct bastion client for %s: %v\n", s.connCfg.Host, err)
+					log.Errorf("%v SSHConnector: Error closing direct bastion client for %s: %v\n", os.Stderr, s.connCfg.Host, err)
 				}
 			}
 		}
@@ -119,7 +119,7 @@ func (s *SSHConnector) Close() error {
 			if firstErr == nil {
 				firstErr = err
 			}
-			fmt.Fprintf(os.Stderr, "SSHConnector: Error closing orphaned direct bastion client for %s: %v\n", s.connCfg.Host, err)
+			log.Errorf("%v SSHConnector: Error closing orphaned direct bastion client for %s: %v\n", os.Stderr, s.connCfg.Host, err)
 		}
 	}
 
@@ -222,12 +222,6 @@ func (s *SSHConnector) Exec(ctx context.Context, cmd string, options *ExecOption
 		if err == nil {
 			return stdout, stderr, nil // Success
 		}
-		//attemptStdout, attemptStderr, attemptErr := runOnce(attemptCtx, stdinReader)
-		//
-		//stdout = attemptStdout
-		//stderr = attemptStderr
-		//err = attemptErr
-
 		if attemptCancel != nil {
 			attemptCancel()
 		}
@@ -237,23 +231,13 @@ func (s *SSHConnector) Exec(ctx context.Context, cmd string, options *ExecOption
 		}
 
 		if ctx.Err() != nil {
-			// Overall context is done, so no more retries.
-			// The 'err' from this attempt (which might be its own context error) is the one we'll return,
-			// potentially wrapped if ctx.Err() is the more direct cause.
-			// If err is already ctx.Err() or a derivative, that's fine.
-			// If err is some other command error, but ctx also timed out, ctx.Err() is more representative.
-			// For now, we let 'err' (the attempt's error) be the one that gets wrapped by CommandError.
-			// A more nuanced approach might be needed if specific overall context errors need to supersede attempt errors.
 			break
 		}
 
 		if i < effectiveOptions.Retries {
 			if effectiveOptions.RetryDelay > 0 {
 				select {
-				case <-ctx.Done(): // Check overall context before sleeping
-					// Overall context cancelled during delay period. 'err' holds current attempt's error.
-					// We should return this 'err' (from current attempt) as it's the most recent failure.
-					// The CommandError wrapping will happen after the loop.
+				case <-ctx.Done():
 					return stdout, stderr, err
 				case <-time.After(effectiveOptions.RetryDelay):
 				}
@@ -314,13 +298,13 @@ func (s *SSHConnector) writeFileFromReader(ctx context.Context, content io.Reade
 
 func (s *SSHConnector) sudoWrite(ctx context.Context, content io.Reader, dstPath string, opts FileTransferOptions) error {
 	tmpPath := filepath.Join("/tmp", fmt.Sprintf("connector-tmp-%d-%s", time.Now().UnixNano(), filepath.Base(dstPath)))
-
+	log := logger.Get()
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		_, _, err := s.Exec(cleanupCtx, fmt.Sprintf("rm -f %s", shellEscape(tmpPath)), nil)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to remove temporary file %s on host %s: %v\n", tmpPath, s.connCfg.Host, err)
+			log.Errorf("%v Warning: failed to remove temporary file %s on host %s: %v\n", os.Stderr, tmpPath, s.connCfg.Host, err)
 		}
 	}()
 
@@ -375,6 +359,7 @@ func (s *SSHConnector) nonSudoWrite(ctx context.Context, content io.Reader, dstP
 }
 
 func (s *SSHConnector) writeFileViaSFTP(ctx context.Context, content io.Reader, destPath, permissions string) error {
+	log := logger.Get()
 	if err := s.ensureSftp(); err != nil {
 		return fmt.Errorf("sftp client not available for writeFileViaSFTP on host %s: %w", s.connCfg.Host, err)
 	}
@@ -399,10 +384,10 @@ func (s *SSHConnector) writeFileViaSFTP(ctx context.Context, content io.Reader, 
 	if permissions != "" {
 		permVal, parseErr := strconv.ParseUint(permissions, 8, 32)
 		if parseErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Invalid permissions format '%s' for SFTP write to %s, skipping chmod: %v\n", permissions, destPath, parseErr)
+			log.Errorf("%v, Warning: Invalid permissions format '%s' for SFTP write to %s, skipping chmod: %v\n", os.Stderr, permissions, destPath, parseErr)
 		} else {
 			if chmodErr := s.sftpClient.Chmod(destPath, os.FileMode(permVal)); chmodErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: Failed to chmod remote file %s to %s via SFTP: %v\n", destPath, permissions, chmodErr)
+				log.Errorf("%v Warning: Failed to chmod remote file %s to %s via SFTP: %v\n", os.Stderr, destPath, permissions, chmodErr)
 			}
 		}
 	}
@@ -448,6 +433,7 @@ func (s *SSHConnector) LookPath(ctx context.Context, file string) (string, error
 }
 
 func (s *SSHConnector) GetOS(ctx context.Context) (*OS, error) {
+	log := logger.Get()
 	if s.cachedOS != nil {
 		return s.cachedOS, nil
 	}
@@ -544,10 +530,10 @@ func (s *SSHConnector) GetOS(ctx context.Context) (*OS, error) {
 	if osInfo.ID != "" {
 		s.cachedOS = osInfo
 		if osInfo.VersionID == "" {
-			fmt.Fprintf(os.Stderr, "Warning: Could not determine OS VersionID for host %s\n", s.connCfg.Host)
+			log.Errorf("%v Warning: Could not determine OS VersionID for host %s\n", os.Stderr, s.connCfg.Host)
 		}
 		if osInfo.PrettyName == "" {
-			fmt.Fprintf(os.Stderr, "Warning: Could not determine OS PrettyName for host %s\n", s.connCfg.Host)
+			log.Errorf("%v Warning: Could not determine OS PrettyName for host %s\n", os.Stderr, s.connCfg.Host)
 		}
 	}
 	return s.cachedOS, nil
@@ -664,6 +650,7 @@ func parseKeyValues(content, delimiter, quoteChar string) map[string]string {
 }
 
 func dialSSH(ctx context.Context, cfg ConnectionCfg, connectTimeout time.Duration) (*ssh.Client, *ssh.Client, error) {
+	log := logger.Get()
 	targetAuthMethods, err := buildAuthMethods(cfg)
 	if err != nil {
 		return nil, nil, &ConnectionError{Host: cfg.Host, Err: fmt.Errorf("target auth error: %w", err)}
@@ -685,7 +672,7 @@ func dialSSH(ctx context.Context, cfg ConnectionCfg, connectTimeout time.Duratio
 	}
 
 	if targetSSHConfig.HostKeyCallback == nil {
-		fmt.Fprintf(os.Stderr, "Warning: HostKeyCallback is not set for target host %s. Using InsecureIgnoreHostKey(). This is NOT recommended for production.\n", cfg.Host)
+		log.Errorf("%v Warning: HostKeyCallback is not set for target host %s. Using InsecureIgnoreHostKey(). This is NOT recommended for production.\n", os.Stderr, cfg.Host)
 		targetSSHConfig.HostKeyCallback = ssh.InsecureIgnoreHostKey()
 	}
 
@@ -713,6 +700,7 @@ func dialSSH(ctx context.Context, cfg ConnectionCfg, connectTimeout time.Duratio
 }
 
 func dialViaBastion(ctx context.Context, targetDialAddr string, targetSSHConfig *ssh.ClientConfig, bastionOverallCfg ConnectionCfg, bastionConnectTimeoutParam time.Duration) (*ssh.Client, *ssh.Client, error) {
+	log := logger.Get()
 	bastionAuthMethods, err := buildAuthMethods(bastionOverallCfg)
 	if err != nil {
 		return nil, nil, &ConnectionError{Host: bastionOverallCfg.Host, Err: fmt.Errorf("bastion auth error: %w", err)}
@@ -734,7 +722,7 @@ func dialViaBastion(ctx context.Context, targetDialAddr string, targetSSHConfig 
 	}
 
 	if bastionSSHConfig.HostKeyCallback == nil {
-		fmt.Fprintf(os.Stderr, "Warning: HostKeyCallback is not set for bastion host %s. Using InsecureIgnoreHostKey(). This is NOT recommended for production.\n", bastionOverallCfg.Host)
+		log.Errorf("%v Warning: HostKeyCallback is not set for bastion host %s. Using InsecureIgnoreHostKey(). This is NOT recommended for production.\n", os.Stderr, bastionOverallCfg.Host)
 		bastionSSHConfig.HostKeyCallback = ssh.InsecureIgnoreHostKey()
 	}
 
@@ -849,6 +837,7 @@ func (s *SSHConnector) Copy(ctx context.Context, srcPath, dstPath string, option
 }
 
 func (s *SSHConnector) copyDirViaTar(ctx context.Context, srcDir, dstDir string, options *FileTransferOptions) error {
+	log := logger.Get()
 	opts := FileTransferOptions{}
 	if options != nil {
 		opts = *options
@@ -909,7 +898,7 @@ func (s *SSHConnector) copyDirViaTar(ctx context.Context, srcDir, dstDir string,
 		defer cancel()
 		_, _, rmErr := s.Exec(cleanupCtx, fmt.Sprintf("rm -f %s", shellEscape(tmpPath)), &ExecOptions{Sudo: false})
 		if rmErr != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to remove temporary archive %s on host %s: %v\n", tmpPath, s.connCfg.Host, rmErr)
+			log.Errorf("%v Warning: failed to remove temporary archive %s on host %s: %v\n", os.Stderr, tmpPath, s.connCfg.Host, rmErr)
 		}
 	}()
 

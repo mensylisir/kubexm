@@ -12,7 +12,6 @@ import (
 	commonstep "github.com/mensylisir/kubexm/pkg/step/common"
 	kubernetessteps "github.com/mensylisir/kubexm/pkg/step/kubernetes"
 	"github.com/mensylisir/kubexm/pkg/task"
-	// "github.com/mensylisir/kubexm/pkg/resource" // If using resource handles for manifest URLs
 )
 
 // InstallNetworkPluginTask deploys the chosen CNI network plugin.

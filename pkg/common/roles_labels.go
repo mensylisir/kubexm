@@ -36,6 +36,6 @@ var ValidTaintEffects = []string{TaintEffectNoSchedule, TaintEffectPreferNoSched
 
 const (
 	AllHostsRole        = "all"
-	ControlNodeRole     = "control-node"
+	ControlNodeRole     = "controlNode"
 	ControlNodeHostName = "kubexm-control-node"
 )

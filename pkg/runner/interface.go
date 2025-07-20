@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"os"
 	"text/template"
 	"time"
 
@@ -36,6 +37,53 @@ type Facts struct {
 	PackageManager *PackageInfo
 	InitSystem     *ServiceInfo
 }
+
+type CPUInfo struct {
+	ModelName      string `json:"modelName"`
+	Architecture   string `json:"architecture"`
+	Sockets        int    `json:"sockets"`
+	CoresPerSocket int    `json:"coresPerSocket"`
+	ThreadsPerCore int    `json:"threadsPerCore"`
+	LogicalCount   int    `json:"logicalCount"`
+}
+
+type MemoryInfo struct {
+	Total     resource.Quantity `json:"total"`
+	SwapTotal resource.Quantity `json:"swapTotal"`
+	SwapFree  resource.Quantity `json:"swapFree"`
+}
+
+type NetworkInterface struct {
+	Name       string   `json:"name"`
+	MACAddress string   `json:"macAddress"`
+	IPv4       []string `json:"ipv4"`
+	IPv6       []string `json:"ipv6"`
+}
+
+type SecurityProfile struct {
+	AppArmorEnabled bool   `json:"appArmorEnabled"`
+	SELinuxStatus   string `json:"seLinuxStatus"`
+}
+
+type HostFacts struct {
+	OS                *connector.OS
+	Hostname          string
+	Kernel            string
+	CPU               *CPUInfo
+	TotalMemory       resource.Quantity
+	Memory            *MemoryInfo
+	Disks             []DiskInfo
+	TotalDisk         resource.Quantity
+	IPv4Default       string
+	IPv6Default       string
+	NetworkInterfaces []NetworkInterface
+	PackageManager    *PackageInfo
+	InitSystem        *ServiceInfo
+	Security          *SecurityProfile
+	SwapOn            bool
+	KernelModules     map[string]bool
+}
+
 type PackageManagerType string
 
 const (
@@ -74,21 +122,25 @@ type ServiceInfo struct {
 
 type Runner interface {
 	GatherFacts(ctx context.Context, conn connector.Connector) (*Facts, error)
+	GatherHostFacts(ctx context.Context, conn connector.Connector) (*HostFacts, error)
 	DetermineSudo(ctx context.Context, conn connector.Connector, path string) (bool, error)
 	Run(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (string, error)
+	OriginRun(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (string, string, error)
 	MustRun(ctx context.Context, conn connector.Connector, cmd string, sudo bool) string
 	Check(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (bool, error)
+	VerifyChecksum(ctx context.Context, conn connector.Connector, filePath, expectedChecksum, checksumType string, sudo bool) error
 	RunWithOptions(ctx context.Context, conn connector.Connector, cmd string, opts *connector.ExecOptions) (stdout, stderr []byte, err error)
 	RunInBackground(ctx context.Context, conn connector.Connector, cmd string, sudo bool) error
 	RunRetry(ctx context.Context, conn connector.Connector, cmd string, sudo bool, retries int, delay time.Duration) (string, error)
 	Download(ctx context.Context, conn connector.Connector, facts *Facts, url, destPath string, sudo bool) error
-	Extract(ctx context.Context, conn connector.Connector, facts *Facts, archivePath, destDir string, sudo bool) error
+	Extract(ctx context.Context, conn connector.Connector, facts *Facts, archivePath, destDir string, sudo bool, preserveOriginalArchive bool) error
 	DownloadAndExtract(ctx context.Context, conn connector.Connector, facts *Facts, url, destDir string, sudo bool) error
 	Compress(ctx context.Context, conn connector.Connector, facts *Facts, archivePath string, sources []string, sudo bool) error
 	ListArchiveContents(ctx context.Context, conn connector.Connector, facts *Facts, archivePath string, sudo bool) ([]string, error)
 	Exists(ctx context.Context, conn connector.Connector, path string) (bool, error)
 	IsDir(ctx context.Context, conn connector.Connector, path string) (bool, error)
 	ReadFile(ctx context.Context, conn connector.Connector, path string) ([]byte, error)
+	Stat(ctx context.Context, conn connector.Connector, path string) (os.FileInfo, error)
 	WriteFile(ctx context.Context, conn connector.Connector, content []byte, destPath, permissions string, sudo bool) error
 	Mkdirp(ctx context.Context, conn connector.Connector, path, permissions string, sudo bool) error
 	Remove(ctx context.Context, conn connector.Connector, path string, sudo bool, recursive bool) error
@@ -112,6 +164,7 @@ type Runner interface {
 	EnableService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) error
 	DisableService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) error
 	IsServiceActive(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) (bool, error)
+	IsServiceEnabled(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) (bool, error)
 	DaemonReload(ctx context.Context, conn connector.Connector, facts *Facts) error
 	Render(ctx context.Context, conn connector.Connector, tmpl *template.Template, data interface{}, destPath, permissions string, sudo bool) error
 	UserExists(ctx context.Context, conn connector.Connector, username string) (bool, error)

@@ -335,7 +335,7 @@ func (l *LocalConnector) CopyContent(ctx context.Context, content []byte, dstPat
 		tmpFile.Close()
 		return fmt.Errorf("failed to write content to temporary file %s: %w", tmpFile.Name(), err)
 	}
-	if err := tmpFile.Close(); err != nil { // Close before mv
+	if err := tmpFile.Close(); err != nil {
 		return fmt.Errorf("failed to close temporary file %s: %w", tmpFile.Name(), err)
 	}
 

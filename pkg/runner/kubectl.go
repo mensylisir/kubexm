@@ -41,7 +41,7 @@ func (r *defaultRunner) KubectlApply(ctx context.Context, conn connector.Connect
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if err := r.Remove(cleanupCtx, conn, remoteTempPath, opts.Sudo, false); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to clean up temporary file %s: %v\n", remoteTempPath, err)
+				r.logger.Errorf("%v Warning: failed to clean up temporary file %s: %v\n", os.Stderr, remoteTempPath, err)
 			}
 		}()
 	}
@@ -175,7 +175,7 @@ func (r *defaultRunner) KubectlDelete(ctx context.Context, conn connector.Connec
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if err := r.Remove(cleanupCtx, conn, remoteTempPath, opts.Sudo, false); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to clean up temporary file %s: %v\n", remoteTempPath, err)
+				r.logger.Errorf("%v Warning: failed to clean up temporary file %s: %v\n", os.Stderr, remoteTempPath, err)
 			}
 		}()
 	}

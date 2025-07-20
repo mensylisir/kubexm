@@ -5,9 +5,8 @@ import (
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/resource"
-	"github.com/mensylisir/kubexm/pkg/step/common"
 	"github.com/mensylisir/kubexm/pkg/step/command"
+	"github.com/mensylisir/kubexm/pkg/step/common"
 	"github.com/mensylisir/kubexm/pkg/task"
 )
 
@@ -74,10 +73,10 @@ func (t *InstallContainerRuntimeTask) Plan(ctx task.TaskContext) (*task.Executio
 		ctx,
 		"containerd",
 		containerRuntimeConfig.Version,
-		"", // Auto-detect architecture
-		"", // Auto-detect OS
+		"",               // Auto-detect architecture
+		"",               // Auto-detect OS
 		"bin/containerd", // Binary name in archive
-		"", // No checksum for now
+		"",               // No checksum for now
 		"",
 	)
 	if err != nil {
@@ -104,7 +103,7 @@ func (t *InstallContainerRuntimeTask) Plan(ctx task.TaskContext) (*task.Executio
 		return nil, fmt.Errorf("failed to get containerd binary path: %w", err)
 	}
 
-	logger.Info("Planning container runtime installation", 
+	logger.Info("Planning container runtime installation",
 		"version", containerRuntimeConfig.Version,
 		"node_count", len(allNodes),
 		"binary_path", containerdBinaryPath)
@@ -112,7 +111,7 @@ func (t *InstallContainerRuntimeTask) Plan(ctx task.TaskContext) (*task.Executio
 	// Create installation steps for each node
 	for i, node := range allNodes {
 		nodePrefix := fmt.Sprintf("node-%d", i)
-		
+
 		// 1. Upload containerd binary
 		uploadNodeID := plan.NodeID(fmt.Sprintf("upload-containerd-%s", nodePrefix))
 		uploadStep := common.NewUploadFileStep(
@@ -168,16 +167,16 @@ func (t *InstallContainerRuntimeTask) Plan(ctx task.TaskContext) (*task.Executio
 		serviceStep := command.NewCommandStep(
 			fmt.Sprintf("start-containerd-%s", node.GetName()),
 			"systemctl daemon-reload && systemctl enable containerd && systemctl start containerd",
-			true,  // sudo
-			false, // ignoreError
-			0,     // timeout (use default)
-			nil,   // env
-			0,     // expectedExitCode
+			true,                             // sudo
+			false,                            // ignoreError
+			0,                                // timeout (use default)
+			nil,                              // env
+			0,                                // expectedExitCode
 			"systemctl is-active containerd", // check command
-			false, // checkSudo
-			0,     // checkExpectedExitCode
+			false,                            // checkSudo
+			0,                                // checkExpectedExitCode
 			"systemctl stop containerd && systemctl disable containerd", // rollback
-			true,  // rollbackSudo
+			true, // rollbackSudo
 		)
 
 		serviceNode := &plan.ExecutionNode{
@@ -201,7 +200,7 @@ func (t *InstallContainerRuntimeTask) Plan(ctx task.TaskContext) (*task.Executio
 	if resourceFragment.IsEmpty() {
 		// If no resource acquisition needed, uploads are entry nodes
 		for i := range allNodes {
-			fragment.EntryNodes = append(fragment.EntryNodes, 
+			fragment.EntryNodes = append(fragment.EntryNodes,
 				plan.NodeID(fmt.Sprintf("upload-containerd-node-%d", i)))
 		}
 	} else {

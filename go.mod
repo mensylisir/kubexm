@@ -5,7 +5,6 @@ go 1.23.0
 require (
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/fatih/color v1.15.0
-	github.com/golang/mock v1.6.0
 	github.com/olekukonko/tablewriter v0.0.5 // Changed to v0.0.5
 	github.com/pkg/sftp v1.13.9
 	github.com/spf13/cobra v1.9.1
@@ -23,6 +22,7 @@ require (
 
 require (
 	github.com/Masterminds/semver/v3 v3.3.0
+	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
 	github.com/containerd/containerd v1.7.27
 	github.com/distribution/reference v0.6.0
 	github.com/docker/docker v28.3.2+incompatible

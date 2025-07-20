@@ -2,14 +2,13 @@ package engine
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/logger"
+	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/step"
 	"golang.org/x/sync/errgroup"
 	"sync"
 	"time"
-
-	"github.com/mensylisir/kubexm/pkg/logger"
-	"github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/step"
 )
 
 type dagExecutor struct {
@@ -167,6 +166,11 @@ func (e *dagExecutor) runNode(rootCtx *runtime.Context, g *plan.ExecutionGraph, 
 		currentHost := host
 		hostGroup.Go(func() error {
 			execCtx := runtime.ForHost(rootCtx, currentHost).WithGoContext(gctx)
+			if rc, ok := execCtx.(*runtime.Context); ok {
+				execCtx = rc.SetRuntimeConfig(node.RuntimeConfig)
+			} else {
+				log.Warn("Could not set runtime config: execCtx is not of type *runtime.Context")
+			}
 			hr := e.runStepOnHost(execCtx, node.Step)
 			mu.Lock()
 			hostResults[currentHost.GetName()] = hr
@@ -247,8 +251,6 @@ func (e *dagExecutor) runStepOnHost(ctx runtime.ExecutionContext, s step.Step) *
 
 func (e *dagExecutor) dryRun(logger *logger.Logger, g *plan.ExecutionGraph, result *plan.GraphExecutionResult) {
 	logger.Info("--- Dry Run Execution Graph ---", "graphName", g.Name)
-	fmt.Printf("--- Dry Run Execution Graph: %s ---\n", g.Name)
-
 	for id, node := range g.Nodes {
 		nodeRes := plan.NewNodeResult(node.Name, node.StepName)
 		nodeRes.Status = plan.StatusSkipped
@@ -284,7 +286,6 @@ func (e *dagExecutor) dryRun(logger *logger.Logger, g *plan.ExecutionGraph, resu
 		fmt.Printf("  Status: %s (Dry Run)\n", plan.StatusSkipped)
 	}
 	logger.Info("--- End of Dry Run ---")
-	fmt.Println("--- End of Dry Run ---")
 }
 
 var _ Engine = &dagExecutor{}

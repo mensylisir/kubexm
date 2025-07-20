@@ -10,8 +10,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/resource"
-	stepcommon "github.com/mensylisir/kubexm/pkg/step/common" 
+	stepcommon "github.com/mensylisir/kubexm/pkg/step/common"
 	stepEtcd "github.com/mensylisir/kubexm/pkg/step/etcd"
 	"github.com/mensylisir/kubexm/pkg/task"
 )
@@ -144,7 +143,6 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 	}
 	localEtcdArchivePathOnControlNode := etcdArchiveResourceHandle.(*resource.RemoteBinaryHandle).BinaryInfo().FilePath
 
-
 	archiveInternalDirName := strings.TrimSuffix(strings.TrimSuffix(filepath.Base(localEtcdArchivePathOnControlNode), ".tar.gz"), ".tar")
 
 	taskFragment := task.NewExecutionFragment(t.Name())
@@ -153,11 +151,10 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 	}
 	controlNodePrepDoneDependencies := resourcePrepFragment.ExitNodes
 	if len(controlNodePrepDoneDependencies) == 0 && len(resourcePrepFragment.Nodes) > 0 {
-		for id := range resourcePrepFragment.Nodes { 
+		for id := range resourcePrepFragment.Nodes {
 			controlNodePrepDoneDependencies = append(controlNodePrepDoneDependencies, id)
 		}
 	}
-
 
 	// --- PKI Generation & Distribution ---
 	// This task assumes PKI generation happens on the control node.
@@ -172,14 +169,13 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 	certsUploadFragment := task.NewExecutionFragment("UploadEtcdCertificates")
 	var allCertUploadExitNodes []plan.NodeID
 
-
 	for _, targetHost := range etcdNodes { // Certs for etcd nodes
 		hostPkiPrefix := fmt.Sprintf("upload-etcd-certs-%s-", targetHost.GetName())
 		certsForEtcdNode := map[string]string{
-			"ca.pem":                                  "0644",
-			fmt.Sprintf("%s.pem", targetHost.GetName()):       "0644",
-			fmt.Sprintf("%s-key.pem", targetHost.GetName()):   "0600",
-			fmt.Sprintf("peer-%s.pem", targetHost.GetName()):  "0644",
+			"ca.pem": "0644",
+			fmt.Sprintf("%s.pem", targetHost.GetName()):          "0644",
+			fmt.Sprintf("%s-key.pem", targetHost.GetName()):      "0600",
+			fmt.Sprintf("peer-%s.pem", targetHost.GetName()):     "0644",
 			fmt.Sprintf("peer-%s-key.pem", targetHost.GetName()): "0600",
 		}
 		var lastUploadOnHost plan.NodeID
@@ -209,9 +205,9 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 		hostPkiPrefix := fmt.Sprintf("upload-apiserver-etcd-client-certs-%s-", targetHost.GetName())
 		// Define certs using common constants for filenames
 		certsForMasterNode := map[string]string{
-			"ca.pem":                "0644",
-			"apiserver-etcd-client.pem":      "0644",
-			"apiserver-etcd-client-key.pem":       "0600",
+			"ca.pem":                        "0644",
+			"apiserver-etcd-client.pem":     "0644",
+			"apiserver-etcd-client-key.pem": "0600",
 		}
 		// Adjust if apiserver-etcd-client is specifically named:
 		// certsForMasterNode := map[string]string{
@@ -220,15 +216,14 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 		// 	"apiserver-etcd-client-key.pem": "0600",
 		// }
 
-
 		var lastUploadOnHost plan.NodeID
 		for certFile, perm := range certsForMasterNode {
 			isEtcdNode := false
-			for _, en := range etcdNodes { 
-				if en.GetName() == targetHost.GetName() { 
+			for _, en := range etcdNodes {
+				if en.GetName() == targetHost.GetName() {
 					isEtcdNode = true
-					break 
-				} 
+					break
+				}
 			}
 			if certFile == "ca.pem" && isEtcdNode {
 				logger.Debug("Skipping CA cert upload to master as it's also an etcd node and CA would have been uploaded.", "host", targetHost.GetName())
@@ -321,7 +316,7 @@ func (t *InstallETCDTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, e
 
 		// Copy Binaries to System Path
 		pathContainingBinariesOnNode := filepath.Join(etcdExtractDirOnHost, archiveInternalDirName)
-		
+
 		copyEtcdStep := stepEtcd.NewCopyEtcdBinariesToPathStep(
 			fmt.Sprintf("CopyEtcdBinaryOn-%s", etcdHost.GetName()),
 			pathContainingBinariesOnNode, "/usr/local/bin",
@@ -445,12 +440,12 @@ func stringSliceContains(slice []connector.Host, hostName string) bool {
 }
 
 func isHostInRole(host connector.Host, roleHosts []connector.Host) bool {
-    for _, rh := range roleHosts {
-        if rh.GetName() == host.GetName() {
-            return true
-        }
-    }
-    return false
+	for _, rh := range roleHosts {
+		if rh.GetName() == host.GetName() {
+			return true
+		}
+	}
+	return false
 }
 
 // findLastPkiNodeForHost attempts to find the NodeID of the last PKI-related operation for a given host
@@ -458,21 +453,21 @@ func isHostInRole(host connector.Host, roleHosts []connector.Host) bool {
 // Note: This helper relies on naming conventions for PKI nodes. A more robust system might involve
 // the PKI fragment explicitly defining its exit nodes per host.
 func findLastPkiNodeForHost(pkiFragment *task.ExecutionFragment, hostName string, etcdNodes, masterNodes []connector.Host) (plan.NodeID, bool) {
-    // Determine the type of certs this host should receive as the "last" one in the sequence.
-    var lastExpectedCertFileBaseName string
-    hostIsEtcdNode := isHostInRole(connector.NewHostFromSpec(v1alpha1.HostSpec{Name: hostName}), etcdNodes)
-    hostIsMasterNode := isHostInRole(connector.NewHostFromSpec(v1alpha1.HostSpec{Name: hostName}), masterNodes)
+	// Determine the type of certs this host should receive as the "last" one in the sequence.
+	var lastExpectedCertFileBaseName string
+	hostIsEtcdNode := isHostInRole(connector.NewHostFromSpec(v1alpha1.HostSpec{Name: hostName}), etcdNodes)
+	hostIsMasterNode := isHostInRole(connector.NewHostFromSpec(v1alpha1.HostSpec{Name: hostName}), masterNodes)
 
-    if hostIsEtcdNode {
-        // For etcd nodes, the peer key is typically among the last etcd-specific certs.
-        lastExpectedCertFileBaseName = fmt.Sprintf("peer-%s-key.pem", hostName)
-    } else if hostIsMasterNode {
-        // For master nodes (that are not also etcd nodes), the apiserver client key for etcd is last.
-        lastExpectedCertFileBaseName = "apiserver-etcd-client-key.pem"
-    } else {
-        // If the host is neither etcd nor master but received certs (e.g. just CA), CA is last.
-        lastExpectedCertFileBaseName = "ca.pem"
-    }
+	if hostIsEtcdNode {
+		// For etcd nodes, the peer key is typically among the last etcd-specific certs.
+		lastExpectedCertFileBaseName = fmt.Sprintf("peer-%s-key.pem", hostName)
+	} else if hostIsMasterNode {
+		// For master nodes (that are not also etcd nodes), the apiserver client key for etcd is last.
+		lastExpectedCertFileBaseName = "apiserver-etcd-client-key.pem"
+	} else {
+		// If the host is neither etcd nor master but received certs (e.g. just CA), CA is last.
+		lastExpectedCertFileBaseName = "ca.pem"
+	}
 
 	// Construct the expected NodeID based on the naming convention used in the PKI distribution loop:
 	// hostPkiPrefix + strings.ReplaceAll(certFile, ".", "_")
@@ -492,8 +487,8 @@ func findLastPkiNodeForHost(pkiFragment *task.ExecutionFragment, hostName string
 		return nodeID, true
 	}
 
-    // Fallback: if the specific "last" cert node isn't found (e.g. master that is also etcd node, where peer key was truly last),
-    // try to find the CA cert upload node for this host, as that's a common baseline.
+	// Fallback: if the specific "last" cert node isn't found (e.g. master that is also etcd node, where peer key was truly last),
+	// try to find the CA cert upload node for this host, as that's a common baseline.
 	if lastExpectedCertFileBaseName != "ca.pem" { // Avoid re-checking if CA was already the target
 		caNodeID := plan.NodeID(nodeIDPrefixPart + strings.ReplaceAll("ca.pem", ".", "_"))
 		if _, exists := pkiFragment.Nodes[caNodeID]; exists {
@@ -503,7 +498,6 @@ func findLastPkiNodeForHost(pkiFragment *task.ExecutionFragment, hostName string
 
 	return "", false // Indicate specific PKI node for this host not reliably found
 }
-
 
 // Ensure InstallETCDTask implements task.Task.
 var _ task.Task = &InstallETCDTask{}

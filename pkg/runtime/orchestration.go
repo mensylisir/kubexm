@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/engine"
 )
 
 type OrchestrationContext interface {
@@ -15,7 +14,7 @@ type OrchestrationContext interface {
 
 type PipelineContext interface {
 	OrchestrationContext
-	GetEngine() engine.Engine
+	//GetEngine() engine.Engine
 }
 
 type ModuleContext interface {

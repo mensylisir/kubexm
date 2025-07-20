@@ -7,7 +7,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/resource"
 	commonstep "github.com/mensylisir/kubexm/pkg/step/common"
 	"github.com/mensylisir/kubexm/pkg/task"
 	// etcdsteps "github.com/mensylisir/kubexm/pkg/step/etcd" // If etcd binaries are also handled here.
@@ -110,12 +109,15 @@ func (t *InstallBinariesTask) Plan(ctx task.TaskContext) (*task.ExecutionFragmen
 
 	for _, host := range targetHosts {
 		hostArch := host.GetArch() // Assuming connector.Host has GetArch() from facts
-		if hostArch == "" { // Fallback if fact not available or host is local control node before full facts
+		if hostArch == "" {        // Fallback if fact not available or host is local control node before full facts
 			cn, _ := ctx.GetControlNode()
 			facts, _ := ctx.GetHostFacts(cn)
-			if facts != nil && facts.OS != nil { hostArch = facts.OS.Arch } else { hostArch = "amd64" } // Ultimate fallback
+			if facts != nil && facts.OS != nil {
+				hostArch = facts.OS.Arch
+			} else {
+				hostArch = "amd64"
+			} // Ultimate fallback
 		}
-
 
 		var lastStepOnHost plan.NodeID = "" // Not strictly needed if all binary installs on a host are parallel
 
@@ -144,9 +146,9 @@ func (t *InstallBinariesTask) Plan(ctx task.TaskContext) (*task.ExecutionFragmen
 			mkdirCmd := fmt.Sprintf("mkdir -p %s", common.KubeBinDir)
 			ensureDirStep := commonstep.NewCommandStep(nodePrefix+"EnsureBinDir", mkdirCmd, true, false, 0, nil, 0, "", false, 0, "", false)
 			ensureDirNodeID, _ := taskFragment.AddNode(&plan.ExecutionNode{
-				Name: ensureDirStep.Meta().Name,
-				Step: ensureDirStep,
-				Hosts: []connector.Host{host},
+				Name:         ensureDirStep.Meta().Name,
+				Step:         ensureDirStep,
+				Hosts:        []connector.Host{host},
 				Dependencies: []plan.NodeID{uploadNodeID}, // Depends on its own binary's upload
 			})
 

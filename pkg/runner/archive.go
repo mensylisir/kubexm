@@ -37,7 +37,7 @@ func (r *defaultRunner) Download(ctx context.Context, conn connector.Connector, 
 	return nil
 }
 
-func (r *defaultRunner) Extract(ctx context.Context, conn connector.Connector, facts *Facts, archivePath, destDir string, sudo bool) error {
+func (r *defaultRunner) Extract(ctx context.Context, conn connector.Connector, facts *Facts, archivePath, destDir string, sudo bool, preserveOriginalArchive bool) error {
 	if conn == nil {
 		return fmt.Errorf("connector cannot be nil")
 	}
@@ -67,6 +67,13 @@ func (r *defaultRunner) Extract(ctx context.Context, conn connector.Connector, f
 	if err != nil {
 		return fmt.Errorf("failed to extract %s to %s using command '%s': %w", archivePath, destDir, cmd, err)
 	}
+	if !preserveOriginalArchive {
+		cmd := fmt.Sprintf("rm -f %s", archivePath)
+		_, _, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: sudo})
+		if err != nil {
+			r.logger.Warn("Extraction successful, but failed to remove original archive.", "file", archivePath, "error", err)
+		}
+	}
 	return nil
 }
 
@@ -91,7 +98,7 @@ func (r *defaultRunner) DownloadAndExtract(ctx context.Context, conn connector.C
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := r.Remove(cleanupCtx, conn, remoteTempPath, sudo, true); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to cleanup temporary archive %s: %v\n", remoteTempPath, err)
+			r.logger.Errorf("%v Warning: failed to cleanup temporary archive %s: %v\n", os.Stderr, remoteTempPath, err)
 		}
 	}()
 
@@ -99,7 +106,7 @@ func (r *defaultRunner) DownloadAndExtract(ctx context.Context, conn connector.C
 		return fmt.Errorf("failed to create destination directory %s for extraction: %w", destDir, err)
 	}
 
-	if err := r.Extract(ctx, conn, facts, remoteTempPath, destDir, sudo); err != nil {
+	if err := r.Extract(ctx, conn, facts, remoteTempPath, destDir, sudo, false); err != nil {
 		return fmt.Errorf("extraction phase of DownloadAndExtract failed for archive %s to %s: %w", remoteTempPath, destDir, err)
 	}
 

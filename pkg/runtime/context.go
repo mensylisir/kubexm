@@ -4,6 +4,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"time"
 
@@ -12,18 +13,17 @@ import (
 	"github.com/mensylisir/kubexm/pkg/cache"
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/engine"
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/runner"
 	"k8s.io/client-go/tools/record"
 )
 
 type Context struct {
-	GoCtx         context.Context
-	Logger        *logger.Logger
-	Runner        runner.Runner
-	Recorder      record.EventRecorder
-	Engine        engine.Engine
+	GoCtx    context.Context
+	Logger   *logger.Logger
+	Runner   runner.Runner
+	Recorder record.EventRecorder
+	//Engine        engine.Engine
 	ClusterConfig *v1alpha1.Cluster
 
 	GlobalWorkDir           string
@@ -43,6 +43,9 @@ type Context struct {
 	currentHost        connector.Host
 	stepExecutionID    string
 	executionStartTime time.Time
+
+	httpClient               *http.Client
+	currentStepRuntimeConfig map[string]interface{}
 }
 
 type HostRuntimeInfo struct {
@@ -70,17 +73,33 @@ func (c *Context) WithGoContext(goCtx context.Context) ExecutionContext {
 	return &newCtx
 }
 
-func (c *Context) GoContext() context.Context          { return c.GoCtx }
-func (c *Context) GetLogger() *logger.Logger           { return c.Logger }
-func (c *Context) GetRunner() runner.Runner            { return c.Runner }
-func (c *Context) GetRecorder() record.EventRecorder   { return c.Recorder }
-func (c *Context) GetEngine() engine.Engine            { return c.Engine }
+func (c *Context) GetFromRuntimeConfig(key string) (interface{}, bool) {
+	if c.currentStepRuntimeConfig == nil {
+		return nil, false
+	}
+	val, ok := c.currentStepRuntimeConfig[key]
+	return val, ok
+}
+
+func (c *Context) SetRuntimeConfig(config map[string]interface{}) *Context {
+	newCtx := *c
+	newCtx.currentStepRuntimeConfig = config
+	return &newCtx
+}
+
+func (c *Context) GoContext() context.Context        { return c.GoCtx }
+func (c *Context) GetLogger() *logger.Logger         { return c.Logger }
+func (c *Context) GetRunner() runner.Runner          { return c.Runner }
+func (c *Context) GetRecorder() record.EventRecorder { return c.Recorder }
+
+// func (c *Context) GetEngine() engine.Engine            { return c.Engine }
 func (c *Context) GetClusterConfig() *v1alpha1.Cluster { return c.ClusterConfig }
 
 func (c *Context) GetPipelineCache() cache.PipelineCache { return c.PipelineCache }
 func (c *Context) GetModuleCache() cache.ModuleCache     { return c.ModuleCache }
 func (c *Context) GetTaskCache() cache.TaskCache         { return c.TaskCache }
 func (c *Context) GetStepCache() cache.StepCache         { return c.StepCache }
+func (c *Context) GetHttpClient() *http.Client           { return c.httpClient }
 
 func (c *Context) GetHostsByRole(role string) []connector.Host {
 	var hosts []connector.Host

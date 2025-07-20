@@ -7,17 +7,18 @@ const (
 	DefaultTmpDirNameLocal      = ".kubexm_tmp"
 	DefaultLocalRegistryDataDir = "/var/lib/registry"
 
-	DefaultHelmHome                = "/root/.helm"
-	DefaultHelmCache               = "/root/.cache/helm"
-	SysctlDefaultConfFileTarget    = "/etc/sysctl.conf"
-	ModulesLoadDefaultDirTarget    = "/etc/modules-load.d"
-	KubernetesSysctlConfFileTarget = "/etc/sysctl.d/99-kubexm.conf"
-	ModulesLoadDefaultFileTarget   = "/etc/modules-load.d/99-kubexm.conf"
-	DefaultSystemdPath             = "/etc/systemd/system"
-	DefaultSystemdDropinPath       = "/etc/systemd/system/%s.service.d"
-	DefaultBinPath                 = "/usr/local/bin"
-	DefaultConfigPath              = "/etc/kubexm"
-	DefaultLogPath                 = "/var/log/kubexm"
+	DefaultHelmHome                 = "/root/.helm"
+	DefaultHelmCache                = "/root/.cache/helm"
+	SysctlDefaultConfFileTarget     = "/etc/sysctl.conf"
+	ModulesLoadDefaultDirTarget     = "/etc/modules-load.d"
+	KubernetesSysctlConfFileTarget  = "/etc/sysctl.d/99-kubexm.conf"
+	ModulesLoadDefaultFileTarget    = "/etc/modules-load.d/99-kubexm.conf"
+	SecuriryLimitsDefaultFileTarget = "/etc/security/limits.conf"
+	DefaultSystemdPath              = "/etc/systemd/system"
+	DefaultSystemdDropinPath        = "/etc/systemd/system/%s.service.d"
+	DefaultBinPath                  = "/usr/local/bin"
+	DefaultConfigPath               = "/etc/kubexm"
+	DefaultLogPath                  = "/var/log/kubexm"
 )
 
 const (
@@ -216,5 +217,72 @@ var (
 		"G": "Gi",
 		"T": "Ti",
 		"P": "Pi",
+	}
+
+	SupportedAptDistributions = []string{
+		DistroUbuntu,
+		DistroDebian,
+	}
+
+	SupportedYumDnfDistributions = []string{
+		DistroCentOS,
+		DistroRHEL,
+		DistroRocky,
+		DistroAlmalinux,
+		DistroFedora,
+		DistroAmazonLinux,
+		DistroOracle,
+		DistroKylin,
+		DistroUOS,
+	}
+
+	SupportedZypperDistributions = []string{
+		DistroSUSE,
+	}
+
+	SupportedTdnfDistributions = []string{
+		DistroPhoton,
+	}
+
+	SupportedSELinuxDistributions = []string{
+		DistroCentOS,
+		DistroRHEL,
+		DistroRocky,
+		DistroAlmalinux,
+		DistroFedora,
+		DistroAmazonLinux,
+		DistroOracle,
+		DistroCoreos,
+		DistroKylin,
+		DistroUOS,
+	}
+
+	SupportedAppArmorDistributions = []string{
+		DistroUbuntu,
+		DistroDebian,
+		DistroSUSE,
+	}
+
+	RedHatFamilyDistributions = []string{
+		DistroRHEL,
+		DistroCentOS,
+		DistroFedora,
+		DistroRocky,
+		DistroAlmalinux,
+		DistroOracle,
+		DistroAmazonLinux,
+		DistroKylin,
+		DistroUOS,
+	}
+
+	DebianFamilyDistributions = []string{
+		DistroDebian,
+		DistroUbuntu,
+	}
+
+	ContainerOptimizedDistributions = []string{
+		DistroFlatcar,
+		DistroCoreos,
+		DistroPhoton,
 	}
 )

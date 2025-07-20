@@ -8,18 +8,17 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/resource" // For LocalCertificateHandle path logic if needed
 )
 
 // DistributeEtcdCertsStep uploads necessary ETCD certificates to ETCD and Master nodes.
 type DistributeEtcdCertsStep struct {
-	meta                spec.StepMeta
-	ClusterName         string   // Used to construct local cert paths via LocalCertificateHandle logic
+	meta                     spec.StepMeta
+	ClusterName              string // Used to construct local cert paths via LocalCertificateHandle logic
 	CertBaseDirOnControlNode string // Base directory on control node where certs are located (e.g., .kubexm/${cluster_name}/certs/etcd)
-	RemotePKIDir        string   // Target directory on remote nodes (e.g., /etc/etcd/pki or /etc/kubernetes/pki/etcd)
-	EtcdNodeRole        string   // Role name for ETCD nodes
-	MasterNodeRole      string   // Role name for Master nodes
-	Sudo                bool     // Whether to use sudo for mkdir and upload.
+	RemotePKIDir             string // Target directory on remote nodes (e.g., /etc/etcd/pki or /etc/kubernetes/pki/etcd)
+	EtcdNodeRole             string // Role name for ETCD nodes
+	MasterNodeRole           string // Role name for Master nodes
+	Sudo                     bool   // Whether to use sudo for mkdir and upload.
 }
 
 // NewDistributeEtcdCertsStep creates a new DistributeEtcdCertsStep.
@@ -43,12 +42,12 @@ func NewDistributeEtcdCertsStep(instanceName, clusterName, certBaseDir, remotePK
 			Name:        name,
 			Description: "Distributes ETCD CA, server, peer, and client certificates to relevant nodes.",
 		},
-		ClusterName:          clusterName,
+		ClusterName:              clusterName,
 		CertBaseDirOnControlNode: certBaseDir, // If empty, will be derived
-		RemotePKIDir:         remotePKIDir,
-		EtcdNodeRole:         etcdRole,
-		MasterNodeRole:       masterRole,
-		Sudo:                 sudo,
+		RemotePKIDir:             remotePKIDir,
+		EtcdNodeRole:             etcdRole,
+		MasterNodeRole:           masterRole,
+		Sudo:                     sudo,
 	}
 }
 
@@ -157,7 +156,6 @@ func (s *DistributeEtcdCertsStep) Run(ctx step.StepContext, host connector.Host)
 	//    effectiveRemotePKIDir = filepath.Join("/etc/kubernetes/pki", "etcd") // Kubeadm default for external etcd certs
 	// }
 
-
 	logger.Info("Ensuring remote PKI directory exists.", "path", effectiveRemotePKIDir)
 	if err := runnerSvc.Mkdirp(ctx.GoContext(), conn, effectiveRemotePKIDir, "0700", s.Sudo); err != nil {
 		return fmt.Errorf("failed to create remote PKI directory %s: %w", effectiveRemotePKIDir, err)
@@ -186,7 +184,6 @@ func (s *DistributeEtcdCertsStep) Run(ctx step.StepContext, host connector.Host)
 		} else {
 			fileTransferOptions.Permissions = "0644" // Or 0640 if group ownership is strict
 		}
-
 
 		errUpload := runnerSvc.UploadFile(ctx.GoContext(), localCertPath, remoteCertPath, fileTransferOptions, host)
 		if errUpload != nil {

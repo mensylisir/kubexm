@@ -11,4 +11,7 @@ const (
 	CacheKeyClusterCAKey             = "kubexm.pipeline.pki.ca.key"
 	CacheKeyAdminKubeconfig          = "kubexm.pipeline.kubeconfig.admin"
 	CacheKeyModuleEtcdEndpoints      = "kubexm.module.etcd.endpoints"
+	CacheArchivePathKey              = "shared.package.archive.path"
+	CacheExtractedDirKey             = "shared.package.extracted.dir"
+	CacheKeyHostFactsTemplate        = "kubexm.facts.host.%s"
 )

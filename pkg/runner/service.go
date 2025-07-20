@@ -2,7 +2,7 @@ package runner
 
 import (
 	"context"
-	"errors" // Added
+	"errors"
 	"fmt"
 	"strings"
 
@@ -107,6 +107,56 @@ func (r *defaultRunner) IsServiceActive(ctx context.Context, conn connector.Conn
 		return false, fmt.Errorf("failed to check SysV service status for %s: %w", serviceName, execErr)
 	}
 	return false, fmt.Errorf("IsServiceActive not fully implemented for init system type: %s", svcInfo.Type)
+}
+
+func (r *defaultRunner) IsServiceEnabled(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) (bool, error) {
+	if conn == nil {
+		return false, fmt.Errorf("connector cannot be nil")
+	}
+	if facts == nil || facts.InitSystem == nil {
+		return false, fmt.Errorf("init system facts not available for IsServiceEnabled")
+	}
+	if strings.TrimSpace(serviceName) == "" {
+		return false, fmt.Errorf("serviceName cannot be empty")
+	}
+
+	svcInfo := facts.InitSystem
+
+	switch svcInfo.Type {
+	case InitSystemSystemd:
+		cmd := fmt.Sprintf("systemctl is-enabled --quiet %s", serviceName)
+		_, _, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: false})
+
+		if err == nil {
+			return true, nil
+		}
+		if _, ok := err.(*connector.CommandError); ok {
+			return false, nil
+		}
+		return false, err
+
+	case InitSystemSysV:
+		osFamily := strings.ToLower(facts.OS.ID)
+
+		if osFamily == "rhel" || osFamily == "centos" || osFamily == "fedora" {
+			if _, err := r.LookPath(ctx, conn, "chkconfig"); err == nil {
+				cmd := fmt.Sprintf("chkconfig %s", serviceName)
+				_, _, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: false})
+				if err == nil {
+					return true, nil
+				}
+				if _, ok := err.(*connector.CommandError); ok {
+					return false, nil
+				}
+				return false, err
+			}
+		}
+		cmd := fmt.Sprintf("ls /etc/rc?.d/S* | grep -qE '/S[0-9]+%s$'", serviceName)
+		return r.Check(ctx, conn, cmd, false)
+
+	default:
+		return false, fmt.Errorf("IsServiceEnabled not implemented for init system type: %s", svcInfo.Type)
+	}
 }
 
 func (r *defaultRunner) DaemonReload(ctx context.Context, conn connector.Connector, facts *Facts) error {

@@ -9,16 +9,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/task"
 )
 
-const DefaultLogo = `
-██╗  ██╗██╗   ██╗██████╗ ███████╗██╗  ██╗███╗   ███╗
-██║  ██║██║   ██║██╔══██╗██╔════╝██║  ██║████╗ ████║
-███████║██║   ██║██████╔╝█████╗  ███████║██╔████╔██║
-██╔══██║██║   ██║██╔══██╗██╔══╝  ██╔══██║██║╚██╔╝██║
-██║  ██║╚██████╔╝██████╔╝███████╗██║  ██║██║ ╚═╝ ██║
-╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝
-Welcome to KubeXM - Kubernetes Xtreme Manager!
-`
-
 // GreetingTask displays a welcome logo/message.
 type GreetingTask struct {
 	name        string
