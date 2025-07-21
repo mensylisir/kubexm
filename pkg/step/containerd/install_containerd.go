@@ -142,10 +142,9 @@ func (s *InstallContainerdStep) Run(ctx runtime.ExecutionContext) error {
 		remoteTempPath := filepath.Join(remoteUploadTmpDir, filepath.Base(localSourcePath))
 		logger.Infof("Uploading %s to %s:%s", localSourcePath, ctx.GetHost().GetName(), remoteTempPath)
 
-		if err := runner.Upload(ctx.GoContext(), conn, localSourcePath, remoteTempPath); err != nil {
+		if err := runner.Upload(ctx.GoContext(), conn, localSourcePath, remoteTempPath, s.Base.Sudo); err != nil {
 			return fmt.Errorf("failed to upload '%s' to '%s': %w", localSourcePath, remoteTempPath, err)
 		}
-
 		installCmd := fmt.Sprintf("install -o root -g root -m %s %s %s", details.Perms, remoteTempPath, details.Target)
 		logger.Infof("Installing file to %s on remote host", details.Target)
 

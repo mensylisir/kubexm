@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/runner/helpers"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,29 @@ func (r *defaultRunner) Download(ctx context.Context, conn connector.Connector, 
 	if err != nil {
 		return fmt.Errorf("failed to download %s to %s using command '%s': %w", url, destPath, cmd, err)
 	}
+	return nil
+}
+
+func (r *defaultRunner) Upload(ctx context.Context, conn connector.Connector, srcPath string, destPath string, sudo bool) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil")
+	}
+	info, err := os.Stat(srcPath)
+	if err != nil {
+		return fmt.Errorf("failed to access source path '%s': %w", srcPath, err)
+	}
+
+	transferOptions := helpers.GetFileMetadata(info, r.logger)
+	transferOptions.Sudo = sudo
+	connCfg := conn.GetConnectionConfig()
+
+	err = conn.Upload(ctx, srcPath, destPath, transferOptions)
+	if err != nil {
+		return fmt.Errorf("failed to upload from '%s' to '%s' on host '%s': %w",
+			srcPath, destPath, connCfg.Host, err)
+	}
+
+	r.logger.Infof("Successfully uploaded '%s' to '%s'", srcPath, destPath)
 	return nil
 }
 

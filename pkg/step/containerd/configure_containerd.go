@@ -1,22 +1,21 @@
 package containerd
 
 import (
-	"bytes" // For template rendering
+	"bytes"
 	"fmt"
 	"path/filepath"
 	"strings"
-	"text/template" // For template rendering
+	"text/template"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/spec" // Added for StepMeta
+	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/templates" // Added for templates.Get
+	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
 const DefaultContainerdConfigPath = "/etc/containerd/config.toml"
 const ContainerdConfigTemplateName = "containerd/config.toml.tmpl"
 
-// MirrorConfiguration holds endpoint and rewrite rules for a registry mirror.
 type MirrorConfiguration struct {
 	Endpoints []string
 	Rewrite   map[string]string // Optional: for advanced image name rewriting
