@@ -7,6 +7,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/schollz/progressbar/v3"
 	"hash"
 	"io"
 	"net/http"
@@ -110,7 +111,20 @@ func (s *DownloadFileStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to create destination file %s: %w", tmpPath, err)
 	}
 	defer out.Close()
-	_, err = io.Copy(out, resp.Body)
+	bar := progressbar.NewOptions64(
+		resp.ContentLength,
+		progressbar.OptionSetDescription(fmt.Sprintf("Downloading %s", s.URL)),
+		progressbar.OptionSetWriter(os.Stderr),
+		progressbar.OptionShowBytes(true),
+		progressbar.OptionSetWidth(40),
+		progressbar.OptionThrottle(65*time.Millisecond),
+		progressbar.OptionOnCompletion(func() {
+			fmt.Fprint(os.Stderr, "\n")
+		}),
+		progressbar.OptionSpinnerType(14),
+		progressbar.OptionFullWidth(),
+	)
+	_, err = io.Copy(io.MultiWriter(out, bar), resp.Body)
 	if err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("failed to write download content to %s: %w", tmpPath, err)
