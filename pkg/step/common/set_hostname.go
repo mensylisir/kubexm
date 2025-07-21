@@ -19,7 +19,7 @@ type SetHostnameStepBuilder struct {
 	step.Builder[SetHostnameStepBuilder, *SetHostnameStep]
 }
 
-func NewSetHostnameStepBuilder(instanceName, hostname string) *SetHostnameStepBuilder {
+func NewSetHostnameStepBuilder(ctx runtime.ExecutionContext, instanceName, hostname string) *SetHostnameStepBuilder {
 	cs := &SetHostnameStep{
 		Hostname: hostname,
 	}

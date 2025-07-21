@@ -44,7 +44,7 @@ type ManageFirewallRuleStepBuilder struct {
 	step.Builder[ManageFirewallRuleStepBuilder, *ManageFirewallRuleStep]
 }
 
-func NewManageFirewallRuleStepBuilder(instanceName string, rule FirewallRule, state FirewallRuleState) *ManageFirewallRuleStepBuilder {
+func NewManageFirewallRuleStepBuilder(ctx runtime.ExecutionContext, instanceName string, rule FirewallRule, state FirewallRuleState) *ManageFirewallRuleStepBuilder {
 	cs := &ManageFirewallRuleStep{Rule: rule, State: state}
 	cs.Base.Meta.Name = instanceName
 	desc := ""
@@ -57,6 +57,16 @@ func NewManageFirewallRuleStepBuilder(instanceName string, rule FirewallRule, st
 	cs.Base.Sudo = false
 	cs.Base.Timeout = 2 * time.Minute
 	return new(ManageFirewallRuleStepBuilder).Init(cs)
+}
+
+func (b *ManageFirewallRuleStepBuilder) WithRule(rule FirewallRule) *ManageFirewallRuleStepBuilder {
+	b.Step.Rule = rule
+	return b
+}
+
+func (b *ManageFirewallRuleStepBuilder) WithState(state FirewallRuleState) *ManageFirewallRuleStepBuilder {
+	b.Step.State = state
+	return b
 }
 
 func (s *ManageFirewallRuleStep) Meta() *spec.StepMeta {

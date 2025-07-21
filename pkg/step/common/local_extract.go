@@ -27,7 +27,7 @@ type ExtractArchiveStepBuilder struct {
 	step.Builder[ExtractArchiveStepBuilder, *ExtractArchiveStep]
 }
 
-func NewExtractArchiveStepBuilder(instanceName, sourceArchivePath, destinationDir string) *ExtractArchiveStepBuilder {
+func NewExtractArchiveStepBuilder(ctx runtime.ExecutionContext, instanceName, sourceArchivePath, destinationDir string) *ExtractArchiveStepBuilder {
 	cs := &ExtractArchiveStep{
 		DestinationDir:    destinationDir,
 		SourceArchivePath: sourceArchivePath,
@@ -38,6 +38,16 @@ func NewExtractArchiveStepBuilder(instanceName, sourceArchivePath, destinationDi
 	cs.Base.IgnoreError = false
 	cs.Base.Timeout = 30 * time.Second
 	return new(ExtractArchiveStepBuilder).Init(cs)
+}
+
+func (b *ExtractArchiveStepBuilder) WithSourceArchivePath(sourceArchivePath string) *ExtractArchiveStepBuilder {
+	b.Step.SourceArchivePath = sourceArchivePath
+	return b
+}
+
+func (b *ExtractArchiveStepBuilder) WithDestinationDir(destinationDir string) *ExtractArchiveStepBuilder {
+	b.Step.DestinationDir = destinationDir
+	return b
 }
 
 func (b *ExtractArchiveStepBuilder) WithRemoveArchiveAfterExtract(removeArchiveAfterExtract bool) *ExtractArchiveStepBuilder {

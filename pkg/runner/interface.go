@@ -133,6 +133,7 @@ type Runner interface {
 	RunInBackground(ctx context.Context, conn connector.Connector, cmd string, sudo bool) error
 	RunRetry(ctx context.Context, conn connector.Connector, cmd string, sudo bool, retries int, delay time.Duration) (string, error)
 	Download(ctx context.Context, conn connector.Connector, facts *Facts, url, destPath string, sudo bool) error
+	Upload(ctx context.Context, conn connector.Connector, srcPath, destPath string) error
 	Extract(ctx context.Context, conn connector.Connector, facts *Facts, archivePath, destDir string, sudo bool, preserveOriginalArchive bool) error
 	DownloadAndExtract(ctx context.Context, conn connector.Connector, facts *Facts, url, destDir string, sudo bool) error
 	Compress(ctx context.Context, conn connector.Connector, facts *Facts, archivePath string, sources []string, sudo bool) error

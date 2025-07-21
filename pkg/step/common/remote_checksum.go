@@ -19,7 +19,7 @@ type RemoteFileChecksumStepBuilder struct {
 	step.Builder[RemoteFileChecksumStepBuilder, *RemoteFileChecksumStep]
 }
 
-func NewRemoteFileChecksumStepBuilder(instanceName, filePath string) *RemoteFileChecksumStepBuilder {
+func NewRemoteFileChecksumStepBuilder(ctx runtime.ExecutionContext, instanceName, filePath string) *RemoteFileChecksumStepBuilder {
 	s := &RemoteFileChecksumStep{
 		FilePath: filePath,
 	}

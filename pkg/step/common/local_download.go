@@ -28,7 +28,7 @@ type DownloadFileStepBuilder struct {
 	step.Builder[DownloadFileStepBuilder, *DownloadFileStep]
 }
 
-func NewDownloadFileStepBuilder(instanceName, url, destPath string) *DownloadFileStepBuilder {
+func NewDownloadFileStepBuilder(ctx runtime.ExecutionContext, instanceName, url, destPath string) *DownloadFileStepBuilder {
 	cs := &DownloadFileStep{
 		URL:      url,
 		DestPath: destPath,

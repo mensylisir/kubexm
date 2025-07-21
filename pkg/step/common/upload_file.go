@@ -24,7 +24,7 @@ type UploadFileStepBuilder struct {
 	step.Builder[UploadFileStepBuilder, *UploadFileStep]
 }
 
-func NewUploadFileStepBuilder(instanceName, localSrc, remoteDest string) *UploadFileStepBuilder {
+func NewUploadFileStepBuilder(ctx runtime.ExecutionContext, instanceName, localSrc, remoteDest string) *UploadFileStepBuilder {
 	cs := &UploadFileStep{
 		LocalSrcPath:   localSrc,
 		RemoteDestPath: remoteDest,

@@ -33,7 +33,7 @@ type ManageHostsStepBuilder struct {
 	step.Builder[ManageHostsStepBuilder, *ManageHostsStep]
 }
 
-func NewManageHostsStepBuilder(instanceName string, action HostAction, ip string, hostnames ...string) *ManageHostsStepBuilder {
+func NewManageHostsStepBuilder(ctx runtime.ExecutionContext, instanceName string, action HostAction, ip string, hostnames ...string) *ManageHostsStepBuilder {
 	uniqueNames := make(map[string]struct{})
 	finalNames := []string{}
 	for _, name := range hostnames {
@@ -60,6 +60,21 @@ func NewManageHostsStepBuilder(instanceName string, action HostAction, ip string
 	cs.Base.Sudo = false
 	cs.Base.Timeout = 2 * time.Minute
 	return new(ManageHostsStepBuilder).Init(cs)
+}
+
+func (b *ManageHostsStepBuilder) WithIP(ip string) *ManageHostsStepBuilder {
+	b.Step.IP = ip
+	return b
+}
+
+func (b *ManageHostsStepBuilder) WithHostnames(hostnames []string) *ManageHostsStepBuilder {
+	b.Step.Hostnames = hostnames
+	return b
+}
+
+func (b *ManageHostsStepBuilder) WithAction(action HostAction) *ManageHostsStepBuilder {
+	b.Step.Action = action
+	return b
 }
 
 func (s *ManageHostsStep) Meta() *spec.StepMeta {
@@ -153,6 +168,7 @@ func (s *ManageHostsStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger.Infof("Rolling back by performing the opposite action: '%s'", oppositeAction)
 
 	rollbackStep := NewManageHostsStepBuilder(
+		ctx,
 		fmt.Sprintf("rollback-%s", s.Base.Meta.Name),
 		oppositeAction,
 		s.IP,

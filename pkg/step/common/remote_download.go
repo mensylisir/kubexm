@@ -21,7 +21,7 @@ type RemoteDownloadFileStepBuilder struct {
 	step.Builder[RemoteDownloadFileStepBuilder, *RemoteDownloadFileStep]
 }
 
-func NewRemoteDownloadFileStepBuilder(instanceName, url, destPath string) *RemoteDownloadFileStepBuilder {
+func NewRemoteDownloadFileStepBuilder(ctx runtime.ExecutionContext, instanceName, url, destPath string) *RemoteDownloadFileStepBuilder {
 	s := &RemoteDownloadFileStep{
 		URL:      url,
 		DestPath: destPath,

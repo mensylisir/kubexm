@@ -20,7 +20,7 @@ type ExtractArchiverStepBuilder struct {
 	step.Builder[ExtractArchiverStepBuilder, *ExtractArchiverStep]
 }
 
-func NewExtractArchiverStepBuilder(instanceName, extractionDir string) *ExtractArchiverStepBuilder {
+func NewExtractArchiverStepBuilder(ctx runtime.ExecutionContext, instanceName, extractionDir string) *ExtractArchiverStepBuilder {
 	cs := &ExtractArchiverStep{
 		ExtractionDir: extractionDir,
 	}

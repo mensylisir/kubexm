@@ -20,7 +20,7 @@ type PrintMessageStepBuilder struct {
 	step.Builder[PrintMessageStepBuilder, *PrintMessageStep]
 }
 
-func NewPrintMessageStepBuilder(instanceName string) *PrintMessageStepBuilder {
+func NewPrintMessageStepBuilder(ctx runtime.ExecutionContext, instanceName string) *PrintMessageStepBuilder {
 	cs := &PrintMessageStep{
 		Message: common.DefaultLogo,
 	}

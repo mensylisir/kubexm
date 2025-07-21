@@ -25,7 +25,7 @@ type InstallPackagesStepBuilder struct {
 	step.Builder[InstallPackagesStepBuilder, *InstallPackagesStep]
 }
 
-func NewInstallPackagesStepBuilder(instanceName string, packages []string) *InstallPackagesStepBuilder {
+func NewInstallPackagesStepBuilder(ctx runtime.ExecutionContext, instanceName string, packages []string) *InstallPackagesStepBuilder {
 	cs := &InstallPackagesStep{
 		Packages: packages,
 	}

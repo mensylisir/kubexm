@@ -36,7 +36,7 @@ type ManageServiceStepBuilder struct {
 	step.Builder[ManageServiceStepBuilder, *ManageServiceStep]
 }
 
-func NewManageServiceStepBuilder(instanceName, serviceName string, action ServiceAction) *ManageServiceStepBuilder {
+func NewManageServiceStepBuilder(ctx runtime.ExecutionContext, instanceName, serviceName string, action ServiceAction) *ManageServiceStepBuilder {
 	cs := &ManageServiceStep{
 		ServiceName: serviceName,
 		Action:      action,

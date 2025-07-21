@@ -29,7 +29,7 @@ type ManageSwapStepBuilder struct {
 	step.Builder[ManageSwapStepBuilder, *ManageSwapStep]
 }
 
-func NewManageSwapStepBuilder(instanceName string, state SwapState) *ManageSwapStepBuilder {
+func NewManageSwapStepBuilder(ctx runtime.ExecutionContext, instanceName string, state SwapState) *ManageSwapStepBuilder {
 	cs := &ManageSwapStep{
 		State: state,
 	}

@@ -26,12 +26,12 @@ type FileChecksumStepBuilder struct {
 	step.Builder[FileChecksumStepBuilder, *FileChecksumStep]
 }
 
-func NewFileChecksumStepBuilder(instanceName, filePathh string) *FileChecksumStepBuilder {
+func NewFileChecksumStepBuilder(ctx runtime.ExecutionContext, instanceName, filePath string) *FileChecksumStepBuilder {
 	cs := &FileChecksumStep{
-		FilePath: filePathh,
+		FilePath: filePath,
 	}
 	cs.Base.Meta.Name = instanceName
-	cs.Base.Meta.Description = fmt.Sprintf("[%s]>>Checksum [%s]", instanceName, filePathh)
+	cs.Base.Meta.Description = fmt.Sprintf("[%s]>>Checksum [%s]", instanceName, filePath)
 	cs.Base.Sudo = false
 	cs.Base.IgnoreError = false
 	cs.Base.Timeout = 30 * time.Second

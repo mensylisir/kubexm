@@ -1,7 +1,8 @@
-package util
+package helpers
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -349,12 +350,12 @@ func (bp *BinaryProvider) GetBinaryInfo(componentName, version, arch, zone, work
 		urlTmplToUse = details.CNURLTemplate
 	}
 
-	fileName, err := RenderTemplate(details.FileNameTemplate, td)
+	fileName, err := util.RenderTemplate(details.FileNameTemplate, td)
 	if err != nil {
 		return nil, fmt.Errorf("failed to render filename for %s (template: '%s'): %w", componentName, details.FileNameTemplate, err) // Corrected
 	}
 
-	downloadURL, err := RenderTemplate(urlTmplToUse, td)
+	downloadURL, err := util.RenderTemplate(urlTmplToUse, td)
 	if err != nil {
 		return nil, fmt.Errorf("failed to render download URL for %s (template: '%s'): %w", componentName, urlTmplToUse, err)
 	}

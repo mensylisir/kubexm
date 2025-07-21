@@ -34,7 +34,7 @@ type ManageLimitsStepBuilder struct {
 	step.Builder[ManageLimitsStepBuilder, *ManageLimitsStep]
 }
 
-func NewManageLimitsStepBuilder(instanceName string) *ManageLimitsStepBuilder {
+func NewManageLimitsStepBuilder(ctx runtime.ExecutionContext, instanceName string) *ManageLimitsStepBuilder {
 	defaultLimits := []LimitEntry{
 		{Domain: "*", Type: "soft", Item: "nofile", Value: "1048576"},
 		{Domain: "*", Type: "hard", Item: "nofile", Value: "1048576"},

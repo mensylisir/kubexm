@@ -18,7 +18,7 @@ type WaitForPortStepBuilder struct {
 	step.Builder[WaitForPortStepBuilder, *WaitForPortStep]
 }
 
-func NewWaitForPortStepBuilder(instanceName string, port int) *WaitForPortStepBuilder {
+func NewWaitForPortStepBuilder(ctx runtime.ExecutionContext, instanceName string, port int) *WaitForPortStepBuilder {
 	cs := &WaitForPortStep{Port: port}
 	cs.Base.Meta.Name = instanceName
 	cs.Base.Meta.Description = fmt.Sprintf("[%s]>>Waiting for port %d to be available", instanceName, port)

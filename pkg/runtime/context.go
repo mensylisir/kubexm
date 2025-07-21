@@ -1,4 +1,3 @@
-// pkg/runtime/context.go
 package runtime
 
 import (

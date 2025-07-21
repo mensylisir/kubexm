@@ -27,7 +27,7 @@ type ManageModulesStepBuilder struct {
 	step.Builder[ManageModulesStepBuilder, *ManageModulesStep]
 }
 
-func NewManageModulesStepBuilder(instanceName string) *ManageModulesStepBuilder {
+func NewManageModulesStepBuilder(ctx runtime.ExecutionContext, instanceName string) *ManageModulesStepBuilder {
 	defaultModules := []string{
 		"overlay",
 		"br_netfilter",

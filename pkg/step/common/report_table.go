@@ -21,7 +21,7 @@ type ReportTableStepBuilder struct {
 	step.Builder[ReportTableStepBuilder, *ReportTableStep]
 }
 
-func NewReportTableStepBuilder(instanceName string) *ReportTableStepBuilder {
+func NewReportTableStepBuilder(ctx runtime.ExecutionContext, instanceName string) *ReportTableStepBuilder {
 	cs := &ReportTableStep{}
 	cs.Base.Meta.Name = instanceName
 	cs.Base.Meta.Description = fmt.Sprintf("[%s]>>Displaying summary report table...", instanceName)

@@ -27,7 +27,7 @@ type ManageFirewallStateStepBuilder struct {
 	step.Builder[ManageFirewallStateStepBuilder, *ManageFirewallStateStep]
 }
 
-func NewManageFirewallStateStepBuilder(instanceName string, state FirewallServiceState) *ManageFirewallStateStepBuilder {
+func NewManageFirewallStateStepBuilder(ctx runtime.ExecutionContext, instanceName string, state FirewallServiceState) *ManageFirewallStateStepBuilder {
 	cs := &ManageFirewallStateStep{
 		State: state,
 	}
