@@ -22,7 +22,7 @@ type UserInputStepBuilder struct {
 	step.Builder[UserInputStepBuilder, *UserInputStep]
 }
 
-func NewUserInputStepBuilder(instanceName, prompt string) *UserInputStepBuilder {
+func NewUserInputStepBuilder(ctx runtime.ExecutionContext, instanceName, prompt string) *UserInputStepBuilder {
 	cs := &UserInputStep{
 		Prompt: prompt,
 	}

@@ -21,7 +21,7 @@ type TransformImagesStepBuilder struct {
 	step.Builder[TransformImagesStepBuilder, *TransformImagesStep]
 }
 
-func NewTransformImagesStepBuilder(instanceName string, imagesToTransform []util.Image) *TransformImagesStepBuilder {
+func NewTransformImagesStepBuilder(ctx runtime.ExecutionContext, instanceName string, imagesToTransform []util.Image) *TransformImagesStepBuilder {
 	cs := &TransformImagesStep{
 		ImagesToTransform: imagesToTransform,
 	}

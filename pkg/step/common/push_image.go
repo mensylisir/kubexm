@@ -18,7 +18,7 @@ type PushImagesStepBuilder struct {
 	step.Builder[PushImagesStepBuilder, *PushImagesStep]
 }
 
-func NewPushImagesStepBuilder(instanceName string) *PushImagesStepBuilder {
+func NewPushImagesStepBuilder(ctx runtime.ExecutionContext, instanceName string) *PushImagesStepBuilder {
 	cs := &PushImagesStep{}
 	cs.Base.Meta.Name = instanceName
 	cs.Base.Meta.Description = fmt.Sprintf("[%s]>>Pushing container images to remote registry...", instanceName)

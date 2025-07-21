@@ -17,7 +17,7 @@ type GatherFactsStepBuilder struct {
 	step.Builder[GatherFactsStepBuilder, *GatherFactsStep]
 }
 
-func NewGatherFactsStepBuilder(instanceName string) *GatherFactsStepBuilder {
+func NewGatherFactsStepBuilder(ctx runtime.ExecutionContext, instanceName string) *GatherFactsStepBuilder {
 	cs := &GatherFactsStep{}
 	cs.Base.Meta.Name = instanceName
 	cs.Base.Meta.Description = fmt.Sprintf("[%s]>>Gather osinfo", instanceName)

@@ -32,7 +32,7 @@ type ManageSysctlStepBuilder struct {
 	step.Builder[ManageSysctlStepBuilder, *ManageSysctlStep]
 }
 
-func NewManageSysctlStepBuilder(instanceName string) *ManageSysctlStepBuilder {
+func NewManageSysctlStepBuilder(ctx runtime.ExecutionContext, instanceName string) *ManageSysctlStepBuilder {
 	cs := &ManageSysctlStep{}
 	cs.Base.Meta.Name = instanceName
 	cs.Base.Meta.Description = fmt.Sprintf("[%s]>>Ensure system kernel parameters are configured", instanceName)

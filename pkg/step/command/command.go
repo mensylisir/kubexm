@@ -26,7 +26,7 @@ type CommandStepBuilder struct {
 	step.Builder[CommandStepBuilder, *CommandStep]
 }
 
-func NewCommandStepBuilder(instanceName, cmd string) *CommandStepBuilder {
+func NewCommandStepBuilder(ctx runtime.ExecutionContext, instanceName, cmd string) *CommandStepBuilder {
 	cs := &CommandStep{
 		Cmd:              cmd,
 		ExpectedExitCode: 0,

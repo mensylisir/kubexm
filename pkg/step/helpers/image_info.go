@@ -1,9 +1,10 @@
-package util
+package helpers
 
 import (
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/util"
 	versionutil "k8s.io/apimachinery/pkg/util/version"
 	"sort"
 	"strings"
@@ -100,9 +101,9 @@ func GetImageNames() []string {
 	}
 }
 
-func GetImages(ctx runtime.Context) []Image {
-	i := Images{}
-	i.Images = []Image{
+func GetImages(ctx runtime.Context) []util.Image {
+	i := util.Images{}
+	i.Images = []util.Image{
 		GetImage(ctx, "etcd"),
 		GetImage(ctx, "pause"),
 		GetImage(ctx, "kube-apiserver"),
@@ -132,7 +133,7 @@ func GetImages(ctx runtime.Context) []Image {
 	return i.Images
 }
 
-func GetImage(context runtime.Context, name string) Image {
+func GetImage(context runtime.Context, name string) util.Image {
 	kubeVersionStr := context.ClusterConfig.Spec.Kubernetes.Version
 	currentKubeVersion := versionutil.MustParseSemantic(kubeVersionStr)
 
@@ -151,7 +152,7 @@ func GetImage(context runtime.Context, name string) Image {
 
 	logger.Debug("pauseTag: %s, corednsTag: %s", pauseTag, corednsTag)
 
-	ImageList := map[string]Image{
+	ImageList := map[string]util.Image{
 		"pause":                     {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "pause", Tag: pauseTag, Group: common.RoleKubernetes, Enable: true},
 		"etcd":                      {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "etcd", Tag: common.DefaultEtcdVersion, Group: common.RoleMaster, Enable: strings.EqualFold(context.GetClusterConfig().Spec.Etcd.Type, string(common.EtcdDeploymentTypeKubeadm))},
 		"kube-apiserver":            {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "kube-apiserver", Tag: context.GetClusterConfig().Spec.Kubernetes.Version, Group: common.RoleRegistry, Enable: true},

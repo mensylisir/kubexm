@@ -26,7 +26,7 @@ type RenderTemplateStepBuilder struct {
 	step.Builder[RenderTemplateStepBuilder, *RenderTemplateStep]
 }
 
-func NewRenderTemplateStepBuilder(instanceName, remotePath string) *RenderTemplateStepBuilder {
+func NewRenderTemplateStepBuilder(ctx runtime.ExecutionContext, instanceName, remotePath string) *RenderTemplateStepBuilder {
 	cs := &RenderTemplateStep{
 		RemoteDestPath: remotePath,
 		Permissions:    "0644",

@@ -19,7 +19,7 @@ type UninstallPackageStepBuilder struct {
 	step.Builder[UninstallPackageStepBuilder, *UninstallPackageStep]
 }
 
-func NewUninstallPackageStepBuilder(instanceName string, packages []string) *UninstallPackageStepBuilder {
+func NewUninstallPackageStepBuilder(ctx runtime.ExecutionContext, instanceName string, packages []string) *UninstallPackageStepBuilder {
 	cs := &UninstallPackageStep{
 		Packages: packages,
 	}

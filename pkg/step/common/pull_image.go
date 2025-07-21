@@ -20,7 +20,7 @@ type PullImagesStepBuilder struct {
 	step.Builder[PullImagesStepBuilder, *PullImagesStep]
 }
 
-func NewPullImagesStepBuilder(instanceName string) *PullImagesStepBuilder {
+func NewPullImagesStepBuilder(ctx runtime.ExecutionContext, instanceName string) *PullImagesStepBuilder {
 	cs := &PullImagesStep{}
 	cs.Base.Meta.Name = instanceName
 	cs.Base.Meta.Description = fmt.Sprintf("[%s]>>Pulling images...", instanceName)

@@ -19,7 +19,7 @@ type DeleteFileStepBuilder struct {
 	step.Builder[DeleteFileStepBuilder, *DeleteFileStep]
 }
 
-func NewDeleteFileStepBuilder(instanceName, remotePath string) *DeleteFileStepBuilder {
+func NewDeleteFileStepBuilder(ctx runtime.ExecutionContext, instanceName, remotePath string) *DeleteFileStepBuilder {
 	cs := &DeleteFileStep{
 		RemotePath: remotePath,
 	}

@@ -65,6 +65,9 @@ func (b *Builder) Build(ctx context.Context) (*Context, func(), error) {
 		log = logger.Get()
 	}
 
+	eventBroadcaster := record.NewBroadcaster()
+	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: "kubexm-cli"})
+
 	var httpClient *http.Client
 	if b.httpClientOverride != nil {
 		log.Info("Using user-provided http.Client.")
@@ -117,31 +120,38 @@ func (b *Builder) Build(ctx context.Context) (*Context, func(), error) {
 	stepCache := cache.NewStepCache(taskCache)
 
 	runtimeCtx := &Context{
-		GoCtx:  ctx,
-		Logger: log,
-		Runner: runnerSvc,
+		GoCtx:    ctx,
+		Logger:   log,
+		Runner:   runnerSvc,
+		Recorder: recorder,
 		//Engine:                  execEngine,
-		ClusterConfig:           currentClusterConfig,
-		hostInfoMap:             make(map[string]*HostRuntimeInfo),
+		ClusterConfig: currentClusterConfig,
+
+		GlobalWorkDir:           currentClusterConfig.Spec.Global.WorkDir,
 		GlobalVerbose:           currentClusterConfig.Spec.Global.Verbose,
 		GlobalIgnoreErr:         currentClusterConfig.Spec.Global.IgnoreErr,
-		GlobalConnectionTimeout: poolConfig.ConnectTimeout,
-		ConnectionPool:          connectionPool,
-		PipelineCache:           pipelineCache,
-		ModuleCache:             moduleCache,
-		TaskCache:               taskCache,
-		StepCache:               stepCache,
-		httpClient:              httpClient,
-	}
+		GlobalConnectionTimeout: currentClusterConfig.Spec.Global.ConnectionTimeout,
 
-	eventBroadcaster := record.NewBroadcaster()
-	runtimeCtx.Recorder = eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: "kubexm-cli"})
+		PipelineCache: pipelineCache,
+		ModuleCache:   moduleCache,
+		TaskCache:     taskCache,
+		StepCache:     stepCache,
+
+		hostInfoMap:    make(map[string]*HostRuntimeInfo),
+		ConnectionPool: connectionPool,
+
+		stepExecutionID:    "",
+		executionStartTime: time.Now(),
+
+		httpClient:               httpClient,
+		currentStepRuntimeConfig: map[string]interface{}{},
+	}
 
 	if err := b.initializeAllHosts(runtimeCtx, connectorFactory, runnerSvc); err != nil {
 		cleanupFunc()
 		return nil, nil, err
 	}
-
+	runtimeCtx.controlNode = runtimeCtx.GetHostsByRole(common.ControlNodeRole)[0]
 	log.Info("Runtime environment built successfully.")
 	return runtimeCtx, cleanupFunc, nil
 }

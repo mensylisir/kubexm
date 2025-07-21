@@ -32,7 +32,7 @@ type ManageSELinuxStepBuilder struct {
 	step.Builder[ManageSELinuxStepBuilder, *ManageSELinuxStep]
 }
 
-func NewManageSELinuxStepBuilder(instanceName string, state SELinuxState) *ManageSELinuxStepBuilder {
+func NewManageSELinuxStepBuilder(ctx runtime.ExecutionContext, instanceName string, state SELinuxState) *ManageSELinuxStepBuilder {
 	cs := &ManageSELinuxStep{State: state}
 	cs.Base.Meta.Name = instanceName
 	cs.Base.Meta.Description = fmt.Sprintf("[%s]>>Ensure SELinux state is [%s]", instanceName, state)
@@ -90,7 +90,7 @@ func (s *ManageSELinuxStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 	}
 	currentMode := strings.ToLower(strings.TrimSpace(stdout))
 
-	configContent, err := s.readRemoteFile(ctx, "/etc/selinux/config")
+	configContent, err := s.ReadRemoteFile(ctx, "/etc/selinux/config")
 	if err != nil && !os.IsNotExist(err) {
 		return false, fmt.Errorf("precheck: failed to read /etc/selinux/config: %w", err)
 	}
@@ -145,7 +145,7 @@ func (s *ManageSELinuxStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	logger.Info("Updating permanent SELinux configuration in /etc/selinux/config...")
-	configContent, err := s.readRemoteFile(ctx, "/etc/selinux/config")
+	configContent, err := s.ReadRemoteFile(ctx, "/etc/selinux/config")
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("run: failed to read /etc/selinux/config: %w", err)
 	}
@@ -155,7 +155,7 @@ func (s *ManageSELinuxStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to rebuild selinux config: %w", err)
 	}
 
-	if err := s.atomicWriteRemoteFile(ctx, "/etc/selinux/config", newConfigContent); err != nil {
+	if err := s.AtomicWriteRemoteFile(ctx, "/etc/selinux/config", newConfigContent); err != nil {
 		return err
 	}
 	logger.Info("SELinux configuration in /etc/selinux/config has been updated.")
@@ -218,7 +218,7 @@ func (s *ManageSELinuxStep) parseSELinuxConfig(content string) string {
 	return ""
 }
 
-func (s *ManageSELinuxStep) readRemoteFile(ctx runtime.ExecutionContext, path string) (string, error) {
+func (s *ManageSELinuxStep) ReadRemoteFile(ctx runtime.ExecutionContext, path string) (string, error) {
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
@@ -234,7 +234,7 @@ func (s *ManageSELinuxStep) readRemoteFile(ctx runtime.ExecutionContext, path st
 	return stdout, nil
 }
 
-func (s *ManageSELinuxStep) atomicWriteRemoteFile(ctx runtime.ExecutionContext, destPath string, content []byte) error {
+func (s *ManageSELinuxStep) AtomicWriteRemoteFile(ctx runtime.ExecutionContext, destPath string, content []byte) error {
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {

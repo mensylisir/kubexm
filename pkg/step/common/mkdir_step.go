@@ -20,7 +20,7 @@ type MkdirStepBuilder struct {
 	step.Builder[MkdirStepBuilder, *MkdirStep]
 }
 
-func NewMkdirStepBuilder(instanceName, path string) *MkdirStepBuilder {
+func NewMkdirStepBuilder(ctx runtime.ExecutionContext, instanceName, path string) *MkdirStepBuilder {
 	cs := &MkdirStep{
 		Path:        path,
 		Permissions: 0755,
