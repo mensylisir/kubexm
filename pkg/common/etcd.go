@@ -32,6 +32,7 @@ const (
 	DefaultEtcdPKIDir           = "/etc/etcd/pki"
 	DefaultEtcdPKISSLDir        = "/etc/ssl/etcd"
 	DefaultEtcdPKILocalDir      = "/etc/etcd/ssl"
+	DefaultEtcdPathTarget       = "/etc/etcd/etcd.conf"
 	DefaultEtcdPKISSLPath       = "/etc/ssl/etcd/ssl"
 	DefaultEtcdPath             = "/var/lib/etcd"
 	DefaultEtcdConfig           = "/etc/etcd.conf"

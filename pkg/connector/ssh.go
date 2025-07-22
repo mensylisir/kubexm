@@ -950,6 +950,64 @@ func (s *SSHConnector) copyDirViaTar(ctx context.Context, srcDir, dstDir string,
 	return nil
 }
 
+func (s *SSHConnector) Fetch(ctx context.Context, remotePath, localPath string, options *FileTransferOptions) error {
+	opts := FileTransferOptions{}
+	if options != nil {
+		opts = *options
+	}
+	if !opts.Sudo {
+		return s.Download(ctx, remotePath, localPath, &opts)
+	}
+
+	log := logger.Get()
+
+	remoteTempPath := filepath.Join("/tmp", fmt.Sprintf("kubexm-fetch-%d-%s", time.Now().UnixNano(), filepath.Base(remotePath)))
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		_, _, rmErr := s.Exec(cleanupCtx, fmt.Sprintf("rm -f %s", shellEscape(remoteTempPath)), &ExecOptions{Sudo: true})
+		if rmErr != nil {
+			log.Errorf("%v Warning: failed to remove temporary fetch file %s on host %s: %v\n", os.Stderr, remoteTempPath, s.connCfg.Host, rmErr)
+		}
+	}()
+
+	stat, err := s.Stat(ctx, remotePath)
+	if err != nil || !stat.IsExist {
+		return fmt.Errorf("remote source path %s does not exist or is not accessible", remotePath)
+	}
+
+	cpFlags := "-p"
+	if stat.IsDir {
+		cpFlags += "r"
+	}
+
+	cpCmd := fmt.Sprintf("cp %s %s %s", cpFlags, shellEscape(remotePath), shellEscape(remoteTempPath))
+	if _, stderr, err := s.Exec(ctx, cpCmd, &ExecOptions{Sudo: true}); err != nil {
+		return fmt.Errorf("failed to copy remote file to temporary path with sudo: %s (underlying error: %w)", string(stderr), err)
+	}
+
+	chownCmd := fmt.Sprintf("chown %s %s", shellEscape(s.connCfg.User), shellEscape(remoteTempPath))
+	if _, stderr, err := s.Exec(ctx, chownCmd, &ExecOptions{Sudo: true}); err != nil {
+		log.Warnf("Failed to chown temporary file %s, SFTP download might fail: %s", remoteTempPath, string(stderr))
+	}
+
+	downloadOpts := &FileTransferOptions{
+		Permissions: opts.Permissions,
+		Timeout:     opts.Timeout,
+		Sudo:        false,
+	}
+
+	if stat.IsDir {
+		return fmt.Errorf("fetching directories is not yet implemented in this simplified version")
+	}
+
+	if err := s.Download(ctx, remoteTempPath, localPath, downloadOpts); err != nil {
+		return fmt.Errorf("failed to download from temporary path %s: %w", remoteTempPath, err)
+	}
+
+	return nil
+}
+
 func (s *SSHConnector) GetConnectionConfig() ConnectionCfg {
 	return s.connCfg
 }
