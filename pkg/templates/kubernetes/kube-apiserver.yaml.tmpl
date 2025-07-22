@@ -1,0 +1,18 @@
+# kube-apiserver configuration
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+kubernetesVersion: {{ .KubernetesVersion }}
+apiServer:
+  extraArgs:
+    authorization-mode: "Node,RBAC"
+  certSANs:
+  - "{{ .ControlPlaneEndpoint }}"
+  - "{{ .APIServerCertSANs }}"
+controlPlaneEndpoint: "{{ .ControlPlaneEndpoint }}"
+etcd:
+  external:
+    endpoints:
+    - "{{ .EtcdEndpoints }}"
+    caFile: "{{ .EtcdCaFile }}"
+    certFile: "{{ .EtcdCertFile }}"
+    keyFile: "{{ .EtcdKeyFile }}"

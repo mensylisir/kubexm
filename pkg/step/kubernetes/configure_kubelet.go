@@ -16,8 +16,8 @@ import (
 
 type ConfigureKubeletStep struct {
 	step.Base
-	TargetPath           string
-	KubeletExecStartPath string
+	TargetPath   string
+	TemplatePath string
 }
 
 type ConfigureKubeletStepBuilder struct {
@@ -26,26 +26,16 @@ type ConfigureKubeletStepBuilder struct {
 
 func NewConfigureKubeletStepBuilder(ctx runtime.Context, instanceName string) *ConfigureKubeletStepBuilder {
 	s := &ConfigureKubeletStep{
-		TargetPath:           common.KubeletDefaultSystemdFile,
-		KubeletExecStartPath: filepath.Join(common.DefaultBinDir, "kubelet"),
+		TargetPath:   filepath.Join(common.KubeConfigDir, "kubelet.conf"),
+		TemplatePath: "kubernetes/kubelet.conf.tmpl",
 	}
 
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install kubelet systemd service from template", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Configure kubelet", s.Base.Meta.Name)
 	s.Base.Sudo = true
 	s.Base.Timeout = 1 * time.Minute
 
 	b := new(ConfigureKubeletStepBuilder).Init(s)
-	return b
-}
-
-func (b *ConfigureKubeletStepBuilder) WithTargetPath(path string) *ConfigureKubeletStepBuilder {
-	b.Step.TargetPath = path
-	return b
-}
-
-func (b *ConfigureKubeletStepBuilder) WithKubeletExecStartPath(path string) *ConfigureKubeletStepBuilder {
-	b.Step.KubeletExecStartPath = path
 	return b
 }
 
@@ -54,27 +44,20 @@ func (s *ConfigureKubeletStep) Meta() *spec.StepMeta {
 }
 
 func (s *ConfigureKubeletStep) renderContent(ctx runtime.ExecutionContext) (string, error) {
-	tmplStr, err := templates.Get(KubeletServiceTemplatePath)
+	tmplStr, err := templates.Get(s.TemplatePath)
 	if err != nil {
 		return "", err
 	}
 
-	tmpl, err := template.New("kubelet.service").Parse(tmplStr)
+	tmpl, err := template.New("kubelet.conf").Parse(tmplStr)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse kubelet service template: %w", err)
-	}
-
-	data := struct {
-		KubeletExecStartPath string
-	}{
-		KubeletExecStartPath: s.KubeletExecStartPath,
+		return "", fmt.Errorf("failed to parse kubelet config template: %w", err)
 	}
 
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("failed to render kubelet service template: %w", err)
+	if err := tmpl.Execute(&buf, s); err != nil {
+		return "", fmt.Errorf("failed to render kubelet config template: %w", err)
 	}
-
 	return buf.String(), nil
 }
 
@@ -93,23 +76,23 @@ func (s *ConfigureKubeletStep) Precheck(ctx runtime.ExecutionContext) (isDone bo
 
 	exists, err := runner.Exists(ctx.GoContext(), conn, s.TargetPath)
 	if err != nil {
-		return false, fmt.Errorf("failed to check for service file '%s': %w", s.TargetPath, err)
+		return false, fmt.Errorf("failed to check for config file '%s': %w", s.TargetPath, err)
 	}
 	if exists {
 		remoteContent, err := runner.ReadFile(ctx.GoContext(), conn, s.TargetPath)
 		if err != nil {
-			logger.Warnf("Service file '%s' exists but failed to read, will overwrite. Error: %v", s.TargetPath, err)
+			logger.Warnf("Config file '%s' exists but failed to read, will overwrite. Error: %v", s.TargetPath, err)
 			return false, nil
 		}
 		if string(remoteContent) == expectedContent {
-			logger.Infof("Kubelet service file '%s' already exists and content matches. Step is done.", s.TargetPath)
+			logger.Infof("Kubelet config file '%s' already exists and content matches. Step is done.", s.TargetPath)
 			return true, nil
 		}
-		logger.Infof("Kubelet service file '%s' exists but content differs. Step needs to run.", s.TargetPath)
+		logger.Infof("Kubelet config file '%s' exists but content differs. Step needs to run.", s.TargetPath)
 		return false, nil
 	}
 
-	logger.Infof("Kubelet service file '%s' does not exist. Installation is required.", s.TargetPath)
+	logger.Infof("Kubelet config file '%s' does not exist. Configuration is required.", s.TargetPath)
 	return false, nil
 }
 
@@ -126,19 +109,10 @@ func (s *ConfigureKubeletStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	logger.Infof("Writing systemd service file to %s", s.TargetPath)
+	logger.Infof("Writing kubelet config file to %s", s.TargetPath)
 	err = runner.WriteFile(ctx.GoContext(), conn, []byte(content), s.TargetPath, "0644", s.Sudo)
 	if err != nil {
-		return fmt.Errorf("failed to write kubelet service file: %w", err)
-	}
-
-	logger.Info("Reloading systemd daemon")
-	facts, err := ctx.GetHostFacts(ctx.GetHost())
-	if err != nil {
-		return fmt.Errorf("failed to gather facts for daemon-reload: %w", err)
-	}
-	if err := runner.DaemonReload(ctx.GoContext(), conn, facts); err != nil {
-		return fmt.Errorf("failed to reload systemd daemon: %w", err)
+		return fmt.Errorf("failed to write kubelet config file: %w", err)
 	}
 
 	return nil
@@ -156,16 +130,6 @@ func (s *ConfigureKubeletStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger.Warnf("Rolling back by removing: %s", s.TargetPath)
 	if err := runner.Remove(ctx.GoContext(), conn, s.TargetPath, s.Sudo, false); err != nil {
 		logger.Errorf("Failed to remove '%s' during rollback: %v", s.TargetPath, err)
-	}
-
-	logger.Info("Reloading systemd daemon after rollback")
-	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
-	if err != nil {
-		logger.Errorf("Failed to gather facts for daemon-reload during rollback: %v", err)
-		return nil
-	}
-	if err := runner.DaemonReload(ctx.GoContext(), conn, facts); err != nil {
-		logger.Errorf("Failed to reload systemd daemon during rollback: %v", err)
 	}
 
 	return nil

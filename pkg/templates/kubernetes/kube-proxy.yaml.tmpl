@@ -1,0 +1,7 @@
+# kube-proxy configuration
+apiVersion: kubeproxy.config.k8s.io/v1alpha1
+kind: KubeProxyConfiguration
+clientConnection:
+  kubeconfig: "/etc/kubernetes/kube-proxy.conf"
+mode: "iptables"
+clusterCIDR: "{{ .ClusterCidr }}"

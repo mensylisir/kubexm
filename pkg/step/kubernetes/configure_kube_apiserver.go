@@ -17,7 +17,14 @@ import (
 type ConfigureKubeApiServerStep struct {
 	step.Base
 	TargetPath           string
-	KubeApiServerExecStartPath string
+	TemplatePath         string
+	ControlPlaneEndpoint string
+	APIServerCertSANs    string
+	EtcdEndpoints        string
+	EtcdCaFile           string
+	EtcdCertFile         string
+	EtcdKeyFile          string
+	KubernetesVersion    string
 }
 
 type ConfigureKubeApiServerStepBuilder struct {
@@ -25,27 +32,37 @@ type ConfigureKubeApiServerStepBuilder struct {
 }
 
 func NewConfigureKubeApiServerStepBuilder(ctx runtime.Context, instanceName string) *ConfigureKubeApiServerStepBuilder {
+	cfg := ctx.GetClusterConfig().Spec
 	s := &ConfigureKubeApiServerStep{
-		TargetPath:           common.KubeApiServerDefaultSystemdFile,
-		KubeApiServerExecStartPath: filepath.Join(common.DefaultBinDir, "kube-apiserver"),
+		TargetPath:           filepath.Join(common.KubeConfigDir, "kube-apiserver.yaml"),
+		TemplatePath:         "kubernetes/kube-apiserver.yaml.tmpl",
+		ControlPlaneEndpoint: "apiserver.cluster.local",
+		APIServerCertSANs:    "apiserver.cluster.local",
+		EtcdEndpoints:        "https://127.0.0.1:2379",
+		EtcdCaFile:           filepath.Join(common.DefaultEtcdPKIDir, "ca.pem"),
+		EtcdCertFile:         filepath.Join(common.DefaultEtcdPKIDir, "etcd.pem"),
+		EtcdKeyFile:          filepath.Join(common.DefaultEtcdPKIDir, "etcd-key.pem"),
+		KubernetesVersion:    cfg.Kubernetes.Version,
+	}
+
+	if cfg.ControlPlane != nil && cfg.ControlPlane.Endpoint != "" {
+		s.ControlPlaneEndpoint = cfg.ControlPlane.Endpoint
+	}
+
+	if cfg.ApiServer != nil && len(cfg.ApiServer.CertSANs) > 0 {
+		s.APIServerCertSANs = cfg.ApiServer.CertSANs[0]
+	}
+
+	if cfg.Etcd != nil && len(cfg.Etcd.Endpoints) > 0 {
+		s.EtcdEndpoints = cfg.Etcd.Endpoints[0]
 	}
 
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install kube-apiserver systemd service from template", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Configure kube-apiserver", s.Base.Meta.Name)
 	s.Base.Sudo = true
 	s.Base.Timeout = 1 * time.Minute
 
 	b := new(ConfigureKubeApiServerStepBuilder).Init(s)
-	return b
-}
-
-func (b *ConfigureKubeApiServerStepBuilder) WithTargetPath(path string) *ConfigureKubeApiServerStepBuilder {
-	b.Step.TargetPath = path
-	return b
-}
-
-func (b *ConfigureKubeApiServerStepBuilder) WithKubeApiServerExecStartPath(path string) *ConfigureKubeApiServerStepBuilder {
-	b.Step.KubeApiServerExecStartPath = path
 	return b
 }
 
@@ -54,27 +71,20 @@ func (s *ConfigureKubeApiServerStep) Meta() *spec.StepMeta {
 }
 
 func (s *ConfigureKubeApiServerStep) renderContent(ctx runtime.ExecutionContext) (string, error) {
-	tmplStr, err := templates.Get(KubeApiServerServiceTemplatePath)
+	tmplStr, err := templates.Get(s.TemplatePath)
 	if err != nil {
 		return "", err
 	}
 
-	tmpl, err := template.New("kube-apiserver.service").Parse(tmplStr)
+	tmpl, err := template.New("kube-apiserver.yaml").Parse(tmplStr)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse kube-apiserver service template: %w", err)
-	}
-
-	data := struct {
-		KubeApiServerExecStartPath string
-	}{
-		KubeApiServerExecStartPath: s.KubeApiServerExecStartPath,
+		return "", fmt.Errorf("failed to parse kube-apiserver config template: %w", err)
 	}
 
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("failed to render kube-apiserver service template: %w", err)
+	if err := tmpl.Execute(&buf, s); err != nil {
+		return "", fmt.Errorf("failed to render kube-apiserver config template: %w", err)
 	}
-
 	return buf.String(), nil
 }
 
@@ -93,23 +103,23 @@ func (s *ConfigureKubeApiServerStep) Precheck(ctx runtime.ExecutionContext) (isD
 
 	exists, err := runner.Exists(ctx.GoContext(), conn, s.TargetPath)
 	if err != nil {
-		return false, fmt.Errorf("failed to check for service file '%s': %w", s.TargetPath, err)
+		return false, fmt.Errorf("failed to check for config file '%s': %w", s.TargetPath, err)
 	}
 	if exists {
 		remoteContent, err := runner.ReadFile(ctx.GoContext(), conn, s.TargetPath)
 		if err != nil {
-			logger.Warnf("Service file '%s' exists but failed to read, will overwrite. Error: %v", s.TargetPath, err)
+			logger.Warnf("Config file '%s' exists but failed to read, will overwrite. Error: %v", s.TargetPath, err)
 			return false, nil
 		}
 		if string(remoteContent) == expectedContent {
-			logger.Infof("KubeApiServer service file '%s' already exists and content matches. Step is done.", s.TargetPath)
+			logger.Infof("KubeApiServer config file '%s' already exists and content matches. Step is done.", s.TargetPath)
 			return true, nil
 		}
-		logger.Infof("KubeApiServer service file '%s' exists but content differs. Step needs to run.", s.TargetPath)
+		logger.Infof("KubeApiServer config file '%s' exists but content differs. Step needs to run.", s.TargetPath)
 		return false, nil
 	}
 
-	logger.Infof("KubeApiServer service file '%s' does not exist. Installation is required.", s.TargetPath)
+	logger.Infof("KubeApiServer config file '%s' does not exist. Configuration is required.", s.TargetPath)
 	return false, nil
 }
 
@@ -126,19 +136,10 @@ func (s *ConfigureKubeApiServerStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	logger.Infof("Writing systemd service file to %s", s.TargetPath)
+	logger.Infof("Writing kube-apiserver config file to %s", s.TargetPath)
 	err = runner.WriteFile(ctx.GoContext(), conn, []byte(content), s.TargetPath, "0644", s.Sudo)
 	if err != nil {
-		return fmt.Errorf("failed to write kube-apiserver service file: %w", err)
-	}
-
-	logger.Info("Reloading systemd daemon")
-	facts, err := ctx.GetHostFacts(ctx.GetHost())
-	if err != nil {
-		return fmt.Errorf("failed to gather facts for daemon-reload: %w", err)
-	}
-	if err := runner.DaemonReload(ctx.GoContext(), conn, facts); err != nil {
-		return fmt.Errorf("failed to reload systemd daemon: %w", err)
+		return fmt.Errorf("failed to write kube-apiserver config file: %w", err)
 	}
 
 	return nil
@@ -156,16 +157,6 @@ func (s *ConfigureKubeApiServerStep) Rollback(ctx runtime.ExecutionContext) erro
 	logger.Warnf("Rolling back by removing: %s", s.TargetPath)
 	if err := runner.Remove(ctx.GoContext(), conn, s.TargetPath, s.Sudo, false); err != nil {
 		logger.Errorf("Failed to remove '%s' during rollback: %v", s.TargetPath, err)
-	}
-
-	logger.Info("Reloading systemd daemon after rollback")
-	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
-	if err != nil {
-		logger.Errorf("Failed to gather facts for daemon-reload during rollback: %v", err)
-		return nil
-	}
-	if err := runner.DaemonReload(ctx.GoContext(), conn, facts); err != nil {
-		logger.Errorf("Failed to reload systemd daemon during rollback: %v", err)
 	}
 
 	return nil
