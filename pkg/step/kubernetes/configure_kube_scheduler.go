@@ -16,8 +16,8 @@ import (
 
 type ConfigureKubeSchedulerStep struct {
 	step.Base
-	TargetPath                  string
-	KubeSchedulerExecStartPath string
+	TargetPath   string
+	TemplatePath string
 }
 
 type ConfigureKubeSchedulerStepBuilder struct {
@@ -26,26 +26,16 @@ type ConfigureKubeSchedulerStepBuilder struct {
 
 func NewConfigureKubeSchedulerStepBuilder(ctx runtime.Context, instanceName string) *ConfigureKubeSchedulerStepBuilder {
 	s := &ConfigureKubeSchedulerStep{
-		TargetPath:                  common.KubeSchedulerDefaultSystemdFile,
-		KubeSchedulerExecStartPath: filepath.Join(common.DefaultBinDir, "kube-scheduler"),
+		TargetPath:   filepath.Join(common.KubeConfigDir, "kube-scheduler.yaml"),
+		TemplatePath: "kubernetes/kube-scheduler.yaml.tmpl",
 	}
 
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install kube-scheduler systemd service from template", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Configure kube-scheduler", s.Base.Meta.Name)
 	s.Base.Sudo = true
 	s.Base.Timeout = 1 * time.Minute
 
 	b := new(ConfigureKubeSchedulerStepBuilder).Init(s)
-	return b
-}
-
-func (b *ConfigureKubeSchedulerStepBuilder) WithTargetPath(path string) *ConfigureKubeSchedulerStepBuilder {
-	b.Step.TargetPath = path
-	return b
-}
-
-func (b *ConfigureKubeSchedulerStepBuilder) WithKubeSchedulerExecStartPath(path string) *ConfigureKubeSchedulerStepBuilder {
-	b.Step.KubeSchedulerExecStartPath = path
 	return b
 }
 
@@ -54,27 +44,20 @@ func (s *ConfigureKubeSchedulerStep) Meta() *spec.StepMeta {
 }
 
 func (s *ConfigureKubeSchedulerStep) renderContent(ctx runtime.ExecutionContext) (string, error) {
-	tmplStr, err := templates.Get(KubeSchedulerServiceTemplatePath)
+	tmplStr, err := templates.Get(s.TemplatePath)
 	if err != nil {
 		return "", err
 	}
 
-	tmpl, err := template.New("kube-scheduler.service").Parse(tmplStr)
+	tmpl, err := template.New("kube-scheduler.yaml").Parse(tmplStr)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse kube-scheduler service template: %w", err)
-	}
-
-	data := struct {
-		KubeSchedulerExecStartPath string
-	}{
-		KubeSchedulerExecStartPath: s.KubeSchedulerExecStartPath,
+		return "", fmt.Errorf("failed to parse kube-scheduler config template: %w", err)
 	}
 
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("failed to render kube-scheduler service template: %w", err)
+	if err := tmpl.Execute(&buf, s); err != nil {
+		return "", fmt.Errorf("failed to render kube-scheduler config template: %w", err)
 	}
-
 	return buf.String(), nil
 }
 
@@ -93,23 +76,23 @@ func (s *ConfigureKubeSchedulerStep) Precheck(ctx runtime.ExecutionContext) (isD
 
 	exists, err := runner.Exists(ctx.GoContext(), conn, s.TargetPath)
 	if err != nil {
-		return false, fmt.Errorf("failed to check for service file '%s': %w", s.TargetPath, err)
+		return false, fmt.Errorf("failed to check for config file '%s': %w", s.TargetPath, err)
 	}
 	if exists {
 		remoteContent, err := runner.ReadFile(ctx.GoContext(), conn, s.TargetPath)
 		if err != nil {
-			logger.Warnf("Service file '%s' exists but failed to read, will overwrite. Error: %v", s.TargetPath, err)
+			logger.Warnf("Config file '%s' exists but failed to read, will overwrite. Error: %v", s.TargetPath, err)
 			return false, nil
 		}
 		if string(remoteContent) == expectedContent {
-			logger.Infof("KubeScheduler service file '%s' already exists and content matches. Step is done.", s.TargetPath)
+			logger.Infof("KubeScheduler config file '%s' already exists and content matches. Step is done.", s.TargetPath)
 			return true, nil
 		}
-		logger.Infof("KubeScheduler service file '%s' exists but content differs. Step needs to run.", s.TargetPath)
+		logger.Infof("KubeScheduler config file '%s' exists but content differs. Step needs to run.", s.TargetPath)
 		return false, nil
 	}
 
-	logger.Infof("KubeScheduler service file '%s' does not exist. Installation is required.", s.TargetPath)
+	logger.Infof("KubeScheduler config file '%s' does not exist. Configuration is required.", s.TargetPath)
 	return false, nil
 }
 
@@ -126,19 +109,10 @@ func (s *ConfigureKubeSchedulerStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	logger.Infof("Writing systemd service file to %s", s.TargetPath)
+	logger.Infof("Writing kube-scheduler config file to %s", s.TargetPath)
 	err = runner.WriteFile(ctx.GoContext(), conn, []byte(content), s.TargetPath, "0644", s.Sudo)
 	if err != nil {
-		return fmt.Errorf("failed to write kube-scheduler service file: %w", err)
-	}
-
-	logger.Info("Reloading systemd daemon")
-	facts, err := ctx.GetHostFacts(ctx.GetHost())
-	if err != nil {
-		return fmt.Errorf("failed to gather facts for daemon-reload: %w", err)
-	}
-	if err := runner.DaemonReload(ctx.GoContext(), conn, facts); err != nil {
-		return fmt.Errorf("failed to reload systemd daemon: %w", err)
+		return fmt.Errorf("failed to write kube-scheduler config file: %w", err)
 	}
 
 	return nil
@@ -156,16 +130,6 @@ func (s *ConfigureKubeSchedulerStep) Rollback(ctx runtime.ExecutionContext) erro
 	logger.Warnf("Rolling back by removing: %s", s.TargetPath)
 	if err := runner.Remove(ctx.GoContext(), conn, s.TargetPath, s.Sudo, false); err != nil {
 		logger.Errorf("Failed to remove '%s' during rollback: %v", s.TargetPath, err)
-	}
-
-	logger.Info("Reloading systemd daemon after rollback")
-	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
-	if err != nil {
-		logger.Errorf("Failed to gather facts for daemon-reload during rollback: %v", err)
-		return nil
-	}
-	if err := runner.DaemonReload(ctx.GoContext(), conn, facts); err != nil {
-		logger.Errorf("Failed to reload systemd daemon during rollback: %v", err)
 	}
 
 	return nil
