@@ -75,6 +75,7 @@ const (
 	DefaultVarDir        = "/var"
 	DefaultOptDir        = "/opt"
 	DefaultSbinDir       = "/usr/local/sbin"
+	DefaultCNIBin        = "/opt/cni/bin"
 
 	// System configuration directories
 	DefaultSystemEtcDir  = "/etc"

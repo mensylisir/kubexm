@@ -1,0 +1,10 @@
+[Service]
+# This drop-in file is managed by kubexm.
+# It overrides the ExecStart of the main etcd.service to apply our configuration.
+
+# First, clear the original ExecStart list. This is a systemd best practice
+# to ensure our ExecStart is the only one that applies.
+ExecStart=
+
+# Then, set the new ExecStart with our YAML config file.
+ExecStart={{.ExecStart}}

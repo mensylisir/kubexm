@@ -1,32 +1,24 @@
 [Unit]
-Description={{ .Description }}
-Documentation={{ .Documentation }}
-After={{ .After }}
-{{- if .Wants }}
-Wants={{ .Wants }}
-{{- end }}
+Description=containerd container runtime
+Documentation=https://containerd.io
+After=network.target local-fs.target
 
 [Service]
-{{- range .ExecStartPre }}
-ExecStartPre={{ . }}
-{{- end }}
-ExecStart={{ .ExecStart }}
-{{- if .ExecReload }}
-ExecReload={{ .ExecReload }}
-{{- end }}
-{{- if .Environment }}
-{{- range .Environment }}
-Environment="{{ . }}"
-{{- end }}
-{{- end }}
-Delegate={{ .Delegate }}
-KillMode={{ .KillMode }}
-Restart={{ .Restart }}
-RestartSec={{ .RestartSec }}
-LimitNOFILE={{ .LimitNOFILE }}
-LimitNPROC={{ .LimitNPROC }}
-LimitCORE={{ .LimitCORE }}
-TasksMax={{ .TasksMax }}
+ExecStartPre=-/sbin/modprobe overlay
+ExecStart={{ .ContainerdExecStartPath }}
+Type=notify
+Delegate=yes
+KillMode=process
+Restart=always
+RestartSec=5
+# Having a larger limit for non-root users is important for
+# allowing users to run rootless containerd with uidmaps and multiple processes.
+# Let's Recommended to raise this limit if you have ever modified it.
+LimitNPROC=infinity
+# Comment TasksMax if your systemd version does not support it.
+# Only systemd 226 and above support this version.
+TasksMax=infinity
+OOMScoreAdjust=-999
 
 [Install]
-WantedBy={{ .WantedBy }}
+WantedBy=multi-user.target

@@ -1,33 +1,52 @@
-name: {{ .Name }}
-data-dir: {{ .DataDir }}
-{{- if .WalDir }}
-wal-dir: {{ .WalDir }}
-{{- end }}
-listen-peer-urls: {{ .ListenPeerURLs }}
-listen-client-urls: {{ .ListenClientURLs }}
-initial-advertise-peer-urls: {{ .InitialAdvertisePeerURLs }}
-advertise-client-urls: {{ .AdvertiseClientURLs }}
-initial-cluster: "{{ .InitialCluster }}"
-initial-cluster-token: {{ .InitialClusterToken }}
-initial-cluster-state: {{ .InitialClusterState }}
+# This is the configuration file for etcd.
+
+# Member name.
+name: '{{.Name}}'
+
+# Path to the data directory.
+data-dir: '{{.DataDir}}'
+
+# List of comma separated URLs to listen on for peer traffic.
+listen-peer-urls: '{{.ListenPeerURLs}}'
+
+# List of comma separated URLs to listen on for client traffic.
+listen-client-urls: '{{.ListenClientURLs}}'
+
+# List of this member's peer URLs to advertise to the rest of the cluster.
+initial-advertise-peer-urls: '{{.InitialAdvertisePeerURLs}}'
+
+# List of this member's client URLs to advertise to the public.
+advertise-client-urls: '{{.AdvertiseClientURLs}}'
+
+# Initial cluster configuration for bootstrapping.
+initial-cluster: '{{.InitialCluster}}'
+
+# Initial cluster token for the etcd cluster during bootstrap.
+initial-cluster-token: '{{.InitialClusterToken}}'
+
+# Initial cluster state ('new' or 'existing').
+initial-cluster-state: '{{.InitialClusterState}}'
+
+# TLS configuration for client-to-server traffic.
 client-transport-security:
-  client-cert-auth: {{ .ClientCertAuth | default true }}
-  auto-tls: {{ .ClientAutoTLS | default false }}
-  trusted-ca-file: {{ .TrustedCAFile }}
-  cert-file: {{ .CertFile }}
-  key-file: {{ .KeyFile }}
+  cert-file: '{{.CertFile}}'
+  key-file: '{{.KeyFile}}'
+  client-cert-auth: true
+  trusted-ca-file: '{{.TrustedCAFile}}'
+
+# TLS configuration for server-to-server (peer) traffic.
 peer-transport-security:
-  client-cert-auth: {{ .PeerClientCertAuth | default true }} # For peer, client-cert-auth means it requires incoming peers to have a client cert signed by its CA.
-  auto-tls: {{ .PeerAutoTLS | default false }}
-  trusted-ca-file: {{ .PeerTrustedCAFile }}
-  cert-file: {{ .PeerCertFile }}
-  key-file: {{ .PeerKeyFile }}
-snapshot-count: {{ .SnapshotCount | default "10000" }}
-auto-compaction-retention: "{{ .AutoCompactionRetention | default "1" }}" # Default to 1 hour if not specified
-max-request-bytes: {{ .MaxRequestBytes | default "10485760" }} # 10 MiB
-quota-backend-bytes: {{ .QuotaBackendBytes | default "8589934592" }} # 8 GiB
-# Enable V2 Emulation for older clients if needed, though generally discouraged for new clusters.
-# enable-v2: false
-# Logging (example, adjust as needed)
-# log-level: "info"
-# log-outputs: ["stderr"] # Or ["systemd/journal"] if using systemd service
+  cert-file: '{{.PeerCertFile}}'
+  key-file: '{{.PeerKeyFile}}'
+  client-cert-auth: true
+  trusted-ca-file: '{{.PeerTrustedCAFile}}'
+
+# Number of committed transactions to trigger a snapshot to disk.
+snapshot-count: {{.SnapshotCount}}
+
+# Auto-compaction retention in hours. 0 means disable.
+auto-compaction-retention: {{.AutoCompactionRetention}}
+
+# Specify 'zap' for structured logging.
+logger: zap
+log-outputs: [stderr]

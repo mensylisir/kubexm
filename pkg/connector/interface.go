@@ -59,6 +59,7 @@ type Connector interface {
 	Exec(ctx context.Context, cmd string, opts *ExecOptions) (stdout, stderr []byte, err error)
 	Upload(ctx context.Context, localPath, remotePath string, opts *FileTransferOptions) error
 	Download(ctx context.Context, remotePath, localPath string, opts *FileTransferOptions) error
+	Fetch(ctx context.Context, remotePath, localPath string, opts *FileTransferOptions) error
 	CopyContent(ctx context.Context, content []byte, destPath string, options *FileTransferOptions) error
 	Stat(ctx context.Context, path string) (*FileStat, error)
 	LookPath(ctx context.Context, file string) (string, error)

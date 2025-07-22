@@ -6,218 +6,232 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+	"time"
 
-	"github.com/mensylisir/kubexm/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
+	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
-const DefaultContainerdConfigPath = "/etc/containerd/config.toml"
-const ContainerdConfigTemplateName = "containerd/config.toml.tmpl"
+const (
+	containerdConfigTemplatePath = "containerd/config.toml.tmpl"
+)
 
-type MirrorConfiguration struct {
-	Endpoints []string
-	Rewrite   map[string]string // Optional: for advanced image name rewriting
+type GrpcConfig struct {
+	Address string
 }
 
-// const containerdConfigTemplate = `...` // REMOVED
+type CniConfig struct {
+	BinDir  string
+	ConfDir string
+}
 
-// ConfigureContainerdStep configures containerd by writing its config.toml.
 type ConfigureContainerdStep struct {
-	meta               spec.StepMeta
-	SandboxImage       string
-	APIRegistryMirrors map[string][]string // Store the API spec version
-	InsecureRegistries []string
-	ConfigFilePath     string
-	RegistryConfigPath string // For plugins."io.containerd.grpc.v1.cri".registry.config_path
-	ExtraTomlContent   string
-	UseSystemdCgroup   bool
-	Sudo               bool
+	step.Base
+	TargetPath      string
+	Root            string
+	State           string
+	Grpc            GrpcConfig
+	SystemdCgroup   bool
+	SandboxImage    string
+	Cni             CniConfig
+	RegistryMirrors map[v1alpha1.ServerAddress]v1alpha1.MirrorConfig
+	RegistryConfigs map[v1alpha1.ServerAddress]v1alpha1.AuthConfig
 }
 
-// NewConfigureContainerdStep creates a new ConfigureContainerdStep.
-// Accepts registryMirrors as map[string][]string, matching v1alpha1.ContainerdConfig.
-func NewConfigureContainerdStep(
-	instanceName string,
-	sandboxImage string,
-	apiRegistryMirrors map[string][]string, // Changed parameter type
-	insecureRegistries []string,
-	configFilePath string,
-	registryConfigPath string,
-	extraTomlContent string,
-	useSystemdCgroup bool,
-	sudo bool,
-) step.Step {
-	effectivePath := configFilePath
-	if effectivePath == "" {
-		effectivePath = DefaultContainerdConfigPath
-	}
-	effectiveSandboxImage := sandboxImage
-	if effectiveSandboxImage == "" {
-		effectiveSandboxImage = "registry.k8s.io/pause:3.9" // Common default
-	}
-	// effectiveRegistryConfigPath defaults to empty string if not provided, which is fine for the template.
-
-	name := instanceName
-	if name == "" {
-		name = "ConfigureContainerdToml"
-	}
-	return &ConfigureContainerdStep{
-		meta: spec.StepMeta{
-			Name:        name,
-			Description: fmt.Sprintf("Configures containerd by writing %s with specified mirrors, insecure registries, sandbox image and cgroup settings.", effectivePath),
-		},
-		SandboxImage:       effectiveSandboxImage,
-		APIRegistryMirrors: apiRegistryMirrors, // Use the new field
-		InsecureRegistries: insecureRegistries,
-		ConfigFilePath:     effectivePath,
-		RegistryConfigPath: registryConfigPath,
-		ExtraTomlContent:   extraTomlContent,
-		UseSystemdCgroup:   useSystemdCgroup,
-		Sudo:               sudo,
-	}
+type ConfigureContainerdStepBuilder struct {
+	step.Builder[ConfigureContainerdStepBuilder, *ConfigureContainerdStep]
 }
 
-// Meta returns the step's metadata.
-func (s *ConfigureContainerdStep) Meta() *spec.StepMeta {
-	return &s.meta
-}
+func NewConfigureContainerdStepBuilder(ctx runtime.Context, instanceName string) *ConfigureContainerdStepBuilder {
+	cfg := ctx.GetClusterConfig().Spec
+	containerdCfg := cfg.Kubernetes.ContainerRuntime.Containerd
 
-// renderExpectedConfig generates the expected config content for precheck comparison.
-func (s *ConfigureContainerdStep) renderExpectedConfig() (string, error) {
-	templateString, err := templates.Get(ContainerdConfigTemplateName)
-	if err != nil {
-		return "", fmt.Errorf("failed to get containerd config template '%s': %w", ContainerdConfigTemplateName, err)
-	}
-	tmpl, err := template.New("containerdConfig").Parse(templateString)
-	if err != nil {
-		return "", fmt.Errorf("dev error: failed to parse containerd config template: %w", err)
-	}
-	var expectedBuf bytes.Buffer
+	grpcAddress := strings.TrimPrefix(common.ContainerdDefaultEndpoint, "unix://")
 
-	// Adapt APIRegistryMirrors (map[string][]string) to the structure expected by the template
-	// The template expects map[string]MirrorConfiguration where MirrorConfiguration has Endpoints.
-	templateRegistryMirrors := make(map[string]MirrorConfiguration)
-	if s.APIRegistryMirrors != nil {
-		for host, endpoints := range s.APIRegistryMirrors {
-			templateRegistryMirrors[host] = MirrorConfiguration{Endpoints: endpoints}
-			// If MirrorConfiguration had a Rewrite field that needed to be populated from API,
-			// that logic would go here. For now, assuming only Endpoints.
+	s := &ConfigureContainerdStep{
+		TargetPath:      common.ContainerdDefaultConfigFile,
+		Root:            common.ContainerdDefaultRoot,
+		State:           common.ContainerdDefaultState,
+		Grpc:            GrpcConfig{Address: grpcAddress},
+		SystemdCgroup:   true,
+		Cni:             CniConfig{BinDir: common.DefaultCNIBin, ConfDir: common.DefaultCNIConfDirTarget},
+		RegistryMirrors: make(map[v1alpha1.ServerAddress]v1alpha1.MirrorConfig),
+		RegistryConfigs: make(map[v1alpha1.ServerAddress]v1alpha1.AuthConfig),
+	}
+
+	if containerdCfg != nil {
+		if containerdCfg.ConfigPath != nil && *containerdCfg.ConfigPath != "" {
+			s.TargetPath = *containerdCfg.ConfigPath
+		}
+		if containerdCfg.Root != nil && *containerdCfg.Root != "" {
+			s.Root = *containerdCfg.Root
+		}
+		if containerdCfg.State != nil && *containerdCfg.State != "" {
+			s.State = *containerdCfg.State
+		}
+		if containerdCfg.Endpoint != "" {
+			s.Grpc.Address = strings.TrimPrefix(containerdCfg.Endpoint, "unix://")
+		}
+		if containerdCfg.UseSystemdCgroup != nil {
+			s.SystemdCgroup = *containerdCfg.UseSystemdCgroup
+		}
+		if containerdCfg.Pause != "" {
+			s.SandboxImage = containerdCfg.Pause
 		}
 	}
 
-	templateData := map[string]interface{}{
-		"SandboxImage":       s.SandboxImage,
-		"RegistryMirrors":    templateRegistryMirrors, // Use the adapted structure
-		"InsecureRegistries": s.InsecureRegistries,
-		"UseSystemdCgroup":   s.UseSystemdCgroup,
-		"RegistryConfigPath": s.RegistryConfigPath,
-		"ExtraTomlContent":   s.ExtraTomlContent,
+	if cfg.Registry != nil {
+		if cfg.Registry.MirroringAndRewriting != nil && cfg.Registry.MirroringAndRewriting.PrivateRegistry != "" {
+			s.RegistryMirrors["docker.io"] = v1alpha1.MirrorConfig{
+				Endpoints: []string{cfg.Registry.MirroringAndRewriting.PrivateRegistry},
+			}
+		}
+		if len(cfg.Registry.Auths) > 0 {
+			for server, auth := range cfg.Registry.Auths {
+				serverAddr := v1alpha1.ServerAddress(server)
+				authConfig := v1alpha1.AuthConfig{
+					Auth: &v1alpha1.ContainerdRegistryAuth{Username: auth.Username, Password: auth.Password, Auth: auth.Auth},
+					TLS:  &v1alpha1.TLSConfig{InsecureSkipVerify: true},
+				}
+				if auth.SkipTLSVerify != nil {
+					authConfig.TLS.InsecureSkipVerify = *auth.SkipTLSVerify
+				}
+				if auth.CertsPath != "" {
+					authConfig.TLS.CAFile = filepath.Join(auth.CertsPath, "ca.crt")
+					authConfig.TLS.CertFile = filepath.Join(auth.CertsPath, "tls.crt")
+					authConfig.TLS.KeyFile = filepath.Join(auth.CertsPath, "tls.key")
+				}
+				if auth.PlainHTTP != nil && *auth.PlainHTTP {
+					authConfig.TLS = nil
+				}
+				s.RegistryConfigs[serverAddr] = authConfig
+			}
+		}
 	}
-	if err := tmpl.Execute(&expectedBuf, templateData); err != nil {
-		return "", fmt.Errorf("failed to render expected containerd config template: %w", err)
+	if containerdCfg != nil && containerdCfg.Registry != nil {
+		for server, mirror := range containerdCfg.Registry.Mirrors {
+			s.RegistryMirrors[server] = mirror
+		}
+		for server, config := range containerdCfg.Registry.Configs {
+			s.RegistryConfigs[server] = config
+		}
 	}
-	// TrimSpace is important to remove leading/trailing newlines from template rendering
-	return strings.TrimSpace(expectedBuf.String()), nil
+
+	if s.SandboxImage == "" {
+		pauseImage := helpers.GetImage(ctx, "pause")
+		s.SandboxImage = pauseImage.ImageName()
+	}
+
+	s.Base.Meta.Name = instanceName
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Configure containerd", s.Base.Meta.Name)
+	s.Base.Sudo = true
+	s.Base.Timeout = 1 * time.Minute
+
+	b := new(ConfigureContainerdStepBuilder).Init(s)
+	return b
 }
 
-func (s *ConfigureContainerdStep) Precheck(ctx step.StepContext, host connector.Host) (bool, error) {
-	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Precheck")
+func (s *ConfigureContainerdStep) Meta() *spec.StepMeta {
+	return &s.Base.Meta
+}
 
-	runnerSvc := ctx.GetRunner()
-	conn, err := ctx.GetConnectorForHost(host)
+func (s *ConfigureContainerdStep) renderContent() (string, error) {
+	tmplStr, err := templates.Get(containerdConfigTemplatePath)
 	if err != nil {
-		return false, fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.meta.Name, err)
+		return "", err
+	}
+	tmpl, err := template.New("config.toml").Parse(tmplStr)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse containerd config template: %w", err)
 	}
 
-	exists, err := runnerSvc.Exists(ctx.GoContext(), conn, s.ConfigFilePath)
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, s); err != nil {
+		return "", fmt.Errorf("failed to render containerd config template: %w", err)
+	}
+	return buf.String(), nil
+}
+
+func (s *ConfigureContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		logger.Warn("Failed to check existence of config file. Assuming not configured.", "path", s.ConfigFilePath, "error", err)
+		return false, err
+	}
+
+	expectedContent, err := s.renderContent()
+	if err != nil {
+		return false, fmt.Errorf("failed to render expected content for precheck: %w", err)
+	}
+
+	exists, err := runner.Exists(ctx.GoContext(), conn, s.TargetPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to check for config file '%s': %w", s.TargetPath, err)
+	}
+
+	if exists {
+		remoteContent, err := runner.ReadFile(ctx.GoContext(), conn, s.TargetPath)
+		if err != nil {
+			logger.Warnf("Config file '%s' exists but failed to read, will overwrite. Error: %v", s.TargetPath, err)
+			return false, nil
+		}
+		if string(remoteContent) == expectedContent {
+			logger.Infof("Containerd config file '%s' already exists and content matches. Step is done.", s.TargetPath)
+			return true, nil
+		}
+		logger.Infof("Containerd config file '%s' exists but content differs. Step needs to run.", s.TargetPath)
 		return false, nil
 	}
-	if !exists {
-		logger.Debug("Containerd config file does not exist.", "path", s.ConfigFilePath)
-		return false, nil
-	}
 
-	// Generate expected content
-	expectedContent, err := s.renderExpectedConfig()
-	if err != nil {
-		logger.Error("Failed to render expected config for precheck comparison.", "error", err)
-		return false, err // Propagate error as it's a step logic issue
-	}
-
-	// Read current content
-	currentContentBytes, err := runnerSvc.ReadFile(ctx.GoContext(), conn, s.ConfigFilePath)
-	if err != nil {
-		logger.Warn("Failed to read existing config for comparison. Assuming not configured correctly.", "path", s.ConfigFilePath, "error", err)
-		return false, nil
-	}
-	currentContent := strings.TrimSpace(string(currentContentBytes))
-
-	// Normalize line endings for comparison
-	currentContent = strings.ReplaceAll(currentContent, "\r\n", "\n")
-	// expectedContent is already normalized by TrimSpace and template rendering typically uses \n
-
-	if currentContent == expectedContent {
-		logger.Info("Containerd config file content matches expected configuration.", "path", s.ConfigFilePath)
-		return true, nil
-	}
-
-	logger.Info("Containerd config file content does not match expected configuration. Will regenerate.", "path", s.ConfigFilePath)
-	// For debugging:
-	// logger.Debug("Current content", "value", currentContent)
-	// logger.Debug("Expected content", "value", expectedContent)
+	logger.Infof("Containerd config file '%s' does not exist. Configuration is required.", s.TargetPath)
 	return false, nil
 }
 
-func (s *ConfigureContainerdStep) Run(ctx step.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Run")
-
-	runnerSvc := ctx.GetRunner()
-	conn, err := ctx.GetConnectorForHost(host)
+func (s *ConfigureContainerdStep) Run(ctx runtime.ExecutionContext) error {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		return fmt.Errorf("failed to get connector for host %s for step %s: %w", host.GetName(), s.meta.Name, err)
+		return err
 	}
 
-	parentDir := filepath.Dir(s.ConfigFilePath)
-	if err := runnerSvc.Mkdirp(ctx.GoContext(), conn, parentDir, "0755", s.Sudo); err != nil {
-		return fmt.Errorf("failed to create directory %s for containerd config on host %s for step %s: %w", parentDir, host.GetName(), s.meta.Name, err)
+	targetDir := filepath.Dir(s.TargetPath)
+	if err := runner.Mkdirp(ctx.GoContext(), conn, targetDir, "0755", s.Sudo); err != nil {
+		return fmt.Errorf("failed to create containerd config directory '%s': %w", targetDir, err)
 	}
 
-	configContent, err := s.renderExpectedConfig() // Use the same rendering logic
+	content, err := s.renderContent()
 	if err != nil {
-		return err // Error from rendering
+		return err
 	}
 
-	err = runnerSvc.WriteFile(ctx.GoContext(), conn, []byte(configContent), s.ConfigFilePath, "0644", s.Sudo)
+	logger.Infof("Writing containerd config file to %s", s.TargetPath)
+	return runner.WriteFile(ctx.GoContext(), conn, []byte(content), s.TargetPath, "0644", s.Sudo)
+}
+
+func (s *ConfigureContainerdStep) Rollback(ctx runtime.ExecutionContext) error {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		return fmt.Errorf("failed to write containerd config to %s on host %s for step %s: %w", s.ConfigFilePath, host.GetName(), s.meta.Name, err)
+		logger.Errorf("Failed to get connector for rollback: %v", err)
+		return nil
 	}
 
-	logger.Info("Containerd configuration written. Restart containerd service for changes to take effect.", "path", s.ConfigFilePath)
+	logger.Warnf("Rolling back by removing: %s", s.TargetPath)
+	if err := runner.Remove(ctx.GoContext(), conn, s.TargetPath, s.Sudo, false); err != nil {
+		if !strings.Contains(err.Error(), "no such file or directory") {
+			logger.Errorf("Failed to remove '%s' during rollback: %v", s.TargetPath, err)
+		}
+	}
+
 	return nil
 }
 
-func (s *ConfigureContainerdStep) Rollback(ctx step.StepContext, host connector.Host) error {
-	logger := ctx.GetLogger().With("step", s.meta.Name, "host", host.GetName(), "phase", "Rollback")
-
-	runnerSvc := ctx.GetRunner()
-	conn, err := ctx.GetConnectorForHost(host)
-	if err != nil {
-		return fmt.Errorf("failed to get connector for host %s for rollback of step %s: %w", host.GetName(), s.meta.Name, err)
-	}
-
-	logger.Info("Attempting to remove containerd config file for rollback.", "path", s.ConfigFilePath)
-	if errRemove := runnerSvc.Remove(ctx.GoContext(), conn, s.ConfigFilePath, s.Sudo); errRemove != nil {
-		logger.Error("Failed to remove containerd config file during rollback.", "path", s.ConfigFilePath, "error", errRemove)
-		// Rollback is best-effort
-	} else {
-		logger.Info("Successfully removed containerd config file if it existed.", "path", s.ConfigFilePath)
-	}
-	return nil
-}
-
-// Ensure ConfigureContainerdStep implements the step.Step interface.
 var _ step.Step = (*ConfigureContainerdStep)(nil)

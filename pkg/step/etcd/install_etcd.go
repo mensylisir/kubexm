@@ -1,4 +1,4 @@
-package containerd
+package etcd
 
 import (
 	"fmt"
@@ -14,7 +14,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step/helpers"
 )
 
-type InstallContainerdStep struct {
+type InstallEtcdStep struct {
 	step.Base
 	Version     string
 	Arch        string
@@ -25,15 +25,18 @@ type InstallContainerdStep struct {
 	Permission  string
 }
 
-type InstallContainerdStepBuilder struct {
-	step.Builder[InstallContainerdStepBuilder, *InstallContainerdStep]
+type InstallEtcdStepBuilder struct {
+	step.Builder[InstallEtcdStepBuilder, *InstallEtcdStep]
 }
 
-func NewInstallContainerdStepBuilder(ctx runtime.Context, instanceName string) *InstallContainerdStepBuilder {
-	cfg := ctx.GetClusterConfig().Spec
+func NewInstallEtcdStepBuilder(ctx runtime.Context, instanceName string) *InstallEtcdStepBuilder {
+	etcdVersion := common.DefaultEtcdVersion
+	if ctx.GetClusterConfig().Spec.Etcd != nil && ctx.GetClusterConfig().Spec.Etcd.Version != "" {
+		etcdVersion = ctx.GetClusterConfig().Spec.Etcd.Version
+	}
 
-	s := &InstallContainerdStep{
-		Version:     cfg.Kubernetes.ContainerRuntime.Containerd.Version,
+	s := &InstallEtcdStep{
+		Version:     etcdVersion,
 		Arch:        "",
 		WorkDir:     ctx.GetGlobalWorkDir(),
 		ClusterName: ctx.GetClusterConfig().ObjectMeta.Name,
@@ -43,33 +46,33 @@ func NewInstallContainerdStepBuilder(ctx runtime.Context, instanceName string) *
 	}
 
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install containerd binaries for version %s", s.Base.Meta.Name, s.Version)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install etcd binaries for version %s", s.Base.Meta.Name, s.Version)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
-	s.Base.Timeout = 5 * time.Minute
+	s.Base.Timeout = 3 * time.Minute
 
-	b := new(InstallContainerdStepBuilder).Init(s)
+	b := new(InstallEtcdStepBuilder).Init(s)
 	return b
 }
 
-func (b *InstallContainerdStepBuilder) WithInstallPath(installPath string) *InstallContainerdStepBuilder {
+func (b *InstallEtcdStepBuilder) WithInstallPath(installPath string) *InstallEtcdStepBuilder {
 	b.Step.InstallPath = installPath
 	return b
 }
 
-func (b *InstallContainerdStepBuilder) WithPermission(permission string) *InstallContainerdStepBuilder {
+func (b *InstallEtcdStepBuilder) WithPermission(permission string) *InstallEtcdStepBuilder {
 	b.Step.Permission = permission
 	return b
 }
 
-func (s *InstallContainerdStep) Meta() *spec.StepMeta {
+func (s *InstallEtcdStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *InstallContainerdStep) getExtractedPathOnControlNode() (string, error) {
+func (s *InstallEtcdStep) getLocalExtractedPath() (string, error) {
 	provider := helpers.NewBinaryProvider()
 	binaryInfo, err := provider.GetBinaryInfo(
-		helpers.ComponentContainerd,
+		helpers.ComponentEtcd,
 		s.Version,
 		s.Arch,
 		s.Zone,
@@ -77,15 +80,13 @@ func (s *InstallContainerdStep) getExtractedPathOnControlNode() (string, error) 
 		s.ClusterName,
 	)
 	if err != nil {
-		return "", fmt.Errorf("failed to get containerd binary info: %w", err)
+		return "", fmt.Errorf("failed to get etcd binary info: %w", err)
 	}
-
 	destDirName := strings.TrimSuffix(binaryInfo.FileName, ".tar.gz")
-	destPath := filepath.Join(common.DefaultExtractTmpDir, destDirName)
-	return destPath, nil
+	return filepath.Join(common.DefaultExtractTmpDir, destDirName), nil
 }
 
-func (s *InstallContainerdStep) filesToInstall() map[string]struct {
+func (s *InstallEtcdStep) filesToInstall() map[string]struct {
 	Target string
 	Perms  string
 } {
@@ -93,15 +94,12 @@ func (s *InstallContainerdStep) filesToInstall() map[string]struct {
 		Target string
 		Perms  string
 	}{
-		"bin/containerd":              {Target: filepath.Join(s.InstallPath, "containerd"), Perms: s.Permission},
-		"bin/containerd-shim":         {Target: filepath.Join(s.InstallPath, "containerd-shim"), Perms: s.Permission},
-		"bin/containerd-shim-runc-v1": {Target: filepath.Join(s.InstallPath, "containerd-shim-runc-v1"), Perms: s.Permission},
-		"bin/containerd-shim-runc-v2": {Target: filepath.Join(s.InstallPath, "containerd-shim-runc-v2"), Perms: s.Permission},
-		"bin/ctr":                     {Target: filepath.Join(s.InstallPath, "ctr"), Perms: s.Permission},
+		"etcd":    {Target: filepath.Join(s.InstallPath, "etcd"), Perms: s.Permission},
+		"etcdctl": {Target: filepath.Join(s.InstallPath, "etcdctl"), Perms: s.Permission},
 	}
 }
 
-func (s *InstallContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+func (s *InstallEtcdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
@@ -113,7 +111,7 @@ func (s *InstallContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 	for _, details := range files {
 		exists, err := runner.Exists(ctx.GoContext(), conn, details.Target)
 		if err != nil {
-			return false, fmt.Errorf("failed to check for file '%s' on host %s: %w", details.Target, ctx.GetHost().GetName(), err)
+			return false, fmt.Errorf("failed to check for file '%s': %w", details.Target, err)
 		}
 		if !exists {
 			logger.Infof("Target file '%s' does not exist. Installation is required.", details.Target)
@@ -121,11 +119,11 @@ func (s *InstallContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 		}
 	}
 
-	logger.Info("All required containerd files already exist on remote host. Step is done.")
+	logger.Info("All required etcd binaries already exist on remote host. Step is done.")
 	return true, nil
 }
 
-func (s *InstallContainerdStep) Run(ctx runtime.ExecutionContext) error {
+func (s *InstallEtcdStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
@@ -133,9 +131,9 @@ func (s *InstallContainerdStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	localExtractedPath, err := s.getExtractedPathOnControlNode()
+	localExtractedPath, err := s.getLocalExtractedPath()
 	if err != nil {
-		return fmt.Errorf("could not determine local extracted path: %w", err)
+		return err
 	}
 
 	remoteUploadTmpDir := common.DefaultUploadTmpDir
@@ -144,21 +142,20 @@ func (s *InstallContainerdStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	files := s.filesToInstall()
-
 	for sourceRelPath, details := range files {
 		localSourcePath := filepath.Join(localExtractedPath, sourceRelPath)
 
 		if _, err := os.Stat(localSourcePath); os.IsNotExist(err) {
-			logger.Warnf("Local source file '%s' not found, skipping its installation.", localSourcePath)
-			continue
+			return fmt.Errorf("local source file '%s' not found, did extract step run correctly?", localSourcePath)
 		}
 
-		remoteTempPath := filepath.Join(remoteUploadTmpDir, filepath.Base(localSourcePath))
+		remoteTempPath := filepath.Join(remoteUploadTmpDir, sourceRelPath)
 		logger.Infof("Uploading %s to %s:%s", localSourcePath, ctx.GetHost().GetName(), remoteTempPath)
 
-		if err := runner.Upload(ctx.GoContext(), conn, localSourcePath, remoteTempPath, s.Base.Sudo); err != nil {
+		if err := runner.Upload(ctx.GoContext(), conn, localSourcePath, remoteTempPath, s.Sudo); err != nil {
 			return fmt.Errorf("failed to upload '%s' to '%s': %w", localSourcePath, remoteTempPath, err)
 		}
+
 		installCmd := fmt.Sprintf("install -o root -g root -m %s %s %s", details.Perms, remoteTempPath, details.Target)
 		logger.Infof("Installing file to %s on remote host", details.Target)
 
@@ -171,20 +168,16 @@ func (s *InstallContainerdStep) Run(ctx runtime.ExecutionContext) error {
 	return nil
 }
 
-func (s *InstallContainerdStep) Rollback(ctx runtime.ExecutionContext) error {
+func (s *InstallEtcdStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		logger.Errorf("Failed to get connector for rollback, cannot remove files: %v", err)
 		return nil
 	}
 
 	files := s.filesToInstall()
 	for _, details := range files {
-		if details.Target == "" {
-			continue
-		}
 		logger.Warnf("Rolling back by removing: %s", details.Target)
 		if err := runner.Remove(ctx.GoContext(), conn, details.Target, s.Sudo, false); err != nil {
 			logger.Errorf("Failed to remove '%s' during rollback: %v", details.Target, err)
@@ -193,4 +186,4 @@ func (s *InstallContainerdStep) Rollback(ctx runtime.ExecutionContext) error {
 	return nil
 }
 
-var _ step.Step = (*InstallContainerdStep)(nil)
+var _ step.Step = (*InstallEtcdStep)(nil)

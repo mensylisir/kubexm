@@ -357,10 +357,9 @@ func (l *LocalConnector) CopyContent(ctx context.Context, content []byte, dstPat
 	return l.applySudoPermissions(ctx, dstPath, opts)
 }
 
-func (l *LocalConnector) Fetch(ctx context.Context, remotePath, localPath string) error {
-	return l.Copy(ctx, remotePath, localPath, nil)
+func (l *LocalConnector) Fetch(ctx context.Context, remotePath, localPath string, options *FileTransferOptions) error {
+	return l.Copy(ctx, remotePath, localPath, options)
 }
-
 func (l *LocalConnector) Stat(ctx context.Context, path string) (*FileStat, error) {
 	fi, err := os.Lstat(path)
 	if err != nil {
