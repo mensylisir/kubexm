@@ -1,0 +1,15 @@
+# kube-controller-manager configuration
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+kubernetesVersion: {{ .KubernetesVersion }}
+controllerManager:
+  extraArgs:
+    cluster-cidr: "{{ .ClusterCidr }}"
+    service-cluster-ip-range: "{{ .ServiceClusterIpRange }}"
+    cluster-signing-cert-file: "/etc/kubernetes/pki/ca.crt"
+    cluster-signing-key-file: "/etc/kubernetes/pki/ca.key"
+    root-ca-file: "/etc/kubernetes/pki/ca.crt"
+    service-account-private-key-file: "/etc/kubernetes/pki/sa.key"
+    kubeconfig: "/etc/kubernetes/controller-manager.conf"
+    leader-elect: "true"
+    use-service-account-credentials: "true"
