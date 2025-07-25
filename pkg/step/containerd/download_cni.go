@@ -19,7 +19,6 @@ import (
 
 type DownloadCNIPluginsStep struct {
 	step.Base
-	URL         string
 	Version     string
 	Arch        string
 	WorkDir     string
@@ -46,23 +45,22 @@ func NewDownloadCNIPluginsStepBuilder(ctx runtime.Context, instanceName string) 
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 2 * time.Minute
 
-	info, err := s.getBinaryInfo()
-	if err != nil {
-		return nil
-	}
-	s.URL = info.URL
-
 	b := new(DownloadCNIPluginsStepBuilder).Init(s)
 	return b
 }
 
 func (b *DownloadCNIPluginsStepBuilder) WithVersion(version string) *DownloadCNIPluginsStepBuilder {
-	b.Step.Version = version
+	if version != "" {
+		b.Step.Version = version
+		b.Step.Base.Meta.Description = fmt.Sprintf("[%s]>>Download cni plugins version %s", b.Step.Base.Meta.Name, b.Step.Version)
+	}
 	return b
 }
 
-func (b *DownloadCNIPluginsStepBuilder) WithURL(url string) *DownloadCNIPluginsStepBuilder {
-	b.Step.URL = url
+func (b *DownloadCNIPluginsStepBuilder) WithArch(arch string) *DownloadCNIPluginsStepBuilder {
+	if arch != "" {
+		b.Step.Arch = arch
+	}
 	return b
 }
 
@@ -145,7 +143,7 @@ func (s *DownloadCNIPluginsStep) Run(ctx runtime.ExecutionContext) error {
 
 	binaryInfo, err := s.getBinaryInfo()
 	if err != nil {
-		return fmt.Errorf("failed to get containerd binary info for run: %w", err)
+		return fmt.Errorf("failed to get CNI plugins binary info for run: %w", err)
 	}
 	destDir := filepath.Dir(binaryInfo.FilePath)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
@@ -157,7 +155,7 @@ func (s *DownloadCNIPluginsStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to create http request: %w", err)
 	}
 
-	logger.Infof("Downloading containerd from %s ...", binaryInfo.URL)
+	logger.Infof("Downloading CNI plugins from %s ...", binaryInfo.URL)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to download file: %w", err)

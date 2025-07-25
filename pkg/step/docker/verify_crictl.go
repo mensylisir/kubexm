@@ -28,7 +28,7 @@ func NewVerifyCrictlStepBuilder(ctx runtime.Context, instanceName string) *Verif
 
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Verify Docker (via cri-dockerd) CRI interface using crictl", s.Base.Meta.Name)
-	s.Base.Sudo = true
+	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 1 * time.Minute
 

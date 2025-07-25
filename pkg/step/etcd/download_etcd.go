@@ -20,7 +20,6 @@ import (
 
 type DownloadEtcdStep struct {
 	step.Base
-	URL         string
 	Version     string
 	Arch        string
 	WorkDir     string
@@ -52,18 +51,22 @@ func NewDownloadEtcdStepBuilder(ctx runtime.Context, instanceName string) *Downl
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	info, err := s.getBinaryInfo()
-	if err != nil {
-		return nil
-	}
-	s.URL = info.URL
-
 	b := new(DownloadEtcdStepBuilder).Init(s)
 	return b
 }
 
-func (b *DownloadEtcdStepBuilder) WithURL(url string) *DownloadEtcdStepBuilder {
-	b.Step.URL = url
+func (b *DownloadEtcdStepBuilder) WithVersion(version string) *DownloadEtcdStepBuilder {
+	if version != "" {
+		b.Step.Version = version
+		b.Step.Base.Meta.Description = fmt.Sprintf("[%s]>>Download etcd version %s", b.Step.Base.Meta.Name, b.Step.Version)
+	}
+	return b
+}
+
+func (b *DownloadEtcdStepBuilder) WithArch(arch string) *DownloadEtcdStepBuilder {
+	if arch != "" {
+		b.Step.Arch = arch
+	}
 	return b
 }
 

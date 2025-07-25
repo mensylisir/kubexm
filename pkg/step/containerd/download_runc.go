@@ -19,7 +19,6 @@ import (
 
 type DownloadRuncStep struct {
 	step.Base
-	URL         string
 	Version     string
 	Arch        string
 	WorkDir     string
@@ -46,25 +45,22 @@ func NewDownloadRuncStepBuilder(ctx runtime.Context, instanceName string) *Downl
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 2 * time.Minute
 
-	info, err := s.getBinaryInfo()
-	if err != nil {
-		return nil
-	}
-	s.URL = info.URL
-
 	b := new(DownloadRuncStepBuilder).Init(s)
 	return b
 }
 
 func (b *DownloadRuncStepBuilder) WithVersion(version string) *DownloadRuncStepBuilder {
 	b.Step.Version = version
-	return b
-}
-func (b *DownloadRuncStepBuilder) WithURL(url string) *DownloadRuncStepBuilder {
-	b.Step.URL = url
+	b.Step.Base.Meta.Description = fmt.Sprintf("[%s]>>Download runc version %s", b.Step.Base.Meta.Name, b.Step.Version)
 	return b
 }
 
+func (b *DownloadRuncStepBuilder) WithArch(arch string) *DownloadRuncStepBuilder {
+	if arch != "" {
+		b.Step.Arch = arch
+	}
+	return b
+}
 func (s *DownloadRuncStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
@@ -144,7 +140,7 @@ func (s *DownloadRuncStep) Run(ctx runtime.ExecutionContext) error {
 
 	binaryInfo, err := s.getBinaryInfo()
 	if err != nil {
-		return fmt.Errorf("failed to get containerd binary info for run: %w", err)
+		return fmt.Errorf("failed to get runc binary info for run: %w", err)
 	}
 	destDir := filepath.Dir(binaryInfo.FilePath)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
@@ -156,7 +152,7 @@ func (s *DownloadRuncStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to create http request: %w", err)
 	}
 
-	logger.Infof("Downloading containerd from %s ...", binaryInfo.URL)
+	logger.Infof("Downloading runc from %s ...", binaryInfo.URL)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to download file: %w", err)

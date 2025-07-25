@@ -42,11 +42,26 @@ func NewInstallDockerStepBuilder(ctx runtime.Context, instanceName string) *Inst
 
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install Docker binaries for version %s", s.Base.Meta.Name, s.Version)
-	s.Base.Sudo = true
+	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
 	b := new(InstallDockerStepBuilder).Init(s)
+	return b
+}
+
+func (b *InstallDockerStepBuilder) WithVersion(version string) *InstallDockerStepBuilder {
+	if version != "" {
+		b.Step.Version = version
+		b.Step.Base.Meta.Description = fmt.Sprintf("[%s]>>Install Docker binaries for version %s", b.Step.Base.Meta.Name, b.Step.Version)
+	}
+	return b
+}
+
+func (b *InstallDockerStepBuilder) WithArch(arch string) *InstallDockerStepBuilder {
+	if arch != "" {
+		b.Step.Arch = arch
+	}
 	return b
 }
 
@@ -79,19 +94,20 @@ func (s *InstallDockerStep) getExtractedPathOnControlNode() (string, error) {
 	}
 
 	destDirName := strings.TrimSuffix(binaryInfo.FileName, ".tgz")
-	destPath := filepath.Join(common.DefaultExtractTmpDir, destDirName)
+	destPath := filepath.Join(common.DefaultExtractTmpDir, destDirName, "docker")
 	return destPath, nil
 }
 
-func (s *InstallDockerStep) filesToInstall() map[string]struct {
-	Target string
-	Perms  string
-} {
-	return map[string]struct {
-		Target string
-		Perms  string
-	}{
-		"docker": {Target: filepath.Join(s.InstallPath, "docker"), Perms: s.Permission},
+func (s *InstallDockerStep) filesToInstall() []string {
+	return []string{
+		"containerd",
+		"containerd-shim-runc-v2",
+		"ctr",
+		"docker",
+		"docker-init",
+		"docker-proxy",
+		"dockerd",
+		"runc",
 	}
 }
 
@@ -104,13 +120,14 @@ func (s *InstallDockerStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 	}
 
 	files := s.filesToInstall()
-	for _, details := range files {
-		exists, err := runner.Exists(ctx.GoContext(), conn, details.Target)
+	for _, fileName := range files {
+		targetPath := filepath.Join(s.InstallPath, fileName)
+		exists, err := runner.Exists(ctx.GoContext(), conn, targetPath)
 		if err != nil {
-			return false, fmt.Errorf("failed to check for file '%s' on host %s: %w", details.Target, ctx.GetHost().GetName(), err)
+			return false, fmt.Errorf("failed to check for file '%s' on host %s: %w", targetPath, ctx.GetHost().GetName(), err)
 		}
 		if !exists {
-			logger.Infof("Target file '%s' does not exist. Installation is required.", details.Target)
+			logger.Infof("Target file '%s' does not exist. Installation is required.", targetPath)
 			return false, nil
 		}
 	}
@@ -127,41 +144,47 @@ func (s *InstallDockerStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	localExtractedPath, err := s.getExtractedPathOnControlNode()
+	localSourceDir, err := s.getExtractedPathOnControlNode()
 	if err != nil {
 		return fmt.Errorf("could not determine local extracted path: %w", err)
 	}
 
+	if err := runner.Mkdirp(ctx.GoContext(), conn, s.InstallPath, s.Permission, s.Sudo); err != nil {
+		return fmt.Errorf("failed to create remote install directory '%s': %w", s.InstallPath, err)
+	}
+
 	remoteUploadTmpDir := common.DefaultUploadTmpDir
-	if err := runner.Mkdirp(ctx.GoContext(), conn, remoteUploadTmpDir, "0755", false); err != nil {
+	if err := runner.Mkdirp(ctx.GoContext(), conn, remoteUploadTmpDir, s.Permission, s.Sudo); err != nil {
 		return fmt.Errorf("failed to create remote upload directory '%s': %w", remoteUploadTmpDir, err)
 	}
 
 	files := s.filesToInstall()
-
-	for sourceRelPath, details := range files {
-		localSourcePath := filepath.Join(localExtractedPath, sourceRelPath)
+	for _, fileName := range files {
+		localSourcePath := filepath.Join(localSourceDir, fileName)
+		targetPath := filepath.Join(s.InstallPath, fileName)
 
 		if _, err := os.Stat(localSourcePath); os.IsNotExist(err) {
-			logger.Warnf("Local source file '%s' not found, skipping its installation.", localSourcePath)
-			continue
+			return fmt.Errorf("local source file '%s' not found, please ensure the extract step ran correctly", localSourcePath)
 		}
 
-		remoteTempPath := filepath.Join(remoteUploadTmpDir, filepath.Base(localSourcePath))
+		remoteTempPath := filepath.Join(remoteUploadTmpDir, fileName)
 		logger.Infof("Uploading %s to %s:%s", localSourcePath, ctx.GetHost().GetName(), remoteTempPath)
 
 		if err := runner.Upload(ctx.GoContext(), conn, localSourcePath, remoteTempPath, s.Base.Sudo); err != nil {
 			return fmt.Errorf("failed to upload '%s' to '%s': %w", localSourcePath, remoteTempPath, err)
 		}
-		installCmd := fmt.Sprintf("install -o root -g root -m %s %s %s", details.Perms, remoteTempPath, details.Target)
-		logger.Infof("Installing file to %s on remote host", details.Target)
+
+		installCmd := fmt.Sprintf("install -o root -g root -m %s %s %s", s.Permission, remoteTempPath, targetPath)
+		logger.Infof("Installing file to %s on remote host", targetPath)
 
 		if _, _, err := runner.OriginRun(ctx.GoContext(), conn, installCmd, s.Sudo); err != nil {
-			runner.Remove(ctx.GoContext(), conn, remoteTempPath, false, false)
-			return fmt.Errorf("failed to install file '%s' on remote host: %w", details.Target, err)
+			runner.Remove(ctx.GoContext(), conn, remoteTempPath, s.Sudo, true)
+			return fmt.Errorf("failed to install file '%s' on remote host: %w", targetPath, err)
 		}
+		runner.Remove(ctx.GoContext(), conn, remoteTempPath, s.Sudo, true)
 	}
 
+	logger.Info("Successfully installed all Docker binaries.")
 	return nil
 }
 
@@ -175,13 +198,11 @@ func (s *InstallDockerStep) Rollback(ctx runtime.ExecutionContext) error {
 	}
 
 	files := s.filesToInstall()
-	for _, details := range files {
-		if details.Target == "" {
-			continue
-		}
-		logger.Warnf("Rolling back by removing: %s", details.Target)
-		if err := runner.Remove(ctx.GoContext(), conn, details.Target, s.Sudo, false); err != nil {
-			logger.Errorf("Failed to remove '%s' during rollback: %v", details.Target, err)
+	for _, fileName := range files {
+		targetPath := filepath.Join(s.InstallPath, fileName)
+		logger.Warnf("Rolling back by removing: %s", targetPath)
+		if err := runner.Remove(ctx.GoContext(), conn, targetPath, s.Sudo, true); err != nil {
+			logger.Errorf("Failed to remove '%s' during rollback: %v", targetPath, err)
 		}
 	}
 	return nil

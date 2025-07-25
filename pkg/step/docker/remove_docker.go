@@ -1,10 +1,14 @@
 package docker
 
 import (
+	"errors" // 需要引入 errors
 	"fmt"
+	"os" // 需要引入 os
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
@@ -12,8 +16,9 @@ import (
 
 type RemoveDockerStep struct {
 	step.Base
-	Packages []string
-	Purge    bool
+	FilesToRemove []string
+	InstallPath   string
+	Purge         bool
 }
 
 type RemoveDockerStepBuilder struct {
@@ -22,13 +27,23 @@ type RemoveDockerStepBuilder struct {
 
 func NewRemoveDockerStepBuilder(ctx runtime.Context, instanceName string) *RemoveDockerStepBuilder {
 	s := &RemoveDockerStep{
-		Packages: []string{"docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin", "docker-compose-plugin"},
-		Purge:    false,
+		FilesToRemove: []string{
+			"containerd",
+			"containerd-shim-runc-v2",
+			"ctr",
+			"docker",
+			"docker-init",
+			"docker-proxy",
+			"dockerd",
+			"runc",
+		},
+		InstallPath: common.DefaultBinDir,
+		Purge:       false,
 	}
 
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Remove Docker Engine packages", s.Base.Meta.Name)
-	s.Base.Sudo = true
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Remove Docker components and configuration", s.Base.Meta.Name)
+	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 10 * time.Minute
 
@@ -36,18 +51,46 @@ func NewRemoveDockerStepBuilder(ctx runtime.Context, instanceName string) *Remov
 	return b
 }
 
-func (b *RemoveDockerStepBuilder) WithPackages(packages []string) *RemoveDockerStepBuilder {
-	b.Step.Packages = packages
+func (b *RemoveDockerStepBuilder) WithFiles(files []string) *RemoveDockerStepBuilder {
+	b.Step.FilesToRemove = files
+	return b
+}
+
+func (b *RemoveDockerStepBuilder) WithInstallPath(path string) *RemoveDockerStepBuilder {
+	b.Step.InstallPath = path
 	return b
 }
 
 func (b *RemoveDockerStepBuilder) WithPurge(purge bool) *RemoveDockerStepBuilder {
 	b.Step.Purge = purge
+	if purge {
+		b.Step.Base.Meta.Description = fmt.Sprintf("[%s]>>Purge (remove with all data) Docker components", b.Step.Base.Meta.Name)
+	}
 	return b
 }
 
 func (s *RemoveDockerStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
+}
+
+func (s *RemoveDockerStep) getAllPathsToRemove() []string {
+	paths := make([]string, 0, len(s.FilesToRemove)+5)
+	for _, file := range s.FilesToRemove {
+		paths = append(paths, filepath.Join(s.InstallPath, file))
+	}
+
+	paths = append(paths,
+		common.DockerDefaultSystemdFile,
+		common.DockerDefaultDropInFile,
+		filepath.Dir(common.DockerDefaultDropInFile),
+		common.DockerDefaultConfDirTarget,
+	)
+
+	if s.Purge {
+		paths = append(paths, common.DockerDefaultDataRoot)
+	}
+
+	return paths
 }
 
 func (s *RemoveDockerStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
@@ -57,27 +100,30 @@ func (s *RemoveDockerStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, 
 	if err != nil {
 		return false, err
 	}
-	facts, err := ctx.GetHostFacts(ctx.GetHost())
-	if err != nil {
-		return false, fmt.Errorf("failed to get host facts: %w", err)
+
+	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
+	if err == nil {
+		isActive, _ := runner.IsServiceActive(ctx.GoContext(), conn, facts, common.DefaultDockerServiceName)
+		if isActive {
+			logger.Info("Docker service is still active. Cleanup is required.")
+			return false, nil
+		}
 	}
 
-	if len(s.Packages) == 0 {
-		logger.Info("No Docker packages specified to check for removal.")
-		return true, nil
+	paths := s.getAllPathsToRemove()
+	for _, path := range paths {
+		exists, err := runner.Exists(ctx.GoContext(), conn, path)
+		if err != nil {
+			return false, fmt.Errorf("failed to check for path '%s': %w", path, err)
+		}
+		if exists {
+			logger.Infof("Path '%s' still exists. Cleanup is required.", path)
+			return false, nil
+		}
 	}
-	keyPackage := s.Packages[0]
-	installed, err := runner.IsPackageInstalled(ctx.GoContext(), conn, facts, keyPackage)
-	if err != nil {
-		logger.Warn("Failed to check if Docker package is installed, assuming it might be present.", "package", keyPackage, "error", err)
-		return false, nil
-	}
-	if !installed {
-		logger.Info("Key Docker package already not installed.", "package", keyPackage)
-		return true, nil
-	}
-	logger.Info("Key Docker package is installed and needs removal.", "package", keyPackage)
-	return false, nil
+
+	logger.Info("All Docker related components have been removed. Step is done.")
+	return true, nil
 }
 
 func (s *RemoveDockerStep) Run(ctx runtime.ExecutionContext) error {
@@ -87,22 +133,56 @@ func (s *RemoveDockerStep) Run(ctx runtime.ExecutionContext) error {
 	if err != nil {
 		return err
 	}
-	facts, err := ctx.GetHostFacts(ctx.GetHost())
+
+	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
 	if err != nil {
-		return fmt.Errorf("failed to get host facts: %w", err)
+		logger.Warnf("Could not gather host facts, will proceed with cleanup but might not be able to interact with services gracefully: %v", err)
 	}
 
-	if len(s.Packages) == 0 {
-		logger.Info("No Docker packages specified for removal.")
-		return nil
+	if facts != nil {
+		logger.Info("Stopping and disabling docker service...")
+		_ = runner.StopService(ctx.GoContext(), conn, facts, common.DefaultDockerServiceName)
+		_ = runner.DisableService(ctx.GoContext(), conn, facts, common.DefaultDockerServiceName)
 	}
 
-	logger.Info("Removing Docker Engine packages.", "packages", strings.Join(s.Packages, ", "), "purge", s.Purge)
-	if err := runner.RemovePackages(ctx.GoContext(), conn, facts, s.Packages...); err != nil {
-		return fmt.Errorf("failed to remove Docker Engine packages (%s): %w", strings.Join(s.Packages, ", "), err)
+	var removalErrors []error
+	paths := s.getAllPathsToRemove()
+	purgeMsg := ""
+	if s.Purge {
+		purgeMsg = " (including data directory)"
+	}
+	logger.Info("Removing Docker files and directories"+purgeMsg, "paths", paths)
+
+	for _, path := range paths {
+		if path == common.DockerDefaultDataRoot {
+			logger.Warnf("PURGE MODE: Removing Docker data root: %s", path)
+		} else {
+			logger.Infof("Removing path: %s", path)
+		}
+
+		if err := runner.Remove(ctx.GoContext(), conn, path, s.Sudo, true); err != nil {
+			if !errors.Is(err, os.ErrNotExist) && !strings.Contains(err.Error(), "no such file or directory") {
+				err := fmt.Errorf("failed to remove '%s': %w", path, err)
+				logger.Error(err.Error())
+				removalErrors = append(removalErrors, err)
+			}
+		}
 	}
 
-	logger.Info("Docker Engine packages removed successfully.")
+	logger.Info("Reloading systemd daemon after cleanup")
+	if facts != nil {
+		if err := runner.DaemonReload(ctx.GoContext(), conn, facts); err != nil {
+			err = fmt.Errorf("failed to reload systemd daemon: %w", err)
+			logger.Error(err.Error())
+			removalErrors = append(removalErrors, err)
+		}
+	}
+
+	if len(removalErrors) > 0 {
+		return fmt.Errorf("encountered %d error(s) during Docker cleanup", len(removalErrors))
+	}
+
+	logger.Info("Docker components removed successfully.")
 	return nil
 }
 

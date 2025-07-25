@@ -62,9 +62,10 @@ const (
 	KubeadmNodeAdminClusterRoleBindingName = "kubeadm:node-admins"
 	SystemNodeClusterRoleName              = "system:node"
 	SystemKubeProxyClusterRoleBindingName  = "system:kube-proxy"
+	SystemNodeProxierOrganization          = "system:node-proxier"
 	DefaultCertificateOrganization         = "system:masters"
 	KubeletCertificateOrganization         = "system:nodes"
-	KubeletCertificateCNPrefix             = "system:node:" // Followed by the node name.
+	KubeletCertificateCNPrefix             = "system:node:"
 	KubeAPIServerCN                        = "kube-apiserver"
 	KubeControllerManagerUser              = "system:kube-controller-manager"
 	KubeSchedulerUser                      = "system:kube-scheduler"
@@ -95,6 +96,7 @@ const (
 	KubeletKubeconfigPathTarget            = "/etc/kubernetes/kubelet.conf"
 	KubeletBootstrapKubeconfigPathTarget   = "/etc/kubernetes/bootstrap-kubelet.conf"
 	KubeletConfigYAMLPathTarget            = "/var/lib/kubelet/config.yaml"
+	KubeproxyConfigYAMLPathTarget          = "/var/lib/kube-proxy/kube-proxy-config.yaml"
 	KubeletFlagsEnvPathTarget              = "/var/lib/kubelet/kubeadm-flags.env"
 	KubeletPKIDirTarget                    = "/var/lib/kubelet/pki"
 	DefaultKubernetesPKIDir                = "/etc/kubernetes/pki"
@@ -133,4 +135,12 @@ const (
 	KubeadmResetCommand     = "reset"
 	KubeadmJoinCommand      = "join"
 	KubeadmUpgradeCommand   = "upgrade"
+)
+
+const (
+	DefaultKubeApiserverServiceFile         = "/etc/systemd/system/kube-apiserver.service"
+	DefaultKubeControllerManagerServiceFile = "/etc/systemd/system/kube-controller-manager.service"
+	DefaultKubeSchedulerServiceFile         = "/etc/systemd/system/kube-scheduler.service"
+	DefaultKubeProxyrServiceFile            = "/etc/systemd/system/kube-proxy.service"
+	DefaultKubeletServiceFile               = "/etc/systemd/system/kubelet.service"
 )

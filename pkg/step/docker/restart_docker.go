@@ -22,7 +22,7 @@ func NewRestartDockerStepBuilder(ctx runtime.Context, instanceName string) *Rest
 
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Restart docker service", s.Base.Meta.Name)
-	s.Base.Sudo = true
+	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 3 * time.Minute
 

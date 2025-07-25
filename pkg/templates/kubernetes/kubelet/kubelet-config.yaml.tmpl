@@ -1,0 +1,87 @@
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+# 认证设置
+authentication:
+  anonymous:
+    enabled: false
+  webhook:
+    cacheTTL: 0s
+    enabled: true
+  x509:
+    clientCAFile: {{ .ClientCAFile }}
+# 授权设置
+authorization:
+  mode: Webhook
+  webhook:
+    cacheAuthorizedTTL: 0s
+    cacheUnauthorizedTTL: 0s
+# 基础配置
+clusterDNS:
+  - {{ .ClusterDNSIP }}
+clusterDomain: {{ .ClusterDomain }}
+# 日志配置
+containerLogMaxFiles: {{ .ContainerLogMaxFiles }}
+containerLogMaxSize: "{{ .ContainerLogMaxSize }}"
+# CPU 管理
+cpuManagerPolicy: "{{ .CpuManagerPolicy }}"
+# 驱逐策略
+evictionHard:
+  {{- range $key, $value := .EvictionHard }}
+  {{ $key }}: "{{ $value }}"
+  {{- end }}
+evictionMaxPodGracePeriod: {{ .EvictionMaxPodGracePeriod }}
+evictionPressureTransitionPeriod: "{{ .EvictionPressureTransitionPeriod }}"
+evictionSoft:
+  {{- range $key, $value := .EvictionSoft }}
+  {{ $key }}: "{{ $value }}"
+  {{- end }}
+evictionSoftGracePeriod:
+  {{- range $key, $value := .EvictionSoftGracePeriod }}
+  {{ $key }}: "{{ $value }}"
+  {{- end }}
+# 特性门控
+featureGates:
+  {{- range $key, $value := .FeatureGates }}
+  {{ $key }}: {{ $value }}
+  {{- end }}
+# 基础检查频率 (0s 禁用)
+fileCheckFrequency: 0s
+healthzBindAddress: 127.0.0.1
+healthzPort: 10248
+httpCheckFrequency: 0s
+# 镜像 GC
+imageGCHighThresholdPercent: 85
+imageGCLowThresholdPercent: 80
+imageMinimumGCAge: 0s
+# 资源预留
+kubeReserved:
+  cpu: {{ .KubeReservedCPU }}
+  memory: {{ .KubeReservedMemory }}
+systemReserved:
+  cpu: {{ .SystemReservedCPU }}
+  memory: {{ .SystemReservedMemory }}
+# 日志 (v1beta1 结构)
+logging:
+  flushFrequency: 5s
+  verbosity: 2
+# Pod 配置
+maxPods: {{ .MaxPods }}
+memorySwap: {}
+podPidsLimit: {{ .PodPidsLimit }}
+# 节点状态
+nodeStatusReportFrequency: 0s
+nodeStatusUpdateFrequency: 0s
+# 基础配置
+resolvConf: "{{ .ResolvConf }}" # 使用动态探测的路径
+rotateCertificates: true
+runtimeRequestTimeout: 0s
+# 关机行为
+shutdownGracePeriod: 0s
+shutdownGracePeriodCriticalPods: 0s
+  {{- /* 关键逻辑：只在 master 节点上设置此路径 */}}
+  {{- if .StaticPodPath }}
+staticPodPath: {{ .StaticPodPath }}
+  {{- end }}
+streamingConnectionIdleTimeout: 0s
+syncFrequency: 0s
+volumeStatsAggPeriod: 0s

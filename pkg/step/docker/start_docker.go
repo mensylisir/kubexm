@@ -22,7 +22,7 @@ func NewStartDockerStepBuilder(ctx runtime.Context, instanceName string) *StartD
 
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Start docker service", s.Base.Meta.Name)
-	s.Base.Sudo = true
+	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 2 * time.Minute
 

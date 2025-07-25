@@ -1,0 +1,14 @@
+[Service]
+ExecStart=
+ExecStart={{ .ExecStart }} {{ .ExtraArgs }}
+
+# Add Environment variables for proxies
+{{- if .HTTPProxy }}
+Environment="HTTP_PROXY={{ .HTTPProxy }}"
+{{- end }}
+{{- if .HTTPSProxy }}
+Environment="HTTPS_PROXY={{ .HTTPSProxy }}"
+{{- end }}
+{{- if .NoProxy }}
+Environment="NO_PROXY={{ .NoProxy }}"
+{{- end }}

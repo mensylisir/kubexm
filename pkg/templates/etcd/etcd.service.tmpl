@@ -7,7 +7,7 @@ After=network.target
 User={{.User}}
 Group={{.Group}}
 Type=notify
-ExecStart={{.EtcdBinaryPath}}
+ExecStart={{.EtcdBinaryPath}} --config-file=/etc/etcd/etcd.conf.yaml
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536

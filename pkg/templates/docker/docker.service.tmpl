@@ -7,39 +7,47 @@ Requires=containerd.service
 
 [Service]
 Type=notify
-# the default is not to use systemd for cgroups because the delegate issues still
-# exists and systemd currently does not support the cgroup feature set required
-# for containers run by docker
-ExecStart=/usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+# Docker 的可执行文件路径可以通过模板变量来指定，以增加灵活性
+ExecStart={{ .ExecStart }}
 ExecReload=/bin/kill -s HUP $MAINPID
-TimeoutSec=0
+TimeoutStartSec=0
 RestartSec=2
 Restart=always
 
-# Note that StartLimit* options were moved from "Service" to "Unit" in systemd 229.
-# Both the old, and new location are accepted by systemd 229 and up, so using the old location
-# is backwardly compatible.
-StartLimitBurst=3
+# 开启 delegate 以允许容器运行时（如 containerd）管理其自己的 cgroups
+# 这对于 Kubernetes 至关重要
+Delegate=yes
 
-# Note that StartLimitInterval was renamed to StartLimitIntervalSec in systemd 230.
-# Both the old, and new name are accepted by systemd 230 and up, so using the old name is
-# backwardly compatible.
-StartLimitInterval=60s
+# a huge number of tasks - recommend for production hosts.
+TasksMax=infinity
 
-# Have Docker wait until REST API is ready
-LimitNOFILE=infinity
-LimitNPROC=infinity
-LimitCORE=infinity
+# set delegate again for firefox
+#Delegate=yes
 
-# Having a kill signal mapped to SIGTERM, ensures that docker will be shutdown gracefully
-KillSignal=SIGTERM
-
-# Delegate builds on top of KillMode=control-group, so we explicitly set it here
-# to make sure it's not overridden by user configurations.
+# kill only the docker process, not all processes in the cgroup
 KillMode=process
 
-TasksMax=infinity
-OOMScoreAdjust=-500
+# restart the docker process if it exits prematurely
+Restart=on-failure
+StartLimitBurst=3
+StartLimitInterval=60s
+
+# notify systemd that the daemon has started
+Type=notify
+NotifyAccess=all
+
+
+# in systemd, this setting affects the default value of memory.limit
+# and other resource limits for services and scopes. By setting it to
+# infinity, you are essentially telling systemd not to impose any
+# default memory limit on the processes started by this service.
+MemoryLimit=infinity
+
+
+# increase the number of open file descriptors
+LimitNOFILE=1048576
+LimitNPROC=infinity
+LimitCORE=infinity
 
 [Install]
 WantedBy=multi-user.target

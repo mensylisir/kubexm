@@ -16,6 +16,13 @@ const (
 	ServiceAccountPublicKeyFileName    = "sa.pub"
 	ServiceAccountPrivateKeyFileName   = "sa.key"
 
+	AdminCertFileName             = "admin.crt"
+	AdminKeyFileName              = "admin.key"
+	ControllerManagerCertFileName = "controller-manager.crt"
+	ControllerManagerKeyFileName  = "controller-manager.key"
+	SchedulerCertFileName         = "scheduler.crt"
+	SchedulerKeyFileName          = "scheduler.key"
+
 	KubeletClientCertFileName   = "kubelet-client.crt"
 	KubeletClientKeyFileName    = "kubelet-client.key"
 	KubeletServerCertFileName   = "kubelet-server.crt"

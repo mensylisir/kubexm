@@ -22,7 +22,7 @@ func NewDisableCriDockerdStepBuilder(ctx runtime.Context, instanceName string) *
 
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Disable cri-dockerd service", s.Base.Meta.Name)
-	s.Base.Sudo = true
+	s.Base.Sudo = false
 	s.Base.Timeout = 1 * time.Minute
 
 	b := new(DisableCriDockerdStepBuilder).Init(s)

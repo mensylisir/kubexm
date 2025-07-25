@@ -1,0 +1,18 @@
+[Unit]
+  Description=Kubernetes Kube Proxy
+  Documentation=https://kubernetes.io/docs/
+  # kube-proxy 需要网络就绪后才能启动
+  Wants=network-online.target
+  After=network-online.target
+  
+  [Service]
+  ExecStart=/usr/local/bin/kube-proxy \
+  --config={{ .ConfigYAMLPath }} \
+  {{- /* 可以在这里添加额外的、不易变动的参数，比如日志级别 */}}
+  --v={{ .LogLevel }}
+  
+  Restart=on-failure
+  RestartSec=5
+  
+  [Install]
+  WantedBy=multi-user.target

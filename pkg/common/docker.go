@@ -7,6 +7,7 @@ const (
 	DockerDefaultSystemdFile            = "/etc/systemd/system/docker.service"
 	DockerDefaultDropInFile             = "/etc/systemd/system/docker.service.d/kubexm.conf"
 	CniDockerdSystemdFile               = "/etc/systemd/system/cri-dockerd.service"
+	CniDockerdSystemdDropinFile         = "/etc/systemd/system/cri-dockerd.service.d/kubexm.conf"
 	DefaultDockerEndpoint               = "unix:///var/run/docker.sock"
 	DockerSocketPath                    = "unix:///var/run/docker.sock"
 	CriDockerdSocketPath                = "/var/run/cri-dockerd.sock"
@@ -28,4 +29,8 @@ const (
 	DockerDefaultPidFile                = "/var/run/docker.pid"
 	StorageDriverOverlay2               = "overlay2"
 	StorageDriverBtrfs                  = "btrfs"
+	CriDockerdDefaultSystemdSocketFile  = "/etc/systemd/system/cri-dockerd.socket"
+	CrictlSocketPath                    = "unix:///run/cri-dockerd.sock"
+	DefaultDockerServiceName            = "docker.service"
+	DefaultCRIDockerServiceName         = "cri-dockerd.service"
 )
