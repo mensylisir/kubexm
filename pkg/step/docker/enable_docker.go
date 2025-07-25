@@ -26,7 +26,7 @@ func NewEnableDockerStepBuilder(ctx runtime.Context, instanceName string) *Enabl
 
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Enable docker service", s.Base.Meta.Name)
-	s.Base.Sudo = true
+	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 1 * time.Minute
 

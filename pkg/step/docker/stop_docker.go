@@ -22,7 +22,7 @@ func NewStopDockerStepBuilder(ctx runtime.Context, instanceName string) *StopDoc
 
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Stop docker service", s.Base.Meta.Name)
-	s.Base.Sudo = true
+	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 2 * time.Minute
 

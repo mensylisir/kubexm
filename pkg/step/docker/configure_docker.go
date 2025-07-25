@@ -1,33 +1,43 @@
 package docker
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
+	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/tidwall/gjson"
 )
 
-const DefaultDockerDaemonJSONPath = "/etc/docker/daemon.json"
+const DefaultDockerDaemonJSONPath = common.DockerDefaultConfigFileTarget
 
-type DockerDaemonConfig struct {
-	ExecOpts           []string          `json:"exec-opts,omitempty"`
-	LogDriver          string            `json:"log-driver,omitempty"`
-	LogOpts            map[string]string `json:"log-opts,omitempty"`
-	StorageDriver      string            `json:"storage-driver,omitempty"`
-	RegistryMirrors    []string          `json:"registry-mirrors,omitempty"`
-	InsecureRegistries []string          `json:"insecure-registries,omitempty"`
-	CgroupDriver       string            `json:"cgroupdriver,omitempty"`
+type daemonConfigForRender struct {
+	ExecOpts               []string                     `json:"exec-opts,omitempty"`
+	LogDriver              string                       `json:"log-driver,omitempty"`
+	LogOpts                map[string]string            `json:"log-opts,omitempty"`
+	StorageDriver          string                       `json:"storage-driver,omitempty"`
+	StorageOpts            []string                     `json:"storage-opts,omitempty"`
+	RegistryMirrors        []string                     `json:"registry-mirrors,omitempty"`
+	InsecureRegistries     []string                     `json:"insecure-registries,omitempty"`
+	DataRoot               string                       `json:"data-root,omitempty"`
+	Bridge                 string                       `json:"bridge,omitempty"`
+	Bip                    string                       `json:"bip,omitempty"`
+	LiveRestore            bool                         `json:"live-restore"` // 使用 bool 而不是 *bool，确保总是有值
+	IPTables               bool                         `json:"iptables"`
+	IPMasq                 bool                         `json:"ip-masq"`
+	DefaultAddressPools    []v1alpha1.DockerAddressPool `json:"default-address-pools,omitempty"`
+	MaxConcurrentDownloads int                          `json:"max-concurrent-downloads,omitempty"`
+	MaxConcurrentUploads   int                          `json:"max-concurrent-uploads,omitempty"`
 }
 
 type ConfigureDockerStep struct {
 	step.Base
-	Config         DockerDaemonConfig
+	FinalConfig    daemonConfigForRender
 	ConfigFilePath string
 }
 
@@ -36,13 +46,82 @@ type ConfigureDockerStepBuilder struct {
 }
 
 func NewConfigureDockerStepBuilder(ctx runtime.Context, instanceName string) *ConfigureDockerStepBuilder {
+	finalConfig := daemonConfigForRender{
+		LogDriver:              common.DockerLogDriverJSONFile,
+		LogOpts:                map[string]string{"max-size": common.DockerLogOptMaxSizeDefault},
+		StorageDriver:          common.StorageDriverOverlay2,
+		DataRoot:               common.DockerDefaultDataRoot,
+		Bridge:                 common.DefaultDockerBridgeName,
+		LiveRestore:            true,
+		IPTables:               true,
+		IPMasq:                 true,
+		ExecOpts:               []string{fmt.Sprintf("native.cgroupdriver=%s", common.CgroupDriverSystemd)}, // 默认 cgroup driver
+		MaxConcurrentDownloads: common.DockerMaxConcurrentDownloadsDefault,
+		MaxConcurrentUploads:   common.DockerMaxConcurrentUploadsDefault,
+	}
+
+	userDockerCfg := ctx.GetClusterConfig().Spec.Kubernetes.ContainerRuntime.Docker
+
+	if userDockerCfg != nil {
+		if userDockerCfg.CgroupDriver != nil && *userDockerCfg.CgroupDriver != "" {
+			finalConfig.ExecOpts = []string{fmt.Sprintf("native.cgroupdriver=%s", *userDockerCfg.CgroupDriver)}
+		}
+
+		if userDockerCfg.LogDriver != nil && *userDockerCfg.LogDriver != "" {
+			finalConfig.LogDriver = *userDockerCfg.LogDriver
+		}
+		if len(userDockerCfg.LogOpts) > 0 {
+			finalConfig.LogOpts = userDockerCfg.LogOpts
+		}
+		if userDockerCfg.StorageDriver != nil && *userDockerCfg.StorageDriver != "" {
+			finalConfig.StorageDriver = *userDockerCfg.StorageDriver
+		}
+		if len(userDockerCfg.StorageOpts) > 0 {
+			finalConfig.StorageOpts = userDockerCfg.StorageOpts
+		}
+		if len(userDockerCfg.RegistryMirrors) > 0 {
+			finalConfig.RegistryMirrors = userDockerCfg.RegistryMirrors
+		}
+		if len(userDockerCfg.InsecureRegistries) > 0 {
+			finalConfig.InsecureRegistries = userDockerCfg.InsecureRegistries
+		}
+		if userDockerCfg.DataRoot != nil && *userDockerCfg.DataRoot != "" {
+			finalConfig.DataRoot = *userDockerCfg.DataRoot
+		}
+		if userDockerCfg.Bridge != nil && *userDockerCfg.Bridge != "" {
+			finalConfig.Bridge = *userDockerCfg.Bridge
+		}
+		if userDockerCfg.BIP != nil && *userDockerCfg.BIP != "" {
+			finalConfig.Bip = *userDockerCfg.BIP
+		}
+		if userDockerCfg.LiveRestore != nil {
+			finalConfig.LiveRestore = *userDockerCfg.LiveRestore
+		}
+		if userDockerCfg.IPTables != nil {
+			finalConfig.IPTables = *userDockerCfg.IPTables
+		}
+		if userDockerCfg.IPMasq != nil {
+			finalConfig.IPMasq = *userDockerCfg.IPMasq
+		}
+		if len(userDockerCfg.DefaultAddressPools) > 0 {
+			finalConfig.DefaultAddressPools = userDockerCfg.DefaultAddressPools
+		}
+		if userDockerCfg.MaxConcurrentDownloads != nil {
+			finalConfig.MaxConcurrentDownloads = *userDockerCfg.MaxConcurrentDownloads
+		}
+		if userDockerCfg.MaxConcurrentUploads != nil {
+			finalConfig.MaxConcurrentUploads = *userDockerCfg.MaxConcurrentUploads
+		}
+	}
+
 	s := &ConfigureDockerStep{
 		ConfigFilePath: DefaultDockerDaemonJSONPath,
+		FinalConfig:    finalConfig,
 	}
 
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate Docker's daemon.json", s.Base.Meta.Name)
-	s.Base.Sudo = true
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Configure Docker's daemon.json", s.Base.Meta.Name)
+	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 1 * time.Minute
 
@@ -50,13 +129,10 @@ func NewConfigureDockerStepBuilder(ctx runtime.Context, instanceName string) *Co
 	return b
 }
 
-func (b *ConfigureDockerStepBuilder) WithConfig(config DockerDaemonConfig) *ConfigureDockerStepBuilder {
-	b.Step.Config = config
-	return b
-}
-
-func (b *ConfigureDockerStepBuilder) WithConfigFilePath(path string) *ConfigureDockerStepBuilder {
-	b.Step.ConfigFilePath = path
+func (b *ConfigureDockerStepBuilder) WithCgroupDriver(driver string) *ConfigureDockerStepBuilder {
+	if driver != "" {
+		b.Step.FinalConfig.ExecOpts = []string{fmt.Sprintf("native.cgroupdriver=%s", driver)}
+	}
 	return b
 }
 
@@ -64,99 +140,83 @@ func (s *ConfigureDockerStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *ConfigureDockerStep) renderExpectedConfig() (string, error) {
-	jsonData, err := json.MarshalIndent(s.Config, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal DockerDaemonConfig to JSON: %w", err)
-	}
-	return string(jsonData), nil
+func (s *ConfigureDockerStep) renderExpectedConfig() ([]byte, error) {
+	return json.MarshalIndent(s.FinalConfig, "", "  ")
 }
 
 func (s *ConfigureDockerStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		return false, err
 	}
 
-	exists, err := runner.Exists(ctx.GoContext(), conn, s.ConfigFilePath)
+	currentContent, err := runner.ReadFile(ctx.GoContext(), conn, s.ConfigFilePath)
 	if err != nil {
-		logger.Warn("Failed to check for existing daemon.json, will attempt generation.", "error", err)
-		return false, nil
-	}
-	if !exists {
-		logger.Info("daemon.json does not exist.", "path", s.ConfigFilePath)
 		return false, nil
 	}
 
-	logger.Info("daemon.json exists. Verifying content...")
-	currentContentBytes, err := runner.ReadFile(ctx.GoContext(), conn, s.ConfigFilePath)
+	expectedContentBytes, err := s.renderExpectedConfig()
 	if err != nil {
-		logger.Warn("Failed to read existing daemon.json for comparison, will regenerate.", "error", err)
-		return false, nil
+		return false, fmt.Errorf("failed to render expected config for precheck: %w", err)
 	}
 
-	expectedContent, err := s.renderExpectedConfig()
-	if err != nil {
-		logger.Error("Failed to render expected daemon.json for comparison.", err)
-		return false, fmt.Errorf("failed to render expected config: %w", err)
-	}
+	expectedResult := gjson.ParseBytes(expectedContentBytes)
 
-	if strings.TrimSpace(string(currentContentBytes)) == strings.TrimSpace(expectedContent) {
-		logger.Info("Existing daemon.json content matches expected content.")
-		return true, nil
-	}
+	mismatch := false
+	expectedResult.ForEach(func(key, value gjson.Result) bool {
+		actualValue := gjson.GetBytes(currentContent, key.String())
+		if actualValue.Raw != value.Raw {
+			mismatch = true
+			return false
+		}
+		return true
+	})
 
-	logger.Info("Existing daemon.json content does not match. Will regenerate.")
-	return false, nil
+	return !mismatch, nil
 }
 
 func (s *ConfigureDockerStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
-
-	configContent, err := s.renderExpectedConfig()
-	if err != nil {
-		return err
-	}
-
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		return err
 	}
 
+	configContent, err := s.renderExpectedConfig()
+	if err != nil {
+		return fmt.Errorf("failed to render final docker config: %w", err)
+	}
+
 	remoteDir := filepath.Dir(s.ConfigFilePath)
-	logger.Info("Ensuring remote directory for daemon.json exists.", "path", remoteDir)
 	if err := runner.Mkdirp(ctx.GoContext(), conn, remoteDir, "0755", s.Sudo); err != nil {
-		return fmt.Errorf("failed to create remote directory %s for daemon.json: %w", remoteDir, err)
+		return fmt.Errorf("failed to create remote directory %s: %w", remoteDir, err)
 	}
 
 	logger.Info("Writing Docker daemon.json file.", "path", s.ConfigFilePath)
-	err = runner.WriteFile(ctx.GoContext(), conn, []byte(configContent), s.ConfigFilePath, "0644", s.Sudo)
+	err = runner.WriteFile(ctx.GoContext(), conn, configContent, s.ConfigFilePath, "0644", s.Sudo)
 	if err != nil {
 		return fmt.Errorf("failed to write Docker daemon.json to %s: %w", s.ConfigFilePath, err)
 	}
 
-	logger.Info("Docker daemon.json file generated successfully. Restart Docker for changes to take effect.")
+	logger.Info("Docker daemon.json file configured successfully. Restart Docker for changes to take effect.")
 	return nil
 }
 
 func (s *ConfigureDockerStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
-	logger.Info("Attempting to remove Docker daemon.json file for rollback.", "path", s.ConfigFilePath)
-
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		logger.Error(err, "Failed to get connector for rollback.")
 		return nil
 	}
 
-	if err := runner.Remove(ctx.GoContext(), conn, s.ConfigFilePath, s.Sudo, false); err != nil {
-		logger.Warn("Failed to remove Docker daemon.json during rollback (best effort).", "error", err)
-	} else {
-		logger.Info("Successfully removed Docker daemon.json (if it existed).")
+	logger.Warnf("Rolling back by removing %s", s.ConfigFilePath)
+	if err := runner.Remove(ctx.GoContext(), conn, s.ConfigFilePath, s.Sudo, true); err != nil {
+		logger.Error(err, "Failed to remove Docker daemon.json during rollback.")
 	}
 	return nil
 }
+
+var _ step.Step = (*ConfigureDockerStep)(nil)

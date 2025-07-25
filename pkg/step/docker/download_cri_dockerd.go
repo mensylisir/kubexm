@@ -20,7 +20,6 @@ import (
 
 type DownloadCriDockerdStep struct {
 	step.Base
-	URL         string
 	Version     string
 	Arch        string
 	WorkDir     string
@@ -47,18 +46,22 @@ func NewDownloadCriDockerdStepBuilder(ctx runtime.Context, instanceName string) 
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	info, err := s.getBinaryInfo()
-	if err != nil {
-		return nil
-	}
-	s.URL = info.URL
-
 	b := new(DownloadCriDockerdStepBuilder).Init(s)
 	return b
 }
 
-func (b *DownloadCriDockerdStepBuilder) WithURL(url string) *DownloadCriDockerdStepBuilder {
-	b.Step.URL = url
+func (b *DownloadCriDockerdStepBuilder) WithVersion(version string) *DownloadCriDockerdStepBuilder {
+	if version != "" {
+		b.Step.Version = version
+		b.Step.Base.Meta.Description = fmt.Sprintf("[%s]>>Download cri-dockerd version %s", b.Step.Base.Meta.Name, b.Step.Version)
+	}
+	return b
+}
+
+func (b *DownloadCriDockerdStepBuilder) WithArch(arch string) *DownloadCriDockerdStepBuilder {
+	if arch != "" {
+		b.Step.Arch = arch
+	}
 	return b
 }
 

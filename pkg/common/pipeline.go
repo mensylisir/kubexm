@@ -12,7 +12,6 @@ const (
 	PipelineTypeRestore        = "restore"
 )
 
-// Pipeline execution strategies
 const (
 	PipelineExecutionSequential  = "sequential"
 	PipelineExecutionParallel    = "parallel"
@@ -20,7 +19,6 @@ const (
 	PipelineExecutionPhased      = "phased"
 )
 
-// Pipeline status constants
 const (
 	PipelineStatusPending     = "pending"
 	PipelineStatusRunning     = "running"
@@ -32,7 +30,6 @@ const (
 	PipelineStatusRolledBack  = "rolled-back"
 )
 
-// Pipeline execution modes
 const (
 	PipelineModeDryRun     = "dry-run"
 	PipelineModeExecution  = "execution"
@@ -40,28 +37,24 @@ const (
 	PipelineModeRollback   = "rollback"
 )
 
-// Default pipeline timeouts and resource limits
 const (
-	DefaultPipelineTimeoutMinutes    = 120 // 2 hours
+	DefaultPipelineTimeoutMinutes    = 120
 	DefaultPipelineRetryAttempts     = 1
 	DefaultPipelineRetryDelaySeconds = 30
 	DefaultPipelineMaxConcurrency    = 5
 )
 
-// Pipeline naming and validation constants
 const (
 	MaxPipelineNameLength            = 100
 	PipelineNameValidCharacters      = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
 	PipelineNameInvalidStartEndChars = "-_."
 )
 
-// Pipeline dependency validation
 const (
 	MaxPipelineDependencyDepth = 5
 	MaxPipelineDependencyCount = 10
 )
 
-// Pipeline progress tracking
 const (
 	PipelineProgressPlanningPhase   = "planning"
 	PipelineProgressExecutionPhase  = "execution"
@@ -69,7 +62,6 @@ const (
 	PipelineProgressCleanupPhase    = "cleanup"
 )
 
-// Pipeline configuration keys
 const (
 	PipelineConfigAssumeYes      = "assume-yes"
 	PipelineConfigDryRun         = "dry-run"
@@ -81,7 +73,6 @@ const (
 	PipelineConfigVerbose        = "verbose"
 )
 
-// Pipeline resource estimation factors
 const (
 	PipelineResourceMultiplier          = 1.5
 	PipelineOverheadPercentage          = 20

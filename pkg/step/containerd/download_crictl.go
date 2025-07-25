@@ -20,7 +20,6 @@ import (
 
 type DownloadCriCtlStep struct {
 	step.Base
-	URL         string
 	Version     string
 	Arch        string
 	WorkDir     string
@@ -47,13 +46,22 @@ func NewDownloadCriCtlStepBuilder(ctx runtime.Context, instanceName string) *Dow
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 2 * time.Minute
 
-	info, err := s.getBinaryInfo()
-	if err != nil {
-		return nil
-	}
-	s.URL = info.URL
-
 	b := new(DownloadCriCtlStepBuilder).Init(s)
+	return b
+}
+
+func (b *DownloadCriCtlStepBuilder) WithVersion(version string) *DownloadCriCtlStepBuilder {
+	if version != "" {
+		b.Step.Version = version
+		b.Step.Base.Meta.Description = fmt.Sprintf("[%s]>>Download crictl version %s", b.Step.Base.Meta.Name, b.Step.Version)
+	}
+	return b
+}
+
+func (b *DownloadCriCtlStepBuilder) WithArch(arch string) *DownloadCriCtlStepBuilder {
+	if arch != "" {
+		b.Step.Arch = arch
+	}
 	return b
 }
 

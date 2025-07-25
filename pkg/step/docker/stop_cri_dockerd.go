@@ -22,7 +22,7 @@ func NewStopCriDockerdStepBuilder(ctx runtime.Context, instanceName string) *Sto
 
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Stop cri-dockerd service", s.Base.Meta.Name)
-	s.Base.Sudo = true
+	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 2 * time.Minute
 

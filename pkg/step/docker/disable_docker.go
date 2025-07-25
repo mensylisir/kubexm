@@ -22,7 +22,7 @@ func NewDisableDockerStepBuilder(ctx runtime.Context, instanceName string) *Disa
 
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Disable docker service", s.Base.Meta.Name)
-	s.Base.Sudo = true
+	s.Base.Sudo = false
 	s.Base.Timeout = 1 * time.Minute
 
 	b := new(DisableDockerStepBuilder).Init(s)

@@ -1,0 +1,21 @@
+apiVersion: kubeproxy.config.k8s.io/v1alpha1
+kind: KubeProxyConfiguration
+# bindAddress: 0.0.0.0 # 通常不需要，kube-proxy 会监听所有接口
+clientConnection:
+  kubeconfig: {{ .KubeconfigPath }}
+clusterCIDR: {{ .ClusterCIDR }}
+mode: "{{ .Mode }}"
+# healthzBindAddress: 0.0.0.0:10256 # 默认值
+# metricsBindAddress: 127.0.0.1:10249 # 默认值
+  {{- if .FeatureGates }}
+featureGates:
+  {{- range $key, $value := .FeatureGates }}
+  {{ $key }}: {{ $value }}
+  {{- end }}
+  {{- end }}
+  {{- if eq .Mode "ipvs" }}
+ipvs:
+  # scheduler: "rr" # 默认是 "rr" (Round Robin)
+  syncPeriod: 30s
+  minSyncPeriod: 1s
+  {{- end }}

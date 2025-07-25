@@ -1,26 +1,16 @@
 package common
 
-// Task-related constants for categorization and scheduling
-
-// TaskCategory defines the type of task for classification and scheduling
 type TaskCategory string
 
 const (
-	// Core system tasks that must run sequentially
-	TaskCategoryCore TaskCategory = "core"
-	// Resource provisioning tasks (downloads, extracts)
-	TaskCategoryResource TaskCategory = "resource"
-	// Configuration tasks (files, templates)
-	TaskCategoryConfig TaskCategory = "config"
-	// Service management tasks (start, stop, restart)
-	TaskCategoryService TaskCategory = "service"
-	// Validation and verification tasks
+	TaskCategoryCore       TaskCategory = "core"
+	TaskCategoryResource   TaskCategory = "resource"
+	TaskCategoryConfig     TaskCategory = "config"
+	TaskCategoryService    TaskCategory = "service"
 	TaskCategoryValidation TaskCategory = "validation"
-	// Cleanup and maintenance tasks
-	TaskCategoryCleanup TaskCategory = "cleanup"
+	TaskCategoryCleanup    TaskCategory = "cleanup"
 )
 
-// TaskPriority defines execution priority for scheduling
 type TaskPriority int
 
 const (
@@ -54,7 +44,6 @@ const (
 	DefaultTaskMaxConcurrency    = 5
 )
 
-// Task naming and validation constants
 const (
 	MaxTaskNameLength            = 100
 	TaskNameValidCharacters      = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."

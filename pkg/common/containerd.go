@@ -16,4 +16,5 @@ const (
 	DefaultContainerdPath        = "/var/lib/containerd"
 	DefaultContainerdConfig      = "config.toml"
 	DefaultContainerdPauseImage  = "registry.k8s.io/pause:3.9"
+	ContainerdDefaultServiceName = "containerd.service"
 )

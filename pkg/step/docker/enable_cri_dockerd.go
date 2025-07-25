@@ -26,7 +26,7 @@ func NewEnableCriDockerdStepBuilder(ctx runtime.Context, instanceName string) *E
 
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Enable cri-dockerd service", s.Base.Meta.Name)
-	s.Base.Sudo = true
+	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 1 * time.Minute
 

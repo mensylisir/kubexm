@@ -222,3 +222,48 @@ func ExpandIPRange(ipRange string) ([]net.IP, error) {
 
 	return ipList, nil
 }
+
+func GetFirstIP(n *net.IPNet) (net.IP, error) {
+	if n == nil {
+		return nil, fmt.Errorf("input network cannot be nil")
+	}
+
+	ip := make(net.IP, len(n.IP))
+	copy(ip, n.IP)
+
+	if ip.To4() != nil {
+		ip = ip.To4()
+	} else if ip.To16() != nil {
+		ip = ip.To16()
+	} else {
+		return nil, fmt.Errorf("invalid IP address format: %s", n.IP.String())
+	}
+
+	for i := len(ip) - 1; i >= 0; i-- {
+		ip[i]++
+		if ip[i] > 0 {
+			break
+		}
+	}
+
+	if !n.Contains(ip) {
+		return nil, fmt.Errorf("calculated IP %s is not in the network %s", ip, n.String())
+	}
+
+	return ip, nil
+}
+
+func UniqueIPs(input []net.IP) []net.IP {
+	seen := make(map[string]struct{})
+	result := []net.IP{}
+
+	for _, ip := range input {
+		ipStr := ip.String()
+
+		if _, ok := seen[ipStr]; !ok {
+			seen[ipStr] = struct{}{}
+			result = append(result, ip)
+		}
+	}
+	return result
+}

@@ -47,6 +47,21 @@ func NewExtractCriDockerdStepBuilder(ctx runtime.Context, instanceName string) *
 	return b
 }
 
+func (b *ExtractCriDockerdStepBuilder) WithVersion(version string) *ExtractCriDockerdStepBuilder {
+	if version != "" {
+		b.Step.Version = version
+		b.Step.Base.Meta.Description = fmt.Sprintf("[%s]>>Extract cri-dockerd archive for version %s", b.Step.Base.Meta.Name, b.Step.Version)
+	}
+	return b
+}
+
+func (b *ExtractCriDockerdStepBuilder) WithArch(arch string) *ExtractCriDockerdStepBuilder {
+	if arch != "" {
+		b.Step.Arch = arch
+	}
+	return b
+}
+
 func (s *ExtractCriDockerdStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
@@ -76,7 +91,7 @@ func (s *ExtractCriDockerdStep) getPaths() (sourcePath, destPath, cacheKey strin
 func (s *ExtractCriDockerdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
 
-	sourcePath, destPath, cacheKey, err := s.getPaths()
+	sourcePath, destPath, _, err := s.getPaths()
 	if err != nil {
 		return false, err
 	}
@@ -101,21 +116,20 @@ func (s *ExtractCriDockerdStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 		return false, nil
 	}
 
-	keyFile := filepath.Join(destPath, "cri-dockerd")
+	keyFile := filepath.Join(destPath, "cri-dockerd", "cri-dockerd")
 	if _, err := os.Stat(keyFile); os.IsNotExist(err) {
 		logger.Warnf("Destination directory '%s' exists, but key file '%s' is missing. Re-extracting.", destPath, keyFile)
 		return false, nil
 	}
 
 	logger.Info("Destination directory exists and seems valid. Step is done.")
-	ctx.GetTaskCache().Set(cacheKey, destPath)
 	return true, nil
 }
 
 func (s *ExtractCriDockerdStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
-	sourcePath, destPath, cacheKey, err := s.getPaths()
+	sourcePath, destPath, _, err := s.getPaths()
 	if err != nil {
 		return err
 	}
@@ -161,7 +175,6 @@ func (s *ExtractCriDockerdStep) Run(ctx runtime.ExecutionContext) error {
 	bar.Finish()
 
 	logger.Info("Successfully extracted archive.")
-	ctx.GetTaskCache().Set(cacheKey, destPath)
 	return nil
 }
 

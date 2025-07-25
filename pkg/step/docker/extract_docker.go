@@ -47,6 +47,21 @@ func NewExtractDockerStepBuilder(ctx runtime.Context, instanceName string) *Extr
 	return b
 }
 
+func (b *ExtractDockerStepBuilder) WithVersion(version string) *ExtractDockerStepBuilder {
+	if version != "" {
+		b.Step.Version = version
+		b.Step.Base.Meta.Description = fmt.Sprintf("[%s]>>Extract Docker archive for version %s", b.Step.Base.Meta.Name, b.Step.Version)
+	}
+	return b
+}
+
+func (b *ExtractDockerStepBuilder) WithArch(arch string) *ExtractDockerStepBuilder {
+	if arch != "" {
+		b.Step.Arch = arch
+	}
+	return b
+}
+
 func (s *ExtractDockerStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
@@ -76,7 +91,7 @@ func (s *ExtractDockerStep) getPaths() (sourcePath, destPath, cacheKey string, e
 func (s *ExtractDockerStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
 
-	sourcePath, destPath, cacheKey, err := s.getPaths()
+	sourcePath, destPath, _, err := s.getPaths()
 	if err != nil {
 		return false, err
 	}
@@ -108,14 +123,13 @@ func (s *ExtractDockerStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 	}
 
 	logger.Info("Destination directory exists and seems valid. Step is done.")
-	ctx.GetTaskCache().Set(cacheKey, destPath)
 	return true, nil
 }
 
 func (s *ExtractDockerStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
-	sourcePath, destPath, cacheKey, err := s.getPaths()
+	sourcePath, destPath, _, err := s.getPaths()
 	if err != nil {
 		return err
 	}
@@ -161,7 +175,6 @@ func (s *ExtractDockerStep) Run(ctx runtime.ExecutionContext) error {
 	bar.Finish()
 
 	logger.Info("Successfully extracted archive.")
-	ctx.GetTaskCache().Set(cacheKey, destPath)
 	return nil
 }
 

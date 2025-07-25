@@ -1,0 +1,55 @@
+[Unit]
+Description=Kubernetes Controller Manager
+Documentation=https://kubernetes.io/docs/
+# 必须在 apiserver 健康运行后才启动
+After=kube-apiserver.service
+Wants=kube-apiserver.service
+
+[Service]
+ExecStart=/usr/local/bin/kube-controller-manager \
+  --allocate-node-cidrs=true \
+  --authentication-kubeconfig={{ .KubeconfigPath }} \
+  --authorization-kubeconfig={{ .KubeconfigPath }} \
+  --bind-address={{ .BindAddress }} \
+  --client-ca-file={{ .PKIDir }}/ca.crt \
+  --cluster-cidr={{ .PodSubnet }} \
+  --cluster-name={{ .ClusterName }} \
+  --cluster-signing-cert-file={{ .PKIDir }}/ca.crt \
+  --cluster-signing-key-file={{ .PKIDir }}/ca.key \
+  --controllers=*,bootstrapsigner,tokencleaner \
+  --kubeconfig={{ .KubeconfigPath }} \
+  --leader-elect=true \
+  --requestheader-client-ca-file={{ .PKIDir }}/front-proxy-ca.crt \
+  --root-ca-file={{ .PKIDir }}/ca.crt \
+  --service-account-private-key-file={{ .PKIDir }}/sa.key \
+  --service-cluster-ip-range={{ .ServiceClusterIPRange }} \
+  --use-service-account-credentials=true \
+  {{- /* [新增] 使用来自 ControllerManagerConfig 的参数 */}}
+  {{- if .NodeCidrMaskSize }}
+  --node-cidr-mask-size={{ .NodeCidrMaskSize }} \
+  {{- end }}
+  {{- if .NodeCidrMaskSizeIPv6 }}
+  --node-cidr-mask-size-ipv6={{ .NodeCidrMaskSizeIPv6 }} \
+  {{- end }}
+  {{- if .PodEvictionTimeout }}
+  --pod-eviction-timeout={{ .PodEvictionTimeout }} \
+  {{- end }}
+  {{- if .NodeMonitorGracePeriod }}
+  --node-monitor-grace-period={{ .NodeMonitorGracePeriod }} \
+  {{- end }}
+  {{- /* ====================== Feature Gates & Extra Args ====================== */}}
+  {{- if .FeatureGates }}
+  --feature-gates={{ .FeatureGates }} \
+  {{- end }}
+  {{- range $key, $value := .ExtraArgs }}
+  --{{ $key }}={{ $value }} \
+  {{- end }}
+  {{- /* ============================= Logging ============================= */}}
+  --v={{ .LogLevel }}
+
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

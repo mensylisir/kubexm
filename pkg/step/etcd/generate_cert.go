@@ -112,12 +112,46 @@ func (s *GenerateEtcdCertsStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to load ETCD CA (cert: %s), please ensure CA generation step ran successfully: %w", caCertPath, caKeyPath, err)
 	}
 
+	altNames := helpers.AltNames{
+		DNSNames: []string{"localhost", "etcd", "etcd.kube-system", "etcd.kube-system.svc",
+			fmt.Sprintf("etcd.kube-system.svc.%s", ctx.GetClusterConfig().Spec.Kubernetes.ClusterName),
+			ctx.GetClusterConfig().Spec.ControlPlaneEndpoint.Domain},
+		IPs: []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("0:0:0:0:0:0:0:1")},
+	}
 	for _, node := range s.EtcdNodes {
+		altNames.DNSNames = append(altNames.DNSNames, node.GetName())
+		if ip := net.ParseIP(node.GetAddress()); ip != nil {
+			altNames.IPs = append(altNames.IPs, ip)
+		}
+		if node.GetInternalAddress() != "" && node.GetInternalAddress() != node.GetAddress() {
+			if ip := net.ParseIP(node.GetInternalAddress()); ip != nil {
+				altNames.IPs = append(altNames.IPs, ip)
+			}
+		}
+	}
+
+	for _, node := range s.EtcdNodes {
+		//altNames := helpers.AltNames{
+		//	DNSNames: []string{node.GetName(), "localhost", "etcd", "etcd.kube-system", "etcd.kube-system.svc",
+		//		fmt.Sprintf("etcd.kube-system.svc.%s", ctx.GetClusterConfig().Spec.Kubernetes.ClusterName),
+		//		ctx.GetClusterConfig().Spec.ControlPlaneEndpoint.Domain},
+		//	IPs: []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("0:0:0:0:0:0:0:1")},
+		//}
+		//if ip := net.ParseIP(node.GetAddress()); ip != nil {
+		//	altNames.IPs = append(altNames.IPs, ip)
+		//}
+		//if node.GetInternalAddress() != "" && node.GetInternalAddress() != node.GetAddress() {
+		//	if ip := net.ParseIP(node.GetInternalAddress()); ip != nil {
+		//		altNames.IPs = append(altNames.IPs, ip)
+		//	}
+		//}
+
 		nodeName := node.GetName()
 		logger.Info("Generating certificates for etcd node", "node", nodeName)
 		adminCfg := helpers.CertConfig{
 			CommonName:   fmt.Sprintf("%s-admin", nodeName),
-			Organization: []string{"system:masters"},
+			Organization: []string{"kubexm-admin"},
+			AltNames:     altNames,
 			Usages:       []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 			Duration:     s.CertDuration,
 		}
@@ -127,22 +161,9 @@ func (s *GenerateEtcdCertsStep) Run(ctx runtime.ExecutionContext) error {
 			return fmt.Errorf("failed to generate etcd admin certificate for node %s: %w", nodeName, err)
 		}
 
-		altNames := helpers.AltNames{
-			DNSNames: []string{node.GetName(), "localhost"},
-			IPs:      []net.IP{net.ParseIP("127.0.0.1")},
-		}
-		if ip := net.ParseIP(node.GetAddress()); ip != nil {
-			altNames.IPs = append(altNames.IPs, ip)
-		}
-		if node.GetInternalAddress() != "" && node.GetInternalAddress() != node.GetAddress() {
-			if ip := net.ParseIP(node.GetInternalAddress()); ip != nil {
-				altNames.IPs = append(altNames.IPs, ip)
-			}
-		}
-
 		nodeCfg := helpers.CertConfig{
 			CommonName:   fmt.Sprintf("%s-node", nodeName),
-			Organization: []string{"kubexm-etcd"},
+			Organization: []string{"kubexm-node"},
 			AltNames:     altNames,
 			Usages:       []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 			Duration:     s.CertDuration,

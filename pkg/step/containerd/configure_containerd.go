@@ -3,6 +3,7 @@ package containerd
 import (
 	"bytes"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -13,7 +14,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
@@ -62,6 +62,11 @@ func NewConfigureContainerdStepBuilder(ctx runtime.Context, instanceName string)
 		Cni:             CniConfig{BinDir: common.DefaultCNIBin, ConfDir: common.DefaultCNIConfDirTarget},
 		RegistryMirrors: make(map[v1alpha1.ServerAddress]v1alpha1.MirrorConfig),
 		RegistryConfigs: make(map[v1alpha1.ServerAddress]v1alpha1.AuthConfig),
+	}
+
+	if s.SandboxImage == "" {
+		pauseImage := helpers.GetImage(ctx, "pause")
+		s.SandboxImage = pauseImage.ImageName()
 	}
 
 	if containerdCfg != nil {
@@ -120,11 +125,6 @@ func NewConfigureContainerdStepBuilder(ctx runtime.Context, instanceName string)
 		for server, config := range containerdCfg.Registry.Configs {
 			s.RegistryConfigs[server] = config
 		}
-	}
-
-	if s.SandboxImage == "" {
-		pauseImage := helpers.GetImage(ctx, "pause")
-		s.SandboxImage = pauseImage.ImageName()
 	}
 
 	s.Base.Meta.Name = instanceName

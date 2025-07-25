@@ -19,7 +19,6 @@ import (
 
 type DownloadContainerdStep struct {
 	step.Base
-	URL         string
 	Version     string
 	Arch        string
 	WorkDir     string
@@ -51,17 +50,22 @@ func NewDownloadContainerdStepBuilder(ctx runtime.Context, instanceName string) 
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 2 * time.Minute
-	info, err := s.getBinaryInfo()
-	if err != nil {
-		return nil
-	}
-	s.URL = info.URL
 	b := new(DownloadContainerdStepBuilder).Init(s)
 	return b
 }
 
-func (b *DownloadContainerdStepBuilder) WithURL(url string) *DownloadContainerdStepBuilder {
-	b.Step.URL = url
+func (b *DownloadContainerdStepBuilder) WithVersion(version string) *DownloadContainerdStepBuilder {
+	if version != "" {
+		b.Step.Version = version
+		b.Step.Base.Meta.Description = fmt.Sprintf("[%s]>>Download containerd version %s", b.Step.Base.Meta.Name, b.Step.Version)
+	}
+	return b
+}
+
+func (b *DownloadContainerdStepBuilder) WithArch(arch string) *DownloadContainerdStepBuilder {
+	if arch != "" {
+		b.Step.Arch = arch
+	}
 	return b
 }
 

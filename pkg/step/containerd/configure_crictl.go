@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	crictlConfigTemplatePath = "crictl/crictl.yaml.tmpl"
+	crictlConfigTemplatePath = "containerd/crictl.yaml.tmpl"
 	remoteCriCtlConfigPath   = common.CrictlDefaultConfigFile
 )
 

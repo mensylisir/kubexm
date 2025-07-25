@@ -11,6 +11,7 @@ import (
 //go:embed kubernetes/*.tmpl
 //go:embed containerd/*.tmpl
 //go:embed os/*.tmpl
+//go:embed docker/*.tmpl
 var embeddedTemplates embed.FS
 
 func Get(templateName string) (string, error) {
