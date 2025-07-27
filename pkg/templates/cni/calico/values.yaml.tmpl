@@ -1,0 +1,64 @@
+# This is a template for Calico's values.yaml, rendered by the deployment tool.
+# It controls the installation of the Tigera Operator and the subsequent Calico deployment.
+
+# Global registry settings for all images deployed by the operator.
+{{- if .Registry }}
+registry: {{ .Registry }}
+{{- end }}
+
+# The core installation resource for Calico.
+installation:
+  # Sets the CNI network configuration.
+  calicoNetwork:
+    # MTU for veth interfaces. Set to 0 to use auto-detection.
+    vethMTU: {{ .VethMTU }}
+
+    # IP pools to use for pod IPs.
+    ipPools:
+      {{- range .IPPools }}
+      - cidr: {{ .CIDR }}
+        encapsulation: {{ .Encapsulation }}
+        {{- if .NatOutgoing }}
+        natOutgoing: "Enabled"
+        {{- else }}
+        natOutgoing: "Disabled"
+        {{- end }}
+        blockSize: {{ .BlockSize }}
+      {{- end }}
+
+  # Controls deployment of Typha for scaling control-plane traffic.
+  {{- if .TyphaEnabled }}
+  typhaDeployment:
+    # If replicas is 0, the operator will auto-scale based on the number of nodes.
+    replicas: {{ .TyphaReplicas }}
+    spec:
+      template:
+        spec:
+          {{- if .TyphaNodeSelector }}
+          nodeSelector:
+            {{- range $key, $value := .TyphaNodeSelector }}
+            {{ $key }}: "{{ $value }}"
+            {{- end }}
+          {{- end }}
+  {{- end }}
+
+  # Configuration for the Felix daemon running on each node.
+  felixConfiguration:
+    logSeverityScreen: "{{ .LogSeverityScreen }}"
+
+# This section configures the Tigera Operator Deployment itself.
+# It is part of the Helm chart but can be configured here.
+tigeraOperator:
+  # The image for the operator. This should be managed by the deployment tool.
+  image: "{{ .OperatorImage }}"
+  # Example of how to template nodeSelector and tolerations for the operator pod.
+  nodeSelector:
+    {{- range $key, $value := .OperatorNodeSelector }}
+    {{ $key }}: "{{ $value }}"
+    {{- end }}
+  tolerations:
+    {{- range .OperatorTolerations }}
+    - key: "{{ .key }}"
+      operator: "{{ .operator }}"
+      effect: "{{ .effect }}"
+    {{- end }}

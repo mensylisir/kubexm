@@ -11,8 +11,9 @@ import (
 )
 
 type CalicoConfig struct {
+	Source             AddonSource               `json:"source,omitempty" yaml:"sources,omitempty"`
 	Networking         *CalicoNetworking         `json:"networking,omitempty" yaml:"networking,omitempty"`
-	TyphaDeployment    *CalicoTyphaDeployment    `json:"typha,omitempty" yaml:"typha,omitempty"` // Renamed from TyphaDeployment to just Typha
+	TyphaDeployment    *CalicoTyphaDeployment    `json:"typha,omitempty" yaml:"typha,omitempty"`
 	IPAM               *CalicoIPAM               `json:"ipam,omitempty" yaml:"ipam,omitempty"`
 	FelixConfiguration *CalicoFelixConfiguration `json:"felix,omitempty" yaml:"felix,omitempty"`
 }

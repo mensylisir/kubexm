@@ -18,6 +18,7 @@ type Storage struct {
 }
 
 type OpenEBSConfig struct {
+	Source  AddonSource          `json:"source,omitempty" yaml:"sources,omitempty"`
 	Enabled *bool                `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 	Version string               `json:"version,omitempty" yaml:"version,omitempty"`
 	Engines *OpenEBSEngineConfig `json:"engines,omitempty" yaml:"engines,omitempty"`
@@ -48,25 +49,28 @@ type LocalHostpathEngineConfig struct {
 }
 
 type NFSConfig struct {
-	Enabled          *bool   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	Server           string  `json:"server,omitempty" yaml:"server,omitempty"`
-	Path             string  `json:"path,omitempty" yaml:"path,omitempty"`
-	StorageClassName *string `json:"storageClassName,omitempty" yaml:"storageClassName,omitempty"`
+	Source           AddonSource `json:"source,omitempty" yaml:"sources,omitempty"`
+	Enabled          *bool       `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Server           string      `json:"server,omitempty" yaml:"server,omitempty"`
+	Path             string      `json:"path,omitempty" yaml:"path,omitempty"`
+	StorageClassName *string     `json:"storageClassName,omitempty" yaml:"storageClassName,omitempty"`
 }
 
 type RookCephConfig struct {
-	Enabled          *bool    `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	Version          string   `json:"version,omitempty" yaml:"version,omitempty"`
-	Devices          []string `json:"devices,omitempty" yaml:"devices,omitempty"`
-	UseAllDevices    *bool    `json:"useAllDevices,omitempty" yaml:"useAllDevices,omitempty"`
-	CreateBlockPool  *bool    `json:"createBlockPool,omitempty" yaml:"createBlockPool,omitempty"`
-	CreateFilesystem *bool    `json:"createFilesystem,omitempty" yaml:"createFilesystem,omitempty"`
+	Source           AddonSource `json:"source,omitempty" yaml:"sources,omitempty"`
+	Enabled          *bool       `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Version          string      `json:"version,omitempty" yaml:"version,omitempty"`
+	Devices          []string    `json:"devices,omitempty" yaml:"devices,omitempty"`
+	UseAllDevices    *bool       `json:"useAllDevices,omitempty" yaml:"useAllDevices,omitempty"`
+	CreateBlockPool  *bool       `json:"createBlockPool,omitempty" yaml:"createBlockPool,omitempty"`
+	CreateFilesystem *bool       `json:"createFilesystem,omitempty" yaml:"createFilesystem,omitempty"`
 }
 
 type LonghornConfig struct {
-	Enabled         *bool   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	Version         string  `json:"version,omitempty" yaml:"version,omitempty"`
-	DefaultDataPath *string `json:"defaultDataPath,omitempty" yaml:"defaultDataPath,omitempty"`
+	Source          AddonSource `json:"source,omitempty" yaml:"sources,omitempty"`
+	Enabled         *bool       `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Version         string      `json:"version,omitempty" yaml:"version,omitempty"`
+	DefaultDataPath *string     `json:"defaultDataPath,omitempty" yaml:"defaultDataPath,omitempty"`
 }
 
 func SetDefaults_Storage(cfg *Storage) {

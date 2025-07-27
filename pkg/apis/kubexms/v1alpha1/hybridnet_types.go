@@ -11,6 +11,7 @@ import (
 )
 
 type HybridnetConfig struct {
+	Source         AddonSource                    `json:"source,omitempty" yaml:"sources,omitempty"`
 	Installation   *HybridnetInstallationConfig   `json:"installation,omitempty" yaml:"installation,omitempty"`
 	DefaultNetwork *HybridnetDefaultNetworkConfig `json:"defaultNetwork,omitempty"yaml:"defaultNetwork,omitempty"`
 	Features       *HybridnetFeaturesConfig       `json:"features,omitempty" yaml:"features,omitempty"`

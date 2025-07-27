@@ -1,0 +1,36 @@
+# Template for Cilium Helm chart values
+
+# Image settings. The deployment tool should populate these.
+image:
+  repository: {{ .ImageRepository }}
+  tag: {{ .ImageTag }}
+
+# IPAM mode. "kubernetes" is a safe default.
+ipam:
+  mode: "{{ .IpamMode }}"
+
+# KubeProxyReplacement mode. 'probe' is a widely compatible default.
+# 'strict' offers better performance but has stricter requirements.
+kubeProxyReplacement: "{{ .KubeProxyReplacement }}"
+
+# Tunnel protocol. "vxlan" is the most compatible default.
+tunnel: "{{ .Tunnel }}"
+
+# Operator configuration
+operator:
+  replicas: {{ .OperatorReplicas }}
+
+# Hubble observability platform.
+hubble:
+  enabled: {{ .HubbleEnabled }}
+  relay:
+    enabled: {{ .HubbleRelayEnabled }}
+  ui:
+    enabled: {{ .HubbleUiEnabled }}
+
+# eBPF settings
+bpf:
+  masquerade: {{ .BpfMasquerade }}
+
+# For cloud environments, this can improve performance.
+autoDirectNodeRoutes: {{ .AutoDirectNodeRoutes }}

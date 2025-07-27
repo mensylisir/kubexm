@@ -34,6 +34,7 @@ type ClusterSpec struct {
 
 	Storage   *Storage   `json:"storage,omitempty" yaml:"storage,omitempty"`
 	Registry  *Registry  `json:"registry,omitempty" yaml:"registry,omitempty"`
+	HelmRepo  *HelmRepo  `json:"helmRepo,omitempty" yaml:"helmRepo,omitempty"`
 	Addons    []Addon    `json:"addons,omitempty" yaml:"addons,omitempty"`
 	Preflight *Preflight `json:"preflight,omitempty" yaml:"preflight,omitempty"`
 	Extra     *Extra     `json:"extra,omitempty" yaml:"extra,omitempty"`
