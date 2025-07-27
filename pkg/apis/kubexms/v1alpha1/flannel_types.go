@@ -10,6 +10,7 @@ import (
 )
 
 type FlannelConfig struct {
+	Source  AddonSource           `json:"source,omitempty" yaml:"sources,omitempty"`
 	Backend *FlannelBackendConfig `json:"backend,omitempty" yaml:"backend,omitempty"`
 }
 

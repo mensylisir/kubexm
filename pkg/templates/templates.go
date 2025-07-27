@@ -1,9 +1,11 @@
 package templates
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
 	"io/fs"
+	"text/template"
 )
 
 //go:embed cni/*.tmpl
@@ -37,4 +39,18 @@ func List() ([]string, error) {
 		return nil, fmt.Errorf("failed to walk embedded templates: %w", err)
 	}
 	return files, nil
+}
+
+func Render(templateContent string, data interface{}) (string, error) {
+	tmpl, err := template.New("").Parse(templateContent)
+	if err != nil {
+		return "", err
+	}
+
+	var buffer bytes.Buffer
+	if err := tmpl.Execute(&buffer, data); err != nil {
+		return "", err
+	}
+
+	return buffer.String(), nil
 }

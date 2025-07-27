@@ -36,7 +36,8 @@ type ChartSource struct {
 }
 
 type YamlSource struct {
-	Path []string `json:"path,omitempty" yaml:"path,omitempty"`
+	Version string   `json:"version,omitempty" yaml:"version,omitempty"`
+	Path    []string `json:"path,omitempty" yaml:"path,omitempty"`
 }
 
 func SetDefaults_Addon(cfg *Addon) {

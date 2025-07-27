@@ -10,6 +10,7 @@ import (
 )
 
 type DNS struct {
+	Source       AddonSource   `json:"source,omitempty" yaml:"sources,omitempty"`
 	DNSEtcHosts  string        `json:"dnsEtcHosts,omitempty" yaml:"dnsEtcHosts,omitempty"`
 	NodeEtcHosts string        `json:"nodeEtcHosts,omitempty" yaml:"nodeEtcHosts,omitempty"`
 	CoreDNS      *CoreDNS      `json:"coredns,omitempty" yaml:"coredns,omitempty"`

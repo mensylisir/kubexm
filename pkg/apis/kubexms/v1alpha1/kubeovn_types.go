@@ -11,6 +11,7 @@ import (
 )
 
 type KubeOvnConfig struct {
+	Source           AddonSource              `json:"source,omitempty" yaml:"sources,omitempty"`
 	Networking       *KubeOvnNetworking       `json:"networking,omitempty" yaml:"networking,omitempty"`
 	Controller       *KubeOvnControllerConfig `json:"controller,omitempty" yaml:"controller,omitempty"`
 	AdvancedFeatures *KubeOvnAdvancedFeatures `json:"advancedFeatures,omitempty" yaml:"advancedFeatures,omitempty"`

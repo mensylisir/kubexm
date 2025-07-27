@@ -10,6 +10,7 @@ import (
 )
 
 type CiliumConfig struct {
+	Source      AddonSource              `json:"source,omitempty" yaml:"sources,omitempty"`
 	Network     *CiliumNetworkConfig     `json:"network,omitempty" yaml:"network,omitempty"`
 	KubeProxy   *CiliumKubeProxyConfig   `json:"kubeProxy,omitempty" yaml:"kubeProxy,omitempty"`
 	Hubble      *CiliumHubbleConfig      `json:"hubble,omitempty" yaml:"hubble,omitempty"`

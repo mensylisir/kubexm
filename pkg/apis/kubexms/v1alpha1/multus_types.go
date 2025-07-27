@@ -7,6 +7,7 @@ import (
 )
 
 type MultusConfig struct {
+	Source       AddonSource               `json:"source,omitempty" yaml:"sources,omitempty"`
 	Installation *MultusInstallationConfig `json:"installation,omitempty" yaml:"installation,omitempty"`
 }
 
