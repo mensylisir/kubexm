@@ -2,6 +2,7 @@ package containerd
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
 	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"path/filepath"
@@ -52,22 +53,16 @@ func (s *ExtractCriCtlStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *ExtractCriCtlStep) getPaths() (sourcePath, destPath, cacheKey string, err error) {
-	provider := util.NewBinaryProvider()
-	binaryInfo, err := provider.GetBinaryInfo(
-		util.ComponentCriCtl,
-		s.Version,
-		s.Arch,
-		s.Zone,
-		s.WorkDir,
-		s.ClusterName,
-	)
+func (s *ExtractCriCtlStep) getPaths(ctx runtime.ExecutionContext) (sourcePath, destPath, cacheKey string, err error) {
+	provider := binary.NewBinaryProvider(ctx)
+	arch := ctx.GetHost().GetArch()
+	binaryInfo, err := provider.GetBinary(binary.ComponentCriCtl, arch)
 	if err != nil {
 		return "", "", "", fmt.Errorf("failed to get crictl binary info: %w", err)
 	}
 
-	sourcePath = binaryInfo.FilePath
-	destDirName := strings.TrimSuffix(binaryInfo.FileName, ".tar.gz")
+	sourcePath = binaryInfo.FilePath()
+	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tar.gz")
 	destPath = filepath.Join(common.DefaultExtractTmpDir, destDirName)
 	cacheKey = sourcePath
 
@@ -77,7 +72,7 @@ func (s *ExtractCriCtlStep) getPaths() (sourcePath, destPath, cacheKey string, e
 func (s *ExtractCriCtlStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
 
-	sourcePath, destPath, cacheKey, err := s.getPaths()
+	sourcePath, destPath, cacheKey, err := s.getPaths(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -116,7 +111,7 @@ func (s *ExtractCriCtlStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 func (s *ExtractCriCtlStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
-	sourcePath, destPath, cacheKey, err := s.getPaths()
+	sourcePath, destPath, cacheKey, err := s.getPaths(ctx)
 	if err != nil {
 		return err
 	}
@@ -168,7 +163,7 @@ func (s *ExtractCriCtlStep) Run(ctx runtime.ExecutionContext) error {
 
 func (s *ExtractCriCtlStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
-	_, destPath, _, err := s.getPaths()
+	_, destPath, _, err := s.getPaths(ctx)
 	if err != nil {
 		logger.Errorf("Failed to get destination path during rollback, cannot determine directory to delete. Error: %v", err)
 		return nil

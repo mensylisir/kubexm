@@ -2,6 +2,7 @@ package containerd
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
 	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"path/filepath"
@@ -51,23 +52,17 @@ func (s *ExtractCNIPluginsStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *ExtractCNIPluginsStep) getPaths() (sourcePath, destPath, cacheKey string, err error) {
-	provider := util.NewBinaryProvider()
-	binaryInfo, err := provider.GetBinaryInfo(
-		util.ComponentKubeCNI,
-		s.Version,
-		s.Arch,
-		s.Zone,
-		s.WorkDir,
-		s.ClusterName,
-	)
+func (s *ExtractCNIPluginsStep) getPaths(ctx runtime.ExecutionContext) (sourcePath, destPath, cacheKey string, err error) {
+	provider := binary.NewBinaryProvider(ctx)
+	arch := ctx.GetHost().GetArch()
+	binaryInfo, err := provider.GetBinary(binary.ComponentKubeCNI, arch)
 	if err != nil {
 		return "", "", "", fmt.Errorf("failed to get CNI plugins binary info: %w", err)
 	}
 
-	sourcePath = binaryInfo.FilePath
+	sourcePath = binaryInfo.FilePath()
 
-	destDirName := strings.TrimSuffix(binaryInfo.FileName, ".tgz")
+	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tgz")
 	destPath = filepath.Join(common.DefaultExtractTmpDir, destDirName)
 	cacheKey = sourcePath
 
@@ -77,7 +72,7 @@ func (s *ExtractCNIPluginsStep) getPaths() (sourcePath, destPath, cacheKey strin
 func (s *ExtractCNIPluginsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
 
-	sourcePath, destPath, cacheKey, err := s.getPaths()
+	sourcePath, destPath, cacheKey, err := s.getPaths(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -116,7 +111,7 @@ func (s *ExtractCNIPluginsStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 func (s *ExtractCNIPluginsStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
-	sourcePath, destPath, cacheKey, err := s.getPaths()
+	sourcePath, destPath, cacheKey, err := s.getPaths(ctx)
 	if err != nil {
 		return err
 	}
@@ -171,7 +166,7 @@ func (s *ExtractCNIPluginsStep) Run(ctx runtime.ExecutionContext) error {
 func (s *ExtractCNIPluginsStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
 
-	_, destPath, _, err := s.getPaths()
+	_, destPath, _, err := s.getPaths(ctx)
 	if err != nil {
 		logger.Errorf("Failed to get destination path during rollback, cannot determine directory to delete. Error: %v", err)
 		return nil
