@@ -64,16 +64,16 @@ func (s *DownloadCNIPluginsStep) Meta() *spec.StepMeta {
 func (s *DownloadCNIPluginsStep) getBinaryInfo(ctx runtime.ExecutionContext) (*binary.Binary, error) {
 	provider := binary.NewBinaryProvider(ctx)
 	arch := ctx.GetHost().GetArch()
-	binary, err := provider.GetBinary(binary.ComponentKubeCNI, arch)
+	binaryInfo, err := provider.GetBinary(binary.ComponentKubeCNI, arch)
 	if err != nil {
 		return nil, err
 	}
-	if binary == nil {
+	if binaryInfo == nil {
 		return nil, fmt.Errorf("CNI plugins are disabled or no compatible version found")
 	}
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Download CNI plugins version %s", s.Base.Meta.Name, binary.Version)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Download CNI plugins version %s", s.Base.Meta.Name, binaryInfo.Version)
 
-	return binary, nil
+	return binaryInfo, nil
 }
 
 func (s *DownloadCNIPluginsStep) verifyChecksum(filePath, expectedChecksum string) (bool, error) {

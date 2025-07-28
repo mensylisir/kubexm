@@ -2,6 +2,7 @@ package containerd
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
 	"github.com/mensylisir/kubexm/pkg/util"
 	"io/fs"
 	"os"
@@ -70,20 +71,14 @@ func (s *InstallCNIPluginsStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *InstallCNIPluginsStep) getLocalExtractedPath() (string, error) {
-	provider := util.NewBinaryProvider()
-	binaryInfo, err := provider.GetBinaryInfo(
-		util.ComponentKubeCNI,
-		s.Version,
-		s.Arch,
-		s.Zone,
-		s.WorkDir,
-		s.ClusterName,
-	)
+func (s *InstallCNIPluginsStep) getLocalExtractedPath(ctx runtime.ExecutionContext) (string, error) {
+	provider := binary.NewBinaryProvider(ctx)
+	arch := ctx.GetHost().GetArch()
+	binaryInfo, err := provider.GetBinary(binary.ComponentKubeCNI, arch)
 	if err != nil {
 		return "", fmt.Errorf("failed to get CNI plugins binary info: %w", err)
 	}
-	destDirName := strings.TrimSuffix(binaryInfo.FileName, ".tgz")
+	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tgz")
 	return filepath.Join(common.DefaultExtractTmpDir, destDirName), nil
 }
 
@@ -95,7 +90,6 @@ func (s *InstallCNIPluginsStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 		return false, err
 	}
 
-	// 检查目标目录是否存在
 	dirExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteCNIBinDir)
 	if err != nil {
 		return false, err
@@ -105,7 +99,6 @@ func (s *InstallCNIPluginsStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 		return false, nil
 	}
 
-	// 检查一个关键插件是否存在
 	keyPluginPath := filepath.Join(s.RemoteCNIBinDir, "bridge")
 	pluginExists, err := runner.Exists(ctx.GoContext(), conn, keyPluginPath)
 	if err != nil {
@@ -128,7 +121,7 @@ func (s *InstallCNIPluginsStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	localExtractedPath, err := s.getLocalExtractedPath()
+	localExtractedPath, err := s.getLocalExtractedPath(ctx)
 	if err != nil {
 		return err
 	}

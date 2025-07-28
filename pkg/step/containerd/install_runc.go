@@ -6,6 +6,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
 	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"path/filepath"
@@ -67,20 +68,14 @@ func (s *InstallRuncStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *InstallRuncStep) getLocalSourcePath() (string, error) {
-	provider := util.NewBinaryProvider()
-	binaryInfo, err := provider.GetBinaryInfo(
-		util.ComponentRunc,
-		s.Version,
-		s.Arch,
-		s.Zone,
-		s.WorkDir,
-		s.ClusterName,
-	)
+func (s *InstallRuncStep) getLocalSourcePath(ctx runtime.ExecutionContext) (string, error) {
+	provider := binary.NewBinaryProvider(ctx)
+	arch := ctx.GetHost().GetArch()
+	binaryInfo, err := provider.GetBinary(binary.ComponentRunc, arch)
 	if err != nil {
 		return "", fmt.Errorf("failed to get runc binary info: %w", err)
 	}
-	return binaryInfo.FilePath, nil
+	return binaryInfo.FilePath(), nil
 }
 
 func (s *InstallRuncStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
@@ -112,7 +107,7 @@ func (s *InstallRuncStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	localSourcePath, err := s.getLocalSourcePath()
+	localSourcePath, err := s.getLocalSourcePath(ctx)
 	if err != nil {
 		return err
 	}

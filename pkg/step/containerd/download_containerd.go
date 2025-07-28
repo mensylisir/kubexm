@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
 	"github.com/mensylisir/kubexm/pkg/util"
 	"github.com/schollz/progressbar/v3"
 	"io"
@@ -73,16 +74,18 @@ func (s *DownloadContainerdStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *DownloadContainerdStep) getBinaryInfo() (*util.BinaryInfo, error) {
-	provider := util.NewBinaryProvider()
-	return provider.GetBinaryInfo(
-		util.ComponentContainerd,
-		s.Version,
-		s.Arch,
-		s.Zone,
-		s.WorkDir,
-		s.ClusterName,
-	)
+func (s *DownloadContainerdStep) getBinaryInfo(ctx runtime.ExecutionContext) (*binary.Binary, error) {
+	provider := binary.NewBinaryProvider(ctx)
+	arch := ctx.GetHost().GetArch()
+	binaryInfo, err := provider.GetBinary(binary.ComponentContainerd, arch)
+	if err != nil {
+		return nil, err
+	}
+	if binaryInfo == nil {
+		return nil, fmt.Errorf("Containerd are disabled or no compatible version found")
+	}
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Download Containerd version %s", s.Base.Meta.Name, binaryInfo.Version)
+	return binaryInfo, nil
 }
 
 func (s *DownloadContainerdStep) verifyChecksum(filePath, expectedChecksum string) (bool, error) {
@@ -108,12 +111,12 @@ func (s *DownloadContainerdStep) verifyChecksum(filePath, expectedChecksum strin
 func (s *DownloadContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
 
-	binaryInfo, err := s.getBinaryInfo()
+	binaryInfo, err := s.getBinaryInfo(ctx)
 	if err != nil {
 		return false, fmt.Errorf("failed to get containerd binary info: %w", err)
 	}
 
-	destPath := binaryInfo.FilePath
+	destPath := binaryInfo.FilePath()
 	logger.Infof("Checking for existing file at: %s", destPath)
 
 	info, err := os.Stat(destPath)
@@ -129,13 +132,13 @@ func (s *DownloadContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone 
 	}
 
 	logger.Infof("File '%s' exists. Verifying checksum...", destPath)
-	match, err := s.verifyChecksum(destPath, binaryInfo.ExpectedChecksum)
+	match, err := s.verifyChecksum(destPath, binaryInfo.Checksum())
 	if err != nil {
 		logger.Warnf("Failed to verify checksum for '%s', will re-download. Error: %v", destPath, err)
 		return false, nil
 	}
 	if !match {
-		logger.Warnf("Checksum mismatch for '%s'. Expected '%s'. Re-downloading.", destPath, binaryInfo.ExpectedChecksum)
+		logger.Warnf("Checksum mismatch for '%s'. Expected '%s'. Re-downloading.", destPath, binaryInfo.Checksum())
 		return false, nil
 	}
 
@@ -146,16 +149,16 @@ func (s *DownloadContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone 
 func (s *DownloadContainerdStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
-	binaryInfo, err := s.getBinaryInfo()
+	binaryInfo, err := s.getBinaryInfo(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get containerd binary info for run: %w", err)
 	}
-	destDir := filepath.Dir(binaryInfo.FilePath)
+	destDir := filepath.Dir(binaryInfo.FilePath())
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return fmt.Errorf("failed to create destination directory '%s': %w", destDir, err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx.GoContext(), "GET", binaryInfo.URL, nil)
+	req, err := http.NewRequestWithContext(ctx.GoContext(), "GET", binaryInfo.URL(), nil)
 	if err != nil {
 		return fmt.Errorf("failed to create http request: %w", err)
 	}
@@ -171,7 +174,7 @@ func (s *DownloadContainerdStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("download failed with status code %d from url %s", resp.StatusCode, binaryInfo.URL)
 	}
 
-	out, err := os.Create(binaryInfo.FilePath)
+	out, err := os.Create(binaryInfo.FilePath())
 	if err != nil {
 		return fmt.Errorf("failed to create destination file '%s': %w", binaryInfo.FilePath, err)
 	}
@@ -179,7 +182,7 @@ func (s *DownloadContainerdStep) Run(ctx runtime.ExecutionContext) error {
 
 	bar := progressbar.NewOptions64(
 		resp.ContentLength,
-		progressbar.OptionSetDescription(fmt.Sprintf("Downloading %s", filepath.Base(binaryInfo.FilePath))),
+		progressbar.OptionSetDescription(fmt.Sprintf("Downloading %s", filepath.Base(binaryInfo.FilePath()))),
 		progressbar.OptionSetWriter(os.Stderr),
 		progressbar.OptionShowBytes(true),
 		progressbar.OptionSetWidth(40),
@@ -194,19 +197,19 @@ func (s *DownloadContainerdStep) Run(ctx runtime.ExecutionContext) error {
 	_, err = io.Copy(io.MultiWriter(out, bar), resp.Body)
 	if err != nil {
 		bar.Clear()
-		os.Remove(binaryInfo.FilePath)
+		os.Remove(binaryInfo.FilePath())
 		return fmt.Errorf("failed to write to destination file '%s': %w", binaryInfo.FilePath, err)
 	}
 
 	bar.Finish()
 	logger.Infof("Successfully downloaded to %s", binaryInfo.FilePath)
 
-	match, err := s.verifyChecksum(binaryInfo.FilePath, binaryInfo.ExpectedChecksum)
+	match, err := s.verifyChecksum(binaryInfo.FilePath(), binaryInfo.Checksum())
 	if err != nil {
 		return fmt.Errorf("failed to verify checksum after download: %w", err)
 	}
 	if !match {
-		return fmt.Errorf("checksum mismatch after download for '%s'. Expected '%s'", binaryInfo.FilePath, binaryInfo.ExpectedChecksum)
+		return fmt.Errorf("checksum mismatch after download for '%s'. Expected '%s'", binaryInfo.FilePath, binaryInfo.Checksum())
 	}
 	logger.Info("Checksum verification successful after download.")
 
@@ -216,15 +219,15 @@ func (s *DownloadContainerdStep) Run(ctx runtime.ExecutionContext) error {
 func (s *DownloadContainerdStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
 
-	binaryInfo, err := s.getBinaryInfo()
+	binaryInfo, err := s.getBinaryInfo(ctx)
 	if err != nil {
 		logger.Errorf("Failed to get binary info during rollback, cannot determine file to delete. Error: %v", err)
 		return nil
 	}
 
 	logger.Warnf("Rolling back by deleting downloaded file: %s", binaryInfo.FilePath)
-	if err := os.Remove(binaryInfo.FilePath); err != nil && !os.IsNotExist(err) {
-		logger.Errorf("Failed to delete file '%s' during rollback: %v", binaryInfo.FilePath, err)
+	if err := os.Remove(binaryInfo.FilePath()); err != nil && !os.IsNotExist(err) {
+		logger.Errorf("Failed to delete file '%s' during rollback: %v", binaryInfo.FilePath(), err)
 	}
 	return nil
 }

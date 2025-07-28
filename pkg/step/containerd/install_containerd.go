@@ -2,6 +2,7 @@ package containerd
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
 	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"path/filepath"
@@ -66,21 +67,15 @@ func (s *InstallContainerdStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *InstallContainerdStep) getExtractedPathOnControlNode() (string, error) {
-	provider := util.NewBinaryProvider()
-	binaryInfo, err := provider.GetBinaryInfo(
-		util.ComponentContainerd,
-		s.Version,
-		s.Arch,
-		s.Zone,
-		s.WorkDir,
-		s.ClusterName,
-	)
+func (s *InstallContainerdStep) getExtractedPathOnControlNode(ctx runtime.ExecutionContext) (string, error) {
+	provider := binary.NewBinaryProvider(ctx)
+	arch := ctx.GetHost().GetArch()
+	binaryInfo, err := provider.GetBinary(binary.ComponentContainerd, arch)
 	if err != nil {
 		return "", fmt.Errorf("failed to get containerd binary info: %w", err)
 	}
 
-	destDirName := strings.TrimSuffix(binaryInfo.FileName, ".tar.gz")
+	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tar.gz")
 	destPath := filepath.Join(common.DefaultExtractTmpDir, destDirName)
 	return destPath, nil
 }
@@ -133,7 +128,7 @@ func (s *InstallContainerdStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	localExtractedPath, err := s.getExtractedPathOnControlNode()
+	localExtractedPath, err := s.getExtractedPathOnControlNode(ctx)
 	if err != nil {
 		return fmt.Errorf("could not determine local extracted path: %w", err)
 	}
