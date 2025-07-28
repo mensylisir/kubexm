@@ -3,6 +3,7 @@ package kube_apiserver
 import (
 	"crypto/sha256"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"io"
 	"net/http"
 	"os"
@@ -14,7 +15,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"github.com/schollz/progressbar/v3"
 )
 
@@ -38,7 +38,7 @@ func NewDownloadKubeApiServerStepBuilder(ctx runtime.Context, instanceName strin
 		Arch:        "",
 		WorkDir:     ctx.GetGlobalWorkDir(),
 		ClusterName: ctx.GetClusterConfig().ObjectMeta.Name,
-		Zone:        helpers.GetZone(),
+		Zone:        util.GetZone(),
 	}
 
 	s.Base.Meta.Name = instanceName
@@ -66,10 +66,10 @@ func (s *DownloadKubeApiServerStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *DownloadKubeApiServerStep) getBinaryInfo() (*helpers.BinaryInfo, error) {
-	provider := helpers.NewBinaryProvider()
+func (s *DownloadKubeApiServerStep) getBinaryInfo() (*util.BinaryInfo, error) {
+	provider := util.NewBinaryProvider()
 	return provider.GetBinaryInfo(
-		helpers.ComponentKubeApiServer,
+		util.ComponentKubeApiServer,
 		s.Version,
 		s.Arch,
 		s.Zone,

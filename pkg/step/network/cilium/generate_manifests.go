@@ -3,6 +3,7 @@ package cilium
 import (
 	"bytes"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -58,7 +59,7 @@ func NewGenerateCiliumHelmArtifactsStepBuilder(ctx runtime.Context, instanceName
 	s.RemoteValuesPath = filepath.Join(remoteDir, "cilium-values.yaml")
 
 	clusterCfg := ctx.GetClusterConfig()
-	ciliumImage := helpers.GetImage(ctx, "cilium")
+	ciliumImage := util.GetImage(ctx, "cilium")
 	s.ImageRepository = ciliumImage.ImageRepo()
 	s.ImageTag = ciliumImage.Tag
 

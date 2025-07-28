@@ -18,6 +18,7 @@ type Image struct {
 	Group             string
 	Enable            bool
 	NamespaceRewrite  *v1alpha1.NamespaceRewrite
+	OriginalRepoAddr  string `json:"-"`
 }
 type Images struct {
 	Images []Image

@@ -14,6 +14,9 @@ import (
 //go:embed containerd/*.tmpl
 //go:embed os/*.tmpl
 //go:embed docker/*.tmpl
+//go:embed cni/calico/*.tmpl
+//go:embed cni/cilium/*.tmpl
+//go:embed cni/flannel/*.tmpl
 var embeddedTemplates embed.FS
 
 func Get(templateName string) (string, error) {

@@ -1,0 +1,51 @@
+# templates/cni/kubeovn/values.yaml.tmpl
+# 此模板严格遵循官方 Kube-OVN Helm Chart 的 values.yaml 结构。
+
+# 全局镜像配置
+image:
+  repository: {{ .Registry }}/kubeovn
+  pullPolicy: IfNotPresent
+  # Kube-OVN 使用多个不同的镜像，这里通过 repository 统一替换镜像仓库地址
+  # 例如: ovs, kube-ovn-cni, kube-ovn-controller, kube-ovn-pinger
+
+# 核心网络配置
+networking:
+  # Kubernetes Pod 网段。将使用您在 KubeOvnConfig 中指定的 podDefaultSubnetCIDR，
+  # 如果未指定，则回退到全局的 KubePodsCIDR。
+  KUBE_POD_CIDR: "{{ .PodCIDR }}"
+  # Kubernetes Service 网段
+  KUBE_SVC_CIDR: "{{ .ServiceCIDR }}"
+
+  {{- if .Controller }}
+  # OVN master 节点和 node 节点之间互联的子网
+  JOIN_CIDR: "{{ .Controller.JoinCIDR }}"
+  # 每个节点内部的 OVS 交换机子网
+  NODE_SWITCH_CIDR: "{{ .Controller.NodeSwitchCIDR }}"
+  {{- end }}
+
+  {{- if .Networking }}
+  # OVN 使用的隧道类型，例如: geneve, vxlan
+  tunnel_type: "{{ .Networking.TunnelType }}"
+
+  {{- with .Networking.PodGateway }}
+  # Pod 的网关地址
+  pod_gateway: "{{ . }}"
+  {{- end }}
+
+  {{- with .Networking.MTU }}
+  # 网络的 MTU 值
+  mtu: {{ . }}
+  {{- end }}
+  {{- end }}
+
+  {{- if .AdvancedFeatures }}
+  {{- with .AdvancedFeatures.EnableSSL }}
+  ENABLE_SSL: "{{ . }}"
+  {{- end }}
+  {{- with .AdvancedFeatures.EnableVPCNATGateway }}
+  ENABLE_VPC_NAT_GATEWAY: "{{ . }}"
+  {{- end }}
+  {{- with .AdvancedFeatures.EnableSubnetQoS }}
+  ENABLE_SUBNET_QOS: "{{ . }}"
+  {{- end }}
+  {{- end }}

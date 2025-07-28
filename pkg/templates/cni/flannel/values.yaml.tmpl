@@ -1,0 +1,49 @@
+# templates/cni/flannel/values.yaml.tmpl
+# 此模板严格遵循官方 flannel-io/flannel Helm Chart 的 values.yaml 结构。
+
+# 镜像配置
+# 将官方镜像 "flannel/flannel" 替换为您指定的私有镜像仓库地址。
+image:
+  repository: {{ .Registry }}/flannel/flannel
+  # 官方 Chart 默认使用 Chart 的 appVersion 作为镜像 tag。
+  # 如果需要，您也可以在这里添加一个可配置的 tag 字段。
+  pullPolicy: IfNotPresent
+
+# Pod 网段，这是 Flannel 运行所必需的核心配置。
+podCidr: "{{ .PodCIDR }}"
+
+# Flannel 插件的核心配置，所有后端相关的设置都在这个 "flannel" 键下。
+flannel:
+  # 后端配置
+  backend:
+    # 后端类型，将从您的 FlannelConfig 中获取，例如: vxlan, host-gw, ipsec
+    type: "{{ .BackendType }}"
+
+    # 仅当后端类型为 "vxlan" 且您在 FlannelConfig 中提供了 vxlan 的详细配置时，
+    # 才渲染此 vxlan 配置块。
+    {{- if and (eq .BackendType "vxlan") .BackendVXLAN }}
+    vxlan:
+      # 以下字段只有在您的配置中不为 nil 时才会渲染。
+      {{- with .BackendVXLAN.VNI }}
+      vni: {{ . }}
+      {{- end }}
+      {{- with .BackendVXLAN.Port }}
+      port: {{ . }}
+      {{- end }}
+      {{- with .BackendVXLAN.DirectRouting }}
+      directRouting: {{ . }}
+      {{- end }}
+    {{- end }}
+
+    # 仅当后端类型为 "ipsec" 且您在 FlannelConfig 中提供了 ipsec 的详细配置时，
+    # 才渲染此 ipsec 配置块。
+    {{- if and (eq .BackendType "ipsec") .BackendIPsec }}
+    ipsec:
+      {{- if .BackendIPsec.PSKSecretName }}
+      pskSecretName: "{{ .BackendIPsec.PSKSecretName }}"
+      {{- end }}
+    {{- end }}
+
+# 说明：官方 Chart 对 "host-gw" 后端类型没有额外的可配置参数，
+# 只需要设置 backend.type: "host-gw" 即可生效。
+# 因此，模板中没有为 host-gw 单独的配置块。

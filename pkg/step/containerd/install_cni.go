@@ -2,6 +2,7 @@ package containerd
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -12,7 +13,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 )
 
 type InstallCNIPluginsStep struct {
@@ -36,7 +36,7 @@ func NewInstallCNIPluginsStepBuilder(ctx runtime.Context, instanceName string) *
 		Arch:            "",
 		WorkDir:         ctx.GetGlobalWorkDir(),
 		ClusterName:     ctx.GetClusterConfig().ObjectMeta.Name,
-		Zone:            helpers.GetZone(),
+		Zone:            util.GetZone(),
 		RemoteCNIBinDir: common.DefaultCNIBin,
 		Permission:      "0755",
 	}
@@ -71,9 +71,9 @@ func (s *InstallCNIPluginsStep) Meta() *spec.StepMeta {
 }
 
 func (s *InstallCNIPluginsStep) getLocalExtractedPath() (string, error) {
-	provider := helpers.NewBinaryProvider()
+	provider := util.NewBinaryProvider()
 	binaryInfo, err := provider.GetBinaryInfo(
-		helpers.ComponentKubeCNI,
+		util.ComponentKubeCNI,
 		s.Version,
 		s.Arch,
 		s.Zone,

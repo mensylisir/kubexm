@@ -6,7 +6,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"path/filepath"
 	"time"
@@ -33,7 +33,7 @@ func NewInstallRuncStepBuilder(ctx runtime.Context, instanceName string) *Instal
 		Arch:                 "",
 		WorkDir:              ctx.GetGlobalWorkDir(),
 		ClusterName:          ctx.GetClusterConfig().ObjectMeta.Name,
-		Zone:                 helpers.GetZone(),
+		Zone:                 util.GetZone(),
 		RemoteRuncTargetPath: filepath.Join(common.DefaultBinDir, "runc"),
 		Permission:           "0755",
 	}
@@ -68,9 +68,9 @@ func (s *InstallRuncStep) Meta() *spec.StepMeta {
 }
 
 func (s *InstallRuncStep) getLocalSourcePath() (string, error) {
-	provider := helpers.NewBinaryProvider()
+	provider := util.NewBinaryProvider()
 	binaryInfo, err := provider.GetBinaryInfo(
-		helpers.ComponentRunc,
+		util.ComponentRunc,
 		s.Version,
 		s.Arch,
 		s.Zone,

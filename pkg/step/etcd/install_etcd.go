@@ -2,6 +2,7 @@ package etcd
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 )
 
 type InstallEtcdStep struct {
@@ -40,7 +40,7 @@ func NewInstallEtcdStepBuilder(ctx runtime.Context, instanceName string) *Instal
 		Arch:        "",
 		WorkDir:     ctx.GetGlobalWorkDir(),
 		ClusterName: ctx.GetClusterConfig().ObjectMeta.Name,
-		Zone:        helpers.GetZone(),
+		Zone:        util.GetZone(),
 		InstallPath: common.DefaultBinDir,
 		Permission:  "0755",
 	}
@@ -70,9 +70,9 @@ func (s *InstallEtcdStep) Meta() *spec.StepMeta {
 }
 
 func (s *InstallEtcdStep) getLocalExtractedPath() (string, error) {
-	provider := helpers.NewBinaryProvider()
+	provider := util.NewBinaryProvider()
 	binaryInfo, err := provider.GetBinaryInfo(
-		helpers.ComponentEtcd,
+		util.ComponentEtcd,
 		s.Version,
 		s.Arch,
 		s.Zone,

@@ -2,6 +2,7 @@ package kubelet
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"path/filepath"
 	"time"
@@ -10,7 +11,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 )
 
 type InstallKubeletStep struct {
@@ -59,7 +59,7 @@ func (s *InstallKubeletStep) Meta() *spec.StepMeta {
 }
 
 func (s *InstallKubeletStep) getLocalSourcePath(ctx runtime.ExecutionContext) (string, error) {
-	provider := helpers.NewBinaryProvider()
+	provider := util.NewBinaryProvider()
 
 	host := ctx.GetHost()
 	arch := s.Arch
@@ -67,7 +67,7 @@ func (s *InstallKubeletStep) getLocalSourcePath(ctx runtime.ExecutionContext) (s
 		arch = host.GetArch()
 	}
 
-	info, err := provider.GetBinaryInfo(helpers.ComponentKubelet, s.Version, arch, "", s.WorkDir, s.ClusterName)
+	info, err := provider.GetBinaryInfo(util.ComponentKubelet, s.Version, arch, "", s.WorkDir, s.ClusterName)
 	if err != nil {
 		return "", fmt.Errorf("failed to get binary info for kubelet: %w", err)
 	}

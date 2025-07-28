@@ -2,6 +2,7 @@ package containerd
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,7 +37,7 @@ func NewExtractContainerdStepBuilder(ctx runtime.Context, instanceName string) *
 		Arch:        "",
 		WorkDir:     ctx.GetGlobalWorkDir(),
 		ClusterName: ctx.GetClusterConfig().ObjectMeta.Name,
-		Zone:        helpers.GetZone(),
+		Zone:        util.GetZone(),
 	}
 
 	s.Base.Meta.Name = instanceName
@@ -53,9 +54,9 @@ func (s *ExtractContainerdStep) Meta() *spec.StepMeta {
 }
 
 func (s *ExtractContainerdStep) getPaths() (sourcePath, destPath, cacheKey string, err error) {
-	provider := helpers.NewBinaryProvider()
+	provider := util.NewBinaryProvider()
 	binaryInfo, err := provider.GetBinaryInfo(
-		helpers.ComponentContainerd,
+		util.ComponentContainerd,
 		s.Version,
 		s.Arch,
 		s.Zone,

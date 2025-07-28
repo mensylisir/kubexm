@@ -1,0 +1,18 @@
+# templates/cni/multus/values.yaml.tmpl
+# 此模板遵循一个通用的 Multus CNI Helm Chart 的 values.yaml 结构。
+# 主要用于配置 Multus DaemonSet 的镜像。
+
+image:
+  # 镜像仓库地址。这将从您提供的 'image' 字符串中解析得出。
+  repository: "{{ .ImageRepository }}"
+
+  # 镜像标签。也将从 'image' 字符串中解析。
+  tag: "{{ .ImageTag }}"
+
+  # 镜像拉取策略。
+  pullPolicy: IfNotPresent
+
+# 注意：
+# 1. 'namespace' 将通过 `helm install --namespace` 标志在安装步骤中直接控制，
+#    因此不需要在 values 文件中设置。
+# 2. 我们假设使用的 Helm Chart 遵循这种 'image.repository' 和 'image.tag' 结构。
