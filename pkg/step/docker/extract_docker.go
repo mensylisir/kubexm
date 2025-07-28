@@ -2,6 +2,7 @@ package docker
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,7 +35,7 @@ func NewExtractDockerStepBuilder(ctx runtime.Context, instanceName string) *Extr
 		Arch:        "",
 		WorkDir:     ctx.GetGlobalWorkDir(),
 		ClusterName: ctx.GetClusterConfig().ObjectMeta.Name,
-		Zone:        helpers.GetZone(),
+		Zone:        util.GetZone(),
 	}
 
 	s.Base.Meta.Name = instanceName
@@ -67,9 +68,9 @@ func (s *ExtractDockerStep) Meta() *spec.StepMeta {
 }
 
 func (s *ExtractDockerStep) getPaths() (sourcePath, destPath, cacheKey string, err error) {
-	provider := helpers.NewBinaryProvider()
+	provider := util.NewBinaryProvider()
 	binaryInfo, err := provider.GetBinaryInfo(
-		helpers.ComponentDocker,
+		util.ComponentDocker,
 		s.Version,
 		s.Arch,
 		s.Zone,

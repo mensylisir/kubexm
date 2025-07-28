@@ -3,6 +3,7 @@ package calico
 import (
 	"bytes"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -57,7 +58,7 @@ func NewGenerateCalicoHelmArtifactsStepBuilder(ctx runtime.Context, instanceName
 	s.RemoteValuesPath = filepath.Join(remoteDir, "calico-values.yaml")
 
 	clusterCfg := ctx.GetClusterConfig()
-	s.OperatorImage = helpers.GetImage(ctx, "tigera-operator").ImageRepo()
+	s.OperatorImage = util.GetImage(ctx, "tigera-operator").ImageRepo()
 	s.OperatorNodeSelector = map[string]string{"kubernetes.io/os": "linux"}
 	s.OperatorTolerations = []map[string]string{
 		{"key": "node-role.kubernetes.io/control-plane", "operator": "Exists", "effect": "NoSchedule"},
@@ -131,7 +132,6 @@ func NewGenerateCalicoHelmArtifactsStepBuilder(ctx runtime.Context, instanceName
 			s.TyphaEnabled = true
 		}
 	}
-
 	b := new(GenerateCalicoHelmArtifactsStepBuilder).Init(s)
 	return b
 }

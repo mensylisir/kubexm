@@ -2,6 +2,7 @@ package docker
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 )
 
 type InstallCriDockerdStep struct {
@@ -35,7 +35,7 @@ func NewInstallCriDockerdStepBuilder(ctx runtime.Context, instanceName string) *
 		Arch:        "",
 		WorkDir:     ctx.GetGlobalWorkDir(),
 		ClusterName: ctx.GetClusterConfig().ObjectMeta.Name,
-		Zone:        helpers.GetZone(),
+		Zone:        util.GetZone(),
 		InstallPath: common.DefaultBinDir,
 		Permission:  "0755",
 	}
@@ -70,8 +70,8 @@ func (s *InstallCriDockerdStep) Meta() *spec.StepMeta {
 }
 
 func (s *InstallCriDockerdStep) getLocalSourcePath() (string, error) {
-	provider := helpers.NewBinaryProvider()
-	binaryInfo, err := provider.GetBinaryInfo(helpers.ComponentCriDockerd, s.Version, s.Arch, s.Zone, s.WorkDir, s.ClusterName)
+	provider := util.NewBinaryProvider()
+	binaryInfo, err := provider.GetBinaryInfo(util.ComponentCriDockerd, s.Version, s.Arch, s.Zone, s.WorkDir, s.ClusterName)
 	if err != nil {
 		return "", fmt.Errorf("failed to get cri-dockerd binary info: %w", err)
 	}

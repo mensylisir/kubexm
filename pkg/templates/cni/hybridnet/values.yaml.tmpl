@@ -1,0 +1,49 @@
+# templates/cni/hybridnet/values.yaml.tmpl
+# 此模板遵循官方 Hybridnet Helm Chart 的 values.yaml 结构。
+
+# 镜像配置
+image:
+  # 此处的值将由 HybridnetInstallationConfig.ImageRegistry 或全局配置决定
+  registry: "{{ .ImageRegistry }}"
+  pullPolicy: IfNotPresent
+
+# 初始化任务配置，用于在安装后创建默认的 Network 和 Subnet CRD
+# 注意: 官方 chart 可能将这些配置放在 manager.args 或类似位置，
+# 此处为清晰起见，假设有独立的 initJob 配置块。
+initJob:
+  # 根据 DefaultNetwork.CreateOnInit 的值决定是否启用此初始化任务
+  {{- with .DefaultNetwork.CreateOnInit }}
+  enabled: {{ . }}
+  {{- end }}
+
+  # 默认网络的类型，例如: underlay, overlay
+  defaultNetworkType: "{{ .DefaultNetwork.Type }}"
+
+  # 默认 Underlay 子网的名称 (引用一个 Subnet CR)
+  {{- with .DefaultNetwork.DefaultUnderlaySubnetName }}
+  defaultUnderlaySubnet: "{{ . }}"
+  {{- end }}
+
+  # 默认 Overlay 子网的 CIDR
+  {{- with .DefaultNetwork.DefaultOverlaySubnetCIDR }}
+  defaultOverlaySubnetCIDR: "{{ . }}"
+  {{- end }}
+
+# 特性开关
+feature:
+  # 是否启用网络策略
+  {{- with .Features.EnableNetworkPolicy }}
+  networkPolicy: {{ . }}
+  {{- end }}
+
+  # 是否启用多集群功能
+  {{- with .Features.EnableMultiCluster }}
+  multiCluster: {{ . }}
+  {{- end }}
+
+# manager 和 daemon 的配置，这里可以添加来自 API 的其他配置项
+# 例如，如果未来 API 支持，可以在这里添加 replicas 或 nodeSelector
+# manager:
+#   replicas: 1
+# daemon:
+#   tolerations: []

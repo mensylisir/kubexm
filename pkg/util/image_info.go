@@ -1,10 +1,9 @@
-package helpers
+package util
 
 import (
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/runtime"
-	"github.com/mensylisir/kubexm/pkg/util"
 	versionutil "k8s.io/apimachinery/pkg/util/version"
 	"sort"
 	"strings"
@@ -98,12 +97,24 @@ func GetImageNames() []string {
 		"csi-node-driver-registrar",
 		"csi-resizer",
 		"csi-snapshotter",
+		"tigera-operator",
+		"calico-apiserver",
+		"calico-kube-controllers",
+		"calico-envoy-gateway",
+		"calico-envoy-proxy",
+		"calico-envoy-ratelimit",
+		"calico-dikastes",
+		"calico-pod2daemon-flexvol",
+		"calico-key-cert-provisioner",
+		"calico-goldmane",
+		"calico-whisker",
+		"calico-whisker-backend",
 	}
 }
 
-func GetImages(ctx runtime.Context) []util.Image {
-	i := util.Images{}
-	i.Images = []util.Image{
+func GetImages(ctx runtime.Context) []Image {
+	i := Images{}
+	i.Images = []Image{
 		GetImage(ctx, "etcd"),
 		GetImage(ctx, "pause"),
 		GetImage(ctx, "kube-apiserver"),
@@ -116,6 +127,7 @@ func GetImages(ctx runtime.Context) []util.Image {
 		GetImage(ctx, "calico-cni"),
 		GetImage(ctx, "calico-node"),
 		GetImage(ctx, "calico-flexvol"),
+		GetImage(ctx, "calico-typha"),
 		GetImage(ctx, "cilium"),
 		GetImage(ctx, "cilium-operator-generic"),
 		GetImage(ctx, "flannel"),
@@ -129,11 +141,23 @@ func GetImages(ctx runtime.Context) []util.Image {
 		GetImage(ctx, "csi-node-driver-registrar"),
 		GetImage(ctx, "csi-resizer"),
 		GetImage(ctx, "csi-snapshotter"),
+		GetImage(ctx, "tigera-operator"),
+		GetImage(ctx, "calico-apiserver"),
+		GetImage(ctx, "calico-kube-controllers"),
+		GetImage(ctx, "calico-envoy-gateway"),
+		GetImage(ctx, "calico-envoy-proxy"),
+		GetImage(ctx, "calico-envoy-ratelimit"),
+		GetImage(ctx, "calico-dikastes"),
+		GetImage(ctx, "calico-pod2daemon-flexvol"),
+		GetImage(ctx, "calico-key-cert-provisioner"),
+		GetImage(ctx, "calico-goldmane"),
+		GetImage(ctx, "calico-whisker"),
+		GetImage(ctx, "calico-whisker-backend"),
 	}
 	return i.Images
 }
 
-func GetImage(context runtime.Context, name string) util.Image {
+func GetImage(context runtime.Context, name string) Image {
 	kubeVersionStr := context.ClusterConfig.Spec.Kubernetes.Version
 	currentKubeVersion := versionutil.MustParseSemantic(kubeVersionStr)
 
@@ -152,7 +176,7 @@ func GetImage(context runtime.Context, name string) util.Image {
 
 	logger.Debug("pauseTag: %s, corednsTag: %s", pauseTag, corednsTag)
 
-	ImageList := map[string]util.Image{
+	ImageList := map[string]Image{
 		"pause":                     {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "pause", Tag: pauseTag, Group: common.RoleKubernetes, Enable: true},
 		"etcd":                      {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "etcd", Tag: common.DefaultEtcdVersion, Group: common.RoleMaster, Enable: strings.EqualFold(context.GetClusterConfig().Spec.Etcd.Type, string(common.EtcdDeploymentTypeKubeadm))},
 		"kube-apiserver":            {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "kube-apiserver", Tag: context.GetClusterConfig().Spec.Kubernetes.Version, Group: common.RoleRegistry, Enable: true},
@@ -185,13 +209,13 @@ func GetImage(context runtime.Context, name string) util.Image {
 		"csi-node-driver-registrar": {RepoAddr: privateRegistry, Namespace: "sig-storage", Repo: "csi-node-driver-registrar", Tag: "v2.10.0", Group: common.RoleWorker, Enable: *context.GetClusterConfig().Spec.Storage.NFS.Enabled},
 		"csi-resizer":               {RepoAddr: privateRegistry, Namespace: "sig-storage", Repo: "csi-resizer", Tag: "v1.10.0", Group: common.RoleWorker, Enable: *context.GetClusterConfig().Spec.Storage.NFS.Enabled},
 		"csi-snapshotter":           {RepoAddr: privateRegistry, Namespace: "sig-storage", Repo: "csi-snapshotter", Tag: "v7.0.1", Group: common.RoleWorker, Enable: *context.GetClusterConfig().Spec.Storage.NFS.Enabled},
+		"tigera-operator":           {RepoAddr: privateRegistry, Namespace: "tigera", Repo: "operator", Tag: "v1.38.3", Group: common.RoleKubernetes, Enable: context.GetClusterConfig().Spec.Network.Plugin == string(common.CNITypeCalico)},
 	}
 
 	image := ImageList[name]
 	if context.ClusterConfig.Spec.Registry.MirroringAndRewriting.NamespaceOverride != "" {
 		image.NamespaceOverride = context.ClusterConfig.Spec.Registry.MirroringAndRewriting.NamespaceOverride
-	}
-	if context.ClusterConfig.Spec.Registry.MirroringAndRewriting.NamespaceRewrite != nil {
+	} else if context.ClusterConfig.Spec.Registry.MirroringAndRewriting.NamespaceRewrite != nil {
 		image.NamespaceRewrite = context.ClusterConfig.Spec.Registry.MirroringAndRewriting.NamespaceRewrite
 	}
 	return image

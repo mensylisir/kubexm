@@ -2,6 +2,7 @@ package docker
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"path/filepath"
 	"time"
@@ -10,7 +11,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 )
 
 type InstallDockerComposeStep struct {
@@ -35,7 +35,7 @@ func NewInstallDockerComposeStepBuilder(ctx runtime.Context, instanceName string
 		Arch:        "",
 		WorkDir:     ctx.GetGlobalWorkDir(),
 		ClusterName: ctx.GetClusterConfig().ObjectMeta.Name,
-		Zone:        helpers.GetZone(),
+		Zone:        util.GetZone(),
 		InstallPath: common.DefaultBinDir,
 		Permission:  "0755",
 	}
@@ -77,8 +77,8 @@ func (s *InstallDockerComposeStep) Meta() *spec.StepMeta {
 }
 
 func (s *InstallDockerComposeStep) getLocalSourcePath() (string, error) {
-	provider := helpers.NewBinaryProvider()
-	binaryInfo, err := provider.GetBinaryInfo(helpers.ComponentCompose, s.Version, s.Arch, s.Zone, s.WorkDir, s.ClusterName)
+	provider := util.NewBinaryProvider()
+	binaryInfo, err := provider.GetBinaryInfo(util.ComponentCompose, s.Version, s.Arch, s.Zone, s.WorkDir, s.ClusterName)
 	if err != nil {
 		return "", fmt.Errorf("failed to get docker-compose binary info: %w", err)
 	}

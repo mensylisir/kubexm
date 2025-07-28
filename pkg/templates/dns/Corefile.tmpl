@@ -1,0 +1,79 @@
+# templates/dns/Corefile.tmpl
+  .:53 {
+    errors
+    health {
+    lameduck 5s
+    }
+    ready
+    {{- if .DNSEtcHosts }}
+    hosts /etc/coredns/hosts {
+    fallthrough
+    }
+    {{- end }}
+    kubernetes {{ .ClusterDomain }} in-addr.arpa ip6.arpa {
+    pods insecure
+    fallthrough in-addr.arpa ip6.arpa
+    }
+    prometheus :9153
+  
+  {{- if .CoreDNS.UpstreamForwarding }}
+  {{- $upstreams := "" }}
+  {{- if .CoreDNS.UpstreamForwarding.StaticServers }}
+  {{- $upstreams = join .CoreDNS.UpstreamForwarding.StaticServers " " }}
+  {{- else if .CoreDNS.UpstreamForwarding.UseNodeResolvConf }}
+  {{- $upstreams = "/etc/resolv.conf" }}
+  {{- end }}
+  
+  {{- if $upstreams }}
+    forward . {{ $upstreams }} {
+    {{- if .CoreDNS.UpstreamForwarding.Policy }}
+    policy {{ .CoreDNS.UpstreamForwarding.Policy }}
+    {{- end }}
+    {{- with .CoreDNS.UpstreamForwarding.MaxConcurrent }}
+    max_concurrent {{ . }}
+    {{- end }}
+}
+  {{- end }}
+  {{- end }}
+
+    cache 30
+
+  {{- if .CoreDNS.RewriteBlock }}
+
+  # Custom rewrite block
+  {{ .CoreDNS.RewriteBlock }}
+
+  {{- end }}
+
+  {{- if .CoreDNS.ExternalZones }}
+  # --- External Zones ---
+  {{- range .CoreDNS.ExternalZones }}
+  {{ join .Zones " " }}:53 {
+    {{- if .Nameservers }}
+    forward . {{ join .Nameservers " " }}
+    {{- end }}
+    {{- if .Cache }}
+    cache {{ .Cache }}
+    {{- end }}
+    {{- if .Rewrite }}
+    {{- range .Rewrite }}
+    rewrite name {{ .FromPattern }} {{ .ToTemplate }}
+    {{- end }}
+    {{- end }}
+    }
+    {{- end }}
+  # --- End External Zones ---
+    {{- end }}
+  
+  {{- if .CoreDNS.AdditionalConfigs }}
+  
+  # --- Additional Configurations ---
+  {{ .CoreDNS.AdditionalConfigs }}
+  # --- End Additional Configurations ---
+  
+  {{- end }}
+    
+    loop
+    reload
+    loadbalance
+}

@@ -3,6 +3,7 @@ package docker
 import (
 	"crypto/sha256"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"io"
 	"net/http"
 	"os"
@@ -14,7 +15,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"github.com/schollz/progressbar/v3"
 )
 
@@ -37,7 +37,7 @@ func NewDownloadDockerComposeStepBuilder(ctx runtime.Context, instanceName strin
 		Arch:        "",
 		WorkDir:     ctx.GetGlobalWorkDir(),
 		ClusterName: ctx.GetClusterConfig().ObjectMeta.Name,
-		Zone:        helpers.GetZone(),
+		Zone:        util.GetZone(),
 	}
 
 	s.Base.Meta.Name = instanceName
@@ -65,10 +65,10 @@ func (b *DownloadDockerComposeStepBuilder) WithArch(arch string) *DownloadDocker
 	return b
 }
 
-func (s *DownloadDockerComposeStep) getBinaryInfo() (*helpers.BinaryInfo, error) {
-	provider := helpers.NewBinaryProvider()
+func (s *DownloadDockerComposeStep) getBinaryInfo() (*util.BinaryInfo, error) {
+	provider := util.NewBinaryProvider()
 	return provider.GetBinaryInfo(
-		helpers.ComponentCompose,
+		util.ComponentCompose,
 		s.Version,
 		s.Arch,
 		s.Zone,

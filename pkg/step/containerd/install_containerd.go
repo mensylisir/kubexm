@@ -2,6 +2,7 @@ package containerd
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 )
 
 type InstallContainerdStep struct {
@@ -37,7 +37,7 @@ func NewInstallContainerdStepBuilder(ctx runtime.Context, instanceName string) *
 		Arch:        "",
 		WorkDir:     ctx.GetGlobalWorkDir(),
 		ClusterName: ctx.GetClusterConfig().ObjectMeta.Name,
-		Zone:        helpers.GetZone(),
+		Zone:        util.GetZone(),
 		InstallPath: common.DefaultBinDir,
 		Permission:  "0755",
 	}
@@ -67,9 +67,9 @@ func (s *InstallContainerdStep) Meta() *spec.StepMeta {
 }
 
 func (s *InstallContainerdStep) getExtractedPathOnControlNode() (string, error) {
-	provider := helpers.NewBinaryProvider()
+	provider := util.NewBinaryProvider()
 	binaryInfo, err := provider.GetBinaryInfo(
-		helpers.ComponentContainerd,
+		util.ComponentContainerd,
 		s.Version,
 		s.Arch,
 		s.Zone,

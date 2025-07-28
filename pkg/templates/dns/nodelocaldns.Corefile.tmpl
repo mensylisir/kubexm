@@ -1,0 +1,63 @@
+# templates/dns/nodelocaldns.Corefile.tmpl
+{{ .ClusterDomain }}:53 {
+  errors
+  cache {
+  success 9984 30
+  denial 9984 5
+  }
+  reload
+  loop
+  bind {{ .IP }}
+  forward . {{ .CoreDNSServiceIP }} {
+  force_tcp
+  }
+  prometheus :9253
+}
+  in-addr.arpa:53 {
+  errors
+  cache 30
+  reload
+  loop
+  bind {{ .IP }}
+  forward . {{ .CoreDNSServiceIP }} {
+  force_tcp
+  }
+  prometheus :9253
+}
+  ip6.arpa:53 {
+  errors
+  cache 30
+  reload
+  loop
+  bind {{ .IP }}
+  forward . {{ .CoreDNSServiceIP }} {
+  force_tcp
+  }
+  prometheus :9253
+}
+  .:53 {
+  errors
+  cache 30
+  reload
+  loop
+  bind {{ .IP }}
+  forward . /etc/resolv.conf
+  prometheus :9253
+}
+
+  {{- if .ExternalZones }}
+  # --- External Zones for NodeLocalDNS ---
+  {{- range .ExternalZones }}
+  {{ join .Zones " " }}:53 {
+  errors
+  cache 30
+  reload
+  loop
+  bind {{ .IP }}
+  {{- if .Nameservers }}
+  forward . {{ join .Nameservers " " }}
+  {{- end }}
+}
+  {{- end }}
+  # --- End External Zones ---
+  {{- end }}

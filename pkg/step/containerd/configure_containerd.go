@@ -3,7 +3,7 @@ package containerd
 import (
 	"bytes"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -65,7 +65,7 @@ func NewConfigureContainerdStepBuilder(ctx runtime.Context, instanceName string)
 	}
 
 	if s.SandboxImage == "" {
-		pauseImage := helpers.GetImage(ctx, "pause")
+		pauseImage := util.GetImage(ctx, "pause")
 		s.SandboxImage = pauseImage.ImageName()
 	}
 

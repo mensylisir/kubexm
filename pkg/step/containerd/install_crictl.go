@@ -2,6 +2,7 @@ package containerd
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 )
 
 type InstallCriCtlStep struct {
@@ -35,7 +35,7 @@ func NewInstallCriCtlStepBuilder(ctx runtime.Context, instanceName string) *Inst
 		Arch:                   "",
 		WorkDir:                ctx.GetGlobalWorkDir(),
 		ClusterName:            ctx.GetClusterConfig().ObjectMeta.Name,
-		Zone:                   helpers.GetZone(),
+		Zone:                   util.GetZone(),
 		RemoteCriCtlTargetPath: filepath.Join(common.DefaultBinDir, "crictl"),
 		CrictlPermissions:      "0755",
 	}
@@ -64,9 +64,9 @@ func (s *InstallCriCtlStep) Meta() *spec.StepMeta {
 }
 
 func (s *InstallCriCtlStep) getLocalExtractedPath() (string, error) {
-	provider := helpers.NewBinaryProvider()
+	provider := util.NewBinaryProvider()
 	binaryInfo, err := provider.GetBinaryInfo(
-		helpers.ComponentCriCtl,
+		util.ComponentCriCtl,
 		s.Version,
 		s.Arch,
 		s.Zone,

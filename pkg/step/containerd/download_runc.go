@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"github.com/schollz/progressbar/v3"
 	"io"
 	"net/http"
@@ -14,7 +15,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 )
 
 type DownloadRuncStep struct {
@@ -36,7 +36,7 @@ func NewDownloadRuncStepBuilder(ctx runtime.Context, instanceName string) *Downl
 		Arch:        "",
 		WorkDir:     ctx.GetGlobalWorkDir(),
 		ClusterName: ctx.GetClusterConfig().ObjectMeta.Name,
-		Zone:        helpers.GetZone(),
+		Zone:        util.GetZone(),
 	}
 
 	s.Base.Meta.Name = instanceName
@@ -65,10 +65,10 @@ func (s *DownloadRuncStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *DownloadRuncStep) getBinaryInfo() (*helpers.BinaryInfo, error) {
-	provider := helpers.NewBinaryProvider()
+func (s *DownloadRuncStep) getBinaryInfo() (*util.BinaryInfo, error) {
+	provider := util.NewBinaryProvider()
 	return provider.GetBinaryInfo(
-		helpers.ComponentRunc,
+		util.ComponentRunc,
 		s.Version,
 		s.Arch,
 		s.Zone,

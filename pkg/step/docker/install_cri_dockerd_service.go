@@ -3,7 +3,7 @@ package docker
 import (
 	"bytes"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
+	"github.com/mensylisir/kubexm/pkg/util"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -53,7 +53,7 @@ func NewSetupCriDockerdServiceStepBuilder(ctx runtime.Context, instanceName stri
 	}
 
 	if s.Config.PodSandboxImage == "" {
-		pauseImage := helpers.GetImage(ctx, "pause")
+		pauseImage := util.GetImage(ctx, "pause")
 		s.Config.PodSandboxImage = pauseImage.ImageName()
 	}
 
