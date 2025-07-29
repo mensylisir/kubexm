@@ -2,8 +2,6 @@ package containerd
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
-	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,16 +12,12 @@ import (
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 	"github.com/mensylisir/kubexm/pkg/step/helpers"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
 	"github.com/schollz/progressbar/v3"
 )
 
 type ExtractContainerdStep struct {
 	step.Base
-	Version     string
-	Arch        string
-	WorkDir     string
-	ClusterName string
-	Zone        string
 }
 
 type ExtractContainerdStepBuilder struct {
@@ -31,19 +25,19 @@ type ExtractContainerdStepBuilder struct {
 }
 
 func NewExtractContainerdStepBuilder(ctx runtime.Context, instanceName string) *ExtractContainerdStepBuilder {
-	cfg := ctx.GetClusterConfig().Spec
+	provider := binary.NewBinaryProvider(&ctx)
+	const representativeArch = "amd64"
+	binaryInfo, err := provider.GetBinary(binary.ComponentContainerd, representativeArch)
 
-	s := &ExtractContainerdStep{
-		Version:     cfg.Kubernetes.ContainerRuntime.Containerd.Version,
-		Arch:        "",
-		WorkDir:     ctx.GetGlobalWorkDir(),
-		ClusterName: ctx.GetClusterConfig().ObjectMeta.Name,
-		Zone:        util.GetZone(),
+	if err != nil || binaryInfo == nil {
+		return nil
 	}
 
+	s := &ExtractContainerdStep{}
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Extract containerd archive for version %s", s.Base.Meta.Name, s.Version)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Extract containerd archives for all required architectures", s.Base.Meta.Name)
 	s.Base.Sudo = false
+	s.Base.IgnoreError = false
 	s.Base.Timeout = 2 * time.Minute
 
 	b := new(ExtractContainerdStepBuilder).Init(s)
@@ -54,16 +48,37 @@ func (s *ExtractContainerdStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *ExtractContainerdStep) getPaths(ctx runtime.ExecutionContext) (sourcePath, destPath, cacheKey string, err error) {
+func (s *ExtractContainerdStep) getRequiredArchs(ctx runtime.ExecutionContext) (map[string]bool, error) {
+	archs := make(map[string]bool)
+	allHosts := ctx.GetHostsByRole("")
+	if len(allHosts) == 0 {
+		return nil, fmt.Errorf("no hosts found in cluster configuration")
+	}
+
 	provider := binary.NewBinaryProvider(ctx)
-	arch := ctx.GetHost().GetArch()
+	for _, host := range allHosts {
+		binaryInfo, err := provider.GetBinary(binary.ComponentContainerd, host.GetArch())
+		if err != nil {
+			return nil, fmt.Errorf("error checking if containerd is needed for host %s: %w", host.GetName(), err)
+		}
+		if binaryInfo != nil {
+			archs[host.GetArch()] = true
+		}
+	}
+	return archs, nil
+}
+
+func (s *ExtractContainerdStep) getPathsForArch(ctx runtime.ExecutionContext, arch string) (sourcePath, destPath, cacheKey string, err error) {
+	provider := binary.NewBinaryProvider(ctx)
 	binaryInfo, err := provider.GetBinary(binary.ComponentContainerd, arch)
 	if err != nil {
-		return "", "", "", fmt.Errorf("failed to get containerd binary info: %w", err)
+		return "", "", "", fmt.Errorf("failed to get containerd binary info for arch %s: %w", arch, err)
+	}
+	if binaryInfo == nil {
+		return "", "", "", fmt.Errorf("containerd is unexpectedly disabled for arch %s", arch)
 	}
 
 	sourcePath = binaryInfo.FilePath()
-
 	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tar.gz")
 	destPath = filepath.Join(common.DefaultExtractTmpDir, destDirName)
 	cacheKey = sourcePath
@@ -74,52 +89,86 @@ func (s *ExtractContainerdStep) getPaths(ctx runtime.ExecutionContext) (sourcePa
 func (s *ExtractContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
 
-	sourcePath, destPath, cacheKey, err := s.getPaths(ctx)
+	requiredArchs, err := s.getRequiredArchs(ctx)
 	if err != nil {
 		return false, err
 	}
-
-	if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
-		return false, fmt.Errorf("source archive '%s' not found, please run download step first", sourcePath)
+	if len(requiredArchs) == 0 {
+		logger.Info("No hosts require containerd. Step is done.")
+		return true, nil
 	}
 
-	info, err := os.Stat(destPath)
-	if os.IsNotExist(err) {
-		logger.Infof("Extraction destination '%s' does not exist. Extraction is required.", destPath)
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("failed to stat destination directory '%s': %w", destPath, err)
-	}
-	if !info.IsDir() {
-		logger.Warnf("Destination '%s' exists but is not a directory. Removing and re-extracting.", destPath)
-		if err := os.RemoveAll(destPath); err != nil {
-			return false, fmt.Errorf("failed to remove invalid destination '%s': %w", destPath, err)
+	allDone := true
+	for arch := range requiredArchs {
+		sourcePath, destPath, cacheKey, err := s.getPathsForArch(ctx, arch)
+		if err != nil {
+			return false, err
 		}
-		return false, nil
+
+		if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
+			return false, fmt.Errorf("source archive '%s' for arch %s not found, ensure download step ran successfully", sourcePath, arch)
+		}
+
+		_, err = os.Stat(destPath)
+		if os.IsNotExist(err) {
+			logger.Infof("Extraction destination '%s' for arch %s does not exist. Extraction is required.", destPath, arch)
+			allDone = false
+			continue
+		}
+
+		keyFile := filepath.Join(destPath, "bin", "containerd")
+		if _, err := os.Stat(keyFile); os.IsNotExist(err) {
+			logger.Warnf("Destination directory for arch %s exists, but key file '%s' is missing. Re-extracting.", arch, keyFile)
+			allDone = false
+		} else {
+			ctx.GetTaskCache().Set(cacheKey, destPath)
+		}
 	}
 
-	keyFile := filepath.Join(destPath, "bin", "containerd")
-	if _, err := os.Stat(keyFile); os.IsNotExist(err) {
-		logger.Warnf("Destination directory '%s' exists, but key file '%s' is missing. Re-extracting.", destPath, keyFile)
-		return false, nil
+	if allDone {
+		logger.Info("All required containerd archives for all architectures already extracted and are valid.")
 	}
 
-	logger.Info("Destination directory exists and seems valid. Step is done.")
-	ctx.GetTaskCache().Set(cacheKey, destPath)
-	return true, nil
+	return allDone, nil
 }
 
 func (s *ExtractContainerdStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
-	sourcePath, destPath, cacheKey, err := s.getPaths(ctx)
+	requiredArchs, err := s.getRequiredArchs(ctx)
 	if err != nil {
 		return err
+	}
+	if len(requiredArchs) == 0 {
+		logger.Info("No hosts require containerd. Skipping extraction.")
+		return nil
 	}
 
 	if err := os.MkdirAll(common.DefaultExtractTmpDir, 0755); err != nil {
 		return fmt.Errorf("failed to create global extract directory '%s': %w", common.DefaultExtractTmpDir, err)
+	}
+
+	for arch := range requiredArchs {
+		if err := s.extractFileForArch(ctx, arch); err != nil {
+			return err
+		}
+	}
+
+	logger.Info("All required containerd archives have been extracted successfully.")
+	return nil
+}
+
+func (s *ExtractContainerdStep) extractFileForArch(ctx runtime.ExecutionContext, arch string) error {
+	logger := ctx.GetLogger()
+	sourcePath, destPath, cacheKey, err := s.getPathsForArch(ctx, arch)
+	if err != nil {
+		return err
+	}
+
+	if _, err := os.Stat(filepath.Join(destPath, "bin", "containerd")); err == nil {
+		logger.Infof("Skipping extraction for arch %s, destination already exists and is valid.", arch)
+		ctx.GetTaskCache().Set(cacheKey, destPath)
+		return nil
 	}
 
 	logger.Infof("Extracting archive '%s' to '%s'...", sourcePath, destPath)
@@ -136,15 +185,13 @@ func (s *ExtractContainerdStep) Run(ctx runtime.ExecutionContext) error {
 		progressbar.OptionShowBytes(true),
 		progressbar.OptionSetWidth(40),
 		progressbar.OptionThrottle(65*time.Millisecond),
-		progressbar.OptionOnCompletion(func() {
-			fmt.Fprint(os.Stderr, "\n")
-		}),
+		progressbar.OptionOnCompletion(func() { fmt.Fprint(os.Stderr, "\n") }),
 		progressbar.OptionSpinnerType(14),
 		progressbar.OptionFullWidth(),
 	)
 
 	progressFunc := func(fileName string, totalBytes int64) {
-		bar.Describe(fmt.Sprintf("Extracting: %s", fileName))
+		bar.Add64(totalBytes)
 	}
 
 	ar := helpers.NewArchiver(
@@ -153,14 +200,14 @@ func (s *ExtractContainerdStep) Run(ctx runtime.ExecutionContext) error {
 	)
 
 	if err := ar.Extract(sourcePath, destPath); err != nil {
-		bar.Clear()
-		os.RemoveAll(destPath)
+		_ = bar.Clear()
+		_ = os.RemoveAll(destPath)
 		return fmt.Errorf("failed to extract archive '%s': %w", sourcePath, err)
 	}
 
-	bar.Finish()
+	_ = bar.Finish()
+	logger.Infof("Successfully extracted archive for arch %s.", arch)
 
-	logger.Info("Successfully extracted archive.")
 	ctx.GetTaskCache().Set(cacheKey, destPath)
 	return nil
 }
@@ -168,15 +215,19 @@ func (s *ExtractContainerdStep) Run(ctx runtime.ExecutionContext) error {
 func (s *ExtractContainerdStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
 
-	_, destPath, _, err := s.getPaths(ctx)
+	requiredArchs, err := s.getRequiredArchs(ctx)
 	if err != nil {
-		logger.Errorf("Failed to get destination path during rollback, cannot determine directory to delete. Error: %v", err)
+		logger.Errorf("Failed to get required architectures during rollback: %v", err)
 		return nil
 	}
 
-	logger.Warnf("Rolling back by deleting extracted directory: %s", destPath)
-	if err := os.RemoveAll(destPath); err != nil {
-		logger.Errorf("Failed to delete directory '%s' during rollback: %v", destPath, err)
+	for arch := range requiredArchs {
+		_, destPath, _, err := s.getPathsForArch(ctx, arch)
+		if err != nil {
+			continue
+		}
+		logger.Warnf("Rolling back by deleting extracted directory: %s", destPath)
+		_ = os.RemoveAll(destPath)
 	}
 
 	return nil

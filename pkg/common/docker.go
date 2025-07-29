@@ -33,4 +33,5 @@ const (
 	CrictlSocketPath                    = "unix:///run/cri-dockerd.sock"
 	DefaultDockerServiceName            = "docker.service"
 	DefaultCRIDockerServiceName         = "cri-dockerd.service"
+	DockerPluginsDir                    = "/usr/libexec/docker/cli-plugins"
 )

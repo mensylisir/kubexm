@@ -2,7 +2,6 @@ package etcd
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,15 +11,11 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
 )
 
 type InstallEtcdStep struct {
 	step.Base
-	Version     string
-	Arch        string
-	WorkDir     string
-	ClusterName string
-	Zone        string
 	InstallPath string
 	Permission  string
 }
@@ -30,23 +25,13 @@ type InstallEtcdStepBuilder struct {
 }
 
 func NewInstallEtcdStepBuilder(ctx runtime.Context, instanceName string) *InstallEtcdStepBuilder {
-	etcdVersion := common.DefaultEtcdVersion
-	if ctx.GetClusterConfig().Spec.Etcd != nil && ctx.GetClusterConfig().Spec.Etcd.Version != "" {
-		etcdVersion = ctx.GetClusterConfig().Spec.Etcd.Version
-	}
-
 	s := &InstallEtcdStep{
-		Version:     etcdVersion,
-		Arch:        "",
-		WorkDir:     ctx.GetGlobalWorkDir(),
-		ClusterName: ctx.GetClusterConfig().ObjectMeta.Name,
-		Zone:        util.GetZone(),
 		InstallPath: common.DefaultBinDir,
 		Permission:  "0755",
 	}
 
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install etcd binaries for version %s", s.Base.Meta.Name, s.Version)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install etcd binaries", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 3 * time.Minute
@@ -56,12 +41,16 @@ func NewInstallEtcdStepBuilder(ctx runtime.Context, instanceName string) *Instal
 }
 
 func (b *InstallEtcdStepBuilder) WithInstallPath(installPath string) *InstallEtcdStepBuilder {
-	b.Step.InstallPath = installPath
+	if installPath != "" {
+		b.Step.InstallPath = installPath
+	}
 	return b
 }
 
 func (b *InstallEtcdStepBuilder) WithPermission(permission string) *InstallEtcdStepBuilder {
-	b.Step.Permission = permission
+	if permission != "" {
+		b.Step.Permission = permission
+	}
 	return b
 }
 
@@ -69,33 +58,28 @@ func (s *InstallEtcdStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *InstallEtcdStep) getLocalExtractedPath() (string, error) {
-	provider := util.NewBinaryProvider()
-	binaryInfo, err := provider.GetBinaryInfo(
-		util.ComponentEtcd,
-		s.Version,
-		s.Arch,
-		s.Zone,
-		s.WorkDir,
-		s.ClusterName,
-	)
+func (s *InstallEtcdStep) getLocalExtractedPath(ctx runtime.ExecutionContext) (string, error) {
+	provider := binary.NewBinaryProvider(ctx)
+	arch := ctx.GetHost().GetArch()
+	binaryInfo, err := provider.GetBinary(binary.ComponentEtcd, arch)
 	if err != nil {
 		return "", fmt.Errorf("failed to get etcd binary info: %w", err)
 	}
-	destDirName := strings.TrimSuffix(binaryInfo.FileName, ".tar.gz")
+	if binaryInfo == nil {
+		return "", fmt.Errorf("etcd is unexpectedly disabled for arch %s", arch)
+	}
+
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install etcd binaries (version %s)", s.Base.Meta.Name, binaryInfo.Version)
+
+	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tar.gz")
 	return filepath.Join(common.DefaultExtractTmpDir, destDirName), nil
 }
 
-func (s *InstallEtcdStep) filesToInstall() map[string]struct {
-	Target string
-	Perms  string
-} {
-	return map[string]struct {
-		Target string
-		Perms  string
-	}{
-		"etcd":    {Target: filepath.Join(s.InstallPath, "etcd"), Perms: s.Permission},
-		"etcdctl": {Target: filepath.Join(s.InstallPath, "etcdctl"), Perms: s.Permission},
+func (s *InstallEtcdStep) filesToInstall() map[string]string {
+	return map[string]string{
+		"etcd":    filepath.Join(s.InstallPath, "etcd"),
+		"etcdctl": filepath.Join(s.InstallPath, "etcdctl"),
+		"etcdutl": filepath.Join(s.InstallPath, "etcdutl"),
 	}
 }
 
@@ -108,19 +92,25 @@ func (s *InstallEtcdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, e
 	}
 
 	files := s.filesToInstall()
-	for _, details := range files {
-		exists, err := runner.Exists(ctx.GoContext(), conn, details.Target)
+	allExist := true
+	for _, targetPath := range files {
+		exists, err := runner.Exists(ctx.GoContext(), conn, targetPath)
 		if err != nil {
-			return false, fmt.Errorf("failed to check for file '%s': %w", details.Target, err)
+			return false, fmt.Errorf("failed to check for file '%s' on host %s: %w", targetPath, ctx.GetHost().GetName(), err)
 		}
 		if !exists {
-			logger.Infof("Target file '%s' does not exist. Installation is required.", details.Target)
-			return false, nil
+			logger.Infof("Target file '%s' does not exist. Installation is required.", targetPath)
+			allExist = false
+			break
 		}
 	}
 
-	logger.Info("All required etcd binaries already exist on remote host. Step is done.")
-	return true, nil
+	if allExist {
+		logger.Info("All required etcd binaries already exist on remote host. Step is done.")
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func (s *InstallEtcdStep) Run(ctx runtime.ExecutionContext) error {
@@ -131,40 +121,54 @@ func (s *InstallEtcdStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	localExtractedPath, err := s.getLocalExtractedPath()
+	localExtractedPath, err := s.getLocalExtractedPath(ctx)
 	if err != nil {
 		return err
 	}
+	if _, err := os.Stat(localExtractedPath); os.IsNotExist(err) {
+		return fmt.Errorf("local etcd extracted path '%s' not found, ensure extract step ran successfully", localExtractedPath)
+	}
 
-	remoteUploadTmpDir := common.DefaultUploadTmpDir
+	if err := runner.Mkdirp(ctx.GoContext(), conn, s.InstallPath, "0755", s.Sudo); err != nil {
+		return fmt.Errorf("failed to create remote install directory '%s': %w", s.InstallPath, err)
+	}
+
+	remoteUploadTmpDir := filepath.Join(common.DefaultUploadTmpDir, fmt.Sprintf("etcd-%d", time.Now().UnixNano()))
 	if err := runner.Mkdirp(ctx.GoContext(), conn, remoteUploadTmpDir, "0755", false); err != nil {
 		return fmt.Errorf("failed to create remote upload directory '%s': %w", remoteUploadTmpDir, err)
 	}
+	defer func() {
+		_ = runner.Remove(ctx.GoContext(), conn, remoteUploadTmpDir, false, true)
+	}()
 
 	files := s.filesToInstall()
-	for sourceRelPath, details := range files {
+	for sourceRelPath, remoteTargetPath := range files {
 		localSourcePath := filepath.Join(localExtractedPath, sourceRelPath)
 
 		if _, err := os.Stat(localSourcePath); os.IsNotExist(err) {
-			return fmt.Errorf("local source file '%s' not found, did extract step run correctly?", localSourcePath)
+			logger.Warnf("Local source file '%s' not found, skipping its installation.", localSourcePath)
+			continue
 		}
 
 		remoteTempPath := filepath.Join(remoteUploadTmpDir, sourceRelPath)
-		logger.Infof("Uploading %s to %s:%s", localSourcePath, ctx.GetHost().GetName(), remoteTempPath)
-
-		if err := runner.Upload(ctx.GoContext(), conn, localSourcePath, remoteTempPath, s.Sudo); err != nil {
-			return fmt.Errorf("failed to upload '%s' to '%s': %w", localSourcePath, remoteTempPath, err)
+		logger.Infof("Uploading %s to %s:%s", sourceRelPath, ctx.GetHost().GetName(), remoteTempPath)
+		if err := runner.Upload(ctx.GoContext(), conn, localSourcePath, remoteTempPath, false); err != nil {
+			return fmt.Errorf("failed to upload '%s': %w", localSourcePath, err)
 		}
 
-		installCmd := fmt.Sprintf("install -o root -g root -m %s %s %s", details.Perms, remoteTempPath, details.Target)
-		logger.Infof("Installing file to %s on remote host", details.Target)
+		moveCmd := fmt.Sprintf("mv %s %s", remoteTempPath, remoteTargetPath)
+		logger.Infof("Moving file to %s on remote host", remoteTargetPath)
+		if _, err := runner.Run(ctx.GoContext(), conn, moveCmd, s.Sudo); err != nil {
+			return fmt.Errorf("failed to move file to '%s': %w", remoteTargetPath, err)
+		}
 
-		if _, _, err := runner.OriginRun(ctx.GoContext(), conn, installCmd, s.Sudo); err != nil {
-			runner.Remove(ctx.GoContext(), conn, remoteTempPath, false, false)
-			return fmt.Errorf("failed to install file '%s' on remote host: %w", details.Target, err)
+		logger.Infof("Setting permissions for %s to %s", remoteTargetPath, s.Permission)
+		if err := runner.Chmod(ctx.GoContext(), conn, remoteTargetPath, s.Permission, s.Sudo); err != nil {
+			return fmt.Errorf("failed to set permission on '%s': %w", remoteTargetPath, err)
 		}
 	}
 
+	logger.Info("Successfully installed all etcd binaries.")
 	return nil
 }
 
@@ -177,10 +181,10 @@ func (s *InstallEtcdStep) Rollback(ctx runtime.ExecutionContext) error {
 	}
 
 	files := s.filesToInstall()
-	for _, details := range files {
-		logger.Warnf("Rolling back by removing: %s", details.Target)
-		if err := runner.Remove(ctx.GoContext(), conn, details.Target, s.Sudo, false); err != nil {
-			logger.Errorf("Failed to remove '%s' during rollback: %v", details.Target, err)
+	for _, targetPath := range files {
+		logger.Warnf("Rolling back by removing: %s", targetPath)
+		if err := runner.Remove(ctx.GoContext(), conn, targetPath, s.Sudo, false); err != nil {
+			logger.Errorf("Failed to remove '%s' during rollback: %v", targetPath, err)
 		}
 	}
 	return nil

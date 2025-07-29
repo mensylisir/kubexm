@@ -1,36 +1,55 @@
-# Template for Cilium Helm chart values
+# templates/cni/cilium/values.yaml.tmpl
 
-# Image settings. The deployment tool should populate these.
+# 镜像设置
+# Cilium 主镜像
 image:
   repository: {{ .ImageRepository }}
   tag: {{ .ImageTag }}
+  pullPolicy: IfNotPresent
 
-# IPAM mode. "kubernetes" is a safe default.
+# Cilium Operator 镜像 (这是被遗漏的关键部分)
+operator:
+  image:
+    repository: {{ .OperatorImageRepository }}
+    tag: {{ .OperatorImageTag }}
+    pullPolicy: IfNotPresent
+  replicas: {{ .OperatorReplicas }}
+
+# IP 地址管理模式
 ipam:
   mode: "{{ .IpamMode }}"
 
-# KubeProxyReplacement mode. 'probe' is a widely compatible default.
-# 'strict' offers better performance but has stricter requirements.
+# kube-proxy 替换模式
 kubeProxyReplacement: "{{ .KubeProxyReplacement }}"
 
-# Tunnel protocol. "vxlan" is the most compatible default.
+# 隧道协议
 tunnel: "{{ .Tunnel }}"
 
-# Operator configuration
-operator:
-  replicas: {{ .OperatorReplicas }}
-
-# Hubble observability platform.
+# Hubble 可观测性平台
 hubble:
   enabled: {{ .HubbleEnabled }}
+  # Hubble Relay 用于跨集群或大规模场景
   relay:
     enabled: {{ .HubbleRelayEnabled }}
+  # Hubble UI 前端
   ui:
     enabled: {{ .HubbleUiEnabled }}
 
-# eBPF settings
+# eBPF 相关设置
 bpf:
+  # 启用 eBPF masquerading
   masquerade: {{ .BpfMasquerade }}
 
-# For cloud environments, this can improve performance.
+# 身份分配模式 (这是被遗漏的功能)
+identityAllocationMode: "{{ .IdentityAllocationMode }}"
+
+# 透明加密 (这是被遗漏的功能)
+encryption:
+  enabled: {{ .EncryptionEnabled }}
+
+# 带宽管理器 (这是被遗omed 的功能)
+bandwidthManager:
+  enabled: {{ .BandwidthManagerEnabled }}
+
+# 自动节点路由 (这是一个被遗漏的字段)
 autoDirectNodeRoutes: {{ .AutoDirectNodeRoutes }}

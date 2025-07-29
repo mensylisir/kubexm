@@ -10,23 +10,26 @@ import (
 	"text/template"
 	"time"
 
+	// 引入必要的包
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/images"
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
 type GenerateKubeOvnHelmArtifactsStep struct {
 	step.Base
+	Chart                *helm.HelmChart
 	RemoteValuesPath     string
-	ChartSourceDecision  *helpers.ChartSourceDecision
-	LocalPulledChartPath string
 	RemoteChartPath      string
+	LocalPulledChartPath string
 
-	Registry         string
+	ImageRegistry    string
+	ImageTag         string
 	PodCIDR          string
 	ServiceCIDR      string
 	Networking       *v1alpha1.KubeOvnNetworking
@@ -39,21 +42,39 @@ type GenerateKubeOvnHelmArtifactsStepBuilder struct {
 }
 
 func NewGenerateKubeOvnHelmArtifactsStepBuilder(ctx runtime.Context, instanceName string) *GenerateKubeOvnHelmArtifactsStepBuilder {
-	s := &GenerateKubeOvnHelmArtifactsStep{}
+	helmProvider := helm.NewHelmProvider(&ctx)
+	kubeovnChart := helmProvider.GetChart(string(common.CNITypeKubeOvn))
+
+	if kubeovnChart == nil {
+		return nil
+	}
+
+	imageProvider := images.NewImageProvider(&ctx)
+	kubeovnImage := imageProvider.GetImage("kubeovn")
+
+	if kubeovnImage == nil {
+		return nil
+	}
+
+	s := &GenerateKubeOvnHelmArtifactsStep{
+		Chart: kubeovnChart,
+	}
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate Kube-OVN Helm artifacts", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate Kube-OVN Helm artifacts (Chart: %s, Version: %s)", s.Base.Meta.Name, kubeovnChart.ChartName(), kubeovnChart.Version)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 10 * time.Minute
 
-	s.ChartSourceDecision = helpers.DecideKubeOvnChartSource(ctx)
+	localChartDir := filepath.Dir(kubeovnChart.LocalPath(common.DefaultKubexmTmpDir))
+	s.LocalPulledChartPath = localChartDir
 
-	s.LocalPulledChartPath = filepath.Join(common.DefaultKubexmTmpDir, "kubeovn")
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, "kubeovn")
+	remoteDir := filepath.Join(common.DefaultUploadTmpDir, kubeovnChart.RepoName())
 	s.RemoteValuesPath = filepath.Join(remoteDir, "kubeovn-values.yaml")
 
+	s.ImageRegistry = kubeovnImage.FullNameWithoutTag()
+	s.ImageTag = kubeovnImage.Tag()
+
 	clusterCfg := ctx.GetClusterConfig()
-	s.Registry = clusterCfg.Spec.Registry.MirroringAndRewriting.PrivateRegistry
 	s.ServiceCIDR = clusterCfg.Spec.Network.KubeServiceCIDR
 	s.PodCIDR = clusterCfg.Spec.Network.KubePodsCIDR
 
@@ -74,7 +95,6 @@ func NewGenerateKubeOvnHelmArtifactsStepBuilder(ctx runtime.Context, instanceNam
 	if s.Networking.TunnelType == "" {
 		s.Networking.TunnelType = "geneve"
 	}
-
 	if s.Controller == nil {
 		s.Controller = &v1alpha1.KubeOvnControllerConfig{
 			JoinCIDR:       "100.64.0.0/16",
@@ -105,8 +125,8 @@ func (s *GenerateKubeOvnHelmArtifactsStep) Run(ctx runtime.ExecutionContext) err
 		return fmt.Errorf("failed to create local temp dir %s: %w", s.LocalPulledChartPath, err)
 	}
 
-	repoName := s.ChartSourceDecision.RepoName
-	repoURL := s.ChartSourceDecision.RepoURL
+	repoName := s.Chart.RepoName()
+	repoURL := s.Chart.RepoURL()
 
 	repoAddCmd := exec.Command(helmPath, "repo", "add", repoName, repoURL)
 	if output, err := repoAddCmd.CombinedOutput(); err != nil && !strings.Contains(string(output), "already exists") {
@@ -118,23 +138,20 @@ func (s *GenerateKubeOvnHelmArtifactsStep) Run(ctx runtime.ExecutionContext) err
 		return fmt.Errorf("failed to update helm repo %s: %w", repoName, err)
 	}
 
-	chartFullName := fmt.Sprintf("%s/%s", repoName, s.ChartSourceDecision.ChartName)
-	pullArgs := []string{"pull", chartFullName, "--destination", s.LocalPulledChartPath}
-	if s.ChartSourceDecision.Version != "" {
-		pullArgs = append(pullArgs, "--version", s.ChartSourceDecision.Version)
-	}
+	chartFullName := s.Chart.FullName()
+	pullArgs := []string{"pull", chartFullName, "--destination", s.LocalPulledChartPath, "--version", s.Chart.Version}
 
-	logger.Infof("Pulling Kube-OVN Helm chart with command: helm %s", strings.Join(pullArgs, " "))
+	logger.Infof("Pulling Helm chart with command: helm %s", strings.Join(pullArgs, " "))
 	pullCmd := exec.Command(helmPath, pullArgs...)
 	if output, err := pullCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to pull Kube-OVN helm chart: %w, output: %s", err, string(output))
 	}
 
-	pulledFiles, _ := filepath.Glob(filepath.Join(s.LocalPulledChartPath, "*.tgz"))
-	if len(pulledFiles) == 0 {
-		return fmt.Errorf("Kube-OVN helm chart .tgz file not found in %s after pull", s.LocalPulledChartPath)
+	actualLocalChartPath := s.Chart.LocalPath(common.DefaultKubexmTmpDir)
+	if _, err := os.Stat(actualLocalChartPath); os.IsNotExist(err) {
+		return fmt.Errorf("expected Kube-OVN helm chart .tgz file not found at %s after pull", actualLocalChartPath)
 	}
-	actualLocalChartPath := pulledFiles[0]
+
 	s.RemoteChartPath = filepath.Join(filepath.Dir(s.RemoteValuesPath), filepath.Base(actualLocalChartPath))
 
 	logger.Info("Rendering kubeovn-values.yaml from template...")

@@ -3,17 +3,19 @@ package flannel
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
+	// 引入必要的包
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 )
 
 type InstallFlannelHelmChartStep struct {
 	step.Base
+	Chart               *helm.HelmChart
 	ReleaseName         string
 	Namespace           string
 	RemoteChartPath     string
@@ -26,20 +28,32 @@ type InstallFlannelHelmChartStepBuilder struct {
 }
 
 func NewInstallFlannelHelmChartStepBuilder(ctx runtime.Context, instanceName string) *InstallFlannelHelmChartStepBuilder {
-	s := &InstallFlannelHelmChartStep{}
+	helmProvider := helm.NewHelmProvider(&ctx)
+	flannelChart := helmProvider.GetChart(string(common.CNITypeFlannel))
+
+	if flannelChart == nil {
+		return nil
+	}
+
+	s := &InstallFlannelHelmChartStep{
+		Chart: flannelChart,
+	}
+
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install or upgrade Flannel via Helm chart", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 15 * time.Minute
 
-	s.ReleaseName = "flannel"
+	s.ReleaseName = flannelChart.ChartName()
 	s.Namespace = "kube-system"
 
-	s.AdminKubeconfigPath = filepath.Join(ctx.GetGlobalWorkDir(), "kubeconfigs", common.AdminKubeconfigFileName)
+	s.AdminKubeconfigPath = filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
 
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, "flannel")
+	remoteDir := filepath.Join(common.DefaultUploadTmpDir, flannelChart.RepoName())
 	s.RemoteValuesPath = filepath.Join(remoteDir, "flannel-values.yaml")
+	chartFileName := fmt.Sprintf("%s-%s.tgz", flannelChart.ChartName(), flannelChart.Version)
+	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)
 
 	b := new(InstallFlannelHelmChartStepBuilder).Init(s)
 	return b
@@ -59,20 +73,29 @@ func (s *InstallFlannelHelmChartStep) Precheck(ctx runtime.ExecutionContext) (is
 
 	valuesExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteValuesPath)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to check for values file: %w", err)
 	}
 	if !valuesExists {
-		return false, fmt.Errorf("required values file not found at %s, cannot proceed", s.RemoteValuesPath)
+		return false, fmt.Errorf("required Flannel values file not found at precise path %s, cannot proceed", s.RemoteValuesPath)
 	}
 
-	remoteDir := filepath.Dir(s.RemoteValuesPath)
-	findCmd := fmt.Sprintf("find %s -name '*.tgz' -print -quit", remoteDir)
-	chartPath, err := runner.Run(ctx.GoContext(), conn, findCmd, s.Sudo)
-	if err != nil || strings.TrimSpace(chartPath) == "" {
-		return false, fmt.Errorf("Flannel Helm chart .tgz file not found in remote directory %s", remoteDir)
+	chartExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteChartPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to check for chart file: %w", err)
+	}
+	if !chartExists {
+		return false, fmt.Errorf("Flannel Helm chart .tgz file not found at precise path %s", s.RemoteChartPath)
 	}
 
-	logger.Info("Helm artifacts (chart and values) for Flannel found on remote host. Ready to install.")
+	kubeconfigExists, err := runner.Exists(ctx.GoContext(), conn, s.AdminKubeconfigPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to check for kubeconfig file: %w", err)
+	}
+	if !kubeconfigExists {
+		return false, fmt.Errorf("admin kubeconfig not found at its permanent location %s; ensure DistributeKubeconfigsStep ran successfully", s.AdminKubeconfigPath)
+	}
+
+	logger.Info("All required Flannel artifacts (chart, values, kubeconfig) found on remote host. Ready to install.")
 	return false, nil
 }
 
@@ -84,18 +107,9 @@ func (s *InstallFlannelHelmChartStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	remoteDir := filepath.Dir(s.RemoteValuesPath)
-	findCmd := fmt.Sprintf("find %s -name '*.tgz' -print -quit", remoteDir)
-	remoteChartPath, err := runner.Run(ctx.GoContext(), conn, findCmd, s.Sudo)
-	if err != nil || strings.TrimSpace(remoteChartPath) == "" {
-		return fmt.Errorf("failed to find Flannel Helm chart .tgz file in remote directory %s", remoteDir)
-	}
-	s.RemoteChartPath = strings.TrimSpace(remoteChartPath)
-
 	cmd := fmt.Sprintf(
 		"helm upgrade --install %s %s "+
 			"--namespace %s "+
-			"--create-namespace "+
 			"--values %s "+
 			"--kubeconfig %s "+
 			"--wait "+

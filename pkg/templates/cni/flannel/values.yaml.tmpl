@@ -4,10 +4,16 @@
 # 镜像配置
 # 将官方镜像 "flannel/flannel" 替换为您指定的私有镜像仓库地址。
 image:
-  repository: {{ .Registry }}/flannel/flannel
+  repository: {{ .ImageFlannelRepo }}
+  tag: {{ .ImageFlannelTag }}
   # 官方 Chart 默认使用 Chart 的 appVersion 作为镜像 tag。
   # 如果需要，您也可以在这里添加一个可配置的 tag 字段。
   pullPolicy: IfNotPresent
+
+cniPlugin:
+  image:
+    repository: {{ .ImageCNIPluginRepo }}
+    tag: {{ .ImageCNIPluginTag }}
 
 # Pod 网段，这是 Flannel 运行所必需的核心配置。
 podCidr: "{{ .PodCIDR }}"

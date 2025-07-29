@@ -2,8 +2,8 @@ package calico
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/common"
@@ -14,6 +14,7 @@ import (
 
 type InstallCalicoHelmChartStep struct {
 	step.Base
+	Chart               *helm.HelmChart
 	ReleaseName         string
 	Namespace           string
 	RemoteChartPath     string
@@ -26,18 +27,27 @@ type InstallCalicoHelmChartStepBuilder struct {
 }
 
 func NewInstallCalicoHelmChartStepBuilder(ctx runtime.Context, instanceName string) *InstallCalicoHelmChartStepBuilder {
-	s := &InstallCalicoHelmChartStep{}
+	helmProvider := helm.NewHelmProvider(&ctx)
+	calicoChart := helmProvider.GetChart(string(common.CNITypeCalico))
+	if calicoChart == nil {
+		return nil
+	}
+	s := &InstallCalicoHelmChartStep{
+		Chart: calicoChart,
+	}
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install or upgrade Calico via Helm chart", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 20 * time.Minute
 
-	s.ReleaseName = "tigera-operator"
+	s.ReleaseName = calicoChart.ChartName()
 	s.Namespace = "tigera-operator"
-	s.AdminKubeconfigPath = filepath.Join(ctx.GetGlobalWorkDir(), "kubeconfigs", common.AdminKubeconfigFileName)
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, "calico")
+	s.AdminKubeconfigPath = filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
+	remoteDir := filepath.Join(common.DefaultUploadTmpDir, calicoChart.RepoName())
 	s.RemoteValuesPath = filepath.Join(remoteDir, "calico-values.yaml")
+	chartFileName := fmt.Sprintf("%s-%s.tgz", calicoChart.ChartName(), calicoChart.Version)
+	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)
 	b := new(InstallCalicoHelmChartStepBuilder).Init(s)
 	return b
 }
@@ -62,14 +72,22 @@ func (s *InstallCalicoHelmChartStep) Precheck(ctx runtime.ExecutionContext) (isD
 		return false, fmt.Errorf("required values file not found at %s, cannot proceed", s.RemoteValuesPath)
 	}
 
-	remoteDir := filepath.Dir(s.RemoteValuesPath)
-	findCmd := fmt.Sprintf("find %s -name '*.tgz' -print -quit", remoteDir)
-	chartPath, err := runner.Run(ctx.GoContext(), conn, findCmd, s.Sudo)
-	if err != nil || strings.TrimSpace(chartPath) == "" {
-		return false, fmt.Errorf("Calico Helm chart .tgz file not found in remote directory %s", remoteDir)
+	chartExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteChartPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to check for chart file: %w", err)
+	}
+	if !chartExists {
+		return false, fmt.Errorf("Helm chart .tgz file not found at precise path %s", s.RemoteChartPath)
+	}
+	kubeconfigExists, err := runner.Exists(ctx.GoContext(), conn, s.AdminKubeconfigPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to check for kubeconfig file: %w", err)
+	}
+	if !kubeconfigExists {
+		return false, fmt.Errorf("admin kubeconfig not found at its permanent location %s; ensure DistributeKubeconfigsStep ran successfully", s.AdminKubeconfigPath)
 	}
 
-	logger.Info("Helm artifacts (chart and values) found on remote host. Ready to install.")
+	logger.Info("All required artifacts (chart, values, kubeconfig) found on remote host. Ready to install.")
 	return false, nil
 }
 
@@ -80,14 +98,6 @@ func (s *InstallCalicoHelmChartStep) Run(ctx runtime.ExecutionContext) error {
 	if err != nil {
 		return err
 	}
-
-	remoteDir := filepath.Dir(s.RemoteValuesPath)
-	findCmd := fmt.Sprintf("find %s -name '*.tgz' -print -quit", remoteDir)
-	remoteChartPath, err := runner.Run(ctx.GoContext(), conn, findCmd, s.Sudo)
-	if err != nil || strings.TrimSpace(remoteChartPath) == "" {
-		return fmt.Errorf("failed to find Calico Helm chart .tgz file in remote directory %s", remoteDir)
-	}
-	s.RemoteChartPath = strings.TrimSpace(remoteChartPath)
 	cmd := fmt.Sprintf(
 		"helm upgrade --install %s %s "+
 			"--namespace %s "+

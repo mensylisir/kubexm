@@ -3,17 +3,19 @@ package hybridnet
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
+	// 引入必要的包
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 )
 
 type InstallHybridnetHelmChartStep struct {
 	step.Base
+	Chart               *helm.HelmChart
 	ReleaseName         string
 	Namespace           string
 	RemoteChartPath     string
@@ -26,20 +28,32 @@ type InstallHybridnetHelmChartStepBuilder struct {
 }
 
 func NewInstallHybridnetHelmChartStepBuilder(ctx runtime.Context, instanceName string) *InstallHybridnetHelmChartStepBuilder {
-	s := &InstallHybridnetHelmChartStep{}
+	helmProvider := helm.NewHelmProvider(&ctx)
+	hybridnetChart := helmProvider.GetChart(string(common.CNITypeHybridnet))
+
+	if hybridnetChart == nil {
+		return nil
+	}
+
+	s := &InstallHybridnetHelmChartStep{
+		Chart: hybridnetChart,
+	}
+
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install or upgrade Hybridnet via Helm chart", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 20 * time.Minute
 
-	s.ReleaseName = "hybridnet"
+	s.ReleaseName = hybridnetChart.ChartName()
 	s.Namespace = "kube-system"
 
-	s.AdminKubeconfigPath = filepath.Join(ctx.GetGlobalWorkDir(), "kubeconfigs", common.AdminKubeconfigFileName)
+	s.AdminKubeconfigPath = filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
 
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, "hybridnet")
+	remoteDir := filepath.Join(common.DefaultUploadTmpDir, hybridnetChart.RepoName())
 	s.RemoteValuesPath = filepath.Join(remoteDir, "hybridnet-values.yaml")
+	chartFileName := fmt.Sprintf("%s-%s.tgz", hybridnetChart.ChartName(), hybridnetChart.Version)
+	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)
 
 	b := new(InstallHybridnetHelmChartStepBuilder).Init(s)
 	return b
@@ -59,20 +73,29 @@ func (s *InstallHybridnetHelmChartStep) Precheck(ctx runtime.ExecutionContext) (
 
 	valuesExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteValuesPath)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to check for values file: %w", err)
 	}
 	if !valuesExists {
-		return false, fmt.Errorf("required Hybridnet values file not found at %s, cannot proceed", s.RemoteValuesPath)
+		return false, fmt.Errorf("required Hybridnet values file not found at precise path %s, cannot proceed", s.RemoteValuesPath)
 	}
 
-	remoteDir := filepath.Dir(s.RemoteValuesPath)
-	findCmd := fmt.Sprintf("find %s -name '*.tgz' -print -quit", remoteDir)
-	chartPath, err := runner.Run(ctx.GoContext(), conn, findCmd, s.Sudo)
-	if err != nil || strings.TrimSpace(chartPath) == "" {
-		return false, fmt.Errorf("Hybridnet Helm chart .tgz file not found in remote directory %s", remoteDir)
+	chartExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteChartPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to check for chart file: %w", err)
+	}
+	if !chartExists {
+		return false, fmt.Errorf("Hybridnet Helm chart .tgz file not found at precise path %s", s.RemoteChartPath)
 	}
 
-	logger.Info("Helm artifacts (chart and values) for Hybridnet found on remote host. Ready to install.")
+	kubeconfigExists, err := runner.Exists(ctx.GoContext(), conn, s.AdminKubeconfigPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to check for kubeconfig file: %w", err)
+	}
+	if !kubeconfigExists {
+		return false, fmt.Errorf("admin kubeconfig not found at its permanent location %s; ensure DistributeKubeconfigsStep ran successfully", s.AdminKubeconfigPath)
+	}
+
+	logger.Info("All required Hybridnet artifacts (chart, values, kubeconfig) found on remote host. Ready to install.")
 	return false, nil
 }
 
@@ -83,14 +106,6 @@ func (s *InstallHybridnetHelmChartStep) Run(ctx runtime.ExecutionContext) error 
 	if err != nil {
 		return err
 	}
-
-	remoteDir := filepath.Dir(s.RemoteValuesPath)
-	findCmd := fmt.Sprintf("find %s -name '*.tgz' -print -quit", remoteDir)
-	remoteChartPath, err := runner.Run(ctx.GoContext(), conn, findCmd, s.Sudo)
-	if err != nil || strings.TrimSpace(remoteChartPath) == "" {
-		return fmt.Errorf("failed to find Hybridnet Helm chart .tgz file in remote directory %s", remoteDir)
-	}
-	s.RemoteChartPath = strings.TrimSpace(remoteChartPath)
 
 	cmd := fmt.Sprintf(
 		"helm upgrade --install %s %s "+
@@ -107,7 +122,7 @@ func (s *InstallHybridnetHelmChartStep) Run(ctx runtime.ExecutionContext) error 
 		s.AdminKubeconfigPath,
 	)
 
-	logger.Infof("Executing remote Helm command for Hybridnet: %s", cmd)
+	logger.Infof("Executing remote Helm command: %s", cmd)
 	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
 		return fmt.Errorf("failed to install/upgrade Hybridnet Helm chart: %w\nOutput: %s", err, output)

@@ -27,7 +27,7 @@ type daemonConfigForRender struct {
 	DataRoot               string                       `json:"data-root,omitempty"`
 	Bridge                 string                       `json:"bridge,omitempty"`
 	Bip                    string                       `json:"bip,omitempty"`
-	LiveRestore            bool                         `json:"live-restore"` // 使用 bool 而不是 *bool，确保总是有值
+	LiveRestore            bool                         `json:"live-restore"`
 	IPTables               bool                         `json:"iptables"`
 	IPMasq                 bool                         `json:"ip-masq"`
 	DefaultAddressPools    []v1alpha1.DockerAddressPool `json:"default-address-pools,omitempty"`
@@ -46,6 +46,10 @@ type ConfigureDockerStepBuilder struct {
 }
 
 func NewConfigureDockerStepBuilder(ctx runtime.Context, instanceName string) *ConfigureDockerStepBuilder {
+	clusterCfgSpec := ctx.GetClusterConfig().Spec
+	if clusterCfgSpec.Kubernetes.ContainerRuntime.Type != common.RuntimeTypeDocker {
+		return nil
+	}
 	finalConfig := daemonConfigForRender{
 		LogDriver:              common.DockerLogDriverJSONFile,
 		LogOpts:                map[string]string{"max-size": common.DockerLogOptMaxSizeDefault},
@@ -55,18 +59,38 @@ func NewConfigureDockerStepBuilder(ctx runtime.Context, instanceName string) *Co
 		LiveRestore:            true,
 		IPTables:               true,
 		IPMasq:                 true,
-		ExecOpts:               []string{fmt.Sprintf("native.cgroupdriver=%s", common.CgroupDriverSystemd)}, // 默认 cgroup driver
+		ExecOpts:               []string{fmt.Sprintf("native.cgroupdriver=%s", common.CgroupDriverSystemd)},
 		MaxConcurrentDownloads: common.DockerMaxConcurrentDownloadsDefault,
 		MaxConcurrentUploads:   common.DockerMaxConcurrentUploadsDefault,
 	}
 
-	userDockerCfg := ctx.GetClusterConfig().Spec.Kubernetes.ContainerRuntime.Docker
+	mirrorSet := make(map[string]struct{})
+	insecureSet := make(map[string]struct{})
 
+	if clusterCfgSpec.Registry != nil {
+		if clusterCfgSpec.Registry.MirroringAndRewriting != nil && clusterCfgSpec.Registry.MirroringAndRewriting.PrivateRegistry != "" {
+			insecureSet[clusterCfgSpec.Registry.MirroringAndRewriting.PrivateRegistry] = struct{}{}
+		}
+
+		for server, auth := range clusterCfgSpec.Registry.Auths {
+			if auth.PlainHTTP != nil && *auth.PlainHTTP {
+				insecureSet[server] = struct{}{}
+			}
+		}
+	}
+
+	userDockerCfg := clusterCfgSpec.Kubernetes.ContainerRuntime.Docker
 	if userDockerCfg != nil {
+		for _, mirror := range userDockerCfg.RegistryMirrors {
+			mirrorSet[mirror] = struct{}{}
+		}
+		for _, insecure := range userDockerCfg.InsecureRegistries {
+			insecureSet[insecure] = struct{}{}
+		}
+
 		if userDockerCfg.CgroupDriver != nil && *userDockerCfg.CgroupDriver != "" {
 			finalConfig.ExecOpts = []string{fmt.Sprintf("native.cgroupdriver=%s", *userDockerCfg.CgroupDriver)}
 		}
-
 		if userDockerCfg.LogDriver != nil && *userDockerCfg.LogDriver != "" {
 			finalConfig.LogDriver = *userDockerCfg.LogDriver
 		}
@@ -78,12 +102,6 @@ func NewConfigureDockerStepBuilder(ctx runtime.Context, instanceName string) *Co
 		}
 		if len(userDockerCfg.StorageOpts) > 0 {
 			finalConfig.StorageOpts = userDockerCfg.StorageOpts
-		}
-		if len(userDockerCfg.RegistryMirrors) > 0 {
-			finalConfig.RegistryMirrors = userDockerCfg.RegistryMirrors
-		}
-		if len(userDockerCfg.InsecureRegistries) > 0 {
-			finalConfig.InsecureRegistries = userDockerCfg.InsecureRegistries
 		}
 		if userDockerCfg.DataRoot != nil && *userDockerCfg.DataRoot != "" {
 			finalConfig.DataRoot = *userDockerCfg.DataRoot
@@ -111,6 +129,19 @@ func NewConfigureDockerStepBuilder(ctx runtime.Context, instanceName string) *Co
 		}
 		if userDockerCfg.MaxConcurrentUploads != nil {
 			finalConfig.MaxConcurrentUploads = *userDockerCfg.MaxConcurrentUploads
+		}
+	}
+
+	if len(mirrorSet) > 0 {
+		finalConfig.RegistryMirrors = make([]string, 0, len(mirrorSet))
+		for mirror := range mirrorSet {
+			finalConfig.RegistryMirrors = append(finalConfig.RegistryMirrors, mirror)
+		}
+	}
+	if len(insecureSet) > 0 {
+		finalConfig.InsecureRegistries = make([]string, 0, len(insecureSet))
+		for insecure := range insecureSet {
+			finalConfig.InsecureRegistries = append(finalConfig.InsecureRegistries, insecure)
 		}
 	}
 
@@ -151,7 +182,7 @@ func (s *ConfigureDockerStep) Precheck(ctx runtime.ExecutionContext) (isDone boo
 		return false, err
 	}
 
-	currentContent, err := runner.ReadFile(ctx.GoContext(), conn, s.ConfigFilePath)
+	currentContentBytes, err := runner.ReadFile(ctx.GoContext(), conn, s.ConfigFilePath)
 	if err != nil {
 		return false, nil
 	}
@@ -161,19 +192,13 @@ func (s *ConfigureDockerStep) Precheck(ctx runtime.ExecutionContext) (isDone boo
 		return false, fmt.Errorf("failed to render expected config for precheck: %w", err)
 	}
 
-	expectedResult := gjson.ParseBytes(expectedContentBytes)
+	if gjson.ParseBytes(currentContentBytes).String() == gjson.ParseBytes(expectedContentBytes).String() {
+		ctx.GetLogger().Info("Existing daemon.json content matches expected content. Step is done.")
+		return true, nil
+	}
 
-	mismatch := false
-	expectedResult.ForEach(func(key, value gjson.Result) bool {
-		actualValue := gjson.GetBytes(currentContent, key.String())
-		if actualValue.Raw != value.Raw {
-			mismatch = true
-			return false
-		}
-		return true
-	})
-
-	return !mismatch, nil
+	ctx.GetLogger().Info("Existing daemon.json content differs. Regeneration is required.")
+	return false, nil
 }
 
 func (s *ConfigureDockerStep) Run(ctx runtime.ExecutionContext) error {

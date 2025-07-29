@@ -13,7 +13,7 @@ var defaultKnownBinaryDetails = map[string]BinaryDetailSpec{
 		FileNameTemplate:     "etcd-{{.Version}}-{{.OS}}-{{.Arch}}.tar.gz",
 		IsArchive:            true,
 		DefaultOS:            "linux",
-		ExpectedChecksum:     "dummy-etcd-checksum-val", // Checksums should be updated for production use
+		ExpectedChecksum:     "dummy-etcd-checksum-val",
 		ExpectedChecksumType: "sha256",
 	},
 	ComponentKubeadm: {

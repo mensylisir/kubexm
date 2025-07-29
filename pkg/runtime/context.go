@@ -105,6 +105,13 @@ func (c *Context) GetHostsByRole(role string) []connector.Host {
 	if c.hostInfoMap == nil {
 		return nil
 	}
+	if role == "" {
+		hosts := make([]connector.Host, 0, len(c.hostInfoMap))
+		for _, hri := range c.hostInfoMap {
+			hosts = append(hosts, hri.Host)
+		}
+		return hosts
+	}
 	for _, hri := range c.hostInfoMap {
 		for _, r := range hri.Host.GetRoles() {
 			if r == role {

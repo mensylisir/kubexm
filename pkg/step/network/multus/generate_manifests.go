@@ -10,20 +10,22 @@ import (
 	"text/template"
 	"time"
 
+	// 引入必要的包
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/images"
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
 type GenerateMultusHelmArtifactsStep struct {
 	step.Base
+	Chart                *helm.HelmChart
 	RemoteValuesPath     string
-	ChartSourceDecision  *helpers.ChartSourceDecision
-	LocalPulledChartPath string
 	RemoteChartPath      string
+	LocalPulledChartPath string
 
 	ImageRepository string
 	ImageTag        string
@@ -34,21 +36,37 @@ type GenerateMultusHelmArtifactsStepBuilder struct {
 }
 
 func NewGenerateMultusHelmArtifactsStepBuilder(ctx runtime.Context, instanceName string) *GenerateMultusHelmArtifactsStepBuilder {
-	s := &GenerateMultusHelmArtifactsStep{}
+	helmProvider := helm.NewHelmProvider(&ctx)
+	multusChart := helmProvider.GetChart(string(common.CNITypeMultus))
+
+	if multusChart == nil {
+		return nil
+	}
+
+	imageProvider := images.NewImageProvider(&ctx)
+	multusImage := imageProvider.GetImage("multus")
+
+	if multusImage == nil {
+		return nil
+	}
+
+	s := &GenerateMultusHelmArtifactsStep{
+		Chart: multusChart,
+	}
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate Multus CNI Helm artifacts", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate Multus CNI Helm artifacts (Chart: %s, Version: %s)", s.Base.Meta.Name, multusChart.ChartName(), multusChart.Version)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 10 * time.Minute
 
-	s.ChartSourceDecision = helpers.DecideMultusChartSource(ctx)
+	localChartDir := filepath.Dir(multusChart.LocalPath(common.DefaultKubexmTmpDir))
+	s.LocalPulledChartPath = localChartDir
 
-	s.LocalPulledChartPath = filepath.Join(common.DefaultKubexmTmpDir, "multus")
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, "multus")
+	remoteDir := filepath.Join(common.DefaultUploadTmpDir, multusChart.RepoName())
 	s.RemoteValuesPath = filepath.Join(remoteDir, "multus-values.yaml")
 
-	s.ImageRepository = "ghcr.io/k8snetworkplumbingwg/multus-cni"
-	s.ImageTag = "v4.0.2"
+	s.ImageRepository = multusImage.FullNameWithoutTag()
+	s.ImageTag = multusImage.Tag()
 
 	clusterCfg := ctx.GetClusterConfig()
 	if clusterCfg.Spec.Network.Multus != nil &&
@@ -56,18 +74,11 @@ func NewGenerateMultusHelmArtifactsStepBuilder(ctx runtime.Context, instanceName
 		clusterCfg.Spec.Network.Multus.Installation.Image != "" {
 
 		fullImage := clusterCfg.Spec.Network.Multus.Installation.Image
-
 		if lastColon := strings.LastIndex(fullImage, ":"); lastColon != -1 {
 			if !strings.Contains(fullImage[lastColon:], "/") {
 				s.ImageRepository = fullImage[:lastColon]
 				s.ImageTag = fullImage[lastColon+1:]
-			} else {
-				s.ImageRepository = fullImage
-				s.ImageTag = "latest"
 			}
-		} else {
-			s.ImageRepository = fullImage
-			s.ImageTag = "latest"
 		}
 	}
 
@@ -94,8 +105,8 @@ func (s *GenerateMultusHelmArtifactsStep) Run(ctx runtime.ExecutionContext) erro
 		return fmt.Errorf("failed to create local temp dir %s: %w", s.LocalPulledChartPath, err)
 	}
 
-	repoName := s.ChartSourceDecision.RepoName
-	repoURL := s.ChartSourceDecision.RepoURL
+	repoName := s.Chart.RepoName()
+	repoURL := s.Chart.RepoURL()
 
 	repoAddCmd := exec.Command(helmPath, "repo", "add", repoName, repoURL)
 	if output, err := repoAddCmd.CombinedOutput(); err != nil && !strings.Contains(string(output), "already exists") {
@@ -107,23 +118,20 @@ func (s *GenerateMultusHelmArtifactsStep) Run(ctx runtime.ExecutionContext) erro
 		return fmt.Errorf("failed to update helm repo %s: %w", repoName, err)
 	}
 
-	chartFullName := fmt.Sprintf("%s/%s", repoName, s.ChartSourceDecision.ChartName)
-	pullArgs := []string{"pull", chartFullName, "--destination", s.LocalPulledChartPath}
-	if s.ChartSourceDecision.Version != "" {
-		pullArgs = append(pullArgs, "--version", s.ChartSourceDecision.Version)
-	}
+	chartFullName := s.Chart.FullName()
+	pullArgs := []string{"pull", chartFullName, "--destination", s.LocalPulledChartPath, "--version", s.Chart.Version}
 
-	logger.Infof("Pulling Multus CNI Helm chart with command: helm %s", strings.Join(pullArgs, " "))
+	logger.Infof("Pulling Helm chart with command: helm %s", strings.Join(pullArgs, " "))
 	pullCmd := exec.Command(helmPath, pullArgs...)
 	if output, err := pullCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to pull Multus CNI helm chart: %w, output: %s", err, string(output))
 	}
 
-	pulledFiles, _ := filepath.Glob(filepath.Join(s.LocalPulledChartPath, "*.tgz"))
-	if len(pulledFiles) == 0 {
-		return fmt.Errorf("Multus CNI helm chart .tgz file not found in %s after pull", s.LocalPulledChartPath)
+	actualLocalChartPath := s.Chart.LocalPath(common.DefaultKubexmTmpDir)
+	if _, err := os.Stat(actualLocalChartPath); os.IsNotExist(err) {
+		return fmt.Errorf("expected Multus CNI helm chart .tgz file not found at %s after pull", actualLocalChartPath)
 	}
-	actualLocalChartPath := pulledFiles[0]
+
 	s.RemoteChartPath = filepath.Join(filepath.Dir(s.RemoteValuesPath), filepath.Base(actualLocalChartPath))
 
 	logger.Info("Rendering multus-values.yaml from template...")

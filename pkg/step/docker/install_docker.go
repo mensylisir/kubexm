@@ -2,7 +2,6 @@ package docker
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,15 +11,11 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
 )
 
 type InstallDockerStep struct {
 	step.Base
-	Version     string
-	Arch        string
-	WorkDir     string
-	ClusterName string
-	Zone        string
 	InstallPath string
 	Permission  string
 }
@@ -30,18 +25,21 @@ type InstallDockerStepBuilder struct {
 }
 
 func NewInstallDockerStepBuilder(ctx runtime.Context, instanceName string) *InstallDockerStepBuilder {
+	provider := binary.NewBinaryProvider(&ctx)
+	const representativeArch = "amd64"
+	binaryInfo, err := provider.GetBinary(binary.ComponentDocker, representativeArch)
+
+	if err != nil || binaryInfo == nil {
+		return nil
+	}
+
 	s := &InstallDockerStep{
-		Version:     common.DefaultDockerVersion,
-		Arch:        "",
-		WorkDir:     ctx.GetGlobalWorkDir(),
-		ClusterName: ctx.GetClusterConfig().ObjectMeta.Name,
-		Zone:        util.GetZone(),
 		InstallPath: common.DefaultBinDir,
 		Permission:  "0755",
 	}
 
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install Docker binaries for version %s", s.Base.Meta.Name, s.Version)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install Docker binaries", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
@@ -50,28 +48,17 @@ func NewInstallDockerStepBuilder(ctx runtime.Context, instanceName string) *Inst
 	return b
 }
 
-func (b *InstallDockerStepBuilder) WithVersion(version string) *InstallDockerStepBuilder {
-	if version != "" {
-		b.Step.Version = version
-		b.Step.Base.Meta.Description = fmt.Sprintf("[%s]>>Install Docker binaries for version %s", b.Step.Base.Meta.Name, b.Step.Version)
-	}
-	return b
-}
-
-func (b *InstallDockerStepBuilder) WithArch(arch string) *InstallDockerStepBuilder {
-	if arch != "" {
-		b.Step.Arch = arch
-	}
-	return b
-}
-
 func (b *InstallDockerStepBuilder) WithInstallPath(installPath string) *InstallDockerStepBuilder {
-	b.Step.InstallPath = installPath
+	if installPath != "" {
+		b.Step.InstallPath = installPath
+	}
 	return b
 }
 
 func (b *InstallDockerStepBuilder) WithPermission(permission string) *InstallDockerStepBuilder {
-	b.Step.Permission = permission
+	if permission != "" {
+		b.Step.Permission = permission
+	}
 	return b
 }
 
@@ -79,23 +66,21 @@ func (s *InstallDockerStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *InstallDockerStep) getExtractedPathOnControlNode() (string, error) {
-	provider := util.NewBinaryProvider()
-	binaryInfo, err := provider.GetBinaryInfo(
-		util.ComponentDocker,
-		s.Version,
-		s.Arch,
-		s.Zone,
-		s.WorkDir,
-		s.ClusterName,
-	)
+func (s *InstallDockerStep) getLocalExtractedPath(ctx runtime.ExecutionContext) (string, error) {
+	provider := binary.NewBinaryProvider(ctx)
+	arch := ctx.GetHost().GetArch()
+	binaryInfo, err := provider.GetBinary(binary.ComponentDocker, arch)
 	if err != nil {
-		return "", fmt.Errorf("failed to get docker binary info: %w", err)
+		return "", fmt.Errorf("failed to get Docker binary info: %w", err)
+	}
+	if binaryInfo == nil {
+		return "", fmt.Errorf("Docker is unexpectedly disabled for arch %s", arch)
 	}
 
-	destDirName := strings.TrimSuffix(binaryInfo.FileName, ".tgz")
-	destPath := filepath.Join(common.DefaultExtractTmpDir, destDirName, "docker")
-	return destPath, nil
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install Docker binaries (version %s)", s.Base.Meta.Name, binaryInfo.Version)
+
+	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tgz")
+	return filepath.Join(common.DefaultExtractTmpDir, destDirName, "docker"), nil
 }
 
 func (s *InstallDockerStep) filesToInstall() []string {
@@ -120,6 +105,7 @@ func (s *InstallDockerStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 	}
 
 	files := s.filesToInstall()
+	allExist := true
 	for _, fileName := range files {
 		targetPath := filepath.Join(s.InstallPath, fileName)
 		exists, err := runner.Exists(ctx.GoContext(), conn, targetPath)
@@ -128,12 +114,17 @@ func (s *InstallDockerStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 		}
 		if !exists {
 			logger.Infof("Target file '%s' does not exist. Installation is required.", targetPath)
-			return false, nil
+			allExist = false
+			break
 		}
 	}
 
-	logger.Info("All required docker files already exist on remote host. Step is done.")
-	return true, nil
+	if allExist {
+		logger.Info("All required Docker files already exist on remote host. Step is done.")
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func (s *InstallDockerStep) Run(ctx runtime.ExecutionContext) error {
@@ -144,44 +135,52 @@ func (s *InstallDockerStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	localSourceDir, err := s.getExtractedPathOnControlNode()
+	localSourceDir, err := s.getLocalExtractedPath(ctx)
 	if err != nil {
-		return fmt.Errorf("could not determine local extracted path: %w", err)
+		return err
+	}
+	if _, err := os.Stat(localSourceDir); os.IsNotExist(err) {
+		return fmt.Errorf("local Docker extracted path '%s' not found, ensure extract step ran successfully", localSourceDir)
 	}
 
-	if err := runner.Mkdirp(ctx.GoContext(), conn, s.InstallPath, s.Permission, s.Sudo); err != nil {
+	if err := runner.Mkdirp(ctx.GoContext(), conn, s.InstallPath, "0755", s.Sudo); err != nil {
 		return fmt.Errorf("failed to create remote install directory '%s': %w", s.InstallPath, err)
 	}
 
-	remoteUploadTmpDir := common.DefaultUploadTmpDir
-	if err := runner.Mkdirp(ctx.GoContext(), conn, remoteUploadTmpDir, s.Permission, s.Sudo); err != nil {
+	remoteUploadTmpDir := filepath.Join(common.DefaultUploadTmpDir, fmt.Sprintf("docker-%d", time.Now().UnixNano()))
+	if err := runner.Mkdirp(ctx.GoContext(), conn, remoteUploadTmpDir, "0755", false); err != nil {
 		return fmt.Errorf("failed to create remote upload directory '%s': %w", remoteUploadTmpDir, err)
 	}
+	defer func() {
+		_ = runner.Remove(ctx.GoContext(), conn, remoteUploadTmpDir, false, true)
+	}()
 
 	files := s.filesToInstall()
 	for _, fileName := range files {
 		localSourcePath := filepath.Join(localSourceDir, fileName)
-		targetPath := filepath.Join(s.InstallPath, fileName)
+		remoteTargetPath := filepath.Join(s.InstallPath, fileName)
 
 		if _, err := os.Stat(localSourcePath); os.IsNotExist(err) {
-			return fmt.Errorf("local source file '%s' not found, please ensure the extract step ran correctly", localSourcePath)
+			logger.Warnf("Local source file '%s' not found, skipping its installation.", localSourcePath)
+			continue
 		}
 
 		remoteTempPath := filepath.Join(remoteUploadTmpDir, fileName)
-		logger.Infof("Uploading %s to %s:%s", localSourcePath, ctx.GetHost().GetName(), remoteTempPath)
-
-		if err := runner.Upload(ctx.GoContext(), conn, localSourcePath, remoteTempPath, s.Base.Sudo); err != nil {
-			return fmt.Errorf("failed to upload '%s' to '%s': %w", localSourcePath, remoteTempPath, err)
+		logger.Infof("Uploading %s to %s:%s", fileName, ctx.GetHost().GetName(), remoteTempPath)
+		if err := runner.Upload(ctx.GoContext(), conn, localSourcePath, remoteTempPath, false); err != nil {
+			return fmt.Errorf("failed to upload '%s': %w", localSourcePath, err)
 		}
 
-		installCmd := fmt.Sprintf("install -o root -g root -m %s %s %s", s.Permission, remoteTempPath, targetPath)
-		logger.Infof("Installing file to %s on remote host", targetPath)
-
-		if _, _, err := runner.OriginRun(ctx.GoContext(), conn, installCmd, s.Sudo); err != nil {
-			runner.Remove(ctx.GoContext(), conn, remoteTempPath, s.Sudo, true)
-			return fmt.Errorf("failed to install file '%s' on remote host: %w", targetPath, err)
+		moveCmd := fmt.Sprintf("mv %s %s", remoteTempPath, remoteTargetPath)
+		logger.Infof("Moving file to %s on remote host", remoteTargetPath)
+		if _, err := runner.Run(ctx.GoContext(), conn, moveCmd, s.Sudo); err != nil {
+			return fmt.Errorf("failed to move file to '%s': %w", remoteTargetPath, err)
 		}
-		runner.Remove(ctx.GoContext(), conn, remoteTempPath, s.Sudo, true)
+
+		logger.Infof("Setting permissions for %s to %s", remoteTargetPath, s.Permission)
+		if err := runner.Chmod(ctx.GoContext(), conn, remoteTargetPath, s.Permission, s.Sudo); err != nil {
+			return fmt.Errorf("failed to set permission on '%s': %w", remoteTargetPath, err)
+		}
 	}
 
 	logger.Info("Successfully installed all Docker binaries.")
@@ -193,7 +192,6 @@ func (s *InstallDockerStep) Rollback(ctx runtime.ExecutionContext) error {
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		logger.Errorf("Failed to get connector for rollback, cannot remove files: %v", err)
 		return nil
 	}
 
@@ -201,9 +199,11 @@ func (s *InstallDockerStep) Rollback(ctx runtime.ExecutionContext) error {
 	for _, fileName := range files {
 		targetPath := filepath.Join(s.InstallPath, fileName)
 		logger.Warnf("Rolling back by removing: %s", targetPath)
-		if err := runner.Remove(ctx.GoContext(), conn, targetPath, s.Sudo, true); err != nil {
+		if err := runner.Remove(ctx.GoContext(), conn, targetPath, s.Sudo, false); err != nil {
 			logger.Errorf("Failed to remove '%s' during rollback: %v", targetPath, err)
 		}
 	}
 	return nil
 }
+
+var _ step.Step = (*InstallDockerStep)(nil)
