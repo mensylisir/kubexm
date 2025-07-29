@@ -5,6 +5,7 @@
 image:
   # 此处的值将由 HybridnetInstallationConfig.ImageRegistry 或全局配置决定
   registry: "{{ .ImageRegistry }}"
+  tag: {{ .ImageTag }}
   pullPolicy: IfNotPresent
 
 # 初始化任务配置，用于在安装后创建默认的 Network 和 Subnet CRD

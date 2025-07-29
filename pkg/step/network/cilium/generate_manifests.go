@@ -3,7 +3,6 @@ package cilium
 import (
 	"bytes"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,32 +10,38 @@ import (
 	"text/template"
 	"time"
 
+	// 引入必要的包
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/images"
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
 type GenerateCiliumHelmArtifactsStep struct {
 	step.Base
+	Chart                *helm.HelmChart
 	RemoteValuesPath     string
-	ChartSourceDecision  *helpers.ChartSourceDecision
-	LocalPulledChartPath string
 	RemoteChartPath      string
+	LocalPulledChartPath string
 
 	ImageRepository         string
 	ImageTag                string
+	OperatorImageRepository string
+	OperatorImageTag        string
 	Tunnel                  string
 	IpamMode                string
 	KubeProxyReplacement    string
 	BpfMasquerade           bool
 	HubbleEnabled           bool
 	HubbleUiEnabled         bool
+	HubbleRelayEnabled      bool
 	IdentityAllocationMode  string
 	EncryptionEnabled       bool
 	BandwidthManagerEnabled bool
+	AutoDirectNodeRoutes    bool
 	OperatorReplicas        int
 }
 
@@ -45,23 +50,40 @@ type GenerateCiliumHelmArtifactsStepBuilder struct {
 }
 
 func NewGenerateCiliumHelmArtifactsStepBuilder(ctx runtime.Context, instanceName string) *GenerateCiliumHelmArtifactsStepBuilder {
-	s := &GenerateCiliumHelmArtifactsStep{}
+	helmProvider := helm.NewHelmProvider(&ctx)
+	ciliumChart := helmProvider.GetChart(string(common.CNITypeCilium))
+
+	if ciliumChart == nil {
+		return nil
+	}
+
+	imageProvider := images.NewImageProvider(&ctx)
+	ciliumImage := imageProvider.GetImage("cilium")
+	operatorImage := imageProvider.GetImage("cilium-operator-generic")
+
+	if ciliumImage == nil || operatorImage == nil {
+		return nil
+	}
+
+	s := &GenerateCiliumHelmArtifactsStep{
+		Chart: ciliumChart,
+	}
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate Cilium Helm artifacts", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate Cilium Helm artifacts (Chart: %s, Version: %s)", s.Base.Meta.Name, ciliumChart.ChartName(), ciliumChart.Version)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 10 * time.Minute
 
-	s.ChartSourceDecision = helpers.DecideCiliumChartSource(ctx)
+	localChartDir := filepath.Dir(ciliumChart.LocalPath(common.DefaultKubexmTmpDir))
+	s.LocalPulledChartPath = localChartDir
 
-	s.LocalPulledChartPath = filepath.Join(common.DefaultKubexmTmpDir, "cilium")
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, "cilium")
+	remoteDir := filepath.Join(common.DefaultUploadTmpDir, ciliumChart.RepoName())
 	s.RemoteValuesPath = filepath.Join(remoteDir, "cilium-values.yaml")
 
-	clusterCfg := ctx.GetClusterConfig()
-	ciliumImage := util.GetImage(ctx, "cilium")
-	s.ImageRepository = ciliumImage.ImageRepo()
-	s.ImageTag = ciliumImage.Tag
+	s.ImageRepository = ciliumImage.FullNameWithoutTag()
+	s.ImageTag = ciliumImage.Tag()
+	s.OperatorImageRepository = operatorImage.FullNameWithoutTag()
+	s.OperatorImageTag = operatorImage.Tag()
 
 	s.Tunnel = "vxlan"
 	s.IpamMode = "kubernetes"
@@ -73,10 +95,12 @@ func NewGenerateCiliumHelmArtifactsStepBuilder(ctx runtime.Context, instanceName
 	s.EncryptionEnabled = false
 	s.BandwidthManagerEnabled = false
 	s.OperatorReplicas = 1
-	s.ImageRepository = clusterCfg.Spec.Registry.MirroringAndRewriting.PrivateRegistry
+	s.HubbleRelayEnabled = true
+	s.AutoDirectNodeRoutes = false
+
+	clusterCfg := ctx.GetClusterConfig()
 	userCiliumCfg := clusterCfg.Spec.Network.Cilium
 	if userCiliumCfg != nil {
-
 		if userCiliumCfg.Network != nil {
 			if userCiliumCfg.Network.TunnelingMode != "" {
 				s.Tunnel = userCiliumCfg.Network.TunnelingMode
@@ -85,7 +109,6 @@ func NewGenerateCiliumHelmArtifactsStepBuilder(ctx runtime.Context, instanceName
 				s.IpamMode = userCiliumCfg.Network.IPAMMode
 			}
 		}
-
 		if userCiliumCfg.KubeProxy != nil {
 			if userCiliumCfg.KubeProxy.ReplacementMode != "" {
 				s.KubeProxyReplacement = userCiliumCfg.KubeProxy.ReplacementMode
@@ -94,12 +117,10 @@ func NewGenerateCiliumHelmArtifactsStepBuilder(ctx runtime.Context, instanceName
 				s.BpfMasquerade = *userCiliumCfg.KubeProxy.EnableBPFMasquerade
 			}
 		}
-
 		if userCiliumCfg.Hubble != nil {
 			s.HubbleEnabled = userCiliumCfg.Hubble.Enable
 			s.HubbleUiEnabled = userCiliumCfg.Hubble.EnableUI
 		}
-
 		if userCiliumCfg.Security != nil {
 			if userCiliumCfg.Security.IdentityAllocationMode != "" {
 				s.IdentityAllocationMode = userCiliumCfg.Security.IdentityAllocationMode
@@ -108,7 +129,6 @@ func NewGenerateCiliumHelmArtifactsStepBuilder(ctx runtime.Context, instanceName
 				s.EncryptionEnabled = *userCiliumCfg.Security.EnableEncryption
 			}
 		}
-
 		if userCiliumCfg.Performance != nil {
 			if userCiliumCfg.Performance.EnableBandwidthManager != nil {
 				s.BandwidthManagerEnabled = *userCiliumCfg.Performance.EnableBandwidthManager
@@ -129,7 +149,7 @@ func (s *GenerateCiliumHelmArtifactsStep) Run(ctx runtime.ExecutionContext) erro
 
 	helmPath, err := exec.LookPath("helm")
 	if err != nil {
-		return fmt.Errorf("helm executable not found in PATH")
+		return fmt.Errorf("helm executable not found in PATH on the machine running this tool")
 	}
 
 	if err := os.RemoveAll(s.LocalPulledChartPath); err != nil {
@@ -139,45 +159,44 @@ func (s *GenerateCiliumHelmArtifactsStep) Run(ctx runtime.ExecutionContext) erro
 		return fmt.Errorf("failed to create local temp dir: %w", err)
 	}
 
-	repoName, repoURL := s.ChartSourceDecision.RepoName, s.ChartSourceDecision.RepoURL
+	repoName := s.Chart.RepoName()
+	repoURL := s.Chart.RepoURL()
+
+	logger.Infof("Adding Helm repo '%s' from '%s'", repoName, repoURL)
 	repoAddCmd := exec.Command(helmPath, "repo", "add", repoName, repoURL)
 	if output, err := repoAddCmd.CombinedOutput(); err != nil && !strings.Contains(string(output), "already exists") {
-		return fmt.Errorf("failed to add helm repo '%s': %w, output: %s", repoName, err, string(output))
+		return fmt.Errorf("failed to add helm repo: %w, output: %s", err, string(output))
 	}
+
+	logger.Infof("Updating Helm repo '%s'", repoName)
 	if err := exec.Command(helmPath, "repo", "update", repoName).Run(); err != nil {
-		return fmt.Errorf("failed to update helm repo %s: %w", repoName, err)
+		return fmt.Errorf("failed to update helm repo: %w", err)
 	}
 
-	chartFullName := fmt.Sprintf("%s/%s", repoName, s.ChartSourceDecision.ChartName)
-	pullArgs := []string{"pull", chartFullName, "--destination", s.LocalPulledChartPath}
-	if s.ChartSourceDecision.Version != "" {
-		pullArgs = append(pullArgs, "--version", s.ChartSourceDecision.Version)
-	}
+	chartFullName := s.Chart.FullName()
+	pullArgs := []string{"pull", chartFullName, "--destination", s.LocalPulledChartPath, "--version", s.Chart.Version}
 
-	pullCmd := exec.Command(helmPath, pullArgs...)
 	logger.Infof("Pulling Helm chart with command: helm %s", strings.Join(pullArgs, " "))
+	pullCmd := exec.Command(helmPath, pullArgs...)
 	if output, err := pullCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to pull helm chart: %w, output: %s", err, string(output))
 	}
 
-	pulledFiles, _ := filepath.Glob(filepath.Join(s.LocalPulledChartPath, "*.tgz"))
-	if len(pulledFiles) == 0 {
-		return fmt.Errorf("helm chart .tgz file not found in %s", s.LocalPulledChartPath)
+	actualLocalChartPath := s.Chart.LocalPath(common.DefaultKubexmTmpDir)
+	if _, err := os.Stat(actualLocalChartPath); os.IsNotExist(err) {
+		return fmt.Errorf("expected helm chart .tgz file not found at %s after pull", actualLocalChartPath)
 	}
 
-	actualLocalChartPath := pulledFiles[0]
 	s.RemoteChartPath = filepath.Join(filepath.Dir(s.RemoteValuesPath), filepath.Base(actualLocalChartPath))
 
 	valuesTemplateContent, err := templates.Get("cni/cilium/values.yaml.tmpl")
 	if err != nil {
-		return fmt.Errorf("failed to get values.yaml.tmpl for cilium: %w", err)
+		return fmt.Errorf("failed to get embedded values.yaml.tmpl for cilium: %w", err)
 	}
-
 	tmpl, err := template.New("ciliumValues").Parse(valuesTemplateContent)
 	if err != nil {
 		return fmt.Errorf("failed to parse cilium values.yaml.tmpl: %w", err)
 	}
-
 	var valuesBuffer bytes.Buffer
 	if err := tmpl.Execute(&valuesBuffer, s); err != nil {
 		return fmt.Errorf("failed to render cilium values.yaml.tmpl: %w", err)
@@ -194,16 +213,13 @@ func (s *GenerateCiliumHelmArtifactsStep) Run(ctx runtime.ExecutionContext) erro
 	if err != nil {
 		return err
 	}
-
 	if err := runner.Mkdirp(ctx.GoContext(), conn, filepath.Dir(s.RemoteChartPath), "0755", s.Sudo); err != nil {
 		return fmt.Errorf("failed to create remote dir for cilium artifacts: %w", err)
 	}
-
 	logger.Infof("Uploading Cilium chart to %s", s.RemoteChartPath)
 	if err := runner.WriteFile(ctx.GoContext(), conn, chartContent, s.RemoteChartPath, "0644", s.Sudo); err != nil {
 		return fmt.Errorf("failed to upload cilium helm chart: %w", err)
 	}
-
 	logger.Infof("Uploading Cilium values to %s", s.RemoteValuesPath)
 	if err := runner.WriteFile(ctx.GoContext(), conn, valuesContent, s.RemoteValuesPath, "0644", s.Sudo); err != nil {
 		return fmt.Errorf("failed to upload cilium values.yaml: %w", err)

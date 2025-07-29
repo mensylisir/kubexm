@@ -1,137 +1,227 @@
 package images
 
 import (
+	"encoding/json"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
-	"github.com/mensylisir/kubexm/pkg/runtime"
-	"github.com/mensylisir/kubexm/pkg/step"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/images"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/opencontainers/image-spec/specs-go/v1"
 )
 
-// OciIndex 描述了 OCI 布局中的 index.json 结构
-type OciIndex struct {
-	Manifests []OciManifest `json:"manifests"`
-}
-type OciManifest struct {
-	MediaType   string            `json:"mediaType"`
-	Digest      string            `json:"digest"`
-	Size        int64             `json:"size"`
-	Annotations map[string]string `json:"annotations"`
+type manifestEntry struct {
+	Image    string      `json:"image"`
+	Platform v1.Platform `json:"platform"`
 }
 
-// PushImagesToRegistryStep 负责从本地 OCI 目录读取镜像，重写名称，并推送到私有仓库。
-type PushImagesToRegistryStep struct {
+type PushImagesStep struct {
 	step.Base
-	LocalImagesPath string
-	ImageProvider   *images.ImageProvider
-	Auths           map[string]v1alpha1.RegistryAuth
+	ImagesDir   string
+	Concurrency int
 }
 
-// PushImagesToRegistryStepBuilder ...
-type PushImagesToRegistryStepBuilder struct {
-	step.Builder[PushImagesToRegistryStepBuilder, *PushImagesToRegistryStep]
+type PushImagesStepBuilder struct {
+	step.Builder[PushImagesStepBuilder, *PushImagesStep]
 }
 
-// NewPushImagesToRegistryStepBuilder ...
-func NewPushImagesToRegistryStepBuilder(ctx runtime.Context, instanceName string) *PushImagesToRegistryStepBuilder {
-	s := &PushImagesToRegistryStep{}
+func NewPushImagesStepBuilder(ctx runtime.Context, instanceName string) *PushImagesStepBuilder {
+	if ctx.GetClusterConfig().Spec.Registry.MirroringAndRewriting == nil ||
+		ctx.GetClusterConfig().Spec.Registry.MirroringAndRewriting.PrivateRegistry == "" {
+		return nil
+	}
+
+	s := &PushImagesStep{
+		ImagesDir:   filepath.Join(ctx.GetClusterArtifactsDir(), "images"),
+		Concurrency: 5,
+	}
+
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Push images from local artifacts to private registry", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Push all saved images to the private registry", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
-	s.Base.Timeout = 2 * time.Hour // 推送镜像可能很耗时
+	s.Base.Timeout = 60 * time.Minute
 
-	// LocalImagesPath 应该指向解压后的 .kubexm/images 目录
-	s.LocalImagesPath = filepath.Join(ctx.GetGlobalWorkDir(), "images") // 假设路径
-	s.ImageProvider = images.NewImageProvider(ctx)
-	s.Auths = ctx.GetClusterConfig().Spec.Registry.Auths
-
-	b := new(PushImagesToRegistryStepBuilder).Init(s)
+	b := new(PushImagesStepBuilder).Init(s)
 	return b
 }
 
-func (s *PushImagesToRegistryStep) Run(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name)
+func (b *PushImagesStepBuilder) WithConcurrency(c int) *PushImagesStepBuilder {
+	if c > 0 {
+		b.Step.Concurrency = c
+	}
+	return b
+}
 
-	// 1. 读取 index.json
-	indexPath := filepath.Join(s.LocalImagesPath, "index.json")
-	indexFile, err := os.ReadFile(indexPath)
+func (s *PushImagesStep) Meta() *spec.StepMeta {
+	return &s.Base.Meta
+}
+
+func (s *PushImagesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	if _, err := exec.LookPath("skopeo"); err != nil {
+		return false, fmt.Errorf("skopeo command not found in PATH, please install it first")
+	}
+
+	ociIndexPath := filepath.Join(s.ImagesDir, "index.json")
+	if _, err := os.Stat(ociIndexPath); os.IsNotExist(err) {
+		return false, fmt.Errorf("local OCI image cache at '%s' not found, ensure save step ran successfully", s.ImagesDir)
+	}
+	return false, nil
+}
+
+func (s *PushImagesStep) Run(ctx runtime.ExecutionContext) error {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
+
+	indexJsonPath := filepath.Join(s.ImagesDir, "index.json")
+	indexJsonContent, err := os.ReadFile(indexJsonPath)
 	if err != nil {
-		return fmt.Errorf("failed to read OCI index file at %s: %w", indexPath, err)
+		return fmt.Errorf("failed to read local index.json: %w", err)
+	}
+	var ociIndex v1.Index
+	if err := json.Unmarshal(indexJsonContent, &ociIndex); err != nil {
+		return fmt.Errorf("failed to unmarshal OCI index: %w", err)
 	}
 
-	var index OciIndex
-	if err := json.Unmarshal(indexFile, &index); err != nil {
-		return fmt.Errorf("failed to unmarshal OCI index file: %w", err)
-	}
-	logger.Infof("Found %d image manifests in local OCI directory.", len(index.Manifests))
+	imageProvider := images.NewImageProvider(ctx)
+	jobs := make(chan v1.Descriptor, len(ociIndex.Manifests))
+	errChan := make(chan error, len(ociIndex.Manifests))
 
-	// 2. 遍历清单，推送每个镜像
-	for _, manifest := range index.Manifests {
-		// oci.manifest.ref.name 通常是 image:tag-platform, e.g., "docker.io/library/nginx:1.21-amd64"
-		originalRefWithPlatform := manifest.Annotations["oci.manifest.ref.name"]
-		if originalRefWithPlatform == "" {
-			continue
-		}
+	manifestList := make(map[string][]manifestEntry)
+	var mu sync.Mutex
 
-		// 3. 从引用中解析出组件名
-		// e.g., "docker.io/library/nginx:1.21-amd64" -> "docker.io/library/nginx"
-		refWithoutTag, _, _ := strings.Cut(originalRefWithPlatform, ":")
-		// e.g., "docker.io/library/nginx" -> "nginx"
-		componentName := images.getComponentNameByRef(refWithoutTag)
-		if componentName == "" {
-			logger.Warnf("Could not find component name for image ref '%s', skipping push.", refWithoutTag)
-			continue
-		}
+	var wg sync.WaitGroup
+	for i := 0; i < s.Concurrency; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			for job := range jobs {
+				originalRefWithArch := job.Annotations["org.opencontainers.image.ref.name"]
 
-		// 4. 使用 ImageProvider 获取完整的、重写后的 Image 对象
-		imgObj := s.ImageProvider.GetImage(componentName)
-		if imgObj == nil {
-			logger.Infof("Image for component '%s' is not enabled in current config, skipping push.", componentName)
-			continue
-		}
+				parts := strings.Split(originalRefWithArch, "-")
+				arch := parts[len(parts)-1]
+				originalRef := strings.TrimSuffix(originalRefWithArch, "-"+arch)
 
-		// 5. 准备推送
-		// 源: oci:./path:original-ref-with-platform
-		srcName := fmt.Sprintf("oci:%s:%s", s.LocalImagesPath, originalRefWithPlatform)
-		// 目标: my-harbor.com/rewritten-ns/repo:tag
-		destName := imgObj.FullName()
+				refParts := strings.Split(originalRef, ":")
+				imageNameWithRepo := refParts[0]
 
-		logger.Infof("Pushing image: %s -> %s", srcName, destName)
+				componentName := images.GetComponentNameByRef(imageNameWithRepo)
+				if componentName == "" {
+					errChan <- fmt.Errorf("could not find component name for image ref: %s", imageNameWithRepo)
+					continue
+				}
 
-		// 获取私有仓库的认证信息
-		privateRepoAddr := imgObj.GetPrivateRepoAddr() // 假设 Image 对象有一个方法可以获取私有仓库地址
-		auth, _ := s.Auths[privateRepoAddr]
+				imgObj := imageProvider.GetImage(componentName)
+				if imgObj == nil {
+					errChan <- fmt.Errorf("could not get image object for component: %s", componentName)
+					continue
+				}
 
-		// 6. 执行复制 (带重试逻辑)
-		copyOpts := &imagecopy.CopyOptions{
-			SrcImage:  srcName,
-			DestImage: destName,
-			DestAuth:  auth,
-		}
+				err := s.copyToRegistry(ctx, originalRefWithArch, imgObj, arch)
+				if err != nil {
+					errChan <- err
+					continue
+				}
 
-		var lastErr error
-		for attempt := 1; attempt <= 3; attempt++ {
-			if err := imagecopy.Copy(copyOpts); err != nil {
-				lastErr = err
-				logger.Warnf("Attempt %d failed to push image %s: %v. Retrying in 5 seconds...", attempt, destName, err)
-				time.Sleep(5 * time.Second)
-				continue
+				mu.Lock()
+				baseImageName := imgObj.FullName()
+				if _, ok := manifestList[baseImageName]; !ok {
+					manifestList[baseImageName] = []manifestEntry{}
+				}
+				manifestList[baseImageName] = append(manifestList[baseImageName], manifestEntry{
+					Image: fmt.Sprintf("%s-%s", baseImageName, arch),
+					Platform: v1.Platform{
+						OS:           "linux",
+						Architecture: arch,
+					},
+				})
+				mu.Unlock()
 			}
-			lastErr = nil
-			break
-		}
-		if lastErr != nil {
-			return fmt.Errorf("failed to push image %s after 3 attempts: %w", destName, lastErr)
-		}
+		}(i)
 	}
 
-	logger.Info("All images from local artifacts have been pushed to the private registry.")
+	for _, manifest := range ociIndex.Manifests {
+		jobs <- manifest
+	}
+	close(jobs)
+	wg.Wait()
+	close(errChan)
+
+	var allErrors []string
+	for err := range errChan {
+		allErrors = append(allErrors, err.Error())
+	}
+	if len(allErrors) > 0 {
+		return fmt.Errorf("failed to push some images:\n- %s", strings.Join(allErrors, "\n- "))
+	}
+
+	ctx.GetTaskCache().Set("manifestList", manifestList)
+	logger.Info("All saved images have been pushed to the private registry successfully.")
 	return nil
 }
 
-// ... Meta, Precheck, Rollback (清理私有仓库中的镜像会很复杂，通常不实现) ...
+func (s *PushImagesStep) copyToRegistry(ctx runtime.ExecutionContext, ociRef string, img *images.Image, arch string) error {
+	srcName := fmt.Sprintf("oci:%s:%s", s.ImagesDir, ociRef)
+
+	destNameWithArch := fmt.Sprintf("%s-%s", img.FullName(), arch)
+	destName := "docker://" + destNameWithArch
+
+	args := []string{
+		"copy",
+		"--all",
+	}
+
+	privateRegistryHost := ctx.GetClusterConfig().Spec.Registry.MirroringAndRewriting.PrivateRegistry
+	if u, err := url.Parse("scheme://" + privateRegistryHost); err == nil {
+		privateRegistryHost = u.Host
+	}
+
+	var creds string
+	if auths := ctx.GetClusterConfig().Spec.Registry.Auths; auths != nil {
+		if auth, ok := auths[privateRegistryHost]; ok {
+			if auth.Username != "" && auth.Password != "" {
+				creds = fmt.Sprintf("%s:%s", auth.Username, auth.Password)
+			}
+		}
+	}
+	if creds != "" {
+		args = append(args, "--dest-creds", creds)
+	}
+
+	skipVerify := false
+	if auths := ctx.GetClusterConfig().Spec.Registry.Auths; auths != nil {
+		if auth, ok := auths[privateRegistryHost]; ok {
+			if (auth.PlainHTTP != nil && *auth.PlainHTTP) || (auth.SkipTLSVerify != nil && *auth.SkipTLSVerify) {
+				skipVerify = true
+			}
+		}
+	}
+	if skipVerify {
+		args = append(args, "--dest-tls-verify=false")
+	}
+
+	args = append(args, srcName, destName)
+
+	cmd := exec.Command("skopeo", args...)
+
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to push %s to %s: %w\nOutput: %s", srcName, destName, err, string(output))
+	}
+
+	return nil
+}
+
+func (s *PushImagesStep) Rollback(ctx runtime.ExecutionContext) error {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+	logger.Warn("Rollback for PushImagesStep is not implemented, as it would require deleting images from the private registry.")
+	return nil
+}
+
+var _ step.Step = (*PushImagesStep)(nil)

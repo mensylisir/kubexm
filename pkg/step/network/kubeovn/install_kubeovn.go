@@ -3,17 +3,19 @@ package kubeovn
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
+	// 引入必要的包
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 )
 
 type InstallKubeOvnHelmChartStep struct {
 	step.Base
+	Chart               *helm.HelmChart
 	ReleaseName         string
 	Namespace           string
 	RemoteChartPath     string
@@ -26,20 +28,32 @@ type InstallKubeOvnHelmChartStepBuilder struct {
 }
 
 func NewInstallKubeOvnHelmChartStepBuilder(ctx runtime.Context, instanceName string) *InstallKubeOvnHelmChartStepBuilder {
-	s := &InstallKubeOvnHelmChartStep{}
+	helmProvider := helm.NewHelmProvider(&ctx)
+	kubeovnChart := helmProvider.GetChart(string(common.CNITypeKubeOvn))
+
+	if kubeovnChart == nil {
+		return nil
+	}
+
+	s := &InstallKubeOvnHelmChartStep{
+		Chart: kubeovnChart,
+	}
+
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install or upgrade Kube-OVN via Helm chart", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 25 * time.Minute
 
-	s.ReleaseName = "kube-ovn"
+	s.ReleaseName = kubeovnChart.ChartName()
 	s.Namespace = "kube-system"
 
-	s.AdminKubeconfigPath = filepath.Join(ctx.GetGlobalWorkDir(), "kubeconfigs", common.AdminKubeconfigFileName)
+	s.AdminKubeconfigPath = filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
 
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, "kubeovn")
+	remoteDir := filepath.Join(common.DefaultUploadTmpDir, kubeovnChart.RepoName())
 	s.RemoteValuesPath = filepath.Join(remoteDir, "kubeovn-values.yaml")
+	chartFileName := fmt.Sprintf("%s-%s.tgz", kubeovnChart.ChartName(), kubeovnChart.Version)
+	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)
 
 	b := new(InstallKubeOvnHelmChartStepBuilder).Init(s)
 	return b
@@ -59,20 +73,29 @@ func (s *InstallKubeOvnHelmChartStep) Precheck(ctx runtime.ExecutionContext) (is
 
 	valuesExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteValuesPath)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to check for values file: %w", err)
 	}
 	if !valuesExists {
-		return false, fmt.Errorf("required Kube-OVN values file not found at %s, cannot proceed", s.RemoteValuesPath)
+		return false, fmt.Errorf("required Kube-OVN values file not found at precise path %s, cannot proceed", s.RemoteValuesPath)
 	}
 
-	remoteDir := filepath.Dir(s.RemoteValuesPath)
-	findCmd := fmt.Sprintf("find %s -name '*.tgz' -print -quit", remoteDir)
-	chartPath, err := runner.Run(ctx.GoContext(), conn, findCmd, s.Sudo)
-	if err != nil || strings.TrimSpace(chartPath) == "" {
-		return false, fmt.Errorf("Kube-OVN Helm chart .tgz file not found in remote directory %s", remoteDir)
+	chartExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteChartPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to check for chart file: %w", err)
+	}
+	if !chartExists {
+		return false, fmt.Errorf("Kube-OVN Helm chart .tgz file not found at precise path %s", s.RemoteChartPath)
 	}
 
-	logger.Info("Helm artifacts (chart and values) for Kube-OVN found on remote host. Ready to install.")
+	kubeconfigExists, err := runner.Exists(ctx.GoContext(), conn, s.AdminKubeconfigPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to check for kubeconfig file: %w", err)
+	}
+	if !kubeconfigExists {
+		return false, fmt.Errorf("admin kubeconfig not found at its permanent location %s; ensure DistributeKubeconfigsStep ran successfully", s.AdminKubeconfigPath)
+	}
+
+	logger.Info("All required Kube-OVN artifacts (chart, values, kubeconfig) found on remote host. Ready to install.")
 	return false, nil
 }
 
@@ -83,14 +106,6 @@ func (s *InstallKubeOvnHelmChartStep) Run(ctx runtime.ExecutionContext) error {
 	if err != nil {
 		return err
 	}
-
-	remoteDir := filepath.Dir(s.RemoteValuesPath)
-	findCmd := fmt.Sprintf("find %s -name '*.tgz' -print -quit", remoteDir)
-	remoteChartPath, err := runner.Run(ctx.GoContext(), conn, findCmd, s.Sudo)
-	if err != nil || strings.TrimSpace(remoteChartPath) == "" {
-		return fmt.Errorf("failed to find Kube-OVN Helm chart .tgz file in remote directory %s", remoteDir)
-	}
-	s.RemoteChartPath = strings.TrimSpace(remoteChartPath)
 
 	cmd := fmt.Sprintf(
 		"helm upgrade --install %s %s "+
@@ -107,7 +122,7 @@ func (s *InstallKubeOvnHelmChartStep) Run(ctx runtime.ExecutionContext) error {
 		s.AdminKubeconfigPath,
 	)
 
-	logger.Infof("Executing remote Helm command for Kube-OVN: %s", cmd)
+	logger.Infof("Executing remote Helm command: %s", cmd)
 	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
 		return fmt.Errorf("failed to install/upgrade Kube-OVN Helm chart: %w\nOutput: %s", err, output)

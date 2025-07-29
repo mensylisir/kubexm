@@ -2,16 +2,27 @@
 # 此模板严格遵循官方 Kube-OVN Helm Chart 的 values.yaml 结构。
 
 # 全局镜像配置
-image:
-  repository: {{ .Registry }}/kubeovn
+# Kube-OVN 使用多个不同的镜像（ovs, kube-ovn-cni, etc.），
+# 官方 Chart 通常允许通过一个全局的 registry 和 tag 来统一控制它们。
+# 我们将使用 ImageProvider 提供的镜像名和 tag 来覆盖。
+images:
+  # 镜像仓库地址，例如：ghcr.io/kubeovn 或您的私有仓库地址
+  # 这将由 s.ImageRegistry 填充
+  registry: "{{ .ImageRegistry }}"
+  # 镜像标签，例如：v1.13.1
+  # 这将由 s.ImageTag 填充
+  tag: "{{ .ImageTag }}"
   pullPolicy: IfNotPresent
-  # Kube-OVN 使用多个不同的镜像，这里通过 repository 统一替换镜像仓库地址
-  # 例如: ovs, kube-ovn-cni, kube-ovn-controller, kube-ovn-pinger
+# 注意：上面的 `images.registry` 和 `images.tag` 结构是基于 Kube-OVN chart 的常见模式，
+# 如果官方 Chart 的结构是 `image.repository` 和 `image.tag`，请相应修改。
+# 您的 Go 代码 `s.ImageRegistry = kubeovnImage.FullNameWithoutTag()`
+# 已经包含了 registry 和 repo name，例如 "ghcr.io/kubeovn/kube-ovn"。
+# 如果 Chart 需要分开的 registry 和 repo name，您的 Go 代码和模板都需要调整。
+# 假设 Chart 只需要一个统一的 registry 前缀。
 
 # 核心网络配置
 networking:
-  # Kubernetes Pod 网段。将使用您在 KubeOvnConfig 中指定的 podDefaultSubnetCIDR，
-  # 如果未指定，则回退到全局的 KubePodsCIDR。
+  # Kubernetes Pod 网段。
   KUBE_POD_CIDR: "{{ .PodCIDR }}"
   # Kubernetes Service 网段
   KUBE_SVC_CIDR: "{{ .ServiceCIDR }}"

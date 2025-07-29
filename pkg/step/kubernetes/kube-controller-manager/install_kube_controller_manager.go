@@ -2,7 +2,6 @@ package kube_controller_manager
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"path/filepath"
 	"time"
@@ -11,16 +10,12 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
 )
 
 type InstallKubeControllerManagerStep struct {
 	step.Base
-	Version     string
-	Arch        string
-	WorkDir     string
-	ClusterName string
 	InstallPath string
-	FileName    string
 	Permission  string
 }
 
@@ -30,12 +25,8 @@ type InstallKubeControllerManagerStepBuilder struct {
 
 func NewInstallKubeControllerManagerStepBuilder(ctx runtime.Context, instanceName string) *InstallKubeControllerManagerStepBuilder {
 	s := &InstallKubeControllerManagerStep{
-		Version:     ctx.GetClusterConfig().Spec.Kubernetes.Version,
-		Arch:        "",
-		WorkDir:     ctx.GetGlobalWorkDir(),
-		ClusterName: ctx.GetClusterConfig().ObjectMeta.Name,
+		// 设置默认值
 		InstallPath: common.DefaultBinDir,
-		FileName:    "kube-controller-manager",
 		Permission:  "0755",
 	}
 
@@ -49,8 +40,17 @@ func NewInstallKubeControllerManagerStepBuilder(ctx runtime.Context, instanceNam
 	return b
 }
 
-func (b *InstallKubeControllerManagerStepBuilder) WithInstallPath(path string) *InstallKubeControllerManagerStepBuilder {
-	b.Step.InstallPath = path
+func (b *InstallKubeControllerManagerStepBuilder) WithInstallPath(installPath string) *InstallKubeControllerManagerStepBuilder {
+	if installPath != "" {
+		b.Step.InstallPath = installPath
+	}
+	return b
+}
+
+func (b *InstallKubeControllerManagerStepBuilder) WithPermission(permission string) *InstallKubeControllerManagerStepBuilder {
+	if permission != "" {
+		b.Step.Permission = permission
+	}
 	return b
 }
 
@@ -59,19 +59,23 @@ func (s *InstallKubeControllerManagerStep) Meta() *spec.StepMeta {
 }
 
 func (s *InstallKubeControllerManagerStep) getLocalSourcePath(ctx runtime.ExecutionContext) (string, error) {
-	provider := util.NewBinaryProvider()
-
-	host := ctx.GetHost()
-	arch := s.Arch
-	if arch == "" {
-		arch = host.GetArch()
-	}
-
-	info, err := provider.GetBinaryInfo(util.ComponentKubeControllerManager, s.Version, arch, "", s.WorkDir, s.ClusterName)
+	provider := binary.NewBinaryProvider(ctx)
+	arch := ctx.GetHost().GetArch()
+	binaryInfo, err := provider.GetBinary(binary.ComponentKubeControllerManager, arch)
 	if err != nil {
-		return "", fmt.Errorf("failed to get binary info for kube-controller-manager: %w", err)
+		return "", fmt.Errorf("failed to get kube-controller-manager binary info: %w", err)
 	}
-	return info.FilePath, nil
+	if binaryInfo == nil {
+		return "", fmt.Errorf("kube-controller-manager is unexpectedly disabled for arch %s", arch)
+	}
+
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install kube-controller-manager binary (version %s)", s.Base.Meta.Name, binaryInfo.Version)
+
+	return binaryInfo.FilePath(), nil
+}
+
+func (s *InstallKubeControllerManagerStep) getRemoteTargetPath() string {
+	return filepath.Join(s.InstallPath, "kube-controller-manager")
 }
 
 func (s *InstallKubeControllerManagerStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
@@ -82,18 +86,18 @@ func (s *InstallKubeControllerManagerStep) Precheck(ctx runtime.ExecutionContext
 		return false, err
 	}
 
-	targetPath := filepath.Join(s.InstallPath, s.FileName)
+	targetPath := s.getRemoteTargetPath()
 	exists, err := runner.Exists(ctx.GoContext(), conn, targetPath)
 	if err != nil {
 		return false, fmt.Errorf("failed to check for file '%s' on host %s: %w", targetPath, ctx.GetHost().GetName(), err)
 	}
-	if !exists {
-		logger.Infof("Target file '%s' does not exist. Installation is required.", targetPath)
-		return false, nil
+	if exists {
+		logger.Infof("Target file '%s' already exists. Step is done.", targetPath)
+		return true, nil
 	}
 
-	logger.Infof("%s binary already exists on remote host. Step is done.", s.FileName)
-	return true, nil
+	logger.Infof("Target file '%s' does not exist. Installation is required.", targetPath)
+	return false, nil
 }
 
 func (s *InstallKubeControllerManagerStep) Run(ctx runtime.ExecutionContext) error {
@@ -108,31 +112,43 @@ func (s *InstallKubeControllerManagerStep) Run(ctx runtime.ExecutionContext) err
 	if err != nil {
 		return err
 	}
+	targetPath := s.getRemoteTargetPath()
+
 	if _, err := os.Stat(localSourcePath); os.IsNotExist(err) {
-		return fmt.Errorf("local source file '%s' not found, please ensure the download step ran successfully", localSourcePath)
+		return fmt.Errorf("local source file '%s' not found, ensure download step ran successfully", localSourcePath)
 	}
 
 	if err := runner.Mkdirp(ctx.GoContext(), conn, s.InstallPath, "0755", s.Sudo); err != nil {
 		return fmt.Errorf("failed to create remote install directory '%s': %w", s.InstallPath, err)
 	}
 
-	targetPath := filepath.Join(s.InstallPath, s.FileName)
-	remoteTempPath := filepath.Join(common.DefaultUploadTmpDir, s.FileName)
+	remoteUploadTmpDir := filepath.Join(common.DefaultUploadTmpDir, fmt.Sprintf("kube-controller-manager-%d", time.Now().UnixNano()))
+	if err := runner.Mkdirp(ctx.GoContext(), conn, remoteUploadTmpDir, "0755", false); err != nil {
+		return fmt.Errorf("failed to create remote upload directory '%s': %w", remoteUploadTmpDir, err)
+	}
+	defer func() {
+		_ = runner.Remove(ctx.GoContext(), conn, remoteUploadTmpDir, false, true)
+	}()
 
-	logger.Infof("Uploading %s to %s:%s", localSourcePath, ctx.GetHost().GetName(), remoteTempPath)
-	if err := runner.Upload(ctx.GoContext(), conn, localSourcePath, remoteTempPath, s.Base.Sudo); err != nil {
+	remoteTempPath := filepath.Join(remoteUploadTmpDir, "kube-controller-manager")
+	logger.Infof("Uploading kube-controller-manager to %s:%s", ctx.GetHost().GetName(), remoteTempPath)
+
+	if err := runner.Upload(ctx.GoContext(), conn, localSourcePath, remoteTempPath, false); err != nil {
 		return fmt.Errorf("failed to upload '%s' to '%s': %w", localSourcePath, remoteTempPath, err)
 	}
 
-	installCmd := fmt.Sprintf("install -o root -g root -m %s %s %s", s.Permission, remoteTempPath, targetPath)
-	logger.Infof("Installing file to %s on remote host", targetPath)
-	if _, _, err := runner.OriginRun(ctx.GoContext(), conn, installCmd, s.Sudo); err != nil {
-		_ = runner.Remove(ctx.GoContext(), conn, remoteTempPath, s.Sudo, false)
-		return fmt.Errorf("failed to install file '%s' on remote host: %w", targetPath, err)
+	moveCmd := fmt.Sprintf("mv %s %s", remoteTempPath, targetPath)
+	logger.Infof("Moving file to %s on remote host", targetPath)
+	if _, err := runner.Run(ctx.GoContext(), conn, moveCmd, s.Sudo); err != nil {
+		return fmt.Errorf("failed to move file to '%s': %w", targetPath, err)
 	}
-	_ = runner.Remove(ctx.GoContext(), conn, remoteTempPath, s.Sudo, false)
 
-	logger.Infof("%s binary installed successfully.", s.FileName)
+	logger.Infof("Setting permissions for %s to %s", targetPath, s.Permission)
+	if err := runner.Chmod(ctx.GoContext(), conn, targetPath, s.Permission, s.Sudo); err != nil {
+		return fmt.Errorf("failed to set permission on '%s': %w", targetPath, err)
+	}
+
+	logger.Infof("Successfully installed kube-controller-manager to %s", targetPath)
 	return nil
 }
 
@@ -141,15 +157,15 @@ func (s *InstallKubeControllerManagerStep) Rollback(ctx runtime.ExecutionContext
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		logger.Errorf("Failed to get connector for rollback: %v", err)
 		return nil
 	}
 
-	targetPath := filepath.Join(s.InstallPath, s.FileName)
+	targetPath := s.getRemoteTargetPath()
 	logger.Warnf("Rolling back by removing: %s", targetPath)
 	if err := runner.Remove(ctx.GoContext(), conn, targetPath, s.Sudo, false); err != nil {
 		logger.Errorf("Failed to remove '%s' during rollback: %v", targetPath, err)
 	}
+
 	return nil
 }
 

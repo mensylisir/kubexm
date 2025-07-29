@@ -3,7 +3,8 @@ package calico
 import (
 	"bytes"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/util"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/images"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,14 +17,13 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
 type GenerateCalicoHelmArtifactsStep struct {
 	step.Base
 	RemoteValuesPath     string
-	ChartSourceDecision  *helpers.ChartSourceDecision
+	Chart                *helm.HelmChart
 	LocalPulledChartPath string
 	RemoteChartPath      string
 
@@ -44,21 +44,33 @@ type GenerateCalicoHelmArtifactsStepBuilder struct {
 }
 
 func NewGenerateCalicoHelmArtifactsStepBuilder(ctx runtime.Context, instanceName string) *GenerateCalicoHelmArtifactsStepBuilder {
-	s := &GenerateCalicoHelmArtifactsStep{}
+	helmProvider := helm.NewHelmProvider(&ctx)
+	calicoChart := helmProvider.GetChart(string(common.CNITypeCalico))
+	if calicoChart == nil {
+		return nil
+	}
+	s := &GenerateCalicoHelmArtifactsStep{
+		Chart: calicoChart,
+	}
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate Calico Helm artifacts", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 10 * time.Minute
 
-	s.ChartSourceDecision = helpers.DecideCalicoChartSource(ctx)
+	localChartDir := filepath.Dir(calicoChart.LocalPath(common.DefaultKubexmTmpDir))
+	s.LocalPulledChartPath = localChartDir
 
-	s.LocalPulledChartPath = filepath.Join(common.DefaultKubexmTmpDir, "calico")
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, "calico")
+	remoteDir := filepath.Join(common.DefaultUploadTmpDir, calicoChart.RepoName())
 	s.RemoteValuesPath = filepath.Join(remoteDir, "calico-values.yaml")
 
 	clusterCfg := ctx.GetClusterConfig()
-	s.OperatorImage = util.GetImage(ctx, "tigera-operator").ImageRepo()
+	imageProvider := images.NewImageProvider(&ctx)
+	operatorImg := imageProvider.GetImage("tigera-operator")
+	if operatorImg == nil {
+		return nil
+	}
+	s.OperatorImage = operatorImg.FullName()
 	s.OperatorNodeSelector = map[string]string{"kubernetes.io/os": "linux"}
 	s.OperatorTolerations = []map[string]string{
 		{"key": "node-role.kubernetes.io/control-plane", "operator": "Exists", "effect": "NoSchedule"},
@@ -155,8 +167,8 @@ func (s *GenerateCalicoHelmArtifactsStep) Run(ctx runtime.ExecutionContext) erro
 		return fmt.Errorf("failed to create local temp dir %s: %w", s.LocalPulledChartPath, err)
 	}
 
-	repoName := s.ChartSourceDecision.RepoName
-	repoURL := s.ChartSourceDecision.RepoURL
+	repoName := s.Chart.RepoName()
+	repoURL := s.Chart.RepoURL()
 
 	repoAddCmd := exec.Command(helmPath, "repo", "add", repoName, repoURL)
 	if output, err := repoAddCmd.CombinedOutput(); err != nil && !strings.Contains(string(output), "already exists") {
@@ -168,10 +180,10 @@ func (s *GenerateCalicoHelmArtifactsStep) Run(ctx runtime.ExecutionContext) erro
 		return fmt.Errorf("failed to update helm repo %s: %w", repoName, err)
 	}
 
-	chartFullName := fmt.Sprintf("%s/%s", repoName, s.ChartSourceDecision.ChartName)
+	chartFullName := fmt.Sprintf("%s/%s", repoName, s.Chart.ChartName())
 	pullArgs := []string{"pull", chartFullName, "--destination", s.LocalPulledChartPath}
-	if s.ChartSourceDecision.Version != "" {
-		pullArgs = append(pullArgs, "--version", s.ChartSourceDecision.Version)
+	if s.Chart.Version != "" {
+		pullArgs = append(pullArgs, "--version", s.Chart.Version)
 	}
 
 	logger.Infof("Pulling Helm chart with command: helm %s", strings.Join(pullArgs, " "))
@@ -180,11 +192,10 @@ func (s *GenerateCalicoHelmArtifactsStep) Run(ctx runtime.ExecutionContext) erro
 		return fmt.Errorf("failed to pull helm chart: %w, output: %s", err, string(output))
 	}
 
-	pulledFiles, _ := filepath.Glob(filepath.Join(s.LocalPulledChartPath, "*.tgz"))
-	if len(pulledFiles) == 0 {
-		return fmt.Errorf("helm chart .tgz file not found in %s after pull", s.LocalPulledChartPath)
+	actualLocalChartPath := s.Chart.LocalPath(common.DefaultKubexmTmpDir)
+	if _, err := os.Stat(actualLocalChartPath); os.IsNotExist(err) {
+		return fmt.Errorf("expected helm chart .tgz file not found at %s after pull", actualLocalChartPath)
 	}
-	actualLocalChartPath := pulledFiles[0]
 	s.RemoteChartPath = filepath.Join(filepath.Dir(s.RemoteValuesPath), filepath.Base(actualLocalChartPath))
 
 	logger.Info("Rendering values.yaml from template...")

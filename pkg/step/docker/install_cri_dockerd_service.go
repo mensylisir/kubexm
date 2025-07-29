@@ -3,7 +3,7 @@ package docker
 import (
 	"bytes"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/util"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -13,6 +13,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/images" // 确保 import 路径正确
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
@@ -40,34 +41,50 @@ type SetupCriDockerdServiceStepBuilder struct {
 }
 
 func NewSetupCriDockerdServiceStepBuilder(ctx runtime.Context, instanceName string) *SetupCriDockerdServiceStepBuilder {
+	provider := binary.NewBinaryProvider(&ctx)
+	const representativeArch = "amd64"
+	binaryInfo, err := provider.GetBinary(binary.ComponentCriDockerd, representativeArch)
+	if err != nil || binaryInfo == nil {
+		return nil
+	}
+
+	var podSandboxImage string
+	cfg := ctx.GetClusterConfig().Spec
+
+	if cfg.Kubernetes.ContainerRuntime.Docker != nil && cfg.Kubernetes.ContainerRuntime.Docker.Pause != "" {
+		podSandboxImage = cfg.Kubernetes.ContainerRuntime.Docker.Pause
+	} else {
+		imageProvider := images.NewImageProvider(&ctx)
+		pauseImage := imageProvider.GetImage("pause")
+
+		if pauseImage == nil {
+			ctx.GetLogger().Debug("Could not create SetupCriDockerdServiceStep: failed to determine a suitable pause image from BOM.")
+			return nil
+		}
+		podSandboxImage = pauseImage.FullName()
+	}
+
+	if podSandboxImage == "" {
+		return nil
+	}
 
 	s := &SetupCriDockerdServiceStep{
 		ServiceFilePath: criDockerdServiceFilePath,
 		Config: CRIDockerdServiceConfig{
-			ExecStartPath: filepath.Join(common.DefaultBinDir, "cri-dockerd"),
-			CRISocket:     common.CriDockerdSocketPath,
-			CNIBinDir:     common.DefaultCNIBin,
-			CNIConfDir:    common.DefaultCNIConfDirTarget,
-			//PodSandboxImage: podSandboxImage,
+			ExecStartPath:   filepath.Join(common.DefaultBinDir, "cri-dockerd"),
+			CRISocket:       common.CriDockerdSocketPath,
+			CNIBinDir:       common.DefaultCNIBin,
+			CNIConfDir:      common.DefaultCNIConfDirTarget,
+			PodSandboxImage: podSandboxImage,
 		},
-	}
-
-	if s.Config.PodSandboxImage == "" {
-		pauseImage := util.GetImage(ctx, "pause")
-		s.Config.PodSandboxImage = pauseImage.ImageName()
 	}
 
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Setup cri-dockerd systemd service", s.Base.Meta.Name)
-	s.Base.Sudo = true
+	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 2 * time.Minute
 
-	cfg := ctx.GetClusterConfig().Spec
-	containerdCfg := cfg.Kubernetes.ContainerRuntime.Docker
-	if containerdCfg.Pause != "" {
-		s.Config.PodSandboxImage = containerdCfg.Pause
-	}
 	b := new(SetupCriDockerdServiceStepBuilder).Init(s)
 	return b
 }
@@ -98,6 +115,10 @@ func (s *SetupCriDockerdServiceStep) Precheck(ctx runtime.ExecutionContext) (isD
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		return false, err
+	}
+
+	if _, err := runner.Run(ctx.GoContext(), conn, "command -v cri-dockerd", s.Sudo); err != nil {
+		return false, fmt.Errorf("cri-dockerd binary not found in PATH on remote host, ensure it's installed first")
 	}
 
 	exists, err := runner.Exists(ctx.GoContext(), conn, s.ServiceFilePath)

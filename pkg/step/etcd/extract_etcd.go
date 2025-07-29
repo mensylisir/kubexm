@@ -2,7 +2,6 @@ package etcd
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/util"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,16 +12,12 @@ import (
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 	"github.com/mensylisir/kubexm/pkg/step/helpers"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
 	"github.com/schollz/progressbar/v3"
 )
 
 type ExtractEtcdStep struct {
 	step.Base
-	Version     string
-	Arch        string
-	WorkDir     string
-	ClusterName string
-	Zone        string
 }
 
 type ExtractEtcdStepBuilder struct {
@@ -30,21 +25,17 @@ type ExtractEtcdStepBuilder struct {
 }
 
 func NewExtractEtcdStepBuilder(ctx runtime.Context, instanceName string) *ExtractEtcdStepBuilder {
-	etcdVersion := common.DefaultEtcdVersion
-	if ctx.GetClusterConfig().Spec.Etcd != nil && ctx.GetClusterConfig().Spec.Etcd.Version != "" {
-		etcdVersion = ctx.GetClusterConfig().Spec.Etcd.Version
+	provider := binary.NewBinaryProvider(&ctx)
+	const representativeArch = "amd64"
+	binaryInfo, err := provider.GetBinary(binary.ComponentEtcd, representativeArch)
+
+	if err != nil || binaryInfo == nil {
+		return nil
 	}
 
-	s := &ExtractEtcdStep{
-		Version:     etcdVersion,
-		Arch:        "",
-		WorkDir:     ctx.GetGlobalWorkDir(),
-		ClusterName: ctx.GetClusterConfig().ObjectMeta.Name,
-		Zone:        util.GetZone(),
-	}
-
+	s := &ExtractEtcdStep{}
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Extract etcd archive for version %s", s.Base.Meta.Name, s.Version)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Extract etcd archives for all required architectures", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 1 * time.Minute
@@ -57,22 +48,38 @@ func (s *ExtractEtcdStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *ExtractEtcdStep) getPaths() (sourcePath, destPath, cacheKey string, err error) {
-	provider := util.NewBinaryProvider()
-	binaryInfo, err := provider.GetBinaryInfo(
-		util.ComponentEtcd,
-		s.Version,
-		s.Arch,
-		s.Zone,
-		s.WorkDir,
-		s.ClusterName,
-	)
-	if err != nil {
-		return "", "", "", fmt.Errorf("failed to get etcd binary info: %w", err)
+func (s *ExtractEtcdStep) getRequiredArchs(ctx runtime.ExecutionContext) (map[string]bool, error) {
+	archs := make(map[string]bool)
+	etcdHosts := ctx.GetHostsByRole("")
+	if len(etcdHosts) == 0 {
+		return nil, fmt.Errorf("no control-plane hosts found to determine required etcd architectures")
 	}
 
-	sourcePath = binaryInfo.FilePath
-	destDirName := strings.TrimSuffix(binaryInfo.FileName, ".tar.gz")
+	provider := binary.NewBinaryProvider(ctx)
+	for _, host := range etcdHosts {
+		binaryInfo, err := provider.GetBinary(binary.ComponentEtcd, host.GetArch())
+		if err != nil {
+			return nil, fmt.Errorf("error checking if etcd is needed for host %s: %w", host.GetName(), err)
+		}
+		if binaryInfo != nil {
+			archs[host.GetArch()] = true
+		}
+	}
+	return archs, nil
+}
+
+func (s *ExtractEtcdStep) getPathsForArch(ctx runtime.ExecutionContext, arch string) (sourcePath, destPath, cacheKey string, err error) {
+	provider := binary.NewBinaryProvider(ctx)
+	binaryInfo, err := provider.GetBinary(binary.ComponentEtcd, arch)
+	if err != nil {
+		return "", "", "", fmt.Errorf("failed to get etcd binary info for arch %s: %w", arch, err)
+	}
+	if binaryInfo == nil {
+		return "", "", "", fmt.Errorf("etcd is unexpectedly disabled for arch %s", arch)
+	}
+
+	sourcePath = binaryInfo.FilePath()
+	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tar.gz")
 	destPath = filepath.Join(common.DefaultExtractTmpDir, destDirName)
 	cacheKey = sourcePath
 
@@ -82,52 +89,86 @@ func (s *ExtractEtcdStep) getPaths() (sourcePath, destPath, cacheKey string, err
 func (s *ExtractEtcdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
 
-	sourcePath, destPath, cacheKey, err := s.getPaths()
+	requiredArchs, err := s.getRequiredArchs(ctx)
 	if err != nil {
 		return false, err
 	}
-
-	if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
-		return false, fmt.Errorf("source archive '%s' not found, please run download step first", sourcePath)
+	if len(requiredArchs) == 0 {
+		logger.Info("No hosts require etcd. Step is done.")
+		return true, nil
 	}
 
-	info, err := os.Stat(destPath)
-	if os.IsNotExist(err) {
-		logger.Infof("Extraction destination '%s' does not exist. Extraction is required.", destPath)
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("failed to stat destination directory '%s': %w", destPath, err)
-	}
-	if !info.IsDir() {
-		logger.Warnf("Destination '%s' exists but is not a directory. Removing and re-extracting.", destPath)
-		if err := os.RemoveAll(destPath); err != nil {
-			return false, fmt.Errorf("failed to remove invalid destination '%s': %w", destPath, err)
+	allDone := true
+	for arch := range requiredArchs {
+		sourcePath, destPath, cacheKey, err := s.getPathsForArch(ctx, arch)
+		if err != nil {
+			return false, err
 		}
-		return false, nil
+
+		if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
+			return false, fmt.Errorf("source archive '%s' for arch %s not found, ensure download step ran successfully", sourcePath, arch)
+		}
+
+		_, err = os.Stat(destPath)
+		if os.IsNotExist(err) {
+			logger.Infof("Extraction destination '%s' for arch %s does not exist. Extraction is required.", destPath, arch)
+			allDone = false
+			continue
+		}
+
+		keyFile := filepath.Join(destPath, "etcd")
+		if _, err := os.Stat(keyFile); os.IsNotExist(err) {
+			logger.Warnf("Destination directory for arch %s exists, but key file '%s' is missing. Re-extracting.", arch, keyFile)
+			allDone = false
+		} else {
+			ctx.GetTaskCache().Set(cacheKey, destPath)
+		}
 	}
 
-	keyFile := filepath.Join(destPath, "etcd")
-	if _, err := os.Stat(keyFile); os.IsNotExist(err) {
-		logger.Warnf("Destination directory '%s' exists, but key file '%s' is missing. Re-extracting.", destPath, keyFile)
-		return false, nil
+	if allDone {
+		logger.Info("All required etcd archives for all architectures already extracted and are valid.")
 	}
 
-	logger.Info("Destination directory exists and seems valid. Step is done.")
-	ctx.GetTaskCache().Set(cacheKey, destPath)
-	return true, nil
+	return allDone, nil
 }
 
 func (s *ExtractEtcdStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
-	sourcePath, destPath, cacheKey, err := s.getPaths()
+	requiredArchs, err := s.getRequiredArchs(ctx)
 	if err != nil {
 		return err
+	}
+	if len(requiredArchs) == 0 {
+		logger.Info("No hosts require etcd. Skipping extraction.")
+		return nil
 	}
 
 	if err := os.MkdirAll(common.DefaultExtractTmpDir, 0755); err != nil {
 		return fmt.Errorf("failed to create global extract directory '%s': %w", common.DefaultExtractTmpDir, err)
+	}
+
+	for arch := range requiredArchs {
+		if err := s.extractFileForArch(ctx, arch); err != nil {
+			return err
+		}
+	}
+
+	logger.Info("All required etcd archives have been extracted successfully.")
+	return nil
+}
+
+func (s *ExtractEtcdStep) extractFileForArch(ctx runtime.ExecutionContext, arch string) error {
+	logger := ctx.GetLogger()
+	sourcePath, destPath, cacheKey, err := s.getPathsForArch(ctx, arch)
+	if err != nil {
+		return err
+	}
+
+	if _, err := os.Stat(filepath.Join(destPath, "etcd")); err == nil {
+		logger.Infof("Skipping extraction for arch %s, destination already exists and is valid.", arch)
+		ctx.GetTaskCache().Set(cacheKey, destPath)
+		return nil
 	}
 
 	logger.Infof("Extracting archive '%s' to '%s'...", sourcePath, destPath)
@@ -150,7 +191,7 @@ func (s *ExtractEtcdStep) Run(ctx runtime.ExecutionContext) error {
 	)
 
 	progressFunc := func(fileName string, totalBytes int64) {
-		bar.Describe(fmt.Sprintf("Extracting: %s", fileName))
+		bar.Add64(totalBytes)
 	}
 
 	ar := helpers.NewArchiver(
@@ -159,29 +200,36 @@ func (s *ExtractEtcdStep) Run(ctx runtime.ExecutionContext) error {
 	)
 
 	if err := ar.Extract(sourcePath, destPath); err != nil {
-		bar.Clear()
-		os.RemoveAll(destPath)
+		_ = bar.Clear()
+		_ = os.RemoveAll(destPath)
 		return fmt.Errorf("failed to extract archive '%s': %w", sourcePath, err)
 	}
 
-	bar.Finish()
+	_ = bar.Finish()
+	logger.Infof("Successfully extracted archive for arch %s.", arch)
 
-	logger.Info("Successfully extracted archive.")
 	ctx.GetTaskCache().Set(cacheKey, destPath)
 	return nil
 }
 
 func (s *ExtractEtcdStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
-	_, destPath, _, err := s.getPaths()
+
+	requiredArchs, err := s.getRequiredArchs(ctx)
 	if err != nil {
-		logger.Errorf("Failed to get destination path during rollback, cannot determine directory to delete. Error: %v", err)
+		logger.Errorf("Failed to get required architectures during rollback: %v", err)
 		return nil
 	}
-	logger.Warnf("Rolling back by deleting extracted directory: %s", destPath)
-	if err := os.RemoveAll(destPath); err != nil {
-		logger.Errorf("Failed to delete directory '%s' during rollback: %v", destPath, err)
+
+	for arch := range requiredArchs {
+		_, destPath, _, err := s.getPathsForArch(ctx, arch)
+		if err != nil {
+			continue
+		}
+		logger.Warnf("Rolling back by deleting extracted directory: %s", destPath)
+		_ = os.RemoveAll(destPath)
 	}
+
 	return nil
 }
 

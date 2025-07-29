@@ -10,23 +10,26 @@ import (
 	"text/template"
 	"time"
 
+	// 引入必要的包
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/images"
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
 type GenerateHybridnetHelmArtifactsStep struct {
 	step.Base
+	Chart                *helm.HelmChart
 	RemoteValuesPath     string
-	ChartSourceDecision  *helpers.ChartSourceDecision
-	LocalPulledChartPath string
 	RemoteChartPath      string
+	LocalPulledChartPath string
 
 	ImageRegistry  string
+	ImageTag       string
 	DefaultNetwork *v1alpha1.HybridnetDefaultNetworkConfig
 	Features       *v1alpha1.HybridnetFeaturesConfig
 }
@@ -36,24 +39,42 @@ type GenerateHybridnetHelmArtifactsStepBuilder struct {
 }
 
 func NewGenerateHybridnetHelmArtifactsStepBuilder(ctx runtime.Context, instanceName string) *GenerateHybridnetHelmArtifactsStepBuilder {
-	s := &GenerateHybridnetHelmArtifactsStep{}
+	helmProvider := helm.NewHelmProvider(&ctx)
+	hybridnetChart := helmProvider.GetChart(string(common.CNITypeHybridnet))
+
+	if hybridnetChart == nil {
+		return nil
+	}
+
+	imageProvider := images.NewImageProvider(&ctx)
+	hybridnetImage := imageProvider.GetImage("hybridnet")
+
+	if hybridnetImage == nil {
+		return nil
+	}
+
+	s := &GenerateHybridnetHelmArtifactsStep{
+		Chart: hybridnetChart,
+	}
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate Hybridnet Helm artifacts", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate Hybridnet Helm artifacts (Chart: %s, Version: %s)", s.Base.Meta.Name, hybridnetChart.ChartName(), hybridnetChart.Version)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 10 * time.Minute
 
-	s.ChartSourceDecision = helpers.DecideHybridnetChartSource(ctx)
+	localChartDir := filepath.Dir(hybridnetChart.LocalPath(common.DefaultKubexmTmpDir))
+	s.LocalPulledChartPath = localChartDir
 
-	s.LocalPulledChartPath = filepath.Join(common.DefaultKubexmTmpDir, "hybridnet")
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, "hybridnet")
+	remoteDir := filepath.Join(common.DefaultUploadTmpDir, hybridnetChart.RepoName())
 	s.RemoteValuesPath = filepath.Join(remoteDir, "hybridnet-values.yaml")
 
-	clusterCfg := ctx.GetClusterConfig()
-	s.ImageRegistry = clusterCfg.Spec.Registry.MirroringAndRewriting.PrivateRegistry
+	s.ImageRegistry = hybridnetImage.FullNameWithoutTag()
+	s.ImageTag = hybridnetImage.Tag()
 
+	clusterCfg := ctx.GetClusterConfig()
 	userHybridnetCfg := clusterCfg.Spec.Network.Hybridnet
 	if userHybridnetCfg != nil {
+
 		if userHybridnetCfg.Installation != nil && userHybridnetCfg.Installation.ImageRegistry != "" {
 			s.ImageRegistry = userHybridnetCfg.Installation.ImageRegistry
 		}
@@ -92,8 +113,8 @@ func (s *GenerateHybridnetHelmArtifactsStep) Run(ctx runtime.ExecutionContext) e
 		return fmt.Errorf("failed to create local temp dir %s: %w", s.LocalPulledChartPath, err)
 	}
 
-	repoName := s.ChartSourceDecision.RepoName
-	repoURL := s.ChartSourceDecision.RepoURL
+	repoName := s.Chart.RepoName()
+	repoURL := s.Chart.RepoURL()
 
 	repoAddCmd := exec.Command(helmPath, "repo", "add", repoName, repoURL)
 	if output, err := repoAddCmd.CombinedOutput(); err != nil && !strings.Contains(string(output), "already exists") {
@@ -105,23 +126,20 @@ func (s *GenerateHybridnetHelmArtifactsStep) Run(ctx runtime.ExecutionContext) e
 		return fmt.Errorf("failed to update helm repo %s: %w", repoName, err)
 	}
 
-	chartFullName := fmt.Sprintf("%s/%s", repoName, s.ChartSourceDecision.ChartName)
-	pullArgs := []string{"pull", chartFullName, "--destination", s.LocalPulledChartPath}
-	if s.ChartSourceDecision.Version != "" {
-		pullArgs = append(pullArgs, "--version", s.ChartSourceDecision.Version)
-	}
+	chartFullName := s.Chart.FullName()
+	pullArgs := []string{"pull", chartFullName, "--destination", s.LocalPulledChartPath, "--version", s.Chart.Version}
 
-	logger.Infof("Pulling Hybridnet Helm chart with command: helm %s", strings.Join(pullArgs, " "))
+	logger.Infof("Pulling Helm chart with command: helm %s", strings.Join(pullArgs, " "))
 	pullCmd := exec.Command(helmPath, pullArgs...)
 	if output, err := pullCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to pull Hybridnet helm chart: %w, output: %s", err, string(output))
 	}
 
-	pulledFiles, _ := filepath.Glob(filepath.Join(s.LocalPulledChartPath, "*.tgz"))
-	if len(pulledFiles) == 0 {
-		return fmt.Errorf("Hybridnet helm chart .tgz file not found in %s after pull", s.LocalPulledChartPath)
+	actualLocalChartPath := s.Chart.LocalPath(common.DefaultKubexmTmpDir)
+	if _, err := os.Stat(actualLocalChartPath); os.IsNotExist(err) {
+		return fmt.Errorf("expected Hybridnet helm chart .tgz file not found at %s after pull", actualLocalChartPath)
 	}
-	actualLocalChartPath := pulledFiles[0]
+
 	s.RemoteChartPath = filepath.Join(filepath.Dir(s.RemoteValuesPath), filepath.Base(actualLocalChartPath))
 
 	logger.Info("Rendering hybridnet-values.yaml from template...")

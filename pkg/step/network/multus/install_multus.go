@@ -3,17 +3,19 @@ package multus
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
+	// 引入必要的包
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 )
 
 type InstallMultusHelmChartStep struct {
 	step.Base
+	Chart               *helm.HelmChart
 	ReleaseName         string
 	Namespace           string
 	RemoteChartPath     string
@@ -26,14 +28,24 @@ type InstallMultusHelmChartStepBuilder struct {
 }
 
 func NewInstallMultusHelmChartStepBuilder(ctx runtime.Context, instanceName string) *InstallMultusHelmChartStepBuilder {
-	s := &InstallMultusHelmChartStep{}
+	helmProvider := helm.NewHelmProvider(&ctx)
+	multusChart := helmProvider.GetChart(string(common.CNITypeMultus))
+
+	if multusChart == nil {
+		return nil
+	}
+
+	s := &InstallMultusHelmChartStep{
+		Chart: multusChart,
+	}
+
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install or upgrade Multus CNI via Helm chart", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 15 * time.Minute
 
-	s.ReleaseName = "multus"
+	s.ReleaseName = multusChart.ChartName()
 	s.Namespace = "kube-system"
 
 	clusterCfg := ctx.GetClusterConfig()
@@ -43,10 +55,12 @@ func NewInstallMultusHelmChartStepBuilder(ctx runtime.Context, instanceName stri
 		s.Namespace = clusterCfg.Spec.Network.Multus.Installation.Namespace
 	}
 
-	s.AdminKubeconfigPath = filepath.Join(ctx.GetGlobalWorkDir(), "kubeconfigs", common.AdminKubeconfigFileName)
+	s.AdminKubeconfigPath = filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
 
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, "multus")
+	remoteDir := filepath.Join(common.DefaultUploadTmpDir, multusChart.RepoName())
 	s.RemoteValuesPath = filepath.Join(remoteDir, "multus-values.yaml")
+	chartFileName := fmt.Sprintf("%s-%s.tgz", multusChart.ChartName(), multusChart.Version)
+	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)
 
 	b := new(InstallMultusHelmChartStepBuilder).Init(s)
 	return b
@@ -66,20 +80,29 @@ func (s *InstallMultusHelmChartStep) Precheck(ctx runtime.ExecutionContext) (isD
 
 	valuesExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteValuesPath)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to check for values file: %w", err)
 	}
 	if !valuesExists {
-		return false, fmt.Errorf("required Multus CNI values file not found at %s, cannot proceed", s.RemoteValuesPath)
+		return false, fmt.Errorf("required Multus CNI values file not found at precise path %s, cannot proceed", s.RemoteValuesPath)
 	}
 
-	remoteDir := filepath.Dir(s.RemoteValuesPath)
-	findCmd := fmt.Sprintf("find %s -name '*.tgz' -print -quit", remoteDir)
-	chartPath, err := runner.Run(ctx.GoContext(), conn, findCmd, s.Sudo)
-	if err != nil || strings.TrimSpace(chartPath) == "" {
-		return false, fmt.Errorf("Multus CNI Helm chart .tgz file not found in remote directory %s", remoteDir)
+	chartExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteChartPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to check for chart file: %w", err)
+	}
+	if !chartExists {
+		return false, fmt.Errorf("Multus CNI Helm chart .tgz file not found at precise path %s", s.RemoteChartPath)
 	}
 
-	logger.Info("Helm artifacts (chart and values) for Multus CNI found on remote host. Ready to install.")
+	kubeconfigExists, err := runner.Exists(ctx.GoContext(), conn, s.AdminKubeconfigPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to check for kubeconfig file: %w", err)
+	}
+	if !kubeconfigExists {
+		return false, fmt.Errorf("admin kubeconfig not found at its permanent location %s; ensure DistributeKubeconfigsStep ran successfully", s.AdminKubeconfigPath)
+	}
+
+	logger.Info("All required Multus CNI artifacts (chart, values, kubeconfig) found on remote host. Ready to install.")
 	return false, nil
 }
 
@@ -90,14 +113,6 @@ func (s *InstallMultusHelmChartStep) Run(ctx runtime.ExecutionContext) error {
 	if err != nil {
 		return err
 	}
-
-	remoteDir := filepath.Dir(s.RemoteValuesPath)
-	findCmd := fmt.Sprintf("find %s -name '*.tgz' -print -quit", remoteDir)
-	remoteChartPath, err := runner.Run(ctx.GoContext(), conn, findCmd, s.Sudo)
-	if err != nil || strings.TrimSpace(remoteChartPath) == "" {
-		return fmt.Errorf("failed to find Multus CNI Helm chart .tgz file in remote directory %s", remoteDir)
-	}
-	s.RemoteChartPath = strings.TrimSpace(remoteChartPath)
 
 	cmd := fmt.Sprintf(
 		"helm upgrade --install %s %s "+
@@ -114,7 +129,7 @@ func (s *InstallMultusHelmChartStep) Run(ctx runtime.ExecutionContext) error {
 		s.AdminKubeconfigPath,
 	)
 
-	logger.Infof("Executing remote Helm command for Multus CNI: %s", cmd)
+	logger.Infof("Executing remote Helm command: %s", cmd)
 	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
 		return fmt.Errorf("failed to install/upgrade Multus CNI Helm chart: %w\nOutput: %s", err, output)

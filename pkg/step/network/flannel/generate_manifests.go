@@ -10,27 +10,32 @@ import (
 	"text/template"
 	"time"
 
+	// 引入必要的包
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/images"
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
 type GenerateFlannelHelmArtifactsStep struct {
 	step.Base
+	Chart                *helm.HelmChart
 	RemoteValuesPath     string
-	ChartSourceDecision  *helpers.ChartSourceDecision
-	LocalPulledChartPath string
 	RemoteChartPath      string
+	LocalPulledChartPath string
 
-	Registry     string
-	PodCIDR      string
-	BackendType  string
-	BackendVXLAN *v1alpha1.FlannelVXLANConfig
-	BackendIPsec *v1alpha1.FlannelIPsecConfig
+	ImageFlannelRepo   string
+	ImageFlannelTag    string
+	ImageCNIPluginRepo string
+	ImageCNIPluginTag  string
+	PodCIDR            string
+	BackendType        string
+	BackendVXLAN       *v1alpha1.FlannelVXLANConfig
+	BackendIPsec       *v1alpha1.FlannelIPsecConfig
 }
 
 type GenerateFlannelHelmArtifactsStepBuilder struct {
@@ -38,21 +43,42 @@ type GenerateFlannelHelmArtifactsStepBuilder struct {
 }
 
 func NewGenerateFlannelHelmArtifactsStepBuilder(ctx runtime.Context, instanceName string) *GenerateFlannelHelmArtifactsStepBuilder {
-	s := &GenerateFlannelHelmArtifactsStep{}
+	helmProvider := helm.NewHelmProvider(&ctx)
+	flannelChart := helmProvider.GetChart(string(common.CNITypeFlannel))
+
+	if flannelChart == nil {
+		return nil
+	}
+
+	imageProvider := images.NewImageProvider(&ctx)
+	flannelImage := imageProvider.GetImage("flannel")
+	cniPluginImage := imageProvider.GetImage("flannel-cni-plugin")
+
+	if flannelImage == nil || cniPluginImage == nil {
+		return nil
+	}
+
+	s := &GenerateFlannelHelmArtifactsStep{
+		Chart: flannelChart,
+	}
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate Flannel Helm artifacts", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate Flannel Helm artifacts (Chart: %s, Version: %s)", s.Base.Meta.Name, flannelChart.ChartName(), flannelChart.Version)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 10 * time.Minute
 
-	s.ChartSourceDecision = helpers.DecideFlannelChartSource(ctx)
+	localChartDir := filepath.Dir(flannelChart.LocalPath(common.DefaultKubexmTmpDir))
+	s.LocalPulledChartPath = localChartDir
 
-	s.LocalPulledChartPath = filepath.Join(common.DefaultKubexmTmpDir, "flannel")
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, "flannel")
+	remoteDir := filepath.Join(common.DefaultUploadTmpDir, flannelChart.RepoName())
 	s.RemoteValuesPath = filepath.Join(remoteDir, "flannel-values.yaml")
 
+	s.ImageFlannelRepo = flannelImage.FullNameWithoutTag()
+	s.ImageFlannelTag = flannelImage.Tag()
+	s.ImageCNIPluginRepo = cniPluginImage.FullNameWithoutTag()
+	s.ImageCNIPluginTag = cniPluginImage.Tag()
+
 	clusterCfg := ctx.GetClusterConfig()
-	s.Registry = clusterCfg.Spec.Registry.MirroringAndRewriting.PrivateRegistry
 	s.PodCIDR = clusterCfg.Spec.Network.KubePodsCIDR
 
 	userFlannelCfg := clusterCfg.Spec.Network.Flannel
@@ -90,8 +116,8 @@ func (s *GenerateFlannelHelmArtifactsStep) Run(ctx runtime.ExecutionContext) err
 		return fmt.Errorf("failed to create local temp dir %s: %w", s.LocalPulledChartPath, err)
 	}
 
-	repoName := s.ChartSourceDecision.RepoName
-	repoURL := s.ChartSourceDecision.RepoURL
+	repoName := s.Chart.RepoName()
+	repoURL := s.Chart.RepoURL()
 
 	repoAddCmd := exec.Command(helmPath, "repo", "add", repoName, repoURL)
 	if output, err := repoAddCmd.CombinedOutput(); err != nil && !strings.Contains(string(output), "already exists") {
@@ -103,11 +129,8 @@ func (s *GenerateFlannelHelmArtifactsStep) Run(ctx runtime.ExecutionContext) err
 		return fmt.Errorf("failed to update helm repo %s: %w", repoName, err)
 	}
 
-	chartFullName := fmt.Sprintf("%s/%s", repoName, s.ChartSourceDecision.ChartName)
-	pullArgs := []string{"pull", chartFullName, "--destination", s.LocalPulledChartPath}
-	if s.ChartSourceDecision.Version != "" {
-		pullArgs = append(pullArgs, "--version", s.ChartSourceDecision.Version)
-	}
+	chartFullName := s.Chart.FullName()
+	pullArgs := []string{"pull", chartFullName, "--destination", s.LocalPulledChartPath, "--version", s.Chart.Version}
 
 	logger.Infof("Pulling Helm chart with command: helm %s", strings.Join(pullArgs, " "))
 	pullCmd := exec.Command(helmPath, pullArgs...)
@@ -115,11 +138,11 @@ func (s *GenerateFlannelHelmArtifactsStep) Run(ctx runtime.ExecutionContext) err
 		return fmt.Errorf("failed to pull helm chart: %w, output: %s", err, string(output))
 	}
 
-	pulledFiles, _ := filepath.Glob(filepath.Join(s.LocalPulledChartPath, "*.tgz"))
-	if len(pulledFiles) == 0 {
-		return fmt.Errorf("helm chart .tgz file not found in %s after pull", s.LocalPulledChartPath)
+	actualLocalChartPath := s.Chart.LocalPath(common.DefaultKubexmTmpDir)
+	if _, err := os.Stat(actualLocalChartPath); os.IsNotExist(err) {
+		return fmt.Errorf("expected helm chart .tgz file not found at %s after pull", actualLocalChartPath)
 	}
-	actualLocalChartPath := pulledFiles[0]
+
 	s.RemoteChartPath = filepath.Join(filepath.Dir(s.RemoteValuesPath), filepath.Base(actualLocalChartPath))
 
 	logger.Info("Rendering flannel-values.yaml from template...")

@@ -2,19 +2,23 @@ package cilium
 
 import (
 	"fmt"
+	"path/filepath"
+	"time"
+
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"path/filepath"
-	"strings"
-	"time"
+	// 引入 helm 包
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 )
 
 type InstallCiliumHelmChartStep struct {
 	step.Base
+	Chart               *helm.HelmChart
 	ReleaseName         string
 	Namespace           string
+	RemoteChartPath     string
 	RemoteValuesPath    string
 	AdminKubeconfigPath string
 }
@@ -24,19 +28,32 @@ type InstallCiliumHelmChartStepBuilder struct {
 }
 
 func NewInstallCiliumHelmChartStepBuilder(ctx runtime.Context, instanceName string) *InstallCiliumHelmChartStepBuilder {
-	s := &InstallCiliumHelmChartStep{}
+	helmProvider := helm.NewHelmProvider(&ctx)
+	ciliumChart := helmProvider.GetChart(string(common.CNITypeCilium))
+
+	if ciliumChart == nil {
+		return nil
+	}
+
+	s := &InstallCiliumHelmChartStep{
+		Chart: ciliumChart,
+	}
+
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install or upgrade Cilium via Helm chart", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 20 * time.Minute
 
-	s.ReleaseName = "cilium"
+	s.ReleaseName = ciliumChart.ChartName()
 	s.Namespace = "kube-system"
 
-	s.AdminKubeconfigPath = filepath.Join(ctx.GetGlobalWorkDir(), "kubeconfigs", common.AdminKubeconfigFileName)
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, "cilium-helm")
+	s.AdminKubeconfigPath = filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
+
+	remoteDir := filepath.Join(common.DefaultUploadTmpDir, ciliumChart.RepoName())
 	s.RemoteValuesPath = filepath.Join(remoteDir, "cilium-values.yaml")
+	chartFileName := fmt.Sprintf("%s-%s.tgz", ciliumChart.ChartName(), ciliumChart.Version)
+	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)
 
 	b := new(InstallCiliumHelmChartStepBuilder).Init(s)
 	return b
@@ -56,20 +73,29 @@ func (s *InstallCiliumHelmChartStep) Precheck(ctx runtime.ExecutionContext) (isD
 
 	valuesExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteValuesPath)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to check for values file: %w", err)
 	}
 	if !valuesExists {
-		return false, fmt.Errorf("required Cilium values file not found at %s, cannot proceed with installation", s.RemoteValuesPath)
+		return false, fmt.Errorf("required Cilium values file not found at precise path %s, cannot proceed", s.RemoteValuesPath)
 	}
 
-	remoteDir := filepath.Dir(s.RemoteValuesPath)
-	findCmd := fmt.Sprintf("find %s -name '*.tgz' -print -quit", remoteDir)
-	chartPath, err := runner.Run(ctx.GoContext(), conn, findCmd, s.Sudo)
-	if err != nil || strings.TrimSpace(chartPath) == "" {
-		return false, fmt.Errorf("Cilium Helm chart .tgz file not found in remote directory %s", remoteDir)
+	chartExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteChartPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to check for chart file: %w", err)
+	}
+	if !chartExists {
+		return false, fmt.Errorf("Cilium Helm chart .tgz file not found at precise path %s", s.RemoteChartPath)
 	}
 
-	logger.Info("Cilium Helm artifacts (chart and values) found on remote host. Ready to install.")
+	kubeconfigExists, err := runner.Exists(ctx.GoContext(), conn, s.AdminKubeconfigPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to check for kubeconfig file: %w", err)
+	}
+	if !kubeconfigExists {
+		return false, fmt.Errorf("admin kubeconfig not found at its permanent location %s; ensure DistributeKubeconfigsStep ran successfully", s.AdminKubeconfigPath)
+	}
+
+	logger.Info("All required Cilium artifacts (chart, values, kubeconfig) found on remote host. Ready to install.")
 	return false, nil
 }
 
@@ -81,14 +107,6 @@ func (s *InstallCiliumHelmChartStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	remoteDir := filepath.Dir(s.RemoteValuesPath)
-	findCmd := fmt.Sprintf("find %s -name '*.tgz' -print -quit", remoteDir)
-	remoteChartPath, err := runner.Run(ctx.GoContext(), conn, findCmd, s.Sudo)
-	if err != nil || strings.TrimSpace(remoteChartPath) == "" {
-		return fmt.Errorf("failed to find Cilium Helm chart .tgz file in remote directory %s", remoteDir)
-	}
-	remoteChartPath = strings.TrimSpace(remoteChartPath)
-
 	cmd := fmt.Sprintf(
 		"helm upgrade --install %s %s "+
 			"--namespace %s "+
@@ -98,7 +116,7 @@ func (s *InstallCiliumHelmChartStep) Run(ctx runtime.ExecutionContext) error {
 			"--wait "+
 			"--atomic",
 		s.ReleaseName,
-		remoteChartPath,
+		s.RemoteChartPath,
 		s.Namespace,
 		s.RemoteValuesPath,
 		s.AdminKubeconfigPath,
