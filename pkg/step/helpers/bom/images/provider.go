@@ -107,7 +107,7 @@ func (p *ImageProvider) isImageEnabled(name string) bool {
 	case "nginx":
 		return cfg.ControlPlaneEndpoint.InternalLoadBalancerType == common.InternalLBTypeNginx
 	case "kubevip":
-		return cfg.ControlPlaneEndpoint.InternalLoadBalancerType == common.InternalLBTypeKubeVIP
+		return cfg.ControlPlaneEndpoint.ExternalLoadBalancerType == common.ExternalLBTypeKubeVIP
 
 	// Addon Images
 	case "kata-deploy":

@@ -148,7 +148,7 @@ func SetDefaults_ClusterSpec(cluster *Cluster) {
 	if cluster.Spec.Global == nil {
 		cluster.Spec.Global = &GlobalSpec{}
 	}
-	SetDefaults_GlobalSpec(cluster.Spec.Global)
+	SetDefaults_GlobalSpec(cluster.Spec.Global, cluster.Name)
 
 	for i := range cluster.Spec.Hosts {
 		SetDefaults_HostSpec(&cluster.Spec.Hosts[i], cluster)
@@ -198,7 +198,7 @@ func SetDefaults_ClusterSpec(cluster *Cluster) {
 	SetDefaults_Preflight(cluster.Spec.Preflight)
 }
 
-func SetDefaults_GlobalSpec(spec *GlobalSpec) {
+func SetDefaults_GlobalSpec(spec *GlobalSpec, clusterName string) {
 	if spec.User == "" {
 		spec.User = common.DefaultUser
 	}
@@ -209,7 +209,7 @@ func SetDefaults_GlobalSpec(spec *GlobalSpec) {
 		spec.ConnectionTimeout = common.DefaultTimeout
 	}
 	if spec.WorkDir == "" {
-		workDir, _ := helpers.GenerateWorkDir()
+		workDir, _ := helpers.GenerateWorkDir(clusterName)
 		spec.WorkDir = workDir
 	}
 }

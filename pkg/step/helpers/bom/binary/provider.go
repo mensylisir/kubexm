@@ -186,7 +186,7 @@ func (p *BinaryProvider) isBinaryEnabled(name string) (bool, error) {
 		if cfg.Etcd == nil {
 			return false, fmt.Errorf("etcd configuration is missing")
 		}
-		return strings.EqualFold(cfg.Etcd.Type, string(common.EtcdDeploymentTypeKubeadm)), nil
+		return strings.EqualFold(cfg.Etcd.Type, string(common.EtcdDeploymentTypeKubexm)), nil
 
 	case ComponentKubeProxy:
 		return cfg.Kubernetes.KubeProxy == nil || cfg.Kubernetes.KubeProxy.Enable == nil || *cfg.Kubernetes.KubeProxy.Enable, nil

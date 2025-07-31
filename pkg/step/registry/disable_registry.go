@@ -50,7 +50,6 @@ func (s *DisableRegistryServiceStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 	if _, err := runner.Run(ctx.GoContext(), conn, "systemctl disable registry.service", s.Sudo); err != nil {
-		// 忽略服务不存在的错误
 	}
 	return nil
 }

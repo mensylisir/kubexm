@@ -13,13 +13,13 @@ type ExternalLoadBalancerConfig struct {
 	Keepalived                *KeepalivedConfig `json:"keepalived,omitempty" yaml:"keepalived,omitempty"`
 	HAProxy                   *HAProxyConfig    `json:"haproxy,omitempty" yaml:"haproxy,omitempty"`
 	NginxLB                   *NginxLBConfig    `json:"nginxLB,omitempty" yaml:"nginxLB,omitempty"`
+	KubeVIP                   *KubeVIPConfig    `json:"kubevip,omitempty" yaml:"kubevip,omitempty"`
 	LoadBalancerHostGroupName *string           `json:"loadBalancerHostGroupName,omitempty" yaml:"loadBalancerHostGroupName,omitempty"`
 }
 
 type InternalLoadBalancerConfig struct {
 	Enabled           *bool          `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 	Type              string         `json:"type,omitempty" yaml:"type,omitempty"`
-	KubeVIP           *KubeVIPConfig `json:"kubevip,omitempty" yaml:"kubevip,omitempty"`
 	WorkerNodeHAProxy *HAProxyConfig `json:"workerNodeHAProxy,omitempty" yaml:"workerNodeHAProxy,omitempty"`
 	WorkerNodeNginxLB *NginxLBConfig `json:"workerNodeNginxLB,omitempty" yaml:"workerNodeNginxLB,omitempty"` // Reuses HAProxyConfig
 }
@@ -80,7 +80,13 @@ func SetDefaults_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig) {
 				cfg.NginxLB = &NginxLBConfig{}
 			}
 			SetDefaults_NginxLBConfig(cfg.NginxLB)
+		case string(common.ExternalLBTypeKubeVIP):
+			if cfg.KubeVIP == nil {
+				cfg.KubeVIP = &KubeVIPConfig{}
+			}
+			SetDefaults_KubeVIPConfig(cfg.KubeVIP)
 		}
+
 	}
 }
 
@@ -94,11 +100,6 @@ func SetDefaults_InternalLoadBalancerConfig(cfg *InternalLoadBalancerConfig) {
 
 	if *cfg.Enabled {
 		switch cfg.Type {
-		case string(common.InternalLBTypeKubeVIP):
-			if cfg.KubeVIP == nil {
-				cfg.KubeVIP = &KubeVIPConfig{}
-			}
-			SetDefaults_KubeVIPConfig(cfg.KubeVIP)
 		case string(common.InternalLBTypeHAProxy):
 			if cfg.WorkerNodeHAProxy == nil {
 				cfg.WorkerNodeHAProxy = &HAProxyConfig{}
@@ -185,6 +186,12 @@ func Validate_ExternalLoadBalancerConfig(cfg *ExternalLoadBalancerConfig, verrs 
 		if cfg.HAProxy != nil {
 			verrs.Add(pathPrefix+".haproxy", "must not be configured for the selected type")
 		}
+	case string(common.ExternalLBTypeKubeVIP):
+		if cfg.KubeVIP == nil {
+			verrs.Add(pathPrefix+".kubevip", "must be configured for the selected type")
+		} else {
+			Validate_KubeVIPConfig(cfg.KubeVIP, verrs, pathPrefix+".kubevip")
+		}
 	case string(common.ExternalLBTypeExternal):
 		if cfg.Keepalived != nil || cfg.HAProxy != nil || cfg.NginxLB != nil {
 			verrs.Add(pathPrefix, "no specific LB configurations (keepalived, haproxy, nginxLB) should be provided when type is 'UserProvided'")
@@ -207,34 +214,18 @@ func Validate_InternalLoadBalancerConfig(cfg *InternalLoadBalancerConfig, verrs 
 		verrs.Add(pathPrefix+".type", fmt.Sprintf("invalid internal LB type '%s', must be one of %v", cfg.Type, common.ValidInternalLoadbalancerTypes))
 		return
 	}
-
 	switch cfg.Type {
-	case string(common.InternalLBTypeKubeVIP):
-		if cfg.KubeVIP == nil {
-			verrs.Add(pathPrefix+".kubevip", "must be configured for the selected type")
-		} else {
-			Validate_KubeVIPConfig(cfg.KubeVIP, verrs, pathPrefix+".kubevip")
-		}
-		if cfg.WorkerNodeHAProxy != nil || cfg.WorkerNodeNginxLB != nil {
-			verrs.Add(pathPrefix, "only the 'kubevip' configuration should be provided for the selected type")
-		}
 	case string(common.InternalLBTypeHAProxy):
 		if cfg.WorkerNodeHAProxy == nil {
 			verrs.Add(pathPrefix+".workerNodeHAProxy", "must be configured for the selected type")
 		} else {
 			Validate_HAProxyConfig(cfg.WorkerNodeHAProxy, verrs, pathPrefix+".workerNodeHAProxy")
 		}
-		if cfg.KubeVIP != nil || cfg.WorkerNodeNginxLB != nil {
-			verrs.Add(pathPrefix, "only the 'workerNodeHAProxy' configuration should be provided for the selected type")
-		}
 	case string(common.InternalLBTypeNginx):
 		if cfg.WorkerNodeNginxLB == nil {
 			verrs.Add(pathPrefix+".workerNodeNginxLB", "must be configured for the selected type")
 		} else {
 			Validate_NginxLBConfig(cfg.WorkerNodeNginxLB, verrs, pathPrefix+".workerNodeNginxLB")
-		}
-		if cfg.KubeVIP != nil || cfg.WorkerNodeHAProxy != nil {
-			verrs.Add(pathPrefix, "only the 'workerNodeNginxLB' configuration should be provided for the selected type")
 		}
 	}
 }

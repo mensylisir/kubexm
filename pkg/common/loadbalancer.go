@@ -3,7 +3,6 @@ package common
 type InternalLoadBalancerType string
 
 const (
-	InternalLBTypeKubeVIP InternalLoadBalancerType = "kube-vip"
 	InternalLBTypeHAProxy InternalLoadBalancerType = "haproxy"
 	InternalLBTypeNginx   InternalLoadBalancerType = "nginx"
 )
@@ -11,6 +10,7 @@ const (
 type ExternalLoadBalancerType string
 
 const (
+	ExternalLBTypeKubeVIP  ExternalLoadBalancerType = "kube-vip"
 	ExternalLBTypeKubexmKH ExternalLoadBalancerType = "kubexm-kh"
 	ExternalLBTypeKubexmKN ExternalLoadBalancerType = "kubexm-kn"
 	ExternalLBTypeExternal ExternalLoadBalancerType = "external"
