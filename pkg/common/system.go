@@ -19,6 +19,7 @@ const (
 	DefaultBinPath                  = "/usr/local/bin"
 	DefaultConfigPath               = "/etc/kubexm"
 	DefaultLogPath                  = "/var/log/kubexm"
+	SecuriryLimitsDefaultFile       = "/etc/security/limits.d/99-kubexm.conf"
 )
 
 const (
@@ -135,7 +136,7 @@ var (
 	ValidCiliumIPAMModes                = []string{CiliumIPAMClusterPoolsMode, CiliumIPAMKubernetesMode}
 	ValidCiliumKPRModes                 = []string{CiliumKPRProbeModes, CiliumKPRStrictModes, CiliumKPRDisabledModes}
 	ValidCiliumIdentModes               = []string{CiliumIdentCrdModes, CiliumIdentKvstoreModes}
-	ValidInternalLoadbalancerTypes      = []string{string(InternalLBTypeKubeVIP), string(InternalLBTypeHAProxy), string(InternalLBTypeNginx)}
+	ValidInternalLoadbalancerTypes      = []string{string(InternalLBTypeHAProxy), string(InternalLBTypeNginx)}
 	ValidKubeVIPModes                   = []string{KubeVIPModeARP, KubeVIPModeBGP}
 	ValidNginxLBModes                   = []string{NginxLBTCPModes, NginxLBHTTPModes}
 	ValidNginxLBAlgorithms              = []string{NginxLBRoundRobin, NginxLBLeastConn, NginxLBIPHash, NginxLBHash, NginxLBRandom, NginxLBLeastTime}
@@ -181,12 +182,12 @@ var (
 	}
 
 	SupportedInternalLoadBalancerTypes = []string{
-		string(InternalLBTypeKubeVIP),
 		string(InternalLBTypeHAProxy),
 		string(InternalLBTypeNginx),
 	}
 
 	SupportedExternalLoadBalancerTypes = []string{
+		string(ExternalLBTypeKubeVIP),
 		string(ExternalLBTypeKubexmKH),
 		string(ExternalLBTypeKubexmKN),
 		string(ExternalLBTypeExternal),

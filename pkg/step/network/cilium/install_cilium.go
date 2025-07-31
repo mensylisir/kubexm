@@ -50,7 +50,7 @@ func NewInstallCiliumHelmChartStepBuilder(ctx runtime.Context, instanceName stri
 
 	s.AdminKubeconfigPath = filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
 
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, ciliumChart.RepoName())
+	remoteDir := filepath.Join(common.DefaultUploadTmpDir, ciliumChart.RepoName(), ciliumChart.ChartName()+"-"+ciliumChart.Version)
 	s.RemoteValuesPath = filepath.Join(remoteDir, "cilium-values.yaml")
 	chartFileName := fmt.Sprintf("%s-%s.tgz", ciliumChart.ChartName(), ciliumChart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)

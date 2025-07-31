@@ -59,8 +59,7 @@ func (s *RemoveRegistryDataStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	logger.Warnf("DANGER: Removing all registry data from '%s'. This will delete all pushed images.", s.DataRoot)
-	// 在实际产品中，这里可能需要一个额外的用户确认步骤
-	time.Sleep(5 * time.Second) // 给用户一个取消的机会
+	time.Sleep(5 * time.Second)
 
 	return runner.Remove(ctx.GoContext(), conn, s.DataRoot, s.Sudo, true)
 }
