@@ -4,136 +4,92 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // For potential future use e.g. ImagePullPolicy
 	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/plan"
+	commonstep "github.com/mensylisir/kubexm/pkg/step/common"
 	"github.com/mensylisir/kubexm/pkg/task"
 )
 
 // PullImagesTask pre-pulls necessary container images on target nodes.
 type PullImagesTask struct {
 	task.BaseTask
-	// ImageRegistryOverride string // e.g., my.private.registry/
-	// Images []string // List of image names (e.g., "kube-apiserver:v1.23.5")
-	// These would come from ClusterConfig or be hardcoded defaults for a K8s version.
 }
 
 // NewPullImagesTask creates a new PullImagesTask.
-func NewPullImagesTask(runOnRoles []string) task.Task {
+func NewPullImagesTask() task.Task {
 	return &PullImagesTask{
 		BaseTask: task.NewBaseTask(
 			"PrePullKubernetesImages",
 			"Pre-pulls core Kubernetes container images.",
-			runOnRoles,
-			nil,   // HostFilter
-			false, // IgnoreError
+			[]string{common.RoleMaster, common.RoleWorker},
+			nil,
+			false,
 		),
 	}
 }
 
-func (t *PullImagesTask) IsRequired(ctx task.TaskContext) (bool, error) {
-	logger := ctx.GetLogger().With("task", t.Name())
-	// Could be optional if images are already available (e.g. air-gapped with preloaded images)
-	// or if a specific image pull policy is defined in ClusterConfig.
-	// For now, assume it's generally required if target roles are specified.
-	if len(t.BaseTask.RunOnRoles) == 0 {
-		logger.Info("No target roles specified for PrePullKubernetesImages task, skipping.")
-		return false, nil
-	}
-	// Example:
-	// clusterCfg := ctx.GetClusterConfig()
-	// if clusterCfg.Spec.Kubernetes != nil && clusterCfg.Spec.Kubernetes.ImagePullPolicy == "Never" { // Assuming such a field
-	//    logger.Info("ImagePullPolicy is Never, skipping image pre-pull.")
-	//    return false, nil
-	// }
-	return true, nil
-}
-
 func (t *PullImagesTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("task", t.Name())
-	taskFragment := task.NewExecutionFragment(t.Name())
+	fragment := task.NewExecutionFragment(t.Name())
 
 	clusterCfg := ctx.GetClusterConfig()
-	if clusterCfg.Spec.Kubernetes == nil || clusterCfg.Spec.Kubernetes.Version == "" {
-		return nil, fmt.Errorf("Kubernetes version not specified in configuration for task %s", t.Name())
-	}
 	k8sVersion := clusterCfg.Spec.Kubernetes.Version
+	if k8sVersion == "" {
+		return nil, fmt.Errorf("kubernetes version is not specified in the cluster configuration")
+	}
 
-	targetHosts, err := ctx.GetHostsByRole(t.BaseTask.RunOnRoles...)
+	// This list should be managed by the BOM in a real scenario.
+	coreImages := []string{
+		fmt.Sprintf("kube-apiserver:%s", k8sVersion),
+		fmt.Sprintf("kube-controller-manager:%s", k8sVersion),
+		fmt.Sprintf("kube-scheduler:%s", k8sVersion),
+		fmt.Sprintf("kube-proxy:%s", k8sVersion),
+		"pause:3.6", // This version is often fixed for a range of k8s versions.
+		fmt.Sprintf("etcd:%s", "3.5.9-0"), // Example version
+		"coredns/coredns:v1.9.3", // Example version
+	}
+
+	// The image registry (e.g., registry.k8s.io) should be prepended.
+	imageRepo := common.DefaultImageRegistry
+	if clusterCfg.Spec.Registry != nil && clusterCfg.Spec.Registry.Mirrors != nil {
+		// A more complex logic would be needed to handle mirrors, rewrites, etc.
+		// For now, we assume a single override.
+		if len(clusterCfg.Spec.Registry.Mirrors) > 0 {
+			imageRepo = clusterCfg.Spec.Registry.Mirrors[0]
+		}
+	}
+
+	targetHosts, err := ctx.GetHostsByRole(t.GetRunOnRoles()...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get target hosts for task %s: %w", t.Name(), err)
-	}
-	if len(targetHosts) == 0 {
-		logger.Info("No target hosts found for roles, skipping image pre-pull.", "roles", t.BaseTask.RunOnRoles)
-		return task.NewEmptyFragment(), nil
+		return nil, err
 	}
 
-	// Determine core images and their versions/tags.
-	// This should ideally come from a centralized place that maps K8s version to component image versions.
-	// For example, using util.GetCoreImageSet(k8sVersion, clusterCfg.Spec.Etcd.Version, clusterCfg.Spec.DNS.CoreDNS.Version)
-	// For now, using placeholder image list.
-	// TODO: Replace with dynamic image list based on k8sVersion and component versions.
-	coreImages := []struct{ Name, Version string }{
-		{Name: common.ImageKubeAPIServer, Version: k8sVersion}, // Assuming common.ImageKubeAPIServer = "kube-apiserver"
-		{Name: common.ImageKubeControllerManager, Version: k8sVersion},
-		{Name: common.ImageKubeScheduler, Version: k8sVersion},
-		{Name: common.ImageKubeProxy, Version: k8sVersion},
-		{Name: common.ImagePause, Version: common.DefaultPauseVersion},     // Pause version might be different
-		{Name: common.ImageEtcd, Version: clusterCfg.Spec.Etcd.Version},    // Use configured Etcd version
-		{Name: common.ImageCoreDNS, Version: common.DefaultCoreDNSVersion}, // Use default or configured CoreDNS version
-	}
-	if clusterCfg.Spec.Etcd.Version == "" { // Fallback if Etcd version not in spec
-		coreImages[5].Version = common.DefaultEtcdVersion // Use general default
-	}
-
-	registryCfg := clusterCfg.Spec.Registry // Can be nil
-
+	var allPullNodes []plan.NodeID
 	for _, host := range targetHosts {
-		hostArch := host.GetArch()
-		if hostArch == "" {
-			cn, _ := ctx.GetControlNode()
-			facts, _ := ctx.GetHostFacts(cn)
-			if facts != nil && facts.OS != nil {
-				hostArch = facts.OS.Arch
-			} else {
-				hostArch = "amd64"
-			}
-		}
+		for _, imageName := range coreImages {
+			fullImageName := fmt.Sprintf("%s/%s", imageRepo, imageName)
 
-		for _, imgSpec := range coreImages {
-			// RemoteImageHandle.getFullImageName will handle registry and namespace overrides using registryCfg.
-			// Arch might be part of the image name/tag for some registries, or not used if multi-arch manifest.
-			// For now, pass arch to the handle.
-			imageHandle := resource.NewRemoteImageHandle(
-				imgSpec.Name,
-				strings.TrimPrefix(imgSpec.Version, "v"), // Ensure version doesn't have 'v' for tag
-				hostArch,                                 // Pass host arch; handle might use it or registry might be multi-arch
-				"",                                       // No specific registry override at handle level, getFullImageName uses global from registryCfg
-				"",                                       // No specific namespace override at handle level
-				[]string{host.GetName()},                 // Target only this host for the steps generated by this handle instance
+			pullStep := commonstep.NewPullImageStep(
+				fmt.Sprintf("Pull-%s-on-%s", strings.ReplaceAll(imageName, ":", "-"), host.GetName()),
+				fullImageName,
+				5, // retries
+				true,
 			)
-
-			// EnsurePlan for RemoteImageHandle creates steps to pull the image on the target host(s)
-			// specified in its own TargetRoles (which we set to just the current host here).
-			imagePullFragment, err := imageHandle.EnsurePlan(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("failed to plan image pull for %s on host %s: %w", imgSpec.Name, host.GetName(), err)
-			}
-			if err := taskFragment.MergeFragment(imagePullFragment); err != nil {
-				return nil, fmt.Errorf("failed to merge image pull fragment for %s on host %s: %w", imgSpec.Name, host.GetName(), err)
-			}
-			// All image pulls on a single host can be parallel, and all pulls across hosts are also parallel.
-			// So, all entry nodes from these imagePullFragments become entry nodes for the task fragment,
-			// and all exit nodes become exit nodes.
+			pullNodeID, _ := fragment.AddNode(&plan.ExecutionNode{
+				Name:  pullStep.Meta().Name,
+				Step:  pullStep,
+				Hosts: []connector.Host{host},
+			})
+			allPullNodes = append(allPullNodes, pullNodeID)
 		}
 	}
 
-	taskFragment.CalculateEntryAndExitNodes()
-	if taskFragment.IsEmpty() {
-		logger.Info("PrePullKubernetesImagesTask planned no executable nodes.")
-	} else {
-		logger.Info("PrePullKubernetesImagesTask planning complete.", "entryNodes", taskFragment.EntryNodes, "exitNodes", taskFragment.ExitNodes)
-	}
-	return taskFragment, nil
+	// All pulls can happen in parallel, so they are all both entry and exit nodes.
+	fragment.EntryNodes = allPullNodes
+	fragment.ExitNodes = allPullNodes
+
+	logger.Info("Kubernetes core images pull task planning complete.")
+	return fragment, nil
 }
 
 var _ task.Task = (*PullImagesTask)(nil)
