@@ -1,0 +1,40 @@
+# Default values for longhorn.
+
+# Longhorn images. The repository part will be overridden by the private registry.
+longhornManager:
+  image:
+    repository: {{.ImageRegistry}}/longhorn-manager
+    tag: "{{.ImageTag}}"
+longhornEngine:
+  image:
+    repository: {{.ImageRegistry}}/longhorn-engine
+    tag: "{{.ImageTag}}"
+longhornUi:
+  image:
+    repository: {{.ImageRegistry}}/longhorn-ui
+    tag: "{{.ImageTag}}"
+longhornInstanceManaager:
+  image:
+    repository: {{.ImageRegistry}}/longhorn-instance-manager
+    tag: "{{.InstanceManagerImageTag}}"
+
+# Default settings
+persistence:
+  # Make Longhorn the default storage class
+  defaultClass: true
+
+# Private registry settings
+privateRegistry:
+  # The registry URL to pull images from.
+  # This is a more direct way to configure it in Longhorn's values.
+  registryUrl: "{{.ImageRegistry}}"
+  # A secret containing credentials for the private registry.
+  # registrySecret: "my-registry-secret"
+
+# Ingress configuration for the Longhorn UI
+# ingress:
+#   enabled: true
+#   host: longhorn.example.com
+#   # ingressClassName: "nginx"
+#   # annotations:
+#   #   some-annotation: value

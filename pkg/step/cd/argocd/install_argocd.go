@@ -1,11 +1,10 @@
-package kubeovn
+package argocd
 
 import (
 	"fmt"
 	"path/filepath"
 	"time"
 
-	// 引入必要的包
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
@@ -13,7 +12,8 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 )
 
-type InstallKubeOvnHelmChartStep struct {
+// InstallArgoCDHelmChartStep is a step to install the Argo CD Helm chart.
+type InstallArgoCDHelmChartStep struct {
 	step.Base
 	Chart               *helm.HelmChart
 	ReleaseName         string
@@ -23,47 +23,50 @@ type InstallKubeOvnHelmChartStep struct {
 	AdminKubeconfigPath string
 }
 
-type InstallKubeOvnHelmChartStepBuilder struct {
-	step.Builder[InstallKubeOvnHelmChartStepBuilder, *InstallKubeOvnHelmChartStep]
+// InstallArgoCDHelmChartStepBuilder is used to build instances.
+type InstallArgoCDHelmChartStepBuilder struct {
+	step.Builder[InstallArgoCDHelmChartStepBuilder, *InstallArgoCDHelmChartStep]
 }
 
-func NewInstallKubeOvnHelmChartStepBuilder(ctx runtime.Context, instanceName string) *InstallKubeOvnHelmChartStepBuilder {
+// NewInstallArgoCDHelmChartStepBuilder is the constructor.
+func NewInstallArgoCDHelmChartStepBuilder(ctx runtime.Context, instanceName string) *InstallArgoCDHelmChartStepBuilder {
 	helmProvider := helm.NewHelmProvider(&ctx)
-	kubeovnChart := helmProvider.GetChart(string(common.CNITypeKubeOvn))
+	chart := helmProvider.GetChart("argocd")
 
-	if kubeovnChart == nil {
+	if chart == nil {
+		// TODO: Add a check for whether argocd is enabled
 		return nil
 	}
 
-	s := &InstallKubeOvnHelmChartStep{
-		Chart: kubeovnChart,
+	s := &InstallArgoCDHelmChartStep{
+		Chart: chart,
 	}
 
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install or upgrade Kube-OVN via Helm chart", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install or upgrade Argo CD via Helm chart", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
-	s.Base.Timeout = 25 * time.Minute
+	s.Base.Timeout = 15 * time.Minute
 
-	s.ReleaseName = kubeovnChart.ChartName()
-	s.Namespace = "kube-system"
+	s.ReleaseName = "argocd"
+	s.Namespace = "argocd"
 
 	s.AdminKubeconfigPath = filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
 
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, kubeovnChart.RepoName(), kubeovnChart.ChartName()+"-"+kubeovnChart.Version)
-	s.RemoteValuesPath = filepath.Join(remoteDir, "kubeovn-values.yaml")
-	chartFileName := fmt.Sprintf("%s-%s.tgz", kubeovnChart.ChartName(), kubeovnChart.Version)
+	remoteDir := filepath.Join(common.DefaultUploadTmpDir, chart.RepoName(), chart.ChartName()+"-"+chart.Version)
+	s.RemoteValuesPath = filepath.Join(remoteDir, "argocd-values.yaml")
+	chartFileName := fmt.Sprintf("%s-%s.tgz", chart.ChartName(), chart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)
 
-	b := new(InstallKubeOvnHelmChartStepBuilder).Init(s)
+	b := new(InstallArgoCDHelmChartStepBuilder).Init(s)
 	return b
 }
 
-func (s *InstallKubeOvnHelmChartStep) Meta() *spec.StepMeta {
+func (s *InstallArgoCDHelmChartStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *InstallKubeOvnHelmChartStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+func (s *InstallArgoCDHelmChartStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
@@ -76,7 +79,7 @@ func (s *InstallKubeOvnHelmChartStep) Precheck(ctx runtime.ExecutionContext) (is
 		return false, fmt.Errorf("failed to check for values file: %w", err)
 	}
 	if !valuesExists {
-		return false, fmt.Errorf("required Kube-OVN values file not found at precise path %s, cannot proceed", s.RemoteValuesPath)
+		return false, fmt.Errorf("required Argo CD values file not found at path %s", s.RemoteValuesPath)
 	}
 
 	chartExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteChartPath)
@@ -84,7 +87,7 @@ func (s *InstallKubeOvnHelmChartStep) Precheck(ctx runtime.ExecutionContext) (is
 		return false, fmt.Errorf("failed to check for chart file: %w", err)
 	}
 	if !chartExists {
-		return false, fmt.Errorf("Kube-OVN Helm chart .tgz file not found at precise path %s", s.RemoteChartPath)
+		return false, fmt.Errorf("Argo CD Helm chart .tgz file not found at path %s", s.RemoteChartPath)
 	}
 
 	kubeconfigExists, err := runner.Exists(ctx.GoContext(), conn, s.AdminKubeconfigPath)
@@ -92,14 +95,14 @@ func (s *InstallKubeOvnHelmChartStep) Precheck(ctx runtime.ExecutionContext) (is
 		return false, fmt.Errorf("failed to check for kubeconfig file: %w", err)
 	}
 	if !kubeconfigExists {
-		return false, fmt.Errorf("admin kubeconfig not found at its permanent location %s; ensure DistributeKubeconfigsStep ran successfully", s.AdminKubeconfigPath)
+		return false, fmt.Errorf("admin kubeconfig not found at %s", s.AdminKubeconfigPath)
 	}
 
-	logger.Info("All required Kube-OVN artifacts (chart, values, kubeconfig) found on remote host. Ready to install.")
+	logger.Info("All required Argo CD artifacts found on remote host.")
 	return false, nil
 }
 
-func (s *InstallKubeOvnHelmChartStep) Run(ctx runtime.ExecutionContext) error {
+func (s *InstallArgoCDHelmChartStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
@@ -125,15 +128,15 @@ func (s *InstallKubeOvnHelmChartStep) Run(ctx runtime.ExecutionContext) error {
 	logger.Infof("Executing remote Helm command: %s", cmd)
 	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
-		return fmt.Errorf("failed to install/upgrade Kube-OVN Helm chart: %w\nOutput: %s", err, output)
+		return fmt.Errorf("failed to install/upgrade Argo CD Helm chart: %w\nOutput: %s", err, output)
 	}
 
-	logger.Info("Kube-OVN Helm chart installed/upgraded successfully.")
+	logger.Info("Argo CD Helm chart installed/upgraded successfully.")
 	logger.Debugf("Helm command output:\n%s", output)
 	return nil
 }
 
-func (s *InstallKubeOvnHelmChartStep) Rollback(ctx runtime.ExecutionContext) error {
+func (s *InstallArgoCDHelmChartStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
@@ -151,12 +154,12 @@ func (s *InstallKubeOvnHelmChartStep) Rollback(ctx runtime.ExecutionContext) err
 
 	logger.Warnf("Rolling back by uninstalling Helm release '%s' from namespace '%s'...", s.ReleaseName, s.Namespace)
 	if _, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo); err != nil {
-		logger.Errorf("Failed to uninstall Kube-OVN Helm release (this may be expected if installation failed): %v", err)
+		logger.Errorf("Failed to uninstall Argo CD Helm release: %v", err)
 	} else {
-		logger.Info("Successfully executed Helm uninstall command for Kube-OVN.")
+		logger.Info("Successfully executed Helm uninstall command for Argo CD.")
 	}
 
 	return nil
 }
 
-var _ step.Step = (*InstallKubeOvnHelmChartStep)(nil)
+var _ step.Step = (*InstallArgoCDHelmChartStep)(nil)

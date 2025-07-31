@@ -57,7 +57,7 @@ func NewInstallMultusHelmChartStepBuilder(ctx runtime.Context, instanceName stri
 
 	s.AdminKubeconfigPath = filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
 
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, multusChart.RepoName())
+	remoteDir := filepath.Join(common.DefaultUploadTmpDir, multusChart.RepoName(), multusChart.ChartName()+"-"+multusChart.Version)
 	s.RemoteValuesPath = filepath.Join(remoteDir, "multus-values.yaml")
 	chartFileName := fmt.Sprintf("%s-%s.tgz", multusChart.ChartName(), multusChart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)

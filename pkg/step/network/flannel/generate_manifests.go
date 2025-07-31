@@ -4,13 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"text/template"
 	"time"
 
-	// 引入必要的包
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -21,13 +18,10 @@ import (
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
-type GenerateFlannelHelmArtifactsStep struct {
+// GenerateFlannelValuesStep is responsible for generating the Helm values file for Flannel based on the cluster configuration.
+// This step runs on the control plane, not interacting with any remote hosts.
+type GenerateFlannelValuesStep struct {
 	step.Base
-	Chart                *helm.HelmChart
-	RemoteValuesPath     string
-	RemoteChartPath      string
-	LocalPulledChartPath string
-
 	ImageFlannelRepo   string
 	ImageFlannelTag    string
 	ImageCNIPluginRepo string
@@ -38,40 +32,29 @@ type GenerateFlannelHelmArtifactsStep struct {
 	BackendIPsec       *v1alpha1.FlannelIPsecConfig
 }
 
-type GenerateFlannelHelmArtifactsStepBuilder struct {
-	step.Builder[GenerateFlannelHelmArtifactsStepBuilder, *GenerateFlannelHelmArtifactsStep]
+// GenerateFlannelValuesStepBuilder is used to build instances.
+type GenerateFlannelValuesStepBuilder struct {
+	step.Builder[GenerateFlannelValuesStepBuilder, *GenerateFlannelValuesStep]
 }
 
-func NewGenerateFlannelHelmArtifactsStepBuilder(ctx runtime.Context, instanceName string) *GenerateFlannelHelmArtifactsStepBuilder {
-	helmProvider := helm.NewHelmProvider(&ctx)
-	flannelChart := helmProvider.GetChart(string(common.CNITypeFlannel))
-
-	if flannelChart == nil {
-		return nil
-	}
-
+func NewGenerateFlannelValuesStepBuilder(ctx runtime.Context, instanceName string) *GenerateFlannelValuesStepBuilder {
 	imageProvider := images.NewImageProvider(&ctx)
 	flannelImage := imageProvider.GetImage("flannel")
 	cniPluginImage := imageProvider.GetImage("flannel-cni-plugin")
 
 	if flannelImage == nil || cniPluginImage == nil {
+		if ctx.GetClusterConfig().Spec.Network.Plugin == string(common.CNITypeFlannel) {
+			fmt.Fprintf(os.Stderr, "Error: Flannel is enabled but 'flannel' or 'flannel-cni-plugin' image is not found in BOM for K8s version %s\n", ctx.GetClusterConfig().Spec.Kubernetes.Version)
+		}
 		return nil
 	}
 
-	s := &GenerateFlannelHelmArtifactsStep{
-		Chart: flannelChart,
-	}
+	s := &GenerateFlannelValuesStep{}
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate Flannel Helm artifacts (Chart: %s, Version: %s)", s.Base.Meta.Name, flannelChart.ChartName(), flannelChart.Version)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate Flannel Helm values file from configuration", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
-	s.Base.Timeout = 10 * time.Minute
-
-	localChartDir := filepath.Dir(flannelChart.LocalPath(common.DefaultKubexmTmpDir))
-	s.LocalPulledChartPath = localChartDir
-
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, flannelChart.RepoName())
-	s.RemoteValuesPath = filepath.Join(remoteDir, "flannel-values.yaml")
+	s.Base.Timeout = 2 * time.Minute
 
 	s.ImageFlannelRepo = flannelImage.FullNameWithoutTag()
 	s.ImageFlannelTag = flannelImage.Tag()
@@ -93,121 +76,78 @@ func NewGenerateFlannelHelmArtifactsStepBuilder(ctx runtime.Context, instanceNam
 		s.BackendType = "vxlan"
 	}
 
-	b := new(GenerateFlannelHelmArtifactsStepBuilder).Init(s)
+	b := new(GenerateFlannelValuesStepBuilder).Init(s)
 	return b
 }
 
-func (s *GenerateFlannelHelmArtifactsStep) Meta() *spec.StepMeta {
+func (s *GenerateFlannelValuesStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *GenerateFlannelHelmArtifactsStep) Run(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
-
-	helmPath, err := exec.LookPath("helm")
-	if err != nil {
-		return fmt.Errorf("helm executable not found in PATH on the machine running this tool")
+func (s *GenerateFlannelValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeFlannel) {
+		return true, nil
 	}
+	return false, nil
+}
 
-	if err := os.RemoveAll(s.LocalPulledChartPath); err != nil {
-		logger.Warnf("Failed to clean up local temp directory %s, continuing...", s.LocalPulledChartPath)
+// getLocalValuesPath defines the conventional storage path for values.yaml in the cluster artifacts directory.
+// It is placed in the same directory as the chart .tgz file.
+func (s *GenerateFlannelValuesStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
+	helmProvider := helm.NewHelmProvider(ctx)
+	chart := helmProvider.GetChart(string(common.CNITypeFlannel))
+	if chart == nil {
+		return "", fmt.Errorf("cannot find chart info for flannel in BOM")
 	}
-	if err := os.MkdirAll(s.LocalPulledChartPath, 0755); err != nil {
-		return fmt.Errorf("failed to create local temp dir %s: %w", s.LocalPulledChartPath, err)
-	}
+	// Get the full path of the chart .tgz file
+	chartTgzPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
+	// Get the directory where the file is located
+	chartDir := filepath.Dir(chartTgzPath)
+	// Place values.yaml in this directory
+	return filepath.Join(chartDir, "flannel-values.yaml"), nil
+}
 
-	repoName := s.Chart.RepoName()
-	repoURL := s.Chart.RepoURL()
+func (s *GenerateFlannelValuesStep) Run(ctx runtime.ExecutionContext) error {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
-	repoAddCmd := exec.Command(helmPath, "repo", "add", repoName, repoURL)
-	if output, err := repoAddCmd.CombinedOutput(); err != nil && !strings.Contains(string(output), "already exists") {
-		return fmt.Errorf("failed to add helm repo '%s' from '%s': %w, output: %s", repoName, repoURL, err, string(output))
-	}
-
-	repoUpdateCmd := exec.Command(helmPath, "repo", "update", repoName)
-	if err := repoUpdateCmd.Run(); err != nil {
-		return fmt.Errorf("failed to update helm repo %s: %w", repoName, err)
-	}
-
-	chartFullName := s.Chart.FullName()
-	pullArgs := []string{"pull", chartFullName, "--destination", s.LocalPulledChartPath, "--version", s.Chart.Version}
-
-	logger.Infof("Pulling Helm chart with command: helm %s", strings.Join(pullArgs, " "))
-	pullCmd := exec.Command(helmPath, pullArgs...)
-	if output, err := pullCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to pull helm chart: %w, output: %s", err, string(output))
-	}
-
-	actualLocalChartPath := s.Chart.LocalPath(common.DefaultKubexmTmpDir)
-	if _, err := os.Stat(actualLocalChartPath); os.IsNotExist(err) {
-		return fmt.Errorf("expected helm chart .tgz file not found at %s after pull", actualLocalChartPath)
-	}
-
-	s.RemoteChartPath = filepath.Join(filepath.Dir(s.RemoteValuesPath), filepath.Base(actualLocalChartPath))
-
-	logger.Info("Rendering flannel-values.yaml from template...")
 	valuesTemplateContent, err := templates.Get("cni/flannel/values.yaml.tmpl")
 	if err != nil {
-		return fmt.Errorf("failed to get embedded values.yaml.tmpl: %w", err)
+		return fmt.Errorf("failed to get embedded flannel values.yaml.tmpl: %w", err)
 	}
 
 	tmpl, err := template.New("flannelValues").Parse(valuesTemplateContent)
 	if err != nil {
-		return fmt.Errorf("failed to parse values.yaml.tmpl: %w", err)
+		return fmt.Errorf("failed to parse flannel values.yaml.tmpl: %w", err)
 	}
 	var valuesBuffer bytes.Buffer
 	if err := tmpl.Execute(&valuesBuffer, s); err != nil {
-		return fmt.Errorf("failed to render values.yaml.tmpl: %w", err)
-	}
-	valuesContent := valuesBuffer.Bytes()
-
-	chartContent, err := os.ReadFile(actualLocalChartPath)
-	if err != nil {
-		return fmt.Errorf("failed to read pulled chart file: %w", err)
+		return fmt.Errorf("failed to render flannel values.yaml.tmpl: %w", err)
 	}
 
-	runner := ctx.GetRunner()
-	conn, err := ctx.GetCurrentHostConnector()
+	localPath, err := s.getLocalValuesPath(ctx)
 	if err != nil {
 		return err
 	}
 
-	if err := runner.Mkdirp(ctx.GoContext(), conn, filepath.Dir(s.RemoteChartPath), "0755", s.Sudo); err != nil {
-		return fmt.Errorf("failed to create remote dir: %w", err)
+	logger.Infof("Generating Flannel Helm values file to: %s", localPath)
+
+	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+		return fmt.Errorf("failed to create local directory for values file: %w", err)
 	}
 
-	logger.Infof("Uploading chart to remote path: %s", s.RemoteChartPath)
-	if err := runner.WriteFile(ctx.GoContext(), conn, chartContent, s.RemoteChartPath, "0644", s.Sudo); err != nil {
-		return fmt.Errorf("failed to upload helm chart: %w", err)
+	if err := os.WriteFile(localPath, valuesBuffer.Bytes(), 0644); err != nil {
+		return fmt.Errorf("failed to write generated values file to %s: %w", localPath, err)
 	}
 
-	logger.Infof("Uploading rendered values.yaml to remote path: %s", s.RemoteValuesPath)
-	if err := runner.WriteFile(ctx.GoContext(), conn, valuesContent, s.RemoteValuesPath, "0644", s.Sudo); err != nil {
-		return fmt.Errorf("failed to upload values.yaml: %w", err)
-	}
-
-	logger.Info("Flannel Helm artifacts, including rendered values.yaml, uploaded successfully.")
+	logger.Info("Successfully generated Flannel Helm values file.")
 	return nil
 }
 
-func (s *GenerateFlannelHelmArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	return false, nil
-}
-
-func (s *GenerateFlannelHelmArtifactsStep) Rollback(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
-	runner := ctx.GetRunner()
-	conn, err := ctx.GetCurrentHostConnector()
-	if err != nil {
-		return nil
-	}
-
-	remoteDir := filepath.Dir(s.RemoteValuesPath)
-	logger.Warnf("Rolling back by removing remote Helm artifacts directory: %s", remoteDir)
-	if err := runner.Remove(ctx.GoContext(), conn, remoteDir, s.Sudo, true); err != nil {
-		logger.Errorf("Failed to remove remote artifacts directory during rollback: %v", err)
+func (s *GenerateFlannelValuesStep) Rollback(ctx runtime.ExecutionContext) error {
+	if localPath, err := s.getLocalValuesPath(ctx); err == nil {
+		os.Remove(localPath)
 	}
 	return nil
 }
 
-var _ step.Step = (*GenerateFlannelHelmArtifactsStep)(nil)
+var _ step.Step = (*GenerateFlannelValuesStep)(nil)

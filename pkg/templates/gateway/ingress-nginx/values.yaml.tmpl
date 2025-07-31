@@ -1,0 +1,30 @@
+# Default values for ingress-nginx.
+# This is a starter template.
+
+controller:
+  image:
+    # The '{{.ImageRegistry}}' will be replaced by the private registry if configured.
+    # The repository name is derived from the BOM.
+    repository: {{.ImageRegistry}}/ingress-nginx/controller
+    tag: "{{.ImageTag}}"
+    pullPolicy: IfNotPresent
+
+  # For bare-metal clusters
+  kind: DaemonSet
+  hostPort:
+    enabled: true
+
+  # Admission webhooks are critical for functionality
+  admissionWebhooks:
+    patch:
+      image:
+        repository: {{.ImageRegistry}}/ingress-nginx/kube-webhook-certgen
+        tag: "{{.WebhookImageTag}}"
+        pullPolicy: IfNotPresent
+
+defaultBackend:
+  enabled: true
+  image:
+    repository: {{.ImageRegistry}}/ingress-nginx/defaultbackend-amd64
+    tag: "{{.DefaultBackendImageTag}}"
+    pullPolicy: IfNotPresent
