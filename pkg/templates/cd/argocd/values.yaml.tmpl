@@ -1,0 +1,43 @@
+# Default values for argo-cd.
+
+# Image repository and tags can be overridden
+global:
+  image:
+    repository: {{.ImageRegistry}}
+    tag: "{{.ImageTag}}"
+    pullPolicy: IfNotPresent
+
+# Argo CD server settings
+server:
+  # To expose the server, you can use a LoadBalancer, NodePort, or Ingress.
+  # For simplicity, we can start with NodePort.
+  service:
+    type: NodePort
+    # port: 80
+    # nodePort: 30080
+
+  # Ingress configuration
+  # ingress:
+  #   enabled: true
+  #   hosts:
+  #     - argocd.example.com
+  #   ingressClassName: nginx
+
+# Disable Dex if not needed for external authentication
+dex:
+  enabled: false
+  image:
+    repository: {{.ImageRegistry}}/dex
+    tag: "{{.DexImageTag}}"
+
+# Repo server settings
+repoServer:
+  image:
+    repository: {{.ImageRegistry}}/argocd-repo-server
+    tag: "{{.ImageTag}}"
+
+# Redis settings
+redis:
+  image:
+    repository: {{.ImageRegistry}}/redis
+    tag: "{{.RedisImageTag}}"

@@ -1,0 +1,146 @@
+package hybridnet
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
+)
+
+// DistributeHybridnetArtifactsStep is responsible for distributing the Hybridnet Helm chart and generated values file to a remote node.
+type DistributeHybridnetArtifactsStep struct {
+	step.Base
+	RemoteValuesPath string
+	RemoteChartPath  string
+}
+
+// DistributeHybridnetArtifactsStepBuilder is used to build instances.
+type DistributeHybridnetArtifactsStepBuilder struct {
+	step.Builder[DistributeHybridnetArtifactsStepBuilder, *DistributeHybridnetArtifactsStep]
+}
+
+func NewDistributeHybridnetArtifactsStepBuilder(ctx runtime.Context, instanceName string) *DistributeHybridnetArtifactsStepBuilder {
+	helmProvider := helm.NewHelmProvider(&ctx)
+	chart := helmProvider.GetChart(string(common.CNITypeHybridnet))
+	if chart == nil {
+		if ctx.GetClusterConfig().Spec.Network.Plugin == string(common.CNITypeHybridnet) {
+			fmt.Fprintf(os.Stderr, "Error: Hybridnet is enabled but chart info is not found for K8s version %s\n", ctx.GetClusterConfig().Spec.Kubernetes.Version)
+		}
+		return nil
+	}
+
+	s := &DistributeHybridnetArtifactsStep{}
+	s.Base.Meta.Name = instanceName
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Distribute Hybridnet Helm artifacts to remote host", s.Base.Meta.Name)
+	s.Base.Sudo = false
+	s.Base.IgnoreError = false
+	s.Base.Timeout = 5 * time.Minute
+
+	// Use a concise remote path convention
+	remoteDir := filepath.Join(common.DefaultUploadTmpDir, chart.RepoName(), chart.ChartName()+"-"+chart.Version)
+	s.RemoteValuesPath = filepath.Join(remoteDir, "hybridnet-values.yaml")
+	chartFileName := fmt.Sprintf("%s-%s.tgz", chart.ChartName(), chart.Version)
+	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)
+
+	b := new(DistributeHybridnetArtifactsStepBuilder).Init(s)
+	return b
+}
+
+func (s *DistributeHybridnetArtifactsStep) Meta() *spec.StepMeta {
+	return &s.Base.Meta
+}
+
+func (s *DistributeHybridnetArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeHybridnet) {
+		return true, nil
+	}
+	return false, nil
+}
+
+// getLocalValuesPath defines the same conventional path as GenerateHybridnetValuesStep.
+func (s *DistributeHybridnetArtifactsStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
+	helmProvider := helm.NewHelmProvider(ctx)
+	chart := helmProvider.GetChart(string(common.CNITypeHybridnet))
+	if chart == nil {
+		return "", fmt.Errorf("cannot find chart info for hybridnet in BOM")
+	}
+	chartTgzPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
+	chartDir := filepath.Dir(chartTgzPath)
+	return filepath.Join(chartDir, "hybridnet-values.yaml"), nil
+}
+
+func (s *DistributeHybridnetArtifactsStep) Run(ctx runtime.ExecutionContext) error {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
+
+	// 1. Find the values file in the local artifacts directory by convention
+	localValuesPath, err := s.getLocalValuesPath(ctx)
+	if err != nil {
+		return err
+	}
+	valuesContent, err := os.ReadFile(localValuesPath)
+	if err != nil {
+		return fmt.Errorf("failed to read generated values file from agreed path %s: %w. Ensure GenerateHybridnetValuesStep ran successfully.", localValuesPath, err)
+	}
+
+	// 2. Find the Chart file in the local artifacts directory
+	helmProvider := helm.NewHelmProvider(ctx)
+	chart := helmProvider.GetChart(string(common.CNITypeHybridnet))
+	if chart == nil {
+		return fmt.Errorf("cannot find chart info for hybridnet in BOM")
+	}
+	localChartPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
+	chartContent, err := os.ReadFile(localChartPath)
+	if err != nil {
+		return fmt.Errorf("failed to read offline chart file from %s: %w. Ensure DownloadHybridnetChartStep ran successfully.", localChartPath, err)
+	}
+
+	// 3. Upload files to the remote node
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		return err
+	}
+
+	remoteDir := filepath.Dir(s.RemoteChartPath)
+	if err := runner.Mkdirp(ctx.GoContext(), conn, remoteDir, "0755", s.Sudo); err != nil {
+		return fmt.Errorf("failed to create remote directory %s on host %s: %w", remoteDir, ctx.GetHost().GetName(), err)
+	}
+
+	logger.Infof("Uploading rendered values.yaml to %s:%s", ctx.GetHost().GetName(), s.RemoteValuesPath)
+	if err := runner.WriteFile(ctx.GoContext(), conn, valuesContent, s.RemoteValuesPath, "0644", s.Sudo); err != nil {
+		return fmt.Errorf("failed to upload values.yaml to %s: %w", ctx.GetHost().GetName(), err)
+	}
+
+	logger.Infof("Uploading chart %s to %s:%s", filepath.Base(localChartPath), ctx.GetHost().GetName(), s.RemoteChartPath)
+	if err := runner.WriteFile(ctx.GoContext(), conn, chartContent, s.RemoteChartPath, "0644", s.Sudo); err != nil {
+		return fmt.Errorf("failed to upload helm chart to %s: %w", ctx.GetHost().GetName(), err)
+	}
+
+	logger.Info("Successfully distributed Hybridnet artifacts to remote host.")
+	return nil
+}
+
+func (s *DistributeHybridnetArtifactsStep) Rollback(ctx runtime.ExecutionContext) error {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		logger.Errorf("Failed to get connector for rollback: %v", err)
+		return nil
+	}
+
+	remoteDir := filepath.Dir(s.RemoteValuesPath)
+	logger.Warnf("Rolling back by removing remote Helm artifacts directory: %s", remoteDir)
+	if err := runner.Remove(ctx.GoContext(), conn, remoteDir, s.Sudo, true); err != nil {
+		logger.Errorf("Failed to remove remote artifacts directory '%s' during rollback: %v", remoteDir, err)
+	}
+	return nil
+}
+
+var _ step.Step = (*DistributeHybridnetArtifactsStep)(nil)
