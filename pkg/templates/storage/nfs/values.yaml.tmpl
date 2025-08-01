@@ -1,0 +1,31 @@
+# Default values for nfs-subdir-external-provisioner.
+
+image:
+  repository: {{.ImageRegistry}}/nfs-subdir-external-provisioner
+  tag: "{{.ImageTag}}"
+  pullPolicy: IfNotPresent
+
+nfs:
+  # The NFS server IP address
+  server: "{{.NfsServer}}"
+  # The base path on the NFS server to use for provisioning
+  path: "{{.NfsPath}}"
+  # Mount options for the NFS volume
+  mountOptions: []
+  # Reclaim policy for the provisioned volumes
+  reclaimPolicy: Retain
+
+# Storage class settings
+storageClass:
+  # Create a new storage class
+  create: true
+  # Make this the default storage class
+  defaultClass: true
+  # Name of the storage class
+  name: nfs-client
+  # Allow volume expansion
+  allowVolumeExpansion: true
+  # Reclaim policy for the storage class
+  reclaimPolicy: Retain
+  # Archive on delete
+  archiveOnDelete: true
