@@ -11,18 +11,18 @@ import (
 )
 
 type Containerd struct {
-	Endpoint         string              `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
-	Version          string              `json:"version,omitempty" yaml:"version,omitempty"`
-	Registry         *ContainerdRegistry `json:"registry,omitempty" yaml:"registry,omitempty"`
-	UseSystemdCgroup *bool               `json:"useSystemdCgroup,omitempty" yaml:"useSystemdCgroup,omitempty"`
-	ExtraTomlConfig  string              `json:"extraTomlConfig,omitempty" yaml:"extraTomlConfig,omitempty"`
-	ConfigPath       *string             `json:"configPath,omitempty" yaml:"configPath,omitempty"`
-	DisabledPlugins  []string            `json:"disabledPlugins,omitempty" yaml:"disabledPlugins,omitempty"`
-	RequiredPlugins  []string            `json:"requiredPlugins,omitempty" yaml:"requiredPlugins,omitempty"`
-	Imports          []string            `json:"imports,omitempty" yaml:"imports,omitempty"`
-	Root             *string             `json:"root,omitempty" yaml:"root,omitempty"`
-	State            *string             `json:"state,omitempty" yaml:"state,omitempty"`
-	Pause            string              `json:"pause,omitempty" yaml:"pause,omitempty"`
+	Endpoint        string              `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+	Version         string              `json:"version,omitempty" yaml:"version,omitempty"`
+	Registry        *ContainerdRegistry `json:"registry,omitempty" yaml:"registry,omitempty"`
+	CgroupDriver    *string             `json:"useSystemdCgroup,omitempty" yaml:"useSystemdCgroup,omitempty"`
+	ExtraTomlConfig string              `json:"extraTomlConfig,omitempty" yaml:"extraTomlConfig,omitempty"`
+	ConfigPath      *string             `json:"configPath,omitempty" yaml:"configPath,omitempty"`
+	DisabledPlugins []string            `json:"disabledPlugins,omitempty" yaml:"disabledPlugins,omitempty"`
+	RequiredPlugins []string            `json:"requiredPlugins,omitempty" yaml:"requiredPlugins,omitempty"`
+	Imports         []string            `json:"imports,omitempty" yaml:"imports,omitempty"`
+	Root            *string             `json:"root,omitempty" yaml:"root,omitempty"`
+	State           *string             `json:"state,omitempty" yaml:"state,omitempty"`
+	Pause           string              `json:"pause,omitempty" yaml:"pause,omitempty"`
 }
 
 type ContainerdRegistry struct {
@@ -66,8 +66,8 @@ func SetDefaults_ContainerdConfig(cfg *Containerd) {
 	if cfg.Registry.Configs == nil {
 		cfg.Registry.Configs = make(map[ServerAddress]AuthConfig)
 	}
-	if cfg.UseSystemdCgroup == nil {
-		cfg.UseSystemdCgroup = helpers.BoolPtr(true)
+	if cfg.CgroupDriver == nil {
+		cfg.CgroupDriver = helpers.StrPtr(common.CgroupDriverSystemd)
 	}
 	if cfg.ConfigPath == nil {
 		cfg.ConfigPath = helpers.StrPtr(common.ContainerdDefaultConfigFile)

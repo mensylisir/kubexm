@@ -45,6 +45,15 @@ func (i *Image) Tag() string {
 	return i.OriginalTag
 }
 
+func (i *Image) RegistryAddr() string {
+	return i.privateRepoAddr
+}
+
+func (i *Image) Namespace() string {
+	finalNamespace := i.finalNamespace()
+	return finalNamespace
+}
+
 // FullName 返回镜像在**私有仓库**中的最终完整名称，包含了所有重写逻辑。
 // 这是在 Kubernetes manifest 中使用或推送到私有仓库时应该使用的名称。
 // Example: "my-harbor.com/public-proxy/node:v3.28.0"

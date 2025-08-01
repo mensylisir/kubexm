@@ -75,7 +75,7 @@ type KubeletConfig struct {
 	EvictionSoftGracePeriod          map[string]string `json:"evictionSoftGracePeriod,omitempty" yaml:"evictionSoftGracePeriod,omitempty"`
 	EvictionMaxPodGracePeriod        *int              `json:"evictionMaxPodGracePeriod,omitempty" yaml:"evictionMaxPodGracePeriod,omitempty"`
 	EvictionPressureTransitionPeriod string            `json:"evictionPressureTransitionPeriod,omitempty" yaml:"evictionPressureTransitionPeriod,omitempty"`
-	PodPidsLimit                     *int64            `json:"podPidsLimit,omitempty" yaml:"podPidsLimit,omitempty"`
+	PodPidsLimit                     *int              `json:"podPidsLimit,omitempty" yaml:"podPidsLimit,omitempty"`
 	HairpinMode                      string            `json:"hairpinMode,omitempty" yaml:"hairpinMode,omitempty"`
 	ContainerLogMaxSize              string            `json:"containerLogMaxSize,omitempty" yaml:"containerLogMaxSize,omitempty"`
 	ContainerLogMaxFiles             *int              `json:"containerLogMaxFiles,omitempty" yaml:"containerLogMaxFiles,omitempty"`
@@ -281,7 +281,7 @@ func SetDefaults_KubeletConfig(cfg *KubeletConfig) {
 		cfg.EvictionPressureTransitionPeriod = "30s"
 	}
 	if cfg.PodPidsLimit == nil {
-		cfg.PodPidsLimit = helpers.Int64Ptr(10000)
+		cfg.PodPidsLimit = helpers.IntPtr(10000)
 	}
 	if cfg.HairpinMode == "" {
 		cfg.HairpinMode = common.DefaultKubeletHairpinMode
