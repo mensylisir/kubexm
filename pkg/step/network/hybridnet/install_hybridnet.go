@@ -50,7 +50,7 @@ func NewInstallHybridnetHelmChartStepBuilder(ctx runtime.Context, instanceName s
 
 	s.AdminKubeconfigPath = filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
 
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, hybridnetChart.RepoName())
+	remoteDir := filepath.Join(common.DefaultUploadTmpDir, hybridnetChart.RepoName(), hybridnetChart.ChartName()+"-"+hybridnetChart.Version)
 	s.RemoteValuesPath = filepath.Join(remoteDir, "hybridnet-values.yaml")
 	chartFileName := fmt.Sprintf("%s-%s.tgz", hybridnetChart.ChartName(), hybridnetChart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)

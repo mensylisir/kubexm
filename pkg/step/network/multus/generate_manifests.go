@@ -4,13 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/template"
 	"time"
 
-	// 引入必要的包
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
@@ -20,50 +18,35 @@ import (
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
-type GenerateMultusHelmArtifactsStep struct {
+// GenerateMultusValuesStep is responsible for generating the Helm values file for Multus.
+type GenerateMultusValuesStep struct {
 	step.Base
-	Chart                *helm.HelmChart
-	RemoteValuesPath     string
-	RemoteChartPath      string
-	LocalPulledChartPath string
-
 	ImageRepository string
 	ImageTag        string
 }
 
-type GenerateMultusHelmArtifactsStepBuilder struct {
-	step.Builder[GenerateMultusHelmArtifactsStepBuilder, *GenerateMultusHelmArtifactsStep]
+// GenerateMultusValuesStepBuilder is used to build instances.
+type GenerateMultusValuesStepBuilder struct {
+	step.Builder[GenerateMultusValuesStepBuilder, *GenerateMultusValuesStep]
 }
 
-func NewGenerateMultusHelmArtifactsStepBuilder(ctx runtime.Context, instanceName string) *GenerateMultusHelmArtifactsStepBuilder {
-	helmProvider := helm.NewHelmProvider(&ctx)
-	multusChart := helmProvider.GetChart(string(common.CNITypeMultus))
-
-	if multusChart == nil {
-		return nil
-	}
-
+func NewGenerateMultusValuesStepBuilder(ctx runtime.Context, instanceName string) *GenerateMultusValuesStepBuilder {
 	imageProvider := images.NewImageProvider(&ctx)
 	multusImage := imageProvider.GetImage("multus")
 
 	if multusImage == nil {
+		if ctx.GetClusterConfig().Spec.Network.Multus.Enabled {
+			fmt.Fprintf(os.Stderr, "Error: Multus is enabled but 'multus' image is not found in BOM for K8s version %s\n", ctx.GetClusterConfig().Spec.Kubernetes.Version)
+		}
 		return nil
 	}
 
-	s := &GenerateMultusHelmArtifactsStep{
-		Chart: multusChart,
-	}
+	s := &GenerateMultusValuesStep{}
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate Multus CNI Helm artifacts (Chart: %s, Version: %s)", s.Base.Meta.Name, multusChart.ChartName(), multusChart.Version)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate Multus CNI Helm values file from configuration", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
-	s.Base.Timeout = 10 * time.Minute
-
-	localChartDir := filepath.Dir(multusChart.LocalPath(common.DefaultKubexmTmpDir))
-	s.LocalPulledChartPath = localChartDir
-
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, multusChart.RepoName())
-	s.RemoteValuesPath = filepath.Join(remoteDir, "multus-values.yaml")
+	s.Base.Timeout = 2 * time.Minute
 
 	s.ImageRepository = multusImage.FullNameWithoutTag()
 	s.ImageTag = multusImage.Tag()
@@ -82,121 +65,73 @@ func NewGenerateMultusHelmArtifactsStepBuilder(ctx runtime.Context, instanceName
 		}
 	}
 
-	b := new(GenerateMultusHelmArtifactsStepBuilder).Init(s)
+	b := new(GenerateMultusValuesStepBuilder).Init(s)
 	return b
 }
 
-func (s *GenerateMultusHelmArtifactsStep) Meta() *spec.StepMeta {
+func (s *GenerateMultusValuesStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *GenerateMultusHelmArtifactsStep) Run(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
-
-	helmPath, err := exec.LookPath("helm")
-	if err != nil {
-		return fmt.Errorf("helm executable not found in PATH on the machine running this tool")
+func (s *GenerateMultusValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	if !ctx.GetClusterConfig().Spec.Network.Multus.Enabled {
+		return true, nil
 	}
+	return false, nil
+}
 
-	if err := os.RemoveAll(s.LocalPulledChartPath); err != nil {
-		logger.Warnf("Failed to clean up local temp directory %s, continuing...", s.LocalPulledChartPath)
+func (s *GenerateMultusValuesStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
+	helmProvider := helm.NewHelmProvider(ctx)
+	chart := helmProvider.GetChart(string(common.CNITypeMultus))
+	if chart == nil {
+		return "", fmt.Errorf("cannot find chart info for multus in BOM")
 	}
-	if err := os.MkdirAll(s.LocalPulledChartPath, 0755); err != nil {
-		return fmt.Errorf("failed to create local temp dir %s: %w", s.LocalPulledChartPath, err)
-	}
+	chartTgzPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
+	chartDir := filepath.Dir(chartTgzPath)
+	return filepath.Join(chartDir, "multus-values.yaml"), nil
+}
 
-	repoName := s.Chart.RepoName()
-	repoURL := s.Chart.RepoURL()
+func (s *GenerateMultusValuesStep) Run(ctx runtime.ExecutionContext) error {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
-	repoAddCmd := exec.Command(helmPath, "repo", "add", repoName, repoURL)
-	if output, err := repoAddCmd.CombinedOutput(); err != nil && !strings.Contains(string(output), "already exists") {
-		return fmt.Errorf("failed to add helm repo '%s' from '%s': %w, output: %s", repoName, repoURL, err, string(output))
-	}
-
-	repoUpdateCmd := exec.Command(helmPath, "repo", "update", repoName)
-	if err := repoUpdateCmd.Run(); err != nil {
-		return fmt.Errorf("failed to update helm repo %s: %w", repoName, err)
-	}
-
-	chartFullName := s.Chart.FullName()
-	pullArgs := []string{"pull", chartFullName, "--destination", s.LocalPulledChartPath, "--version", s.Chart.Version}
-
-	logger.Infof("Pulling Helm chart with command: helm %s", strings.Join(pullArgs, " "))
-	pullCmd := exec.Command(helmPath, pullArgs...)
-	if output, err := pullCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to pull Multus CNI helm chart: %w, output: %s", err, string(output))
-	}
-
-	actualLocalChartPath := s.Chart.LocalPath(common.DefaultKubexmTmpDir)
-	if _, err := os.Stat(actualLocalChartPath); os.IsNotExist(err) {
-		return fmt.Errorf("expected Multus CNI helm chart .tgz file not found at %s after pull", actualLocalChartPath)
-	}
-
-	s.RemoteChartPath = filepath.Join(filepath.Dir(s.RemoteValuesPath), filepath.Base(actualLocalChartPath))
-
-	logger.Info("Rendering multus-values.yaml from template...")
 	valuesTemplateContent, err := templates.Get("cni/multus/values.yaml.tmpl")
 	if err != nil {
-		return fmt.Errorf("failed to get embedded values.yaml.tmpl for multus: %w", err)
+		return fmt.Errorf("failed to get embedded multus values.yaml.tmpl: %w", err)
 	}
 
 	tmpl, err := template.New("multusValues").Parse(valuesTemplateContent)
 	if err != nil {
-		return fmt.Errorf("failed to parse multus-values.yaml.tmpl: %w", err)
+		return fmt.Errorf("failed to parse multus values.yaml.tmpl: %w", err)
 	}
 	var valuesBuffer bytes.Buffer
 	if err := tmpl.Execute(&valuesBuffer, s); err != nil {
-		return fmt.Errorf("failed to render multus-values.yaml.tmpl: %w", err)
-	}
-	valuesContent := valuesBuffer.Bytes()
-
-	chartContent, err := os.ReadFile(actualLocalChartPath)
-	if err != nil {
-		return fmt.Errorf("failed to read pulled Multus CNI chart file: %w", err)
+		return fmt.Errorf("failed to render multus values.yaml.tmpl: %w", err)
 	}
 
-	runner := ctx.GetRunner()
-	conn, err := ctx.GetCurrentHostConnector()
+	localPath, err := s.getLocalValuesPath(ctx)
 	if err != nil {
 		return err
 	}
 
-	if err := runner.Mkdirp(ctx.GoContext(), conn, filepath.Dir(s.RemoteChartPath), "0755", s.Sudo); err != nil {
-		return fmt.Errorf("failed to create remote dir: %w", err)
+	logger.Infof("Generating Multus Helm values file to: %s", localPath)
+
+	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+		return fmt.Errorf("failed to create local directory for values file: %w", err)
 	}
 
-	logger.Infof("Uploading Multus CNI chart to remote path: %s", s.RemoteChartPath)
-	if err := runner.WriteFile(ctx.GoContext(), conn, chartContent, s.RemoteChartPath, "0644", s.Sudo); err != nil {
-		return fmt.Errorf("failed to upload Multus CNI helm chart: %w", err)
+	if err := os.WriteFile(localPath, valuesBuffer.Bytes(), 0644); err != nil {
+		return fmt.Errorf("failed to write generated values file to %s: %w", localPath, err)
 	}
 
-	logger.Infof("Uploading rendered values.yaml to remote path: %s", s.RemoteValuesPath)
-	if err := runner.WriteFile(ctx.GoContext(), conn, valuesContent, s.RemoteValuesPath, "0644", s.Sudo); err != nil {
-		return fmt.Errorf("failed to upload Multus CNI values.yaml: %w", err)
-	}
-
-	logger.Info("Multus CNI Helm artifacts, including rendered values.yaml, uploaded successfully.")
+	logger.Info("Successfully generated Multus Helm values file.")
 	return nil
 }
 
-func (s *GenerateMultusHelmArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	return false, nil
-}
-
-func (s *GenerateMultusHelmArtifactsStep) Rollback(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
-	runner := ctx.GetRunner()
-	conn, err := ctx.GetCurrentHostConnector()
-	if err != nil {
-		return nil
-	}
-
-	remoteDir := filepath.Dir(s.RemoteValuesPath)
-	logger.Warnf("Rolling back by removing remote Multus CNI Helm artifacts directory: %s", remoteDir)
-	if err := runner.Remove(ctx.GoContext(), conn, remoteDir, s.Sudo, true); err != nil {
-		logger.Errorf("Failed to remove remote Multus CNI artifacts directory during rollback: %v", err)
+func (s *GenerateMultusValuesStep) Rollback(ctx runtime.ExecutionContext) error {
+	if localPath, err := s.getLocalValuesPath(ctx); err == nil {
+		os.Remove(localPath)
 	}
 	return nil
 }
 
-var _ step.Step = (*GenerateMultusHelmArtifactsStep)(nil)
+var _ step.Step = (*GenerateMultusValuesStep)(nil)
