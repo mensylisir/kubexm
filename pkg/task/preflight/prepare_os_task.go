@@ -44,15 +44,45 @@ func (t *PrepareOSTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, 
 	clusterCfg := ctx.GetClusterConfig()
 	var lastStepID plan.NodeID
 
-	// --- Step 1: Disable Swap ---
-	disableSwapStep := osstep.NewDisableSwapStep("DisableSwapOnNodes", true)
+	// --- Step 1: Load Kernel Modules ---
+	kernelModules := []string{"br_netfilter", "overlay", "ip_vs"}
+	if clusterCfg.Spec.System != nil && len(clusterCfg.Spec.System.Modules) > 0 {
+		kernelModules = clusterCfg.Spec.System.Modules
+	}
+	loadModulesStep := osstep.NewLoadKernelModulesStep("LoadKernelModules", kernelModules, true, "")
 	lastStepID, _ = fragment.AddNode(&plan.ExecutionNode{
-		Name:  disableSwapStep.Meta().Name,
-		Step:  disableSwapStep,
+		Name:  loadModulesStep.Meta().Name,
+		Step:  loadModulesStep,
 		Hosts: allHosts,
 	})
 
-	// --- Step 2: Configure SELinux ---
+	// --- Step 2: Set Sysctl Parameters ---
+	sysctlParams := map[string]string{
+		"net.bridge.bridge-nf-call-iptables":  "1",
+		"net.ipv4.ip_forward":                 "1",
+		"net.bridge.bridge-nf-call-ip6tables": "1",
+	}
+	if clusterCfg.Spec.System != nil && len(clusterCfg.Spec.System.SysctlParams) > 0 {
+		sysctlParams = clusterCfg.Spec.System.SysctlParams
+	}
+	setSysctlStep := osstep.NewConfigureSysctlStep("SetSysctl", sysctlParams, true, "/etc/sysctl.d/90-kubexms-kernel.conf")
+	lastStepID, _ = fragment.AddNode(&plan.ExecutionNode{
+		Name:         setSysctlStep.Meta().Name,
+		Step:         setSysctlStep,
+		Hosts:        allHosts,
+		Dependencies: []plan.NodeID{lastStepID},
+	})
+
+	// --- Step 3: Disable Swap ---
+	disableSwapStep := osstep.NewDisableSwapStep("DisableSwapOnNodes", true)
+	lastStepID, _ = fragment.AddNode(&plan.ExecutionNode{
+		Name:         disableSwapStep.Meta().Name,
+		Step:         disableSwapStep,
+		Hosts:        allHosts,
+		Dependencies: []plan.NodeID{lastStepID},
+	})
+
+	// --- Step 4: Configure SELinux ---
 	selinuxMode := common.DefaultSELinuxMode
 	if clusterCfg.Spec.System != nil && clusterCfg.Spec.System.SELinux != "" {
 		selinuxMode = clusterCfg.Spec.System.SELinux
@@ -65,7 +95,7 @@ func (t *PrepareOSTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, 
 		Dependencies: []plan.NodeID{lastStepID},
 	})
 
-	// --- Step 3: Disable Common Firewalls ---
+	// --- Step 5: Disable Common Firewalls ---
 	var targetFirewalls []string
 	if clusterCfg.Spec.System != nil && len(clusterCfg.Spec.System.TargetFirewalls) > 0 {
 		targetFirewalls = clusterCfg.Spec.System.TargetFirewalls
@@ -77,54 +107,6 @@ func (t *PrepareOSTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, 
 		Hosts:        allHosts,
 		Dependencies: []plan.NodeID{lastStepID},
 	})
-
-	// --- Step 4: Set IPTables Alternatives ---
-	iptablesMode := common.DefaultIPTablesMode
-	if clusterCfg.Spec.System != nil && clusterCfg.Spec.System.IPTablesMode != "" {
-		iptablesMode = clusterCfg.Spec.System.IPTablesMode
-	}
-	setIPTablesAltStep := osstep.NewSetIPTablesAlternativesStep("SetIPTablesAlternatives", iptablesMode, true)
-	lastStepID, _ = fragment.AddNode(&plan.ExecutionNode{
-		Name:         setIPTablesAltStep.Meta().Name,
-		Step:         setIPTablesAltStep,
-		Hosts:        allHosts,
-		Dependencies: []plan.NodeID{lastStepID},
-	})
-
-	// --- Step 5: Update /etc/hosts ---
-	if clusterCfg.Spec.HostsFileContent != "" {
-		etcHostsEntries := make(map[string][]string)
-		lines := strings.Split(strings.TrimSpace(clusterCfg.Spec.HostsFileContent), "\n")
-		for _, line := range lines {
-			fields := strings.Fields(strings.TrimSpace(line))
-			if len(fields) >= 2 {
-				ip := fields[0]
-				hostnames := fields[1:]
-				etcHostsEntries[ip] = append(etcHostsEntries[ip], hostnames...)
-			}
-		}
-
-		if len(etcHostsEntries) > 0 {
-			updateHostsStep := osstep.NewUpdateEtcHostsStep("UpdateEtcHostsFile", etcHostsEntries, true)
-			lastStepID, _ = fragment.AddNode(&plan.ExecutionNode{
-				Name:         updateHostsStep.Meta().Name,
-				Step:         updateHostsStep,
-				Hosts:        allHosts,
-				Dependencies: []plan.NodeID{lastStepID},
-			})
-		}
-	}
-
-	// --- Step 6: Apply Security Limits ---
-	if clusterCfg.Spec.System != nil && len(clusterCfg.Spec.System.SecurityLimits) > 0 {
-		applyLimitsStep := osstep.NewApplySecurityLimitsStep("ApplySecurityLimits", clusterCfg.Spec.System.SecurityLimits, "", true)
-		lastStepID, _ = fragment.AddNode(&plan.ExecutionNode{
-			Name:         applyLimitsStep.Meta().Name,
-			Step:         applyLimitsStep,
-			Hosts:        allHosts,
-			Dependencies: []plan.NodeID{lastStepID},
-		})
-	}
 
 	fragment.CalculateEntryAndExitNodes()
 	logger.Info("OS preparation task planning complete.")
