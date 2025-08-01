@@ -20,7 +20,7 @@ type Isulad struct {
 	InsecureRegistries []string                       `json:"insecure-registries,omitempty" yaml:"insecure-registries,omitempty"`
 	Auths              map[ServerAddress]RegistryAuth `json:"auths,omitempty" yaml:"auths,omitempty"`
 	CgroupParent       *string                        `json:"cgroup-parent,omitempty" yaml:"cgroup-parent,omitempty"`
-	CgroupManager      *string                        `json:"cgroupManager,omitempty" yaml:"cgroupManager,omitempty"`
+	CgroupDriver       *string                        `json:"cgroupManager,omitempty" yaml:"cgroupManager,omitempty"`
 	LogLevel           *string                        `json:"log-level,omitempty" yaml:"log-level,omitempty"`
 	LogDriver          *string                        `json:"log-driver,omitempty" yaml:"log-driver,omitempty"`
 	LogOpts            map[string]string              `json:"log-opts,omitempty" yaml:"log-opts,omitempty"`
@@ -52,8 +52,8 @@ func SetDefaults_IsuladConfig(cfg *Isulad) {
 	if cfg.Auths == nil {
 		cfg.Auths = make(map[ServerAddress]RegistryAuth)
 	}
-	if cfg.CgroupManager == nil {
-		cfg.CgroupManager = helpers.StrPtr(common.CgroupDriverSystemd)
+	if cfg.CgroupDriver == nil {
+		cfg.CgroupDriver = helpers.StrPtr(common.CgroupDriverSystemd)
 	}
 	if cfg.LogLevel == nil {
 		cfg.LogLevel = helpers.StrPtr("info")

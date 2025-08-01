@@ -70,3 +70,42 @@ func GetIPAtIndex(n *net.IPNet, index int64) (net.IP, error) {
 
 	return resultIP, nil
 }
+
+func GetDNSIPFromCIDR(serviceCIDR string) (string, error) {
+	_, ipNet, err := net.ParseCIDR(serviceCIDR)
+	if err != nil {
+		return "", fmt.Errorf("无效的 CIDR 地址 '%s': %w", serviceCIDR, err)
+	}
+
+	ipAsInt := big.NewInt(0)
+	ipAsInt.SetBytes(ipNet.IP)
+
+	offset := big.NewInt(10)
+	ipAsInt.Add(ipAsInt, offset)
+
+	resultIPBytes := make([]byte, len(ipNet.IP))
+	ipAsInt.FillBytes(resultIPBytes)
+
+	resultIP := net.IP(resultIPBytes)
+
+	return resultIP.String(), nil
+}
+
+func GetFirstIPFromCIDR(cidr string) (string, error) {
+	_, ipNet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return "", fmt.Errorf("无效的 CIDR 地址 '%s': %w", cidr, err)
+	}
+
+	ipAsInt := big.NewInt(0)
+	ipAsInt.SetBytes(ipNet.IP)
+	offset := big.NewInt(1)
+	ipAsInt.Add(ipAsInt, offset)
+
+	resultIPBytes := make([]byte, len(ipNet.IP))
+	ipAsInt.FillBytes(resultIPBytes)
+
+	resultIP := net.IP(resultIPBytes)
+
+	return resultIP.String(), nil
+}

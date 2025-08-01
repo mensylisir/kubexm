@@ -68,7 +68,7 @@ func (s *UpdateEtcHostsStep) generateHostsEntries(ctx runtime.ExecutionContext) 
 		entryMap[ip] = append(entryMap[ip], host.Name)
 
 		if cluster.Spec.Kubernetes != nil && cluster.Spec.Kubernetes.ClusterName != "" {
-			longHostname := fmt.Sprintf("%s.%s", host.Name, cluster.Spec.Kubernetes.ClusterName)
+			longHostname := fmt.Sprintf("%s.%s", host.Name, cluster.Spec.Kubernetes.DNSDomain)
 			entryMap[ip] = append(entryMap[ip], longHostname)
 		}
 	}

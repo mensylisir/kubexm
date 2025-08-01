@@ -13,7 +13,7 @@ type Crio struct {
 	Endpoint        string                               `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
 	Version         string                               `json:"version,omitempty" yaml:"version,omitempty"`
 	Conmon          *string                              `json:"conmon,omitempty" yaml:"conmon,omitempty"`
-	CgroupManager   *string                              `json:"cgroupManager,omitempty" yaml:"cgroupManager,omitempty"`
+	CgroupDriver    *string                              `json:"cgroupManager,omitempty" yaml:"cgroupManager,omitempty"`
 	StorageDriver   *string                              `json:"storageDriver,omitempty" yaml:"storageDriver,omitempty"`
 	StorageOption   []string                             `json:"storageOption,omitempty" yaml:"storageOption,omitempty"`
 	LogLevel        *string                              `json:"logLevel,omitempty" yaml:"logLevel,omitempty"`
@@ -52,8 +52,8 @@ func SetDefaults_CrioConfig(cfg *Crio) {
 	if cfg == nil {
 		return
 	}
-	if cfg.CgroupManager == nil {
-		cfg.CgroupManager = helpers.StrPtr(common.CgroupDriverSystemd)
+	if cfg.CgroupDriver == nil {
+		cfg.CgroupDriver = helpers.StrPtr(common.CgroupDriverSystemd)
 	}
 	if cfg.StorageOption == nil {
 		cfg.StorageOption = []string{}
