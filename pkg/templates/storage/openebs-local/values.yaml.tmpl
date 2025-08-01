@@ -1,0 +1,32 @@
+# Default values for openebs.
+# This is a starter template for local PV provisioners.
+
+localprovisioner:
+  # Base path for local PVs on the host machine.
+  basePath: "/var/openebs/local"
+
+  # Image settings for the local PV provisioner.
+  image:
+    repository: {{.ImageRegistry}}/openebs/provisioner-localpv
+    tag: "{{.ImageTag}}"
+    pullPolicy: IfNotPresent
+
+  # Enable this provisioner.
+  enabled: true
+
+# Other OpenEBS engines can be disabled if only local PV is needed.
+jiva:
+  enabled: false
+cstor:
+  enabled: false
+ndm:
+  enabled: true # NDM is often needed to discover block devices for local PVs
+ndmOperator:
+  enabled: true
+  image:
+    repository: {{.ImageRegistry}}/openebs/ndm-operator-amd64
+    tag: "{{.NdmOperatorImageTag}}"
+ndmDaemon:
+  image:
+    repository: {{.ImageRegistry}}/openebs/node-disk-manager-amd64
+    tag: "{{.NdmDaemonImageTag}}"

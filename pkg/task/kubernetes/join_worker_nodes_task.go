@@ -1,43 +1,92 @@
 package kubernetes
 
 import (
+	"fmt"
+
+	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/plan"
+	commonstep "github.com/mensylisir/kubexm/pkg/step/common"
 	"github.com/mensylisir/kubexm/pkg/task"
-	// commonsteps "github.com/mensylisir/kubexm/pkg/step/common"
 )
 
-// JoinWorkerNodesTask joins worker nodes to the Kubernetes cluster.
+// JoinWorkerNodesTask joins worker nodes to the cluster.
 type JoinWorkerNodesTask struct {
 	task.BaseTask
-	// Relies on join information (token, discovery hash) from TaskCache.
 }
 
 // NewJoinWorkerNodesTask creates a new JoinWorkerNodesTask.
 func NewJoinWorkerNodesTask() task.Task {
 	return &JoinWorkerNodesTask{
-		BaseTask: task.BaseTask{
-			TaskName: "JoinWorkerNodes",
-			TaskDesc: "Joins worker nodes to the Kubernetes cluster using kubeadm.",
-			// Runs on all designated worker nodes.
-		},
+		BaseTask: task.NewBaseTask(
+			"JoinWorkerNodes",
+			"Joins worker nodes to the Kubernetes cluster.",
+			[]string{common.RoleWorker},
+			nil,
+			false,
+		),
 	}
 }
 
 func (t *JoinWorkerNodesTask) IsRequired(ctx task.TaskContext) (bool, error) {
-	// Required if there are worker nodes to join.
-	// workers, _ := ctx.GetHostsByRole("worker") // Or specific worker role
-	// return len(workers) > 0, nil
-	return true, nil // Placeholder
+	workers, err := ctx.GetHostsByRole(common.RoleWorker)
+	if err != nil {
+		return false, err
+	}
+	return len(workers) > 0, nil
 }
 
 func (t *JoinWorkerNodesTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
-	// Plan would involve:
-	// For each worker node:
-	//  1. Retrieve join command (or token and discovery hash) from TaskCache.
-	//  2. Construct the `kubeadm join <control-plane-endpoint> --token <token> --discovery-token-ca-cert-hash <hash>` command.
-	//  3. Create a CommandStep to execute this join command on the target worker node.
-	//
-	// All worker join operations can be parallel but depend on InitMasterTask completion.
-	return task.NewEmptyFragment(), nil // Placeholder
+	logger := ctx.GetLogger().With("task", t.Name())
+	fragment := task.NewExecutionFragment(t.Name())
+	clusterCfg := ctx.GetClusterConfig()
+
+	// Retrieve join info from cache
+	token, tokenFound := ctx.GetTaskCache().Get(common.KubeadmTokenCacheKey)
+	discoveryHash, hashFound := ctx.GetTaskCache().Get(common.KubeadmDiscoveryHashCacheKey)
+
+	if !tokenFound || !hashFound {
+		return nil, fmt.Errorf("kubeadm token or discovery hash not found in cache. InitFirstMasterTask must run first")
+	}
+
+	joinCmd := fmt.Sprintf("sudo kubeadm join %s:%d --token %s --discovery-token-ca-cert-hash %s",
+		clusterCfg.Spec.ControlPlaneEndpoint.Domain,
+		clusterCfg.Spec.ControlPlaneEndpoint.Port,
+		token,
+		discoveryHash,
+	)
+
+	targetHosts, err := ctx.GetHostsByRole(common.RoleWorker)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(targetHosts) == 0 {
+		logger.Info("No worker nodes to join.")
+		return task.NewEmptyFragment(), nil
+	}
+
+	var allJoinNodes []plan.NodeID
+	for _, host := range targetHosts {
+		step := commonstep.NewCommandStep(
+			fmt.Sprintf("KubeadmJoinWorker-%s", host.GetName()),
+			joinCmd,
+			true, // sudo
+			false,
+			0, nil, 0, "", false, 0, "", false,
+		)
+		nodeID, _ := fragment.AddNode(&plan.ExecutionNode{
+			Name:  step.Meta().Name,
+			Step:  step,
+			Hosts: []connector.Host{host},
+		})
+		allJoinNodes = append(allJoinNodes, nodeID)
+	}
+
+	fragment.EntryNodes = allJoinNodes
+	fragment.ExitNodes = allJoinNodes
+
+	logger.Info("Worker node join task planning complete.")
+	return fragment, nil
 }
 
 var _ task.Task = (*JoinWorkerNodesTask)(nil)
