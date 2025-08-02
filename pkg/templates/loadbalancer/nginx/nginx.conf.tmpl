@@ -1,0 +1,15 @@
+stream {
+    upstream kube_apiserver {
+        least_conn;
+        {{- range .MasterNodes }}
+        server {{ .GetInternalAddress }}:6443;
+        {{- end }}
+    }
+
+    server {
+        listen {{ .BindPort }};
+        proxy_connect_timeout 5s;
+        proxy_timeout 24h; # For kubectl exec
+        proxy_pass kube_apiserver;
+    }
+}

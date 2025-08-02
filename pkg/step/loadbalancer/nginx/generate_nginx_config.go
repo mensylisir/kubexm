@@ -36,25 +36,12 @@ func (s *GenerateNginxConfigStep) Run(ctx runtime.ExecutionContext) error {
 		BindPort:    common.DefaultLBPort,
 	}
 
-	// Template for TCP stream load balancing
-	dummyTemplate := `
-stream {
-    upstream kube_apiserver {
-        least_conn;
-        {{- range .MasterNodes }}
-        server {{ .GetInternalAddress }}:6443;
-        {{- end }}
-    }
+	templateContent, err := templates.Get("loadbalancer/nginx/nginx.conf.tmpl")
+	if err != nil {
+		return fmt.Errorf("failed to get nginx config template: %w", err)
+	}
 
-    server {
-        listen {{ .BindPort }};
-        proxy_connect_timeout 5s;
-        proxy_timeout 24h; # For kubectl exec
-        proxy_pass kube_apiserver;
-    }
-}
-`
-	renderedConfig, err := templates.Render(dummyTemplate, data)
+	renderedConfig, err := templates.Render(templateContent, data)
 	if err != nil {
 		return fmt.Errorf("failed to render nginx config template: %w", err)
 	}

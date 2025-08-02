@@ -33,36 +33,12 @@ func (s *GenerateNginxStaticPodManifestStep) Run(ctx runtime.ExecutionContext) e
 		Image: "nginx:1.21",
 	}
 
-	dummyTemplate := `
-apiVersion: v1
-kind: Pod
-metadata:
-  name: kube-nginx
-  namespace: kube-system
-spec:
-  containers:
-  - name: kube-nginx
-    image: {{ .Image }}
-    command:
-    - nginx
-    - -g
-    - "daemon off;"
-    livenessProbe:
-      httpGet:
-        path: /
-        port: 80
-    volumeMounts:
-    - mountPath: /etc/nginx/nginx.conf
-      name: nginx-cfg
-      readOnly: true
-  hostNetwork: true
-  volumes:
-  - hostPath:
-      path: /etc/nginx/nginx.conf
-      type: FileOrCreate
-    name: nginx-cfg
-`
-	renderedManifest, err := templates.Render(dummyTemplate, data)
+	templateContent, err := templates.Get("loadbalancer/nginx/nginx.yaml.tmpl")
+	if err != nil {
+		return fmt.Errorf("failed to get nginx static pod manifest template: %w", err)
+	}
+
+	renderedManifest, err := templates.Render(templateContent, data)
 	if err != nil {
 		return fmt.Errorf("failed to render nginx static pod manifest: %w", err)
 	}
