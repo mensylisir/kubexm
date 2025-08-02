@@ -7,6 +7,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/step/common"
 	osstep "github.com/mensylisir/kubexm/pkg/step/os"
 	"github.com/mensylisir/kubexm/pkg/task"
 )
@@ -41,22 +42,35 @@ func (t *PrepareOSTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, 
 		return task.NewEmptyFragment(), nil
 	}
 
-	clusterCfg := ctx.GetClusterConfig()
-	var lastStepID plan.NodeID
+	// --- Step 1: Gather Facts ---
+	// This step should run first to get information about the hosts.
+	gatherFactsStep := common.NewGatherFactsStep("GatherFacts")
+	gatherFactsNodeID, _ := fragment.AddNode(&plan.ExecutionNode{
+		Name:  gatherFactsStep.Meta().Name,
+		Step:  gatherFactsStep,
+		Hosts: allHosts,
+	})
 
-	// --- Step 1: Load Kernel Modules ---
+	// --- Step 2: Parallel OS Configuration ---
+	clusterCfg := ctx.GetClusterConfig()
+	var osConfigDependencies = []plan.NodeID{gatherFactsNodeID}
+	var osConfigNodeIDs []plan.NodeID
+
+	// Load Kernel Modules
 	kernelModules := []string{"br_netfilter", "overlay", "ip_vs"}
 	if clusterCfg.Spec.System != nil && len(clusterCfg.Spec.System.Modules) > 0 {
 		kernelModules = clusterCfg.Spec.System.Modules
 	}
 	loadModulesStep := osstep.NewLoadKernelModulesStep("LoadKernelModules", kernelModules, true, "")
-	lastStepID, _ = fragment.AddNode(&plan.ExecutionNode{
-		Name:  loadModulesStep.Meta().Name,
-		Step:  loadModulesStep,
-		Hosts: allHosts,
+	loadModulesNodeID, _ := fragment.AddNode(&plan.ExecutionNode{
+		Name:         loadModulesStep.Meta().Name,
+		Step:         loadModulesStep,
+		Hosts:        allHosts,
+		Dependencies: osConfigDependencies,
 	})
+	osConfigNodeIDs = append(osConfigNodeIDs, loadModulesNodeID)
 
-	// --- Step 2: Set Sysctl Parameters ---
+	// Set Sysctl Parameters
 	sysctlParams := map[string]string{
 		"net.bridge.bridge-nf-call-iptables":  "1",
 		"net.ipv4.ip_forward":                 "1",
@@ -66,46 +80,68 @@ func (t *PrepareOSTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, 
 		sysctlParams = clusterCfg.Spec.System.SysctlParams
 	}
 	setSysctlStep := osstep.NewConfigureSysctlStep("SetSysctl", sysctlParams, true, "/etc/sysctl.d/90-kubexms-kernel.conf")
-	lastStepID, _ = fragment.AddNode(&plan.ExecutionNode{
+	setSysctlNodeID, _ := fragment.AddNode(&plan.ExecutionNode{
 		Name:         setSysctlStep.Meta().Name,
 		Step:         setSysctlStep,
 		Hosts:        allHosts,
-		Dependencies: []plan.NodeID{lastStepID},
+		Dependencies: osConfigDependencies,
 	})
+	osConfigNodeIDs = append(osConfigNodeIDs, setSysctlNodeID)
 
-	// --- Step 3: Disable Swap ---
+	// Disable Swap
 	disableSwapStep := osstep.NewDisableSwapStep("DisableSwapOnNodes", true)
-	lastStepID, _ = fragment.AddNode(&plan.ExecutionNode{
+	disableSwapNodeID, _ := fragment.AddNode(&plan.ExecutionNode{
 		Name:         disableSwapStep.Meta().Name,
 		Step:         disableSwapStep,
 		Hosts:        allHosts,
-		Dependencies: []plan.NodeID{lastStepID},
+		Dependencies: osConfigDependencies,
 	})
+	osConfigNodeIDs = append(osConfigNodeIDs, disableSwapNodeID)
 
-	// --- Step 4: Configure SELinux ---
+	// Configure SELinux
 	selinuxMode := common.DefaultSELinuxMode
 	if clusterCfg.Spec.System != nil && clusterCfg.Spec.System.SELinux != "" {
 		selinuxMode = clusterCfg.Spec.System.SELinux
 	}
 	configureSELinuxStep := osstep.NewConfigureSELinuxStep("ConfigureSELinux", selinuxMode, true)
-	lastStepID, _ = fragment.AddNode(&plan.ExecutionNode{
+	configureSELinuxNodeID, _ := fragment.AddNode(&plan.ExecutionNode{
 		Name:         configureSELinuxStep.Meta().Name,
 		Step:         configureSELinuxStep,
 		Hosts:        allHosts,
-		Dependencies: []plan.NodeID{lastStepID},
+		Dependencies: osConfigDependencies,
 	})
+	osConfigNodeIDs = append(osConfigNodeIDs, configureSELinuxNodeID)
 
-	// --- Step 5: Disable Common Firewalls ---
+	// Disable Common Firewalls
 	var targetFirewalls []string
 	if clusterCfg.Spec.System != nil && len(clusterCfg.Spec.System.TargetFirewalls) > 0 {
 		targetFirewalls = clusterCfg.Spec.System.TargetFirewalls
 	}
 	disableFirewallStep := osstep.NewDisableFirewallStep("DisableFirewalls", true, targetFirewalls)
-	lastStepID, _ = fragment.AddNode(&plan.ExecutionNode{
+	disableFirewallNodeID, _ := fragment.AddNode(&plan.ExecutionNode{
 		Name:         disableFirewallStep.Meta().Name,
 		Step:         disableFirewallStep,
 		Hosts:        allHosts,
-		Dependencies: []plan.NodeID{lastStepID},
+		Dependencies: osConfigDependencies,
+	})
+	osConfigNodeIDs = append(osConfigNodeIDs, disableFirewallNodeID)
+
+	// --- Step 3: Hostname and /etc/hosts ---
+	// These should run after the main OS configuration is done.
+	setHostnameStep := common.NewSetHostnameStep("SetHostname")
+	setHostnameNodeID, _ := fragment.AddNode(&plan.ExecutionNode{
+		Name:         setHostnameStep.Meta().Name,
+		Step:         setHostnameStep,
+		Hosts:        allHosts,
+		Dependencies: osConfigNodeIDs,
+	})
+
+	addHostsStep := osstep.NewAddHostsStep("AddHosts")
+	_, _ = fragment.AddNode(&plan.ExecutionNode{
+		Name:         addHostsStep.Meta().Name,
+		Step:         addHostsStep,
+		Hosts:        allHosts,
+		Dependencies: []plan.NodeID{setHostnameNodeID}, // Depends on hostname being set
 	})
 
 	fragment.CalculateEntryAndExitNodes()

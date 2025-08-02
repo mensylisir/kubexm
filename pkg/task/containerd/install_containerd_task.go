@@ -2,127 +2,165 @@ package containerd
 
 import (
 	"fmt"
-	"path/filepath"
 
-	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/common"
-	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/plan"
-	commonstep "github.com/mensylisir/kubexm/pkg/step/common"
-	stepContainerd "github.com/mensylisir/kubexm/pkg/step/containerd"
-	"github.com/mensylisir/kubexm/pkg/task"
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/step/containerd"
+	"github.comcom/mensylisir/kubexm/pkg/task"
 )
 
 // InstallContainerdTask installs and configures containerd.
 type InstallContainerdTask struct {
-	task.BaseTask
+	task.Base
 }
 
 // NewInstallContainerdTask creates a new task for installing and configuring containerd.
-func NewInstallContainerdTask() task.Task {
-	return &InstallContainerdTask{
-		BaseTask: task.NewBaseTask(
-			"InstallAndConfigureContainerd",
-			"Installs and configures containerd, runc, and CNI plugins.",
-			[]string{common.RoleMaster, common.RoleWorker},
-			nil,
-			false,
-		),
+func NewInstallContainerdTask(ctx *task.TaskContext) (task.Interface, error) {
+	s := &InstallContainerdTask{
+		Base: task.Base{
+			Name:   "InstallContainerd",
+			Desc:   "Install and configure containerd on all nodes",
+			Hosts:  ctx.GetHosts(),
+			Action: new(InstallContainerdAction),
+		},
 	}
+	return s, nil
 }
 
-func (t *InstallContainerdTask) Plan(ctx task.TaskContext) (*task.ExecutionFragment, error) {
-	logger := ctx.GetLogger().With("task", t.Name())
-	fragment := task.NewExecutionFragment(t.Name())
-	cfg := ctx.GetClusterConfig()
-
-	controlPlaneHost, err := ctx.GetControlNode()
-	if err != nil {
-		return nil, err
-	}
-
-	// --- 1. Resource Acquisition on Control Node ---
-	containerdVersion := "1.7.13" // Example, should come from config
-	runcVersion := "v1.1.12"      // Example
-	cniPluginsVersion := "v1.4.0" // Example
-	if cfg.Spec.ContainerRuntime != nil && cfg.Spec.ContainerRuntime.Version != "" {
-		containerdVersion = cfg.Spec.ContainerRuntime.Version
-	}
-
-	// Define local paths for downloaded files
-	localContainerdPath := filepath.Join(ctx.GetGlobalWorkDir(), fmt.Sprintf("containerd-%s-linux-amd64.tar.gz", containerdVersion))
-	localRuncPath := filepath.Join(ctx.GetGlobalWorkDir(), "runc.amd64")
-	localCniPath := filepath.Join(ctx.GetGlobalWorkDir(), fmt.Sprintf("cni-plugins-linux-amd64-%s.tgz", cniPluginsVersion))
-
-	// Simplified URLs, a real implementation would have better logic
-	containerdURL := fmt.Sprintf("https://github.com/containerd/containerd/releases/download/v%s/containerd-%s-linux-amd64.tar.gz", containerdVersion, containerdVersion)
-	runcURL := fmt.Sprintf("https://github.com/opencontainers/runc/releases/download/%s/runc.amd64", runcVersion)
-	cniURL := fmt.Sprintf("https://github.com/containernetworking/plugins/releases/download/%s/cni-plugins-linux-amd64-%s.tgz", cniPluginsVersion, cniPluginsVersion)
-
-	// Create download steps
-	downloadContainerdStep := commonstep.NewDownloadFileStep("DownloadContainerd", containerdURL, localContainerdPath, "", "0644", false)
-	downloadRuncStep := commonstep.NewDownloadFileStep("DownloadRunc", runcURL, localRuncPath, "", "0755", false)
-	downloadCniStep := commonstep.NewDownloadFileStep("DownloadCniPlugins", cniURL, localCniPath, "", "0644", false)
-
-	downloadContainerdNodeID, _ := fragment.AddNode(&plan.ExecutionNode{Name: "DownloadContainerd", Step: downloadContainerdStep, Hosts: []connector.Host{controlPlaneHost}})
-	downloadRuncNodeID, _ := fragment.AddNode(&plan.ExecutionNode{Name: "DownloadRunc", Step: downloadRuncStep, Hosts: []connector.Host{controlPlaneHost}})
-	downloadCniNodeID, _ := fragment.AddNode(&plan.ExecutionNode{Name: "DownloadCni", Step: downloadCniStep, Hosts: []connector.Host{controlPlaneHost}})
-
-	downloadDependencies := []plan.NodeID{downloadContainerdNodeID, downloadRuncNodeID, downloadCniNodeID}
-
-	// --- 2. Distribution, Extraction, Installation per node ---
-	targetHosts, err := ctx.GetHostsByRole(t.GetRunOnRoles()...)
-	if err != nil {
-		return nil, err
-	}
-
-	var allFinalNodes []plan.NodeID
-	for _, host := range targetHosts {
-		// Upload binaries
-		remoteContainerdPath := filepath.Join("/tmp", filepath.Base(localContainerdPath))
-		remoteRuncPath := filepath.Join("/tmp", filepath.Base(localRuncPath))
-		remoteCniPath := filepath.Join("/tmp", filepath.Base(localCniPath))
-
-		uploadContainerdStep := commonstep.NewUploadFileStep("UploadContainerd-"+host.GetName(), localContainerdPath, remoteContainerdPath, "0644", true, false)
-		uploadRuncStep := commonstep.NewUploadFileStep("UploadRunc-"+host.GetName(), localRuncPath, remoteRuncPath, "0755", true, false)
-		uploadCniStep := commonstep.NewUploadFileStep("UploadCni-"+host.GetName(), localCniPath, remoteCniPath, "0644", true, false)
-
-		uploadContainerdNodeID, _ := fragment.AddNode(&plan.ExecutionNode{Name: "UploadContainerd-"+host.GetName(), Step: uploadContainerdStep, Hosts: []connector.Host{host}, Dependencies: downloadDependencies})
-		uploadRuncNodeID, _ := fragment.AddNode(&plan.ExecutionNode{Name: "UploadRunc-"+host.GetName(), Step: uploadRuncStep, Hosts: []connector.Host{host}, Dependencies: downloadDependencies})
-		uploadCniNodeID, _ := fragment.AddNode(&plan.ExecutionNode{Name: "UploadCni-"+host.GetName(), Step: uploadCniStep, Hosts: []connector.Host{host}, Dependencies: downloadDependencies})
-
-		// Install/Extract
-		extractContainerdStep := stepContainerd.NewExtractContainerdStep("ExtractContainerd-"+host.GetName(), remoteContainerdPath, "/usr/local", true)
-		installRuncStep := stepContainerd.NewInstallRuncBinaryStep("InstallRunc-"+host.GetName(), remoteRuncPath, "/usr/local/sbin/runc", true)
-		extractCniStep := stepContainerd.NewExtractCNIPluginsArchiveStep("ExtractCni-"+host.GetName(), remoteCniPath, "/opt/cni/bin", "", true, true)
-
-		extractContainerdNodeID, _ := fragment.AddNode(&plan.ExecutionNode{Name: "ExtractContainerd-"+host.GetName(), Step: extractContainerdStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{uploadContainerdNodeID}})
-		installRuncNodeID, _ := fragment.AddNode(&plan.ExecutionNode{Name: "InstallRunc-"+host.GetName(), Step: installRuncStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{uploadRuncNodeID}})
-		extractCniNodeID, _ := fragment.AddNode(&plan.ExecutionNode{Name: "ExtractCni-"+host.GetName(), Step: extractCniStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{uploadCniNodeID}})
-
-		binariesReadyDeps := []plan.NodeID{extractContainerdNodeID, installRuncNodeID, extractCniNodeID}
-
-		// Configure and start service
-		configureStep := stepContainerd.NewConfigureContainerdStep("ConfigureContainerd-"+host.GetName(), "registry.k8s.io/pause:3.9", nil, nil, "", "", "", true, true)
-		configureNodeID, _ := fragment.AddNode(&plan.ExecutionNode{Name: "ConfigureContainerd-"+host.GetName(), Step: configureStep, Hosts: []connector.Host{host}, Dependencies: binariesReadyDeps})
-
-		genServiceStep := stepContainerd.NewGenerateContainerdServiceStep("GenerateContainerdService-"+host.GetName(), stepContainerd.ContainerdServiceData{}, "", true)
-		genServiceNodeID, _ := fragment.AddNode(&plan.ExecutionNode{Name: "GenerateContainerdService-"+host.GetName(), Step: genServiceStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{configureNodeID}})
-
-		enableServiceStep := stepContainerd.NewManageContainerdServiceStep("EnableContainerd-"+host.GetName(), stepContainerd.ActionEnable, true)
-		enableServiceNodeID, _ := fragment.AddNode(&plan.ExecutionNode{Name: "EnableContainerd-"+host.GetName(), Step: enableServiceStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{genServiceNodeID}})
-
-		startServiceStep := stepContainerd.NewManageContainerdServiceStep("StartContainerd-"+host.GetName(), stepContainerd.ActionStart, true)
-		startServiceNodeID, _ := fragment.AddNode(&plan.ExecutionNode{Name: "StartContainerd-"+host.GetName(), Step: startServiceStep, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{enableServiceNodeID}})
-
-		allFinalNodes = append(allFinalNodes, startServiceNodeID)
-	}
-
-	fragment.EntryNodes = downloadDependencies
-	fragment.ExitNodes = allFinalNodes
-
-	logger.Info("Containerd installation task planning complete.")
-	return fragment, nil
+type InstallContainerdAction struct {
+	task.Action
 }
 
-var _ task.Task = (*InstallContainerdTask)(nil)
+func (a *InstallContainerdAction) Execute(ctx runtime.Context) (*plan.ExecutionGraph, error) {
+	p := plan.NewExecutionGraph("Install and Configure Containerd Phase")
+
+	hosts := a.GetHosts()
+	if len(hosts) == 0 {
+		return p, nil
+	}
+
+	// For each host, create a chain of steps to install containerd.
+	for _, host := range hosts {
+		hostName := host.GetName()
+
+		// 1. Download steps (can run in parallel)
+		downloadContainerd := &plan.ExecutionNode{
+			Step:  containerd.NewDownloadContainerdStep(ctx, fmt.Sprintf("DownloadContainerd-%s", hostName)),
+			Hosts: []connector.Host{host},
+		}
+		downloadRunc := &plan.ExecutionNode{
+			Step:  containerd.NewDownloadRuncStep(ctx, fmt.Sprintf("DownloadRunc-%s", hostName)),
+			Hosts: []connector.Host{host},
+		}
+		downloadCni := &plan.ExecutionNode{
+			Step:  containerd.NewDownloadCNIStep(ctx, fmt.Sprintf("DownloadCNI-%s", hostName)),
+			Hosts: []connector.Host{host},
+		}
+		downloadCrictl := &plan.ExecutionNode{
+			Step:  containerd.NewDownloadCrictlStep(ctx, fmt.Sprintf("DownloadCrictl-%s", hostName)),
+			Hosts: []connector.Host{host},
+		}
+
+		p.AddNode(plan.NodeID(downloadContainerd.Step.Meta().Name), downloadContainerd)
+		p.AddNode(plan.NodeID(downloadRunc.Step.Meta().Name), downloadRunc)
+		p.AddNode(plan.NodeID(downloadCni.Step.Meta().Name), downloadCni)
+		p.AddNode(plan.NodeID(downloadCrictl.Step.Meta().Name), downloadCrictl)
+
+		// 2. Extract and Install steps
+		extractContainerd := &plan.ExecutionNode{
+			Step:  containerd.NewExtractContainerdStep(ctx, fmt.Sprintf("ExtractContainerd-%s", hostName)),
+			Hosts: []connector.Host{host},
+		}
+		p.AddNode(plan.NodeID(extractContainerd.Step.Meta().Name), extractContainerd)
+		p.AddDependency(downloadContainerd.Step.Meta().Name, extractContainerd.Step.Meta().Name)
+
+		installRunc := &plan.ExecutionNode{
+			Step:  containerd.NewInstallRuncStep(ctx, fmt.Sprintf("InstallRunc-%s", hostName)),
+			Hosts: []connector.Host{host},
+		}
+		p.AddNode(plan.NodeID(installRunc.Step.Meta().Name), installRunc)
+		p.AddDependency(downloadRunc.Step.Meta().Name, installRunc.Step.Meta().Name)
+
+		extractCni := &plan.ExecutionNode{
+			Step:  containerd.NewExtractCNIStep(ctx, fmt.Sprintf("ExtractCNI-%s", hostName)),
+			Hosts: []connector.Host{host},
+		}
+		p.AddNode(plan.NodeID(extractCni.Step.Meta().Name), extractCni)
+		p.AddDependency(downloadCni.Step.Meta().Name, extractCni.Step.Meta().Name)
+
+		extractCrictl := &plan.ExecutionNode{
+			Step:  containerd.NewExtractCrictlStep(ctx, fmt.Sprintf("ExtractCrictl-%s", hostName)),
+			Hosts: []connector.Host{host},
+		}
+		p.AddNode(plan.NodeID(extractCrictl.Step.Meta().Name), extractCrictl)
+		p.AddDependency(downloadCrictl.Step.Meta().Name, extractCrictl.Step.Meta().Name)
+
+		installContainerd := &plan.ExecutionNode{
+			Step:  containerd.NewInstallContainerdStep(ctx, fmt.Sprintf("InstallContainerd-%s", hostName)),
+			Hosts: []connector.Host{host},
+		}
+		p.AddNode(plan.NodeID(installContainerd.Step.Meta().Name), installContainerd)
+		p.AddDependency(extractContainerd.Step.Meta().Name, installContainerd.Step.Meta().Name)
+
+		installCni := &plan.ExecutionNode{
+			Step:  containerd.NewInstallCNIStep(ctx, fmt.Sprintf("InstallCNI-%s", hostName)),
+			Hosts: []connector.Host{host},
+		}
+		p.AddNode(plan.NodeID(installCni.Step.Meta().Name), installCni)
+		p.AddDependency(extractCni.Step.Meta().Name, installCni.Step.Meta().Name)
+
+		installCrictl := &plan.ExecutionNode{
+			Step:  containerd.NewInstallCrictlStep(ctx, fmt.Sprintf("InstallCrictl-%s", hostName)),
+			Hosts: []connector.Host{host},
+		}
+		p.AddNode(plan.NodeID(installCrictl.Step.Meta().Name), installCrictl)
+		p.AddDependency(extractCrictl.Step.Meta().Name, installCrictl.Step.Meta().Name)
+
+		// 3. Configure steps
+		depsForConfig := []plan.NodeID{
+			plan.NodeID(installContainerd.Step.Meta().Name),
+			plan.NodeID(installRunc.Step.Meta().Name),
+			plan.NodeID(installCni.Step.Meta().Name),
+			plan.NodeID(installCrictl.Step.Meta().Name),
+		}
+
+		configureContainerd := &plan.ExecutionNode{
+			Step:         containerd.NewConfigureContainerdStep(ctx, fmt.Sprintf("ConfigureContainerd-%s", hostName)),
+			Hosts:        []connector.Host{host},
+			Dependencies: depsForConfig,
+		}
+		p.AddNode(plan.NodeID(configureContainerd.Step.Meta().Name), configureContainerd)
+
+		installService := &plan.ExecutionNode{
+			Step:         containerd.NewInstallContainerdServiceStep(ctx, fmt.Sprintf("InstallContainerdService-%s", hostName)),
+			Hosts:        []connector.Host{host},
+			Dependencies: []plan.NodeID{plan.NodeID(configureContainerd.Step.Meta().Name)},
+		}
+		p.AddNode(plan.NodeID(installService.Step.Meta().Name), installService)
+
+		configureCrictl := &plan.ExecutionNode{
+			Step:         containerd.NewConfigureCrictlStep(ctx, fmt.Sprintf("ConfigureCrictl-%s", hostName)),
+			Hosts:        []connector.Host{host},
+			Dependencies: []plan.NodeID{plan.NodeID(installService.Step.Meta().Name)},
+		}
+		p.AddNode(plan.NodeID(configureCrictl.Step.Meta().Name), configureCrictl)
+
+		// 4. Service management steps
+		enableService := &plan.ExecutionNode{
+			Step:         containerd.NewEnableContainerdStep(ctx, fmt.Sprintf("EnableContainerd-%s", hostName)),
+			Hosts:        []connector.Host{host},
+			Dependencies: []plan.NodeID{plan.NodeID(configureCrictl.Step.Meta().Name)},
+		}
+		p.AddNode(plan.NodeID(enableService.Step.Meta().Name), enableService)
+
+		startService := &plan.ExecutionNode{
+			Step:         containerd.NewStartContainerdStep(ctx, fmt.Sprintf("StartContainerd-%s", hostName)),
+			Hosts:        []connector.Host{host},
+			Dependencies: []plan.NodeID{plan.NodeID(enableService.Step.Meta().Name)},
+		}
+		p.AddNode(plan.NodeID(startService.Step.Meta().Name), startService)
+	}
+
+	return p, nil
+}
