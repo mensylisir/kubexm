@@ -1,0 +1,35 @@
+apiVersion: apiserver.config.k8s.io/v1
+kind: KubeAPIServerConfiguration
+etcd:
+  servers:
+  {{- range .EtcdServers }}
+  - {{ . }}
+  {{- end }}
+  caFile: {{ .EtcdCaFile }}
+  certFile: {{ .EtcdCertFile }}
+  keyFile: {{ .EtcdKeyFile }}
+admissionControl:
+- Name: "NamespaceLifecycle"
+- Name: "LimitRanger"
+- Name: "ServiceAccount"
+- Name: "DefaultStorageClass"
+- Name: "DefaultTolerationSeconds"
+- Name: "NodeRestriction"
+- Name: "MutatingAdmissionWebhook"
+- Name: "ValidatingAdmissionWebhook"
+- Name: "ResourceQuota"
+authorization:
+  modes:
+  - "Node"
+  - "RBAC"
+kubeletClient:
+  caFile: {{ .KubeletClientCaFile }}
+  certFile: {{ .KubeletClientCertFile }}
+  keyFile: {{ .KubeletClientKeyFile }}
+serviceAccount:
+  keyFiles:
+  - {{ .ServiceAccountKeyFile }}
+  issuer: {{ .ServiceAccountIssuer }}
+tls:
+  certFile: {{ .TlsCertFile }}
+  privateKeyFile: {{ .TlsPrivateKeyFile }}
