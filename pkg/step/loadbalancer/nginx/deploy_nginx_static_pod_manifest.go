@@ -1,0 +1,76 @@
+package nginx
+
+import (
+	"fmt"
+	"path/filepath"
+	"time"
+
+	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/spec"
+	"github.com/mensylisir/kubexm/pkg/step"
+)
+
+type DeployNginxStaticPodManifestStep struct {
+	step.Base
+}
+
+func NewDeployNginxStaticPodManifestStepBuilder(ctx runtime.Context, instanceName string) *step.Builder[step.EmptyStepBuilder, *DeployNginxStaticPodManifestStep] {
+	s := &DeployNginxStaticPodManifestStep{}
+	s.Base.Meta.Name = instanceName
+	s.Base.Meta.Description = "Deploy nginx static pod manifest"
+	s.Base.Sudo = true
+	s.Base.Timeout = 1 * time.Minute
+	b := new(step.EmptyStepBuilder).Init(s)
+	return b
+}
+
+func (s *DeployNginxStaticPodManifestStep) Run(ctx runtime.ExecutionContext) error {
+	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", ctx.GetHost().GetName())
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		return err
+	}
+
+	manifestContent, ok := ctx.Get("nginx.yaml")
+	if !ok {
+		return fmt.Errorf("nginx.yaml not found in context")
+	}
+
+	manifestBytes, ok := manifestContent.([]byte)
+	if !ok {
+		return fmt.Errorf("nginx.yaml in context is not of type []byte")
+	}
+
+	remotePath := filepath.Join(common.KubernetesManifestsDir, "nginx.yaml")
+	logger.Infof("Deploying nginx static pod manifest to %s", remotePath)
+
+	if err := runner.WriteFile(ctx.GoContext(), conn, manifestBytes, remotePath, "0644", true); err != nil {
+		return fmt.Errorf("failed to deploy nginx static pod manifest: %w", err)
+	}
+
+	return nil
+}
+
+func (s *DeployNginxStaticPodManifestStep) Rollback(ctx runtime.ExecutionContext) error {
+	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", ctx.GetHost().GetName())
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		return nil
+	}
+
+	remotePath := filepath.Join(common.KubernetesManifestsDir, "nginx.yaml")
+	logger.Warnf("Rolling back by removing %s", remotePath)
+
+	if err := runner.Remove(ctx.GoContext(), conn, remotePath, true, false); err != nil {
+		logger.Errorf("Failed to remove nginx manifest during rollback: %v", err)
+	}
+
+	return nil
+}
+
+func (s *DeployNginxStaticPodManifestStep) Meta() *spec.StepMeta {
+	return &s.Base.Meta
+}
