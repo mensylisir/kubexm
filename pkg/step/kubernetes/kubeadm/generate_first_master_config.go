@@ -15,7 +15,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step"
 	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/images"
-	"github.comcom/mensylisir/kubexm/pkg/templates"
+	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
 // GenerateFirstMasterConfigStep is a step to generate the kubeadm config for the first master.
@@ -169,7 +169,7 @@ func (s *GenerateFirstMasterConfigStep) renderContent(ctx runtime.ExecutionConte
 
 	// --- 1. Set default values ---
 	data := TemplateData{
-		ImageRepository:   fmt.Sprintf("%s/%s", corednsImage.Registry, corednsImage.Namespace),
+		ImageRepository:   corednsImage.Registry,
 		KubernetesVersion: common.DefaultK8sVersion,
 		ClusterName:       common.DefaultClusterName,
 		ClusterConfiguration: ClusterConfigurationTemplate{
@@ -257,11 +257,6 @@ func (s *GenerateFirstMasterConfigStep) renderContent(ctx runtime.ExecutionConte
 	data.ClusterName = helpers.FirstNonEmpty(cluster.Spec.Kubernetes.ClusterName, data.ClusterName)
 	data.ClusterConfiguration.Networking.DNSDomain = helpers.FirstNonEmpty(cluster.Spec.Kubernetes.DNSDomain, data.ClusterConfiguration.Networking.DNSDomain)
 
-	// If a private registry is configured, prepend its URL.
-	if reg := cluster.Spec.Registry; reg != nil && reg.URL != "" {
-		data.ImageRepository = reg.URL
-	}
-
 	// Networking
 	data.ClusterConfiguration.Networking.PodSubnet = helpers.FirstNonEmpty(cluster.Spec.Network.KubePodsCIDR, data.ClusterConfiguration.Networking.PodSubnet)
 	data.ClusterConfiguration.Networking.ServiceSubnet = helpers.FirstNonEmpty(cluster.Spec.Network.KubeServiceCIDR, data.ClusterConfiguration.Networking.ServiceSubnet)
@@ -269,7 +264,7 @@ func (s *GenerateFirstMasterConfigStep) renderContent(ctx runtime.ExecutionConte
 	// Control plane endpoint
 	cpEndpoint := cluster.Spec.ControlPlaneEndpoint
 	cpDomain := helpers.FirstNonEmpty(cpEndpoint.Domain, cpEndpoint.Address)
-	cpPort := helpers.FirstNonZero(cpEndpoint.Port, data.InitConfiguration.LocalAPIEndpoint.BindPort)
+	cpPort := helpers.FirstNonZeroInteger(cpEndpoint.Port, data.InitConfiguration.LocalAPIEndpoint.BindPort)
 	data.ClusterConfiguration.ControlPlaneEndpoint = fmt.Sprintf("%s:%d", cpDomain, cpPort)
 	data.InitConfiguration.LocalAPIEndpoint.AdvertiseAddress = currentHost.GetInternalAddress() // This is the first master
 	data.InitConfiguration.LocalAPIEndpoint.BindPort = cpPort

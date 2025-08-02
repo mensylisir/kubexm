@@ -117,7 +117,7 @@ func (s *GenerateOtherMasterConfigStep) renderContent(ctx runtime.ExecutionConte
 	// Control plane endpoint
 	cpEndpoint := cluster.Spec.ControlPlaneEndpoint
 	cpDomain := helpers.FirstNonEmpty(cpEndpoint.Domain, cpEndpoint.Address)
-	cpPort := helpers.FirstNonZero(cpEndpoint.Port, common.DefaultAPIServerPort)
+	cpPort := helpers.FirstNonZeroInteger(cpEndpoint.Port, common.DefaultAPIServerPort)
 
 	data := JoinMasterTemplateData{
 		APIServerEndpoint: fmt.Sprintf("%s:%d", cpDomain, cpPort),

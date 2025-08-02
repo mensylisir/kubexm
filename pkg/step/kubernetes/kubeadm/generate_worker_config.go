@@ -104,7 +104,7 @@ func (s *GenerateWorkerConfigStep) renderContent(ctx runtime.ExecutionContext) (
 	// Control plane endpoint
 	cpEndpoint := cluster.Spec.ControlPlaneEndpoint
 	cpDomain := helpers.FirstNonEmpty(cpEndpoint.Domain, cpEndpoint.Address)
-	cpPort := helpers.FirstNonZero(cpEndpoint.Port, common.DefaultAPIServerPort)
+	cpPort := helpers.FirstNonZeroInteger(cpEndpoint.Port, common.DefaultAPIServerPort)
 
 	data := JoinWorkerTemplateData{
 		APIServerEndpoint: fmt.Sprintf("%s:%d", cpDomain, cpPort),
@@ -141,7 +141,7 @@ func (s *GenerateWorkerConfigStep) Precheck(ctx runtime.ExecutionContext) (isDon
 
 	logger.Info("Remote join config file exists. Comparing content.")
 	expectedContent, err := s.renderContent(ctx)
-	if err != nil {
+	if err !=.
 		logger.Warnf("Could not render expected config for precheck: %v. Assuming step needs to run.", err)
 		return false, nil
 	}
