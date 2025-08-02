@@ -2,11 +2,13 @@ package controllermanager
 
 import (
 	"fmt"
+	"path/filepath"
 
+	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
+	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
 type GenerateControllerManagerKubeconfigStep struct {
@@ -21,39 +23,38 @@ func NewGenerateControllerManagerKubeconfigStepBuilder(ctx runtime.Context, inst
 	return b
 }
 
+type KubeconfigTemplateData struct {
+	ServerURL      string
+	CaPath         string
+	UserName       string
+	ClientCertPath string
+	ClientKeyPath  string
+}
+
 func (s *GenerateControllerManagerKubeconfigStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", ctx.GetHost().GetName())
 
-	// This is a simplified placeholder.
-	// A real implementation would call a helper function to generate a kubeconfig.
-	// e.g., helpers.CreateKubeconfig(server, ca, clientCert, clientKey)
+	pkiPath := common.DefaultKubernetesPKIDir
 
-	// The server would be the local apiserver endpoint (e.g., https://127.0.0.1:6443)
-	// The user would be "system:kube-controller-manager"
-	// The certs would be generated specifically for this user.
+	data := KubeconfigTemplateData{
+		ServerURL:      fmt.Sprintf("https://%s:%d", "127.0.0.1", common.DefaultAPIServerPort),
+		CaPath:         filepath.Join(pkiPath, "ca.pem"),
+		UserName:       "system:kube-controller-manager",
+		ClientCertPath: filepath.Join(pkiPath, "kube-controller-manager.pem"),
+		ClientKeyPath:  filepath.Join(pkiPath, "kube-controller-manager-key.pem"),
+	}
 
-	dummyKubeconfig := `
-apiVersion: v1
-kind: Config
-clusters:
-- cluster:
-    certificate-authority-data: "..." # Base64 encoded CA cert
-    server: "https://127.0.0.1:6443"
-  name: "kubernetes"
-contexts:
-- context:
-    cluster: "kubernetes"
-    user: "system:kube-controller-manager"
-  name: "system:kube-controller-manager@kubernetes"
-current-context: "system:kube-controller-manager@kubernetes"
-users:
-- name: "system:kube-controller-manager"
-  user:
-    client-certificate-data: "..." # Base64 encoded client cert
-    client-key-data: "..." # Base64 encoded client key
-`
+	templateContent, err := templates.Get("kubernetes/kubeconfig.yaml.tmpl")
+	if err != nil {
+		return fmt.Errorf("failed to get generic kubeconfig template: %w", err)
+	}
 
-	ctx.Set("controller-manager.kubeconfig", []byte(dummyKubeconfig))
+	renderedConfig, err := templates.Render(templateContent, data)
+	if err != nil {
+		return fmt.Errorf("failed to render controller-manager kubeconfig: %w", err)
+	}
+
+	ctx.Set("controller-manager.kubeconfig", renderedConfig)
 	logger.Info("controller-manager.kubeconfig generated successfully.")
 
 	return nil

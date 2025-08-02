@@ -2,11 +2,13 @@ package scheduler
 
 import (
 	"fmt"
+	"path/filepath"
 
+	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
+	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
 type GenerateSchedulerKubeconfigStep struct {
@@ -21,34 +23,38 @@ func NewGenerateSchedulerKubeconfigStepBuilder(ctx runtime.Context, instanceName
 	return b
 }
 
+type KubeconfigTemplateData struct {
+	ServerURL      string
+	CaPath         string
+	UserName       string
+	ClientCertPath string
+	ClientKeyPath  string
+}
+
 func (s *GenerateSchedulerKubeconfigStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", ctx.GetHost().GetName())
 
-	// This is a simplified placeholder.
-	// A real implementation would call a helper function to generate a kubeconfig.
+	pkiPath := common.DefaultKubernetesPKIDir
 
-	dummyKubeconfig := `
-apiVersion: v1
-kind: Config
-clusters:
-- cluster:
-    certificate-authority-data: "..." # Base64 encoded CA cert
-    server: "https://127.0.0.1:6443"
-  name: "kubernetes"
-contexts:
-- context:
-    cluster: "kubernetes"
-    user: "system:kube-scheduler"
-  name: "system:kube-scheduler@kubernetes"
-current-context: "system:kube-scheduler@kubernetes"
-users:
-- name: "system:kube-scheduler"
-  user:
-    client-certificate-data: "..." # Base64 encoded client cert
-    client-key-data: "..." # Base64 encoded client key
-`
+	data := KubeconfigTemplateData{
+		ServerURL:      fmt.Sprintf("https://%s:%d", "127.0.0.1", common.DefaultAPIServerPort),
+		CaPath:         filepath.Join(pkiPath, "ca.pem"),
+		UserName:       "system:kube-scheduler",
+		ClientCertPath: filepath.Join(pkiPath, "kube-scheduler.pem"),
+		ClientKeyPath:  filepath.Join(pkiPath, "kube-scheduler-key.pem"),
+	}
 
-	ctx.Set("scheduler.kubeconfig", []byte(dummyKubeconfig))
+	templateContent, err := templates.Get("kubernetes/kubeconfig.yaml.tmpl")
+	if err != nil {
+		return fmt.Errorf("failed to get generic kubeconfig template: %w", err)
+	}
+
+	renderedConfig, err := templates.Render(templateContent, data)
+	if err != nil {
+		return fmt.Errorf("failed to render scheduler kubeconfig: %w", err)
+	}
+
+	ctx.Set("scheduler.kubeconfig", renderedConfig)
 	logger.Info("scheduler.kubeconfig generated successfully.")
 
 	return nil
