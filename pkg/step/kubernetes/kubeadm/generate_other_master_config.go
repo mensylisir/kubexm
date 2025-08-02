@@ -15,26 +15,6 @@ import (
 )
 
 const (
-	// JoinMasterConfigTemplate is the template for the kubeadm join config for a master node.
-	JoinMasterConfigTemplate = `apiVersion: kubeadm.k8s.io/v1beta3
-kind: JoinConfiguration
-discovery:
-  bootstrapToken:
-    apiServerEndpoint: "{{ .APIServerEndpoint }}"
-    token: "{{ .Token }}"
-    caCertHashes:
-    - "{{ .CACertHash }}"
-nodeRegistration:
-  criSocket: "{{ .CRISocket }}"
-  cgroupDriver: "{{ .CgroupDriver }}"
-  kubeletExtraArgs:
-    cgroup-driver: "{{ .CgroupDriver }}"
-controlPlane:
-  localAPIEndpoint:
-    advertiseAddress: "{{ .AdvertiseAddress }}"
-    bindPort: {{ .BindPort }}
-  certificateKey: "{{ .CertificateKey }}"
-`
 	KubeadmJoinMasterConfigFileName = "kubeadm-join-master-config.yaml"
 )
 
@@ -130,7 +110,11 @@ func (s *GenerateOtherMasterConfigStep) renderContent(ctx runtime.ExecutionConte
 		BindPort:          cpPort,
 	}
 
-	renderedConfig, err := templates.Render(JoinMasterConfigTemplate, data)
+	templateContent, err := templates.Get("kubernetes/kubeadm/kubeadm-join-master-config.tmpl")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get kubeadm join master template: %w", err)
+	}
+	renderedConfig, err := templates.Render(templateContent, data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to render kubeadm join master template: %w", err)
 	}

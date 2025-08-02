@@ -1,0 +1,18 @@
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: JoinConfiguration
+discovery:
+  bootstrapToken:
+    apiServerEndpoint: "{{ .APIServerEndpoint }}"
+    token: "{{ .Token }}"
+    caCertHashes:
+    - "{{ .CACertHash }}"
+nodeRegistration:
+  criSocket: "{{ .CRISocket }}"
+  cgroupDriver: "{{ .CgroupDriver }}"
+  kubeletExtraArgs:
+    cgroup-driver: "{{ .CgroupDriver }}"
+controlPlane:
+  localAPIEndpoint:
+    advertiseAddress: "{{ .AdvertiseAddress }}"
+    bindPort: {{ .BindPort }}
+  certificateKey: "{{ .CertificateKey }}"

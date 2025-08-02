@@ -15,21 +15,6 @@ import (
 )
 
 const (
-	// JoinWorkerConfigTemplate is the template for the kubeadm join config for a worker node.
-	JoinWorkerConfigTemplate = `apiVersion: kubeadm.k8s.io/v1beta3
-kind: JoinConfiguration
-discovery:
-  bootstrapToken:
-    apiServerEndpoint: "{{ .APIServerEndpoint }}"
-    token: "{{ .Token }}"
-    caCertHashes:
-    - "{{ .CACertHash }}"
-nodeRegistration:
-  criSocket: "{{ .CRISocket }}"
-  cgroupDriver: "{{ .CgroupDriver }}"
-  kubeletExtraArgs:
-    cgroup-driver: "{{ .CgroupDriver }}"
-`
 	KubeadmJoinWorkerConfigFileName = "kubeadm-join-worker-config.yaml"
 )
 
@@ -114,7 +99,11 @@ func (s *GenerateWorkerConfigStep) renderContent(ctx runtime.ExecutionContext) (
 		CgroupDriver:      cgroupDriver,
 	}
 
-	renderedConfig, err := templates.Render(JoinWorkerConfigTemplate, data)
+	templateContent, err := templates.Get("kubernetes/kubeadm/kubeadm-join-worker-config.tmpl")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get kubeadm join worker template: %w", err)
+	}
+	renderedConfig, err := templates.Render(templateContent, data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to render kubeadm join worker template: %w", err)
 	}
@@ -141,7 +130,7 @@ func (s *GenerateWorkerConfigStep) Precheck(ctx runtime.ExecutionContext) (isDon
 
 	logger.Info("Remote join config file exists. Comparing content.")
 	expectedContent, err := s.renderContent(ctx)
-	if err !=.
+	if err != nil {
 		logger.Warnf("Could not render expected config for precheck: %v. Assuming step needs to run.", err)
 		return false, nil
 	}
