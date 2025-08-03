@@ -1,140 +1,68 @@
 package pki
 
 import (
-	"crypto/x509"
 	"fmt"
-	"time"
 
 	"github.com/mensylisir/kubexm/pkg/common"
-	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
-	commonstep "github.com/mensylisir/kubexm/pkg/step/common"
+	"github.com/mensylisir/kubexm/pkg/step/kubernetes/certs"
 	"github.com/mensylisir/kubexm/pkg/task"
 )
 
-// GenerateKubernetesPkiTask orchestrates the generation of Kubernetes PKI.
 type GenerateKubernetesPkiTask struct {
-	task.BaseTask
+	task.Base
 }
 
-// NewGenerateKubernetesPkiTask creates a new task for generating Kubernetes PKI.
-func NewGenerateKubernetesPkiTask() task.Task {
-	return &GenerateKubernetesPkiTask{
-		BaseTask: task.NewBaseTask(
-			"GenerateKubernetesPki",
-			"Generates all necessary Kubernetes PKI (CA, component certificates).",
-			[]string{common.ControlNodeRole},
-			nil,
-			false,
-		),
+func NewGenerateKubernetesPkiTask(ctx *task.TaskContext) (task.Interface, error) {
+	s := &GenerateKubernetesPkiTask{
+		Base: task.Base{
+			Name:   "GenerateKubernetesPki",
+			Desc:   "Generate all necessary Kubernetes PKI (CA, component certs, etc.)",
+			Hosts:  ctx.GetHostsByRole(common.RoleControlPlane),
+			Action: new(GenerateKubernetesPkiAction),
+		},
 	}
+	return s, nil
 }
 
-func (t *GenerateKubernetesPkiTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
-	logger := ctx.GetLogger().With("task", t.Name())
-	fragment := task.NewExecutionFragment(t.Name())
+type GenerateKubernetesPkiAction struct {
+	task.Action
+}
+
+func (a *GenerateKubernetesPkiAction) Execute(ctx runtime.Context) (*plan.ExecutionGraph, error) {
+	p := plan.NewExecutionGraph("Generate Kubernetes PKI Phase")
 
 	controlPlaneHost, err := ctx.GetControlNode()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get control plane host for PKI generation: %w", err)
+		return nil, err
 	}
 
-	k8sCertDir := ctx.GetKubernetesCertsDir()
+	allHosts := a.GetHosts()
 
-	// Step 1: Generate Kubernetes CA
-	caStep := commonstep.NewGenerateCAStepBuilder(ctx, "GenerateKubernetesCA").
-		WithLocalCertsDir(k8sCertDir).
-		WithCertFileName(common.KubeCaPemFileName).
-		WithKeyFileName(common.KubeCaKeyFileName).
-		Build()
+	// 1. Generate the main Certificate Authority (CA) on the control node.
+	genCaNode := plan.NodeID("generate-k8s-ca")
+	p.AddNode(genCaNode, &plan.ExecutionNode{Step: certs.NewGenerateCAStep(ctx, genCaNode.String()), Hosts: []connector.Host{controlPlaneHost}})
 
-	caNodeID, _ := fragment.AddNode(&plan.ExecutionNode{
-		Name:  caStep.Meta().Name,
-		Step:  caStep,
-		Hosts: []connector.Host{controlPlaneHost},
-	})
+	// 2. Distribute the public CA certificate to all nodes.
+	distributeCaNode := plan.NodeID("distribute-k8s-ca")
+	p.AddNode(distributeCaNode, &plan.ExecutionNode{Step: certs.NewDistributionCAStep(ctx, distributeCaNode.String()), Hosts: allHosts, Dependencies: []plan.NodeID{genCaNode}})
 
-	// Define certificates to generate
-	certsToGenerate := []struct {
-		BaseName     string
-		CommonName   string
-		Organization []string
-		SANs         []string // Static SANs
-		Usages       []x509.ExtKeyUsage
-	}{
-		{
-			BaseName:   "kube-apiserver",
-			CommonName: "kube-apiserver",
-			SANs:       []string{"kubernetes", "kubernetes.default", "kubernetes.default.svc", "kubernetes.default.svc.cluster.local", "127.0.0.1"},
-			Usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		},
-		{
-			BaseName:     "kube-controller-manager",
-			CommonName:   "system:kube-controller-manager",
-			Organization: []string{"system:kube-controller-manager"},
-			Usages:       []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-		},
-		{
-			BaseName:     "kube-scheduler",
-			CommonName:   "system:kube-scheduler",
-			Organization: []string{"system:kube-scheduler"},
-			Usages:       []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-		},
-		{
-			BaseName:     "admin",
-			CommonName:   "kubernetes-admin",
-			Organization: []string{"system:masters"},
-			Usages:       []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-		},
-		{
-			BaseName:   "front-proxy-ca",
-			CommonName: "front-proxy-ca",
-			Usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-		},
-		{
-			BaseName:   "front-proxy-client",
-			CommonName: "front-proxy-client",
-			Usages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-		},
-	}
+	// 3. Generate all other certificates on the control node, signed by the CA.
+	genCertsNode := plan.NodeID("generate-k8s-certs")
+	p.AddNode(genCertsNode, &plan.ExecutionNode{Step: certs.NewGenerateCertsStep(ctx, genCertsNode.String()), Hosts: []connector.Host{controlPlaneHost}, Dependencies: []plan.NodeID{genCaNode}})
 
-	var allCertNodeIDs []plan.NodeID
-	for _, cert := range certsToGenerate {
-		// Add dynamic SANs for apiserver
-		if cert.BaseName == "kube-apiserver" {
-			cert.SANs = append(cert.SANs, ctx.GetClusterConfig().Spec.ControlPlaneEndpoint.Domain)
-			for _, master := range ctx.GetHostsByRoleUnsafe(common.RoleMaster) {
-				cert.SANs = append(cert.SANs, master.GetName(), master.GetAddress())
-			}
-		}
+	// 4. Distribute the generated component certificates to the relevant nodes.
+	distributeCertsNode := plan.NodeID("distribute-k8s-certs")
+	p.AddNode(distributeCertsNode, &plan.ExecutionNode{Step: certs.NewDistributionCertsStep(ctx, distributeCertsNode.String()), Hosts: allHosts, Dependencies: []plan.NodeID{genCertsNode}})
 
-		certStep := commonstep.NewGenerateCertsStepBuilder(ctx, fmt.Sprintf("GenerateCert-%s", cert.BaseName)).
-			WithLocalCertsDir(k8sCertDir).
-			WithCaCertFileName(common.KubeCaPemFileName).
-			WithCaKeyFileName(common.KubeCaKeyFileName).
-			WithCert(fmt.Sprintf("%s.pem", cert.BaseName)).
-			WithCertKey(fmt.Sprintf("%s-key.pem", cert.BaseName)).
-			WithCommonName(cert.CommonName).
-			WithOrganization(cert.Organization).
-			WithHosts(cert.SANs).
-			WithUsages(cert.Usages).
-			Build()
+	// 5. Generate Kubeconfig files for components and users.
+	genKubeconfigsNode := plan.NodeID("generate-kubeconfigs")
+	p.AddNode(genKubeconfigsNode, &plan.ExecutionNode{Step: certs.NewGenerateKubeconfigStep(ctx, genKubeconfigsNode.String()), Hosts: []connector.Host{controlPlaneHost}, Dependencies: []plan.NodeID{genCertsNode}})
 
-		certNodeID, _ := fragment.AddNode(&plan.ExecutionNode{
-			Name:         certStep.Meta().Name,
-			Step:         certStep,
-			Hosts:        []connector.Host{controlPlaneHost},
-			Dependencies: []plan.NodeID{caNodeID},
-		})
-		allCertNodeIDs = append(allCertNodeIDs, certNodeID)
-	}
+	// 6. Distribute the kubeconfig files.
+	distributeKubeconfigsNode := plan.NodeID("distribute-kubeconfigs")
+	p.AddNode(distributeKubeconfigsNode, &plan.ExecutionNode{Step: certs.NewDistributionKubeconfigStep(ctx, distributeKubeconfigsNode.String()), Hosts: allHosts, Dependencies: []plan.NodeID{genKubeconfigsNode}})
 
-	fragment.EntryNodes = []plan.NodeID{caNodeID}
-	fragment.ExitNodes = allCertNodeIDs
-
-	logger.Info("Kubernetes PKI generation task planning complete.")
-	return fragment, nil
+	return p, nil
 }
-
-var _ task.Task = (*GenerateKubernetesPkiTask)(nil)

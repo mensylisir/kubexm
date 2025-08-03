@@ -1,142 +1,89 @@
-package etcd
+package pki
 
 import (
-	"crypto/x509"
 	"fmt"
-	"path/filepath"
-	"time"
 
 	"github.com/mensylisir/kubexm/pkg/common"
-	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
-	commonstep "github.com/mensylisir/kubexm/pkg/step/common"
+	"github.com/mensylisir/kubexm/pkg/step/etcd"
 	"github.com/mensylisir/kubexm/pkg/task"
 )
 
-// GenerateEtcdPkiTask orchestrates the generation of etcd PKI.
 type GenerateEtcdPkiTask struct {
-	task.BaseTask
+	task.Base
 }
 
-// NewGenerateEtcdPkiTask creates a new task for generating etcd PKI.
-func NewGenerateEtcdPkiTask() task.Task {
-	return &GenerateEtcdPkiTask{
-		BaseTask: task.NewBaseTask(
-			"GenerateEtcdPki",
-			"Generates all necessary etcd PKI (CA, member, client certificates).",
-			[]string{common.ControlNodeRole},
-			nil,
-			false,
-		),
+func NewGenerateEtcdPkiTask(ctx *task.TaskContext) (task.Interface, error) {
+	s := &GenerateEtcdPkiTask{
+		Base: task.Base{
+			Name:   "GenerateEtcdPki",
+			Desc:   "Generate all necessary etcd PKI (CA, member, client certificates)",
+			Hosts:  ctx.GetHostsByRole(common.RoleControlPlane), // This task runs on the control-plane node
+			Action: new(GenerateEtcdPkiAction),
+		},
 	}
+	return s, nil
 }
 
-func (t *GenerateEtcdPkiTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
-	logger := ctx.GetLogger().With("task", t.Name())
-	fragment := task.NewExecutionFragment(t.Name())
+type GenerateEtcdPkiAction struct {
+	task.Action
+}
+
+func (a *GenerateEtcdPkiAction) Execute(ctx runtime.Context) (*plan.ExecutionGraph, error) {
+	p := plan.NewExecutionGraph("Generate Etcd PKI Phase")
 
 	controlPlaneHost, err := ctx.GetControlNode()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get control plane host for PKI generation: %w", err)
+		return nil, err
 	}
 
-	etcdCertDir := ctx.GetEtcdCertsDir()
+	etcdHosts := ctx.GetHostsByRole(common.RoleEtcd)
 
-	// Step 1: Generate Etcd CA
-	caStep := commonstep.NewGenerateCAStepBuilder(ctx, "GenerateEtcdCA").
-		WithLocalCertsDir(etcdCertDir).
-		WithCertFileName(common.EtcdCaPemFileName).
-		WithKeyFileName(common.EtcdCaKeyPemFileName).
-		WithCADuration(10 * 365 * 24 * time.Hour).
-		Build()
+	// 1. Generate Etcd CA
+	genCaNode := plan.NodeID("generate-etcd-ca")
+	p.AddNode(genCaNode, &plan.ExecutionNode{Step: etcd.NewGenerateCAStep(ctx, genCaNode.String()), Hosts: []connector.Host{controlPlaneHost}})
 
-	genCaNodeID, _ := fragment.AddNode(&plan.ExecutionNode{
-		Name:  caStep.Meta().Name,
-		Step:  caStep,
-		Hosts: []connector.Host{controlPlaneHost},
-	})
+	// 2. Generate Server/Peer certs for each etcd node
+	var certNodes []plan.NodeID
+	for _, host := range etcdHosts {
+		hostName := host.GetName()
 
-	// Step 2: Generate Server/Peer certs for each etcd node
-	etcdNodes, err := ctx.GetHostsByRole(common.RoleEtcd)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get etcd nodes for task %s: %w", t.Name(), err)
-	}
-
-	var allCertNodeIDs []plan.NodeID
-
-	for _, etcdHost := range etcdNodes {
-		hostName := etcdHost.GetName()
-		hostIP := etcdHost.GetAddress()
-
-		// Server Cert
-		serverCertStep := commonstep.NewGenerateCertsStepBuilder(ctx, fmt.Sprintf("GenerateEtcdServerCert-%s", hostName)).
-			WithLocalCertsDir(etcdCertDir).
-			WithCaCertFileName(common.EtcdCaPemFileName).
-			WithCaKeyFileName(common.EtcdCaKeyPemFileName).
-			WithCert(fmt.Sprintf("%s.pem", hostName)).
-			WithCertKey(fmt.Sprintf("%s-key.pem", hostName)).
-			WithCommonName(hostName).
-			WithOrganization([]string{"kubexm-etcd-server"}).
-			WithHosts([]string{hostName, hostIP}).
-			WithUsages([]x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth}).
-			Build()
-
-		serverCertNodeID, _ := fragment.AddNode(&plan.ExecutionNode{
-			Name:         serverCertStep.Meta().Name,
-			Step:         serverCertStep,
+		// Generate server cert
+		genServerCertNode := plan.NodeID(fmt.Sprintf("generate-etcd-server-cert-%s", hostName))
+		p.AddNode(genServerCertNode, &plan.ExecutionNode{
+			Step:         etcd.NewGenerateCertStep(ctx, genServerCertNode.String(), "server"), // type: server
 			Hosts:        []connector.Host{controlPlaneHost},
-			Dependencies: []plan.NodeID{genCaNodeID},
+			Dependencies: []plan.NodeID{genCaNode},
 		})
-		allCertNodeIDs = append(allCertNodeIDs, serverCertNodeID)
+		certNodes = append(certNodes, genServerCertNode)
 
-		// Peer Cert
-		peerCertStep := commonstep.NewGenerateCertsStepBuilder(ctx, fmt.Sprintf("GenerateEtcdPeerCert-%s", hostName)).
-			WithLocalCertsDir(etcdCertDir).
-			WithCaCertFileName(common.EtcdCaPemFileName).
-			WithCaKeyFileName(common.EtcdCaKeyPemFileName).
-			WithCert(fmt.Sprintf("peer-%s.pem", hostName)).
-			WithCertKey(fmt.Sprintf("peer-%s-key.pem", hostName)).
-			WithCommonName(hostName).
-			WithOrganization([]string{"kubexm-etcd-peer"}).
-			WithHosts([]string{hostName, hostIP}).
-			WithUsages([]x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth}).
-			Build()
-
-		peerCertNodeID, _ := fragment.AddNode(&plan.ExecutionNode{
-			Name:         peerCertStep.Meta().Name,
-			Step:         peerCertStep,
+		// Generate peer cert
+		genPeerCertNode := plan.NodeID(fmt.Sprintf("generate-etcd-peer-cert-%s", hostName))
+		p.AddNode(genPeerCertNode, &plan.ExecutionNode{
+			Step:         etcd.NewGenerateCertStep(ctx, genPeerCertNode.String(), "peer"), // type: peer
 			Hosts:        []connector.Host{controlPlaneHost},
-			Dependencies: []plan.NodeID{genCaNodeID},
+			Dependencies: []plan.NodeID{genCaNode},
 		})
-		allCertNodeIDs = append(allCertNodeIDs, peerCertNodeID)
+		certNodes = append(certNodes, genPeerCertNode)
 	}
 
-	// Step 3: Generate apiserver-etcd-client certificate
-	apiClientCertStep := commonstep.NewGenerateCertsStepBuilder(ctx, "GenerateApiServerEtcdClientCert").
-		WithLocalCertsDir(etcdCertDir).
-		WithCaCertFileName(common.EtcdCaPemFileName).
-		WithCaKeyFileName(common.EtcdCaKeyPemFileName).
-		WithCert("apiserver-etcd-client.pem").
-		WithCertKey("apiserver-etcd-client-key.pem").
-		WithCommonName("kube-apiserver-etcd-client").
-		WithOrganization([]string{"system:masters"}).
-		WithUsages([]x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}).
-		Build()
-
-	apiClientCertNodeID, _ := fragment.AddNode(&plan.ExecutionNode{
-		Name:         apiClientCertStep.Meta().Name,
-		Step:         apiClientCertStep,
+	// 3. Generate apiserver-etcd-client certificate
+	genApiClientCertNode := plan.NodeID("generate-apiserver-etcd-client-cert")
+	p.AddNode(genApiClientCertNode, &plan.ExecutionNode{
+		Step:         etcd.NewGenerateCertStep(ctx, genApiClientCertNode.String(), "client"), // type: client
 		Hosts:        []connector.Host{controlPlaneHost},
-		Dependencies: []plan.NodeID{genCaNodeID},
+		Dependencies: []plan.NodeID{genCaNode},
 	})
-	allCertNodeIDs = append(allCertNodeIDs, apiClientCertNodeID)
 
-	fragment.EntryNodes = []plan.NodeID{genCaNodeID}
-	fragment.ExitNodes = allCertNodeIDs
+	// 4. Distribute all certificates
+	distributeCertsNode := plan.NodeID("distribute-etcd-certs")
+	allCertsReadyDeps := append(certNodes, genApiClientCertNode)
+	p.AddNode(distributeCertsNode, &plan.ExecutionNode{
+		Step:         etcd.NewDistributeEtcdCertsStep(ctx, distributeCertsNode.String()),
+		Hosts:        etcdHosts,
+		Dependencies: allCertsReadyDeps,
+	})
 
-	logger.Info("Planned steps for Etcd PKI generation on control-plane node.")
-	return fragment, nil
+	return p, nil
 }
-
-var _ task.Task = (*GenerateEtcdPkiTask)(nil)

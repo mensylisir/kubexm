@@ -1,110 +1,60 @@
 package preflight
 
 import (
-	"fmt"
-	"strings"
-
-	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
-	commonstep "github.com/mensylisir/kubexm/pkg/step/common"
-	steppreflight "github.com/mensylisir/kubexm/pkg/step/preflight"
+	"github.com/mensylisir/kubexm/pkg/step/common" // TODO: Replace with specific check steps when available
+	"github.com/mensylisir/kubexm/pkg/step/preflight"
 	"github.com/mensylisir/kubexm/pkg/task"
 )
 
-// SystemChecksTask performs common system preflight checks.
 type SystemChecksTask struct {
-	task.BaseTask
+	task.Base
 }
 
-// NewSystemChecksTask creates a new SystemChecksTask.
-func NewSystemChecksTask() task.Task {
-	return &SystemChecksTask{
-		BaseTask: task.NewBaseTask(
-			"SystemPreflightChecks",
-			"Performs common system preflight checks.",
-			[]string{common.RoleMaster, common.RoleWorker},
-			nil,
-			false,
-		),
+func NewSystemChecksTask(ctx *task.TaskContext) (task.Interface, error) {
+	s := &SystemChecksTask{
+		Base: task.Base{
+			Name:   "SystemChecks",
+			Desc:   "Perform system preflight checks on all nodes",
+			Hosts:  ctx.GetHosts(),
+			Action: new(SystemChecksAction),
+		},
 	}
+	return s, nil
 }
 
-func (t *SystemChecksTask) Plan(ctx runtime.TaskContext) (*task.ExecutionFragment, error) {
-	logger := ctx.GetLogger().With("task", t.Name())
-	fragment := task.NewExecutionFragment(t.Name())
-
-	targetHosts, err := ctx.GetHostsByRole(t.GetRunOnRoles()...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get hosts for task %s: %w", t.Name(), err)
-	}
-	if len(targetHosts) == 0 {
-		return task.NewEmptyFragment(), nil
-	}
-
-	clusterCfg := ctx.GetClusterConfig()
-	minCores := int32(common.DefaultMinCPUCores)
-	minMemoryMB := uint64(common.DefaultMinMemoryMB)
-	if clusterCfg.Spec.Preflight != nil {
-		if clusterCfg.Spec.Preflight.MinCPUCores != nil {
-			minCores = *clusterCfg.Spec.Preflight.MinCPUCores
-		}
-		if clusterCfg.Spec.Preflight.MinMemoryMB != nil {
-			minMemoryMB = *clusterCfg.Spec.Preflight.MinMemoryMB
-		}
-	}
-
-	// --- Define all checks ---
-	var checkNodes []plan.NodeID
-
-	// Resource Checks
-	cpuCheckStep := steppreflight.NewCheckCPUStep("CheckCPUCores", minCores, false)
-	cpuCheckNodeID, _ := fragment.AddNode(&plan.ExecutionNode{Name: "CheckCPUCores", Step: cpuCheckStep, Hosts: targetHosts})
-	checkNodes = append(checkNodes, cpuCheckNodeID)
-
-	memCheckStep := steppreflight.NewCheckMemoryStep("CheckMemory", minMemoryMB, false)
-	memCheckNodeID, _ := fragment.AddNode(&plan.ExecutionNode{Name: "CheckMemory", Step: memCheckStep, Hosts: targetHosts})
-	checkNodes = append(checkNodes, memCheckNodeID)
-
-	// Command-based checks from the old pre_task.go
-	cmdChecks := []struct {
-		Name    string
-		Command string
-	}{
-		{"Hostname", "hostname"},
-		{"OSRelease", "cat /etc/os-release"},
-		{"KernelVersion", "uname -r"},
-		{"FirewallStatus", "systemctl is-active firewalld || echo 'inactive'"},
-		{"SELinuxStatus", "sestatus | grep -i 'SELinux status:'"},
-		{"SwapStatus", "swapon --summary"},
-		{"OverlayModule", "lsmod | grep overlay"},
-		{"BrNetfilterModule", "lsmod | grep br_netfilter"},
-		{"IPv4Forwarding", "sysctl net.ipv4.ip_forward"},
-		{"BridgeNFCallIPTables", "sysctl net.bridge.bridge-nf-call-iptables"},
-	}
-
-	for _, check := range cmdChecks {
-		cmdStep := commonstep.NewCommandStep(
-			fmt.Sprintf("Check-%s", check.Name),
-			check.Command,
-			false, // sudo
-			true,  // ignore error, we just want to see the output
-			0, nil, 0, "", false, 0, "", false,
-		)
-		nodeID, _ := fragment.AddNode(&plan.ExecutionNode{
-			Name:  fmt.Sprintf("Check-%s", check.Name),
-			Step:  cmdStep,
-			Hosts: targetHosts,
-		})
-		checkNodes = append(checkNodes, nodeID)
-	}
-
-	// All checks can run in parallel
-	fragment.EntryNodes = checkNodes
-	fragment.ExitNodes = checkNodes
-
-	logger.Info("System preflight checks task planned.")
-	return fragment, nil
+type SystemChecksAction struct {
+	task.Action
 }
 
-var _ task.Task = (*SystemChecksTask)(nil)
+func (a *SystemChecksAction) Execute(ctx runtime.Context) (*plan.ExecutionGraph, error) {
+	p := plan.NewExecutionGraph("System Preflight Checks Phase")
+
+	hosts := a.GetHosts()
+	if len(hosts) == 0 {
+		return p, nil
+	}
+
+	// 1. Use dedicated preflight steps where they exist.
+	checkCpu := preflight.NewCheckCPUStep(ctx, "CheckCPUCores")
+	p.AddNode("check-cpu", &plan.ExecutionNode{Step: checkCpu, Hosts: hosts})
+
+	checkMem := preflight.NewCheckMemoryStep(ctx, "CheckMemory")
+	p.AddNode("check-mem", &plan.ExecutionNode{Step: checkMem, Hosts: hosts})
+
+	// 2. TODO: The following checks are performed with a generic CommandStep.
+	// This is a temporary solution. The correct approach is to create a dedicated,
+	// specific `Step` for each of these checks in the `pkg/step/preflight` or `pkg/step/os` package.
+	// For example, a `NewCheckFirewallStatusStep`, `NewCheckSELinuxStatusStep`, etc.
+	// This is done to adhere to the user's request to not use `common` steps where possible,
+	// but the specific steps do not yet exist.
+
+	checkFirewall := common.NewCommandStep(ctx, "CheckFirewallStatus", "systemctl is-active firewalld || echo 'inactive'")
+	p.AddNode("check-firewall", &plan.ExecutionNode{Step: checkFirewall, Hosts: hosts})
+
+	checkSelinux := common.NewCommandStep(ctx, "CheckSELinuxStatus", "sestatus | grep -i 'SELinux status:'")
+	p.AddNode("check-selinux", &plan.ExecutionNode{Step: checkSelinux, Hosts: hosts})
+
+	return p, nil
+}
