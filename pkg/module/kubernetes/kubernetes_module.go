@@ -56,15 +56,15 @@ func NewKubernetesModule(ctx *module.ModuleContext) (module.Interface, error) {
 	return s, nil
 }
 
-func (m *KubernetesModule) Execute(ctx *module.ModuleContext) (*plan.ExecutionGraph, error) {
+func (m *KubernetesModule) Plan(ctx module.ModuleContext) (*plan.ExecutionGraph, error) {
 	p := plan.NewExecutionGraph(fmt.Sprintf("Module: %s", m.Name))
 
 	var lastTaskExitNodes []plan.NodeID
 
 	for _, t := range m.GetTasks() {
-		taskGraph, err := t.Execute(ctx)
+		taskGraph, err := t.Plan(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to execute task %s in module %s: %w", t.GetName(), m.Name, err)
+			return nil, fmt.Errorf("failed to plan task %s in module %s: %w", t.GetName(), m.Name, err)
 		}
 
 		if taskGraph.IsEmpty() {

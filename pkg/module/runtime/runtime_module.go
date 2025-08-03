@@ -45,13 +45,11 @@ func NewContainerRuntimeModule(ctx *module.ModuleContext) (module.Interface, err
 	return s, nil
 }
 
-func (m *ContainerRuntimeModule) Execute(ctx *module.ModuleContext) (*plan.ExecutionGraph, error) {
-	// This module is simple: it just executes the single task that was selected
-	// during its creation.
+func (m *ContainerRuntimeModule) Plan(ctx module.ModuleContext) (*plan.ExecutionGraph, error) {
 	if len(m.GetTasks()) == 0 {
 		return plan.NewExecutionGraph("Empty Container Runtime Module"), nil
 	}
 
 	runtimeTask := m.GetTasks()[0]
-	return runtimeTask.Execute(ctx)
+	return runtimeTask.Plan(ctx)
 }

@@ -21,7 +21,6 @@ func NewPreflightModule(ctx *module.ModuleContext) (module.Interface, error) {
 		},
 	}
 
-	// The tasks this module will orchestrate.
 	tasks := []task.Interface{
 		preflight.NewGatherFactsTask(ctx),
 		preflight.NewSystemChecksTask(ctx),
@@ -32,30 +31,26 @@ func NewPreflightModule(ctx *module.ModuleContext) (module.Interface, error) {
 	return s, nil
 }
 
-func (m *PreflightModule) Execute(ctx *module.ModuleContext) (*plan.ExecutionGraph, error) {
+func (m *PreflightModule) Plan(ctx module.ModuleContext) (*plan.ExecutionGraph, error) {
 	p := plan.NewExecutionGraph(fmt.Sprintf("Module: %s", m.Name))
 
 	var lastTaskExitNodes []plan.NodeID
 
 	for _, t := range m.GetTasks() {
-		// Check if the task is required for the current execution context.
-		// This logic would be more complex in a real scenario.
-		// For preflight, all tasks are usually required.
+		// In a real pipeline, we might check if a task is required.
+		// isRequired, err := t.IsRequired(ctx) ...
 
-		taskGraph, err := t.Execute(ctx)
+		taskGraph, err := t.Plan(ctx) // Call Plan, not Execute
 		if err != nil {
-			return nil, fmt.Errorf("failed to execute task %s in module %s: %w", t.GetName(), m.Name, err)
+			return nil, fmt.Errorf("failed to plan task %s in module %s: %w", t.GetName(), m.Name, err)
 		}
 
 		if taskGraph.IsEmpty() {
 			continue
 		}
 
-		// Merge the task's graph into the module's graph.
 		p.Merge(taskGraph)
 
-		// Create dependencies: the entry points of the current task graph
-		// should depend on the exit points of the previous task graph.
 		if len(lastTaskExitNodes) > 0 {
 			for _, entryNodeID := range taskGraph.EntryNodes {
 				for _, depNodeID := range lastTaskExitNodes {

@@ -52,12 +52,11 @@ func NewLoadBalancerModule(ctx *module.ModuleContext) (module.Interface, error) 
 	return s, nil
 }
 
-func (m *LoadBalancerModule) Execute(ctx *module.ModuleContext) (*plan.ExecutionGraph, error) {
+func (m *LoadBalancerModule) Plan(ctx module.ModuleContext) (*plan.ExecutionGraph, error) {
 	if len(m.GetTasks()) == 0 {
-		// No LB configured, return empty graph
 		return plan.NewExecutionGraph("Empty LoadBalancer Module"), nil
 	}
 
 	lbTask := m.GetTasks()[0]
-	return lbTask.Execute(ctx)
+	return lbTask.Plan(ctx)
 }
