@@ -38,14 +38,14 @@ func (a *InstallFlannelAction) Execute(ctx runtime.Context) (*plan.ExecutionGrap
 		return nil, err
 	}
 
-	downloadStep := flannel.NewDownloadFlannelStep(ctx, "DownloadFlannel")
-	p.AddNode("download-flannel", &plan.ExecutionNode{Step: downloadStep, Hosts: []connector.Host{controlPlaneHost}})
+	downloadNode := plan.NodeID("download-flannel")
+	p.AddNode(downloadNode, &plan.ExecutionNode{Step: flannel.NewDownloadFlannelStep(ctx, downloadNode.String()), Hosts: []connector.Host{controlPlaneHost}})
 
-	generateStep := flannel.NewGenerateManifestsStep(ctx, "GenerateFlannelManifests")
-	p.AddNode("generate-flannel-manifests", &plan.ExecutionNode{Step: generateStep, Hosts: []connector.Host{controlPlaneHost}, Dependencies: []plan.NodeID{"download-flannel"}})
+	generateNode := plan.NodeID("generate-flannel-manifests")
+	p.AddNode(generateNode, &plan.ExecutionNode{Step: flannel.NewGenerateManifestsStep(ctx, generateNode.String()), Hosts: []connector.Host{controlPlaneHost}, Dependencies: []plan.NodeID{downloadNode}})
 
-	installStep := flannel.NewInstallFlannelStep(ctx, "InstallFlannel")
-	p.AddNode("install-flannel", &plan.ExecutionNode{Step: installStep, Hosts: []connector.Host{controlPlaneHost}, Dependencies: []plan.NodeID{"generate-flannel-manifests"}})
+	installNode := plan.NodeID("install-flannel")
+	p.AddNode(installNode, &plan.ExecutionNode{Step: flannel.NewInstallFlannelStep(ctx, installNode.String()), Hosts: []connector.Host{controlPlaneHost}, Dependencies: []plan.NodeID{generateNode}})
 
 	return p, nil
 }

@@ -38,24 +38,23 @@ func (a *SetupInternalServiceLBAction) Execute(ctx runtime.Context) (*plan.Execu
 		return p, nil
 	}
 
-	// This task assumes HAProxy. A real implementation would switch.
 	for _, host := range masterHosts {
 		hostName := host.GetName()
 
-		installHAProxy := haproxy.NewInstallHAProxyStep(ctx, fmt.Sprintf("InstallHAProxy-%s", hostName))
-		p.AddNode(plan.NodeID(installHAProxy.Meta().Name), &plan.ExecutionNode{Step: installHAProxy, Hosts: []connector.Host{host}})
+		installNode := plan.NodeID(fmt.Sprintf("install-haproxy-%s", hostName))
+		p.AddNode(installNode, &plan.ExecutionNode{Step: haproxy.NewInstallHAProxyStep(ctx, installNode.String()), Hosts: []connector.Host{host}})
 
-		genHAProxyCfg := haproxy.NewGenerateHAProxyConfigStep(ctx, fmt.Sprintf("GenerateHAProxyConfig-%s", hostName))
-		p.AddNode(plan.NodeID(genHAProxyCfg.Meta().Name), &plan.ExecutionNode{Step: genHAProxyCfg, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(installHAProxy.Meta().Name)}})
+		genCfgNode := plan.NodeID(fmt.Sprintf("gen-haproxy-cfg-%s", hostName))
+		p.AddNode(genCfgNode, &plan.ExecutionNode{Step: haproxy.NewGenerateHAProxyConfigStep(ctx, genCfgNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{installNode}})
 
-		deployHAProxyCfg := haproxy.NewDeployHAProxyConfigStep(ctx, fmt.Sprintf("DeployHAProxyConfig-%s", hostName))
-		p.AddNode(plan.NodeID(deployHAProxyCfg.Meta().Name), &plan.ExecutionNode{Step: deployHAProxyCfg, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(genHAProxyCfg.Meta().Name)}})
+		deployCfgNode := plan.NodeID(fmt.Sprintf("deploy-haproxy-cfg-%s", hostName))
+		p.AddNode(deployCfgNode, &plan.ExecutionNode{Step: haproxy.NewDeployHAProxyConfigStep(ctx, deployCfgNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{genCfgNode}})
 
-		enableHAProxy := haproxy.NewEnableHAProxyStep(ctx, fmt.Sprintf("EnableHAProxy-%s", hostName))
-		p.AddNode(plan.NodeID(enableHAProxy.Meta().Name), &plan.ExecutionNode{Step: enableHAProxy, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(deployHAProxyCfg.Meta().Name)}})
+		enableNode := plan.NodeID(fmt.Sprintf("enable-haproxy-%s", hostName))
+		p.AddNode(enableNode, &plan.ExecutionNode{Step: haproxy.NewEnableHAProxyStep(ctx, enableNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{deployCfgNode}})
 
-		restartHAProxy := haproxy.NewRestartHAProxyStep(ctx, fmt.Sprintf("RestartHAProxy-%s", hostName))
-		p.AddNode(plan.NodeID(restartHAProxy.Meta().Name), &plan.ExecutionNode{Step: restartHAProxy, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(enableHAProxy.Meta().Name)}})
+		restartNode := plan.NodeID(fmt.Sprintf("restart-haproxy-%s", hostName))
+		p.AddNode(restartNode, &plan.ExecutionNode{Step: haproxy.NewRestartHAProxyStep(ctx, restartNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{enableNode}})
 	}
 
 	return p, nil

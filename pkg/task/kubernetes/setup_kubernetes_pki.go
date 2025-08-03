@@ -3,7 +3,6 @@ package kubernetes
 import (
 	"fmt"
 
-	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/step/kubernetes/certs"
@@ -40,31 +39,23 @@ func (a *SetupKubernetesPKIAction) Execute(ctx runtime.Context) (*plan.Execution
 
 	allHosts := a.GetHosts()
 
-	// 1. Generate the main Certificate Authority (CA) on the control node.
-	genCA := certs.NewGenerateCAStep(ctx, "GenerateClusterCA")
-	p.AddNode("gen-ca", &plan.ExecutionNode{Step: genCA, Hosts: []connector.Host{controlPlaneHost}})
+	genCaNode := plan.NodeID("gen-ca")
+	p.AddNode(genCaNode, &plan.ExecutionNode{Step: certs.NewGenerateCAStep(ctx, genCaNode.String()), Hosts: []connector.Host{controlPlaneHost}})
 
-	// 2. Distribute the public CA certificate to all nodes.
-	distributeCA := certs.NewDistributionCAStep(ctx, "DistributeClusterCA")
-	p.AddNode("distribute-ca", &plan.ExecutionNode{Step: distributeCA, Hosts: allHosts, Dependencies: []plan.NodeID{"gen-ca"}})
+	distributeCaNode := plan.NodeID("distribute-ca")
+	p.AddNode(distributeCaNode, &plan.ExecutionNode{Step: certs.NewDistributionCAStep(ctx, distributeCaNode.String()), Hosts: allHosts, Dependencies: []plan.NodeID{genCaNode}})
 
-	// 3. Generate all other certificates on the control node, signed by the CA.
-	// In a real implementation, you might generate certs for each component.
-	// This is a simplified representation.
-	genCerts := certs.NewGenerateCertsStep(ctx, "GenerateAllCerts")
-	p.AddNode("gen-certs", &plan.ExecutionNode{Step: genCerts, Hosts: []connector.Host{controlPlaneHost}, Dependencies: []plan.NodeID{"gen-ca"}})
+	genCertsNode := plan.NodeID("gen-certs")
+	p.AddNode(genCertsNode, &plan.ExecutionNode{Step: certs.NewGenerateCertsStep(ctx, genCertsNode.String()), Hosts: []connector.Host{controlPlaneHost}, Dependencies: []plan.NodeID{genCaNode}})
 
-	// 4. Distribute the generated component certificates to the relevant nodes.
-	distributeCerts := certs.NewDistributionCertsStep(ctx, "DistributeAllCerts")
-	p.AddNode("distribute-certs", &plan.ExecutionNode{Step: distributeCerts, Hosts: allHosts, Dependencies: []plan.NodeID{"gen-certs"}})
+	distributeCertsNode := plan.NodeID("distribute-certs")
+	p.AddNode(distributeCertsNode, &plan.ExecutionNode{Step: certs.NewDistributionCertsStep(ctx, distributeCertsNode.String()), Hosts: allHosts, Dependencies: []plan.NodeID{genCertsNode}})
 
-	// 5. Generate Kubeconfig files for components that need them (controller-manager, scheduler, admin).
-	genKubeconfigs := certs.NewGenerateKubeconfigStep(ctx, "GenerateAllKubeconfigs")
-	p.AddNode("gen-kubeconfigs", &plan.ExecutionNode{Step: genKubeconfigs, Hosts: []connector.Host{controlPlaneHost}, Dependencies: []plan.NodeID{"gen-certs"}})
+	genKubeconfigsNode := plan.NodeID("gen-kubeconfigs")
+	p.AddNode(genKubeconfigsNode, &plan.ExecutionNode{Step: certs.NewGenerateKubeconfigStep(ctx, genKubeconfigsNode.String()), Hosts: []connector.Host{controlPlaneHost}, Dependencies: []plan.NodeID{genCertsNode}})
 
-	// 6. Distribute the kubeconfig files.
-	distributeKubeconfigs := certs.NewDistributionKubeconfigStep(ctx, "DistributeAllKubeconfigs")
-	p.AddNode("distribute-kubeconfigs", &plan.ExecutionNode{Step: distributeKubeconfigs, Hosts: allHosts, Dependencies: []plan.NodeID{"gen-kubeconfigs"}})
+	distributeKubeconfigsNode := plan.NodeID("distribute-kubeconfigs")
+	p.AddNode(distributeKubeconfigsNode, &plan.ExecutionNode{Step: certs.NewDistributionKubeconfigStep(ctx, distributeKubeconfigsNode.String()), Hosts: allHosts, Dependencies: []plan.NodeID{genKubeconfigsNode}})
 
 	return p, nil
 }

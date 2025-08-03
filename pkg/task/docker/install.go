@@ -15,7 +15,6 @@ type InstallDockerTask struct {
 	task.Base
 }
 
-// NewInstallDockerTask creates a new task for installing Docker and cri-dockerd.
 func NewInstallDockerTask(ctx *task.TaskContext) (task.Interface, error) {
 	s := &InstallDockerTask{
 		Base: task.Base{
@@ -43,58 +42,52 @@ func (a *InstallDockerAction) Execute(ctx runtime.Context) (*plan.ExecutionGraph
 	for _, host := range hosts {
 		hostName := host.GetName()
 
-		// --- Docker Engine Installation Chain ---
-		downloadDocker := docker.NewDownloadDockerStep(ctx, fmt.Sprintf("DownloadDocker-%s", hostName))
-		p.AddNode(plan.NodeID(downloadDocker.Meta().Name), &plan.ExecutionNode{Step: downloadDocker, Hosts: []connector.Host{host}})
+		// --- Docker Engine Installation ---
+		dlDockerNode := plan.NodeID(fmt.Sprintf("download-docker-%s", hostName))
+		p.AddNode(dlDockerNode, &plan.ExecutionNode{Step: docker.NewDownloadDockerStep(ctx, dlDockerNode.String()), Hosts: []connector.Host{host}})
 
-		installDocker := docker.NewInstallDockerStep(ctx, fmt.Sprintf("InstallDocker-%s", hostName))
-		p.AddNode(plan.NodeID(installDocker.Meta().Name), &plan.ExecutionNode{Step: installDocker, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(downloadDocker.Meta().Name)}})
+		installDockerNode := plan.NodeID(fmt.Sprintf("install-docker-%s", hostName))
+		p.AddNode(installDockerNode, &plan.ExecutionNode{Step: docker.NewInstallDockerStep(ctx, installDockerNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{dlDockerNode}})
 
-		configureDocker := docker.NewConfigureDockerStep(ctx, fmt.Sprintf("ConfigureDocker-%s", hostName))
-		p.AddNode(plan.NodeID(configureDocker.Meta().Name), &plan.ExecutionNode{Step: configureDocker, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(installDocker.Meta().Name)}})
+		cfgDockerNode := plan.NodeID(fmt.Sprintf("configure-docker-%s", hostName))
+		p.AddNode(cfgDockerNode, &plan.ExecutionNode{Step: docker.NewConfigureDockerStep(ctx, cfgDockerNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{installDockerNode}})
 
-		installDockerSvc := docker.NewInstallDockerServiceStep(ctx, fmt.Sprintf("InstallDockerSvc-%s", hostName))
-		p.AddNode(plan.NodeID(installDockerSvc.Meta().Name), &plan.ExecutionNode{Step: installDockerSvc, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(configureDocker.Meta().Name)}})
+		installDockerSvcNode := plan.NodeID(fmt.Sprintf("install-docker-svc-%s", hostName))
+		p.AddNode(installDockerSvcNode, &plan.ExecutionNode{Step: docker.NewInstallDockerServiceStep(ctx, installDockerSvcNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{cfgDockerNode}})
 
-		enableDocker := docker.NewEnableDockerStep(ctx, fmt.Sprintf("EnableDocker-%s", hostName))
-		p.AddNode(plan.NodeID(enableDocker.Meta().Name), &plan.ExecutionNode{Step: enableDocker, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(installDockerSvc.Meta().Name)}})
+		enableDockerNode := plan.NodeID(fmt.Sprintf("enable-docker-%s", hostName))
+		p.AddNode(enableDockerNode, &plan.ExecutionNode{Step: docker.NewEnableDockerStep(ctx, enableDockerNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{installDockerSvcNode}})
 
-		startDocker := docker.NewStartDockerStep(ctx, fmt.Sprintf("StartDocker-%s", hostName))
-		p.AddNode(plan.NodeID(startDocker.Meta().Name), &plan.ExecutionNode{Step: startDocker, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(enableDocker.Meta().Name)}})
-		dockerReadyNode := plan.NodeID(startDocker.Meta().Name)
+		startDockerNode := plan.NodeID(fmt.Sprintf("start-docker-%s", hostName))
+		p.AddNode(startDockerNode, &plan.ExecutionNode{Step: docker.NewStartDockerStep(ctx, startDockerNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{enableDockerNode}})
+		dockerReadyNode := startDockerNode
 
-		// --- CNI Plugins Installation Chain (in parallel) ---
-		downloadCni := containerd.NewDownloadCNIStep(ctx, fmt.Sprintf("DownloadCNI-%s", hostName))
-		p.AddNode(plan.NodeID(downloadCni.Meta().Name), &plan.ExecutionNode{Step: downloadCni, Hosts: []connector.Host{host}})
+		// --- CNI Plugins Installation (can run in parallel with Docker install) ---
+		dlCniNode := plan.NodeID(fmt.Sprintf("download-cni-for-docker-%s", hostName))
+		p.AddNode(dlCniNode, &plan.ExecutionNode{Step: containerd.NewDownloadCNIStep(ctx, dlCniNode.String()), Hosts: []connector.Host{host}})
 
-		extractCni := containerd.NewExtractCNIStep(ctx, fmt.Sprintf("ExtractCNI-%s", hostName))
-		p.AddNode(plan.NodeID(extractCni.Meta().Name), &plan.ExecutionNode{Step: extractCni, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(downloadCni.Meta().Name)}})
+		installCniNode := plan.NodeID(fmt.Sprintf("install-cni-for-docker-%s", hostName))
+		p.AddNode(installCniNode, &plan.ExecutionNode{Step: containerd.NewInstallCNIStep(ctx, installCniNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{dlCniNode}})
+		cniReadyNode := installCniNode
 
-		installCni := containerd.NewInstallCNIStep(ctx, fmt.Sprintf("InstallCNI-%s", hostName))
-		p.AddNode(plan.NodeID(installCni.Meta().Name), &plan.ExecutionNode{Step: installCni, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(extractCni.Meta().Name)}})
-		cniReadyNode := plan.NodeID(installCni.Meta().Name)
+		// --- cri-dockerd Installation ---
+		dlCriDockerdNode := plan.NodeID(fmt.Sprintf("download-cri-dockerd-%s", hostName))
+		p.AddNode(dlCriDockerdNode, &plan.ExecutionNode{Step: docker.NewDownloadCriDockerdStep(ctx, dlCriDockerdNode.String()), Hosts: []connector.Host{host}})
 
-		// --- cri-dockerd Installation Chain ---
-		downloadCriDockerd := docker.NewDownloadCriDockerdStep(ctx, fmt.Sprintf("DownloadCriDockerd-%s", hostName))
-		p.AddNode(plan.NodeID(downloadCriDockerd.Meta().Name), &plan.ExecutionNode{Step: downloadCriDockerd, Hosts: []connector.Host{host}})
+		installCriDockerdNode := plan.NodeID(fmt.Sprintf("install-cri-dockerd-%s", hostName))
+		p.AddNode(installCriDockerdNode, &plan.ExecutionNode{Step: docker.NewInstallCriDockerdStep(ctx, installCriDockerdNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{dlCriDockerdNode}})
 
-		extractCriDockerd := docker.NewExtractCriDockerdStep(ctx, fmt.Sprintf("ExtractCriDockerd-%s", hostName))
-		p.AddNode(plan.NodeID(extractCriDockerd.Meta().Name), &plan.ExecutionNode{Step: extractCriDockerd, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(downloadCriDockerd.Meta().Name)}})
+		installCriDockerdSvcNode := plan.NodeID(fmt.Sprintf("install-cri-dockerd-svc-%s", hostName))
+		p.AddNode(installCriDockerdSvcNode, &plan.ExecutionNode{Step: docker.NewInstallCriDockerdServiceStep(ctx, installCriDockerdSvcNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{installCriDockerdNode}})
 
-		installCriDockerd := docker.NewInstallCriDockerdStep(ctx, fmt.Sprintf("InstallCriDockerd-%s", hostName))
-		p.AddNode(plan.NodeID(installCriDockerd.Meta().Name), &plan.ExecutionNode{Step: installCriDockerd, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(extractCriDockerd.Meta().Name)}})
+		// cri-dockerd depends on docker and cni
+		criDockerdDeps := []plan.NodeID{dockerReadyNode, cniReadyNode, installCriDockerdSvcNode}
 
-		installCriDockerdSvc := docker.NewInstallCriDockerdServiceStep(ctx, fmt.Sprintf("InstallCriDockerdSvc-%s", hostName))
-		p.AddNode(plan.NodeID(installCriDockerdSvc.Meta().Name), &plan.ExecutionNode{Step: installCriDockerdSvc, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(installCriDockerd.Meta().Name)}})
+		enableCriDockerdNode := plan.NodeID(fmt.Sprintf("enable-cri-dockerd-%s", hostName))
+		p.AddNode(enableCriDockerdNode, &plan.ExecutionNode{Step: docker.NewEnableCriDockerdStep(ctx, enableCriDockerdNode.String()), Hosts: []connector.Host{host}, Dependencies: criDockerdDeps})
 
-		// cri-dockerd needs docker to be running and CNI to be installed
-		criDockerdDeps := []plan.NodeID{dockerReadyNode, cniReadyNode, plan.NodeID(installCriDockerdSvc.Meta().Name)}
-
-		enableCriDockerd := docker.NewEnableCriDockerdStep(ctx, fmt.Sprintf("EnableCriDockerd-%s", hostName))
-		p.AddNode(plan.NodeID(enableCriDockerd.Meta().Name), &plan.ExecutionNode{Step: enableCriDockerd, Hosts: []connector.Host{host}, Dependencies: criDockerdDeps})
-
-		startCriDockerd := docker.NewStartCriDockerdStep(ctx, fmt.Sprintf("StartCriDockerd-%s", hostName))
-		p.AddNode(plan.NodeID(startCriDockerd.Meta().Name), &plan.ExecutionNode{Step: startCriDockerd, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(enableCriDockerd.Meta().Name)}})
+		startCriDockerdNode := plan.NodeID(fmt.Sprintf("start-cri-dockerd-%s", hostName))
+		p.AddNode(startCriDockerdNode, &plan.ExecutionNode{Step: docker.NewStartCriDockerdStep(ctx, startCriDockerdNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{enableCriDockerdNode}})
 	}
 
 	return p, nil

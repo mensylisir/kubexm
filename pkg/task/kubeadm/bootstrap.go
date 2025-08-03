@@ -1,4 +1,4 @@
-package kubernetes
+package kubeadm
 
 import (
 	"fmt"
@@ -44,38 +44,34 @@ func (a *BootstrapClusterWithKubeadmAction) Execute(ctx runtime.Context) (*plan.
 	firstMaster := masterNodes[0]
 	otherMasters := masterNodes[1:]
 
-	// 1. Initialize the first master
-	genFirstMasterCfg := kubeadm.NewGenerateFirstMasterConfigStep(ctx, "GenerateFirstMasterConfig")
-	p.AddNode("gen-first-master-cfg", &plan.ExecutionNode{Step: genFirstMasterCfg, Hosts: []connector.Host{firstMaster}})
+	genFirstMasterCfgNode := plan.NodeID("gen-first-master-cfg")
+	p.AddNode(genFirstMasterCfgNode, &plan.ExecutionNode{Step: kubeadm.NewGenerateFirstMasterConfigStep(ctx, genFirstMasterCfgNode.String()), Hosts: []connector.Host{firstMaster}})
 
-	initFirstMaster := kubeadm.NewInitFirstMasterStep(ctx, "InitFirstMaster")
-	p.AddNode("init-first-master", &plan.ExecutionNode{Step: initFirstMaster, Hosts: []connector.Host{firstMaster}, Dependencies: []plan.NodeID{"gen-first-master-cfg"}})
+	initFirstMasterNode := plan.NodeID("init-first-master")
+	p.AddNode(initFirstMasterNode, &plan.ExecutionNode{Step: kubeadm.NewInitFirstMasterStep(ctx, initFirstMasterNode.String()), Hosts: []connector.Host{firstMaster}, Dependencies: []plan.NodeID{genFirstMasterCfgNode}})
 
-	// Kubelet must be started after init
-	enableKubeletFirstMaster := kubelet.NewEnableKubeletServiceStep(ctx, "EnableKubeletOnFirstMaster")
-	p.AddNode("enable-kubelet-first-master", &plan.ExecutionNode{Step: enableKubeletFirstMaster, Hosts: []connector.Host{firstMaster}, Dependencies: []plan.NodeID{"init-first-master"}})
+	enableKubeletNode := plan.NodeID("enable-kubelet-first-master")
+	p.AddNode(enableKubeletNode, &plan.ExecutionNode{Step: kubelet.NewEnableKubeletServiceStep(ctx, enableKubeletNode.String()), Hosts: []connector.Host{firstMaster}, Dependencies: []plan.NodeID{initFirstMasterNode}})
 
-	startKubeletFirstMaster := kubelet.NewStartKubeletStep(ctx, "StartKubeletOnFirstMaster")
-	p.AddNode("start-kubelet-first-master", &plan.ExecutionNode{Step: startKubeletFirstMaster, Hosts: []connector.Host{firstMaster}, Dependencies: []plan.NodeID{"enable-kubelet-first-master"}})
+	startKubeletNode := plan.NodeID("start-kubelet-first-master")
+	p.AddNode(startKubeletNode, &plan.ExecutionNode{Step: kubelet.NewStartKubeletStep(ctx, startKubeletNode.String()), Hosts: []connector.Host{firstMaster}, Dependencies: []plan.NodeID{enableKubeletNode}})
 
-	firstMasterReadyNode := plan.NodeID("start-kubelet-first-master")
+	firstMasterReadyNode := startKubeletNode
 
-	// 2. Join other masters (if any)
 	if len(otherMasters) > 0 {
-		genOtherMasterCfg := kubeadm.NewGenerateOtherMasterConfigStep(ctx, "GenerateOtherMasterConfig")
-		p.AddNode("gen-other-master-cfg", &plan.ExecutionNode{Step: genOtherMasterCfg, Hosts: otherMasters, Dependencies: []plan.NodeID{firstMasterReadyNode}})
+		genOtherMasterCfgNode := plan.NodeID("gen-other-master-cfg")
+		p.AddNode(genOtherMasterCfgNode, &plan.ExecutionNode{Step: kubeadm.NewGenerateOtherMasterConfigStep(ctx, genOtherMasterCfgNode.String()), Hosts: otherMasters, Dependencies: []plan.NodeID{firstMasterReadyNode}})
 
-		joinMasters := kubeadm.NewJoinOtherMastersStep(ctx, "JoinOtherMasters")
-		p.AddNode("join-other-masters", &plan.ExecutionNode{Step: joinMasters, Hosts: otherMasters, Dependencies: []plan.NodeID{"gen-other-master-cfg"}})
+		joinMastersNode := plan.NodeID("join-other-masters")
+		p.AddNode(joinMastersNode, &plan.ExecutionNode{Step: kubeadm.NewJoinOtherMastersStep(ctx, joinMastersNode.String()), Hosts: otherMasters, Dependencies: []plan.NodeID{genOtherMasterCfgNode}})
 	}
 
-	// 3. Join worker nodes (if any)
 	if len(workerNodes) > 0 {
-		genWorkerCfg := kubeadm.NewGenerateWorkerConfigStep(ctx, "GenerateWorkerConfig")
-		p.AddNode("gen-worker-cfg", &plan.ExecutionNode{Step: genWorkerCfg, Hosts: workerNodes, Dependencies: []plan.NodeID{firstMasterReadyNode}})
+		genWorkerCfgNode := plan.NodeID("gen-worker-cfg")
+		p.AddNode(genWorkerCfgNode, &plan.ExecutionNode{Step: kubeadm.NewGenerateWorkerConfigStep(ctx, genWorkerCfgNode.String()), Hosts: workerNodes, Dependencies: []plan.NodeID{firstMasterReadyNode}})
 
-		joinWorkers := kubeadm.NewJoinWorkersStep(ctx, "JoinWorkers")
-		p.AddNode("join-workers", &plan.ExecutionNode{Step: joinWorkers, Hosts: workerNodes, Dependencies: []plan.NodeID{"gen-worker-cfg"}})
+		joinWorkersNode := plan.NodeID("join-workers")
+		p.AddNode(joinWorkersNode, &plan.ExecutionNode{Step: kubeadm.NewJoinWorkersStep(ctx, joinWorkersNode.String()), Hosts: workerNodes, Dependencies: []plan.NodeID{genWorkerCfgNode}})
 	}
 
 	return p, nil

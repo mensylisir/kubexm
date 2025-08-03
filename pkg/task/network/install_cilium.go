@@ -38,14 +38,14 @@ func (a *InstallCiliumAction) Execute(ctx runtime.Context) (*plan.ExecutionGraph
 		return nil, err
 	}
 
-	downloadStep := cilium.NewDownloadCiliumStep(ctx, "DownloadCilium")
-	p.AddNode("download-cilium", &plan.ExecutionNode{Step: downloadStep, Hosts: []connector.Host{controlPlaneHost}})
+	downloadNode := plan.NodeID("download-cilium")
+	p.AddNode(downloadNode, &plan.ExecutionNode{Step: cilium.NewDownloadCiliumStep(ctx, downloadNode.String()), Hosts: []connector.Host{controlPlaneHost}})
 
-	generateStep := cilium.NewGenerateManifestsStep(ctx, "GenerateCiliumManifests")
-	p.AddNode("generate-cilium-manifests", &plan.ExecutionNode{Step: generateStep, Hosts: []connector.Host{controlPlaneHost}, Dependencies: []plan.NodeID{"download-cilium"}})
+	generateNode := plan.NodeID("generate-cilium-manifests")
+	p.AddNode(generateNode, &plan.ExecutionNode{Step: cilium.NewGenerateManifestsStep(ctx, generateNode.String()), Hosts: []connector.Host{controlPlaneHost}, Dependencies: []plan.NodeID{downloadNode}})
 
-	installStep := cilium.NewInstallCiliumStep(ctx, "InstallCilium")
-	p.AddNode("install-cilium", &plan.ExecutionNode{Step: installStep, Hosts: []connector.Host{controlPlaneHost}, Dependencies: []plan.NodeID{"generate-cilium-manifests"}})
+	installNode := plan.NodeID("install-cilium")
+	p.AddNode(installNode, &plan.ExecutionNode{Step: cilium.NewInstallCiliumStep(ctx, installNode.String()), Hosts: []connector.Host{controlPlaneHost}, Dependencies: []plan.NodeID{generateNode}})
 
 	return p, nil
 }

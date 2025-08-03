@@ -38,27 +38,22 @@ func (a *SetupInternalStaticPodLBAction) Execute(ctx runtime.Context) (*plan.Exe
 		return p, nil
 	}
 
-	// This task assumes HAProxy. A real implementation would switch between haproxy and nginx.
-
-	// First, generate the haproxy.cfg and deploy it to all master nodes.
-	// The generation step can be run on the control node.
-	controlNode, err := ctx.GetControlNode()
+	controlPlaneHost, err := ctx.GetControlNode()
 	if err != nil {
 		return nil, err
 	}
 
-	genCfg := haproxy.NewGenerateHAProxyConfigStep(ctx, "GenerateHAProxyConfigForStaticPod")
-	p.AddNode("gen-haproxy-cfg", &plan.ExecutionNode{Step: genCfg, Hosts: []connector.Host{controlNode}})
+	genCfgNode := plan.NodeID("gen-haproxy-cfg-for-static-pod")
+	p.AddNode(genCfgNode, &plan.ExecutionNode{Step: haproxy.NewGenerateHAProxyConfigStep(ctx, genCfgNode.String()), Hosts: []connector.Host{controlPlaneHost}})
 
-	deployCfg := haproxy.NewDeployHAProxyConfigStep(ctx, "DeployHAProxyConfigForStaticPod")
-	p.AddNode("deploy-haproxy-cfg", &plan.ExecutionNode{Step: deployCfg, Hosts: masterHosts, Dependencies: []plan.NodeID{"gen-haproxy-cfg"}})
+	deployCfgNode := plan.NodeID("deploy-haproxy-cfg-for-static-pod")
+	p.AddNode(deployCfgNode, &plan.ExecutionNode{Step: haproxy.NewDeployHAProxyConfigStep(ctx, deployCfgNode.String()), Hosts: masterHosts, Dependencies: []plan.NodeID{genCfgNode}})
 
-	// Then, generate and deploy the static pod manifest to all master nodes.
-	genManifest := haproxy.NewGenerateHAProxyStaticPodManifestStep(ctx, "GenerateHAProxyStaticPodManifest")
-	p.AddNode("gen-haproxy-manifest", &plan.ExecutionNode{Step: genManifest, Hosts: []connector.Host{controlNode}})
+	genManifestNode := plan.NodeID("gen-haproxy-manifest")
+	p.AddNode(genManifestNode, &plan.ExecutionNode{Step: haproxy.NewGenerateHAProxyStaticPodManifestStep(ctx, genManifestNode.String()), Hosts: []connector.Host{controlPlaneHost}})
 
-	deployManifest := haproxy.NewDeployHAProxyStaticPodManifestStep(ctx, "DeployHAProxyStaticPodManifest")
-	p.AddNode("deploy-haproxy-manifest", &plan.ExecutionNode{Step: deployManifest, Hosts: masterHosts, Dependencies: []plan.NodeID{"gen-haproxy-manifest", "deploy-haproxy-cfg"}})
+	deployManifestNode := plan.NodeID("deploy-haproxy-manifest")
+	p.AddNode(deployManifestNode, &plan.ExecutionNode{Step: haproxy.NewDeployHAProxyStaticPodManifestStep(ctx, deployManifestNode.String()), Hosts: masterHosts, Dependencies: []plan.NodeID{genManifestNode, deployCfgNode}})
 
 	return p, nil
 }

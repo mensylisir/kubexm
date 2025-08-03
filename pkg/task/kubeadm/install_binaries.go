@@ -1,9 +1,8 @@
-package kubernetes
+package kubeadm
 
 import (
 	"fmt"
 
-	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/step/kubernetes/kubeadm"
@@ -43,28 +42,26 @@ func (a *InstallKubeadmBinariesAction) Execute(ctx runtime.Context) (*plan.Execu
 	for _, host := range hosts {
 		hostName := host.GetName()
 
-		// These can all run in parallel for a given host.
-		downloadKubeadm := kubeadm.NewDownloadKubeadmStep(ctx, fmt.Sprintf("DownloadKubeadm-%s", hostName))
-		p.AddNode(plan.NodeID(downloadKubeadm.Meta().Name), &plan.ExecutionNode{Step: downloadKubeadm, Hosts: []connector.Host{host}})
+		dlKubeadmNode := plan.NodeID(fmt.Sprintf("download-kubeadm-%s", hostName))
+		p.AddNode(dlKubeadmNode, &plan.ExecutionNode{Step: kubeadm.NewDownloadKubeadmStep(ctx, dlKubeadmNode.String()), Hosts: []connector.Host{host}})
 
-		installKubeadm := kubeadm.NewInstallKubeadmStep(ctx, fmt.Sprintf("InstallKubeadm-%s", hostName))
-		p.AddNode(plan.NodeID(installKubeadm.Meta().Name), &plan.ExecutionNode{Step: installKubeadm, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(downloadKubeadm.Meta().Name)}})
+		installKubeadmNode := plan.NodeID(fmt.Sprintf("install-kubeadm-%s", hostName))
+		p.AddNode(installKubeadmNode, &plan.ExecutionNode{Step: kubeadm.NewInstallKubeadmStep(ctx, installKubeadmNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{dlKubeadmNode}})
 
-		downloadKubelet := kubelet.NewDownloadKubeletStep(ctx, fmt.Sprintf("DownloadKubelet-%s", hostName))
-		p.AddNode(plan.NodeID(downloadKubelet.Meta().Name), &plan.ExecutionNode{Step: downloadKubelet, Hosts: []connector.Host{host}})
+		dlKubeletNode := plan.NodeID(fmt.Sprintf("download-kubelet-%s", hostName))
+		p.AddNode(dlKubeletNode, &plan.ExecutionNode{Step: kubelet.NewDownloadKubeletStep(ctx, dlKubeletNode.String()), Hosts: []connector.Host{host}})
 
-		installKubelet := kubelet.NewInstallKubeletStep(ctx, fmt.Sprintf("InstallKubelet-%s", hostName))
-		p.AddNode(plan.NodeID(installKubelet.Meta().Name), &plan.ExecutionNode{Step: installKubelet, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(downloadKubelet.Meta().Name)}})
+		installKubeletNode := plan.NodeID(fmt.Sprintf("install-kubelet-%s", hostName))
+		p.AddNode(installKubeletNode, &plan.ExecutionNode{Step: kubelet.NewInstallKubeletStep(ctx, installKubeletNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{dlKubeletNode}})
 
-		downloadKubectl := kubectl.NewDownloadKubectlStep(ctx, fmt.Sprintf("DownloadKubectl-%s", hostName))
-		p.AddNode(plan.NodeID(downloadKubectl.Meta().Name), &plan.ExecutionNode{Step: downloadKubectl, Hosts: []connector.Host{host}})
+		dlKubectlNode := plan.NodeID(fmt.Sprintf("download-kubectl-%s", hostName))
+		p.AddNode(dlKubectlNode, &plan.ExecutionNode{Step: kubectl.NewDownloadKubectlStep(ctx, dlKubectlNode.String()), Hosts: []connector.Host{host}})
 
-		installKubectl := kubectl.NewInstallKubectlStep(ctx, fmt.Sprintf("InstallKubectl-%s", hostName))
-		p.AddNode(plan.NodeID(installKubectl.Meta().Name), &plan.ExecutionNode{Step: installKubectl, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(downloadKubectl.Meta().Name)}})
+		installKubectlNode := plan.NodeID(fmt.Sprintf("install-kubectl-%s", hostName))
+		p.AddNode(installKubectlNode, &plan.ExecutionNode{Step: kubectl.NewInstallKubectlStep(ctx, installKubectlNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{dlKubectlNode}})
 
-		// The service file for kubelet is also needed.
-		installKubeletSvc := kubelet.NewInstallKubeletServiceStep(ctx, fmt.Sprintf("InstallKubeletSvc-%s", hostName))
-		p.AddNode(plan.NodeID(installKubeletSvc.Meta().Name), &plan.ExecutionNode{Step: installKubeletSvc, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(installKubelet.Meta().Name)}})
+		installKubeletSvcNode := plan.NodeID(fmt.Sprintf("install-kubelet-svc-%s", hostName))
+		p.AddNode(installKubeletSvcNode, &plan.ExecutionNode{Step: kubelet.NewInstallKubeletServiceStep(ctx, installKubeletSvcNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{installKubeletNode}})
 	}
 
 	return p, nil

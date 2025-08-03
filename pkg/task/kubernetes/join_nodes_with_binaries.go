@@ -40,36 +40,33 @@ func (a *JoinNodesWithBinariesAction) Execute(ctx runtime.Context) (*plan.Execut
 		hostName := host.GetName()
 
 		// --- Kubelet ---
-		// Assumes kubelet binary is already installed from a previous task.
-		// Also assumes certs and kubeconfigs have been generated and distributed.
-		createKubeletConfig := kubelet.NewCreateKubeletConfigStep(ctx, fmt.Sprintf("CreateKubeletConfig-%s", hostName))
-		p.AddNode(plan.NodeID(createKubeletConfig.Meta().Name), &plan.ExecutionNode{Step: createKubeletConfig, Hosts: []connector.Host{host}})
+		createKubeletCfgNode := plan.NodeID(fmt.Sprintf("create-kubelet-cfg-%s", hostName))
+		p.AddNode(createKubeletCfgNode, &plan.ExecutionNode{Step: kubelet.NewCreateKubeletConfigStep(ctx, createKubeletCfgNode.String()), Hosts: []connector.Host{host}})
 
-		installKubeletSvc := kubelet.NewInstallKubeletServiceStep(ctx, fmt.Sprintf("InstallKubeletService-%s", hostName))
-		p.AddNode(plan.NodeID(installKubeletSvc.Meta().Name), &plan.ExecutionNode{Step: installKubeletSvc, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(createKubeletConfig.Meta().Name)}})
+		installKubeletSvcNode := plan.NodeID(fmt.Sprintf("install-kubelet-svc-%s", hostName))
+		p.AddNode(installKubeletSvcNode, &plan.ExecutionNode{Step: kubelet.NewInstallKubeletServiceStep(ctx, installKubeletSvcNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{createKubeletCfgNode}})
 
-		enableKubelet := kubelet.NewEnableKubeletServiceStep(ctx, fmt.Sprintf("EnableKubelet-%s", hostName))
-		p.AddNode(plan.NodeID(enableKubelet.Meta().Name), &plan.ExecutionNode{Step: enableKubelet, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(installKubeletSvc.Meta().Name)}})
+		enableKubeletNode := plan.NodeID(fmt.Sprintf("enable-kubelet-%s", hostName))
+		p.AddNode(enableKubeletNode, &plan.ExecutionNode{Step: kubelet.NewEnableKubeletServiceStep(ctx, enableKubeletNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{installKubeletSvcNode}})
 
-		startKubelet := kubelet.NewStartKubeletStep(ctx, fmt.Sprintf("StartKubelet-%s", hostName))
-		p.AddNode(plan.NodeID(startKubelet.Meta().Name), &plan.ExecutionNode{Step: startKubelet, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(enableKubelet.Meta().Name)}})
-		kubeletReadyNode := plan.NodeID(startKubelet.Meta().Name)
+		startKubeletNode := plan.NodeID(fmt.Sprintf("start-kubelet-%s", hostName))
+		p.AddNode(startKubeletNode, &plan.ExecutionNode{Step: kubelet.NewStartKubeletStep(ctx, startKubeletNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{enableKubeletNode}})
 
 		// --- Kube-proxy ---
-		genProxyKubeconfig := kubeproxy.NewGenerateKubeProxyKubeconfigStep(ctx, fmt.Sprintf("GenerateKubeProxyKubeconfig-%s", hostName))
-		p.AddNode(plan.NodeID(genProxyKubeconfig.Meta().Name), &plan.ExecutionNode{Step: genProxyKubeconfig, Hosts: []connector.Host{host}})
+		genProxyKubeconfigNode := plan.NodeID(fmt.Sprintf("gen-proxy-kubeconfig-%s", hostName))
+		p.AddNode(genProxyKubeconfigNode, &plan.ExecutionNode{Step: kubeproxy.NewGenerateKubeProxyKubeconfigStep(ctx, genProxyKubeconfigNode.String()), Hosts: []connector.Host{host}})
 
-		genProxyConfig := kubeproxy.NewGenerateKubeProxyConfigStep(ctx, fmt.Sprintf("GenerateKubeProxyConfig-%s", hostName))
-		p.AddNode(plan.NodeID(genProxyConfig.Meta().Name), &plan.ExecutionNode{Step: genProxyConfig, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(genProxyKubeconfig.Meta().Name)}})
+		genProxyCfgNode := plan.NodeID(fmt.Sprintf("gen-proxy-cfg-%s", hostName))
+		p.AddNode(genProxyCfgNode, &plan.ExecutionNode{Step: kubeproxy.NewGenerateKubeProxyConfigStep(ctx, genProxyCfgNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{genProxyKubeconfigNode}})
 
-		installProxySvc := kubeproxy.NewInstallKubeProxyServiceStep(ctx, fmt.Sprintf("InstallKubeProxyService-%s", hostName))
-		p.AddNode(plan.NodeID(installProxySvc.Meta().Name), &plan.ExecutionNode{Step: installProxySvc, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(genProxyConfig.Meta().Name)}})
+		installProxySvcNode := plan.NodeID(fmt.Sprintf("install-proxy-svc-%s", hostName))
+		p.AddNode(installProxySvcNode, &plan.ExecutionNode{Step: kubeproxy.NewInstallKubeProxyServiceStep(ctx, installProxySvcNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{genProxyCfgNode}})
 
-		enableProxy := kubeproxy.NewEnableKubeProxyStep(ctx, fmt.Sprintf("EnableKubeProxy-%s", hostName))
-		p.AddNode(plan.NodeID(enableProxy.Meta().Name), &plan.ExecutionNode{Step: enableProxy, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(installProxySvc.Meta().Name)}})
+		enableProxyNode := plan.NodeID(fmt.Sprintf("enable-proxy-%s", hostName))
+		p.AddNode(enableProxyNode, &plan.ExecutionNode{Step: kubeproxy.NewEnableKubeProxyStep(ctx, enableProxyNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{installProxySvcNode}})
 
-		startProxy := kubeproxy.NewStartKubeProxyStep(ctx, fmt.Sprintf("StartKubeProxy-%s", hostName))
-		p.AddNode(plan.NodeID(startProxy.Meta().Name), &plan.ExecutionNode{Step: startProxy, Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{plan.NodeID(enableProxy.Meta().Name), kubeletReadyNode}})
+		startProxyNode := plan.NodeID(fmt.Sprintf("start-proxy-%s", hostName))
+		p.AddNode(startProxyNode, &plan.ExecutionNode{Step: kubeproxy.NewStartKubeProxyStep(ctx, startProxyNode.String()), Hosts: []connector.Host{host}, Dependencies: []plan.NodeID{enableProxyNode, startKubeletNode}})
 	}
 
 	return p, nil

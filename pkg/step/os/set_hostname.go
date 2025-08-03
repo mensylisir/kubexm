@@ -1,4 +1,4 @@
-package common
+package os
 
 import (
 	"fmt"
@@ -25,7 +25,7 @@ func NewSetHostnameStepBuilder(ctx runtime.ExecutionContext, instanceName, hostn
 	}
 	cs.Base.Meta.Name = instanceName
 	cs.Base.Meta.Description = fmt.Sprintf("[%s]>>Set hostname to [%s]", instanceName, hostname)
-	cs.Base.Sudo = false
+	cs.Base.Sudo = true // Setting hostname usually requires sudo
 	cs.Base.IgnoreError = false
 	cs.Base.Timeout = 1 * time.Minute
 	return new(SetHostnameStepBuilder).Init(cs)
@@ -67,9 +67,12 @@ func (s *SetHostnameStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("run: failed to get connector for host %s: %w", ctx.GetHost().GetName(), err)
 	}
 
+	// In a real runner, this would likely be `hostnamectl set-hostname`.
+	// For this example, we'll assume a generic command.
+	cmd := fmt.Sprintf("hostnamectl set-hostname %s", s.Hostname)
+
 	logger.Infof("Setting hostname to '%s' on host %s...", s.Hostname, ctx.GetHost().GetName())
-	err = runnerSvc.SetHostname(ctx.GoContext(), conn, nil, s.Hostname)
-	if err != nil {
+	if _, err := runnerSvc.SudoExec(ctx.GoContext(), conn, cmd); err != nil {
 		return fmt.Errorf("failed to set hostname to '%s' on host %s: %w", s.Hostname, ctx.GetHost().GetName(), err)
 	}
 

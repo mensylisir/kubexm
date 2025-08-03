@@ -38,38 +38,37 @@ func (a *BootstrapControlPlaneWithBinariesAction) Execute(ctx runtime.Context) (
 	masterHosts := a.GetHosts()
 
 	// --- Kube-apiserver ---
-	installApiSvc := apiserver.NewInstallApiServerServiceStep(ctx, "InstallApiServerService")
-	p.AddNode("install-apiserver-svc", &plan.ExecutionNode{Step: installApiSvc, Hosts: masterHosts})
+	installApiSvcNode := plan.NodeID("install-apiserver-svc")
+	p.AddNode(installApiSvcNode, &plan.ExecutionNode{Step: apiserver.NewInstallApiServerServiceStep(ctx, installApiSvcNode.String()), Hosts: masterHosts})
 
-	enableApiSvc := apiserver.NewEnableApiServerStep(ctx, "EnableApiServer")
-	p.AddNode("enable-apiserver", &plan.ExecutionNode{Step: enableApiSvc, Hosts: masterHosts, Dependencies: []plan.NodeID{"install-apiserver-svc"}})
+	enableApiSvcNode := plan.NodeID("enable-apiserver")
+	p.AddNode(enableApiSvcNode, &plan.ExecutionNode{Step: apiserver.NewEnableApiServerStep(ctx, enableApiSvcNode.String()), Hosts: masterHosts, Dependencies: []plan.NodeID{installApiSvcNode}})
 
-	startApiSvc := apiserver.NewStartApiServerStep(ctx, "StartApiServer")
-	p.AddNode("start-apiserver", &plan.ExecutionNode{Step: startApiSvc, Hosts: masterHosts, Dependencies: []plan.NodeID{"enable-apiserver"}})
+	startApiSvcNode := plan.NodeID("start-apiserver")
+	p.AddNode(startApiSvcNode, &plan.ExecutionNode{Step: apiserver.NewStartApiServerStep(ctx, startApiSvcNode.String()), Hosts: masterHosts, Dependencies: []plan.NodeID{enableApiSvcNode}})
 
-	checkApiHealth := apiserver.NewCheckApiServerHealthStep(ctx, "CheckApiServerHealth")
-	p.AddNode("check-apiserver-health", &plan.ExecutionNode{Step: checkApiHealth, Hosts: masterHosts, Dependencies: []plan.NodeID{"start-apiserver"}})
-	apiServerReadyNode := plan.NodeID("check-apiserver-health")
+	checkApiHealthNode := plan.NodeID("check-apiserver-health")
+	p.AddNode(checkApiHealthNode, &plan.ExecutionNode{Step: apiserver.NewCheckApiServerHealthStep(ctx, checkApiHealthNode.String()), Hosts: masterHosts, Dependencies: []plan.NodeID{startApiSvcNode}})
 
 	// --- Kube-controller-manager ---
-	installCMService := controllermanager.NewInstallControllerManagerServiceStep(ctx, "InstallControllerManagerService")
-	p.AddNode("install-cm-svc", &plan.ExecutionNode{Step: installCMService, Hosts: masterHosts})
+	installCMServiceNode := plan.NodeID("install-cm-svc")
+	p.AddNode(installCMServiceNode, &plan.ExecutionNode{Step: controllermanager.NewInstallControllerManagerServiceStep(ctx, installCMServiceNode.String()), Hosts: masterHosts})
 
-	enableCM := controllermanager.NewEnableControllerManagerStep(ctx, "EnableControllerManager")
-	p.AddNode("enable-cm", &plan.ExecutionNode{Step: enableCM, Hosts: masterHosts, Dependencies: []plan.NodeID{"install-cm-svc", apiServerReadyNode}})
+	enableCMNode := plan.NodeID("enable-cm")
+	p.AddNode(enableCMNode, &plan.ExecutionNode{Step: controllermanager.NewEnableControllerManagerStep(ctx, enableCMNode.String()), Hosts: masterHosts, Dependencies: []plan.NodeID{installCMServiceNode, checkApiHealthNode}})
 
-	startCM := controllermanager.NewStartControllerManagerStep(ctx, "StartControllerManager")
-	p.AddNode("start-cm", &plan.ExecutionNode{Step: startCM, Hosts: masterHosts, Dependencies: []plan.NodeID{"enable-cm"}})
+	startCMNode := plan.NodeID("start-cm")
+	p.AddNode(startCMNode, &plan.ExecutionNode{Step: controllermanager.NewStartControllerManagerStep(ctx, startCMNode.String()), Hosts: masterHosts, Dependencies: []plan.NodeID{enableCMNode}})
 
 	// --- Kube-scheduler ---
-	installSchedulerSvc := scheduler.NewInstallSchedulerServiceStep(ctx, "InstallSchedulerService")
-	p.AddNode("install-scheduler-svc", &plan.ExecutionNode{Step: installSchedulerSvc, Hosts: masterHosts})
+	installSchedulerSvcNode := plan.NodeID("install-scheduler-svc")
+	p.AddNode(installSchedulerSvcNode, &plan.ExecutionNode{Step: scheduler.NewInstallSchedulerServiceStep(ctx, installSchedulerSvcNode.String()), Hosts: masterHosts})
 
-	enableScheduler := scheduler.NewEnableSchedulerStep(ctx, "EnableScheduler")
-	p.AddNode("enable-scheduler", &plan.ExecutionNode{Step: enableScheduler, Hosts: masterHosts, Dependencies: []plan.NodeID{"install-scheduler-svc", apiServerReadyNode}})
+	enableSchedulerNode := plan.NodeID("enable-scheduler")
+	p.AddNode(enableSchedulerNode, &plan.ExecutionNode{Step: scheduler.NewEnableSchedulerStep(ctx, enableSchedulerNode.String()), Hosts: masterHosts, Dependencies: []plan.NodeID{installSchedulerSvcNode, checkApiHealthNode}})
 
-	startScheduler := scheduler.NewStartSchedulerStep(ctx, "StartScheduler")
-	p.AddNode("start-scheduler", &plan.ExecutionNode{Step: startScheduler, Hosts: masterHosts, Dependencies: []plan.NodeID{"enable-scheduler"}})
+	startSchedulerNode := plan.NodeID("start-scheduler")
+	p.AddNode(startSchedulerNode, &plan.ExecutionNode{Step: scheduler.NewStartSchedulerStep(ctx, startSchedulerNode.String()), Hosts: masterHosts, Dependencies: []plan.NodeID{enableSchedulerNode}})
 
 	return p, nil
 }

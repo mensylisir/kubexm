@@ -43,13 +43,11 @@ func (a *SetupKubeVipAction) Execute(ctx runtime.Context) (*plan.ExecutionGraph,
 		return nil, err
 	}
 
-	// 1. Generate the manifest on the control node.
-	genManifest := kubevip.NewGenerateKubeVipManifestStep(ctx, "GenerateKubeVipManifest")
-	p.AddNode("gen-kubevip-manifest", &plan.ExecutionNode{Step: genManifest, Hosts: []connector.Host{controlPlaneHost}})
+	genManifestNode := plan.NodeID("gen-kubevip-manifest")
+	p.AddNode(genManifestNode, &plan.ExecutionNode{Step: kubevip.NewGenerateKubeVipManifestStep(ctx, genManifestNode.String()), Hosts: []connector.Host{controlPlaneHost}})
 
-	// 2. Deploy the manifest to all master nodes.
-	deployManifest := kubevip.NewDeployKubeVipManifestStep(ctx, "DeployKubeVipManifest")
-	p.AddNode("deploy-kubevip-manifest", &plan.ExecutionNode{Step: deployManifest, Hosts: masterHosts, Dependencies: []plan.NodeID{"gen-kubevip-manifest"}})
+	deployManifestNode := plan.NodeID("deploy-kubevip-manifest")
+	p.AddNode(deployManifestNode, &plan.ExecutionNode{Step: kubevip.NewDeployKubeVipManifestStep(ctx, deployManifestNode.String()), Hosts: masterHosts, Dependencies: []plan.NodeID{genManifestNode}})
 
 	return p, nil
 }
