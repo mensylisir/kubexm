@@ -50,7 +50,7 @@ func NewInstallArgoCDHelmChartStepBuilder(ctx runtime.Context, instanceName stri
 
 	s.AdminKubeconfigPath = filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
 
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, ctx.GetHost().GetName(), chart.RepoName(), chart.ChartName()+"-"+chart.Version)
+	remoteDir := filepath.Join(ctx.GetUploadDir(), ctx.GetHost().GetName(), chart.RepoName(), chart.ChartName()+"-"+chart.Version)
 	s.RemoteValuesPath = filepath.Join(remoteDir, "argocd-values.yaml")
 	chartFileName := fmt.Sprintf("%s-%s.tgz", chart.ChartName(), chart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)

@@ -63,7 +63,7 @@ func (s *DistributeRegistryArtifactsStep) getLocalBinaryPath(ctx runtime.Executi
 	}
 
 	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tar.gz")
-	return filepath.Join(common.DefaultExtractTmpDir, destDirName, "registry"), nil
+	return filepath.Join(ctx.GetExtractDir(), destDirName, "registry"), nil
 }
 
 func (s *DistributeRegistryArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {

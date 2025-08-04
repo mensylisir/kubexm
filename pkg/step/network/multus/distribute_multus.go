@@ -42,7 +42,7 @@ func NewDistributeMultusArtifactsStepBuilder(ctx runtime.Context, instanceName s
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, chart.RepoName(), chart.ChartName()+"-"+chart.Version)
+	remoteDir := filepath.Join(ctx.GetUploadDir(), chart.RepoName(), chart.ChartName()+"-"+chart.Version)
 	s.RemoteValuesPath = filepath.Join(remoteDir, "multus-values.yaml")
 	chartFileName := fmt.Sprintf("%s-%s.tgz", chart.ChartName(), chart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)

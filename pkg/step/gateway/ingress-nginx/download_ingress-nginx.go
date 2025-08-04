@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
@@ -30,7 +29,7 @@ type DownloadIngressNginxChartStepBuilder struct {
 // NewDownloadIngressNginxChartStepBuilder is the constructor for DownloadIngressNginxChartStep.
 func NewDownloadIngressNginxChartStepBuilder(ctx runtime.Context, instanceName string) *DownloadIngressNginxChartStepBuilder {
 	s := &DownloadIngressNginxChartStep{
-		ChartsDir: filepath.Join(ctx.GetClusterArtifactsDir(), "helm"),
+		ChartsDir: filepath.Join(ctx.GetGlobalWorkDir(), "helm"),
 	}
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Download Ingress-Nginx Helm chart to local directory", s.Base.Meta.Name)

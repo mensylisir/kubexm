@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
@@ -41,7 +40,7 @@ func NewDistributeIngressNginxArtifactsStepBuilder(ctx runtime.Context, instance
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, chart.RepoName(), chart.ChartName()+"-"+chart.Version)
+	remoteDir := filepath.Join(ctx.GetUploadDir(), ctx.GetHost().GetName(), chart.RepoName(), chart.ChartName()+"-"+chart.Version)
 	s.RemoteValuesPath = filepath.Join(remoteDir, "ingress-nginx-values.yaml")
 	chartFileName := fmt.Sprintf("%s-%s.tgz", chart.ChartName(), chart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)
@@ -65,7 +64,7 @@ func (s *DistributeIngressNginxArtifactsStep) getLocalValuesPath(ctx runtime.Exe
 	if chart == nil {
 		return "", fmt.Errorf("cannot find chart info for ingress-nginx in BOM")
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
+	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
 	chartDir := filepath.Dir(chartTgzPath)
 	return filepath.Join(chartDir, "ingress-nginx-values.yaml"), nil
 }
@@ -87,7 +86,7 @@ func (s *DistributeIngressNginxArtifactsStep) Run(ctx runtime.ExecutionContext) 
 	if chart == nil {
 		return fmt.Errorf("cannot find chart info for ingress-nginx in BOM")
 	}
-	localChartPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
+	localChartPath := chart.LocalPath(ctx.GetGlobalWorkDir())
 	chartContent, err := os.ReadFile(localChartPath)
 	if err != nil {
 		return fmt.Errorf("failed to read offline chart file from %s: %w. Ensure DownloadIngressNginxChartStep ran successfully.", localChartPath, err)

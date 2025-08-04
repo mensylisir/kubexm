@@ -74,7 +74,7 @@ func (s *InstallCNIPluginsStep) getLocalExtractedPath(ctx runtime.ExecutionConte
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install CNI plugins (version %s)", s.Base.Meta.Name, binaryInfo.Version)
 
 	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tgz")
-	return filepath.Join(common.DefaultExtractTmpDir, destDirName), nil
+	return filepath.Join(ctx.GetExtractDir(), destDirName), nil
 }
 
 func (s *InstallCNIPluginsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
@@ -119,7 +119,7 @@ func (s *InstallCNIPluginsStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to create remote CNI bin directory '%s': %w", s.RemoteCNIBinDir, err)
 	}
 
-	remoteUploadTmpDir := filepath.Join(common.DefaultUploadTmpDir, fmt.Sprintf("cni-plugins-%d", time.Now().UnixNano()))
+	remoteUploadTmpDir := filepath.Join(ctx.GetUploadDir(), fmt.Sprintf("cni-plugins-%d", time.Now().UnixNano()))
 	if err := runner.Mkdirp(ctx.GoContext(), conn, remoteUploadTmpDir, "0755", false); err != nil {
 		return fmt.Errorf("failed to create remote upload directory '%s': %w", remoteUploadTmpDir, err)
 	}

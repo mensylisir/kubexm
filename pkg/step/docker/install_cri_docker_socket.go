@@ -3,6 +3,7 @@ package docker
 import (
 	"bytes"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"strings"
 	"text/template"
 	"time"
@@ -105,7 +106,7 @@ func (s *SetupCriDockerdSocketStep) Precheck(ctx runtime.ExecutionContext) (isDo
 
 func (s *SetupCriDockerdSocketStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
-	runner := ctx.GetRunner()
+	//runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		return err
@@ -117,7 +118,7 @@ func (s *SetupCriDockerdSocketStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	logger.Infof("Writing systemd socket file to %s", s.SocketFilePath)
-	if err := runner.WriteFile(ctx.GoContext(), conn, []byte(socketContent), s.SocketFilePath, "0644", s.Sudo); err != nil {
+	if err := helpers.WriteContentToRemote(ctx, conn, socketContent, s.SocketFilePath, "0644", s.Sudo); err != nil {
 		return fmt.Errorf("failed to write cri-dockerd.socket: %w", err)
 	}
 

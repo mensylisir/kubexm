@@ -27,7 +27,7 @@ type DistributeEtcdCertsStepBuilder struct {
 
 func NewDistributeEtcdCertsStepBuilder(ctx runtime.Context, instanceName string) *DistributeEtcdCertsStepBuilder {
 	s := &DistributeEtcdCertsStep{
-		LocalCertsDir:  filepath.Join(ctx.GetGlobalWorkDir(), "certs", "etcd"),
+		LocalCertsDir:  ctx.GetEtcdCertsDir(),
 		RemoteCertsDir: common.DefaultEtcdPKIDir,
 		CaCertFileName: common.EtcdCaPemFileName,
 		PermissionDir:  "0755",

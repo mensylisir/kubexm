@@ -112,7 +112,7 @@ func (s *ConfigureKubectlStep) Run(ctx runtime.ExecutionContext) error {
 			return fmt.Errorf("failed to get kubectl completion script template: %w", err)
 		}
 
-		remoteScriptPath := filepath.Join(common.DefaultUploadTmpDir, "kubectl-completion.sh")
+		remoteScriptPath := filepath.Join(ctx.GetUploadDir(), "kubectl-completion.sh")
 		if err := helpers.WriteContentToRemote(ctx, conn, completionScriptContent, remoteScriptPath, "0755", false); err != nil {
 			return fmt.Errorf("failed to write completion script: %w", err)
 		}

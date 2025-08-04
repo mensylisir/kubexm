@@ -32,7 +32,7 @@ func NewUploadHarborInstallerStepBuilder(ctx runtime.Context, instanceName strin
 	}
 
 	s := &UploadHarborInstallerStep{
-		RemoteTempPath: filepath.Join(common.DefaultUploadTmpDir, "harbor-installer.tgz"),
+		RemoteTempPath: filepath.Join(ctx.GetUploadDir(), "harbor-installer.tgz"),
 	}
 
 	s.Base.Meta.Name = instanceName

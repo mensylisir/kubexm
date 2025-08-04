@@ -44,7 +44,7 @@ func NewInstallCalicoHelmChartStepBuilder(ctx runtime.Context, instanceName stri
 	s.ReleaseName = calicoChart.ChartName()
 	s.Namespace = "tigera-operator"
 	s.AdminKubeconfigPath = filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, calicoChart.RepoName(), calicoChart.ChartName()+"-"+calicoChart.Version)
+	remoteDir := filepath.Join(ctx.GetUploadDir(), calicoChart.RepoName(), calicoChart.ChartName()+"-"+calicoChart.Version)
 	s.RemoteValuesPath = filepath.Join(remoteDir, "calico-values.yaml")
 	chartFileName := fmt.Sprintf("%s-%s.tgz", calicoChart.ChartName(), calicoChart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)

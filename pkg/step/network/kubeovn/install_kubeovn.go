@@ -50,7 +50,7 @@ func NewInstallKubeOvnHelmChartStepBuilder(ctx runtime.Context, instanceName str
 
 	s.AdminKubeconfigPath = filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
 
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, kubeovnChart.RepoName(), kubeovnChart.ChartName()+"-"+kubeovnChart.Version)
+	remoteDir := filepath.Join(ctx.GetUploadDir(), kubeovnChart.RepoName(), kubeovnChart.ChartName()+"-"+kubeovnChart.Version)
 	s.RemoteValuesPath = filepath.Join(remoteDir, "kubeovn-values.yaml")
 	chartFileName := fmt.Sprintf("%s-%s.tgz", kubeovnChart.ChartName(), kubeovnChart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)

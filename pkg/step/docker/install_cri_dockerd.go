@@ -80,7 +80,7 @@ func (s *InstallCriDockerdStep) getLocalSourcePath(ctx runtime.ExecutionContext)
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install cri-dockerd binary (version %s)", s.Base.Meta.Name, binaryInfo.Version)
 
 	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tgz")
-	sourcePath := filepath.Join(common.DefaultExtractTmpDir, destDirName, "cri-dockerd", "cri-dockerd")
+	sourcePath := filepath.Join(ctx.GetExtractDir(), destDirName, "cri-dockerd", "cri-dockerd")
 	return sourcePath, nil
 }
 
@@ -132,7 +132,7 @@ func (s *InstallCriDockerdStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to create remote install directory '%s': %w", s.InstallPath, err)
 	}
 
-	remoteUploadTmpDir := filepath.Join(common.DefaultUploadTmpDir, fmt.Sprintf("cri-dockerd-%d", time.Now().UnixNano()))
+	remoteUploadTmpDir := filepath.Join(ctx.GetUploadDir(), fmt.Sprintf("cri-dockerd-%d", time.Now().UnixNano()))
 	if err := runner.Mkdirp(ctx.GoContext(), conn, remoteUploadTmpDir, "0755", false); err != nil {
 		return fmt.Errorf("failed to create remote upload directory '%s': %w", remoteUploadTmpDir, err)
 	}
