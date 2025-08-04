@@ -1,18 +1,17 @@
-package kube_proxy
+package kube_controller_manager
 
 import (
 	"encoding/base64"
 	"fmt"
-	"os"
-	"path/filepath"
-	"time"
-
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"github.com/mensylisir/kubexm/pkg/templates"
+	"os"
+	"path/filepath"
+	"time"
 )
 
 type KubeconfigTemplateData struct {
@@ -24,7 +23,7 @@ type KubeconfigTemplateData struct {
 	ClientKeyDataBase64  string
 }
 
-type CreateKubeProxyKubeconfigStep struct {
+type CreateControllerManagerKubeconfigStep struct {
 	step.Base
 	ClusterName          string
 	APIServerURL         string
@@ -32,57 +31,52 @@ type CreateKubeProxyKubeconfigStep struct {
 	RemoteKubeconfigFile string
 }
 
-type CreateKubeProxyKubeconfigStepBuilder struct {
-	step.Builder[CreateKubeProxyKubeconfigStepBuilder, *CreateKubeProxyKubeconfigStep]
+type CreateControllerManagerKubeconfigStepBuilder struct {
+	step.Builder[CreateControllerManagerKubeconfigStepBuilder, *CreateControllerManagerKubeconfigStep]
 }
 
-func NewCreateKubeProxyKubeconfigStepBuilder(ctx runtime.Context, instanceName string) *CreateKubeProxyKubeconfigStepBuilder {
-	clusterCfg := ctx.GetClusterConfig()
-	k8sSpec := clusterCfg.Spec.Kubernetes
-	controlEndpoint := "127.0.0.1"
-	if clusterCfg.Spec.ControlPlaneEndpoint.Address != "" {
-		controlEndpoint = clusterCfg.Spec.ControlPlaneEndpoint.Address
-	}
-
-	s := &CreateKubeProxyKubeconfigStep{
+func NewCreateControllerManagerKubeconfigStepBuilder(ctx runtime.Context, instanceName string) *CreateControllerManagerKubeconfigStepBuilder {
+	k8sSpec := ctx.GetClusterConfig().Spec.Kubernetes
+	host := ctx.GetHost()
+	s := &CreateControllerManagerKubeconfigStep{
 		ClusterName:          k8sSpec.ClusterName,
-		APIServerURL:         fmt.Sprintf("https://%s:%d", controlEndpoint, common.DefaultAPIServerPort),
-		PKIDir:               ctx.GetKubernetesCertsDir(),
-		RemoteKubeconfigFile: filepath.Join(common.KubernetesConfigDir, common.KubeProxyKubeconfigFileName),
+		APIServerURL:         fmt.Sprintf("https://%s:%d", host.GetInternalAddress(), common.DefaultAPIServerPort),
+		PKIDir:               common.KubernetesPKIDir,
+		RemoteKubeconfigFile: filepath.Join(common.KubernetesConfigDir, common.ControllerManagerKubeconfigFileName),
 	}
 
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Create kube-proxy kubeconfig file", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Create kube-controller-manager kubeconfig file", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	b := new(CreateKubeProxyKubeconfigStepBuilder).Init(s)
+	b := new(CreateControllerManagerKubeconfigStepBuilder).Init(s)
 	return b
 }
 
-func (s *CreateKubeProxyKubeconfigStep) Meta() *spec.StepMeta { return &s.Base.Meta }
+func (s *CreateControllerManagerKubeconfigStep) Meta() *spec.StepMeta { return &s.Base.Meta }
 
-func (s *CreateKubeProxyKubeconfigStep) renderKubeconfig() (string, error) {
+func (s *CreateControllerManagerKubeconfigStep) renderKubeconfig() (string, error) {
 	caCert, err := os.ReadFile(filepath.Join(s.PKIDir, common.CACertFileName))
 	if err != nil {
 		return "", fmt.Errorf("failed to read ca.crt: %w", err)
 	}
 
-	clientCert, err := os.ReadFile(filepath.Join(s.PKIDir, common.KubeProxyClientCertFileName))
+	clientCert, err := os.ReadFile(filepath.Join(s.PKIDir, common.ControllerManagerCertFileName))
 	if err != nil {
-		return "", fmt.Errorf("failed to read kube-proxy client certificate (%s): %w", common.KubeProxyClientCertFileName, err)
+		return "", fmt.Errorf("failed to read system:kube-controller-manager.crt: %w", err)
 	}
-	clientKey, err := os.ReadFile(filepath.Join(s.PKIDir, common.KubeProxyClientKeyFileName))
+	clientKey, err := os.ReadFile(filepath.Join(s.PKIDir, common.ControllerManagerKeyFileName))
 	if err != nil {
-		return "", fmt.Errorf("failed to read kube-proxy client key (%s): %w", common.KubeProxyClientKeyFileName, err)
+		return "", fmt.Errorf("failed to read system:kube-controller-manager.key: %w", err)
 	}
 
 	data := KubeconfigTemplateData{
 		ClusterName:          s.ClusterName,
 		APIServerURL:         s.APIServerURL,
 		CACertDataBase64:     base64.StdEncoding.EncodeToString(caCert),
-		UserName:             common.KubeProxyUser,
+		UserName:             "system:kube-controller-manager",
 		ClientCertDataBase64: base64.StdEncoding.EncodeToString(clientCert),
 		ClientKeyDataBase64:  base64.StdEncoding.EncodeToString(clientKey),
 	}
@@ -95,7 +89,7 @@ func (s *CreateKubeProxyKubeconfigStep) renderKubeconfig() (string, error) {
 	return templates.Render(tmplContent, data)
 }
 
-func (s *CreateKubeProxyKubeconfigStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+func (s *CreateControllerManagerKubeconfigStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
@@ -114,15 +108,15 @@ func (s *CreateKubeProxyKubeconfigStep) Precheck(ctx runtime.ExecutionContext) (
 		return false, nil
 	}
 	if string(remoteContent) != expectedContent {
-		logger.Warn("Remote kube-proxy.kubeconfig file content mismatch. Re-configuration is required.")
+		logger.Warn("Remote kube-controller-manager.kubeconfig file content mismatch. Re-configuration is required.")
 		return false, nil
 	}
 
-	logger.Info("kube-proxy.kubeconfig file is up to date. Step is done.")
+	logger.Info("kube-controller-manager.kubeconfig file is up to date. Step is done.")
 	return true, nil
 }
 
-func (s *CreateKubeProxyKubeconfigStep) Run(ctx runtime.ExecutionContext) error {
+func (s *CreateControllerManagerKubeconfigStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
@@ -131,18 +125,18 @@ func (s *CreateKubeProxyKubeconfigStep) Run(ctx runtime.ExecutionContext) error 
 
 	kubeconfigContent, err := s.renderKubeconfig()
 	if err != nil {
-		return fmt.Errorf("failed to render kube-proxy.kubeconfig: %w", err)
+		return fmt.Errorf("failed to render kube-controller-manager.kubeconfig: %w", err)
 	}
 
 	if err := helpers.WriteContentToRemote(ctx, conn, kubeconfigContent, s.RemoteKubeconfigFile, "0644", s.Sudo); err != nil {
-		return fmt.Errorf("failed to write kube-proxy.kubeconfig file: %w", err)
+		return fmt.Errorf("failed to write kube-controller-manager.kubeconfig file: %w", err)
 	}
 
-	logger.Info("kube-proxy.kubeconfig has been created successfully.")
+	logger.Info("kube-controller-manager.kubeconfig has been created successfully.")
 	return nil
 }
 
-func (s *CreateKubeProxyKubeconfigStep) Rollback(ctx runtime.ExecutionContext) error {
+func (s *CreateControllerManagerKubeconfigStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
@@ -159,4 +153,4 @@ func (s *CreateKubeProxyKubeconfigStep) Rollback(ctx runtime.ExecutionContext) e
 	return nil
 }
 
-var _ step.Step = (*CreateKubeProxyKubeconfigStep)(nil)
+var _ step.Step = (*CreateControllerManagerKubeconfigStep)(nil)

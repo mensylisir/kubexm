@@ -17,13 +17,13 @@ func IsInStringSlice(slice []string, str string) bool {
 	return false
 }
 
-func GenerateWorkDir(name string) (string, error) {
+func GenerateWorkDir() (string, error) {
 	currentDir, err := filepath.Abs(filepath.Dir(os.Args[0]))
 	if err != nil {
 		return "", errors.Wrap(err, "get current dir failed")
 	}
 
-	rootPath := filepath.Join(currentDir, common.KUBEXM, name)
+	rootPath := filepath.Join(currentDir, common.KUBEXM)
 	if err := CreateDir(rootPath); err != nil {
 		return "", errors.Wrap(err, "create work dir failed")
 	}

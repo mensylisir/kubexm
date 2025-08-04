@@ -172,6 +172,92 @@ func (r *defaultRunner) GetDiskUsage(ctx context.Context, conn connector.Connect
 	return
 }
 
+func (r *defaultRunner) Move(ctx context.Context, conn connector.Connector, src, dest string, sudo bool) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil for Move")
+	}
+	if strings.TrimSpace(src) == "" {
+		return fmt.Errorf("sourcePath cannot be empty for Move")
+	}
+	if strings.TrimSpace(dest) == "" {
+		return fmt.Errorf("destPath cannot be empty for Move")
+	}
+	destDir := filepath.Dir(dest)
+	exists, err := r.Exists(ctx, conn, dest)
+	if err != nil {
+		return fmt.Errorf("failed to check existence of destination %s: %w", dest, err)
+	}
+	if exists {
+		isDir, err := r.IsDir(ctx, conn, dest)
+		if err != nil {
+			return fmt.Errorf("failed to check if destination %s is a directory: %w", dest, err)
+		}
+		if isDir {
+			destDir = dest
+		}
+	}
+	if destDir != "." && destDir != "/" && destDir != "" {
+		if err := r.Mkdirp(ctx, conn, destDir, "0755", sudo); err != nil {
+			return fmt.Errorf("failed to create parent directory %s for move destination: %w", destDir, err)
+		}
+	}
+
+	cmd := fmt.Sprintf("mv %s %s", src, dest)
+	_, stderr, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: sudo})
+	if err != nil {
+		return fmt.Errorf("failed to move '%s' to '%s': %w (stderr: %s)", src, dest, err, string(stderr))
+	}
+	r.logger.Debug("Moved remote path successfully", "source", src, "destination", dest)
+	return nil
+}
+func (r *defaultRunner) CopyFile(ctx context.Context, conn connector.Connector, src, dest string, recursive bool, sudo bool) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil for Cp")
+	}
+	if strings.TrimSpace(src) == "" {
+		return fmt.Errorf("sourcePath cannot be empty for Cp")
+	}
+	if strings.TrimSpace(dest) == "" {
+		return fmt.Errorf("destPath cannot be empty for Cp")
+	}
+	destDir := filepath.Dir(dest)
+
+	exists, err := r.Exists(ctx, conn, dest)
+	if err != nil {
+		return fmt.Errorf("failed to check existence of destination %s: %w", dest, err)
+	}
+	if exists {
+		isDir, err := r.IsDir(ctx, conn, dest)
+		if err != nil {
+			return fmt.Errorf("failed to check if destination %s is a directory: %w", dest, err)
+		}
+		if isDir {
+			destDir = dest
+		}
+	}
+
+	if destDir != "." && destDir != "/" && destDir != "" {
+		if err := r.Mkdirp(ctx, conn, destDir, "0755", sudo); err != nil {
+			return fmt.Errorf("failed to create parent directory %s for copy destination: %w", destDir, err)
+		}
+	}
+
+	recursiveFlag := ""
+	if recursive {
+		recursiveFlag = "-a"
+	}
+
+	cmdParts := []string{"cp", recursiveFlag, src, dest}
+	cmd := strings.Join(strings.Fields(strings.Join(cmdParts, " ")), " ")
+
+	_, stderr, err := r.RunWithOptions(ctx, conn, cmd, &connector.ExecOptions{Sudo: sudo})
+	if err != nil {
+		return fmt.Errorf("failed to copy '%s' to '%s' (recursive: %v): %w (stderr: %s)", src, dest, recursive, err, string(stderr))
+	}
+	r.logger.Debug("Copied remote path successfully", "source", src, "destination", dest, "recursive", recursive)
+	return nil
+}
+
 func (r *defaultRunner) Remove(ctx context.Context, conn connector.Connector, path string, sudo bool, recursive bool) error {
 	if conn == nil {
 		return fmt.Errorf("connector cannot be nil")

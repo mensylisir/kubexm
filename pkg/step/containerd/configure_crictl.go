@@ -3,6 +3,7 @@ package containerd
 import (
 	"bytes"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"text/template"
 	"time"
 
@@ -105,7 +106,6 @@ func (s *ConfigureCriCtlStep) Precheck(ctx runtime.ExecutionContext) (isDone boo
 
 func (s *ConfigureCriCtlStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
-	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		return err
@@ -117,7 +117,7 @@ func (s *ConfigureCriCtlStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	logger.Infof("Writing crictl config file to %s", s.TargetPath)
-	return runner.WriteFile(ctx.GoContext(), conn, []byte(content), s.TargetPath, "0644", s.Sudo)
+	return helpers.WriteContentToRemote(ctx, conn, content, s.TargetPath, "0644", s.Sudo)
 }
 
 func (s *ConfigureCriCtlStep) Rollback(ctx runtime.ExecutionContext) error {

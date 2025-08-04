@@ -179,28 +179,44 @@ func (c *Context) GetGlobalConnectionTimeout() time.Duration {
 func (c *Context) GetGlobalWorkDir() string { return c.GlobalWorkDir }
 func (c *Context) GetWorkspace() string     { return c.GetGlobalWorkDir() }
 
-func (c *Context) GetClusterArtifactsDir() string {
+func (c *Context) GetClusterWorkDir() string {
 	if c.ClusterConfig == nil || c.ClusterConfig.Name == "" {
 		c.Logger.Error(nil, "ClusterConfig or name is not set, returning invalid artifacts dir")
-		return filepath.Join(c.GlobalWorkDir, common.KUBEXM, "_INVALID_CLUSTER_")
+		return filepath.Join(c.GlobalWorkDir, "_INVALID_CLUSTER_")
 	}
-	return c.GlobalWorkDir
+	return filepath.Join(c.GlobalWorkDir, c.ClusterConfig.Name)
 }
 
-func (c *Context) GetCertsDir() string {
-	return filepath.Join(c.GetClusterArtifactsDir(), common.DefaultCertsDir)
+func (c *Context) GetHostWorkDir() string {
+	if c.ClusterConfig == nil || c.ClusterConfig.Name == "" {
+		c.Logger.Error(nil, "ClusterConfig or name is not set, returning invalid artifacts dir")
+		return filepath.Join(c.GlobalWorkDir, "_INVALID_CLUSTER_")
+	}
+	return filepath.Join(c.GlobalWorkDir, c.ClusterConfig.Name, c.currentHost.GetName())
+}
+
+func (c *Context) GetExtractDir() string {
+	return common.DefaultExtractTmpDir
+}
+
+func (c *Context) GetUploadDir() string {
+	return common.DefaultUploadTmpDir
+}
+
+func (c *Context) GetKubernetesCertsDir() string {
+	return filepath.Join(c.GetClusterWorkDir(), common.DefaultKubernetesDir, common.DefaultCertsDir)
 }
 
 func (c *Context) GetEtcdCertsDir() string {
-	return filepath.Join(c.GetCertsDir(), common.DefaultEtcdDir)
+	return filepath.Join(c.GetClusterWorkDir(), common.DefaultEtcdDir, common.DefaultCertsDir)
 }
 
 func (c *Context) GetComponentArtifactsDir(componentTypeDir string) string {
-	return filepath.Join(c.GetClusterArtifactsDir(), componentTypeDir)
+	return filepath.Join(c.GetClusterWorkDir(), componentTypeDir)
 }
 
 func (c *Context) GetFileDownloadPath(componentName, version, arch, fileName string) string {
-	componentDir := filepath.Join(c.GetClusterArtifactsDir(), componentName, version, arch)
+	componentDir := filepath.Join(c.GetClusterWorkDir(), componentName, version, arch)
 	if fileName != "" {
 		return filepath.Join(componentDir, fileName)
 	}
@@ -208,7 +224,7 @@ func (c *Context) GetFileDownloadPath(componentName, version, arch, fileName str
 }
 
 func (c *Context) GetHostDir(hostname string) string {
-	return filepath.Join(c.GetClusterArtifactsDir(), hostname)
+	return filepath.Join(c.GetClusterWorkDir(), hostname)
 }
 
 func (c *Context) GetCurrentHostConnector() (connector.Connector, error) {

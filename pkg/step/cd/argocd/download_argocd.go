@@ -14,22 +14,19 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 )
 
-// DownloadArgoCDChartStep is a step to download the Argo CD Helm chart.
 type DownloadArgoCDChartStep struct {
 	step.Base
 	HelmBinaryPath string
 	ChartsDir      string
 }
 
-// DownloadArgoCDChartStepBuilder is used to build DownloadArgoCDChartStep instances.
 type DownloadArgoCDChartStepBuilder struct {
 	step.Builder[DownloadArgoCDChartStepBuilder, *DownloadArgoCDChartStep]
 }
 
-// NewDownloadArgoCDChartStepBuilder is the constructor for DownloadArgoCDChartStep.
 func NewDownloadArgoCDChartStepBuilder(ctx runtime.Context, instanceName string) *DownloadArgoCDChartStepBuilder {
 	s := &DownloadArgoCDChartStep{
-		ChartsDir: filepath.Join(ctx.GetClusterArtifactsDir(), "helm"),
+		ChartsDir: filepath.Join(ctx.GetGlobalWorkDir(), "helm"),
 	}
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Download Argo CD Helm chart to local directory", s.Base.Meta.Name)

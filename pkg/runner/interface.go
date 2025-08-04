@@ -141,6 +141,8 @@ type Runner interface {
 	Exists(ctx context.Context, conn connector.Connector, path string) (bool, error)
 	IsDir(ctx context.Context, conn connector.Connector, path string) (bool, error)
 	ReadFile(ctx context.Context, conn connector.Connector, path string) ([]byte, error)
+	Move(ctx context.Context, conn connector.Connector, src, dest string, sudo bool) error
+	CopyFile(ctx context.Context, conn connector.Connector, src, dest string, recursive bool, sudo bool) error
 	Stat(ctx context.Context, conn connector.Connector, path string) (os.FileInfo, error)
 	WriteFile(ctx context.Context, conn connector.Connector, content []byte, destPath, permissions string, sudo bool) error
 	Mkdirp(ctx context.Context, conn connector.Connector, path, permissions string, sudo bool) error

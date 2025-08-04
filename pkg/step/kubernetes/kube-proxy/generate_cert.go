@@ -26,7 +26,7 @@ type GenerateKubeProxyCertsStepBuilder struct {
 
 func NewGenerateKubeProxyCertsStepBuilder(ctx runtime.Context, instanceName string) *GenerateKubeProxyCertsStepBuilder {
 	s := &GenerateKubeProxyCertsStep{
-		CertsDir:     filepath.Join(ctx.GetGlobalWorkDir(), "certs", "kubernetes"),
+		CertsDir:     ctx.GetKubernetesCertsDir(),
 		CertDuration: common.DefaultCertificateValidityDays * 24 * time.Hour,
 	}
 

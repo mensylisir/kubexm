@@ -115,10 +115,11 @@ const (
 	DefaultKeepalivedLogDir = "/var/log/keepalived" // Keepalived log directory
 
 	// Pod log directories
-	DefaultPodLogDir       = "/var/log/pods"            // Pod log directory
-	DefaultContainerLogDir = "/var/log/containers"      // Container log directory
-	DefaultAuditPolicyDir  = "/etc/kubernetes/audit"    // Audit policy directory
-	DefaultAuditLogFile    = "/var/log/audit/audit.log" // Audit log file
+	DefaultPodLogDir       = "/var/log/pods"       // Pod log directory
+	DefaultContainerLogDir = "/var/log/containers" // Container log directory
+	DefaultAuditPolicyDir  = "/etc/kubernetes/audit"
+	DefaultAuditPolicyFile = "/etc/kubernetes/audit/audit-policy.yaml" // Audit policy directory
+	DefaultAuditLogFile    = "/var/log/audit/audit.log"                // Audit log file
 )
 
 // Cache and temporary directory constants

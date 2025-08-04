@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+# 设置 kubectl 的 bash 自动补全
+kubectl completion bash > /etc/bash_completion.d/kubectl
+
+# 为 root 用户设置别名和补全（如果 .bashrc 存在）
+BASHRC_FILE="/root/.bashrc"
+if [ -f "$BASHRC_FILE" ]; then
+    # 防止重复添加
+    grep -q "alias k=kubectl" "$BASHRC_FILE" || echo 'alias k=kubectl' >> "$BASHRC_FILE"
+    grep -q "complete -F __start_kubectl k" "$BASHRC_FILE" || echo 'complete -F __start_kubectl k' >> "$BASHRC_FILE"
+fi

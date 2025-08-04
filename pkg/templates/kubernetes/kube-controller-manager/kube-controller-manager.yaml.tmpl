@@ -1,0 +1,42 @@
+# templates/kubernetes/kube-controller-manager.yaml.tmpl
+apiVersion: controllermanager.config.k8s.io/v1alpha1
+kind: KubeControllerManagerConfiguration
+address: "0.0.0.0" # 一般不监听，由 leader-election 保证只有一个实例工作，但配置项存在
+bindAddress: "{{ .BindAddress }}"
+clientConnection:
+  kubeconfig: "{{ .KubeconfigPath }}"
+  contentType: "application/vnd.kubernetes.protobuf"
+  qps: 50
+  burst: 100
+clusterCIDR: "{{ .PodSubnet }}"
+serviceClusterIPRange: "{{ .ServiceClusterIPRange }}"
+clusterName: "{{ .ClusterName }}"
+nodeCIDRMaskSize: {{ .NodeCidrMaskSize }}
+{{- if .NodeCidrMaskSizeIPv6 }}
+nodeCIDRMaskSizeIPv6: {{ .NodeCidrMaskSizeIPv6 }}
+{{- end }}
+nodeLifecycle:
+  podEvictionTimeout: "{{ .PodEvictionTimeout }}"
+  nodeMonitorGracePeriod: "{{ .NodeMonitorGracePeriod }}"
+controllers:
+- "*" # 启用所有默认控制器
+rootCAFile: "{{ .PKIDir }}/ca.crt"
+clusterSigningCertFile: "{{ .PKIDir }}/ca.crt"
+clusterSigningKeyFile: "{{ .PKIDir }}/ca.key"
+serviceAccountPrivateKeyFile: "{{ .PKIDir }}/sa.key"
+kubeAPIQPS: 100
+kubeAPIBurst: 200
+leaderElection:
+  leaderElect: true
+  leaseDuration: 15s
+  renewDeadline: 10s
+  retryPeriod: 2s
+  resourceName: kube-controller-manager
+  resourceNamespace: kube-system
+port: 10257 # HTTPS port, 默认为 10257，0 表示禁用
+securePort: 10257
+useServiceAccountCredentials: true
+featureGates:
+{{- range $k, $v := .FeatureGates }}
+  {{ $k }}: {{ $v }}
+{{- end }}

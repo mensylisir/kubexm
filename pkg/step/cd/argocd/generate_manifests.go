@@ -16,7 +16,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
-// GenerateArgoCDValuesStep is responsible for generating the Helm values file for Argo CD.
 type GenerateArgoCDValuesStep struct {
 	step.Base
 	ImageRegistry string
@@ -25,16 +24,14 @@ type GenerateArgoCDValuesStep struct {
 	RedisImageTag string
 }
 
-// GenerateArgoCDValuesStepBuilder is used to build instances.
 type GenerateArgoCDValuesStepBuilder struct {
 	step.Builder[GenerateArgoCDValuesStepBuilder, *GenerateArgoCDValuesStep]
 }
 
-// NewGenerateArgoCDValuesStepBuilder is the constructor.
 func NewGenerateArgoCDValuesStepBuilder(ctx runtime.Context, instanceName string) *GenerateArgoCDValuesStepBuilder {
 	imageProvider := images.NewImageProvider(&ctx)
 
-	argocdImage := imageProvider.GetImage("argocd-server") // Main image
+	argocdImage := imageProvider.GetImage("argocd-server")
 	dexImage := imageProvider.GetImage("argocd-dex")
 	redisImage := imageProvider.GetImage("argocd-redis")
 
@@ -51,7 +48,7 @@ func NewGenerateArgoCDValuesStepBuilder(ctx runtime.Context, instanceName string
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 2 * time.Minute
 
-	s.ImageRegistry = argocdImage.Registry()
+	s.ImageRegistry = argocdImage.RegistryAddr()
 	if reg := ctx.GetClusterConfig().Spec.Registry.MirroringAndRewriting.PrivateRegistry; reg != "" {
 		s.ImageRegistry = reg
 	}
@@ -69,19 +66,18 @@ func (s *GenerateArgoCDValuesStep) Meta() *spec.StepMeta {
 }
 
 func (s *GenerateArgoCDValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	// TODO: Add a check to see if argocd is enabled
 	return false, nil
 }
 
-func (s *GenerateArgoCDValuesStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
+func (s *GenerateArgoCDValuesStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, string, error) {
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart("argocd")
 	if chart == nil {
-		return "", fmt.Errorf("cannot find chart info for argocd in BOM")
+		return "", "", fmt.Errorf("cannot find chart info for argocd in BOM")
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
-	chartDir := filepath.Dir(chartTgzPath)
-	return filepath.Join(chartDir, "argocd-values.yaml"), nil
+	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
+	valueYamlPath := filepath.Join(ctx.GetClusterWorkDir(), chart.ChartName(), chart.Version, "argocd-values.yaml")
+	return chartTgzPath, valueYamlPath, nil
 }
 
 func (s *GenerateArgoCDValuesStep) Run(ctx runtime.ExecutionContext) error {
@@ -101,19 +97,19 @@ func (s *GenerateArgoCDValuesStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to render argocd values.yaml.tmpl: %w", err)
 	}
 
-	localPath, err := s.getLocalValuesPath(ctx)
+	_, valuePath, err := s.getLocalValuesPath(ctx)
 	if err != nil {
 		return err
 	}
 
-	logger.Infof("Generating Argo CD Helm values file to: %s", localPath)
+	logger.Infof("Generating Argo CD Helm values file to: %s", valuePath)
 
-	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(valuePath), 0755); err != nil {
 		return fmt.Errorf("failed to create local directory for values file: %w", err)
 	}
 
-	if err := os.WriteFile(localPath, valuesBuffer.Bytes(), 0644); err != nil {
-		return fmt.Errorf("failed to write generated values file to %s: %w", localPath, err)
+	if err := os.WriteFile(valuePath, valuesBuffer.Bytes(), 0644); err != nil {
+		return fmt.Errorf("failed to write generated values file to %s: %w", valuePath, err)
 	}
 
 	logger.Info("Successfully generated Argo CD Helm values file.")
@@ -121,8 +117,8 @@ func (s *GenerateArgoCDValuesStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *GenerateArgoCDValuesStep) Rollback(ctx runtime.ExecutionContext) error {
-	if localPath, err := s.getLocalValuesPath(ctx); err == nil {
-		os.Remove(localPath)
+	if _, valuePath, err := s.getLocalValuesPath(ctx); err == nil {
+		os.Remove(valuePath)
 	}
 	return nil
 }

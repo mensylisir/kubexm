@@ -15,7 +15,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step/helpers"
 )
 
-type GenerateCAStep struct {
+type GenerateCAPEMStep struct {
 	step.Base
 	LocalCertsDir string
 	CADuration    time.Duration
@@ -24,59 +24,66 @@ type GenerateCAStep struct {
 	KeyFileName   string
 }
 
-type GenerateCAStepBuilder struct {
-	step.Builder[GenerateCAStepBuilder, *GenerateCAStep]
+type GenerateCAPEMStepBuilder struct {
+	step.Builder[GenerateCAPEMStepBuilder, *GenerateCAPEMStep]
 }
 
-func NewGenerateCAStepBuilder(ctx runtime.Context, instanceName string) *GenerateCAStepBuilder {
-	s := &GenerateCAStep{
-		LocalCertsDir: filepath.Join(ctx.GetGlobalWorkDir(), "certs"),
+func NewGenerateCAPEMStepBuilder(ctx runtime.Context, instanceName string) *GenerateCAPEMStepBuilder {
+	s := &GenerateCAPEMStep{
+		LocalCertsDir: ctx.GetEtcdCertsDir(),
 		CADuration:    10 * 365 * 24 * time.Hour,
 		Permission:    "0755",
 		CertFileName:  common.EtcdCaPemFileName,
 		KeyFileName:   common.EtcdCaKeyPemFileName,
 	}
-
+	if ctx.GetClusterConfig().Spec.Certs.CADuration != "" {
+		parsedDuration, err := time.ParseDuration(ctx.GetClusterConfig().Spec.Certs.CADuration)
+		if err == nil {
+			s.CADuration = parsedDuration
+		} else {
+			ctx.GetLogger().Warnf("Failed to parse user-provided CA duration '%s', using default. Error: %v", ctx.GetClusterConfig().Spec.Certs.CADuration, err)
+		}
+	}
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate or load etcd CA for the cluster", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 1 * time.Minute
 
-	b := new(GenerateCAStepBuilder).Init(s)
+	b := new(GenerateCAPEMStepBuilder).Init(s)
 	return b
 }
 
-func (b *GenerateCAStepBuilder) WithCertFileName(name string) *GenerateCAStepBuilder {
+func (b *GenerateCAPEMStepBuilder) WithCertFileName(name string) *GenerateCAPEMStepBuilder {
 	b.Step.CertFileName = name
 	return b
 }
 
-func (b *GenerateCAStepBuilder) WithKeyFileName(name string) *GenerateCAStepBuilder {
+func (b *GenerateCAPEMStepBuilder) WithKeyFileName(name string) *GenerateCAPEMStepBuilder {
 	b.Step.KeyFileName = name
 	return b
 }
 
-func (b *GenerateCAStepBuilder) WithLocalCertsDir(path string) *GenerateCAStepBuilder {
+func (b *GenerateCAPEMStepBuilder) WithLocalCertsDir(path string) *GenerateCAPEMStepBuilder {
 	b.Step.LocalCertsDir = path
 	return b
 }
 
-func (b *GenerateCAStepBuilder) WithCADuration(duration time.Duration) *GenerateCAStepBuilder {
+func (b *GenerateCAPEMStepBuilder) WithCADuration(duration time.Duration) *GenerateCAPEMStepBuilder {
 	b.Step.CADuration = duration
 	return b
 }
 
-func (b *GenerateCAStepBuilder) WithPermission(permission string) *GenerateCAStepBuilder {
+func (b *GenerateCAPEMStepBuilder) WithPermission(permission string) *GenerateCAPEMStepBuilder {
 	b.Step.Permission = permission
 	return b
 }
 
-func (s *GenerateCAStep) Meta() *spec.StepMeta {
+func (s *GenerateCAPEMStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *GenerateCAStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+func (s *GenerateCAPEMStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
 
 	caCertPath := filepath.Join(s.LocalCertsDir, s.CertFileName)
@@ -95,7 +102,7 @@ func (s *GenerateCAStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, er
 	return true, nil
 }
 
-func (s *GenerateCAStep) Run(ctx runtime.ExecutionContext) error {
+func (s *GenerateCAPEMStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
 	perm, err := strconv.ParseUint(s.Permission, 8, 32)
@@ -107,7 +114,6 @@ func (s *GenerateCAStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	logger.Info("Ensuring CA certificate and key exist...")
-	// 变化点 5: 在生成证书时使用配置的文件名
 	_, _, err = helpers.NewCertificateAuthority(s.LocalCertsDir, s.CertFileName, s.KeyFileName, s.CADuration)
 	if err != nil {
 		return fmt.Errorf("failed to setup ETCD CA: %w", err)
@@ -117,7 +123,7 @@ func (s *GenerateCAStep) Run(ctx runtime.ExecutionContext) error {
 	return nil
 }
 
-func (s *GenerateCAStep) Rollback(ctx runtime.ExecutionContext) error {
+func (s *GenerateCAPEMStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
 
 	caCertPath := filepath.Join(s.LocalCertsDir, s.CertFileName)
@@ -136,4 +142,4 @@ func (s *GenerateCAStep) Rollback(ctx runtime.ExecutionContext) error {
 	return nil
 }
 
-var _ step.Step = (*GenerateCAStep)(nil)
+var _ step.Step = (*GenerateCAPEMStep)(nil)

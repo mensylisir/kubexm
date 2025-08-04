@@ -29,7 +29,7 @@ type DownloadHelmCharts2StepBuilder struct {
 func NewDownloadHelmCharts2StepBuilder(ctx runtime.Context, instanceName string) *DownloadHelmCharts2StepBuilder {
 	s := &DownloadHelmCharts2Step{
 		Concurrency: 5,
-		ChartsDir:   filepath.Join(ctx.GetClusterArtifactsDir(), "helm"),
+		ChartsDir:   filepath.Join(ctx.GetGlobalWorkDir(), "helm"),
 	}
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Download all required Helm charts to local directory", s.Base.Meta.Name)
@@ -76,7 +76,6 @@ func (s *DownloadHelmCharts2Step) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to create base charts directory '%s': %w", s.ChartsDir, err)
 	}
 
-	// 在并发前，先统一添加所有 repo，避免竞争
 	addedRepos := make(map[string]bool)
 	for _, chart := range chartsToDownload {
 		if !addedRepos[chart.RepoName()] {
@@ -90,7 +89,6 @@ func (s *DownloadHelmCharts2Step) Run(ctx runtime.ExecutionContext) error {
 			addedRepos[chart.RepoName()] = true
 		}
 	}
-	// 更新所有新添加的 repo
 	if len(addedRepos) > 0 {
 		logger.Info("Updating Helm repositories...")
 		repoUpdateCmd := exec.Command(s.HelmBinaryPath, "repo", "update")

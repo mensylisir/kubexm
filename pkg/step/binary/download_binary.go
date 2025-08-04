@@ -16,21 +16,18 @@ import (
 	"time"
 )
 
-// DownloadBinariesStep 负责下载所有必需的二进制文件。
 type DownloadBinariesStep struct {
 	step.Base
 	Concurrency int
 }
 
-// DownloadBinariesStepBuilder 用于构建 DownloadBinariesStep 实例。
 type DownloadBinariesStepBuilder struct {
 	step.Builder[DownloadBinariesStepBuilder, *DownloadBinariesStep]
 }
 
-// NewDownloadBinariesStepBuilder 是 DownloadBinariesStep 的构造函数。
 func NewDownloadBinariesStepBuilder(ctx runtime.Context, instanceName string) *DownloadBinariesStepBuilder {
 	s := &DownloadBinariesStep{
-		Concurrency: 5, // 默认并发数为 5
+		Concurrency: 5,
 	}
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Download all required binaries to local directories", s.Base.Meta.Name)
@@ -42,7 +39,6 @@ func NewDownloadBinariesStepBuilder(ctx runtime.Context, instanceName string) *D
 	return b
 }
 
-// WithConcurrency 设置下载的并发数。
 func (b *DownloadBinariesStepBuilder) WithConcurrency(c int) *DownloadBinariesStepBuilder {
 	if c > 0 {
 		b.Step.Concurrency = c
@@ -50,13 +46,10 @@ func (b *DownloadBinariesStepBuilder) WithConcurrency(c int) *DownloadBinariesSt
 	return b
 }
 
-// Meta 返回步骤的元数据。
 func (s *DownloadBinariesStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-// getRequiredArchs 从集群配置中获取所有需要支持的 CPU 架构。
-// (这个函数可以放到一个公共的 helper 包中，与 SaveImagesStep 共享)
 func (s *DownloadBinariesStep) getRequiredArchs(ctx runtime.ExecutionContext) (map[string]bool, error) {
 	archs := make(map[string]bool)
 	allHosts := ctx.GetHostsByRole("")
@@ -69,13 +62,10 @@ func (s *DownloadBinariesStep) getRequiredArchs(ctx runtime.ExecutionContext) (m
 	return archs, nil
 }
 
-// Precheck 检查执行此步骤所需的前置条件。
 func (s *DownloadBinariesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	// 下载步骤通常不需要预检，除非有特殊依赖。
 	return false, nil
 }
 
-// Run 执行下载二进制文件的主要逻辑。
 func (s *DownloadBinariesStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
@@ -99,7 +89,6 @@ func (s *DownloadBinariesStep) Run(ctx runtime.ExecutionContext) error {
 		return nil
 	}
 
-	// --- 并发下载逻辑 ---
 	jobs := make(chan *binary.Binary, len(binariesToDownload))
 	errChan := make(chan error, len(binariesToDownload))
 
@@ -142,23 +131,19 @@ func (s *DownloadBinariesStep) Run(ctx runtime.ExecutionContext) error {
 	return nil
 }
 
-// downloadAndVerify 是单个文件的下载和校验逻辑。
 func (s *DownloadBinariesStep) downloadAndVerify(b *binary.Binary) error {
 	destPath := b.FilePath()
 
-	// 1. 确保目标目录存在
 	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", filepath.Dir(destPath), err)
 	}
 
-	// 2. 如果文件已存在，检查校验和 (如果提供了)
 	if _, err := os.Stat(destPath); err == nil {
 		if b.Checksum() == "" || b.Checksum() == "dummy-etcd-checksum-val" { // 忽略未提供或虚拟的校验和
 			// fmt.Printf("File %s already exists, skipping download as no checksum is provided.\n", b.FileName())
 			return nil
 		}
 
-		// 文件存在且有校验和，进行校验
 		match, err := verifyChecksum(destPath, b.Checksum())
 		if err != nil {
 			return fmt.Errorf("failed to verify checksum for existing file %s: %w", destPath, err)
@@ -167,12 +152,9 @@ func (s *DownloadBinariesStep) downloadAndVerify(b *binary.Binary) error {
 			// fmt.Printf("File %s already exists and checksum matches. Skipping download.\n", b.FileName())
 			return nil
 		}
-		// fmt.Printf("File %s exists but checksum mismatch. Re-downloading.\n", destPath)
 	}
 
-	// 3. 执行下载
 	url := b.URL()
-	// fmt.Printf("Downloading %s from %s ...\n", b.FileName(), url)
 
 	resp, err := http.Get(url)
 	if err != nil {
@@ -184,31 +166,27 @@ func (s *DownloadBinariesStep) downloadAndVerify(b *binary.Binary) error {
 		return fmt.Errorf("bad status for %s: %s", url, resp.Status)
 	}
 
-	// 创建临时文件进行下载，避免下载中断导致文件损坏
 	tmpFile, err := os.Create(destPath + ".tmp")
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
-	defer tmpFile.Close() // 确保关闭
+	defer tmpFile.Close()
 
 	_, err = io.Copy(tmpFile, resp.Body)
 	if err != nil {
-		os.Remove(tmpFile.Name()) // 下载失败，删除临时文件
+		os.Remove(tmpFile.Name())
 		return fmt.Errorf("failed to copy response body to file: %w", err)
 	}
 
-	// 确保所有内容都写入磁盘
 	if err := tmpFile.Sync(); err != nil {
 		os.Remove(tmpFile.Name())
 		return fmt.Errorf("failed to sync temp file to disk: %w", err)
 	}
 
-	// 4. 下载后重命名
 	if err := os.Rename(tmpFile.Name(), destPath); err != nil {
 		return fmt.Errorf("failed to rename temp file to final destination: %w", err)
 	}
 
-	// 5. 下载后再次校验 (如果提供了)
 	if b.Checksum() != "" && b.Checksum() != "dummy-etcd-checksum-val" {
 		match, err := verifyChecksum(destPath, b.Checksum())
 		if err != nil {
@@ -217,13 +195,11 @@ func (s *DownloadBinariesStep) downloadAndVerify(b *binary.Binary) error {
 		if !match {
 			return fmt.Errorf("checksum mismatch for downloaded file %s", destPath)
 		}
-		// fmt.Printf("Checksum for %s verified.\n", b.FileName())
 	}
 
 	return nil
 }
 
-// verifyChecksum 计算文件的 SHA256 哈希值并与预期值比较。
 func verifyChecksum(filePath string, expectedChecksum string) (bool, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -240,18 +216,13 @@ func verifyChecksum(filePath string, expectedChecksum string) (bool, error) {
 	return actualChecksum == expectedChecksum, nil
 }
 
-// Rollback 定义回滚操作。对于下载步骤，通常是清理已下载的文件。
 func (s *DownloadBinariesStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
-	// 注意：这里的回滚可能比较危险，因为它会删除所有下载的二进制文件。
-	// 也许只打印警告信息更安全。
-	// For example:
 	workDir := ctx.GetGlobalWorkDir()
 	clusterName := ctx.GetClusterConfig().Name
-	binariesDir := filepath.Join(workDir, "kubexm", clusterName) // 根据你的路径结构调整
+	binariesDir := filepath.Join(workDir, "kubexm", clusterName)
 	logger.Warnf("Rollback is triggered. You might want to manually delete the binaries directory: %s", binariesDir)
 	return nil
 }
 
-// 确保 DownloadBinariesStep 实现了 Step 接口
 var _ step.Step = (*DownloadBinariesStep)(nil)

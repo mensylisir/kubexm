@@ -37,7 +37,7 @@ func NewInstallKubeletDropInStepBuilder(ctx runtime.Context, instanceName string
 
 	s := &InstallKubeletDropInStep{
 		ConfigYAMLPath:           common.KubeletConfigYAMLPathTarget,
-		CgroupDriver:             k8sSpec.Kubelet.CgroupDriver,
+		CgroupDriver:             common.CgroupDriverSystemd,
 		ContainerRuntimeEndpoint: common.ContainerdDefaultEndpoint,
 		RemoteDropInDir:          common.KubeletSystemdDropinDirTarget,
 		RemoteDropInFile:         filepath.Join(common.KubeletSystemdDropinDirTarget, "10-kubexm.conf"),
@@ -49,11 +49,7 @@ func NewInstallKubeletDropInStepBuilder(ctx runtime.Context, instanceName string
 	}
 
 	if k8sSpec.ContainerRuntime.Type == common.RuntimeTypeContainerd {
-		if *k8sSpec.ContainerRuntime.Containerd.UseSystemdCgroup {
-			s.CgroupDriver = common.CgroupDriverSystemd
-		} else {
-			s.CgroupDriver = common.CgroupDriverCgroupfs
-		}
+		s.CgroupDriver = *k8sSpec.ContainerRuntime.Containerd.CgroupDriver
 		s.ContainerRuntimeEndpoint = k8sSpec.ContainerRuntime.Containerd.Endpoint
 		s.PodInfraContainerImage = k8sSpec.ContainerRuntime.Containerd.Pause
 	} else if k8sSpec.ContainerRuntime.Type == common.RuntimeTypeDocker {
@@ -61,11 +57,11 @@ func NewInstallKubeletDropInStepBuilder(ctx runtime.Context, instanceName string
 		s.ContainerRuntimeEndpoint = k8sSpec.ContainerRuntime.Docker.Endpoint
 		s.PodInfraContainerImage = k8sSpec.ContainerRuntime.Docker.Pause
 	} else if k8sSpec.ContainerRuntime.Type == common.RuntimeTypeCRIO {
-		s.CgroupDriver = *k8sSpec.ContainerRuntime.Crio.CgroupManager
+		s.CgroupDriver = *k8sSpec.ContainerRuntime.Crio.CgroupDriver
 		s.ContainerRuntimeEndpoint = k8sSpec.ContainerRuntime.Crio.Endpoint
 		s.PodInfraContainerImage = k8sSpec.ContainerRuntime.Crio.Pause
 	} else if k8sSpec.ContainerRuntime.Type == common.RuntimeTypeIsula {
-		s.CgroupDriver = *k8sSpec.ContainerRuntime.Isulad.CgroupManager
+		s.CgroupDriver = *k8sSpec.ContainerRuntime.Isulad.CgroupDriver
 		s.ContainerRuntimeEndpoint = k8sSpec.ContainerRuntime.Crio.Endpoint
 		s.PodInfraContainerImage = k8sSpec.ContainerRuntime.Crio.Pause
 	}
