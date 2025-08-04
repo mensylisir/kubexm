@@ -79,7 +79,7 @@ func NewGenerateHarborConfigStepBuilder(ctx runtime.Context, instanceName string
 
 	binaryInfoNoArch, _ := provider.GetBinary(binary.ComponentHarbor, "")
 	extractedDirName := strings.TrimSuffix(binaryInfoNoArch.FileName(), ".tgz")
-	localExtractedPath := filepath.Join(common.DefaultExtractTmpDir, extractedDirName, "harbor")
+	localExtractedPath := filepath.Join(ctx.GetExtractDir(), extractedDirName, "harbor")
 
 	s := &GenerateHarborConfigStep{
 		LocalExtractedPath: localExtractedPath,

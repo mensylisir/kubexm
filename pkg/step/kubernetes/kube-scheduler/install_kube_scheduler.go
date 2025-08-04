@@ -121,7 +121,7 @@ func (s *InstallKubeSchedulerStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to create remote install directory '%s': %w", s.InstallPath, err)
 	}
 
-	remoteUploadTmpDir := filepath.Join(common.DefaultUploadTmpDir, fmt.Sprintf("kube-scheduler-%d", time.Now().UnixNano()))
+	remoteUploadTmpDir := filepath.Join(ctx.GetUploadDir(), fmt.Sprintf("kube-scheduler-%d", time.Now().UnixNano()))
 	if err := runner.Mkdirp(ctx.GoContext(), conn, remoteUploadTmpDir, "0755", false); err != nil {
 		return fmt.Errorf("failed to create remote upload directory '%s': %w", remoteUploadTmpDir, err)
 	}

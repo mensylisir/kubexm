@@ -32,12 +32,20 @@ type GenerateEtcdCertsStepBuilder struct {
 
 func NewGenerateEtcdCertsStepBuilder(ctx runtime.Context, instanceName string) *GenerateEtcdCertsStepBuilder {
 	s := &GenerateEtcdCertsStep{
-		LocalCertsDir:  filepath.Join(ctx.GetGlobalWorkDir(), "certs", "etcd"),
+		LocalCertsDir:  ctx.GetEtcdCertsDir(),
 		EtcdNodes:      ctx.GetHostsByRole(common.RoleEtcd),
 		CertDuration:   365 * 24 * time.Hour * 10,
 		CaCertFileName: common.EtcdCaPemFileName,
 		CaKeyFileName:  common.EtcdCaKeyPemFileName,
 		Permission:     "0755",
+	}
+	if ctx.GetClusterConfig().Spec.Certs.CertDuration != "" {
+		parsedDuration, err := time.ParseDuration(ctx.GetClusterConfig().Spec.Certs.CADuration)
+		if err == nil {
+			s.CertDuration = parsedDuration
+		} else {
+			ctx.GetLogger().Warnf("Failed to parse user-provided Cert duration '%s', using default. Error: %v", ctx.GetClusterConfig().Spec.Certs.CertDuration, err)
+		}
 	}
 
 	s.Base.Meta.Name = instanceName

@@ -196,11 +196,11 @@ func (c *Context) GetHostWorkDir() string {
 }
 
 func (c *Context) GetExtractDir() string {
-	return common.DefaultExtractTmpDir
+	return ctx.GetExtractDir()
 }
 
 func (c *Context) GetUploadDir() string {
-	return common.DefaultUploadTmpDir
+	return ctx.GetUploadDir()
 }
 
 func (c *Context) GetKubernetesCertsDir() string {

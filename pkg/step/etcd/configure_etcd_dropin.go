@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"io/fs"
 	"path/filepath"
 	"text/template"
@@ -133,7 +134,7 @@ func (s *ConfigureEtcdDropInStep) Run(ctx runtime.ExecutionContext) error {
 
 	remotePath := s.ServicePath
 	logger.Info("Writing systemd drop-in file", "path", remotePath)
-	if err := runner.WriteFile(ctx.GoContext(), conn, s.renderedContent, remotePath, "0644", s.Sudo); err != nil {
+	if err := helpers.WriteContentToRemote(ctx, conn, string(s.renderedContent), remotePath, "0644", s.Sudo); err != nil {
 		return fmt.Errorf("failed to write etcd drop-in file to %s: %w", remotePath, err)
 	}
 

@@ -40,7 +40,7 @@ func NewExtractHarborInstallerStepBuilder(ctx runtime.Context, instanceName stri
 	}
 
 	s := &ExtractHarborInstallerStep{
-		RemoteTempPath:    filepath.Join(common.DefaultUploadTmpDir, "harbor-installer.tgz"),
+		RemoteTempPath:    filepath.Join(ctx.GetUploadDir(), "harbor-installer.tgz"),
 		RemoteInstallRoot: installRoot,
 	}
 

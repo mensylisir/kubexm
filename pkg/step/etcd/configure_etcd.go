@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"io/fs"
 	"path/filepath"
 	"strings"
@@ -208,7 +209,7 @@ func (s *ConfigureEtcdStep) Run(ctx runtime.ExecutionContext) error {
 	remotePath := filepath.Join(s.RemoteConfDir, "etcd.conf.yaml")
 	logger.Info("Writing etcd config file", "node", ctx.GetHost().GetName(), "path", remotePath)
 
-	if err := runner.WriteFile(ctx.GoContext(), conn, s.renderedContent, remotePath, s.PermissionFile, s.Sudo); err != nil {
+	if err := helpers.WriteContentToRemote(ctx, conn, string(s.renderedContent), remotePath, s.PermissionFile, s.Sudo); err != nil {
 		return fmt.Errorf("failed to write etcd config to %s on node %s: %w", remotePath, ctx.GetHost().GetName(), err)
 	}
 

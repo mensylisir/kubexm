@@ -3,6 +3,7 @@ package docker
 import (
 	"bytes"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
 	"path/filepath"
 	"strings"
@@ -13,7 +14,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/images" // 确保 import 路径正确
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/images"
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
@@ -148,7 +149,7 @@ func (s *SetupCriDockerdServiceStep) Precheck(ctx runtime.ExecutionContext) (isD
 
 func (s *SetupCriDockerdServiceStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
-	runner := ctx.GetRunner()
+	//runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		return err
@@ -160,7 +161,7 @@ func (s *SetupCriDockerdServiceStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	logger.Infof("Writing systemd service file to %s", s.ServiceFilePath)
-	if err := runner.WriteFile(ctx.GoContext(), conn, []byte(serviceContent), s.ServiceFilePath, "0644", s.Sudo); err != nil {
+	if err := helpers.WriteContentToRemote(ctx, conn, serviceContent, s.ServiceFilePath, "0644", s.Sudo); err != nil {
 		return fmt.Errorf("failed to write cri-dockerd.service: %w", err)
 	}
 

@@ -79,7 +79,7 @@ func (s *InstallCriCtlStep) getLocalExtractedPath(ctx runtime.ExecutionContext) 
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install crictl binary (version %s)", s.Base.Meta.Name, binaryInfo.Version)
 
 	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tar.gz")
-	return filepath.Join(common.DefaultExtractTmpDir, destDirName), nil
+	return filepath.Join(ctx.GetExtractDir(), destDirName), nil
 }
 
 func (s *InstallCriCtlStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
@@ -126,7 +126,7 @@ func (s *InstallCriCtlStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to create remote install directory '%s': %w", common.DefaultBinDir, err)
 	}
 
-	remoteUploadTmpDir := filepath.Join(common.DefaultUploadTmpDir, fmt.Sprintf("crictl-%d", time.Now().UnixNano()))
+	remoteUploadTmpDir := filepath.Join(ctx.GetUploadDir(), fmt.Sprintf("crictl-%d", time.Now().UnixNano()))
 	if err := runner.Mkdirp(ctx.GoContext(), conn, remoteUploadTmpDir, "0755", false); err != nil {
 		return fmt.Errorf("failed to create remote upload directory '%s': %w", remoteUploadTmpDir, err)
 	}

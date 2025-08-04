@@ -80,7 +80,7 @@ func (s *ExtractCriCtlStep) getPathsForArch(ctx runtime.ExecutionContext, arch s
 
 	sourcePath = binaryInfo.FilePath()
 	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tar.gz")
-	destPath = filepath.Join(common.DefaultExtractTmpDir, destDirName)
+	destPath = filepath.Join(ctx.GetExtractDir(), destDirName)
 	cacheKey = sourcePath
 
 	return sourcePath, destPath, cacheKey, nil
@@ -144,8 +144,8 @@ func (s *ExtractCriCtlStep) Run(ctx runtime.ExecutionContext) error {
 		return nil
 	}
 
-	if err := os.MkdirAll(common.DefaultExtractTmpDir, 0755); err != nil {
-		return fmt.Errorf("failed to create global extract directory '%s': %w", common.DefaultExtractTmpDir, err)
+	if err := os.MkdirAll(ctx.GetExtractDir(), 0755); err != nil {
+		return fmt.Errorf("failed to create global extract directory '%s': %w", ctx.GetExtractDir(), err)
 	}
 
 	for arch := range requiredArchs {

@@ -64,7 +64,7 @@ func (s *ApplyEssentialRBACStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to render RBAC YAML: %w", err)
 	}
 
-	remoteTempFile := filepath.Join(common.DefaultUploadTmpDir, "essential-rbac.yaml")
+	remoteTempFile := filepath.Join(ctx.GetUploadDir(), "essential-rbac.yaml")
 	if err := helpers.WriteContentToRemote(ctx, conn, rbacContent, remoteTempFile, "0644", false); err != nil { //写入 /tmp 不需要 sudo
 		return fmt.Errorf("failed to write temporary RBAC file: %w", err)
 	}
@@ -96,7 +96,7 @@ func (s *ApplyEssentialRBACStep) Rollback(ctx runtime.ExecutionContext) error {
 		return nil
 	}
 
-	remoteTempFile := filepath.Join(common.DefaultUploadTmpDir, "essential-rbac-rollback.yaml")
+	remoteTempFile := filepath.Join(ctx.GetUploadDir(), "essential-rbac-rollback.yaml")
 	if err := helpers.WriteContentToRemote(ctx, conn, rbacContent, remoteTempFile, "0644", false); err != nil {
 		logger.Warnf("Failed to write temporary RBAC file for rollback: %v", err)
 		return nil

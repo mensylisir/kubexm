@@ -3,6 +3,7 @@ package docker
 import (
 	"bytes"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -110,7 +111,7 @@ func (s *SetupDockerServiceStep) Precheck(ctx runtime.ExecutionContext) (isDone 
 
 func (s *SetupDockerServiceStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
-	runner := ctx.GetRunner()
+	//runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		return err
@@ -122,7 +123,7 @@ func (s *SetupDockerServiceStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	logger.Info("Writing Docker systemd service file.", "path", s.ServiceFilePath)
-	err = runner.WriteFile(ctx.GoContext(), conn, []byte(serviceContent), s.ServiceFilePath, "0644", s.Sudo)
+	err = helpers.WriteContentToRemote(ctx, conn, serviceContent, s.ServiceFilePath, "0644", s.Sudo)
 	if err != nil {
 		return fmt.Errorf("failed to write docker.service to %s: %w", s.ServiceFilePath, err)
 	}

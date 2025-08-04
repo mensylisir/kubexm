@@ -43,7 +43,7 @@ func NewDistributeCalicoArtifactsStepBuilder(ctx runtime.Context, instanceName s
 	s.Base.Timeout = 5 * time.Minute
 
 	// 使用简洁的远程路径约定
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, chart.RepoName(), chart.ChartName()+"-"+chart.Version)
+	remoteDir := filepath.Join(ctx.GetUploadDir(), chart.RepoName(), chart.ChartName()+"-"+chart.Version)
 	s.RemoteValuesPath = filepath.Join(remoteDir, "calico-values.yaml")
 	chartFileName := fmt.Sprintf("%s-%s.tgz", chart.ChartName(), chart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)

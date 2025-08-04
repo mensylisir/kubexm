@@ -50,7 +50,7 @@ func NewConfigureHarborStepBuilder(ctx runtime.Context, instanceName string) *Co
 	extractedDirName := filepath.Base(strings.TrimSuffix(binaryInfoNoArch.FileName(), ".tgz"))
 
 	s := &ConfigureHarborStep{
-		LocalExtractedPath: filepath.Join(common.DefaultExtractTmpDir, extractedDirName, "harbor"),
+		LocalExtractedPath: filepath.Join(ctx.GetExtractDir(), extractedDirName, "harbor"),
 		LocalCertsDir:      filepath.Join(ctx.GetCertsDir(), "harbor"),
 		RemoteInstallDir:   filepath.Join(installRoot, "harbor"),
 	}

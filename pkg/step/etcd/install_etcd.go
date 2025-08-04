@@ -72,7 +72,7 @@ func (s *InstallEtcdStep) getLocalExtractedPath(ctx runtime.ExecutionContext) (s
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install etcd binaries (version %s)", s.Base.Meta.Name, binaryInfo.Version)
 
 	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tar.gz")
-	return filepath.Join(common.DefaultExtractTmpDir, destDirName), nil
+	return filepath.Join(ctx.GetExtractDir(), destDirName), nil
 }
 
 func (s *InstallEtcdStep) filesToInstall() map[string]string {
@@ -133,7 +133,7 @@ func (s *InstallEtcdStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to create remote install directory '%s': %w", s.InstallPath, err)
 	}
 
-	remoteUploadTmpDir := filepath.Join(common.DefaultUploadTmpDir, fmt.Sprintf("etcd-%d", time.Now().UnixNano()))
+	remoteUploadTmpDir := filepath.Join(ctx.GetUploadDir(), fmt.Sprintf("etcd-%d", time.Now().UnixNano()))
 	if err := runner.Mkdirp(ctx.GoContext(), conn, remoteUploadTmpDir, "0755", false); err != nil {
 		return fmt.Errorf("failed to create remote upload directory '%s': %w", remoteUploadTmpDir, err)
 	}
