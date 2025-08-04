@@ -27,7 +27,7 @@ type GenerateKubeletCertsForAllNodesStepBuilder struct {
 
 func NewGenerateKubeletCertsForAllNodesStepBuilder(ctx runtime.Context, instanceName string) *GenerateKubeletCertsForAllNodesStepBuilder {
 	s := &GenerateKubeletCertsForAllNodesStep{
-		CertsDir:     filepath.Join(ctx.GetGlobalWorkDir(), "certs", "kubernetes"),
+		CertsDir:     ctx.GetKubernetesCertsDir(),
 		CertDuration: common.DefaultCertificateValidityDays * 24 * time.Hour,
 	}
 

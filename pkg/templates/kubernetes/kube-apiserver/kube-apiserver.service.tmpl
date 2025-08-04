@@ -1,91 +1,21 @@
+# /path/to/your/templates/kubernetes/kube-apiserver.service.tmpl
 [Unit]
 Description=Kubernetes API Server
-Documentation=https://kubernetes.io/docs/
-Wants=network-online.target
-After=network-online.target etcd.service
+Documentation=https://github.com/kubernetes/kubernetes
+After=network.target etcd.service
 
 [Service]
 ExecStart=/usr/local/bin/kube-apiserver \
-  {{- /* ============================ Network ============================ */}}
-  --advertise-address={{ .AdvertiseAddress }} \
-  --bind-address={{ .BindAddress }} \
-  --secure-port={{ .BindPort }} \
-  \
-  {{- /* ======================== Authentication ======================== */}}
-  --client-ca-file={{ .PKIDir }}/ca.crt \
-  --enable-bootstrap-token-auth=true \
-  --service-account-key-file={{ .PKIDir }}/sa.pub \
-  --service-account-signing-key-file={{ .PKIDir }}/sa.key \
-  --service-account-issuer={{ .ServiceAccountIssuer }} \
-  \
-  {{- /* ======================== Authorization ========================= */}}
-  --authorization-mode={{ .AuthorizationMode }} \
-  --allow-privileged={{ .AllowPrivileged }} \
-  \
-  {{- /* ===================== Admission Control ====================== */}}
-  --enable-admission-plugins={{ .AdmissionPlugins }} \
-  \
-  {{- /* ========================== Etcd Backend ========================== */}}
-  --etcd-servers={{ .EtcdServers }} \
-  --etcd-cafile={{ .EtcdPKIDir }}/ca.pem \
-  --etcd-certfile={{ .EtcdPKIDir }}/{{ .EtcdClientCertFile }} \
-  --etcd-keyfile={{ .EtcdPKIDir }}/{{ .EtcdClientKeyFile }} \
-  {{- if .EtcdPrefix }}
-  --etcd-prefix={{ .EtcdPrefix }} \
+  --config={{ .RemoteConfigFile }} \
+  --v={{ .LogLevel }} \
+  {{- if .ExtraArgsStr }}
+  {{ .ExtraArgsStr }} \
   {{- end }}
-  \
-  {{- /* ========================== Kubelet Connection ========================== */}}
-  --kubelet-client-certificate={{ .PKIDir }}/apiserver-kubelet-client.crt \
-  --kubelet-client-key={{ .PKIDir }}/apiserver-kubelet-client.key \
-  --kubelet-certificate-authority={{ .PKIDir }}/ca.crt \
-  --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname \
-  \
-  {{- /* ====================== Aggregation Layer (Front Proxy) ====================== */}}
-  --proxy-client-cert-file={{ .PKIDir }}/front-proxy-client.crt \
-  --proxy-client-key-file={{ .PKIDir }}/front-proxy-client.key \
-  --requestheader-client-ca-file={{ .PKIDir }}/front-proxy-ca.crt \
-  --requestheader-allowed-names=front-proxy-client \
-  --requestheader-extra-headers-prefix=X-Remote-Extra- \
-  --requestheader-group-headers=X-Remote-Group \
-  --requestheader-username-headers=X-Remote-User \
-  \
-  {{- /* ========================= TLS Security ========================= */}}
-  --tls-cert-file={{ .PKIDir }}/apiserver.crt \
-  --tls-private-key-file={{ .PKIDir }}/apiserver.key \
-  {{- if .TlsCipherSuites }}
-  --tls-cipher-suites={{ .TlsCipherSuites }} \
-  {{- end }}
-  \
-  {{- /* ============================= Audit ============================= */}}
-  {{- /* .Audit.Enabled 是从 Step 结构体中的 AuditConfig 指针访问的 */}}
-  {{- if and .Audit .Audit.Enabled (ne (printf "%v" .Audit.Enabled) "<nil>") (eq (printf "%v" .Audit.Enabled) "true") }}
-  --audit-log-path={{ .Audit.LogPath }} \
-  --audit-policy-file={{ .Audit.PolicyFile }} \
-  {{- if .Audit.MaxAge }}
-  --audit-log-maxage={{ .Audit.MaxAge }} \
-  {{- end }}
-  {{- if .Audit.MaxBackups }}
-  --audit-log-maxbackup={{ .Audit.MaxBackups }} \
-  {{- end }}
-  {{- if .Audit.MaxSize }}
-  --audit-log-maxsize={{ .Audit.MaxSize }} \
-  {{- end }}
-  {{- end }}
-  \
-  {{- /* ====================== Feature Gates & Extra Args ====================== */}}
-  {{- if .FeatureGates }}
-  --feature-gates={{ .FeatureGates }} \
-  {{- end }}
-  {{- range $key, $value := .ExtraArgs }}
-  --{{ $key }}={{ $value }} \
-  {{- end }}
-  \
-  {{- /* ============================= Logging ============================= */}}
-  --v={{ .LogLevel }}
+  --logtostderr=true
 
-Type=notify
 Restart=on-failure
 RestartSec=5
+Type=notify
 LimitNOFILE=65536
 
 [Install]

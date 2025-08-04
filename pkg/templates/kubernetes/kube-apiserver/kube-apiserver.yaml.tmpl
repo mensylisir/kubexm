@@ -1,0 +1,64 @@
+# /path/to/your/templates/kubernetes/kube-apiserver.yaml.tmpl
+apiVersion: apiserver.config.k8s.io/v1
+kind: APIServerConfiguration
+advertiseAddress: "{{ .AdvertiseAddress }}"
+allowPrivileged: {{ .AllowPrivileged }}
+authorization:
+  modes:
+  {{- range $i, $v := .AuthorizationModeSlice }}
+  - {{ $v }}
+  {{- end }}
+bindAddress: "{{ .BindAddress }}"
+clientCAFile: "{{ .PKIDir }}/ca.crt"
+enableAdmissionPlugins:
+{{- range $i, $v := .AdmissionPluginsSlice }}
+- name: {{ $v }}
+{{- end }}
+etcd:
+  caFile: "{{ .EtcdPKIDir }}/ca.crt"
+  certFile: "{{ .EtcdPKIDir }}/{{ .EtcdClientCertFile }}"
+  keyFile: "{{ .EtcdPKIDir }}/{{ .EtcdClientKeyFile }}"
+  endpoints:
+  {{- range $i, $v := .EtcdServersSlice }}
+  - {{ $v }}
+  {{- end }}
+  prefix: "{{ .EtcdPrefix }}"
+featureGates:
+{{- range $k, $v := .FeatureGates }}
+  {{ $k }}: {{ $v }}
+{{- end }}
+kubeletClientCertificate: "{{ .PKIDir }}/apiserver-kubelet-client.crt"
+kubeletClientKey: "{{ .PKIDir }}/apiserver-kubelet-client.key"
+kubeletPreferredAddressTypes:
+- InternalIP
+- ExternalIP
+- Hostname
+proxyClientCertFile: "{{ .PKIDir }}/front-proxy-client.crt"
+proxyClientKeyFile: "{{ .PKIDir }}/front-proxy-client.key"
+requestheaderClientCAFile: "{{ .PKIDir }}/front-proxy-ca.crt"
+serviceAccountIssuer: "{{ .ServiceAccountIssuer }}"
+# service-account-key-file in component config is a list
+serviceAccountKeyFile:
+- "{{ .PKIDir }}/sa.pub"
+serviceAccountSigningKeyFile: "{{ .PKIDir }}/sa.key"
+serviceClusterIPRange: "{{ .ServiceClusterIPRange }}"
+serviceNodePortRange: "{{ .ServiceNodePortRange }}"
+tlsCertFile: "{{ .PKIDir }}/apiserver.crt"
+tlsPrivateKeyFile: "{{ .PKIDir }}/apiserver.key"
+{{- if .TlsCipherSuites }}
+tlsCipherSuites:
+{{- range $i, $v := .TlsCipherSuitesSlice }}
+- {{ $v }}
+{{- end }}
+{{- end }}
+{{- if and .Audit .Audit.Enabled }}
+audit:
+  log:
+    path: "{{ .Audit.LogPath }}"
+    maxAge: {{ .Audit.LogMaxAge }}
+    maxBackup: {{ .Audit.LogMaxBackup }}
+    maxSize: {{ .Audit.LogMaxSize }}
+    format: "json" # Recommended format
+  policy:
+    file: "{{ .RemoteAuditPolicyFile }}"
+{{- end }}

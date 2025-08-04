@@ -12,7 +12,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 )
 
-// InstallArgoCDHelmChartStep is a step to install the Argo CD Helm chart.
 type InstallArgoCDHelmChartStep struct {
 	step.Base
 	Chart               *helm.HelmChart
@@ -23,12 +22,10 @@ type InstallArgoCDHelmChartStep struct {
 	AdminKubeconfigPath string
 }
 
-// InstallArgoCDHelmChartStepBuilder is used to build instances.
 type InstallArgoCDHelmChartStepBuilder struct {
 	step.Builder[InstallArgoCDHelmChartStepBuilder, *InstallArgoCDHelmChartStep]
 }
 
-// NewInstallArgoCDHelmChartStepBuilder is the constructor.
 func NewInstallArgoCDHelmChartStepBuilder(ctx runtime.Context, instanceName string) *InstallArgoCDHelmChartStepBuilder {
 	helmProvider := helm.NewHelmProvider(&ctx)
 	chart := helmProvider.GetChart("argocd")
@@ -49,11 +46,11 @@ func NewInstallArgoCDHelmChartStepBuilder(ctx runtime.Context, instanceName stri
 	s.Base.Timeout = 15 * time.Minute
 
 	s.ReleaseName = "argocd"
-	s.Namespace = "argocd"
+	s.Namespace = "argocd-system"
 
 	s.AdminKubeconfigPath = filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
 
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, chart.RepoName(), chart.ChartName()+"-"+chart.Version)
+	remoteDir := filepath.Join(common.DefaultUploadTmpDir, ctx.GetHost().GetName(), chart.RepoName(), chart.ChartName()+"-"+chart.Version)
 	s.RemoteValuesPath = filepath.Join(remoteDir, "argocd-values.yaml")
 	chartFileName := fmt.Sprintf("%s-%s.tgz", chart.ChartName(), chart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)

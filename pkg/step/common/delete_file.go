@@ -71,16 +71,8 @@ func (s *DeleteFileStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	logger.Info("Removing remote path.", "path", s.RemotePath, "recursive", s.Recursive)
-	if s.Recursive {
-		rmCmd := fmt.Sprintf("rm -rf %s", s.RemotePath)
-		_, errRm := runnerSvc.Run(ctx.GoContext(), conn, rmCmd, s.Sudo)
-		if errRm != nil {
-			return fmt.Errorf("failed to recursively remove %s: %w", s.RemotePath, errRm)
-		}
-	} else {
-		if err := runnerSvc.Remove(ctx.GoContext(), conn, s.RemotePath, s.Sudo, s.Recursive); err != nil {
-			return fmt.Errorf("failed to remove %s: %w", s.RemotePath, err)
-		}
+	if err := runnerSvc.Remove(ctx.GoContext(), conn, s.RemotePath, s.Sudo, s.Recursive); err != nil {
+		return fmt.Errorf("failed to remove %s: %w", s.RemotePath, err)
 	}
 
 	logger.Info("Remote path removed successfully.", "path", s.RemotePath)

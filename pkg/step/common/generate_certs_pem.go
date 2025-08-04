@@ -3,7 +3,6 @@ package common
 import (
 	"crypto/x509"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -15,7 +14,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step/helpers"
 )
 
-type GenerateCertsStep struct {
+type GenerateCertsPEMStep struct {
 	step.Base
 	LocalCertsDir  string
 	CertDuration   time.Duration
@@ -30,20 +29,28 @@ type GenerateCertsStep struct {
 	Usages         []x509.ExtKeyUsage
 }
 
-type GenerateCertsStepBuilder struct {
-	step.Builder[GenerateCertsStepBuilder, *GenerateCertsStep]
+type GenerateCertsPEMStepBuilder struct {
+	step.Builder[GenerateCertsPEMStepBuilder, *GenerateCertsPEMStep]
 }
 
-func NewGenerateCertsStepBuilder(ctx runtime.Context, instanceName string) *GenerateCertsStepBuilder {
-	s := &GenerateCertsStep{
-		LocalCertsDir:  filepath.Join(ctx.GetGlobalWorkDir(), "certs"),
+func NewGenerateCertsPEMStepBuilder(ctx runtime.Context, instanceName string) *GenerateCertsPEMStepBuilder {
+	s := &GenerateCertsPEMStep{
+		LocalCertsDir:  ctx.GetEtcdCertsDir(),
 		CertDuration:   365 * 24 * time.Hour * 10,
 		Permission:     "0755",
 		CaCertFileName: common.EtcdCaPemFileName,
 		CaKeyFileName:  common.EtcdCaKeyPemFileName,
-		CommonName:     "kubexm-client",
-		Organization:   []string{"system:masters"},
+		CommonName:     "kubexm",
+		Organization:   []string{"kubexm"},
 		Usages:         []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	if ctx.GetClusterConfig().Spec.Certs.CertDuration != "" {
+		parsedDuration, err := time.ParseDuration(ctx.GetClusterConfig().Spec.Certs.CADuration)
+		if err == nil {
+			s.CertDuration = parsedDuration
+		} else {
+			ctx.GetLogger().Warnf("Failed to parse user-provided Cert duration '%s', using default. Error: %v", ctx.GetClusterConfig().Spec.Certs.CertDuration, err)
+		}
 	}
 
 	s.Base.Meta.Name = instanceName
@@ -52,77 +59,77 @@ func NewGenerateCertsStepBuilder(ctx runtime.Context, instanceName string) *Gene
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	b := new(GenerateCertsStepBuilder).Init(s)
+	b := new(GenerateCertsPEMStepBuilder).Init(s)
 	return b
 }
 
-func (b *GenerateCertsStepBuilder) WithCaCertFileName(name string) *GenerateCertsStepBuilder {
+func (b *GenerateCertsPEMStepBuilder) WithCaCertFileName(name string) *GenerateCertsPEMStepBuilder {
 	b.Step.CaCertFileName = name
 	return b
 }
 
-func (b *GenerateCertsStepBuilder) WithCaKeyFileName(name string) *GenerateCertsStepBuilder {
+func (b *GenerateCertsPEMStepBuilder) WithCaKeyFileName(name string) *GenerateCertsPEMStepBuilder {
 	b.Step.CaKeyFileName = name
 	return b
 }
 
-func (b *GenerateCertsStepBuilder) WithCommonName(cn string) *GenerateCertsStepBuilder {
+func (b *GenerateCertsPEMStepBuilder) WithCommonName(cn string) *GenerateCertsPEMStepBuilder {
 	b.Step.CommonName = cn
 	return b
 }
 
-func (b *GenerateCertsStepBuilder) WithOrganization(org []string) *GenerateCertsStepBuilder {
+func (b *GenerateCertsPEMStepBuilder) WithOrganization(org []string) *GenerateCertsPEMStepBuilder {
 	b.Step.Organization = org
 	return b
 }
 
-func (b *GenerateCertsStepBuilder) WithUsages(usages []x509.ExtKeyUsage) *GenerateCertsStepBuilder {
+func (b *GenerateCertsPEMStepBuilder) WithUsages(usages []x509.ExtKeyUsage) *GenerateCertsPEMStepBuilder {
 	b.Step.Usages = usages
 	return b
 }
 
-func (b *GenerateCertsStepBuilder) WithLocalCertsDir(path string) *GenerateCertsStepBuilder {
+func (b *GenerateCertsPEMStepBuilder) WithLocalCertsDir(path string) *GenerateCertsPEMStepBuilder {
 	b.Step.LocalCertsDir = path
 	return b
 }
 
-func (b *GenerateCertsStepBuilder) WithCertDuration(duration time.Duration) *GenerateCertsStepBuilder {
+func (b *GenerateCertsPEMStepBuilder) WithCertDuration(duration time.Duration) *GenerateCertsPEMStepBuilder {
 	b.Step.CertDuration = duration
 	return b
 }
 
-func (b *GenerateCertsStepBuilder) WithPermission(permission string) *GenerateCertsStepBuilder {
+func (b *GenerateCertsPEMStepBuilder) WithPermission(permission string) *GenerateCertsPEMStepBuilder {
 	b.Step.Permission = permission
 	return b
 }
 
-func (b *GenerateCertsStepBuilder) WithHosts(hosts []string) *GenerateCertsStepBuilder {
+func (b *GenerateCertsPEMStepBuilder) WithHosts(hosts []string) *GenerateCertsPEMStepBuilder {
 	b.Step.Hosts = hosts
 	return b
 }
 
-func (b *GenerateCertsStepBuilder) WithCert(cert string) *GenerateCertsStepBuilder {
+func (b *GenerateCertsPEMStepBuilder) WithCert(cert string) *GenerateCertsPEMStepBuilder {
 	b.Step.Cert = cert
 	return b
 }
 
-func (b *GenerateCertsStepBuilder) WithCertKey(certKey string) *GenerateCertsStepBuilder {
+func (b *GenerateCertsPEMStepBuilder) WithCertKey(certKey string) *GenerateCertsPEMStepBuilder {
 	b.Step.CertKey = certKey
 	return b
 }
 
-func (s *GenerateCertsStep) Meta() *spec.StepMeta {
+func (s *GenerateCertsPEMStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *GenerateCertsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+func (s *GenerateCertsPEMStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	if !fileExists(s.LocalCertsDir, s.Cert) || !fileExists(s.LocalCertsDir, s.CertKey) {
 		return false, nil
 	}
 	return true, nil
 }
 
-func (s *GenerateCertsStep) Run(ctx runtime.ExecutionContext) error {
+func (s *GenerateCertsPEMStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 	logger.Info("Loading CA...", "caCert", s.CaCertFileName, "caKey", s.CaKeyFileName)
 	caCertPath := filepath.Join(s.LocalCertsDir, s.CaCertFileName)
@@ -155,7 +162,7 @@ func (s *GenerateCertsStep) Run(ctx runtime.ExecutionContext) error {
 	return nil
 }
 
-func (s *GenerateCertsStep) Rollback(ctx runtime.ExecutionContext) error {
+func (s *GenerateCertsPEMStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
 
 	filesToRemove := []string{}
@@ -170,20 +177,5 @@ func (s *GenerateCertsStep) Rollback(ctx runtime.ExecutionContext) error {
 
 	return nil
 }
-func fileExists(dir, file string) bool {
-	_, err := os.Stat(filepath.Join(dir, file))
-	return err == nil
-}
 
-func splitHosts(hosts []string) (ips []net.IP, dnsNames []string) {
-	for _, host := range hosts {
-		if ip := net.ParseIP(host); ip != nil {
-			ips = append(ips, ip)
-		} else {
-			dnsNames = append(dnsNames, host)
-		}
-	}
-	return
-}
-
-var _ step.Step = (*GenerateCertsStep)(nil)
+var _ step.Step = (*GenerateCertsPEMStep)(nil)

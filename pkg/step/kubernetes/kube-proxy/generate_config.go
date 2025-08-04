@@ -3,6 +3,7 @@ package kube_proxy
 import (
 	"bytes"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"path/filepath"
 	"text/template"
 	"time"
@@ -32,11 +33,20 @@ func NewCreateKubeProxyConfigYAMLStepBuilder(ctx runtime.Context, instanceName s
 	k8sSpec := clusterCfg.Spec.Kubernetes
 
 	s := &CreateKubeProxyConfigYAMLStep{
-		KubeconfigPath:       filepath.Join(ctx.GetGlobalWorkDir(), "kubeconfigs", common.KubeProxyKubeconfigFileName),
-		ClusterCIDR:          clusterCfg.Spec.Network.KubePodsCIDR,
-		Mode:                 k8sSpec.KubeProxy.Mode,
-		FeatureGates:         k8sSpec.KubeProxy.FeatureGates,
+		KubeconfigPath:       filepath.Join(common.KubernetesConfigDir, common.KubeProxyKubeconfigFileName),
+		ClusterCIDR:          common.DefaultKubePodsCIDR,
+		Mode:                 common.KubeProxyModeIPVS,
 		RemoteConfigYAMLFile: common.KubeproxyConfigYAMLPathTarget,
+	}
+
+	if clusterCfg.Spec.Network.KubePodsCIDR != "" {
+		s.ClusterCIDR = clusterCfg.Spec.Network.KubePodsCIDR
+	}
+	if k8sSpec.KubeProxy.Mode != "" {
+		s.Mode = k8sSpec.KubeProxy.Mode
+	}
+	if k8sSpec.KubeProxy.FeatureGates != nil {
+		s.FeatureGates = k8sSpec.KubeProxy.FeatureGates
 	}
 
 	s.Base.Meta.Name = instanceName
@@ -124,7 +134,7 @@ func (s *CreateKubeProxyConfigYAMLStep) Run(ctx runtime.ExecutionContext) error 
 	}
 
 	logger.Infof("Writing kube-proxy config.yaml to %s", s.RemoteConfigYAMLFile)
-	return runner.WriteFile(ctx.GoContext(), conn, []byte(content), s.RemoteConfigYAMLFile, "0644", s.Sudo)
+	return helpers.WriteContentToRemote(ctx, conn, content, s.RemoteConfigYAMLFile, "0644", s.Sudo)
 }
 
 func (s *CreateKubeProxyConfigYAMLStep) Rollback(ctx runtime.ExecutionContext) error {

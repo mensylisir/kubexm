@@ -2,30 +2,26 @@ package argocd
 
 import (
 	"fmt"
-	"os"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"path/filepath"
 	"time"
 
-	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 )
 
-// DistributeArgoCDArtifactsStep is responsible for distributing the Argo CD artifacts.
 type DistributeArgoCDArtifactsStep struct {
 	step.Base
 	RemoteValuesPath string
 	RemoteChartPath  string
 }
 
-// DistributeArgoCDArtifactsStepBuilder is used to build instances.
 type DistributeArgoCDArtifactsStepBuilder struct {
 	step.Builder[DistributeArgoCDArtifactsStepBuilder, *DistributeArgoCDArtifactsStep]
 }
 
-// NewDistributeArgoCDArtifactsStepBuilder is the constructor.
 func NewDistributeArgoCDArtifactsStepBuilder(ctx runtime.Context, instanceName string) *DistributeArgoCDArtifactsStepBuilder {
 	helmProvider := helm.NewHelmProvider(&ctx)
 	chart := helmProvider.GetChart("argocd")
@@ -41,7 +37,7 @@ func NewDistributeArgoCDArtifactsStepBuilder(ctx runtime.Context, instanceName s
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	remoteDir := filepath.Join(common.DefaultUploadTmpDir, chart.RepoName(), chart.ChartName()+"-"+chart.Version)
+	remoteDir := filepath.Join(ctx.GetUploadDir(), ctx.GetHost().GetName(), chart.RepoName(), chart.ChartName()+"-"+chart.Version)
 	s.RemoteValuesPath = filepath.Join(remoteDir, "argocd-values.yaml")
 	chartFileName := fmt.Sprintf("%s-%s.tgz", chart.ChartName(), chart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)
@@ -59,40 +55,24 @@ func (s *DistributeArgoCDArtifactsStep) Precheck(ctx runtime.ExecutionContext) (
 	return false, nil
 }
 
-func (s *DistributeArgoCDArtifactsStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
+func (s *DistributeArgoCDArtifactsStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, string, error) {
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart("argocd")
 	if chart == nil {
-		return "", fmt.Errorf("cannot find chart info for argocd in BOM")
+		return "", "", fmt.Errorf("cannot find chart info for argocd in BOM")
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
-	chartDir := filepath.Dir(chartTgzPath)
-	return filepath.Join(chartDir, "argocd-values.yaml"), nil
+	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
+	valueYamlPath := filepath.Join(ctx.GetClusterWorkDir(), chart.ChartName(), chart.Version, "argocd-values.yaml")
+	return chartTgzPath, valueYamlPath, nil
 }
 
 func (s *DistributeArgoCDArtifactsStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
-	localValuesPath, err := s.getLocalValuesPath(ctx)
+	localTgzPath, localValuesPath, err := s.getLocalValuesPath(ctx)
 	if err != nil {
 		return err
 	}
-	valuesContent, err := os.ReadFile(localValuesPath)
-	if err != nil {
-		return fmt.Errorf("failed to read generated values file from agreed path %s: %w. Ensure GenerateArgoCDValuesStep ran successfully.", localValuesPath, err)
-	}
-
-	helmProvider := helm.NewHelmProvider(ctx)
-	chart := helmProvider.GetChart("argocd")
-	if chart == nil {
-		return fmt.Errorf("cannot find chart info for argocd in BOM")
-	}
-	localChartPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
-	chartContent, err := os.ReadFile(localChartPath)
-	if err != nil {
-		return fmt.Errorf("failed to read offline chart file from %s: %w. Ensure DownloadArgoCDChartStep ran successfully.", localChartPath, err)
-	}
-
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
@@ -105,15 +85,14 @@ func (s *DistributeArgoCDArtifactsStep) Run(ctx runtime.ExecutionContext) error 
 	}
 
 	logger.Infof("Uploading rendered values.yaml to %s:%s", ctx.GetHost().GetName(), s.RemoteValuesPath)
-	if err := runner.WriteFile(ctx.GoContext(), conn, valuesContent, s.RemoteValuesPath, "0644", s.Sudo); err != nil {
+	if err := helpers.UploadFile(ctx, conn, localValuesPath, s.RemoteValuesPath, "0644", s.Sudo); err != nil {
 		return fmt.Errorf("failed to upload values.yaml to %s: %w", ctx.GetHost().GetName(), err)
 	}
 
-	logger.Infof("Uploading chart %s to %s:%s", filepath.Base(localChartPath), ctx.GetHost().GetName(), s.RemoteChartPath)
-	if err := runner.WriteFile(ctx.GoContext(), conn, chartContent, s.RemoteChartPath, "0644", s.Sudo); err != nil {
+	logger.Infof("Uploading chart %s to %s:%s", filepath.Base(localTgzPath), ctx.GetHost().GetName(), s.RemoteChartPath)
+	if err := helpers.UploadFile(ctx, conn, localTgzPath, s.RemoteChartPath, "0644", s.Sudo); err != nil {
 		return fmt.Errorf("failed to upload helm chart to %s: %w", ctx.GetHost().GetName(), err)
 	}
-
 	logger.Info("Successfully distributed Argo CD artifacts to remote host.")
 	return nil
 }

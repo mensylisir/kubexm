@@ -38,6 +38,12 @@ type ClusterSpec struct {
 	Addons    []Addon    `json:"addons,omitempty" yaml:"addons,omitempty"`
 	Preflight *Preflight `json:"preflight,omitempty" yaml:"preflight,omitempty"`
 	Extra     *Extra     `json:"extra,omitempty" yaml:"extra,omitempty"`
+	Certs     *CertSpec  `json:"certs,omitempty" yaml:"certs,omitempty"`
+}
+
+type CertSpec struct {
+	CADuration   string `json:"CADuration,omitempty" yaml:"CADuration,omitempty"`
+	CertDuration string `json:"CertDuration,omitempty" yaml:"CertDuration,omitempty"`
 }
 
 type HostSpec struct {
@@ -148,7 +154,7 @@ func SetDefaults_ClusterSpec(cluster *Cluster) {
 	if cluster.Spec.Global == nil {
 		cluster.Spec.Global = &GlobalSpec{}
 	}
-	SetDefaults_GlobalSpec(cluster.Spec.Global, cluster.Name)
+	SetDefaults_GlobalSpec(cluster.Spec.Global)
 
 	for i := range cluster.Spec.Hosts {
 		SetDefaults_HostSpec(&cluster.Spec.Hosts[i], cluster)
@@ -198,7 +204,7 @@ func SetDefaults_ClusterSpec(cluster *Cluster) {
 	SetDefaults_Preflight(cluster.Spec.Preflight)
 }
 
-func SetDefaults_GlobalSpec(spec *GlobalSpec, clusterName string) {
+func SetDefaults_GlobalSpec(spec *GlobalSpec) {
 	if spec.User == "" {
 		spec.User = common.DefaultUser
 	}
@@ -209,7 +215,7 @@ func SetDefaults_GlobalSpec(spec *GlobalSpec, clusterName string) {
 		spec.ConnectionTimeout = common.DefaultTimeout
 	}
 	if spec.WorkDir == "" {
-		workDir, _ := helpers.GenerateWorkDir(clusterName)
+		workDir, _ := helpers.GenerateWorkDir()
 		spec.WorkDir = workDir
 	}
 }

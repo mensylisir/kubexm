@@ -112,7 +112,7 @@ func NewCreateKubeletConfigYAMLStepBuilder(ctx runtime.Context, instanceName str
 			s.EvictionPressureTransitionPeriod = kubeletCfg.EvictionPressureTransitionPeriod
 		}
 		if kubeletCfg.PodPidsLimit != nil {
-			s.PodPidsLimit = *kubeletCfg.PodPidsLimit
+			s.PodPidsLimit = int64(*kubeletCfg.PodPidsLimit)
 		}
 		if kubeletCfg.HairpinMode != "" {
 			s.HairpinMode = kubeletCfg.HairpinMode
@@ -262,7 +262,7 @@ func (s *CreateKubeletConfigYAMLStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	logger.Infof("Writing kubelet config.yaml to %s", s.RemoteConfigYAMLFile)
-	return runner.WriteFile(ctx.GoContext(), conn, []byte(content), s.RemoteConfigYAMLFile, "0644", s.Sudo)
+	return helpers.WriteContentToRemote(ctx, conn, content, s.RemoteConfigYAMLFile, "0644", s.Sudo)
 }
 
 func (s *CreateKubeletConfigYAMLStep) Rollback(ctx runtime.ExecutionContext) error {

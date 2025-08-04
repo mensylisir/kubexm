@@ -3,6 +3,7 @@ package containerd
 import (
 	"bytes"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -37,7 +38,7 @@ type ConfigureContainerdStep struct {
 	Root            string
 	State           string
 	Grpc            GrpcConfig
-	SystemdCgroup   bool
+	SystemdCgroup   string
 	SandboxImage    string
 	Cni             CniConfig
 	RegistryMirrors map[v1alpha1.ServerAddress]v1alpha1.MirrorConfig
@@ -79,7 +80,7 @@ func NewConfigureContainerdStepBuilder(ctx runtime.Context, instanceName string)
 		Root:            common.ContainerdDefaultRoot,
 		State:           common.ContainerdDefaultState,
 		Grpc:            GrpcConfig{Address: strings.TrimPrefix(common.ContainerdDefaultEndpoint, "unix://")},
-		SystemdCgroup:   true,
+		SystemdCgroup:   common.CgroupDriverSystemd,
 		SandboxImage:    sandboxImage,
 		Cni:             CniConfig{BinDir: common.DefaultCNIBin, ConfDir: common.DefaultCNIConfDirTarget},
 		RegistryMirrors: make(map[v1alpha1.ServerAddress]v1alpha1.MirrorConfig),
@@ -99,8 +100,8 @@ func NewConfigureContainerdStepBuilder(ctx runtime.Context, instanceName string)
 		if containerdCfg.Endpoint != "" {
 			s.Grpc.Address = strings.TrimPrefix(containerdCfg.Endpoint, "unix://")
 		}
-		if containerdCfg.UseSystemdCgroup != nil {
-			s.SystemdCgroup = *containerdCfg.UseSystemdCgroup
+		if containerdCfg.CgroupDriver != nil {
+			s.SystemdCgroup = *containerdCfg.CgroupDriver
 		}
 	}
 
@@ -236,7 +237,7 @@ func (s *ConfigureContainerdStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	logger.Infof("Writing containerd config file to %s", s.TargetPath)
-	return runner.WriteFile(ctx.GoContext(), conn, []byte(content), s.TargetPath, "0644", s.Sudo)
+	return helpers.WriteContentToRemote(ctx, conn, content, s.TargetPath, "0644", s.Sudo)
 }
 
 func (s *ConfigureContainerdStep) Rollback(ctx runtime.ExecutionContext) error {

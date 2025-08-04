@@ -1,0 +1,70 @@
+# 这个文件包含了二进制部署所需的、kubeadm 默认会创建的关键 RBAC 规则。
+
+# 1. 授权 kube-apiserver 访问 kubelet API
+# 这是 kubectl logs/exec 等功能正常工作的前提。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: system:kube-apiserver-to-kubelet
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:kubelet-api-admin
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: User
+  # 这个 User 必须与 apiserver-kubelet-client.crt 证书的 CN (Common Name) 一致。
+  # 根据您的 common 包常量，我们假设它是 "kubernetes"。
+  name: {{ .APIServerUser }}
+
+---
+# 2. 授权所有节点 (kubelet) 自动续签自己的客户端证书。
+# 这是 kubelet 配置中 rotateCertificates: true 能够生效的前提。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubeadm:kubelet-auto-approver-for-client-certs
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  # system:certificates.k8s.io:certificatesigningrequests:selfnodeclient 是一个内置的、权限受限的角色。
+  # 它只允许节点为自己 (self) 申请客户端 (client) 证书。
+  name: system:certificates.k8s.io:certificatesigningrequests:selfnodeclient
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: Group
+  name: system:nodes
+
+---
+# 3. 授权所有节点 (kubelet) 自动续签/申请自己的服务端证书。
+# 这是 kubelet 配置中 RotateKubeletServerCertificate: true 能够生效的前提。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubeadm:kubelet-auto-approver-for-server-certs
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  # system:certificates.k8s.io:certificatesigningrequests:selfnodeserver 是一个内置的、权限受限的角色。
+  # 它只允许节点为自己 (self) 申请服务端 (server) 证书。
+  name: system:certificates.k8s.io:certificatesigningrequests:selfnodeserver
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: Group
+  name: system:nodes
+
+---
+# 4. (推荐) 显式地将 system:kube-proxy 用户绑定到 system:node-proxier 角色。
+# 这让 kube-proxy 的权限来源更加清晰。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubeadm:node-proxier
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:node-proxier
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: User
+  name: system:kube-proxy

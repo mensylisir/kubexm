@@ -28,8 +28,11 @@ type ClusterQueryContext interface {
 type FileSystemContext interface {
 	GetGlobalWorkDir() string
 	GetWorkspace() string
-	GetClusterArtifactsDir() string
-	GetCertsDir() string
+	GetClusterWorkDir() string
+	GetHostWorkDir() string
+	GetExtractDir() string
+	GetUploadDir() string
+	GetKubernetesCertsDir() string
 	GetEtcdCertsDir() string
 	GetComponentArtifactsDir(componentTypeDir string) string
 	GetFileDownloadPath(componentName, version, arch, fileName string) string

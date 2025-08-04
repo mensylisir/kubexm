@@ -1,0 +1,32 @@
+# templates/kubernetes/kube-scheduler.yaml.tmpl
+apiVersion: kubescheduler.config.k8s.io/v1
+kind: KubeSchedulerConfiguration
+# 客户端连接配置，指向 kubeconfig 文件
+clientConnection:
+  kubeconfig: "{{ .KubeconfigPath }}"
+  qps: 50
+  burst: 100
+# Leader 选举配置，确保高可用集群中只有一个 scheduler 实例在工作
+leaderElection:
+  leaderElect: true
+  leaseDuration: 15s
+  renewDeadline: 10s
+  retryPeriod: 2s
+  resourceName: kube-scheduler
+  resourceNamespace: kube-system
+# 绑定地址配置
+bindAddress: "{{ .BindAddress }}"
+# 健康检查和 metrics 的绑定地址
+# 在 v1 版本中，这些被合并到 secure serving 中，但为兼容性保留
+healthzBindAddress: "0.0.0.0:10259" # 使用新的默认端口 10259
+metricsBindAddress: "0.0.0.0:10259" # 使用新的默认端口 10259
+# 特性门控
+featureGates:
+{{- range $k, $v := .FeatureGates }}
+  {{ $k }}: {{ $v }}
+{{- end }}
+# Pod 最大抢占次数
+podMaxInUnschedulablePodsDuration: 5m0s
+# 配置文件中可以定义多个 profile，这里使用默认
+# profiles:
+# - schedulerName: default-scheduler

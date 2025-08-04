@@ -3,6 +3,7 @@ package containerd
 import (
 	"bytes"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -160,7 +161,7 @@ func (s *ConfigureContainerdDropInStep) Run(ctx runtime.ExecutionContext) error 
 			return fmt.Errorf("failed to create drop-in directory '%s': %w", targetDir, err)
 		}
 		logger.Infof("Writing systemd drop-in file to %s", s.TargetPath)
-		if err := runner.WriteFile(ctx.GoContext(), conn, []byte(content), s.TargetPath, "0644", s.Sudo); err != nil {
+		if err := helpers.WriteContentToRemote(ctx, conn, content, s.TargetPath, "0644", s.Sudo); err != nil {
 			return fmt.Errorf("failed to write drop-in file: %w", err)
 		}
 	}

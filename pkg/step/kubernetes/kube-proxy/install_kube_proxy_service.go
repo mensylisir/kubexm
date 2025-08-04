@@ -3,6 +3,7 @@ package kube_proxy
 import (
 	"bytes"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"text/template"
 	"time"
 
@@ -113,7 +114,7 @@ func (s *InstallKubeProxyServiceStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	logger.Infof("Writing kube-proxy.service file to %s", s.RemoteServiceFile)
-	if err := runner.WriteFile(ctx.GoContext(), conn, []byte(content), s.RemoteServiceFile, "0644", s.Sudo); err != nil {
+	if err := helpers.WriteContentToRemote(ctx, conn, content, s.RemoteServiceFile, "0644", s.Sudo); err != nil {
 		return fmt.Errorf("failed to write service file to %s: %w", s.RemoteServiceFile, err)
 	}
 

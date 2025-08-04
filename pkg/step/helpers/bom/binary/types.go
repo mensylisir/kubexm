@@ -172,8 +172,9 @@ func (b *Binary) componentDir() string {
 		// 防止因未初始化路径参数而 panic
 		return ""
 	}
-	kubexmRoot := filepath.Join(b.workDir, common.KubexmRootDirName)
-	clusterBaseDir := filepath.Join(kubexmRoot, b.clusterName)
+	//kubexmRoot := filepath.Join(b.workDir, common.KubexmRootDirName)
+	//clusterBaseDir := filepath.Join(b.workDir, b.clusterName)
+	clusterBaseDir := b.workDir
 	var typeSpecificBaseDir string
 
 	switch b.meta.BinaryType {

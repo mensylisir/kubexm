@@ -1,0 +1,24 @@
+[Unit]
+Description=Kubernetes Scheduler
+Documentation=https://github.com/kubernetes/kubernetes
+# 同样依赖于 API Server
+After=kube-apiserver.service
+
+[Service]
+# 二进制文件路径
+ExecStart=/usr/local/bin/kube-scheduler \
+  # 指向我们在上一步生成的 YAML 配置文件
+  --config={{ .RemoteConfigFile }} \
+  # 日志级别
+  --v={{ .LogLevel }} \
+  # 处理无法放入配置文件的额外参数
+  {{- if .ExtraArgsStr }}
+  {{ .ExtraArgsStr }}
+  {{- end }}
+
+# 失败时总是重启
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
