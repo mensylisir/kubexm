@@ -29,8 +29,8 @@ func NewInstallNodeLocalDNSStepBuilder(ctx runtime.Context, instanceName string)
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 10 * time.Minute
 
-	s.RemoteManifestPath = filepath.Join(common.DefaultUploadTmpDir, "dns", "nodelocaldns.yaml")
-	s.AdminKubeconfigPath = filepath.Join(ctx.GetGlobalWorkDir(), "kubeconfigs", common.AdminKubeconfigFileName)
+	s.RemoteManifestPath = filepath.Join(ctx.GetUploadDir(), ctx.GetHost().GetName(), "nodelocaldns.yaml")
+	s.AdminKubeconfigPath = filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
 
 	b := new(InstallNodeLocalDNSStepBuilder).Init(s)
 	return b

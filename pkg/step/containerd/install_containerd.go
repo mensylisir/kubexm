@@ -78,9 +78,8 @@ func (s *InstallContainerdStep) getLocalExtractedPath(ctx runtime.ExecutionConte
 func (s *InstallContainerdStep) filesToInstall() map[string]string {
 	return map[string]string{
 		"bin/containerd":              filepath.Join(s.InstallPath, "containerd"),
-		"bin/containerd-shim":         filepath.Join(s.InstallPath, "containerd-shim"),
-		"bin/containerd-shim-runc-v1": filepath.Join(s.InstallPath, "containerd-shim-runc-v1"),
 		"bin/containerd-shim-runc-v2": filepath.Join(s.InstallPath, "containerd-shim-runc-v2"),
+		"bin/containerd-stress":       filepath.Join(s.InstallPath, "containerd-stress"),
 		"bin/ctr":                     filepath.Join(s.InstallPath, "ctr"),
 	}
 }

@@ -3,6 +3,7 @@ package docker
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"path/filepath"
 	"time"
 
@@ -220,7 +221,7 @@ func (s *ConfigureDockerStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	logger.Info("Writing Docker daemon.json file.", "path", s.ConfigFilePath)
-	err = runner.WriteFile(ctx.GoContext(), conn, configContent, s.ConfigFilePath, "0644", s.Sudo)
+	err = helpers.WriteContentToRemote(ctx, conn, string(configContent), s.ConfigFilePath, "0644", s.Sudo)
 	if err != nil {
 		return fmt.Errorf("failed to write Docker daemon.json to %s: %w", s.ConfigFilePath, err)
 	}

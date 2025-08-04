@@ -67,6 +67,8 @@ const (
 // System directory constants
 const (
 	// Standard system directories
+	DefaultSBinDir       = "/usr/sbin"
+	DefaultLocalSBinDir  = "/usr/local/sbin"
 	DefaultInstallPrefix = "/usr/local"
 	DefaultBinDir        = DefaultInstallPrefix + "/bin"
 	DefaultEtcDir        = DefaultInstallPrefix + "/etc"
