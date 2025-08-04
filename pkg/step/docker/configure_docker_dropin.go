@@ -162,7 +162,7 @@ func (s *SetupDockerDropInStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	logger.Info("Writing Docker systemd drop-in file.", "path", s.DropInFilePath)
-	err = helpers.WriteContentToRemote(ctx, conn, []byte(dropInContent), s.DropInFilePath, "0644", s.Sudo)
+	err = helpers.WriteContentToRemote(ctx, conn, dropInContent, s.DropInFilePath, "0644", s.Sudo)
 	if err != nil {
 		return fmt.Errorf("failed to write Docker drop-in file to %s: %w", s.DropInFilePath, err)
 	}
