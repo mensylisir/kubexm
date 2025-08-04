@@ -4,13 +4,15 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
+	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/images"
 	"net"
 	"path/filepath"
 	"strings"
 	"text/template"
 	"time"
 
-	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
@@ -43,7 +45,7 @@ func NewGenerateCoreDNSArtifactsStepBuilder(ctx runtime.Context, instanceName st
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	s.RemoteManifestPath = filepath.Join(common.DefaultUploadTmpDir, "dns", "coredns.yaml")
+	s.RemoteManifestPath = filepath.Join(ctx.GetUploadDir(), ctx.GetHost().GetName(), "coredns.yaml")
 
 	clusterCfg := ctx.GetClusterConfig()
 
@@ -55,10 +57,14 @@ func NewGenerateCoreDNSArtifactsStepBuilder(ctx runtime.Context, instanceName st
 		s.ClusterIP = dnsIP.String()
 	}
 
-	s.Image = "coredns/coredns:1.9.3"
 	s.Replicas = 2
-	s.ClusterDomain = "cluster.local"
-
+	s.ClusterDomain = common.DefaultClusterLocal
+	if clusterCfg.Spec.Kubernetes.DNSDomain != "" {
+		s.ClusterDomain = clusterCfg.Spec.Kubernetes.DNSDomain
+	}
+	imageProvider := images.NewImageProvider(&ctx)
+	image := imageProvider.GetImage("coredns")
+	s.Image = image.FullName()
 	if clusterCfg.Spec.DNS != nil {
 		s.DNSEtcHosts = clusterCfg.Spec.DNS.DNSEtcHosts
 		s.CoreDNSConfig = clusterCfg.Spec.DNS.CoreDNS
@@ -105,6 +111,10 @@ func getNthIP(cidrStr string, n int) (net.IP, error) {
 
 func (s *GenerateCoreDNSArtifactsStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
+}
+
+func (s *GenerateCoreDNSArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	return false, nil
 }
 
 func (s *GenerateCoreDNSArtifactsStep) Run(ctx runtime.ExecutionContext) error {
@@ -168,16 +178,12 @@ func (s *GenerateCoreDNSArtifactsStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	logger.Infof("Uploading CoreDNS manifest to remote path: %s", s.RemoteManifestPath)
-	if err := runner.WriteFile(ctx.GoContext(), conn, finalManifestBuffer.Bytes(), s.RemoteManifestPath, "0644", s.Sudo); err != nil {
+	if err := helpers.WriteContentToRemote(ctx, conn, finalManifestBuffer.String(), s.RemoteManifestPath, "0644", s.Sudo); err != nil {
 		return fmt.Errorf("failed to upload CoreDNS manifest: %w", err)
 	}
 
 	logger.Info("CoreDNS manifest generated and uploaded successfully.")
 	return nil
-}
-
-func (s *GenerateCoreDNSArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	return false, nil
 }
 
 func (s *GenerateCoreDNSArtifactsStep) Rollback(ctx runtime.ExecutionContext) error {

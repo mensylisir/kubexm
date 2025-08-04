@@ -25,7 +25,7 @@ type InstallRuncStepBuilder struct {
 
 func NewInstallRuncStepBuilder(ctx runtime.Context, instanceName string) *InstallRuncStepBuilder {
 	s := &InstallRuncStep{
-		RemoteRuncTargetPath: filepath.Join(common.DefaultBinDir, "runc"),
+		RemoteRuncTargetPath: filepath.Join(common.DefaultLocalSBinDir, "runc"),
 		Permission:           "0755",
 	}
 

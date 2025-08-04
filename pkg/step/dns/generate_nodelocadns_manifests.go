@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
+	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/images"
 	"path/filepath"
 	"strings"
 	"text/template"
 	"time"
 
-	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
@@ -41,7 +43,7 @@ func NewGenerateNodeLocalDNSArtifactsStepBuilder(ctx runtime.Context, instanceNa
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	s.RemoteManifestPath = filepath.Join(common.DefaultUploadTmpDir, "dns", "nodelocaldns.yaml")
+	s.RemoteManifestPath = filepath.Join(ctx.GetUploadDir(), ctx.GetHost().GetName(), "nodelocaldns.yaml")
 
 	clusterCfg := ctx.GetClusterConfig()
 
@@ -53,8 +55,13 @@ func NewGenerateNodeLocalDNSArtifactsStepBuilder(ctx runtime.Context, instanceNa
 		s.CoreDNSServiceIP = dnsIP.String()
 	}
 
-	s.Image = "registry.k8s.io/dns/k8s-dns-node-cache:1.17.17"
-	s.ClusterDomain = "cluster.local"
+	imageProvider := images.NewImageProvider(&ctx)
+	image := imageProvider.GetImage("k8s-dns-node-cache")
+	s.Image = image.FullName()
+	s.ClusterDomain = common.DefaultClusterLocal
+	if clusterCfg.Spec.Kubernetes.DNSDomain != "" {
+		s.ClusterDomain = clusterCfg.Spec.Kubernetes.DNSDomain
+	}
 
 	if clusterCfg.Spec.DNS != nil && clusterCfg.Spec.DNS.NodeLocalDNS != nil {
 		nodeLocalDNSCfg := clusterCfg.Spec.DNS.NodeLocalDNS
@@ -130,7 +137,7 @@ func (s *GenerateNodeLocalDNSArtifactsStep) Run(ctx runtime.ExecutionContext) er
 	}
 
 	logger.Infof("Uploading NodeLocalDNS manifest to remote path: %s", s.RemoteManifestPath)
-	if err := runner.WriteFile(ctx.GoContext(), conn, finalManifestBuffer.Bytes(), s.RemoteManifestPath, "0644", s.Sudo); err != nil {
+	if err := helpers.WriteContentToRemote(ctx, conn, finalManifestBuffer.String(), s.RemoteManifestPath, "0644", s.Sudo); err != nil {
 		return fmt.Errorf("failed to upload NodeLocalDNS manifest: %w", err)
 	}
 
