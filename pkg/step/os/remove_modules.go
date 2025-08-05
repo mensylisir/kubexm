@@ -2,6 +2,7 @@ package os
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"strings"
 	"time"
@@ -100,7 +101,7 @@ func (s *RemoveKernelModulesStep) Run(ctx runtime.ExecutionContext) error {
 
 func (s *RemoveKernelModulesStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
-	runner := ctx.GetRunner()
+	//runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		return err
@@ -115,7 +116,7 @@ func (s *RemoveKernelModulesStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger.Infof("Rolling back by restoring kernel modules config file '%s'...", filePath)
 
 	permissions := fmt.Sprintf("0%o", common.DefaultConfigFilePermission)
-	err = runner.WriteFile(ctx.GoContext(), conn, s.removedFileContent, filePath, permissions, s.Sudo)
+	err = helpers.WriteContentToRemote(ctx, conn, string(s.removedFileContent), filePath, permissions, s.Sudo)
 	if err != nil {
 		return errors.Wrapf(err, "failed to restore kernel modules config file '%s' during rollback", filePath)
 	}

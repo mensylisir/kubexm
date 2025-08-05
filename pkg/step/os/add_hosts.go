@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"regexp"
 	"strings"
@@ -171,7 +172,7 @@ func (s *UpdateEtcHostsStep) Run(ctx runtime.ExecutionContext) error {
 	finalContent := strings.TrimSpace(baseContent) + "\n" + strings.TrimSpace(newBlock) + "\n"
 
 	logger.Info("Writing new content to /etc/hosts...")
-	err = runner.WriteFile(ctx.GoContext(), conn, []byte(finalContent), "/etc/hosts", "0644", s.Sudo)
+	err = helpers.WriteContentToRemote(ctx, conn, finalContent, "/etc/hosts", "0644", s.Sudo)
 	if err != nil {
 		return errors.Wrapf(err, "failed to write to /etc/hosts")
 	}
@@ -206,7 +207,7 @@ func (s *UpdateEtcHostsStep) Rollback(ctx runtime.ExecutionContext) error {
 		finalContent = strings.TrimSpace(baseContent) + "\n"
 	}
 
-	err = runner.WriteFile(ctx.GoContext(), conn, []byte(finalContent), "/etc/hosts", "0644", s.Sudo)
+	err = helpers.WriteContentToRemote(ctx, conn, finalContent, "/etc/hosts", "0644", s.Sudo)
 	if err != nil {
 		return errors.Wrapf(err, "failed to write rolled back content to /etc/hosts")
 	}

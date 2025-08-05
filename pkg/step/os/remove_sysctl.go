@@ -2,6 +2,7 @@ package os
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"strings"
 	"time"
@@ -115,7 +116,7 @@ func (s *RemoveSysctlStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger.Infof("Rolling back by restoring sysctl config file '%s'...", filePath)
 
 	permissions := fmt.Sprintf("0%o", common.DefaultConfigFilePermission)
-	err = runner.WriteFile(ctx.GoContext(), conn, s.removedFileContent, filePath, permissions, s.Sudo)
+	err = helpers.WriteContentToRemote(ctx, conn, string(s.removedFileContent), filePath, permissions, s.Sudo)
 	if err != nil {
 		return errors.Wrapf(err, "failed to restore sysctl config file '%s' during rollback", filePath)
 	}

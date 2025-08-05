@@ -196,11 +196,11 @@ func (c *Context) GetHostWorkDir() string {
 }
 
 func (c *Context) GetExtractDir() string {
-	return ctx.GetExtractDir()
+	return c.GetExtractDir()
 }
 
 func (c *Context) GetUploadDir() string {
-	return ctx.GetUploadDir()
+	return c.GetUploadDir()
 }
 
 func (c *Context) GetKubernetesCertsDir() string {
@@ -209,6 +209,14 @@ func (c *Context) GetKubernetesCertsDir() string {
 
 func (c *Context) GetEtcdCertsDir() string {
 	return filepath.Join(c.GetClusterWorkDir(), common.DefaultEtcdDir, common.DefaultCertsDir)
+}
+
+func (c *Context) GetHarborCertsDir() string {
+	return filepath.Join(c.GetClusterWorkDir(), common.RegistryTypeHarbor, common.DefaultCertsDir)
+}
+
+func (c *Context) GetRegistryCertsDir() string {
+	return filepath.Join(c.GetClusterWorkDir(), common.RegistryTypeRegistry, common.DefaultCertsDir)
 }
 
 func (c *Context) GetComponentArtifactsDir(componentTypeDir string) string {

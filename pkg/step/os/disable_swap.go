@@ -2,6 +2,7 @@ package os
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"strings"
 	"time"
@@ -100,7 +101,7 @@ func (s *DisableSwapStep) Run(ctx runtime.ExecutionContext) error {
 
 	if changed {
 		newFstabContent := strings.Join(newLines, "\n")
-		err = runner.WriteFile(ctx.GoContext(), conn, []byte(newFstabContent), fstabPath, "0644", s.Sudo)
+		err = helpers.WriteContentToRemote(ctx, conn, newFstabContent, fstabPath, "0644", s.Sudo)
 		if err != nil {
 			return errors.Wrap(err, "failed to write updated /etc/fstab")
 		}
@@ -125,7 +126,7 @@ func (s *DisableSwapStep) Rollback(ctx runtime.ExecutionContext) error {
 		logger.Warn("No original /etc/fstab content was saved, skipping fstab rollback.")
 	} else {
 		logger.Info("Restoring original /etc/fstab...")
-		err = runner.WriteFile(ctx.GoContext(), conn, []byte(s.originalFstabContent), "/etc/fstab", "0644", s.Sudo)
+		err = helpers.WriteContentToRemote(ctx, conn, s.originalFstabContent, "/etc/fstab", "0644", s.Sudo)
 		if err != nil {
 			return errors.Wrap(err, "failed to restore /etc/fstab")
 		}

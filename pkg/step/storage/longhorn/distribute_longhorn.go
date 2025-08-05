@@ -2,11 +2,11 @@ package longhorn
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"path/filepath"
 	"time"
 
-	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
@@ -65,7 +65,7 @@ func (s *DistributeLonghornArtifactsStep) getLocalValuesPath(ctx runtime.Executi
 	if chart == nil {
 		return "", fmt.Errorf("cannot find chart info for longhorn in BOM")
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
+	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
 	chartDir := filepath.Dir(chartTgzPath)
 	return filepath.Join(chartDir, "longhorn-values.yaml"), nil
 }
@@ -87,7 +87,7 @@ func (s *DistributeLonghornArtifactsStep) Run(ctx runtime.ExecutionContext) erro
 	if chart == nil {
 		return fmt.Errorf("cannot find chart info for longhorn in BOM")
 	}
-	localChartPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
+	localChartPath := chart.LocalPath(ctx.GetGlobalWorkDir())
 	chartContent, err := os.ReadFile(localChartPath)
 	if err != nil {
 		return fmt.Errorf("failed to read offline chart file from %s: %w. Ensure DownloadLonghornChartStep ran successfully.", localChartPath, err)
@@ -105,12 +105,12 @@ func (s *DistributeLonghornArtifactsStep) Run(ctx runtime.ExecutionContext) erro
 	}
 
 	logger.Infof("Uploading rendered values.yaml to %s:%s", ctx.GetHost().GetName(), s.RemoteValuesPath)
-	if err := runner.WriteFile(ctx.GoContext(), conn, valuesContent, s.RemoteValuesPath, "0644", s.Sudo); err != nil {
+	if err := helpers.WriteContentToRemote(ctx, conn, string(valuesContent), s.RemoteValuesPath, "0644", s.Sudo); err != nil {
 		return fmt.Errorf("failed to upload values.yaml to %s: %w", ctx.GetHost().GetName(), err)
 	}
 
 	logger.Infof("Uploading chart %s to %s:%s", filepath.Base(localChartPath), ctx.GetHost().GetName(), s.RemoteChartPath)
-	if err := runner.WriteFile(ctx.GoContext(), conn, chartContent, s.RemoteChartPath, "0644", s.Sudo); err != nil {
+	if err := helpers.WriteContentToRemote(ctx, conn, string(chartContent), s.RemoteChartPath, "0644", s.Sudo); err != nil {
 		return fmt.Errorf("failed to upload helm chart to %s: %w", ctx.GetHost().GetName(), err)
 	}
 

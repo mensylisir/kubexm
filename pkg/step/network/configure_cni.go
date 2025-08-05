@@ -3,6 +3,7 @@ package network
 import (
 	"bytes"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"path/filepath"
 	"text/template"
 	"time"
@@ -28,13 +29,13 @@ type ConfigureCniStepBuilder struct {
 func NewConfigureCniStepBuilder(ctx runtime.Context, instanceName string) *ConfigureCniStepBuilder {
 	cfg := ctx.GetClusterConfig().Spec
 	s := &ConfigureCniStep{
-		TargetPath:   filepath.Join(common.DefaultCNIConfDir, "10-kubexm-cni.conf"),
+		TargetPath:   filepath.Join(common.DefaultCNIConfDirTarget, "10-kubexm-cni.conf"),
 		TemplatePath: "cni/10-kubexm-cni.conf.tmpl",
 		PodCidr:      "10.244.0.0/16",
 	}
 
-	if cfg.Network != nil && cfg.Network.PodCidr != "" {
-		s.PodCidr = cfg.Network.PodCidr
+	if cfg.Network != nil && cfg.Network.KubePodsCIDR != "" {
+		s.PodCidr = cfg.Network.KubePodsCIDR
 	}
 
 	s.Base.Meta.Name = instanceName
@@ -105,7 +106,7 @@ func (s *ConfigureCniStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, 
 
 func (s *ConfigureCniStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
-	runner := ctx.GetRunner()
+	//runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		return err
@@ -117,7 +118,7 @@ func (s *ConfigureCniStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	logger.Infof("Writing CNI config file to %s", s.TargetPath)
-	err = runner.WriteFile(ctx.GoContext(), conn, []byte(content), s.TargetPath, "0644", s.Sudo)
+	err = helpers.WriteContentToRemote(ctx, conn, content, s.TargetPath, "0644", s.Sudo)
 	if err != nil {
 		return fmt.Errorf("failed to write CNI config file: %w", err)
 	}

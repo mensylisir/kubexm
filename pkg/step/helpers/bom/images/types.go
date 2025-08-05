@@ -54,6 +54,14 @@ func (i *Image) Namespace() string {
 	return finalNamespace
 }
 
+func (i *Image) RegistryAddrWithNamespace() string {
+	finalNamespace := i.finalNamespace()
+	if finalNamespace == "" {
+		return i.privateRepoAddr
+	}
+	return path.Join(i.privateRepoAddr, finalNamespace)
+}
+
 // FullName 返回镜像在**私有仓库**中的最终完整名称，包含了所有重写逻辑。
 // 这是在 Kubernetes manifest 中使用或推送到私有仓库时应该使用的名称。
 // Example: "my-harbor.com/public-proxy/node:v3.28.0"

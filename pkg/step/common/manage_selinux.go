@@ -3,6 +3,7 @@ package common
 import (
 	"bufio"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"path/filepath"
 	"strings"
@@ -247,7 +248,7 @@ func (s *ManageSELinuxStep) AtomicWriteRemoteFile(ctx runtime.ExecutionContext, 
 	}
 	tmpFilePath := strings.TrimSpace(stdout)
 
-	if err := runner.WriteFile(ctx.GoContext(), conn, content, tmpFilePath, "0644", s.Sudo); err != nil {
+	if err := helpers.WriteContentToRemote(ctx, conn, string(content), tmpFilePath, "0644", s.Sudo); err != nil {
 		runner.OriginRun(ctx.GoContext(), conn, "rm -f "+tmpFilePath, s.Sudo)
 		return fmt.Errorf("failed to write to temp file %s: %w", tmpFilePath, err)
 	}

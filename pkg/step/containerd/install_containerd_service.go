@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"path/filepath"
 	"text/template"
 	"time"
@@ -132,7 +133,7 @@ func (s *InstallContainerdServiceStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	logger.Infof("Writing systemd service file to %s", s.TargetPath)
-	err = runner.WriteFile(ctx.GoContext(), conn, []byte(content), s.TargetPath, "0644", s.Sudo)
+	err = helpers.WriteContentToRemote(ctx, conn, content, s.TargetPath, "0644", s.Sudo)
 	if err != nil {
 		return fmt.Errorf("failed to write containerd service file: %w", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -45,7 +46,7 @@ func NewDistributeHarborCACertStepBuilder(ctx runtime.Context, instanceName stri
 	}
 
 	s := &DistributeHarborCACertStep{
-		LocalCACertPath: filepath.Join(ctx.GetCertsDir(), "harbor", "ca.crt"),
+		LocalCACertPath: filepath.Join(ctx.GetHarborCertsDir(), "harbor", "ca.crt"),
 		HarborDomain:    domain,
 	}
 
@@ -147,7 +148,7 @@ func (s *DistributeHarborCACertStep) Run(ctx runtime.ExecutionContext) error {
 
 		remoteCertPath := filepath.Join(targetDir, "ca.crt")
 		logger.Infof("Uploading Harbor CA certificate to %s", remoteCertPath)
-		if err := runner.WriteFile(ctx.GoContext(), conn, localContent, remoteCertPath, "0644", s.Sudo); err != nil {
+		if err := helpers.WriteContentToRemote(ctx, conn, string(localContent), remoteCertPath, "0644", s.Sudo); err != nil {
 			return fmt.Errorf("failed to write remote CA certificate to '%s': %w", remoteCertPath, err)
 		}
 	}

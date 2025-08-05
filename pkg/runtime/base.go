@@ -34,6 +34,8 @@ type FileSystemContext interface {
 	GetUploadDir() string
 	GetKubernetesCertsDir() string
 	GetEtcdCertsDir() string
+	GetHarborCertsDir() string
+	GetRegistryCertsDir() string
 	GetComponentArtifactsDir(componentTypeDir string) string
 	GetFileDownloadPath(componentName, version, arch, fileName string) string
 	GetHostDir(hostname string) string

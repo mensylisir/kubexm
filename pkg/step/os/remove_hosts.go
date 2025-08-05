@@ -2,6 +2,7 @@ package os
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"regexp"
 	"strings"
@@ -95,7 +96,7 @@ func (s *RemoveEtcHostsStep) Run(ctx runtime.ExecutionContext) error {
 	finalContent = strings.TrimSpace(finalContent) + "\n"
 
 	logger.Info("Removing KubeXM block from /etc/hosts...")
-	err = runner.WriteFile(ctx.GoContext(), conn, []byte(finalContent), "/etc/hosts", "0644", s.Sudo)
+	err = helpers.WriteContentToRemote(ctx, conn, finalContent, "/etc/hosts", "0644", s.Sudo)
 	if err != nil {
 		return errors.Wrapf(err, "failed to write cleaned content to /etc/hosts")
 	}
@@ -127,7 +128,7 @@ func (s *RemoveEtcHostsStep) Rollback(ctx runtime.ExecutionContext) error {
 
 	finalContent := strings.TrimSpace(currentContent) + "\n" + strings.TrimSpace(s.removedKubeXMBlock) + "\n"
 
-	err = runner.WriteFile(ctx.GoContext(), conn, []byte(finalContent), "/etc/hosts", "0644", s.Sudo)
+	err = helpers.WriteContentToRemote(ctx, conn, finalContent, "/etc/hosts", "0644", s.Sudo)
 	if err != nil {
 		return errors.Wrapf(err, "failed to write rolled back content to /etc/hosts")
 	}

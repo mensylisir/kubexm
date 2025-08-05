@@ -2,6 +2,7 @@ package multus
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"path/filepath"
 	"time"
@@ -29,7 +30,7 @@ func NewDistributeMultusArtifactsStepBuilder(ctx runtime.Context, instanceName s
 	helmProvider := helm.NewHelmProvider(&ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeMultus))
 	if chart == nil {
-		if ctx.GetClusterConfig().Spec.Network.Multus.Enabled {
+		if ctx.GetClusterConfig().Spec.Network.Multus.Installation.Enabled == helpers.BoolPtr(true) {
 			fmt.Fprintf(os.Stderr, "Error: Multus is enabled but chart info is not found for K8s version %s\n", ctx.GetClusterConfig().Spec.Kubernetes.Version)
 		}
 		return nil
@@ -56,7 +57,7 @@ func (s *DistributeMultusArtifactsStep) Meta() *spec.StepMeta {
 }
 
 func (s *DistributeMultusArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	if !ctx.GetClusterConfig().Spec.Network.Multus.Enabled {
+	if ctx.GetClusterConfig().Spec.Network.Multus.Installation.Enabled == helpers.BoolPtr(false) {
 		return true, nil
 	}
 	return false, nil
@@ -68,7 +69,7 @@ func (s *DistributeMultusArtifactsStep) getLocalValuesPath(ctx runtime.Execution
 	if chart == nil {
 		return "", fmt.Errorf("cannot find chart info for multus in BOM")
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
+	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
 	chartDir := filepath.Dir(chartTgzPath)
 	return filepath.Join(chartDir, "multus-values.yaml"), nil
 }
@@ -90,7 +91,7 @@ func (s *DistributeMultusArtifactsStep) Run(ctx runtime.ExecutionContext) error 
 	if chart == nil {
 		return fmt.Errorf("cannot find chart info for multus in BOM")
 	}
-	localChartPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
+	localChartPath := chart.LocalPath(ctx.GetGlobalWorkDir())
 	chartContent, err := os.ReadFile(localChartPath)
 	if err != nil {
 		return fmt.Errorf("failed to read offline chart file from %s: %w. Ensure DownloadMultusChartStep ran successfully.", localChartPath, err)
@@ -108,12 +109,12 @@ func (s *DistributeMultusArtifactsStep) Run(ctx runtime.ExecutionContext) error 
 	}
 
 	logger.Infof("Uploading rendered values.yaml to %s:%s", ctx.GetHost().GetName(), s.RemoteValuesPath)
-	if err := runner.WriteFile(ctx.GoContext(), conn, valuesContent, s.RemoteValuesPath, "0644", s.Sudo); err != nil {
+	if err := helpers.WriteContentToRemote(ctx, conn, string(valuesContent), s.RemoteValuesPath, "0644", s.Sudo); err != nil {
 		return fmt.Errorf("failed to upload values.yaml to %s: %w", ctx.GetHost().GetName(), err)
 	}
 
 	logger.Infof("Uploading chart %s to %s:%s", filepath.Base(localChartPath), ctx.GetHost().GetName(), s.RemoteChartPath)
-	if err := runner.WriteFile(ctx.GoContext(), conn, chartContent, s.RemoteChartPath, "0644", s.Sudo); err != nil {
+	if err := helpers.WriteContentToRemote(ctx, conn, string(chartContent), s.RemoteChartPath, "0644", s.Sudo); err != nil {
 		return fmt.Errorf("failed to upload helm chart to %s: %w", ctx.GetHost().GetName(), err)
 	}
 

@@ -3,6 +3,7 @@ package registry
 import (
 	"bytes"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"path/filepath"
 	"text/template"
 	"time"
@@ -75,7 +76,7 @@ func (s *SetupRegistryServiceStep) Precheck(ctx runtime.ExecutionContext) (isDon
 
 func (s *SetupRegistryServiceStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
-	runner := ctx.GetRunner()
+	//runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		return err
@@ -87,7 +88,7 @@ func (s *SetupRegistryServiceStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	logger.Infof("Writing registry.service file to %s", registryServicePath)
-	if err := runner.WriteFile(ctx.GoContext(), conn, []byte(serviceContent), registryServicePath, "0644", s.Sudo); err != nil {
+	if err := helpers.WriteContentToRemote(ctx, conn, serviceContent, registryServicePath, "0644", s.Sudo); err != nil {
 		return fmt.Errorf("failed to write registry.service file: %w", err)
 	}
 	return nil
