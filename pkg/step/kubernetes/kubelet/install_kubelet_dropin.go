@@ -3,6 +3,7 @@ package kubelet
 import (
 	"bytes"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"github.com/mensylisir/kubexm/pkg/util"
 	"path/filepath"
 	"text/template"
@@ -165,7 +166,7 @@ func (s *InstallKubeletDropInStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	logger.Infof("Writing kubelet drop-in file to %s", s.RemoteDropInFile)
-	return runner.WriteFile(ctx.GoContext(), conn, []byte(content), s.RemoteDropInFile, "0644", s.Sudo)
+	return helpers.WriteContentToRemote(ctx, conn, content, s.RemoteDropInFile, "0644", s.Sudo)
 }
 
 func (s *InstallKubeletDropInStep) Rollback(ctx runtime.ExecutionContext) error {

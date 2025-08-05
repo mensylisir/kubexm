@@ -2,6 +2,7 @@ package os
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"sort"
 	"strings"
@@ -170,7 +171,7 @@ func (s *LoadKernelModulesStep) Run(ctx runtime.ExecutionContext) error {
 		content := strings.Join(availableModules, "\n") + "\n"
 		permissions := fmt.Sprintf("0%o", common.DefaultConfigFilePermission)
 
-		err = runner.WriteFile(ctx.GoContext(), conn, []byte(content), filePath, permissions, s.Sudo)
+		err = helpers.WriteContentToRemote(ctx, conn, content, filePath, permissions, s.Sudo)
 		if err != nil {
 			return errors.Wrapf(err, "failed to write modules config file '%s'", filePath)
 		}
@@ -200,7 +201,7 @@ func (s *LoadKernelModulesStep) Rollback(ctx runtime.ExecutionContext) error {
 	} else if s.originalConfigFileContent != nil {
 		logger.Infof("Rolling back by restoring original content of '%s'...", filePath)
 		permissions := fmt.Sprintf("0%o", common.DefaultConfigFilePermission)
-		err := runner.WriteFile(ctx.GoContext(), conn, s.originalConfigFileContent, filePath, permissions, s.Sudo)
+		err := helpers.WriteContentToRemote(ctx, conn, string(s.originalConfigFileContent), filePath, permissions, s.Sudo)
 		if err != nil {
 			return errors.Wrapf(err, "failed to restore modules config file '%s' during rollback", filePath)
 		}

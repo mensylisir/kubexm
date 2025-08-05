@@ -25,17 +25,18 @@ type PartitionInfo struct {
 }
 
 type Facts struct {
-	OS             *connector.OS
-	Hostname       string
-	Kernel         string
-	TotalMemory    resource.Quantity
-	TotalCPU       resource.Quantity
-	Disks          []DiskInfo
-	TotalDisk      resource.Quantity
-	IPv4Default    string
-	IPv6Default    string
-	PackageManager *PackageInfo
-	InitSystem     *ServiceInfo
+	OS               *connector.OS
+	Hostname         string
+	Kernel           string
+	TotalMemory      resource.Quantity
+	TotalCPU         resource.Quantity
+	Disks            []DiskInfo
+	TotalDisk        resource.Quantity
+	IPv4Default      string
+	IPv6Default      string
+	PackageManager   *PackageInfo
+	InitSystem       *ServiceInfo
+	DefaultInterface string
 }
 
 type CPUInfo struct {

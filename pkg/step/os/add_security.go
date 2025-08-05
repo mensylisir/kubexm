@@ -2,6 +2,7 @@ package os
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"sort"
 	"strings"
@@ -122,7 +123,7 @@ func (s *ConfigureSecurityLimitsStep) Run(ctx runtime.ExecutionContext) error {
 
 	logger.Infof("Writing security limits configuration to '%s'...", filePath)
 	permissions := fmt.Sprintf("0%o", common.DefaultConfigFilePermission)
-	err = runner.WriteFile(ctx.GoContext(), conn, []byte(content), filePath, permissions, s.Sudo)
+	err = helpers.WriteContentToRemote(ctx, conn, content, filePath, permissions, s.Sudo)
 	if err != nil {
 		return errors.Wrapf(err, "failed to write security limits config file '%s'", filePath)
 	}

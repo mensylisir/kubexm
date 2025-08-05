@@ -2,6 +2,7 @@ package os
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"strings"
 	"time"
@@ -120,7 +121,7 @@ func (s *EnableSelinuxStep) Rollback(ctx runtime.ExecutionContext) error {
 	if s.originalSelinuxConfigContent != "" {
 		logger.Info("Restoring original /etc/selinux/config...")
 		configPath := "/etc/selinux/config"
-		err := runner.WriteFile(ctx.GoContext(), conn, []byte(s.originalSelinuxConfigContent), configPath, "0644", s.Sudo)
+		err := helpers.WriteContentToRemote(ctx, conn, s.originalSelinuxConfigContent, configPath, "0644", s.Sudo)
 		if err != nil {
 			return errors.Wrapf(err, "failed to restore '%s'", configPath)
 		}

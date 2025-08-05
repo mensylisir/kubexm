@@ -4,6 +4,7 @@ const (
 	DefaultNginxMode                   = "tcp"
 	DefaultNginxAlgorithm              = "round_robin"
 	DefaultNginxListenPort             = 6443
+	DefaultNginxConfigDir              = "/etc/nginx"
 	DefaultNginxConfigFilePath         = "/etc/nginx/nginx.conf"
 	DefaultNginxConfigFilePathTarget   = "/etc/nginx/nginx.conf"
 	DefaultNginxConfig                 = "nginx.conf"

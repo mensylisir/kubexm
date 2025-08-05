@@ -14,4 +14,7 @@ const (
 	CacheArchivePathKey              = "shared.package.archive.path"
 	CacheExtractedDirKey             = "shared.package.extracted.dir"
 	CacheKeyHostFactsTemplate        = "kubexm.facts.host.%s"
+	CacheKubeadmInitToken            = "kubexm.pipeline.kubeadm.init.token"
+	CacheKubeadmInitCertKey          = "kubexm.pipeline.kubeadm.init.certkey"
+	CacheKubeadmInitCACertHash       = "kubexm.pipeline.kubeadm.init.cacerthash"
 )

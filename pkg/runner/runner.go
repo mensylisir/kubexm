@@ -57,6 +57,7 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 	cpuChan := make(chan resource.Quantity, 1)
 	memChan := make(chan resource.Quantity, 1)
 	ipv4Chan := make(chan string, 1)
+	interfaceChan := make(chan string, 1)
 	ipv6Chan := make(chan string, 1)
 	disksChan := make(chan []DiskInfo, 1)
 
@@ -172,6 +173,31 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 	})
 
 	g.Go(func() error {
+		defer close(interfaceChan)
+
+		var ifaceCmd string
+		switch strings.ToLower(facts.OS.ID) {
+		case "linux", "ubuntu", "debian", "centos", "rhel", "fedora", "almalinux", "rocky", "raspbian", "linuxmint":
+			ifaceCmd = "ip -4 route get 8.8.8.8 | awk 'NR==1{print $5}'"
+		case "darwin":
+			ifaceCmd = "route -n get default | awk '/interface:/ {print $2}'"
+		}
+
+		if ifaceCmd != "" {
+			ifaceBytes, _, execErr := conn.Exec(gCtx, ifaceCmd, nil)
+			if execErr != nil {
+				r.logger.Errorf("Warning: failed to get default interface for host %s (%s): %v", facts.Hostname, facts.OS.ID, execErr)
+				interfaceChan <- ""
+			} else {
+				interfaceChan <- strings.TrimSpace(string(ifaceBytes))
+			}
+		} else {
+			interfaceChan <- ""
+		}
+		return nil
+	})
+
+	g.Go(func() error {
 		defer close(ipv6Chan)
 
 		var ip6Cmd string
@@ -202,6 +228,7 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 	facts.TotalCPU = <-cpuChan
 	facts.TotalMemory = <-memChan
 	facts.IPv4Default = <-ipv4Chan
+	facts.DefaultInterface = <-interfaceChan
 	facts.IPv6Default = <-ipv6Chan
 	facts.Disks = <-disksChan
 
