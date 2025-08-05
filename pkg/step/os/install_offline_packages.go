@@ -89,7 +89,23 @@ func (s *InstallOfflinePackagesStep) getRequiredPackages(ctx runtime.ExecutionCo
 			}
 		}
 	}
+	systemSpec := cluster.Spec.System
+	if systemSpec != nil {
+		logger := ctx.GetLogger()
+		switch facts.PackageManager.Type {
+		case runner.PackageManagerApt:
+			if len(systemSpec.Debs) > 0 {
+				logger.Infof("Adding custom DEB packages from spec: %v", systemSpec.Debs)
+				packages = append(packages, systemSpec.Debs...)
+			}
 
+		case runner.PackageManagerYum, runner.PackageManagerDnf:
+			if len(systemSpec.RPMs) > 0 {
+				logger.Infof("Adding custom RPM packages from spec: %v", systemSpec.RPMs)
+				packages = append(packages, systemSpec.RPMs...)
+			}
+		}
+	}
 	return packages, nil
 }
 
@@ -130,7 +146,7 @@ func (s *InstallOfflinePackagesStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to gather facts to determine offline package: %w", err)
 	}
 
-	localTarballName := fmt.Sprintf("packages-%s-%s-%s.tar.gz", facts.OS.ID, facts.OS.Version, facts.OS.Arch)
+	localTarballName := fmt.Sprintf("packages-%s-%s-%s.tar.gz", facts.OS.ID, facts.OS.VersionID, facts.OS.Arch)
 	localPackagePath := filepath.Join(s.LocalPackagesDir, localTarballName)
 
 	// 2.
