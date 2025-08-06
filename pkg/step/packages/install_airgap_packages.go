@@ -1,9 +1,10 @@
-package os
+package packages
 
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/pkg/common"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/runner"
@@ -14,11 +15,10 @@ import (
 
 type InstallOfflinePackagesStep struct {
 	step.Base
-	LocalPackagesDir string
+	LocalPackagesPath string
 }
 type InstallOfflinePackagesStepBuilder struct {
 	step.Builder[InstallOfflinePackagesStepBuilder, *InstallOfflinePackagesStep]
-	localPackagesDir string
 }
 
 func NewInstallOfflinePackagesStepBuilder(ctx runtime.Context, instanceName string) *InstallOfflinePackagesStepBuilder {
@@ -28,14 +28,8 @@ func NewInstallOfflinePackagesStepBuilder(ctx runtime.Context, instanceName stri
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 20 * time.Minute
-
+	s.LocalPackagesPath = strings.TrimSuffix(filepath.Join(ctx.GetUploadDir(), "packages.tar.gz"), ".tar.gz")
 	b := new(InstallOfflinePackagesStepBuilder).Init(s)
-	b.localPackagesDir = "packages"
-	return b
-}
-
-func (b *InstallOfflinePackagesStepBuilder) WithLocalPackagesDir(dir string) *InstallOfflinePackagesStepBuilder {
-	b.Step.LocalPackagesDir = dir
 	return b
 }
 
@@ -82,9 +76,9 @@ func (s *InstallOfflinePackagesStep) getRequiredPackages(ctx runtime.ExecutionCo
 
 		if isLBNode {
 			switch haSpec.External.Type {
-			case "kubexm-kh":
+			case string(common.ExternalLBTypeKubexmKH):
 				packages = append(packages, "keepalived", "haproxy")
-			case "kubexm-xn":
+			case string(common.ExternalLBTypeKubexmKN):
 				packages = append(packages, "keepalived", "nginx")
 			}
 		}
@@ -122,9 +116,25 @@ func (s *InstallOfflinePackagesStep) Precheck(ctx runtime.ExecutionContext) (isD
 		return false, err
 	}
 
+	var checkCmd string
+	facts, err := ctx.GetHostFacts(ctx.GetHost())
+	if err != nil {
+		return false, err
+	}
+
+	switch facts.PackageManager.Type {
+	case runner.PackageManagerApt:
+		checkCmd = "dpkg -s %s"
+	case runner.PackageManagerYum, runner.PackageManagerDnf:
+		checkCmd = "rpm -q %s"
+	default:
+		logger.Warnf("Unknown package manager, cannot precheck. Assuming installation is needed.")
+		return false, nil
+	}
+
 	for _, pkg := range packages {
-		if _, err := runnerSvc.Run(ctx.GoContext(), conn, fmt.Sprintf("which %s", pkg), false); err != nil {
-			logger.Infof("Key package binary '%s' not found. Offline installation is required.", pkg)
+		if _, err := runnerSvc.Run(ctx.GoContext(), conn, fmt.Sprintf(checkCmd, pkg), false); err != nil {
+			logger.Infof("Key package '%s' not found. Offline installation is required.", pkg)
 			return false, nil
 		}
 	}
@@ -146,38 +156,15 @@ func (s *InstallOfflinePackagesStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to gather facts to determine offline package: %w", err)
 	}
 
-	localTarballName := fmt.Sprintf("packages-%s-%s-%s.tar.gz", facts.OS.ID, facts.OS.VersionID, facts.OS.Arch)
-	localPackagePath := filepath.Join(s.LocalPackagesDir, localTarballName)
-
-	// 2.
-	remoteTempDir := "/tmp/kubexm_packages_offline"
-	remotePackagePath := filepath.Join(remoteTempDir, "packages.tar.gz")
-
-	logger.Infof("Uploading offline package '%s' to host...", localTarballName)
-
-	if _, err := runnerSvc.Run(ctx.GoContext(), conn, fmt.Sprintf("rm -rf %s && mkdir -p %s", remoteTempDir, remoteTempDir), s.Sudo); err != nil {
-		return fmt.Errorf("failed to prepare remote directory: %w", err)
+	exists, err := runnerSvc.Exists(ctx.GoContext(), conn, s.LocalPackagesPath)
+	if err != nil || !exists {
+		return fmt.Errorf("failed to check remote directory: %w", err)
 	}
-
-	if err := runnerSvc.Upload(ctx.GoContext(), conn, localPackagePath, remotePackagePath, s.Sudo); err != nil {
-		return fmt.Errorf("failed to upload offline package: %w", err)
-	}
-
-	logger.Info("Extracting offline packages on host...")
-	extractCmd := fmt.Sprintf("tar -zxf %s -C %s", remotePackagePath, remoteTempDir)
-	if _, err := runnerSvc.Run(ctx.GoContext(), conn, extractCmd, s.Sudo); err != nil {
-		return fmt.Errorf("failed to extract offline package: %w", err)
-	}
-
-	logger.Info("Starting local installation from extracted packages...")
-
-	packageInstallDir := filepath.Join(remoteTempDir, facts.OS.ID, facts.OS.VersionID, facts.OS.Arch)
-	var installCmd string
 
 	if facts.PackageManager == nil || facts.PackageManager.Type == runner.PackageManagerUnknown {
 		return fmt.Errorf("cannot perform offline install without a known package manager")
 	}
-
+	var installCmd string
 	switch facts.PackageManager.Type {
 	case runner.PackageManagerApt:
 		// dpkg -i 安装 .deb 文件。-R 表示递归处理目录。
@@ -185,10 +172,10 @@ func (s *InstallOfflinePackagesStep) Run(ctx runtime.ExecutionContext) error {
 		// 如果我们的包不全，这里会失败。一个更安全的命令是 `dpkg -i ... && apt-get install -fy --no-download`
 		// 但假设我们的包是完整的。
 		// `|| true` 确保即使有些包已安装导致 dpkg 报错，也不会中断流程。
-		installCmd = fmt.Sprintf("dpkg -R -i %s || apt-get install -fy", packageInstallDir)
+		installCmd = fmt.Sprintf("apt install -y %s/*/*/*.deb", s.LocalPackagesPath)
 
 	case runner.PackageManagerYum, runner.PackageManagerDnf:
-		installCmd = fmt.Sprintf("%s install -y %s/*.rpm", facts.PackageManager.Type, packageInstallDir)
+		installCmd = fmt.Sprintf("%s install -y %s/*/*/*.rpm", facts.PackageManager.Type, s.LocalPackagesPath)
 
 	default:
 		return fmt.Errorf("unsupported package manager for offline installation: %s", facts.PackageManager.Type)
@@ -199,10 +186,10 @@ func (s *InstallOfflinePackagesStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to install offline packages: %w", err)
 	}
 
-	logger.Info("Cleaning up temporary package files...")
-	if _, err := runnerSvc.Run(ctx.GoContext(), conn, fmt.Sprintf("rm -rf %s", remoteTempDir), s.Sudo); err != nil {
-		logger.Warnf("Failed to clean up temporary directory %s: %v", remoteTempDir, err)
-	}
+	//logger.Info("Cleaning up temporary package files...")
+	//if _, err := runnerSvc.Run(ctx.GoContext(), conn, fmt.Sprintf("rm -rf %s", s.LocalPackagesPath), s.Sudo); err != nil {
+	//	logger.Warnf("Failed to clean up temporary directory %s: %v", s.LocalPackagesPath, err)
+	//}
 
 	logger.Info("All required packages have been installed successfully from offline source.")
 	return nil
@@ -216,10 +203,9 @@ func (s *InstallOfflinePackagesStep) Rollback(ctx runtime.ExecutionContext) erro
 		return nil
 	}
 
-	remoteTempDir := "/tmp/kubexm_packages_offline"
-	logger.Warnf("Rolling back by removing temporary directory: %s", remoteTempDir)
-	if _, err := runnerSvc.Run(ctx.GoContext(), conn, fmt.Sprintf("rm -rf %s", remoteTempDir), s.Sudo); err != nil {
-		logger.Errorf("Failed to remove temporary directory '%s' during rollback: %v", remoteTempDir, err)
+	logger.Warnf("Rolling back by removing temporary directory: %s", s.LocalPackagesPath)
+	if _, err := runnerSvc.Run(ctx.GoContext(), conn, fmt.Sprintf("rm -rf %s", s.LocalPackagesPath), s.Sudo); err != nil {
+		logger.Errorf("Failed to remove temporary directory '%s' during rollback: %v", s.LocalPackagesPath, err)
 	}
 
 	return nil
