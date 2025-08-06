@@ -12,35 +12,30 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step/helpers"
 )
 
-// CompressBundleStep is a step to create an offline asset bundle.
 type CompressBundleStep struct {
 	step.Base
 	SourceDir  string
 	OutputPath string
 }
 
-// CompressBundleStepBuilder is used to build CompressBundleStep instances.
 type CompressBundleStepBuilder struct {
 	step.Builder[CompressBundleStepBuilder, *CompressBundleStep]
 }
 
-// NewCompressBundleStepBuilder is the constructor for CompressBundleStep.
 func NewCompressBundleStepBuilder(ctx runtime.Context, instanceName string) *CompressBundleStepBuilder {
 	s := &CompressBundleStep{
-		// The source should be the root of the shared asset cache.
 		SourceDir: ctx.GetGlobalWorkDir(),
 	}
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Compress shared asset cache into an offline bundle", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
-	s.Base.Timeout = 20 * time.Minute // Compression can take time
+	s.Base.Timeout = 20 * time.Minute
 
 	b := new(CompressBundleStepBuilder).Init(s)
 	return b
 }
 
-// WithOutputPath sets the path for the output tarball.
 func (b *CompressBundleStepBuilder) WithOutputPath(path string) *CompressBundleStepBuilder {
 	b.Step.OutputPath = path
 	return b
@@ -57,7 +52,6 @@ func (s *CompressBundleStep) Precheck(ctx runtime.ExecutionContext) (isDone bool
 		return false, fmt.Errorf("output path for the offline bundle is not specified")
 	}
 
-	// Check if the source directory exists and is not empty.
 	dirEntries, err := os.ReadDir(s.SourceDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -69,8 +63,6 @@ func (s *CompressBundleStep) Precheck(ctx runtime.ExecutionContext) (isDone bool
 		return false, fmt.Errorf("source directory %s is empty, nothing to compress", s.SourceDir)
 	}
 
-	// If the output file already exists, we can consider the step done.
-	// This prevents re-compressing unnecessarily.
 	if _, err := os.Stat(s.OutputPath); err == nil {
 		logger.Info("Offline bundle already exists at the output path. Skipping compression.", "path", s.OutputPath)
 		return true, nil
@@ -84,14 +76,11 @@ func (s *CompressBundleStep) Run(ctx runtime.ExecutionContext) error {
 
 	logger.Info("Compressing asset directory into an offline bundle...", "source", s.SourceDir, "output", s.OutputPath)
 
-	// Ensure the parent directory of the output path exists.
 	outputParentDir := filepath.Dir(s.OutputPath)
 	if err := os.MkdirAll(outputParentDir, 0755); err != nil {
 		return fmt.Errorf("failed to create parent directory for output file: %w", err)
 	}
 
-	// Assuming a helper function exists to handle tar.gz compression.
-	// This would be the counterpart to ExtractTarGz.
 	if err := helpers.CompressTarGz(s.SourceDir, s.OutputPath); err != nil {
 		return fmt.Errorf("failed to compress asset bundle: %w", err)
 	}
