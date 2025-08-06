@@ -220,11 +220,15 @@ func (c *Context) GetRegistryCertsDir() string {
 }
 
 func (c *Context) GetComponentArtifactsDir(componentTypeDir string) string {
-	return filepath.Join(c.GetClusterWorkDir(), componentTypeDir)
+	return filepath.Join(c.GetGlobalWorkDir(), componentTypeDir)
+}
+
+func (c *Context) GetRepositoryDir() string {
+	return filepath.Join(c.GetGlobalWorkDir(), "repository")
 }
 
 func (c *Context) GetFileDownloadPath(componentName, version, arch, fileName string) string {
-	componentDir := filepath.Join(c.GetClusterWorkDir(), componentName, version, arch)
+	componentDir := filepath.Join(c.GetGlobalWorkDir(), componentName, version, arch)
 	if fileName != "" {
 		return filepath.Join(componentDir, fileName)
 	}

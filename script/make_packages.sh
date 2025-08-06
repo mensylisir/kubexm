@@ -2,6 +2,13 @@
 set -e
 set -o pipefail
 
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+    SUDO="sudo"
+fi
+# 然后将脚本中所有的 `sudo` 替换为 `${SUDO}`
+#${SUDO} apt-get update -qq
+
 # ==============================================================================
 #                      生产级离线软件包打包脚本
 # ==============================================================================
@@ -86,7 +93,7 @@ package_deb() {
 
     # 更新包列表
     echo "Running apt-get update..."
-    sudo apt-get update -qq
+    ${SUDO} apt-get update -qq
 
     echo "Collecting dependencies..."
     # 使用 apt-rdepends 来获取更精确的依赖列表（如果没有，可以安装 apt-rdepends）
@@ -104,10 +111,18 @@ package_deb() {
     cd "${PACKAGE_DIR}"
     # 下载所有 .deb 文件
     apt-get download ${DEPS}
+    if [ $? -ne 0 ]; then
+        echo >&2 "Error downloading one of the packages or dependencies for: ${ALL_PACKAGES}"
+        exit 1
+    fi
 
     # 生成清单文件
     echo "Generating manifest..."
-    dpkg -l ${ALL_PACKAGES} > manifest.txt
+    echo "--- Precise Package Info from downloaded files ---" > manifest.txt
+    for pkg in *.deb; do
+        dpkg-deb -f "$pkg" Package Version Architecture >> manifest.txt
+        echo "---" >> manifest.txt
+    done
     echo "" >> manifest.txt
     echo "--- Packed Files ---" >> manifest.txt
     ls -1 *.deb >> manifest.txt
@@ -128,10 +143,10 @@ package_rpm() {
     # 确定包管理器
     if command -v dnf >/dev/null 2>&1; then
         PKG_MANAGER="dnf"
-        sudo ${PKG_MANAGER} install -y 'dnf-command(download)'
+        ${SUDO} ${PKG_MANAGER} install -y 'dnf-command(download)'
     elif command -v yum >/dev/null 2>&1; then
         PKG_MANAGER="yum"
-        sudo ${PKG_MANAGER} install -y yum-utils
+        ${SUDO} ${PKG_MANAGER} install -y yum-utils
     else
         echo >&2 "Neither yum nor dnf found. Aborting."
         exit 1
@@ -141,11 +156,15 @@ package_rpm() {
     cd "${PACKAGE_DIR}"
 
     # 使用 download 命令下载
-    sudo ${PKG_MANAGER} download --resolve --destdir=. ${ALL_PACKAGES}
+    ${SUDO} ${PKG_MANAGER} download --resolve --destdir=. ${ALL_PACKAGES}
 
     # 生成清单文件
     echo "Generating manifest..."
-    rpm -qa ${ALL_PACKAGES} > manifest.txt
+    echo "--- Precise Package Info from downloaded files ---" > manifest.txt
+    for pkg in *.rpm; do
+        rpm -qip "$pkg" >> manifest.txt
+        echo "---" >> manifest.txt
+    done
     echo "" >> manifest.txt
     echo "--- Packed Files ---" >> manifest.txt
     ls -1 *.rpm >> manifest.txt

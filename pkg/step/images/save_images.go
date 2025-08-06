@@ -27,7 +27,7 @@ type SaveImagesStepBuilder struct {
 
 func NewSaveImagesStepBuilder(ctx runtime.Context, instanceName string) *SaveImagesStepBuilder {
 	s := &SaveImagesStep{
-		ImagesDir:   filepath.Join(ctx.GetClusterArtifactsDir(), "images"),
+		ImagesDir:   filepath.Join(ctx.GetGlobalWorkDir(), "images"),
 		Concurrency: 5,
 	}
 

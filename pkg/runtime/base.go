@@ -36,6 +36,7 @@ type FileSystemContext interface {
 	GetEtcdCertsDir() string
 	GetHarborCertsDir() string
 	GetRegistryCertsDir() string
+	GetRepositoryDir() string
 	GetComponentArtifactsDir(componentTypeDir string) string
 	GetFileDownloadPath(componentName, version, arch, fileName string) string
 	GetHostDir(hostname string) string
