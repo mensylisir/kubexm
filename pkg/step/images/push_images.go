@@ -40,7 +40,7 @@ func NewPushImagesStepBuilder(ctx runtime.Context, instanceName string) *PushIma
 	}
 
 	s := &PushImagesStep{
-		ImagesDir:   filepath.Join(ctx.GetClusterArtifactsDir(), "images"),
+		ImagesDir:   filepath.Join(ctx.GetGlobalWorkDir(), "images"),
 		Concurrency: 5,
 	}
 
