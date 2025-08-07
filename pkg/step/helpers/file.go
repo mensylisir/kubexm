@@ -26,7 +26,7 @@ func UploadFile(ctx runtime.ExecutionContext, conn connector.Connector, localFil
 	}
 
 	fileName := filepath.Base(localFile)
-	uploadDir := filepath.Join(ctx.GetUploadDir(), ctx.GetHost().GetName())
+	uploadDir := filepath.Join(ctx.GetUploadDir())
 	remoteTempFile := filepath.Join(uploadDir, fileName)
 	runner := ctx.GetRunner()
 
@@ -62,7 +62,7 @@ func UploadFile(ctx runtime.ExecutionContext, conn connector.Connector, localFil
 func WriteContentToRemote(ctx runtime.ExecutionContext, conn connector.Connector, content string, destFile string, permission string, sudo bool) error {
 	fileName := filepath.Base(destFile)
 	localTempFile := filepath.Join(ctx.GetHostWorkDir(), fileName)
-	uploadDir := filepath.Join(ctx.GetUploadDir(), ctx.GetHost().GetName())
+	uploadDir := ctx.GetUploadDir()
 	remoteTempFile := filepath.Join(uploadDir, fileName)
 	runner := ctx.GetRunner()
 

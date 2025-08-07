@@ -14,14 +14,12 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 )
 
-// DistributeHybridnetArtifactsStep is responsible for distributing the Hybridnet Helm chart and generated values file to a remote node.
 type DistributeHybridnetArtifactsStep struct {
 	step.Base
 	RemoteValuesPath string
 	RemoteChartPath  string
 }
 
-// DistributeHybridnetArtifactsStepBuilder is used to build instances.
 type DistributeHybridnetArtifactsStepBuilder struct {
 	step.Builder[DistributeHybridnetArtifactsStepBuilder, *DistributeHybridnetArtifactsStep]
 }
@@ -43,7 +41,6 @@ func NewDistributeHybridnetArtifactsStepBuilder(ctx runtime.Context, instanceNam
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	// Use a concise remote path convention
 	remoteDir := filepath.Join(ctx.GetUploadDir(), chart.RepoName(), chart.ChartName()+"-"+chart.Version)
 	s.RemoteValuesPath = filepath.Join(remoteDir, "hybridnet-values.yaml")
 	chartFileName := fmt.Sprintf("%s-%s.tgz", chart.ChartName(), chart.Version)
@@ -64,7 +61,6 @@ func (s *DistributeHybridnetArtifactsStep) Precheck(ctx runtime.ExecutionContext
 	return false, nil
 }
 
-// getLocalValuesPath defines the same conventional path as GenerateHybridnetValuesStep.
 func (s *DistributeHybridnetArtifactsStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeHybridnet))
@@ -79,7 +75,6 @@ func (s *DistributeHybridnetArtifactsStep) getLocalValuesPath(ctx runtime.Execut
 func (s *DistributeHybridnetArtifactsStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
-	// 1. Find the values file in the local artifacts directory by convention
 	localValuesPath, err := s.getLocalValuesPath(ctx)
 	if err != nil {
 		return err
@@ -89,7 +84,6 @@ func (s *DistributeHybridnetArtifactsStep) Run(ctx runtime.ExecutionContext) err
 		return fmt.Errorf("failed to read generated values file from agreed path %s: %w. Ensure GenerateHybridnetValuesStep ran successfully.", localValuesPath, err)
 	}
 
-	// 2. Find the Chart file in the local artifacts directory
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeHybridnet))
 	if chart == nil {
@@ -101,7 +95,6 @@ func (s *DistributeHybridnetArtifactsStep) Run(ctx runtime.ExecutionContext) err
 		return fmt.Errorf("failed to read offline chart file from %s: %w. Ensure DownloadHybridnetChartStep ran successfully.", localChartPath, err)
 	}
 
-	// 3. Upload files to the remote node
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {

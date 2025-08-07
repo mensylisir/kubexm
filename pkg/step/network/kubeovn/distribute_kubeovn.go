@@ -14,14 +14,12 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 )
 
-// DistributeKubeovnArtifactsStep is responsible for distributing the Kube-OVN Helm chart and generated values file to a remote node.
 type DistributeKubeovnArtifactsStep struct {
 	step.Base
 	RemoteValuesPath string
 	RemoteChartPath  string
 }
 
-// DistributeKubeovnArtifactsStepBuilder is used to build instances.
 type DistributeKubeovnArtifactsStepBuilder struct {
 	step.Builder[DistributeKubeovnArtifactsStepBuilder, *DistributeKubeovnArtifactsStep]
 }

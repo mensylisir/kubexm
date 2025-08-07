@@ -17,11 +17,8 @@ import (
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
-// GenerateCiliumValuesStep 负责根据配置生成 Cilium 的 Helm values 文件。
-// 这个步骤在控制端运行，不与任何远程主机交互。
 type GenerateCiliumValuesStep struct {
 	step.Base
-	// ... (所有用于模板渲染的字段保持不变) ...
 	ImageRepository         string
 	ImageTag                string
 	OperatorImageRepository string
@@ -40,7 +37,6 @@ type GenerateCiliumValuesStep struct {
 	OperatorReplicas        int
 }
 
-// GenerateCiliumValuesStepBuilder 用于构建实例。
 type GenerateCiliumValuesStepBuilder struct {
 	step.Builder[GenerateCiliumValuesStepBuilder, *GenerateCiliumValuesStep]
 }
@@ -53,14 +49,13 @@ func NewGenerateCiliumValuesStepBuilder(ctx runtime.Context, instanceName string
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 2 * time.Minute
 
-	// --- 您的配置解析逻辑，完整保留 ---
 	clusterCfg := ctx.GetClusterConfig()
 	imageProvider := images.NewImageProvider(&ctx)
 	ciliumImage := imageProvider.GetImage("cilium")
 	operatorImage := imageProvider.GetImage("cilium-operator-generic")
 	if ciliumImage == nil || operatorImage == nil {
 		if clusterCfg.Spec.Network.Plugin == string(common.CNITypeCilium) {
-			fmt.Fprintf(os.Stderr, "Fatal: Cilium is enabled but its images are not found in BOM for K8s version %s.\n", clusterCfg.Spec.Kubernetes.Version)
+			ctx.GetLogger().Errorf("Fatal: Cilium is enabled but its images are not found in BOM for K8s version %s.\n %v", clusterCfg.Spec.Kubernetes.Version, os.Stderr)
 		}
 		return nil
 	}
@@ -116,7 +111,6 @@ func NewGenerateCiliumValuesStepBuilder(ctx runtime.Context, instanceName string
 			}
 		}
 	}
-	// --- 配置解析逻辑结束 ---
 
 	b := new(GenerateCiliumValuesStepBuilder).Init(s)
 	return b
@@ -133,19 +127,14 @@ func (s *GenerateCiliumValuesStep) Precheck(ctx runtime.ExecutionContext) (isDon
 	return false, nil
 }
 
-// getLocalValuesPath 定义了 values.yaml 在集群 artifacts 目录中的约定存储路径。
 func (s *GenerateCiliumValuesStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeCilium))
 	if chart == nil {
 		return "", fmt.Errorf("cannot find chart info for cilium in BOM")
 	}
-	// *** 关键修改 ***
-	// 1. 获取 chart .tgz 文件的完整路径
-	chartTgzPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
-	// 2. 获取该文件所在的目录
+	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
 	chartDir := filepath.Dir(chartTgzPath)
-	// 3. 将 values.yaml 放在这个目录下
 	return filepath.Join(chartDir, "cilium-values.yaml"), nil
 }
 
@@ -166,8 +155,6 @@ func (s *GenerateCiliumValuesStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to render cilium values.yaml.tmpl: %w", err)
 	}
 
-	// *** 关键修改 ***
-	// 使用新的约定路径逻辑
 	localPath, err := s.getLocalValuesPath(ctx)
 	if err != nil {
 		return err

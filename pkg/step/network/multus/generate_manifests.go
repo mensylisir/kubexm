@@ -18,14 +18,12 @@ import (
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
-// GenerateMultusValuesStep is responsible for generating the Helm values file for Multus.
 type GenerateMultusValuesStep struct {
 	step.Base
 	ImageRepository string
 	ImageTag        string
 }
 
-// GenerateMultusValuesStepBuilder is used to build instances.
 type GenerateMultusValuesStepBuilder struct {
 	step.Builder[GenerateMultusValuesStepBuilder, *GenerateMultusValuesStep]
 }
@@ -35,8 +33,8 @@ func NewGenerateMultusValuesStepBuilder(ctx runtime.Context, instanceName string
 	multusImage := imageProvider.GetImage("multus")
 
 	if multusImage == nil {
-		if ctx.GetClusterConfig().Spec.Network.Multus.Enabled {
-			fmt.Fprintf(os.Stderr, "Error: Multus is enabled but 'multus' image is not found in BOM for K8s version %s\n", ctx.GetClusterConfig().Spec.Kubernetes.Version)
+		if *ctx.GetClusterConfig().Spec.Network.Multus.Installation.Enabled {
+			ctx.GetLogger().Errorf("Error: Multus is enabled but 'multus' image is not found in BOM for K8s version %s\n %v", ctx.GetClusterConfig().Spec.Kubernetes.Version, os.Stderr)
 		}
 		return nil
 	}
@@ -74,7 +72,7 @@ func (s *GenerateMultusValuesStep) Meta() *spec.StepMeta {
 }
 
 func (s *GenerateMultusValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	if !ctx.GetClusterConfig().Spec.Network.Multus.Enabled {
+	if !*ctx.GetClusterConfig().Spec.Network.Multus.Installation.Enabled {
 		return true, nil
 	}
 	return false, nil
@@ -86,7 +84,7 @@ func (s *GenerateMultusValuesStep) getLocalValuesPath(ctx runtime.ExecutionConte
 	if chart == nil {
 		return "", fmt.Errorf("cannot find chart info for multus in BOM")
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
+	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
 	chartDir := filepath.Dir(chartTgzPath)
 	return filepath.Join(chartDir, "multus-values.yaml"), nil
 }

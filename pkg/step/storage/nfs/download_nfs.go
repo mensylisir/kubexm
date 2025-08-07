@@ -12,27 +12,24 @@ import (
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
+	"github.com/pkg/errors" // 引入 errors 包
 )
 
-// DownloadNFSProvisionerChartStep is a step to download the NFS Subdir External Provisioner Helm chart.
+const NfsChartName = "nfs-subdir-external-provisioner"
+
 type DownloadNFSProvisionerChartStep struct {
 	step.Base
 	HelmBinaryPath string
-	ChartsDir      string
 }
 
-// DownloadNFSProvisionerChartStepBuilder is used to build DownloadNFSProvisionerChartStep instances.
 type DownloadNFSProvisionerChartStepBuilder struct {
 	step.Builder[DownloadNFSProvisionerChartStepBuilder, *DownloadNFSProvisionerChartStep]
 }
 
-// NewDownloadNFSProvisionerChartStepBuilder is the constructor.
 func NewDownloadNFSProvisionerChartStepBuilder(ctx runtime.Context, instanceName string) *DownloadNFSProvisionerChartStepBuilder {
-	s := &DownloadNFSProvisionerChartStep{
-		ChartsDir: filepath.Join(ctx.GetClusterArtifactsDir(), "helm"),
-	}
+	s := &DownloadNFSProvisionerChartStep{}
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Download NFS Provisioner Helm chart to local directory", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s] >> Download NFS Provisioner Helm chart to local directory", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 10 * time.Minute
@@ -45,35 +42,51 @@ func (s *DownloadNFSProvisionerChartStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
+func getChart(ctx runtime.ExecutionContext) (*helm.HelmChart, error) {
+	helmProvider := helm.NewHelmProvider(ctx)
+	chart := helmProvider.GetChart(NfsChartName)
+	if chart == nil {
+		return nil, fmt.Errorf("NFS Provisioner chart is not enabled or no compatible version found in BOM for K8s version %s", ctx.GetClusterConfig().Spec.Kubernetes.Version)
+	}
+	return chart, nil
+}
+
 func (s *DownloadNFSProvisionerChartStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	// TODO: Add a check to see if nfs provisioner is enabled in the cluster config.
 	helmPath, err := exec.LookPath("helm")
 	if err != nil {
-		return false, fmt.Errorf("helm command not found in PATH, please install it first")
+		return false, errors.Wrap(err, "helm command not found in local PATH, please install it first")
 	}
 	s.HelmBinaryPath = helmPath
+
+	chart, err := getChart(ctx)
+	if err != nil {
+		ctx.GetLogger().Infof("Skipping NFS Provisioner chart download: %v", err)
+		return true, nil
+	}
+
+	destFile := chart.LocalPath(ctx.GetGlobalWorkDir())
+	if _, err := os.Stat(destFile); err == nil {
+		ctx.GetLogger().Infof("NFS Provisioner chart package %s already exists locally.", destFile)
+		return true, nil
+	}
+
 	return false, nil
 }
 
 func (s *DownloadNFSProvisionerChartStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
-	helmProvider := helm.NewHelmProvider(ctx)
-	chart := helmProvider.GetChart("nfs-subdir-external-provisioner")
-	if chart == nil {
-		return fmt.Errorf("could not get nfs-subdir-external-provisioner chart info for Kubernetes version %s", ctx.GetClusterConfig().Spec.Kubernetes.Version)
+	chart, err := getChart(ctx)
+	if err != nil {
+		logger.Warnf("Could not execute step (was supposed to be skipped by Precheck): %v", err)
+		return nil
 	}
 
-	destFile := chart.LocalPath(s.ChartsDir)
+	destFile := chart.LocalPath(ctx.GetGlobalWorkDir())
 	destDir := filepath.Dir(destFile)
 
 	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("failed to create destination directory %s: %w", destDir, err)
-	}
-
-	if _, err := os.Stat(destFile); err == nil {
-		logger.Infof("NFS Provisioner chart package %s already exists, skipping download.", destFile)
-		return nil
+		return fmt.Errorf("failed to create local destination directory %s: %w", destDir, err)
 	}
 
 	logger.Infof("Adding Helm repo: %s (%s)", chart.RepoName(), chart.RepoURL())
@@ -87,7 +100,7 @@ func (s *DownloadNFSProvisionerChartStep) Run(ctx runtime.ExecutionContext) erro
 	logger.Infof("Updating Helm repo: %s", chart.RepoName())
 	repoUpdateCmd := exec.Command(s.HelmBinaryPath, "repo", "update", chart.RepoName())
 	if output, err := repoUpdateCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to update helm repo %s: %w\nOutput: %s", chart.RepoName(), err, string(output))
+		return fmt.Errorf("failed to update helm repo '%s': %w\nOutput: %s", chart.RepoName(), err, string(output))
 	}
 
 	logger.Infof("Pulling NFS Provisioner chart %s version %s to %s", chart.FullName(), chart.Version, destDir)
@@ -102,7 +115,13 @@ func (s *DownloadNFSProvisionerChartStep) Run(ctx runtime.ExecutionContext) erro
 
 func (s *DownloadNFSProvisionerChartStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
-	logger.Warn("Rollback for DownloadNFSProvisionerChartStep is a no-op.")
+	if chart, err := getChart(ctx); err == nil {
+		destFile := chart.LocalPath(ctx.GetGlobalWorkDir())
+		if _, statErr := os.Stat(destFile); statErr == nil {
+			logger.Infof("Rolling back by deleting locally downloaded chart file: %s", destFile)
+			os.Remove(destFile)
+		}
+	}
 	return nil
 }
 

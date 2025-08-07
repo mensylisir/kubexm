@@ -30,6 +30,12 @@ func SetDefaults_Preflight(cfg *Preflight) {
 	if cfg.DisableSelinux == nil {
 		cfg.DisableSelinux = helpers.BoolPtr(true)
 	}
+	if cfg.MinMemoryMB == nil {
+		cfg.MinMemoryMB = helpers.Uint64Ptr(common.DefaultMinMemoryMB)
+	}
+	if cfg.MinCPUCores == nil {
+		cfg.MinCPUCores = helpers.Int32Ptr(common.DefaultMinCPUCores)
+	}
 }
 
 func Validate_Preflight(cfg *Preflight, verrs *validation.ValidationErrors, pathPrefix string) {

@@ -14,14 +14,12 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 )
 
-// DistributeMultusArtifactsStep is responsible for distributing the Multus Helm chart and generated values file to a remote node.
 type DistributeMultusArtifactsStep struct {
 	step.Base
 	RemoteValuesPath string
 	RemoteChartPath  string
 }
 
-// DistributeMultusArtifactsStepBuilder is used to build instances.
 type DistributeMultusArtifactsStepBuilder struct {
 	step.Builder[DistributeMultusArtifactsStepBuilder, *DistributeMultusArtifactsStep]
 }
@@ -31,7 +29,7 @@ func NewDistributeMultusArtifactsStepBuilder(ctx runtime.Context, instanceName s
 	chart := helmProvider.GetChart(string(common.CNITypeMultus))
 	if chart == nil {
 		if ctx.GetClusterConfig().Spec.Network.Multus.Installation.Enabled == helpers.BoolPtr(true) {
-			fmt.Fprintf(os.Stderr, "Error: Multus is enabled but chart info is not found for K8s version %s\n", ctx.GetClusterConfig().Spec.Kubernetes.Version)
+			ctx.GetLogger().Errorf("Error: Multus is enabled but chart info is not found for K8s version %s\n %v", ctx.GetClusterConfig().Spec.Kubernetes.Version, os.Stderr)
 		}
 		return nil
 	}

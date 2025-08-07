@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-// DisableRegistryServiceStep 是一个无状态的节点执行步骤。
 type DisableRegistryServiceStep struct {
 	step.Base
 }

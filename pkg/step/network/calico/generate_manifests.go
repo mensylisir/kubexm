@@ -18,11 +18,8 @@ import (
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
-// GenerateCalicoValuesStep 负责根据集群配置生成 Calico 的 Helm values 文件。
-// 这个步骤在控制端运行，不与任何远程主机交互。
 type GenerateCalicoValuesStep struct {
 	step.Base
-	// 所有需要传递给模板的字段
 	Registry             string
 	IPPools              []v1alpha1.CalicoIPPool
 	VethMTU              int
@@ -35,7 +32,6 @@ type GenerateCalicoValuesStep struct {
 	OperatorTolerations  []map[string]string
 }
 
-// GenerateCalicoValuesStepBuilder 用于构建实例。
 type GenerateCalicoValuesStepBuilder struct {
 	step.Builder[GenerateCalicoValuesStepBuilder, *GenerateCalicoValuesStep]
 }
@@ -51,7 +47,6 @@ func NewGenerateCalicoValuesStepBuilder(ctx runtime.Context, instanceName string
 	clusterCfg := ctx.GetClusterConfig()
 	imageProvider := images.NewImageProvider(&ctx)
 
-	// 1. 设置默认值
 	s.OperatorNodeSelector = map[string]string{"kubernetes.io/os": "linux"}
 	s.OperatorTolerations = []map[string]string{
 		{"key": "node-role.kubernetes.io/control-plane", "operator": "Exists", "effect": "NoSchedule"},
@@ -60,7 +55,6 @@ func NewGenerateCalicoValuesStepBuilder(ctx runtime.Context, instanceName string
 	s.LogSeverityScreen = "Info"
 	s.TyphaNodeSelector = map[string]string{"node-role.kubernetes.io/control-plane": ""}
 
-	// 2. 从关键配置中获取值
 	if clusterCfg.Spec.Registry != nil && clusterCfg.Spec.Registry.MirroringAndRewriting != nil {
 		s.Registry = clusterCfg.Spec.Registry.MirroringAndRewriting.PrivateRegistry
 	}
@@ -68,13 +62,12 @@ func NewGenerateCalicoValuesStepBuilder(ctx runtime.Context, instanceName string
 	operatorImg := imageProvider.GetImage("tigera-operator")
 	if operatorImg == nil {
 		if clusterCfg.Spec.Network.Plugin == string(common.CNITypeCalico) {
-			fmt.Fprintf(os.Stderr, "Error: Calico is enabled but 'tigera-operator' image is not found in BOM for K8s version %s\n", clusterCfg.Spec.Kubernetes.Version)
+			ctx.GetLogger().Errorf("Error: Calico is enabled but 'tigera-operator' image is not found in BOM for K8s version %s\n %v", clusterCfg.Spec.Kubernetes.Version, os.Stderr)
 		}
 		return nil
 	}
 	s.OperatorImage = operatorImg.FullName()
 
-	// 3. 应用默认值和用户覆盖逻辑
 	defaultNat := true
 	defaultBlockSize := 26
 	defaultPool := v1alpha1.CalicoIPPool{
@@ -86,12 +79,10 @@ func NewGenerateCalicoValuesStepBuilder(ctx runtime.Context, instanceName string
 
 	userCalicoCfg := clusterCfg.Spec.Network.Calico
 	if userCalicoCfg != nil {
-		// 用户配置覆盖网络设置
 		if userCalicoCfg.Networking != nil {
 			if userCalicoCfg.Networking.VethMTU != nil {
 				s.VethMTU = *userCalicoCfg.Networking.VethMTU
 			}
-			// 封装模式的默认值，可被用户覆盖
 			if userCalicoCfg.Networking.IPIPMode != "" {
 				defaultPool.Encapsulation = "IPIP"
 			}
@@ -100,10 +91,8 @@ func NewGenerateCalicoValuesStepBuilder(ctx runtime.Context, instanceName string
 			}
 		}
 
-		// 用户配置覆盖 IP 池
 		if userCalicoCfg.IPAM != nil && len(userCalicoCfg.IPAM.Pools) > 0 {
 			s.IPPools = userCalicoCfg.IPAM.Pools
-			// 为用户定义的池填充默认值
 			for i := range s.IPPools {
 				if s.IPPools[i].Encapsulation == "" {
 					s.IPPools[i].Encapsulation = defaultPool.Encapsulation
@@ -119,12 +108,10 @@ func NewGenerateCalicoValuesStepBuilder(ctx runtime.Context, instanceName string
 			s.IPPools = []v1alpha1.CalicoIPPool{defaultPool}
 		}
 
-		// 用户配置覆盖 Felix 日志级别
 		if userCalicoCfg.FelixConfiguration != nil && userCalicoCfg.FelixConfiguration.LogSeverityScreen != "" {
 			s.LogSeverityScreen = userCalicoCfg.FelixConfiguration.LogSeverityScreen
 		}
 
-		// 用户配置覆盖 Typha 设置
 		if userCalicoCfg.TyphaDeployment != nil {
 			if userCalicoCfg.TyphaDeployment.Replicas != nil {
 				s.TyphaReplicas = *userCalicoCfg.TyphaDeployment.Replicas
@@ -137,11 +124,9 @@ func NewGenerateCalicoValuesStepBuilder(ctx runtime.Context, instanceName string
 			}
 		}
 	} else {
-		// 用户完全没有提供 calico 配置块，使用完全的默认值
 		s.IPPools = []v1alpha1.CalicoIPPool{defaultPool}
 	}
 
-	// 基于上下文的智能默认值，仅当用户未明确指定时生效
 	if userCalicoCfg == nil || userCalicoCfg.TyphaDeployment == nil || userCalicoCfg.TyphaDeployment.Enabled == nil {
 		if len(ctx.GetHostsByRole(common.RoleKubernetes)) > 50 {
 			s.TyphaEnabled = true
@@ -163,19 +148,14 @@ func (s *GenerateCalicoValuesStep) Precheck(ctx runtime.ExecutionContext) (isDon
 	return false, nil
 }
 
-// getLocalValuesPath 定义了 values.yaml 在集群 artifacts 目录中的约定存储路径。
-// 它与 chart .tgz 文件在同一个目录下。
 func (s *GenerateCalicoValuesStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeCalico))
 	if chart == nil {
 		return "", fmt.Errorf("cannot find chart info for calico in BOM")
 	}
-	// 获取 chart .tgz 文件的完整路径
-	chartTgzPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
-	// 获取该文件所在的目录
+	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
 	chartDir := filepath.Dir(chartTgzPath)
-	// 将 values.yaml 放在这个目录下
 	return filepath.Join(chartDir, "calico-values.yaml"), nil
 }
 

@@ -16,47 +16,35 @@ import (
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
-// GenerateLonghornValuesStep is responsible for generating the Helm values file for Longhorn.
 type GenerateLonghornValuesStep struct {
 	step.Base
-	ImageRegistry         string
-	ImageTag              string
-	InstanceManagerImageTag string
+	SystemDefaultRegistry string
 }
 
-// GenerateLonghornValuesStepBuilder is used to build instances.
 type GenerateLonghornValuesStepBuilder struct {
 	step.Builder[GenerateLonghornValuesStepBuilder, *GenerateLonghornValuesStep]
 }
 
-// NewGenerateLonghornValuesStepBuilder is the constructor.
 func NewGenerateLonghornValuesStepBuilder(ctx runtime.Context, instanceName string) *GenerateLonghornValuesStepBuilder {
+	if ctx.GetClusterConfig().Spec.Addons == nil || ctx.GetClusterConfig().Spec.Storage.Longhorn == nil || !*ctx.GetClusterConfig().Spec.Storage.Longhorn.Enabled {
+		return nil
+	}
+
 	imageProvider := images.NewImageProvider(&ctx)
-
-	// Longhorn uses a main tag for most of its images, and a separate one for the instance manager.
-	longhornImage := imageProvider.GetImage("longhorn-manager") // Assuming manager image holds the main tag
-	instanceManagerImage := imageProvider.GetImage("longhorn-instance-manager")
-
-	if longhornImage == nil || instanceManagerImage == nil {
-		// TODO: Add a check for whether longhorn is enabled
-		fmt.Fprintf(os.Stderr, "Error: Longhorn is enabled but one or more required images are not found in BOM for K8s version %s\n", ctx.GetClusterConfig().Spec.Kubernetes.Version)
+	longhornImage := imageProvider.GetImage("longhorn-manager")
+	if longhornImage == nil {
+		ctx.GetLogger().Errorf("Error: Longhorn is enabled but 'longhorn-manager' image is not found in BOM for K8s version %s\n %v", ctx.GetClusterConfig().Spec.Kubernetes.Version, os.Stderr)
 		return nil
 	}
 
 	s := &GenerateLonghornValuesStep{}
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate Longhorn Helm values file from configuration", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s] >> Generate Longhorn Helm values file from configuration", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 2 * time.Minute
 
-	s.ImageRegistry = longhornImage.Registry()
-	if reg := ctx.GetClusterConfig().Spec.Registry.MirroringAndRewriting.PrivateRegistry; reg != "" {
-		s.ImageRegistry = reg
-	}
-
-	s.ImageTag = longhornImage.Tag()
-	s.InstanceManagerImageTag = instanceManagerImage.Tag()
+	s.SystemDefaultRegistry = longhornImage.RegistryAddrWithNamespace()
 
 	b := new(GenerateLonghornValuesStepBuilder).Init(s)
 	return b
@@ -67,7 +55,21 @@ func (s *GenerateLonghornValuesStep) Meta() *spec.StepMeta {
 }
 
 func (s *GenerateLonghornValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	// TODO: Add a check to see if longhorn is enabled
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
+	cfg := ctx.GetClusterConfig()
+	if cfg.Spec.Addons == nil || cfg.Spec.Storage.Longhorn == nil || !*cfg.Spec.Storage.Longhorn.Enabled {
+		return true, nil
+	}
+
+	localPath, err := s.getLocalValuesPath(ctx)
+	if err != nil {
+		return false, nil
+	}
+
+	if _, err := os.Stat(localPath); err == nil {
+		logger.Infof("Longhorn values file %s already exists. Skipping generation.", localPath)
+		return true, nil
+	}
 	return false, nil
 }
 
@@ -77,9 +79,8 @@ func (s *GenerateLonghornValuesStep) getLocalValuesPath(ctx runtime.ExecutionCon
 	if chart == nil {
 		return "", fmt.Errorf("cannot find chart info for longhorn in BOM")
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
-	chartDir := filepath.Dir(chartTgzPath)
-	return filepath.Join(chartDir, "longhorn-values.yaml"), nil
+	chartDir := filepath.Dir(chart.LocalPath(ctx.GetGlobalWorkDir()))
+	return filepath.Join(chartDir, chart.Version, "longhorn-values.yaml"), nil
 }
 
 func (s *GenerateLonghornValuesStep) Run(ctx runtime.ExecutionContext) error {
@@ -94,6 +95,7 @@ func (s *GenerateLonghornValuesStep) Run(ctx runtime.ExecutionContext) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse longhorn values.yaml.tmpl: %w", err)
 	}
+
 	var valuesBuffer bytes.Buffer
 	if err := tmpl.Execute(&valuesBuffer, s); err != nil {
 		return fmt.Errorf("failed to render longhorn values.yaml.tmpl: %w", err)
@@ -120,6 +122,8 @@ func (s *GenerateLonghornValuesStep) Run(ctx runtime.ExecutionContext) error {
 
 func (s *GenerateLonghornValuesStep) Rollback(ctx runtime.ExecutionContext) error {
 	if localPath, err := s.getLocalValuesPath(ctx); err == nil {
+		logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+		logger.Infof("Removing generated Longhorn values file: %s", localPath)
 		os.Remove(localPath)
 	}
 	return nil

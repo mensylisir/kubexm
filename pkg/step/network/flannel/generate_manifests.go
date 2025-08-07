@@ -18,8 +18,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
-// GenerateFlannelValuesStep is responsible for generating the Helm values file for Flannel based on the cluster configuration.
-// This step runs on the control plane, not interacting with any remote hosts.
 type GenerateFlannelValuesStep struct {
 	step.Base
 	ImageFlannelRepo   string
@@ -32,7 +30,6 @@ type GenerateFlannelValuesStep struct {
 	BackendIPsec       *v1alpha1.FlannelIPsecConfig
 }
 
-// GenerateFlannelValuesStepBuilder is used to build instances.
 type GenerateFlannelValuesStepBuilder struct {
 	step.Builder[GenerateFlannelValuesStepBuilder, *GenerateFlannelValuesStep]
 }
@@ -44,7 +41,7 @@ func NewGenerateFlannelValuesStepBuilder(ctx runtime.Context, instanceName strin
 
 	if flannelImage == nil || cniPluginImage == nil {
 		if ctx.GetClusterConfig().Spec.Network.Plugin == string(common.CNITypeFlannel) {
-			fmt.Fprintf(os.Stderr, "Error: Flannel is enabled but 'flannel' or 'flannel-cni-plugin' image is not found in BOM for K8s version %s\n", ctx.GetClusterConfig().Spec.Kubernetes.Version)
+			ctx.GetLogger().Errorf("Error: Flannel is enabled but 'flannel' or 'flannel-cni-plugin' image is not found in BOM for K8s version %s\n %v", ctx.GetClusterConfig().Spec.Kubernetes.Version, os.Stderr)
 		}
 		return nil
 	}
@@ -91,19 +88,14 @@ func (s *GenerateFlannelValuesStep) Precheck(ctx runtime.ExecutionContext) (isDo
 	return false, nil
 }
 
-// getLocalValuesPath defines the conventional storage path for values.yaml in the cluster artifacts directory.
-// It is placed in the same directory as the chart .tgz file.
 func (s *GenerateFlannelValuesStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeFlannel))
 	if chart == nil {
 		return "", fmt.Errorf("cannot find chart info for flannel in BOM")
 	}
-	// Get the full path of the chart .tgz file
-	chartTgzPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
-	// Get the directory where the file is located
+	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
 	chartDir := filepath.Dir(chartTgzPath)
-	// Place values.yaml in this directory
 	return filepath.Join(chartDir, "flannel-values.yaml"), nil
 }
 

@@ -2,7 +2,9 @@ package longhorn
 
 import (
 	"fmt"
+	"github.com/pkg/errors"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/common"
@@ -12,7 +14,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 )
 
-// InstallLonghornHelmChartStep is a step to install the Longhorn Helm chart.
 type InstallLonghornHelmChartStep struct {
 	step.Base
 	Chart               *helm.HelmChart
@@ -23,12 +24,10 @@ type InstallLonghornHelmChartStep struct {
 	AdminKubeconfigPath string
 }
 
-// InstallLonghornHelmChartStepBuilder is used to build instances.
 type InstallLonghornHelmChartStepBuilder struct {
 	step.Builder[InstallLonghornHelmChartStepBuilder, *InstallLonghornHelmChartStep]
 }
 
-// NewInstallLonghornHelmChartStepBuilder is the constructor.
 func NewInstallLonghornHelmChartStepBuilder(ctx runtime.Context, instanceName string) *InstallLonghornHelmChartStepBuilder {
 	helmProvider := helm.NewHelmProvider(&ctx)
 	chart := helmProvider.GetChart("longhorn")
@@ -46,7 +45,7 @@ func NewInstallLonghornHelmChartStepBuilder(ctx runtime.Context, instanceName st
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install or upgrade Longhorn via Helm chart", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
-	s.Base.Timeout = 20 * time.Minute // Longhorn can take a while to install
+	s.Base.Timeout = 20 * time.Minute
 
 	s.ReleaseName = "longhorn"
 	s.Namespace = "longhorn-system"
@@ -74,31 +73,41 @@ func (s *InstallLonghornHelmChartStep) Precheck(ctx runtime.ExecutionContext) (i
 		return false, err
 	}
 
-	valuesExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteValuesPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check for values file: %w", err)
-	}
-	if !valuesExists {
-		return false, fmt.Errorf("required Longhorn values file not found at path %s", s.RemoteValuesPath)
+	if _, err := runner.LookPath(ctx.GoContext(), conn, "helm"); err != nil {
+		return false, errors.Wrap(err, "helm command not found in PATH on the target host")
 	}
 
-	chartExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteChartPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check for chart file: %w", err)
+	for _, path := range []string{s.RemoteValuesPath, s.RemoteChartPath, s.AdminKubeconfigPath} {
+		exists, err := runner.Exists(ctx.GoContext(), conn, path)
+		if err != nil {
+			return false, fmt.Errorf("failed to check for required file %s: %w", path, err)
+		}
+		if !exists {
+			return false, fmt.Errorf("required file not found at remote path %s", path)
+		}
 	}
-	if !chartExists {
-		return false, fmt.Errorf("Longhorn Helm chart .tgz file not found at path %s", s.RemoteChartPath)
+	logger.Debug("All required artifacts found on remote host.")
+
+	statusCmd := fmt.Sprintf(
+		"helm status %s --namespace %s --kubeconfig %s -o json",
+		s.ReleaseName,
+		s.Namespace,
+		s.AdminKubeconfigPath,
+	)
+
+	output, err := runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
+	if err != nil {
+
+		logger.Infof("Helm release '%s' not found. Installation is required.", s.ReleaseName)
+		return false, nil
 	}
 
-	kubeconfigExists, err := runner.Exists(ctx.GoContext(), conn, s.AdminKubeconfigPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check for kubeconfig file: %w", err)
-	}
-	if !kubeconfigExists {
-		return false, fmt.Errorf("admin kubeconfig not found at %s", s.AdminKubeconfigPath)
+	if strings.Contains(output, `"status":"deployed"`) {
+		logger.Infof("Helm release '%s' is already in 'deployed' state. Skipping.", s.ReleaseName)
+		return true, nil
 	}
 
-	logger.Info("All required Longhorn artifacts found on remote host.")
+	logger.Infof("Helm release '%s' found but not in 'deployed' state. Upgrade is required.", s.ReleaseName)
 	return false, nil
 }
 

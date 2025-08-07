@@ -11,9 +11,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 
-//const registryServicePath = "/etc/systemd/system/registry.service"
-
-// RemoveRegistryArtifactsStep 是一个无状态的节点执行步骤。
 type RemoveRegistryArtifactsStep struct {
 	step.Base
 }
@@ -70,11 +67,9 @@ func (s *RemoveRegistryArtifactsStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	for _, path := range s.filesToRemove() {
-		// force remove, ignore "not found" errors
 		_ = runner.Remove(ctx.GoContext(), conn, path, s.Sudo, true)
 	}
 
-	// 确保 systemd 感知到 service 文件被删除
 	_, _ = runner.Run(ctx.GoContext(), conn, "systemctl daemon-reload", s.Sudo)
 	return nil
 }

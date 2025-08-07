@@ -16,7 +16,6 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
-// ExtractRegistryStep 是一个无状态的编排步骤。
 type ExtractRegistryStep struct {
 	step.Base
 }
@@ -25,7 +24,6 @@ type ExtractRegistryStepBuilder struct {
 	step.Builder[ExtractRegistryStepBuilder, *ExtractRegistryStep]
 }
 
-// NewExtractRegistryStepBuilder 在创建前会检查 Registry 是否被启用。
 func NewExtractRegistryStepBuilder(ctx runtime.Context, instanceName string) *ExtractRegistryStepBuilder {
 	provider := binary.NewBinaryProvider(&ctx)
 	const representativeArch = "amd64"
@@ -39,6 +37,7 @@ func NewExtractRegistryStepBuilder(ctx runtime.Context, instanceName string) *Ex
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Extract registry archives for all required architectures", s.Base.Meta.Name)
 	s.Base.Sudo = false
+	s.Base.IgnoreError = false
 	s.Base.Timeout = 1 * time.Minute
 
 	b := new(ExtractRegistryStepBuilder).Init(s)
@@ -49,7 +48,6 @@ func (s *ExtractRegistryStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-// getRequiredArchs 辅助函数，精确找出集群中所有需要 registry 的节点架构。
 func (s *ExtractRegistryStep) getRequiredArchs(ctx runtime.ExecutionContext) (map[string]bool, error) {
 	archs := make(map[string]bool)
 	registryHosts := ctx.GetHostsByRole(common.RoleRegistry)
@@ -70,7 +68,6 @@ func (s *ExtractRegistryStep) getRequiredArchs(ctx runtime.ExecutionContext) (ma
 	return archs, nil
 }
 
-// getPathsForArch 辅助函数，为特定架构计算路径。
 func (s *ExtractRegistryStep) getPathsForArch(ctx runtime.ExecutionContext, arch string) (sourcePath, destPath, cacheKey string, err error) {
 	provider := binary.NewBinaryProvider(ctx)
 	binaryInfo, err := provider.GetBinary(binary.ComponentRegistry, arch)
@@ -89,7 +86,6 @@ func (s *ExtractRegistryStep) getPathsForArch(ctx runtime.ExecutionContext, arch
 	return sourcePath, destPath, cacheKey, nil
 }
 
-// Precheck 现在会检查所有需要的架构对应的文件是否已解压。
 func (s *ExtractRegistryStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
 
@@ -120,13 +116,11 @@ func (s *ExtractRegistryStep) Precheck(ctx runtime.ExecutionContext) (isDone boo
 			continue
 		}
 
-		// 检查一个关键文件 'registry' 来判断解压是否完整
 		keyFile := filepath.Join(destPath, "registry")
 		if _, err := os.Stat(keyFile); os.IsNotExist(err) {
 			logger.Warnf("Destination directory for arch %s exists, but key file '%s' is missing. Re-extracting.", arch, keyFile)
 			allDone = false
 		} else {
-			// 如果目录和关键文件都存在，我们就缓存这个路径
 			ctx.GetTaskCache().Set(cacheKey, destPath)
 		}
 	}
@@ -138,7 +132,6 @@ func (s *ExtractRegistryStep) Precheck(ctx runtime.ExecutionContext) (isDone boo
 	return allDone, nil
 }
 
-// Run 方法现在会遍历所有需要的架构并进行解压。
 func (s *ExtractRegistryStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
@@ -165,7 +158,6 @@ func (s *ExtractRegistryStep) Run(ctx runtime.ExecutionContext) error {
 	return nil
 }
 
-// extractFileForArch 是实际的解压逻辑，被 Run 方法循环调用。
 func (s *ExtractRegistryStep) extractFileForArch(ctx runtime.ExecutionContext, arch string) error {
 	logger := ctx.GetLogger()
 	sourcePath, destPath, cacheKey, err := s.getPathsForArch(ctx, arch)

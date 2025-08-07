@@ -2,7 +2,9 @@ package nfs
 
 import (
 	"fmt"
+	"github.com/pkg/errors"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/common"
@@ -12,7 +14,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 )
 
-// InstallNFSProvisionerHelmChartStep is a step to install the NFS Provisioner Helm chart.
 type InstallNFSProvisionerHelmChartStep struct {
 	step.Base
 	Chart               *helm.HelmChart
@@ -23,12 +24,10 @@ type InstallNFSProvisionerHelmChartStep struct {
 	AdminKubeconfigPath string
 }
 
-// InstallNFSProvisionerHelmChartStepBuilder is used to build instances.
 type InstallNFSProvisionerHelmChartStepBuilder struct {
 	step.Builder[InstallNFSProvisionerHelmChartStepBuilder, *InstallNFSProvisionerHelmChartStep]
 }
 
-// NewInstallNFSProvisionerHelmChartStepBuilder is the constructor.
 func NewInstallNFSProvisionerHelmChartStepBuilder(ctx runtime.Context, instanceName string) *InstallNFSProvisionerHelmChartStepBuilder {
 	helmProvider := helm.NewHelmProvider(&ctx)
 	chart := helmProvider.GetChart("nfs-subdir-external-provisioner")
@@ -49,7 +48,7 @@ func NewInstallNFSProvisionerHelmChartStepBuilder(ctx runtime.Context, instanceN
 	s.Base.Timeout = 15 * time.Minute
 
 	s.ReleaseName = "nfs-subdir-external-provisioner"
-	s.Namespace = "nfs-provisioner" // Default namespace for this chart
+	s.Namespace = "nfs-provisioner"
 
 	s.AdminKubeconfigPath = filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
 
@@ -74,31 +73,45 @@ func (s *InstallNFSProvisionerHelmChartStep) Precheck(ctx runtime.ExecutionConte
 		return false, err
 	}
 
-	valuesExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteValuesPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check for values file: %w", err)
-	}
-	if !valuesExists {
-		return false, fmt.Errorf("required NFS Provisioner values file not found at path %s", s.RemoteValuesPath)
+	cfg := ctx.GetClusterConfig()
+	if cfg.Spec.Storage == nil || cfg.Spec.Storage.NFS == nil || !*cfg.Spec.Storage.NFS.Enabled {
+		return true, nil
 	}
 
-	chartExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteChartPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check for chart file: %w", err)
-	}
-	if !chartExists {
-		return false, fmt.Errorf("NFS Provisioner Helm chart .tgz file not found at path %s", s.RemoteChartPath)
+	if _, err := runner.LookPath(ctx.GoContext(), conn, "helm"); err != nil {
+		return false, errors.Wrap(err, "helm command not found in PATH on the target host")
 	}
 
-	kubeconfigExists, err := runner.Exists(ctx.GoContext(), conn, s.AdminKubeconfigPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check for kubeconfig file: %w", err)
+	for _, path := range []string{s.RemoteValuesPath, s.RemoteChartPath, s.AdminKubeconfigPath} {
+		exists, err := runner.Exists(ctx.GoContext(), conn, path)
+		if err != nil {
+			return false, fmt.Errorf("failed to check for required file %s: %w", path, err)
+		}
+		if !exists {
+			return false, fmt.Errorf("required file not found at remote path %s", path)
+		}
 	}
-	if !kubeconfigExists {
-		return false, fmt.Errorf("admin kubeconfig not found at %s", s.AdminKubeconfigPath)
+	logger.Debug("All required NFS Provisioner artifacts found on remote host.")
+
+	statusCmd := fmt.Sprintf(
+		"helm status %s --namespace %s --kubeconfig %s -o json",
+		s.ReleaseName,
+		s.Namespace,
+		s.AdminKubeconfigPath,
+	)
+
+	output, err := runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
+	if err != nil {
+		logger.Infof("Helm release '%s' not found. Installation is required.", s.ReleaseName)
+		return false, nil
 	}
 
-	logger.Info("All required NFS Provisioner artifacts found on remote host.")
+	if strings.Contains(output, `"status":"deployed"`) {
+		logger.Infof("Helm release '%s' is already in 'deployed' state. Skipping.", s.ReleaseName)
+		return true, nil
+	}
+
+	logger.Infof("Helm release '%s' found but not in 'deployed' state. Upgrade is required.", s.ReleaseName)
 	return false, nil
 }
 

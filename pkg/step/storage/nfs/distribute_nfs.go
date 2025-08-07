@@ -2,7 +2,6 @@ package nfs
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"path/filepath"
 	"time"
@@ -10,38 +9,41 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
+	"github.com/pkg/errors"
 )
 
-// DistributeNFSProvisionerArtifactsStep is responsible for distributing the NFS Provisioner artifacts.
 type DistributeNFSProvisionerArtifactsStep struct {
 	step.Base
 	RemoteValuesPath string
 	RemoteChartPath  string
 }
 
-// DistributeNFSProvisionerArtifactsStepBuilder is used to build instances.
 type DistributeNFSProvisionerArtifactsStepBuilder struct {
 	step.Builder[DistributeNFSProvisionerArtifactsStepBuilder, *DistributeNFSProvisionerArtifactsStep]
 }
 
-// NewDistributeNFSProvisionerArtifactsStepBuilder is the constructor.
 func NewDistributeNFSProvisionerArtifactsStepBuilder(ctx runtime.Context, instanceName string) *DistributeNFSProvisionerArtifactsStepBuilder {
+	cfg := ctx.GetClusterConfig()
+	if cfg.Spec.Storage == nil || cfg.Spec.Storage.NFS == nil || !*cfg.Spec.Storage.NFS.Enabled {
+		return nil
+	}
+
 	helmProvider := helm.NewHelmProvider(&ctx)
-	chart := helmProvider.GetChart("nfs-subdir-external-provisioner")
+	chart := helmProvider.GetChart(NfsChartName)
 	if chart == nil {
-		// TODO: Add a check for whether nfs provisioner is enabled
 		return nil
 	}
 
 	s := &DistributeNFSProvisionerArtifactsStep{}
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Distribute NFS Provisioner Helm artifacts to remote host", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s] >> Distribute NFS Provisioner Helm artifacts to remote host", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	remoteDir := filepath.Join(ctx.GetUploadDir(), chart.RepoName(), chart.ChartName()+"-"+chart.Version)
+	remoteDir := filepath.Join(ctx.GetUploadDir(), chart.RepoName(), chart.Version)
 	s.RemoteValuesPath = filepath.Join(remoteDir, "nfs-provisioner-values.yaml")
 	chartFileName := fmt.Sprintf("%s-%s.tgz", chart.ChartName(), chart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)
@@ -54,43 +56,74 @@ func (s *DistributeNFSProvisionerArtifactsStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *DistributeNFSProvisionerArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	// TODO: Add a check to see if nfs provisioner is enabled
-	return false, nil
+func (s *DistributeNFSProvisionerArtifactsStep) getLocalPaths(ctx runtime.ExecutionContext) (localValuesPath, localChartPath string, err error) {
+	helmProvider := helm.NewHelmProvider(ctx)
+	chart := helmProvider.GetChart(NfsChartName)
+	if chart == nil {
+		return "", "", fmt.Errorf("cannot find chart info for '%s' in BOM", NfsChartName)
+	}
+
+	chartDir := filepath.Dir(chart.LocalPath(ctx.GetGlobalWorkDir()))
+	localValuesPath = filepath.Join(chartDir, chart.Version, "nfs-provisioner-values.yaml")
+
+	localChartPath = chart.LocalPath(ctx.GetGlobalWorkDir())
+
+	return localValuesPath, localChartPath, nil
 }
 
-func (s *DistributeNFSProvisionerArtifactsStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
-	helmProvider := helm.NewHelmProvider(ctx)
-	chart := helmProvider.GetChart("nfs-subdir-external-provisioner")
-	if chart == nil {
-		return "", fmt.Errorf("cannot find chart info for nfs-subdir-external-provisioner in BOM")
+func (s *DistributeNFSProvisionerArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+
+	cfg := ctx.GetClusterConfig()
+	if cfg.Spec.Storage == nil || cfg.Spec.Storage.NFS == nil || !*cfg.Spec.Storage.NFS.Enabled {
+		return true, nil
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
-	chartDir := filepath.Dir(chartTgzPath)
-	return filepath.Join(chartDir, "nfs-provisioner-values.yaml"), nil
+
+	localValuesPath, localChartPath, err := s.getLocalPaths(ctx)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(localValuesPath); os.IsNotExist(err) {
+		return false, errors.Wrapf(err, "local source file not found: %s. Ensure GenerateNFSProvisionerValuesStep ran.", localValuesPath)
+	}
+	if _, err := os.Stat(localChartPath); os.IsNotExist(err) {
+		return false, errors.Wrapf(err, "local source file not found: %s. Ensure DownloadNFSProvisionerChartStep ran.", localChartPath)
+	}
+
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		return false, errors.Wrap(err, "failed to get connector for precheck")
+	}
+
+	valuesExistsCmd := fmt.Sprintf("test -f %s", s.RemoteValuesPath)
+	chartExistsCmd := fmt.Sprintf("test -f %s", s.RemoteChartPath)
+
+	_, errValues := runner.Run(ctx.GoContext(), conn, valuesExistsCmd, s.Sudo)
+	_, errChart := runner.Run(ctx.GoContext(), conn, chartExistsCmd, s.Sudo)
+
+	if errValues == nil && errChart == nil {
+		logger.Info("Both NFS Provisioner artifacts already exist on the remote host. Skipping.")
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func (s *DistributeNFSProvisionerArtifactsStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
-	localValuesPath, err := s.getLocalValuesPath(ctx)
+	localValuesPath, localChartPath, err := s.getLocalPaths(ctx)
 	if err != nil {
 		return err
 	}
 	valuesContent, err := os.ReadFile(localValuesPath)
 	if err != nil {
-		return fmt.Errorf("failed to read generated values file from agreed path %s: %w. Ensure GenerateNFSProvisionerValuesStep ran successfully.", localValuesPath, err)
+		return fmt.Errorf("failed to read local values file %s: %w", localValuesPath, err)
 	}
-
-	helmProvider := helm.NewHelmProvider(ctx)
-	chart := helmProvider.GetChart("nfs-subdir-external-provisioner")
-	if chart == nil {
-		return fmt.Errorf("cannot find chart info for nfs-subdir-external-provisioner in BOM")
-	}
-	localChartPath := chart.LocalPath(ctx.GetGlobalWorkDir())
 	chartContent, err := os.ReadFile(localChartPath)
 	if err != nil {
-		return fmt.Errorf("failed to read offline chart file from %s: %w. Ensure DownloadNFSProvisionerChartStep ran successfully.", localChartPath, err)
+		return fmt.Errorf("failed to read local chart file %s: %w", localChartPath, err)
 	}
 
 	runner := ctx.GetRunner()

@@ -3,6 +3,7 @@ package nfs
 import (
 	"bytes"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 	"os"
 	"path/filepath"
 	"text/template"
@@ -11,12 +12,10 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/images"
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
-// GenerateNFSProvisionerValuesStep is responsible for generating the Helm values file for the NFS Provisioner.
 type GenerateNFSProvisionerValuesStep struct {
 	step.Base
 	ImageRegistry string
@@ -25,40 +24,35 @@ type GenerateNFSProvisionerValuesStep struct {
 	NfsPath       string
 }
 
-// GenerateNFSProvisionerValuesStepBuilder is used to build instances.
 type GenerateNFSProvisionerValuesStepBuilder struct {
 	step.Builder[GenerateNFSProvisionerValuesStepBuilder, *GenerateNFSProvisionerValuesStep]
 }
 
-// NewGenerateNFSProvisionerValuesStepBuilder is the constructor.
 func NewGenerateNFSProvisionerValuesStepBuilder(ctx runtime.Context, instanceName string) *GenerateNFSProvisionerValuesStepBuilder {
-	imageProvider := images.NewImageProvider(&ctx)
+	cfg := ctx.GetClusterConfig()
+	if cfg.Spec.Storage == nil || cfg.Spec.Storage.NFS == nil || !*cfg.Spec.Storage.NFS.Enabled {
+		return nil
+	}
 
-	provisionerImage := imageProvider.GetImage("nfs-subdir-external-provisioner")
+	imageProvider := images.NewImageProvider(&ctx)
+	provisionerImage := imageProvider.GetImage(NfsChartName)
 	if provisionerImage == nil {
-		// TODO: Add a check for whether nfs is enabled
-		fmt.Fprintf(os.Stderr, "Error: NFS Provisioner is enabled but its image is not found in BOM for K8s version %s\n", ctx.GetClusterConfig().Spec.Kubernetes.Version)
+		ctx.GetLogger().Errorf("NFS Provisioner is enabled but its image ('%s') is not found in BOM for K8s version %s", NfsChartName, cfg.Spec.Kubernetes.Version)
 		return nil
 	}
 
 	s := &GenerateNFSProvisionerValuesStep{}
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate NFS Provisioner Helm values file", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s] >> Generate NFS Provisioner Helm values file", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 2 * time.Minute
 
-	s.ImageRegistry = provisionerImage.Registry()
-	if reg := ctx.GetClusterConfig().Spec.Registry.MirroringAndRewriting.PrivateRegistry; reg != "" {
-		s.ImageRegistry = reg
-	}
+	s.ImageRegistry = provisionerImage.RegistryAddrWithNamespace()
 	s.ImageTag = provisionerImage.Tag()
 
-	// These values should be provided by the cluster configuration.
-	// TODO: Add logic to read these from the cluster config spec.
-	// For now, using placeholder values.
-	s.NfsServer = "127.0.0.1" // Placeholder
-	s.NfsPath = "/nfs/share" // Placeholder
+	s.NfsServer = cfg.Spec.Storage.NFS.Server
+	s.NfsPath = cfg.Spec.Storage.NFS.Path
 
 	b := new(GenerateNFSProvisionerValuesStepBuilder).Init(s)
 	return b
@@ -68,24 +62,42 @@ func (s *GenerateNFSProvisionerValuesStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *GenerateNFSProvisionerValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	// TODO: Add a check to see if nfs is enabled
-	return false, nil
-}
-
 func (s *GenerateNFSProvisionerValuesStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
 	helmProvider := helm.NewHelmProvider(ctx)
-	chart := helmProvider.GetChart("nfs-subdir-external-provisioner")
+	chart := helmProvider.GetChart(NfsChartName)
 	if chart == nil {
-		return "", fmt.Errorf("cannot find chart info for nfs-subdir-external-provisioner in BOM")
+		return "", fmt.Errorf("cannot find chart info for '%s' in BOM", NfsChartName)
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
-	chartDir := filepath.Dir(chartTgzPath)
-	return filepath.Join(chartDir, "nfs-provisioner-values.yaml"), nil
+
+	chartDownloadDir := filepath.Dir(chart.LocalPath(ctx.GetGlobalWorkDir()))
+	return filepath.Join(chartDownloadDir, chart.Version, "nfs-provisioner-values.yaml"), nil
+}
+
+func (s *GenerateNFSProvisionerValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
+
+	cfg := ctx.GetClusterConfig()
+	if err != nil {
+		return false, nil
+	}
+	if cfg.Spec.Storage == nil || cfg.Spec.Storage.NFS == nil || !*cfg.Spec.Storage.NFS.Enabled {
+		return true, nil
+	}
+
+	localPath, err := s.getLocalValuesPath(ctx)
+	if _, err := os.Stat(localPath); err == nil {
+		logger.Infof("NFS Provisioner values file %s already exists. Skipping generation.", localPath)
+		return true, nil
+	}
+	return false, nil
 }
 
 func (s *GenerateNFSProvisionerValuesStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
+
+	if s.NfsServer == "" || s.NfsPath == "" {
+		return fmt.Errorf("NFS Server or Path is not configured, cannot generate values file")
+	}
 
 	valuesTemplateContent, err := templates.Get("storage/nfs/values.yaml.tmpl")
 	if err != nil {
@@ -122,6 +134,8 @@ func (s *GenerateNFSProvisionerValuesStep) Run(ctx runtime.ExecutionContext) err
 
 func (s *GenerateNFSProvisionerValuesStep) Rollback(ctx runtime.ExecutionContext) error {
 	if localPath, err := s.getLocalValuesPath(ctx); err == nil {
+		logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+		logger.Infof("Removing generated NFS Provisioner values file: %s", localPath)
 		os.Remove(localPath)
 	}
 	return nil

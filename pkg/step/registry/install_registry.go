@@ -37,7 +37,7 @@ func NewDistributeRegistryArtifactsStepBuilder(ctx runtime.Context, instanceName
 	}
 
 	s := &DistributeRegistryArtifactsStep{
-		LocalConfigPath: filepath.Join(ctx.GetClusterArtifactsDir(), "registry", "config.yml"),
+		LocalConfigPath: filepath.Join(ctx.GetGlobalWorkDir(), "registry", "config.yml"),
 	}
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Distribute registry binary and configuration", s.Base.Meta.Name)

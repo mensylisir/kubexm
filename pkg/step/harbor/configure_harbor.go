@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
@@ -51,7 +50,7 @@ func NewConfigureHarborStepBuilder(ctx runtime.Context, instanceName string) *Co
 
 	s := &ConfigureHarborStep{
 		LocalExtractedPath: filepath.Join(ctx.GetExtractDir(), extractedDirName, "harbor"),
-		LocalCertsDir:      filepath.Join(ctx.GetCertsDir(), "harbor"),
+		LocalCertsDir:      ctx.GetHarborCertsDir(),
 		RemoteInstallDir:   filepath.Join(installRoot, "harbor"),
 	}
 
