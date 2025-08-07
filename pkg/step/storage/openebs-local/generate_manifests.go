@@ -16,7 +16,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
-// GenerateOpenEBSValuesStep is responsible for generating the Helm values file for OpenEBS.
 type GenerateOpenEBSValuesStep struct {
 	step.Base
 	ImageRegistry       string
@@ -25,22 +24,23 @@ type GenerateOpenEBSValuesStep struct {
 	NdmDaemonImageTag   string
 }
 
-// GenerateOpenEBSValuesStepBuilder is used to build instances.
 type GenerateOpenEBSValuesStepBuilder struct {
 	step.Builder[GenerateOpenEBSValuesStepBuilder, *GenerateOpenEBSValuesStep]
 }
 
-// NewGenerateOpenEBSValuesStepBuilder is the constructor.
 func NewGenerateOpenEBSValuesStepBuilder(ctx runtime.Context, instanceName string) *GenerateOpenEBSValuesStepBuilder {
-	imageProvider := images.NewImageProvider(&ctx)
+	cfg := ctx.GetClusterConfig()
+	if cfg.Spec.Addons == nil || cfg.Spec.Storage.OpenEBS == nil || !*cfg.Spec.Storage.OpenEBS.Enabled {
+		return nil
+	}
 
+	imageProvider := images.NewImageProvider(&ctx)
 	provisionerImage := imageProvider.GetImage("openebs-provisioner-localpv")
 	ndmOperatorImage := imageProvider.GetImage("openebs-ndm-operator")
 	ndmDaemonImage := imageProvider.GetImage("openebs-ndm")
 
 	if provisionerImage == nil || ndmOperatorImage == nil || ndmDaemonImage == nil {
-		// TODO: Add a check for whether openebs is enabled
-		fmt.Fprintf(os.Stderr, "Error: OpenEBS is enabled but one or more required images are not found in BOM for K8s version %s\n", ctx.GetClusterConfig().Spec.Kubernetes.Version)
+		ctx.GetLogger().Errorf("OpenEBS is enabled but one or more required images are not found in BOM for K8s version %s", cfg.Spec.Kubernetes.Version)
 		return nil
 	}
 
@@ -51,11 +51,7 @@ func NewGenerateOpenEBSValuesStepBuilder(ctx runtime.Context, instanceName strin
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 2 * time.Minute
 
-	s.ImageRegistry = provisionerImage.Registry()
-	if reg := ctx.GetClusterConfig().Spec.Registry.MirroringAndRewriting.PrivateRegistry; reg != "" {
-		s.ImageRegistry = reg
-	}
-
+	s.ImageRegistry = provisionerImage.RegistryAddrWithNamespace()
 	s.ImageTag = provisionerImage.Tag()
 	s.NdmOperatorImageTag = ndmOperatorImage.Tag()
 	s.NdmDaemonImageTag = ndmDaemonImage.Tag()
@@ -68,20 +64,35 @@ func (s *GenerateOpenEBSValuesStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *GenerateOpenEBSValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	// TODO: Add a check to see if openebs is enabled
-	return false, nil
-}
-
 func (s *GenerateOpenEBSValuesStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
 	helmProvider := helm.NewHelmProvider(ctx)
-	chart := helmProvider.GetChart("openebs")
+	chart := helmProvider.GetChart(OpenEBSChartName)
 	if chart == nil {
-		return "", fmt.Errorf("cannot find chart info for openebs in BOM")
+		return "", fmt.Errorf("cannot find chart info for '%s' in BOM", OpenEBSChartName)
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
-	chartDir := filepath.Dir(chartTgzPath)
-	return filepath.Join(chartDir, "openebs-values.yaml"), nil
+
+	chartDownloadDir := filepath.Dir(chart.LocalPath(ctx.GetGlobalWorkDir()))
+	return filepath.Join(chartDownloadDir, chart.Version, "openebs-values.yaml"), nil
+}
+
+func (s *GenerateOpenEBSValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
+
+	cfg := ctx.GetClusterConfig()
+	if cfg.Spec.Addons == nil || cfg.Spec.Storage.OpenEBS == nil || !*cfg.Spec.Storage.OpenEBS.Enabled {
+		return true, nil
+	}
+
+	localPath, err := s.getLocalValuesPath(ctx)
+	if err != nil {
+		return false, nil
+	}
+	if _, err := os.Stat(localPath); err == nil {
+		logger.Infof("OpenEBS values file %s already exists. Skipping generation.", localPath)
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func (s *GenerateOpenEBSValuesStep) Run(ctx runtime.ExecutionContext) error {
@@ -122,7 +133,11 @@ func (s *GenerateOpenEBSValuesStep) Run(ctx runtime.ExecutionContext) error {
 
 func (s *GenerateOpenEBSValuesStep) Rollback(ctx runtime.ExecutionContext) error {
 	if localPath, err := s.getLocalValuesPath(ctx); err == nil {
-		os.Remove(localPath)
+		if _, statErr := os.Stat(localPath); statErr == nil {
+			logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+			logger.Infof("Removing generated OpenEBS values file: %s", localPath)
+			os.Remove(localPath)
+		}
 	}
 	return nil
 }
