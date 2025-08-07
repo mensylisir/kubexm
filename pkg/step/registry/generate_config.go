@@ -14,12 +14,10 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
 )
 
-// registryConfigForRender 用于渲染 config.yml 模板
 type registryConfigForRender struct {
 	StorageRootDirectory string
 }
 
-// GenerateRegistryConfigStep 是一个无状态的编排步骤。
 type GenerateRegistryConfigStep struct {
 	step.Base
 	RenderedConfigPath string
@@ -30,7 +28,6 @@ type GenerateRegistryConfigStepBuilder struct {
 	step.Builder[GenerateRegistryConfigStepBuilder, *GenerateRegistryConfigStep]
 }
 
-// NewGenerateRegistryConfigStepBuilder 在创建前会检查 Registry 是否被启用。
 func NewGenerateRegistryConfigStepBuilder(ctx runtime.Context, instanceName string) *GenerateRegistryConfigStepBuilder {
 	provider := binary.NewBinaryProvider(&ctx)
 	const representativeArch = "amd64"
@@ -46,8 +43,7 @@ func NewGenerateRegistryConfigStepBuilder(ctx runtime.Context, instanceName stri
 		return nil
 	}
 
-	// 确定存储根目录
-	storageRoot := "/var/lib/registry" // 官方默认
+	storageRoot := "/var/lib/registry"
 	if localCfg.DataRoot != "" {
 		storageRoot = localCfg.DataRoot
 	}
@@ -57,14 +53,14 @@ func NewGenerateRegistryConfigStepBuilder(ctx runtime.Context, instanceName stri
 	}
 
 	s := &GenerateRegistryConfigStep{
-		// 将配置文件生成在 artifacts 目录，以便后续分发
-		RenderedConfigPath: filepath.Join(ctx.GetClusterArtifactsDir(), "registry", "config.yml"),
+		RenderedConfigPath: filepath.Join(ctx.GetGlobalWorkDir(), "registry", "config.yml"),
 		RenderConfig:       renderCfg,
 	}
 
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate registry config.yml", s.Base.Meta.Name)
 	s.Base.Sudo = false
+	s.Base.IgnoreError = false
 	s.Base.Timeout = 1 * time.Minute
 
 	b := new(GenerateRegistryConfigStepBuilder).Init(s)
@@ -75,7 +71,6 @@ func (s *GenerateRegistryConfigStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-// Precheck 检查渲染后的 config.yml 是否已存在且内容一致。
 func (s *GenerateRegistryConfigStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
 
@@ -107,7 +102,6 @@ func (s *GenerateRegistryConfigStep) Precheck(ctx runtime.ExecutionContext) (isD
 	return false, nil
 }
 
-// Run 执行模板渲染并写入文件。
 func (s *GenerateRegistryConfigStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
@@ -125,9 +119,7 @@ func (s *GenerateRegistryConfigStep) Run(ctx runtime.ExecutionContext) error {
 	return nil
 }
 
-// renderContent 是一个辅助函数，负责读取模板并执行渲染。
 func (s *GenerateRegistryConfigStep) renderContent() (string, error) {
-	// 这个模板非常简单，我们可以直接内联，或者从 templates 包读取
 	tmplStr := `version: 0.1
 log:
   fields:

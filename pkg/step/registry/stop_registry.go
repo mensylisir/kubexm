@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-// StopRegistryServiceStep 是一个无状态的节点执行步骤。
 type StopRegistryServiceStep struct {
 	step.Base
 }
@@ -39,7 +38,6 @@ func (s *StopRegistryServiceStep) Precheck(ctx runtime.ExecutionContext) (isDone
 	if err != nil {
 		return false, err
 	}
-	// is-active 返回 inactive 或 failed 都算作已停止
 	output, err := runner.Run(ctx.GoContext(), conn, "systemctl is-active registry.service", s.Sudo)
 	return err != nil || strings.TrimSpace(output) != "active", nil
 }
@@ -51,13 +49,11 @@ func (s *StopRegistryServiceStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 	if _, err := runner.Run(ctx.GoContext(), conn, "systemctl stop registry.service", s.Sudo); err != nil {
-		// 如果服务不存在，stop 会失败，但我们的目标已经达成，所以可以忽略某些错误
 	}
 	return nil
 }
 
 func (s *StopRegistryServiceStep) Rollback(ctx runtime.ExecutionContext) error {
-	// 回滚一个 stop 操作就是 start
 	runner := ctx.GetRunner()
 	conn, _ := ctx.GetCurrentHostConnector()
 	_, _ = runner.Run(ctx.GoContext(), conn, "systemctl start registry.service", s.Sudo)

@@ -18,7 +18,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
-// GenerateKubeovnValuesStep is responsible for generating the Helm values file for Kube-OVN.
 type GenerateKubeovnValuesStep struct {
 	step.Base
 	ImageRegistry    string
@@ -30,7 +29,6 @@ type GenerateKubeovnValuesStep struct {
 	AdvancedFeatures *v1alpha1.KubeOvnAdvancedFeatures
 }
 
-// GenerateKubeovnValuesStepBuilder is used to build instances.
 type GenerateKubeovnValuesStepBuilder struct {
 	step.Builder[GenerateKubeovnValuesStepBuilder, *GenerateKubeovnValuesStep]
 }
@@ -40,7 +38,7 @@ func NewGenerateKubeovnValuesStepBuilder(ctx runtime.Context, instanceName strin
 	kubeovnImage := imageProvider.GetImage("kube-ovn")
 
 	if kubeovnImage == nil {
-		if ctx.GetClusterConfig().Spec.Network.Plugin == string(common.CNITypeKubeOVN) {
+		if ctx.GetClusterConfig().Spec.Network.Plugin == string(common.CNITypeKubeOvn) {
 			fmt.Fprintf(os.Stderr, "Error: Kube-OVN is enabled but 'kube-ovn' image is not found in BOM for K8s version %s\n", ctx.GetClusterConfig().Spec.Kubernetes.Version)
 		}
 		return nil
@@ -93,7 +91,7 @@ func (s *GenerateKubeovnValuesStep) Meta() *spec.StepMeta {
 }
 
 func (s *GenerateKubeovnValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeKubeOVN) {
+	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeKubeOvn) {
 		return true, nil
 	}
 	return false, nil
@@ -101,11 +99,11 @@ func (s *GenerateKubeovnValuesStep) Precheck(ctx runtime.ExecutionContext) (isDo
 
 func (s *GenerateKubeovnValuesStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
 	helmProvider := helm.NewHelmProvider(ctx)
-	chart := helmProvider.GetChart(string(common.CNITypeKubeOVN))
+	chart := helmProvider.GetChart(string(common.CNITypeKubeOvn))
 	if chart == nil {
 		return "", fmt.Errorf("cannot find chart info for kube-ovn in BOM")
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
+	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
 	chartDir := filepath.Dir(chartTgzPath)
 	return filepath.Join(chartDir, "kubeovn-values.yaml"), nil
 }

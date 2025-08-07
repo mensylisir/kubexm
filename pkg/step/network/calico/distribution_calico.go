@@ -14,14 +14,12 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 )
 
-// DistributeCalicoArtifactsStep 负责将 Calico 的 Helm Chart 和生成的 values 文件分发到远程节点。
 type DistributeCalicoArtifactsStep struct {
 	step.Base
 	RemoteValuesPath string
 	RemoteChartPath  string
 }
 
-// DistributeCalicoArtifactsStepBuilder 用于构建实例。
 type DistributeCalicoArtifactsStepBuilder struct {
 	step.Builder[DistributeCalicoArtifactsStepBuilder, *DistributeCalicoArtifactsStep]
 }
@@ -43,7 +41,6 @@ func NewDistributeCalicoArtifactsStepBuilder(ctx runtime.Context, instanceName s
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	// 使用简洁的远程路径约定
 	remoteDir := filepath.Join(ctx.GetUploadDir(), chart.RepoName(), chart.ChartName()+"-"+chart.Version)
 	s.RemoteValuesPath = filepath.Join(remoteDir, "calico-values.yaml")
 	chartFileName := fmt.Sprintf("%s-%s.tgz", chart.ChartName(), chart.Version)
@@ -64,7 +61,6 @@ func (s *DistributeCalicoArtifactsStep) Precheck(ctx runtime.ExecutionContext) (
 	return false, nil
 }
 
-// getLocalValuesPath 定义了与 GenerateCalicoValuesStep 完全相同的约定路径。
 func (s *DistributeCalicoArtifactsStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeCalico))
@@ -78,8 +74,6 @@ func (s *DistributeCalicoArtifactsStep) getLocalValuesPath(ctx runtime.Execution
 
 func (s *DistributeCalicoArtifactsStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
-
-	// 1. 根据约定，找到本地 artifacts 目录中的 values 文件
 	localValuesPath, err := s.getLocalValuesPath(ctx)
 	if err != nil {
 		return err
@@ -89,7 +83,6 @@ func (s *DistributeCalicoArtifactsStep) Run(ctx runtime.ExecutionContext) error 
 		return fmt.Errorf("failed to read generated values file from agreed path %s: %w. Ensure GenerateCalicoValuesStep ran successfully.", localValuesPath, err)
 	}
 
-	// 2. 找到本地 artifacts 目录中的 Chart 文件
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeCalico))
 	if chart == nil {
@@ -101,7 +94,6 @@ func (s *DistributeCalicoArtifactsStep) Run(ctx runtime.ExecutionContext) error 
 		return fmt.Errorf("failed to read offline chart file from %s: %w. Ensure DownloadCalicoChartStep ran successfully.", localChartPath, err)
 	}
 
-	// 3. 上传文件到远程节点
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {

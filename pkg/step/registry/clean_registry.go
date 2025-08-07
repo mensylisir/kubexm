@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-// RemoveRegistryDataStep 是一个无状态的节点执行步骤。
 type RemoveRegistryDataStep struct {
 	step.Base
 	DataRoot string
@@ -19,7 +18,7 @@ type RemoveRegistryDataStepBuilder struct {
 }
 
 func NewRemoveRegistryDataStepBuilder(ctx runtime.Context, instanceName string) *RemoveRegistryDataStepBuilder {
-	dataRoot := "/var/lib/registry" // 默认
+	dataRoot := "/var/lib/registry"
 	if localCfg := ctx.GetClusterConfig().Spec.Registry.LocalDeployment; localCfg != nil && localCfg.DataRoot != "" {
 		dataRoot = localCfg.DataRoot
 	}

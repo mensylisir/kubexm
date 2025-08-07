@@ -18,7 +18,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
-// GenerateHybridnetValuesStep is responsible for generating the Helm values file for Hybridnet.
 type GenerateHybridnetValuesStep struct {
 	step.Base
 	ImageRegistry  string
@@ -27,7 +26,6 @@ type GenerateHybridnetValuesStep struct {
 	Features       *v1alpha1.HybridnetFeaturesConfig
 }
 
-// GenerateHybridnetValuesStepBuilder is used to build instances.
 type GenerateHybridnetValuesStepBuilder struct {
 	step.Builder[GenerateHybridnetValuesStepBuilder, *GenerateHybridnetValuesStep]
 }
@@ -38,7 +36,7 @@ func NewGenerateHybridnetValuesStepBuilder(ctx runtime.Context, instanceName str
 
 	if hybridnetImage == nil {
 		if ctx.GetClusterConfig().Spec.Network.Plugin == string(common.CNITypeHybridnet) {
-			fmt.Fprintf(os.Stderr, "Error: Hybridnet is enabled but 'hybridnet' image is not found in BOM for K8s version %s\n", ctx.GetClusterConfig().Spec.Kubernetes.Version)
+			ctx.GetLogger().Errorf("Error: Hybridnet is enabled but 'hybridnet' image is not found in BOM for K8s version %s\n %v", ctx.GetClusterConfig().Spec.Kubernetes.Version, os.Stderr)
 		}
 		return nil
 	}
@@ -91,7 +89,7 @@ func (s *GenerateHybridnetValuesStep) getLocalValuesPath(ctx runtime.ExecutionCo
 	if chart == nil {
 		return "", fmt.Errorf("cannot find chart info for hybridnet in BOM")
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
+	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
 	chartDir := filepath.Dir(chartTgzPath)
 	return filepath.Join(chartDir, "hybridnet-values.yaml"), nil
 }

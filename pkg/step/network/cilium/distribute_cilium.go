@@ -14,7 +14,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 )
 
-// DistributeCiliumArtifactsStep 负责将 Cilium 的 Helm Chart 和生成的 values 文件分发到远程节点。
 type DistributeCiliumArtifactsStep struct {
 	step.Base
 	RemoteValuesPath string
@@ -42,7 +41,6 @@ func NewDistributeCiliumArtifactsStepBuilder(ctx runtime.Context, instanceName s
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	// 远程路径遵循同一目录的约定
 	remoteDir := filepath.Join(ctx.GetUploadDir(), chart.RepoName(), chart.ChartName()+"-"+chart.Version)
 	s.RemoteValuesPath = filepath.Join(remoteDir, "cilium-values.yaml")
 	chartFileName := fmt.Sprintf("%s-%s.tgz", chart.ChartName(), chart.Version)
@@ -63,7 +61,6 @@ func (s *DistributeCiliumArtifactsStep) Precheck(ctx runtime.ExecutionContext) (
 	return false, nil
 }
 
-// getLocalValuesPath 定义了与 GenerateCiliumValuesStep 完全相同的约定路径。
 func (s *DistributeCiliumArtifactsStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeCilium))
@@ -78,7 +75,6 @@ func (s *DistributeCiliumArtifactsStep) getLocalValuesPath(ctx runtime.Execution
 func (s *DistributeCiliumArtifactsStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
-	// 1. 根据约定，找到本地 artifacts 目录中的 values 文件
 	localValuesPath, err := s.getLocalValuesPath(ctx)
 	if err != nil {
 		return err
@@ -88,7 +84,6 @@ func (s *DistributeCiliumArtifactsStep) Run(ctx runtime.ExecutionContext) error 
 		return fmt.Errorf("failed to read generated values file from agreed path %s: %w. Ensure GenerateCiliumValuesStep ran successfully.", localValuesPath, err)
 	}
 
-	// 2. 找到本地 artifacts 目录中的 Chart 文件
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeCilium))
 	if chart == nil {
@@ -100,7 +95,6 @@ func (s *DistributeCiliumArtifactsStep) Run(ctx runtime.ExecutionContext) error 
 		return fmt.Errorf("failed to read offline chart file from %s: %w. Ensure DownloadCiliumChartStep ran successfully.", localChartPath, err)
 	}
 
-	// 3. 上传文件到远程节点
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
@@ -131,7 +125,6 @@ func (s *DistributeCiliumArtifactsStep) Rollback(ctx runtime.ExecutionContext) e
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		// 在回滚阶段，如果连接失败，通常最好是记录日志而不是返回错误，以允许其他回滚步骤继续
 		logger.Errorf("Failed to get connector for rollback: %v", err)
 		return nil
 	}
