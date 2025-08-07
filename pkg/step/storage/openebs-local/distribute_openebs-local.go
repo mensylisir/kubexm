@@ -2,7 +2,6 @@ package openebslocal
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"path/filepath"
 	"time"
@@ -10,27 +9,30 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
+	"github.com/pkg/errors"
 )
 
-// DistributeOpenEBSArtifactsStep is responsible for distributing the OpenEBS artifacts.
 type DistributeOpenEBSArtifactsStep struct {
 	step.Base
 	RemoteValuesPath string
 	RemoteChartPath  string
 }
 
-// DistributeOpenEBSArtifactsStepBuilder is used to build instances.
 type DistributeOpenEBSArtifactsStepBuilder struct {
 	step.Builder[DistributeOpenEBSArtifactsStepBuilder, *DistributeOpenEBSArtifactsStep]
 }
 
-// NewDistributeOpenEBSArtifactsStepBuilder is the constructor.
 func NewDistributeOpenEBSArtifactsStepBuilder(ctx runtime.Context, instanceName string) *DistributeOpenEBSArtifactsStepBuilder {
+	cfg := ctx.GetClusterConfig()
+	if cfg.Spec.Addons == nil || cfg.Spec.Storage.OpenEBS == nil || !*cfg.Spec.Storage.OpenEBS.Enabled {
+		return nil
+	}
+
 	helmProvider := helm.NewHelmProvider(&ctx)
-	chart := helmProvider.GetChart("openebs")
+	chart := helmProvider.GetChart(OpenEBSChartName)
 	if chart == nil {
-		// TODO: Add a check for whether openebs is enabled
 		return nil
 	}
 
@@ -41,7 +43,7 @@ func NewDistributeOpenEBSArtifactsStepBuilder(ctx runtime.Context, instanceName 
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	remoteDir := filepath.Join(ctx.GetUploadDir(), chart.RepoName(), chart.ChartName()+"-"+chart.Version)
+	remoteDir := filepath.Join(ctx.GetUploadDir(), chart.RepoName(), chart.Version)
 	s.RemoteValuesPath = filepath.Join(remoteDir, "openebs-values.yaml")
 	chartFileName := fmt.Sprintf("%s-%s.tgz", chart.ChartName(), chart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)
@@ -54,43 +56,74 @@ func (s *DistributeOpenEBSArtifactsStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *DistributeOpenEBSArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	// TODO: Add a check to see if openebs is enabled
-	return false, nil
+func (s *DistributeOpenEBSArtifactsStep) getLocalPaths(ctx runtime.ExecutionContext) (localValuesPath, localChartPath string, err error) {
+	helmProvider := helm.NewHelmProvider(ctx)
+	chart := helmProvider.GetChart(OpenEBSChartName)
+	if chart == nil {
+		return "", "", fmt.Errorf("cannot find chart info for '%s' in BOM", OpenEBSChartName)
+	}
+
+	chartDir := filepath.Dir(chart.LocalPath(ctx.GetGlobalWorkDir()))
+	localValuesPath = filepath.Join(chartDir, chart.Version, "openebs-values.yaml")
+
+	localChartPath = chart.LocalPath(ctx.GetGlobalWorkDir())
+
+	return localValuesPath, localChartPath, nil
 }
 
-func (s *DistributeOpenEBSArtifactsStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
-	helmProvider := helm.NewHelmProvider(ctx)
-	chart := helmProvider.GetChart("openebs")
-	if chart == nil {
-		return "", fmt.Errorf("cannot find chart info for openebs in BOM")
+func (s *DistributeOpenEBSArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+
+	cfg := ctx.GetClusterConfig()
+	if cfg.Spec.Addons == nil || cfg.Spec.Storage.OpenEBS == nil || !*cfg.Spec.Storage.OpenEBS.Enabled {
+		return true, nil
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
-	chartDir := filepath.Dir(chartTgzPath)
-	return filepath.Join(chartDir, "openebs-values.yaml"), nil
+
+	localValuesPath, localChartPath, err := s.getLocalPaths(ctx)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(localValuesPath); os.IsNotExist(err) {
+		return false, errors.Wrapf(err, "local source file not found: %s. Ensure GenerateOpenEBSValuesStep ran.", localValuesPath)
+	}
+	if _, err := os.Stat(localChartPath); os.IsNotExist(err) {
+		return false, errors.Wrapf(err, "local source file not found: %s. Ensure DownloadOpenEBSChartStep ran.", localChartPath)
+	}
+
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		return false, errors.Wrap(err, "failed to get connector for precheck")
+	}
+
+	valuesExistsCmd := fmt.Sprintf("test -f %s", s.RemoteValuesPath)
+	chartExistsCmd := fmt.Sprintf("test -f %s", s.RemoteChartPath)
+
+	_, errValues := runner.Run(ctx.GoContext(), conn, valuesExistsCmd, s.Sudo)
+	_, errChart := runner.Run(ctx.GoContext(), conn, chartExistsCmd, s.Sudo)
+
+	if errValues == nil && errChart == nil {
+		logger.Info("Both OpenEBS artifacts already exist on the remote host. Skipping.")
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func (s *DistributeOpenEBSArtifactsStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
-	localValuesPath, err := s.getLocalValuesPath(ctx)
+	localValuesPath, localChartPath, err := s.getLocalPaths(ctx)
 	if err != nil {
 		return err
 	}
 	valuesContent, err := os.ReadFile(localValuesPath)
 	if err != nil {
-		return fmt.Errorf("failed to read generated values file from agreed path %s: %w. Ensure GenerateOpenEBSValuesStep ran successfully.", localValuesPath, err)
+		return fmt.Errorf("failed to read local values file %s: %w", localValuesPath, err)
 	}
-
-	helmProvider := helm.NewHelmProvider(ctx)
-	chart := helmProvider.GetChart("openebs")
-	if chart == nil {
-		return fmt.Errorf("cannot find chart info for openebs in BOM")
-	}
-	localChartPath := chart.LocalPath(ctx.GetGlobalWorkDir())
 	chartContent, err := os.ReadFile(localChartPath)
 	if err != nil {
-		return fmt.Errorf("failed to read offline chart file from %s: %w. Ensure DownloadOpenEBSChartStep ran successfully.", localChartPath, err)
+		return fmt.Errorf("failed to read local chart file %s: %w", localChartPath, err)
 	}
 
 	runner := ctx.GetRunner()
