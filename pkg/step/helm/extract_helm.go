@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -49,13 +48,13 @@ func (s *ExtractHelmStep) Meta() *spec.StepMeta {
 
 func (s *ExtractHelmStep) getRequiredArchs(ctx runtime.ExecutionContext) (map[string]bool, error) {
 	archs := make(map[string]bool)
-	controlPlaneHosts := ctx.GetHostsByRole("")
-	if len(controlPlaneHosts) == 0 {
-		return nil, fmt.Errorf("no control-plane hosts found to determine required helm architectures")
+	allHosts := ctx.GetHostsByRole("")
+	if len(allHosts) == 0 {
+		return nil, fmt.Errorf("no hosts found to determine required helm architectures")
 	}
 
 	provider := binary.NewBinaryProvider(ctx)
-	for _, host := range controlPlaneHosts {
+	for _, host := range allHosts {
 		binaryInfo, err := provider.GetBinary(binary.ComponentHelm, host.GetArch())
 		if err != nil {
 			return nil, fmt.Errorf("error checking if helm is needed for host %s: %w", host.GetName(), err)
@@ -78,8 +77,9 @@ func (s *ExtractHelmStep) getPathsForArch(ctx runtime.ExecutionContext, arch str
 	}
 
 	sourcePath = binaryInfo.FilePath()
-	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tar.gz")
-	destPath = filepath.Join(ctx.GetExtractDir(), destDirName)
+
+	destPath = filepath.Dir(sourcePath)
+
 	cacheKey = sourcePath
 
 	return sourcePath, destPath, cacheKey, nil
@@ -108,19 +108,14 @@ func (s *ExtractHelmStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, e
 			return false, fmt.Errorf("source archive '%s' for arch %s not found, ensure download step ran successfully", sourcePath, arch)
 		}
 
-		_, err = os.Stat(destPath)
-		if os.IsNotExist(err) {
-			logger.Infof("Extraction destination '%s' for arch %s does not exist. Extraction is required.", destPath, arch)
-			allDone = false
-			continue
-		}
+		innerDir := fmt.Sprintf("linux-%s", arch)
+		keyFile := filepath.Join(destPath, innerDir, "helm")
 
-		keyFile := filepath.Join(destPath, "helm")
 		if _, err := os.Stat(keyFile); os.IsNotExist(err) {
-			logger.Warnf("Destination directory for arch %s exists, but key file '%s' is missing. Re-extracting.", arch, keyFile)
+			logger.Infof("Key file '%s' for arch %s does not exist. Extraction is required.", keyFile, arch)
 			allDone = false
 		} else {
-			ctx.GetTaskCache().Set(cacheKey, destPath)
+			ctx.GetTaskCache().Set(cacheKey, filepath.Dir(keyFile))
 		}
 	}
 
@@ -143,10 +138,6 @@ func (s *ExtractHelmStep) Run(ctx runtime.ExecutionContext) error {
 		return nil
 	}
 
-	if err := os.MkdirAll(ctx.GetExtractDir(), 0755); err != nil {
-		return fmt.Errorf("failed to create global extract directory '%s': %w", ctx.GetExtractDir(), err)
-	}
-
 	for arch := range requiredArchs {
 		if err := s.extractFileForArch(ctx, arch); err != nil {
 			return err
@@ -158,15 +149,17 @@ func (s *ExtractHelmStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *ExtractHelmStep) extractFileForArch(ctx runtime.ExecutionContext, arch string) error {
-	logger := ctx.GetLogger()
+	logger := ctx.GetLogger().With("arch", arch)
 	sourcePath, destPath, cacheKey, err := s.getPathsForArch(ctx, arch)
 	if err != nil {
 		return err
 	}
 
-	if _, err := os.Stat(filepath.Join(destPath, "helm")); err == nil {
-		logger.Infof("Skipping extraction for arch %s, destination already exists and is valid.", arch)
-		ctx.GetTaskCache().Set(cacheKey, destPath)
+	innerDir := fmt.Sprintf("linux-%s", arch)
+	keyFile := filepath.Join(destPath, innerDir, "helm")
+	if _, err := os.Stat(keyFile); err == nil {
+		logger.Infof("Skipping extraction, destination already exists and is valid.")
+		ctx.GetTaskCache().Set(cacheKey, filepath.Dir(keyFile))
 		return nil
 	}
 
@@ -176,7 +169,6 @@ func (s *ExtractHelmStep) extractFileForArch(ctx runtime.ExecutionContext, arch 
 	if err != nil {
 		return fmt.Errorf("failed to get info for source file %s: %w", sourcePath, err)
 	}
-
 	bar := progressbar.NewOptions64(
 		fileInfo.Size(),
 		progressbar.OptionSetDescription(fmt.Sprintf("Extracting %s", filepath.Base(sourcePath))),
@@ -188,15 +180,8 @@ func (s *ExtractHelmStep) extractFileForArch(ctx runtime.ExecutionContext, arch 
 		progressbar.OptionSpinnerType(14),
 		progressbar.OptionFullWidth(),
 	)
-
-	progressFunc := func(fileName string, totalBytes int64) {
-		bar.Add64(totalBytes)
-	}
-
-	ar := helpers.NewArchiver(
-		helpers.WithOverwrite(true),
-		helpers.WithProgress(progressFunc),
-	)
+	progressFunc := func(fileName string, totalBytes int64) { bar.Add64(totalBytes) }
+	ar := helpers.NewArchiver(helpers.WithOverwrite(true), helpers.WithProgress(progressFunc))
 
 	if err := ar.Extract(sourcePath, destPath); err != nil {
 		_ = bar.Clear()
@@ -207,7 +192,7 @@ func (s *ExtractHelmStep) extractFileForArch(ctx runtime.ExecutionContext, arch 
 	_ = bar.Finish()
 	logger.Infof("Successfully extracted archive for arch %s.", arch)
 
-	ctx.GetTaskCache().Set(cacheKey, destPath)
+	ctx.GetTaskCache().Set(cacheKey, filepath.Dir(keyFile))
 	return nil
 }
 
@@ -225,8 +210,12 @@ func (s *ExtractHelmStep) Rollback(ctx runtime.ExecutionContext) error {
 		if err != nil {
 			continue
 		}
-		logger.Warnf("Rolling back by deleting extracted directory: %s", destPath)
-		_ = os.RemoveAll(destPath)
+
+		innerDir := fmt.Sprintf("linux-%s", arch)
+		dirToRemove := filepath.Join(destPath, innerDir)
+
+		logger.Warnf("Rolling back by deleting extracted directory: %s", dirToRemove)
+		_ = os.RemoveAll(dirToRemove)
 	}
 
 	return nil

@@ -1,18 +1,17 @@
 package helm
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers" // 引入 helpers 包
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
 	"github.com/schollz/progressbar/v3"
 )
@@ -51,41 +50,22 @@ func (s *DownloadHelmStep) Meta() *spec.StepMeta {
 
 func (s *DownloadHelmStep) getRequiredArchs(ctx runtime.ExecutionContext) (map[string]bool, error) {
 	archs := make(map[string]bool)
-	controlPlaneHosts := ctx.GetHostsByRole("control-plane")
-	if len(controlPlaneHosts) == 0 {
+	hosts := ctx.GetHostsByRole("control-plane")
+	if len(hosts) == 0 {
 		return nil, fmt.Errorf("no control-plane hosts found to determine required helm architectures")
 	}
 
 	provider := binary.NewBinaryProvider(ctx)
-
-	for _, host := range controlPlaneHosts {
+	for _, host := range hosts {
 		binaryInfo, err := provider.GetBinary(binary.ComponentHelm, host.GetArch())
 		if err != nil {
 			return nil, fmt.Errorf("error checking if helm is needed for host %s: %w", host.GetName(), err)
 		}
-
 		if binaryInfo != nil {
 			archs[host.GetArch()] = true
 		}
 	}
 	return archs, nil
-}
-
-func (s *DownloadHelmStep) verifyChecksum(filePath string, binaryInfo *binary.Binary) (bool, error) {
-	expectedChecksum := binaryInfo.Checksum()
-	if expectedChecksum == "" || strings.HasPrefix(expectedChecksum, "dummy-") {
-		return true, nil
-	}
-	f, err := os.Open(filePath)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return false, err
-	}
-	return fmt.Sprintf("%x", h.Sum(nil)) == expectedChecksum, nil
 }
 
 func (s *DownloadHelmStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
@@ -95,9 +75,8 @@ func (s *DownloadHelmStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, 
 	if err != nil {
 		return false, err
 	}
-
 	if len(requiredArchs) == 0 {
-		logger.Info("No hosts require helm in this cluster configuration. Step is done.")
+		logger.Info("No hosts require helm in this cluster configuration. Step is complete.")
 		return true, nil
 	}
 
@@ -105,26 +84,26 @@ func (s *DownloadHelmStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, 
 	allDone := true
 
 	for arch := range requiredArchs {
-		binaryInfo, err := provider.GetBinary(binary.ComponentHelm, arch)
-		if err != nil {
-			return false, fmt.Errorf("failed to get helm info for arch %s: %w", arch, err)
-		}
+		binaryInfo, _ := provider.GetBinary(binary.ComponentHelm, arch)
 		if binaryInfo == nil {
 			continue
 		}
 
 		destPath := binaryInfo.FilePath()
-		logger.Infof("Checking for helm (arch: %s) at: %s", arch, destPath)
-
 		if _, err := os.Stat(destPath); os.IsNotExist(err) {
-			logger.Infof("File for arch %s does not exist. Download is required.", arch)
+			logger.Debugf("File for arch %s (%s) does not exist. Download is required.", arch, destPath)
 			allDone = false
 			continue
 		}
 
-		match, _ := s.verifyChecksum(destPath, binaryInfo)
+		match, err := helpers.VerifyLocalFileChecksum(destPath, binaryInfo.Checksum())
+		if err != nil {
+			logger.Warnf("Failed to verify checksum for arch %s file (%s): %v. Re-download is required.", arch, destPath, err)
+			allDone = false
+			continue
+		}
 		if !match {
-			logger.Warnf("Checksum mismatch for arch %s file. Re-download is required.", arch)
+			logger.Warnf("Checksum mismatch for arch %s file (%s). Re-download is required.", arch, destPath)
 			allDone = false
 		}
 	}
@@ -144,29 +123,19 @@ func (s *DownloadHelmStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	if len(requiredArchs) == 0 {
-		logger.Info("No hosts require helm in this cluster configuration. Skipping download.")
-		return nil
-	}
-
 	provider := binary.NewBinaryProvider(ctx)
 
 	for arch := range requiredArchs {
-		binaryInfo, err := provider.GetBinary(binary.ComponentHelm, arch)
-		if err != nil {
-			return fmt.Errorf("failed to get helm info for arch %s: %w", arch, err)
-		}
+		binaryInfo, _ := provider.GetBinary(binary.ComponentHelm, arch)
 		if binaryInfo == nil {
 			continue
 		}
 
 		destPath := binaryInfo.FilePath()
-		if _, err := os.Stat(destPath); err == nil {
-			match, _ := s.verifyChecksum(destPath, binaryInfo)
-			if match {
-				logger.Infof("Skipping download for arch %s, file already exists and is valid.", arch)
-				continue
-			}
+		match, _ := helpers.VerifyLocalFileChecksum(destPath, binaryInfo.Checksum())
+		if match {
+			logger.Infof("Skipping download for arch %s, file already exists and is valid.", arch)
+			continue
 		}
 
 		if err := s.downloadFile(ctx, binaryInfo); err != nil {
@@ -180,8 +149,8 @@ func (s *DownloadHelmStep) Run(ctx runtime.ExecutionContext) error {
 
 func (s *DownloadHelmStep) downloadFile(ctx runtime.ExecutionContext, binaryInfo *binary.Binary) error {
 	logger := ctx.GetLogger()
-
-	destDir := filepath.Dir(binaryInfo.FilePath())
+	destPath := binaryInfo.FilePath()
+	destDir := filepath.Dir(destPath)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return fmt.Errorf("failed to create destination directory '%s': %w", destDir, err)
 	}
@@ -202,7 +171,7 @@ func (s *DownloadHelmStep) downloadFile(ctx runtime.ExecutionContext, binaryInfo
 		return fmt.Errorf("download failed with status code %d", resp.StatusCode)
 	}
 
-	out, err := os.Create(binaryInfo.FilePath())
+	out, err := os.Create(destPath)
 	if err != nil {
 		return fmt.Errorf("failed to create destination file: %w", err)
 	}
@@ -210,7 +179,7 @@ func (s *DownloadHelmStep) downloadFile(ctx runtime.ExecutionContext, binaryInfo
 
 	bar := progressbar.NewOptions64(
 		resp.ContentLength,
-		progressbar.OptionSetDescription(fmt.Sprintf("Downloading %s", filepath.Base(binaryInfo.FilePath()))),
+		progressbar.OptionSetDescription(fmt.Sprintf("Downloading %s", filepath.Base(destPath))),
 		progressbar.OptionSetWriter(os.Stderr),
 		progressbar.OptionShowBytes(true),
 		progressbar.OptionSetWidth(40),
@@ -224,19 +193,19 @@ func (s *DownloadHelmStep) downloadFile(ctx runtime.ExecutionContext, binaryInfo
 	if err != nil {
 		_ = bar.Clear()
 		_ = out.Close()
-		_ = os.Remove(binaryInfo.FilePath())
+		_ = os.Remove(destPath)
 		return fmt.Errorf("failed to write to destination file: %w", err)
 	}
 	_ = bar.Finish()
 
-	logger.Infof("Successfully downloaded to %s", binaryInfo.FilePath())
+	logger.Infof("Successfully downloaded to %s", destPath)
 
-	match, err := s.verifyChecksum(binaryInfo.FilePath(), binaryInfo)
+	match, err := helpers.VerifyLocalFileChecksum(destPath, binaryInfo.Checksum())
 	if err != nil {
 		return fmt.Errorf("failed to verify checksum after download: %w", err)
 	}
 	if !match {
-		return fmt.Errorf("checksum mismatch after download for '%s'. Expected '%s'", binaryInfo.FilePath(), binaryInfo.Checksum())
+		return fmt.Errorf("checksum mismatch after download for '%s'. Expected '%s'", destPath, binaryInfo.Checksum())
 	}
 	logger.Info("Checksum verification successful.")
 
@@ -254,12 +223,15 @@ func (s *DownloadHelmStep) Rollback(ctx runtime.ExecutionContext) error {
 
 	provider := binary.NewBinaryProvider(ctx)
 	for arch := range requiredArchs {
-		binaryInfo, err := provider.GetBinary(binary.ComponentHelm, arch)
-		if err != nil || binaryInfo == nil {
+		binaryInfo, _ := provider.GetBinary(binary.ComponentHelm, arch)
+		if binaryInfo == nil {
 			continue
 		}
-		logger.Warnf("Rolling back by deleting downloaded file: %s", binaryInfo.FilePath())
-		_ = os.Remove(binaryInfo.FilePath())
+		destFile := binaryInfo.FilePath()
+		if _, statErr := os.Stat(destFile); statErr == nil {
+			logger.Warnf("Rolling back by deleting downloaded file: %s", destFile)
+			_ = os.Remove(destFile)
+		}
 	}
 	return nil
 }
