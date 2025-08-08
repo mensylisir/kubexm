@@ -2,7 +2,6 @@ package flannel
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"path/filepath"
 	"time"
@@ -11,7 +10,9 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
+	"github.com/pkg/errors"
 )
 
 type DistributeFlannelArtifactsStep struct {
@@ -25,12 +26,13 @@ type DistributeFlannelArtifactsStepBuilder struct {
 }
 
 func NewDistributeFlannelArtifactsStepBuilder(ctx runtime.Context, instanceName string) *DistributeFlannelArtifactsStepBuilder {
+	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeFlannel) {
+		return nil
+	}
+
 	helmProvider := helm.NewHelmProvider(&ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeFlannel))
 	if chart == nil {
-		if ctx.GetClusterConfig().Spec.Network.Plugin == string(common.CNITypeFlannel) {
-			ctx.GetLogger().Errorf("Error: Flannel is enabled but chart info is not found for K8s version %s\n %v", ctx.GetClusterConfig().Spec.Kubernetes.Version, os.Stderr)
-		}
 		return nil
 	}
 
@@ -41,8 +43,10 @@ func NewDistributeFlannelArtifactsStepBuilder(ctx runtime.Context, instanceName 
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	remoteDir := filepath.Join(ctx.GetUploadDir(), chart.RepoName(), chart.ChartName()+"-"+chart.Version)
-	s.RemoteValuesPath = filepath.Join(remoteDir, "flannel-values.yaml")
+	remoteDir := filepath.Join(ctx.GetUploadDir(), chart.RepoName(), chart.Version)
+
+	valuesFileName := fmt.Sprintf("%s-values.yaml", chart.RepoName())
+	s.RemoteValuesPath = filepath.Join(remoteDir, valuesFileName)
 	chartFileName := fmt.Sprintf("%s-%s.tgz", chart.ChartName(), chart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)
 
@@ -54,45 +58,72 @@ func (s *DistributeFlannelArtifactsStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *DistributeFlannelArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeFlannel) {
-		return true, nil
-	}
-	return false, nil
-}
-
-func (s *DistributeFlannelArtifactsStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
+func (s *DistributeFlannelArtifactsStep) getLocalPaths(ctx runtime.ExecutionContext) (localValuesPath, localChartPath string, err error) {
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeFlannel))
 	if chart == nil {
-		return "", fmt.Errorf("cannot find chart info for flannel in BOM")
+		return "", "", fmt.Errorf("cannot find chart info for flannel in BOM")
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
-	chartDir := filepath.Dir(chartTgzPath)
-	return filepath.Join(chartDir, "flannel-values.yaml"), nil
+
+	valuesFileName := fmt.Sprintf("%s-values.yaml", chart.RepoName())
+	chartDir := filepath.Dir(chart.LocalPath(ctx.GetGlobalWorkDir()))
+	localValuesPath = filepath.Join(chartDir, chart.Version, valuesFileName)
+
+	localChartPath = chart.LocalPath(ctx.GetGlobalWorkDir())
+
+	return localValuesPath, localChartPath, nil
+}
+
+func (s *DistributeFlannelArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+
+	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeFlannel) {
+		logger.Info("Flannel is not enabled, skipping.")
+		return true, nil
+	}
+
+	localValuesPath, localChartPath, err := s.getLocalPaths(ctx)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(localValuesPath); os.IsNotExist(err) {
+		return false, errors.Wrapf(err, "local source file not found: %s. Ensure GenerateFlannelValuesStep ran.", localValuesPath)
+	}
+	if _, err := os.Stat(localChartPath); os.IsNotExist(err) {
+		return false, errors.Wrapf(err, "local source file not found: %s. Ensure DownloadFlannelChartStep ran.", localChartPath)
+	}
+
+	valuesDone, err := helpers.CheckRemoteFileIntegrity(ctx, localValuesPath, s.RemoteValuesPath, s.Sudo)
+	if err != nil {
+		return false, err
+	}
+	chartDone, err := helpers.CheckRemoteFileIntegrity(ctx, localChartPath, s.RemoteChartPath, s.Sudo)
+	if err != nil {
+		return false, err
+	}
+
+	if valuesDone && chartDone {
+		logger.Info("All Flannel artifacts already exist on the remote host and are up-to-date. Skipping.")
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func (s *DistributeFlannelArtifactsStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
-	localValuesPath, err := s.getLocalValuesPath(ctx)
+	localValuesPath, localChartPath, err := s.getLocalPaths(ctx)
 	if err != nil {
 		return err
 	}
 	valuesContent, err := os.ReadFile(localValuesPath)
 	if err != nil {
-		return fmt.Errorf("failed to read generated values file from agreed path %s: %w. Ensure GenerateFlannelValuesStep ran successfully.", localValuesPath, err)
+		return fmt.Errorf("failed to read local values file %s: %w", localValuesPath, err)
 	}
-
-	helmProvider := helm.NewHelmProvider(ctx)
-	chart := helmProvider.GetChart(string(common.CNITypeFlannel))
-	if chart == nil {
-		return fmt.Errorf("cannot find chart info for flannel in BOM")
-	}
-	localChartPath := chart.LocalPath(ctx.GetGlobalWorkDir())
 	chartContent, err := os.ReadFile(localChartPath)
 	if err != nil {
-		return fmt.Errorf("failed to read offline chart file from %s: %w. Ensure DownloadFlannelChartStep ran successfully.", localChartPath, err)
+		return fmt.Errorf("failed to read local chart file %s: %w", localChartPath, err)
 	}
 
 	runner := ctx.GetRunner()

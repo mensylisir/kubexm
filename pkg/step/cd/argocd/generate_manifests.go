@@ -30,14 +30,11 @@ type GenerateArgoCDValuesStepBuilder struct {
 
 func NewGenerateArgoCDValuesStepBuilder(ctx runtime.Context, instanceName string) *GenerateArgoCDValuesStepBuilder {
 	imageProvider := images.NewImageProvider(&ctx)
-
 	argocdImage := imageProvider.GetImage("argocd-server")
 	dexImage := imageProvider.GetImage("argocd-dex")
 	redisImage := imageProvider.GetImage("argocd-redis")
 
 	if argocdImage == nil || dexImage == nil || redisImage == nil {
-		// TODO: Add a check for whether argocd is enabled
-		fmt.Fprintf(os.Stderr, "Error: Argo CD is enabled but one or more required images are not found in BOM for K8s version %s\n", ctx.GetClusterConfig().Spec.Kubernetes.Version)
 		return nil
 	}
 
@@ -65,19 +62,34 @@ func (s *GenerateArgoCDValuesStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *GenerateArgoCDValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	return false, nil
-}
-
-func (s *GenerateArgoCDValuesStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, string, error) {
+func (s *GenerateArgoCDValuesStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart("argocd")
 	if chart == nil {
-		return "", "", fmt.Errorf("cannot find chart info for argocd in BOM")
+		return "", fmt.Errorf("cannot find chart info for argocd in BOM")
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
-	valueYamlPath := filepath.Join(ctx.GetClusterWorkDir(), chart.ChartName(), chart.Version, "argocd-values.yaml")
-	return chartTgzPath, valueYamlPath, nil
+
+	chartDir := filepath.Dir(chart.LocalPath(ctx.GetGlobalWorkDir()))
+
+	valuesFileName := fmt.Sprintf("%s-values.yaml", chart.RepoName())
+
+	return filepath.Join(chartDir, chart.Version, valuesFileName), nil
+}
+
+func (s *GenerateArgoCDValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
+	localPath, err := s.getLocalValuesPath(ctx)
+	if err != nil {
+		logger.Infof("Skipping step, could not determine values path: %v", err)
+		return true, nil
+	}
+
+	if _, err := os.Stat(localPath); err == nil {
+		logger.Infof("Argo CD values file %s already exists. Step is complete.", localPath)
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func (s *GenerateArgoCDValuesStep) Run(ctx runtime.ExecutionContext) error {
@@ -97,19 +109,19 @@ func (s *GenerateArgoCDValuesStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to render argocd values.yaml.tmpl: %w", err)
 	}
 
-	_, valuePath, err := s.getLocalValuesPath(ctx)
+	localPath, err := s.getLocalValuesPath(ctx)
 	if err != nil {
 		return err
 	}
 
-	logger.Infof("Generating Argo CD Helm values file to: %s", valuePath)
+	logger.Infof("Generating Argo CD Helm values file to: %s", localPath)
 
-	if err := os.MkdirAll(filepath.Dir(valuePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
 		return fmt.Errorf("failed to create local directory for values file: %w", err)
 	}
 
-	if err := os.WriteFile(valuePath, valuesBuffer.Bytes(), 0644); err != nil {
-		return fmt.Errorf("failed to write generated values file to %s: %w", valuePath, err)
+	if err := os.WriteFile(localPath, valuesBuffer.Bytes(), 0644); err != nil {
+		return fmt.Errorf("failed to write generated values file to %s: %w", localPath, err)
 	}
 
 	logger.Info("Successfully generated Argo CD Helm values file.")
@@ -117,9 +129,23 @@ func (s *GenerateArgoCDValuesStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *GenerateArgoCDValuesStep) Rollback(ctx runtime.ExecutionContext) error {
-	if _, valuePath, err := s.getLocalValuesPath(ctx); err == nil {
-		os.Remove(valuePath)
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+
+	localPath, err := s.getLocalValuesPath(ctx)
+	if err != nil {
+		logger.Infof("Skipping rollback as no values path could be determined: %v", err)
+		return nil
 	}
+
+	if _, statErr := os.Stat(localPath); statErr == nil {
+		logger.Warnf("Rolling back by deleting generated values file: %s", localPath)
+		if err := os.Remove(localPath); err != nil {
+			logger.Errorf("Failed to remove file during rollback: %v", err)
+		}
+	} else {
+		logger.Infof("Rollback unnecessary, file to be deleted does not exist: %s", localPath)
+	}
+
 	return nil
 }
 

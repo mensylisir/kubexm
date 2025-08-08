@@ -1,6 +1,7 @@
 package cilium
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -9,8 +10,8 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	// 引入 helm 包
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
+	"github.com/pkg/errors"
 )
 
 type InstallCiliumHelmChartStep struct {
@@ -28,9 +29,12 @@ type InstallCiliumHelmChartStepBuilder struct {
 }
 
 func NewInstallCiliumHelmChartStepBuilder(ctx runtime.Context, instanceName string) *InstallCiliumHelmChartStepBuilder {
+	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeCilium) {
+		return nil
+	}
+
 	helmProvider := helm.NewHelmProvider(&ctx)
 	ciliumChart := helmProvider.GetChart(string(common.CNITypeCilium))
-
 	if ciliumChart == nil {
 		return nil
 	}
@@ -47,11 +51,12 @@ func NewInstallCiliumHelmChartStepBuilder(ctx runtime.Context, instanceName stri
 
 	s.ReleaseName = ciliumChart.ChartName()
 	s.Namespace = "kube-system"
-
 	s.AdminKubeconfigPath = filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
 
-	remoteDir := filepath.Join(ctx.GetUploadDir(), ciliumChart.RepoName(), ciliumChart.ChartName()+"-"+ciliumChart.Version)
-	s.RemoteValuesPath = filepath.Join(remoteDir, "cilium-values.yaml")
+	remoteDir := filepath.Join(ctx.GetUploadDir(), ciliumChart.RepoName(), ciliumChart.Version)
+
+	valuesFileName := fmt.Sprintf("%s-values.yaml", ciliumChart.RepoName())
+	s.RemoteValuesPath = filepath.Join(remoteDir, valuesFileName)
 	chartFileName := fmt.Sprintf("%s-%s.tgz", ciliumChart.ChartName(), ciliumChart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)
 
@@ -63,6 +68,19 @@ func (s *InstallCiliumHelmChartStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
+type helmStatusOutput struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Info      struct {
+		Status string `json:"status"`
+	} `json:"info"`
+	Chart struct {
+		Metadata struct {
+			Version string `json:"version"`
+		} `json:"metadata"`
+	} `json:"chart"`
+}
+
 func (s *InstallCiliumHelmChartStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	runner := ctx.GetRunner()
@@ -71,31 +89,45 @@ func (s *InstallCiliumHelmChartStep) Precheck(ctx runtime.ExecutionContext) (isD
 		return false, err
 	}
 
-	valuesExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteValuesPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check for values file: %w", err)
-	}
-	if !valuesExists {
-		return false, fmt.Errorf("required Cilium values file not found at precise path %s, cannot proceed", s.RemoteValuesPath)
+	if _, err := runner.LookPath(ctx.GoContext(), conn, "helm"); err != nil {
+		return false, errors.Wrap(err, "helm command not found in PATH on the target host")
 	}
 
-	chartExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteChartPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check for chart file: %w", err)
+	for _, path := range []string{s.RemoteValuesPath, s.RemoteChartPath, s.AdminKubeconfigPath} {
+		exists, err := runner.Exists(ctx.GoContext(), conn, path)
+		if err != nil {
+			return false, fmt.Errorf("failed to check for required file %s: %w", path, err)
+		}
+		if !exists {
+			return false, fmt.Errorf("required file not found at remote path %s", path)
+		}
 	}
-	if !chartExists {
-		return false, fmt.Errorf("Cilium Helm chart .tgz file not found at precise path %s", s.RemoteChartPath)
+	logger.Debug("All required Cilium artifacts found on remote host.")
+
+	statusCmd := fmt.Sprintf(
+		"helm status %s --namespace %s --kubeconfig %s -o json",
+		s.ReleaseName,
+		s.Namespace,
+		s.AdminKubeconfigPath,
+	)
+
+	output, err := runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
+	if err != nil {
+		logger.Infof("Helm release '%s' not found. Installation is required.", s.ReleaseName)
+		return false, nil
 	}
 
-	kubeconfigExists, err := runner.Exists(ctx.GoContext(), conn, s.AdminKubeconfigPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check for kubeconfig file: %w", err)
-	}
-	if !kubeconfigExists {
-		return false, fmt.Errorf("admin kubeconfig not found at its permanent location %s; ensure DistributeKubeconfigsStep ran successfully", s.AdminKubeconfigPath)
+	var status helmStatusOutput
+	if err := json.Unmarshal([]byte(output), &status); err != nil {
+		return false, errors.Wrap(err, "failed to parse helm status JSON output")
 	}
 
-	logger.Info("All required Cilium artifacts (chart, values, kubeconfig) found on remote host. Ready to install.")
+	if status.Info.Status == "deployed" && status.Chart.Metadata.Version == s.Chart.Version {
+		logger.Infof("Helm release '%s' version %s is already deployed in namespace '%s'. Skipping.", s.ReleaseName, s.Chart.Version, s.Namespace)
+		return true, nil
+	}
+
+	logger.Infof("Helm release '%s' found, but its status ('%s') or version ('%s') is not as expected ('deployed', '%s'). Upgrade is required.", s.ReleaseName, status.Info.Status, status.Chart.Metadata.Version, s.Chart.Version)
 	return false, nil
 }
 
@@ -151,7 +183,7 @@ func (s *InstallCiliumHelmChartStep) Rollback(ctx runtime.ExecutionContext) erro
 
 	logger.Warnf("Rolling back by uninstalling Helm release '%s' from namespace '%s'...", s.ReleaseName, s.Namespace)
 	if _, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo); err != nil {
-		logger.Errorf("Failed to uninstall Cilium Helm release (this may be expected if installation failed): %v", err)
+		logger.Errorf("Failed to uninstall Cilium Helm release (this is expected if installation failed): %v", err)
 	} else {
 		logger.Info("Successfully executed Helm uninstall command for Cilium.")
 	}

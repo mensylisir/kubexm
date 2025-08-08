@@ -1,13 +1,12 @@
 package calico
 
 import (
-	"crypto/sha256"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -71,23 +70,6 @@ func (s *DownloadCalicoctlStep) getRequiredArchs(ctx runtime.ExecutionContext) (
 	return archs, nil
 }
 
-func (s *DownloadCalicoctlStep) verifyChecksum(filePath string, binaryInfo *binary.Binary) (bool, error) {
-	expectedChecksum := binaryInfo.Checksum()
-	if expectedChecksum == "" || strings.HasPrefix(expectedChecksum, "dummy-") {
-		return true, nil
-	}
-	f, err := os.Open(filePath)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return false, err
-	}
-	return fmt.Sprintf("%x", h.Sum(nil)) == expectedChecksum, nil
-}
-
 func (s *DownloadCalicoctlStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
 
@@ -105,26 +87,26 @@ func (s *DownloadCalicoctlStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 	allDone := true
 
 	for arch := range requiredArchs {
-		binaryInfo, err := provider.GetBinary(binary.ComponentCalicoCtl, arch)
-		if err != nil {
-			return false, fmt.Errorf("failed to get calicoctl info for arch %s: %w", arch, err)
-		}
+		binaryInfo, _ := provider.GetBinary(binary.ComponentCalicoCtl, arch)
 		if binaryInfo == nil {
 			continue
 		}
 
 		destPath := binaryInfo.FilePath()
-		logger.Infof("Checking for calicoctl (arch: %s) at: %s", arch, destPath)
-
 		if _, err := os.Stat(destPath); os.IsNotExist(err) {
-			logger.Infof("File for arch %s does not exist. Download is required.", arch)
+			logger.Debugf("File for arch %s (%s) does not exist. Download is required.", arch, destPath)
 			allDone = false
 			continue
 		}
 
-		match, _ := s.verifyChecksum(destPath, binaryInfo)
+		match, err := helpers.VerifyLocalFileChecksum(destPath, binaryInfo.Checksum())
+		if err != nil {
+			logger.Warnf("Failed to verify checksum for arch %s file (%s): %v. Re-download is required.", arch, destPath, err)
+			allDone = false
+			continue
+		}
 		if !match {
-			logger.Warnf("Checksum mismatch for arch %s file. Re-download is required.", arch)
+			logger.Warnf("Checksum mismatch for arch %s file (%s). Re-download is required.", arch, destPath)
 			allDone = false
 		}
 	}
@@ -145,26 +127,24 @@ func (s *DownloadCalicoctlStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	if len(requiredArchs) == 0 {
-		logger.Info("No hosts require calicoctl in this cluster configuration. Skipping download.")
+		logger.Info("No hosts require calicoctl. Skipping download.")
 		return nil
 	}
 
 	provider := binary.NewBinaryProvider(ctx)
 
 	for arch := range requiredArchs {
-		binaryInfo, err := provider.GetBinary(binary.ComponentCalicoCtl, arch)
-		if err != nil {
-			return fmt.Errorf("failed to get calicoctl info for arch %s: %w", arch, err)
-		}
+		binaryInfo, _ := provider.GetBinary(binary.ComponentCalicoCtl, arch)
 		if binaryInfo == nil {
 			continue
 		}
 
 		destPath := binaryInfo.FilePath()
+
 		if _, err := os.Stat(destPath); err == nil {
-			match, _ := s.verifyChecksum(destPath, binaryInfo)
+			match, _ := helpers.VerifyLocalFileChecksum(destPath, binaryInfo.Checksum())
 			if match {
-				logger.Infof("Skipping download for arch %s, file already exists and is valid.", arch)
+				logger.Debugf("Skipping download for arch %s, file already exists and is valid.", arch)
 				continue
 			}
 		}
@@ -181,7 +161,8 @@ func (s *DownloadCalicoctlStep) Run(ctx runtime.ExecutionContext) error {
 func (s *DownloadCalicoctlStep) downloadFile(ctx runtime.ExecutionContext, binaryInfo *binary.Binary) error {
 	logger := ctx.GetLogger()
 
-	destDir := filepath.Dir(binaryInfo.FilePath())
+	destPath := binaryInfo.FilePath()
+	destDir := filepath.Dir(destPath)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return fmt.Errorf("failed to create destination directory '%s': %w", destDir, err)
 	}
@@ -202,7 +183,7 @@ func (s *DownloadCalicoctlStep) downloadFile(ctx runtime.ExecutionContext, binar
 		return fmt.Errorf("download failed with status code %d", resp.StatusCode)
 	}
 
-	out, err := os.Create(binaryInfo.FilePath())
+	out, err := os.Create(destPath)
 	if err != nil {
 		return fmt.Errorf("failed to create destination file: %w", err)
 	}
@@ -210,7 +191,7 @@ func (s *DownloadCalicoctlStep) downloadFile(ctx runtime.ExecutionContext, binar
 
 	bar := progressbar.NewOptions64(
 		resp.ContentLength,
-		progressbar.OptionSetDescription(fmt.Sprintf("Downloading %s", filepath.Base(binaryInfo.FilePath()))),
+		progressbar.OptionSetDescription(fmt.Sprintf("Downloading %s", filepath.Base(destPath))),
 		progressbar.OptionSetWriter(os.Stderr),
 		progressbar.OptionShowBytes(true),
 		progressbar.OptionSetWidth(40),
@@ -224,19 +205,19 @@ func (s *DownloadCalicoctlStep) downloadFile(ctx runtime.ExecutionContext, binar
 	if err != nil {
 		_ = bar.Clear()
 		_ = out.Close()
-		_ = os.Remove(binaryInfo.FilePath())
+		_ = os.Remove(destPath)
 		return fmt.Errorf("failed to write to destination file: %w", err)
 	}
 	_ = bar.Finish()
 
-	logger.Infof("Successfully downloaded to %s", binaryInfo.FilePath())
+	logger.Infof("Successfully downloaded to %s", destPath)
 
-	match, err := s.verifyChecksum(binaryInfo.FilePath(), binaryInfo)
+	match, err := helpers.VerifyLocalFileChecksum(destPath, binaryInfo.Checksum())
 	if err != nil {
 		return fmt.Errorf("failed to verify checksum after download: %w", err)
 	}
 	if !match {
-		return fmt.Errorf("checksum mismatch after download for '%s'. Expected '%s'", binaryInfo.FilePath(), binaryInfo.Checksum())
+		return fmt.Errorf("checksum mismatch after download for '%s'. Expected '%s'", destPath, binaryInfo.Checksum())
 	}
 	logger.Info("Checksum verification successful.")
 

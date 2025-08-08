@@ -13,27 +13,26 @@ import (
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
+	"github.com/pkg/errors"
 )
 
-// DownloadKubeovnChartStep is a step to download the Kube-OVN Helm chart from the network.
 type DownloadKubeovnChartStep struct {
 	step.Base
 	HelmBinaryPath string
-	ChartsDir      string
 }
 
-// DownloadKubeovnChartStepBuilder is used to build DownloadKubeovnChartStep instances.
 type DownloadKubeovnChartStepBuilder struct {
 	step.Builder[DownloadKubeovnChartStepBuilder, *DownloadKubeovnChartStep]
 }
 
-// NewDownloadKubeovnChartStepBuilder is the constructor for DownloadKubeovnChartStep.
 func NewDownloadKubeovnChartStepBuilder(ctx runtime.Context, instanceName string) *DownloadKubeovnChartStepBuilder {
-	s := &DownloadKubeovnChartStep{
-		ChartsDir: filepath.Join(ctx.GetClusterArtifactsDir(), "helm"),
+	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeKubeOvn) {
+		return nil
 	}
+
+	s := &DownloadKubeovnChartStep{}
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Download Kube-OVN Helm chart to local directory", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Download Kube-OVN Helm chart to local work directory", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 10 * time.Minute
@@ -46,39 +45,58 @@ func (s *DownloadKubeovnChartStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *DownloadKubeovnChartStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeKubeOVN) {
-		ctx.GetLogger().Infof("Kube-OVN is not enabled, skipping download step.")
-		return true, nil
+func (s *DownloadKubeovnChartStep) getChartAndPath(ctx runtime.ExecutionContext) (*helm.HelmChart, string, error) {
+	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeKubeOvn) {
+		return nil, "", fmt.Errorf("Kube-OVN is not the configured CNI plugin")
 	}
+
+	helmProvider := helm.NewHelmProvider(ctx)
+	kubeovnChart := helmProvider.GetChart(string(common.CNITypeKubeOvn))
+	if kubeovnChart == nil {
+		return nil, "", fmt.Errorf("could not get Kube-OVN chart info for Kubernetes version %s", ctx.GetClusterConfig().Spec.Kubernetes.Version)
+	}
+
+	destFile := kubeovnChart.LocalPath(ctx.GetGlobalWorkDir())
+
+	return kubeovnChart, destFile, nil
+}
+
+func (s *DownloadKubeovnChartStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
 
 	helmPath, err := exec.LookPath("helm")
 	if err != nil {
-		return false, fmt.Errorf("helm command not found in PATH, please install it first")
+		return false, errors.Wrap(err, "helm command not found in local PATH, please install it first")
 	}
 	s.HelmBinaryPath = helmPath
+
+	_, destFile, err := s.getChartAndPath(ctx)
+	if err != nil {
+		logger.Infof("Skipping step: %v", err)
+		return true, nil
+	}
+
+	if _, err := os.Stat(destFile); err == nil {
+		logger.Infof("Kube-OVN chart package %s already exists locally. Step is complete.", destFile)
+		return true, nil
+	}
+
 	return false, nil
 }
 
 func (s *DownloadKubeovnChartStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
-	helmProvider := helm.NewHelmProvider(ctx)
-	kubeovnChart := helmProvider.GetChart(string(common.CNITypeKubeOVN))
-	if kubeovnChart == nil {
-		return fmt.Errorf("could not get Kube-OVN chart info for Kubernetes version %s", ctx.GetClusterConfig().Spec.Kubernetes.Version)
+	kubeovnChart, destFile, err := s.getChartAndPath(ctx)
+	if err != nil {
+		logger.Warnf("Execution was not skipped by Precheck, but chart info is still unavailable. Error: %v", err)
+		return nil
 	}
 
-	destFile := kubeovnChart.LocalPath(s.ChartsDir)
 	destDir := filepath.Dir(destFile)
 
 	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("failed to create destination directory %s: %w", destDir, err)
-	}
-
-	if _, err := os.Stat(destFile); err == nil {
-		logger.Infof("Kube-OVN chart package %s already exists, skipping download.", destFile)
-		return nil
+		return fmt.Errorf("failed to create local destination directory %s: %w", destDir, err)
 	}
 
 	logger.Infof("Adding Helm repo: %s (%s)", kubeovnChart.RepoName(), kubeovnChart.RepoURL())
@@ -95,7 +113,7 @@ func (s *DownloadKubeovnChartStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to update helm repo %s: %w\nOutput: %s", kubeovnChart.RepoName(), err, string(output))
 	}
 
-	logger.Infof("Pulling Kube-OVN chart %s version %s to %s", kubeovnChart.FullName(), kubeovnChart.Version, destDir)
+	logger.Infof("Pulling Kube-OVN chart %s (version %s) to %s", kubeovnChart.FullName(), kubeovnChart.Version, destDir)
 	pullCmd := exec.Command(s.HelmBinaryPath, "pull", kubeovnChart.FullName(), "--version", kubeovnChart.Version, "--destination", destDir)
 	if output, err := pullCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to pull Kube-OVN chart: %w\nOutput: %s", err, string(output))
@@ -107,7 +125,22 @@ func (s *DownloadKubeovnChartStep) Run(ctx runtime.ExecutionContext) error {
 
 func (s *DownloadKubeovnChartStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
-	logger.Warn("Rollback for DownloadKubeovnChartStep is a no-op.")
+
+	_, destFile, err := s.getChartAndPath(ctx)
+	if err != nil {
+		logger.Infof("Skipping rollback as no chart path could be determined: %v", err)
+		return nil
+	}
+
+	if _, statErr := os.Stat(destFile); statErr == nil {
+		logger.Warnf("Rolling back by deleting locally downloaded chart file: %s", destFile)
+		if err := os.Remove(destFile); err != nil {
+			logger.Errorf("Failed to remove file during rollback: %v", err)
+		}
+	} else {
+		logger.Infof("Rollback unnecessary, file to be deleted does not exist: %s", destFile)
+	}
+
 	return nil
 }
 

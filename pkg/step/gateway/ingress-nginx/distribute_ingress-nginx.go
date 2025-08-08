@@ -2,7 +2,6 @@ package ingressnginx
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"path/filepath"
 	"time"
@@ -10,27 +9,25 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
+	"github.com/pkg/errors"
 )
 
-// DistributeIngressNginxArtifactsStep is responsible for distributing the Ingress-Nginx artifacts.
 type DistributeIngressNginxArtifactsStep struct {
 	step.Base
 	RemoteValuesPath string
 	RemoteChartPath  string
 }
 
-// DistributeIngressNginxArtifactsStepBuilder is used to build instances.
 type DistributeIngressNginxArtifactsStepBuilder struct {
 	step.Builder[DistributeIngressNginxArtifactsStepBuilder, *DistributeIngressNginxArtifactsStep]
 }
 
-// NewDistributeIngressNginxArtifactsStepBuilder is the constructor.
 func NewDistributeIngressNginxArtifactsStepBuilder(ctx runtime.Context, instanceName string) *DistributeIngressNginxArtifactsStepBuilder {
 	helmProvider := helm.NewHelmProvider(&ctx)
 	chart := helmProvider.GetChart("ingress-nginx")
 	if chart == nil {
-		// TODO: Add a check for whether ingress-nginx is enabled
 		return nil
 	}
 
@@ -41,8 +38,10 @@ func NewDistributeIngressNginxArtifactsStepBuilder(ctx runtime.Context, instance
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	remoteDir := filepath.Join(ctx.GetUploadDir(), ctx.GetHost().GetName(), chart.RepoName(), chart.ChartName()+"-"+chart.Version)
-	s.RemoteValuesPath = filepath.Join(remoteDir, "ingress-nginx-values.yaml")
+	remoteDir := filepath.Join(ctx.GetUploadDir(), chart.RepoName(), chart.Version)
+
+	valuesFileName := fmt.Sprintf("%s-values.yaml", chart.RepoName())
+	s.RemoteValuesPath = filepath.Join(remoteDir, valuesFileName)
 	chartFileName := fmt.Sprintf("%s-%s.tgz", chart.ChartName(), chart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)
 
@@ -54,43 +53,67 @@ func (s *DistributeIngressNginxArtifactsStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *DistributeIngressNginxArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	// TODO: Add a check to see if ingress-nginx is enabled
-	return false, nil
-}
-
-func (s *DistributeIngressNginxArtifactsStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
+func (s *DistributeIngressNginxArtifactsStep) getLocalPaths(ctx runtime.ExecutionContext) (localValuesPath, localChartPath string, err error) {
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart("ingress-nginx")
 	if chart == nil {
-		return "", fmt.Errorf("cannot find chart info for ingress-nginx in BOM")
+		return "", "", fmt.Errorf("cannot find chart info for ingress-nginx in BOM")
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
-	chartDir := filepath.Dir(chartTgzPath)
-	return filepath.Join(chartDir, "ingress-nginx-values.yaml"), nil
+
+	valuesFileName := fmt.Sprintf("%s-values.yaml", chart.RepoName())
+	chartDir := filepath.Dir(chart.LocalPath(ctx.GetGlobalWorkDir()))
+	localValuesPath = filepath.Join(chartDir, chart.Version, valuesFileName)
+
+	localChartPath = chart.LocalPath(ctx.GetGlobalWorkDir())
+
+	return localValuesPath, localChartPath, nil
+}
+
+func (s *DistributeIngressNginxArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+
+	localValuesPath, localChartPath, err := s.getLocalPaths(ctx)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(localValuesPath); os.IsNotExist(err) {
+		return false, errors.Wrapf(err, "local source file not found: %s. Ensure GenerateIngressNginxValuesStep ran.", localValuesPath)
+	}
+	if _, err := os.Stat(localChartPath); os.IsNotExist(err) {
+		return false, errors.Wrapf(err, "local source file not found: %s. Ensure DownloadIngressNginxChartStep ran.", localChartPath)
+	}
+
+	valuesDone, err := helpers.CheckRemoteFileIntegrity(ctx, localValuesPath, s.RemoteValuesPath, s.Sudo)
+	if err != nil {
+		return false, err
+	}
+	chartDone, err := helpers.CheckRemoteFileIntegrity(ctx, localChartPath, s.RemoteChartPath, s.Sudo)
+	if err != nil {
+		return false, err
+	}
+
+	if valuesDone && chartDone {
+		logger.Info("All Ingress-Nginx artifacts already exist on the remote host and are up-to-date. Skipping.")
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func (s *DistributeIngressNginxArtifactsStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
-	localValuesPath, err := s.getLocalValuesPath(ctx)
+	localValuesPath, localChartPath, err := s.getLocalPaths(ctx)
 	if err != nil {
 		return err
 	}
 	valuesContent, err := os.ReadFile(localValuesPath)
 	if err != nil {
-		return fmt.Errorf("failed to read generated values file from agreed path %s: %w. Ensure GenerateIngressNginxValuesStep ran successfully.", localValuesPath, err)
+		return fmt.Errorf("failed to read local values file %s: %w", localValuesPath, err)
 	}
-
-	helmProvider := helm.NewHelmProvider(ctx)
-	chart := helmProvider.GetChart("ingress-nginx")
-	if chart == nil {
-		return fmt.Errorf("cannot find chart info for ingress-nginx in BOM")
-	}
-	localChartPath := chart.LocalPath(ctx.GetGlobalWorkDir())
 	chartContent, err := os.ReadFile(localChartPath)
 	if err != nil {
-		return fmt.Errorf("failed to read offline chart file from %s: %w. Ensure DownloadIngressNginxChartStep ran successfully.", localChartPath, err)
+		return fmt.Errorf("failed to read local chart file %s: %w", localChartPath, err)
 	}
 
 	runner := ctx.GetRunner()

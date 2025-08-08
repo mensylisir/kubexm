@@ -3,7 +3,6 @@ package cilium
 import (
 	"bytes"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 	"os"
 	"path/filepath"
 	"text/template"
@@ -13,6 +12,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/images"
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
@@ -42,6 +42,10 @@ type GenerateCiliumValuesStepBuilder struct {
 }
 
 func NewGenerateCiliumValuesStepBuilder(ctx runtime.Context, instanceName string) *GenerateCiliumValuesStepBuilder {
+	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeCilium) {
+		return nil
+	}
+
 	s := &GenerateCiliumValuesStep{}
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate Cilium Helm values file from configuration", s.Base.Meta.Name)
@@ -53,16 +57,15 @@ func NewGenerateCiliumValuesStepBuilder(ctx runtime.Context, instanceName string
 	imageProvider := images.NewImageProvider(&ctx)
 	ciliumImage := imageProvider.GetImage("cilium")
 	operatorImage := imageProvider.GetImage("cilium-operator-generic")
+
 	if ciliumImage == nil || operatorImage == nil {
-		if clusterCfg.Spec.Network.Plugin == string(common.CNITypeCilium) {
-			ctx.GetLogger().Errorf("Fatal: Cilium is enabled but its images are not found in BOM for K8s version %s.\n %v", clusterCfg.Spec.Kubernetes.Version, os.Stderr)
-		}
 		return nil
 	}
 	s.ImageRepository = ciliumImage.FullNameWithoutTag()
 	s.ImageTag = ciliumImage.Tag()
 	s.OperatorImageRepository = operatorImage.FullNameWithoutTag()
 	s.OperatorImageTag = operatorImage.Tag()
+
 	s.Tunnel = "vxlan"
 	s.IpamMode = "kubernetes"
 	s.KubeProxyReplacement = "probe"
@@ -120,22 +123,40 @@ func (s *GenerateCiliumValuesStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *GenerateCiliumValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeCilium) {
-		return true, nil
-	}
-	return false, nil
-}
-
 func (s *GenerateCiliumValuesStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeCilium))
 	if chart == nil {
 		return "", fmt.Errorf("cannot find chart info for cilium in BOM")
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
-	chartDir := filepath.Dir(chartTgzPath)
-	return filepath.Join(chartDir, "cilium-values.yaml"), nil
+
+	chartDir := filepath.Dir(chart.LocalPath(ctx.GetGlobalWorkDir()))
+
+	valuesFileName := fmt.Sprintf("%s-values.yaml", chart.RepoName())
+
+	return filepath.Join(chartDir, chart.Version, valuesFileName), nil
+}
+
+func (s *GenerateCiliumValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
+
+	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeCilium) {
+		logger.Info("Cilium is not enabled, skipping.")
+		return true, nil
+	}
+
+	localPath, err := s.getLocalValuesPath(ctx)
+	if err != nil {
+		logger.Infof("Skipping step, could not determine values path: %v", err)
+		return true, nil
+	}
+
+	if _, err := os.Stat(localPath); err == nil {
+		logger.Infof("Cilium values file %s already exists. Step is complete.", localPath)
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func (s *GenerateCiliumValuesStep) Run(ctx runtime.ExecutionContext) error {
@@ -175,9 +196,23 @@ func (s *GenerateCiliumValuesStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *GenerateCiliumValuesStep) Rollback(ctx runtime.ExecutionContext) error {
-	if localPath, err := s.getLocalValuesPath(ctx); err == nil {
-		os.Remove(localPath)
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+
+	localPath, err := s.getLocalValuesPath(ctx)
+	if err != nil {
+		logger.Infof("Skipping rollback as no values path could be determined: %v", err)
+		return nil
 	}
+
+	if _, statErr := os.Stat(localPath); statErr == nil {
+		logger.Warnf("Rolling back by deleting generated values file: %s", localPath)
+		if err := os.Remove(localPath); err != nil {
+			logger.Errorf("Failed to remove file during rollback: %v", err)
+		}
+	} else {
+		logger.Infof("Rollback unnecessary, file to be deleted does not exist: %s", localPath)
+	}
+
 	return nil
 }
 

@@ -74,9 +74,9 @@ func (s *DistributeLonghornArtifactsStep) getLocalPaths(ctx runtime.ExecutionCon
 func (s *DistributeLonghornArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 
-	// 1. 检查 Longhorn 是否启用
 	cfg := ctx.GetClusterConfig()
 	if cfg.Spec.Addons == nil || cfg.Spec.Storage.Longhorn == nil || !*cfg.Spec.Storage.Longhorn.Enabled {
+		logger.Info("Longhorn is not enabled, skipping.")
 		return true, nil
 	}
 
@@ -91,20 +91,17 @@ func (s *DistributeLonghornArtifactsStep) Precheck(ctx runtime.ExecutionContext)
 		return false, errors.Wrapf(err, "local source file not found: %s. Ensure DownloadLonghornChartStep ran.", localChartPath)
 	}
 
-	runner := ctx.GetRunner()
-	conn, err := ctx.GetCurrentHostConnector()
+	valuesDone, err := helpers.CheckRemoteFileIntegrity(ctx, localValuesPath, s.RemoteValuesPath, s.Sudo)
 	if err != nil {
-		return false, errors.Wrap(err, "failed to get connector for precheck")
+		return false, err
+	}
+	chartDone, err := helpers.CheckRemoteFileIntegrity(ctx, localChartPath, s.RemoteChartPath, s.Sudo)
+	if err != nil {
+		return false, err
 	}
 
-	valuesExistsCmd := fmt.Sprintf("test -f %s", s.RemoteValuesPath)
-	chartExistsCmd := fmt.Sprintf("test -f %s", s.RemoteChartPath)
-
-	_, errValues := runner.Run(ctx.GoContext(), conn, valuesExistsCmd, s.Sudo)
-	_, errChart := runner.Run(ctx.GoContext(), conn, chartExistsCmd, s.Sudo)
-
-	if errValues == nil && errChart == nil {
-		logger.Info("Both Longhorn artifacts already exist on the remote host. Skipping.")
+	if valuesDone && chartDone {
+		logger.Info("All Longhorn artifacts already exist on the remote host and are up-to-date. Skipping.")
 		return true, nil
 	}
 

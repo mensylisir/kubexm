@@ -132,13 +132,23 @@ func (s *GenerateOpenEBSValuesStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *GenerateOpenEBSValuesStep) Rollback(ctx runtime.ExecutionContext) error {
-	if localPath, err := s.getLocalValuesPath(ctx); err == nil {
-		if _, statErr := os.Stat(localPath); statErr == nil {
-			logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
-			logger.Infof("Removing generated OpenEBS values file: %s", localPath)
-			os.Remove(localPath)
-		}
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+
+	localPath, err := s.getLocalValuesPath(ctx)
+	if err != nil {
+		logger.Infof("Skipping rollback as no values path could be determined: %v", err)
+		return nil
 	}
+
+	if _, statErr := os.Stat(localPath); statErr == nil {
+		logger.Warnf("Rolling back by deleting generated values file: %s", localPath)
+		if err := os.Remove(localPath); err != nil {
+			logger.Errorf("Failed to remove file during rollback: %v", err)
+		}
+	} else {
+		logger.Infof("Rollback unnecessary, file to be deleted does not exist: %s", localPath)
+	}
+
 	return nil
 }
 

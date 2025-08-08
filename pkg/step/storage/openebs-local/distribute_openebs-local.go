@@ -76,6 +76,7 @@ func (s *DistributeOpenEBSArtifactsStep) Precheck(ctx runtime.ExecutionContext) 
 
 	cfg := ctx.GetClusterConfig()
 	if cfg.Spec.Addons == nil || cfg.Spec.Storage.OpenEBS == nil || !*cfg.Spec.Storage.OpenEBS.Enabled {
+		logger.Info("OpenEBS is not enabled, skipping.")
 		return true, nil
 	}
 
@@ -90,20 +91,17 @@ func (s *DistributeOpenEBSArtifactsStep) Precheck(ctx runtime.ExecutionContext) 
 		return false, errors.Wrapf(err, "local source file not found: %s. Ensure DownloadOpenEBSChartStep ran.", localChartPath)
 	}
 
-	runner := ctx.GetRunner()
-	conn, err := ctx.GetCurrentHostConnector()
+	valuesDone, err := helpers.CheckRemoteFileIntegrity(ctx, localValuesPath, s.RemoteValuesPath, s.Sudo)
 	if err != nil {
-		return false, errors.Wrap(err, "failed to get connector for precheck")
+		return false, err
+	}
+	chartDone, err := helpers.CheckRemoteFileIntegrity(ctx, localChartPath, s.RemoteChartPath, s.Sudo)
+	if err != nil {
+		return false, err
 	}
 
-	valuesExistsCmd := fmt.Sprintf("test -f %s", s.RemoteValuesPath)
-	chartExistsCmd := fmt.Sprintf("test -f %s", s.RemoteChartPath)
-
-	_, errValues := runner.Run(ctx.GoContext(), conn, valuesExistsCmd, s.Sudo)
-	_, errChart := runner.Run(ctx.GoContext(), conn, chartExistsCmd, s.Sudo)
-
-	if errValues == nil && errChart == nil {
-		logger.Info("Both OpenEBS artifacts already exist on the remote host. Skipping.")
+	if valuesDone && chartDone {
+		logger.Info("All OpenEBS artifacts already exist on the remote host and are up-to-date. Skipping.")
 		return true, nil
 	}
 

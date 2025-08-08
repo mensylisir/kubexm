@@ -1,6 +1,7 @@
 package helm
 
 import (
+	"bufio"
 	"fmt"
 	"strings"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/pkg/errors"
 )
 
 type AddRepoStep struct {
@@ -24,8 +26,8 @@ func NewAddRepoStepBuilder(ctx runtime.Context, instanceName string) *AddRepoSte
 	s := &AddRepoStep{}
 
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Add helm repository", s.Base.Meta.Name)
-	s.Base.Sudo = true
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Add or update a Helm repository on a remote host", s.Base.Meta.Name)
+	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
@@ -55,18 +57,41 @@ func (s *AddRepoStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err e
 		return false, err
 	}
 
-	cmd := "helm"
-	args := []string{"repo", "list"}
-	stdout, _, err := runner.OriginRun(ctx.GoContext(), conn, fmt.Sprintf("%s %s", cmd, strings.Join(args, " ")), s.Sudo)
+	if s.RepoName == "" || s.RepoURL == "" {
+		return false, errors.New("RepoName and RepoURL must be provided")
+	}
+
+	if _, err := runner.LookPath(ctx.GoContext(), conn, "helm"); err != nil {
+		return false, errors.Wrap(err, "helm command not found on remote host")
+	}
+
+	listCmd := "helm repo list"
+	output, err := runner.Run(ctx.GoContext(), conn, listCmd, s.Sudo)
 	if err != nil {
-		return false, fmt.Errorf("failed to list helm repos: %w", err)
+		logger.Warnf("Failed to list helm repos, assuming repo needs to be added: %v", err)
+		return false, nil
 	}
 
-	if strings.Contains(stdout, s.RepoName) {
-		logger.Infof("Helm repo %s already exists. Step is done.", s.RepoName)
-		return true, nil
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := scanner.Text()
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			repoName := fields[0]
+			repoURL := fields[1]
+			if repoName == s.RepoName {
+				if repoURL == s.RepoURL {
+					logger.Infof("Helm repo '%s' with URL '%s' already exists. Step is complete.", s.RepoName, s.RepoURL)
+					return true, nil
+				} else {
+					logger.Warnf("Helm repo '%s' exists but with a different URL ('%s'). It will be updated.", s.RepoName, repoURL)
+					return false, nil
+				}
+			}
+		}
 	}
 
+	logger.Infof("Helm repo '%s' does not exist. It will be added.", s.RepoName)
 	return false, nil
 }
 
@@ -78,15 +103,16 @@ func (s *AddRepoStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	cmd := "helm"
-	args := []string{"repo", "add", s.RepoName, s.RepoURL}
+	addCmd := fmt.Sprintf("helm repo add %s %s --force-update", s.RepoName, s.RepoURL)
 
-	logger.Infof("Adding helm repo %s from %s", s.RepoName, s.RepoURL)
-	_, _, err = runner.OriginRun(ctx.GoContext(), conn, fmt.Sprintf("%s %s", cmd, strings.Join(args, " ")), s.Sudo)
+	logger.Infof("Adding or updating helm repo '%s' from '%s'", s.RepoName, s.RepoURL)
+	output, err := runner.Run(ctx.GoContext(), conn, addCmd, s.Sudo)
 	if err != nil {
-		return fmt.Errorf("failed to add helm repo: %w", err)
+		return errors.Wrapf(err, "failed to add helm repo '%s'\nOutput: %s", s.RepoName, output)
 	}
 
+	logger.Info("Successfully added or updated helm repo.")
+	logger.Debugf("Helm command output:\n%s", output)
 	return nil
 }
 
@@ -95,16 +121,17 @@ func (s *AddRepoStep) Rollback(ctx runtime.ExecutionContext) error {
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
+		logger.Errorf("Failed to get connector for rollback: %v", err)
 		return nil
 	}
 
-	cmd := "helm"
-	args := []string{"repo", "remove", s.RepoName}
+	removeCmd := fmt.Sprintf("helm repo remove %s", s.RepoName)
 
-	logger.Warnf("Rolling back by removing helm repo %s", s.RepoName)
-	_, _, err = runner.OriginRun(ctx.GoContext(), conn, fmt.Sprintf("%s %s", cmd, strings.Join(args, " ")), s.Sudo)
-	if err != nil {
-		logger.Errorf("Failed to remove helm repo during rollback: %v", err)
+	logger.Warnf("Rolling back by removing helm repo '%s'", s.RepoName)
+	if _, err := runner.Run(ctx.GoContext(), conn, removeCmd, s.Sudo); err != nil {
+		logger.Errorf("Failed to remove helm repo during rollback (this may be expected if add failed): %v", err)
+	} else {
+		logger.Info("Successfully executed helm repo remove.")
 	}
 
 	return nil

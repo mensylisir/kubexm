@@ -1,10 +1,9 @@
 package longhorn
 
 import (
+	"encoding/json"
 	"fmt"
-	"github.com/pkg/errors"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/common"
@@ -12,6 +11,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
+	"github.com/pkg/errors"
 )
 
 type InstallLonghornHelmChartStep struct {
@@ -29,11 +29,14 @@ type InstallLonghornHelmChartStepBuilder struct {
 }
 
 func NewInstallLonghornHelmChartStepBuilder(ctx runtime.Context, instanceName string) *InstallLonghornHelmChartStepBuilder {
+	cfg := ctx.GetClusterConfig()
+	if cfg.Spec.Addons == nil || cfg.Spec.Storage.Longhorn == nil || !*cfg.Spec.Storage.Longhorn.Enabled {
+		return nil
+	}
+
 	helmProvider := helm.NewHelmProvider(&ctx)
 	chart := helmProvider.GetChart("longhorn")
-
 	if chart == nil {
-		// TODO: Add a check for whether longhorn is enabled
 		return nil
 	}
 
@@ -49,10 +52,9 @@ func NewInstallLonghornHelmChartStepBuilder(ctx runtime.Context, instanceName st
 
 	s.ReleaseName = "longhorn"
 	s.Namespace = "longhorn-system"
-
 	s.AdminKubeconfigPath = filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
 
-	remoteDir := filepath.Join(ctx.GetUploadDir(), chart.RepoName(), chart.ChartName()+"-"+chart.Version)
+	remoteDir := filepath.Join(ctx.GetUploadDir(), chart.RepoName(), chart.Version)
 	s.RemoteValuesPath = filepath.Join(remoteDir, "longhorn-values.yaml")
 	chartFileName := fmt.Sprintf("%s-%s.tgz", chart.ChartName(), chart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)
@@ -63,6 +65,19 @@ func NewInstallLonghornHelmChartStepBuilder(ctx runtime.Context, instanceName st
 
 func (s *InstallLonghornHelmChartStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
+}
+
+type helmStatusOutput struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Info      struct {
+		Status string `json:"status"`
+	} `json:"info"`
+	Chart struct {
+		Metadata struct {
+			Version string `json:"version"`
+		} `json:"metadata"`
+	} `json:"chart"`
 }
 
 func (s *InstallLonghornHelmChartStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
@@ -86,7 +101,7 @@ func (s *InstallLonghornHelmChartStep) Precheck(ctx runtime.ExecutionContext) (i
 			return false, fmt.Errorf("required file not found at remote path %s", path)
 		}
 	}
-	logger.Debug("All required artifacts found on remote host.")
+	logger.Debug("All required Longhorn artifacts found on remote host.")
 
 	statusCmd := fmt.Sprintf(
 		"helm status %s --namespace %s --kubeconfig %s -o json",
@@ -97,17 +112,21 @@ func (s *InstallLonghornHelmChartStep) Precheck(ctx runtime.ExecutionContext) (i
 
 	output, err := runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
 	if err != nil {
-
 		logger.Infof("Helm release '%s' not found. Installation is required.", s.ReleaseName)
 		return false, nil
 	}
 
-	if strings.Contains(output, `"status":"deployed"`) {
-		logger.Infof("Helm release '%s' is already in 'deployed' state. Skipping.", s.ReleaseName)
+	var status helmStatusOutput
+	if err := json.Unmarshal([]byte(output), &status); err != nil {
+		return false, errors.Wrap(err, "failed to parse helm status JSON output")
+	}
+
+	if status.Info.Status == "deployed" && status.Chart.Metadata.Version == s.Chart.Version {
+		logger.Infof("Helm release '%s' version %s is already deployed in namespace '%s'. Skipping.", s.ReleaseName, s.Chart.Version, s.Namespace)
 		return true, nil
 	}
 
-	logger.Infof("Helm release '%s' found but not in 'deployed' state. Upgrade is required.", s.ReleaseName)
+	logger.Infof("Helm release '%s' found, but its status ('%s') or version ('%s') is not as expected ('deployed', '%s'). Upgrade is required.", s.ReleaseName, status.Info.Status, status.Chart.Metadata.Version, s.Chart.Version)
 	return false, nil
 }
 
