@@ -12,7 +12,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
-	"github.com/pkg/errors" // 引入 errors 包
+	"github.com/pkg/errors"
 )
 
 const OpenEBSChartName = "openebs"
@@ -27,6 +27,11 @@ type DownloadOpenEBSChartStepBuilder struct {
 }
 
 func NewDownloadOpenEBSChartStepBuilder(ctx runtime.Context, instanceName string) *DownloadOpenEBSChartStepBuilder {
+	cfg := ctx.GetClusterConfig()
+	if cfg.Spec.Addons == nil || cfg.Spec.Storage.OpenEBS == nil || !*cfg.Spec.Storage.OpenEBS.Enabled {
+		return nil
+	}
+
 	s := &DownloadOpenEBSChartStep{}
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Download OpenEBS Helm chart to local directory", s.Base.Meta.Name)
@@ -42,36 +47,40 @@ func (s *DownloadOpenEBSChartStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func getChart(ctx runtime.ExecutionContext) (*helm.HelmChart, error) {
+func (s *DownloadOpenEBSChartStep) getChartAndPath(ctx runtime.ExecutionContext) (*helm.HelmChart, string, error) {
+	cfg := ctx.GetClusterConfig()
+	if cfg.Spec.Addons == nil || cfg.Spec.Storage.OpenEBS == nil || !*cfg.Spec.Storage.OpenEBS.Enabled {
+		return nil, "", fmt.Errorf("OpenEBS is not enabled")
+	}
+
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart(OpenEBSChartName)
 	if chart == nil {
-		return nil, fmt.Errorf("OpenEBS chart is not enabled or no compatible version found in BOM for K8s version %s", ctx.GetClusterConfig().Spec.Kubernetes.Version)
+		return nil, "", fmt.Errorf("OpenEBS chart is not enabled or no compatible version found in BOM for K8s version %s", cfg.Spec.Kubernetes.Version)
 	}
-	return chart, nil
+
+	destFile := chart.LocalPath(ctx.GetGlobalWorkDir())
+
+	return chart, destFile, nil
 }
 
 func (s *DownloadOpenEBSChartStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
+
 	helmPath, err := exec.LookPath("helm")
 	if err != nil {
 		return false, errors.Wrap(err, "helm command not found in local PATH, please install it first")
 	}
 	s.HelmBinaryPath = helmPath
 
-	cfg := ctx.GetClusterConfig()
-	if cfg.Spec.Addons == nil || cfg.Spec.Storage.OpenEBS == nil || !*cfg.Spec.Storage.OpenEBS.Enabled {
-		return true, nil
-	}
-
-	chart, err := getChart(ctx)
+	_, destFile, err := s.getChartAndPath(ctx)
 	if err != nil {
-		ctx.GetLogger().Infof("Skipping OpenEBS chart download: %v", err)
+		logger.Infof("Skipping step: %v", err)
 		return true, nil
 	}
 
-	destFile := chart.LocalPath(ctx.GetGlobalWorkDir())
 	if _, err := os.Stat(destFile); err == nil {
-		ctx.GetLogger().Infof("OpenEBS chart package %s already exists locally.", destFile)
+		logger.Infof("OpenEBS chart package %s already exists locally. Step is complete.", destFile)
 		return true, nil
 	}
 
@@ -81,13 +90,12 @@ func (s *DownloadOpenEBSChartStep) Precheck(ctx runtime.ExecutionContext) (isDon
 func (s *DownloadOpenEBSChartStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
-	chart, err := getChart(ctx)
+	chart, destFile, err := s.getChartAndPath(ctx)
 	if err != nil {
-		logger.Warnf("Could not execute step (was supposed to be skipped by Precheck): %v", err)
+		logger.Warnf("Execution was not skipped by Precheck, but chart info is still unavailable. Error: %v", err)
 		return nil
 	}
 
-	destFile := chart.LocalPath(ctx.GetGlobalWorkDir())
 	destDir := filepath.Dir(destFile)
 
 	if err := os.MkdirAll(destDir, 0755); err != nil {
@@ -108,7 +116,7 @@ func (s *DownloadOpenEBSChartStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to update helm repo %s: %w\nOutput: %s", chart.RepoName(), err, string(output))
 	}
 
-	logger.Infof("Pulling OpenEBS chart %s version %s to %s", chart.FullName(), chart.Version, destDir)
+	logger.Infof("Pulling OpenEBS chart %s (version %s) to %s", chart.FullName(), chart.Version, destDir)
 	pullCmd := exec.Command(s.HelmBinaryPath, "pull", chart.FullName(), "--version", chart.Version, "--destination", destDir)
 	if output, err := pullCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to pull OpenEBS chart: %w\nOutput: %s", err, string(output))
@@ -120,13 +128,22 @@ func (s *DownloadOpenEBSChartStep) Run(ctx runtime.ExecutionContext) error {
 
 func (s *DownloadOpenEBSChartStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
-	if chart, err := getChart(ctx); err == nil {
-		destFile := chart.LocalPath(ctx.GetGlobalWorkDir())
-		if _, statErr := os.Stat(destFile); statErr == nil {
-			logger.Infof("Rolling back by deleting locally downloaded chart file: %s", destFile)
-			os.Remove(destFile)
-		}
+
+	_, destFile, err := s.getChartAndPath(ctx)
+	if err != nil {
+		logger.Infof("Skipping rollback as no chart path could be determined: %v", err)
+		return nil
 	}
+
+	if _, statErr := os.Stat(destFile); statErr == nil {
+		logger.Warnf("Rolling back by deleting locally downloaded chart file: %s", destFile)
+		if err := os.Remove(destFile); err != nil {
+			logger.Errorf("Failed to remove file during rollback: %v", err)
+		}
+	} else {
+		logger.Infof("Rollback unnecessary, file to be deleted does not exist: %s", destFile)
+	}
+
 	return nil
 }
 

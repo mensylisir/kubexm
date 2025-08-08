@@ -13,13 +13,13 @@ import (
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
+	"github.com/pkg/errors"
 )
 
 type DownloadHelmCharts2Step struct {
 	step.Base
 	HelmBinaryPath string
 	Concurrency    int
-	ChartsDir      string
 }
 
 type DownloadHelmCharts2StepBuilder struct {
@@ -29,10 +29,9 @@ type DownloadHelmCharts2StepBuilder struct {
 func NewDownloadHelmCharts2StepBuilder(ctx runtime.Context, instanceName string) *DownloadHelmCharts2StepBuilder {
 	s := &DownloadHelmCharts2Step{
 		Concurrency: 5,
-		ChartsDir:   filepath.Join(ctx.GetGlobalWorkDir(), "helm"),
 	}
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Download all required Helm charts to local directory", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Download all required Helm charts to local work directory", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 30 * time.Minute
@@ -53,11 +52,37 @@ func (s *DownloadHelmCharts2Step) Meta() *spec.StepMeta {
 }
 
 func (s *DownloadHelmCharts2Step) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
+
 	helmPath, err := exec.LookPath("helm")
 	if err != nil {
-		return false, fmt.Errorf("helm command not found in PATH, please install it first")
+		return false, errors.Wrap(err, "helm command not found in local PATH, please install it first")
 	}
 	s.HelmBinaryPath = helmPath
+
+	helmProvider := helm.NewHelmProvider(ctx)
+	chartsToDownload := helmProvider.GetCharts()
+
+	if len(chartsToDownload) == 0 {
+		logger.Info("No Helm charts are enabled for this configuration. Step is complete.")
+		return true, nil
+	}
+
+	allExist := true
+	for _, chart := range chartsToDownload {
+		destFile := chart.LocalPath(ctx.GetGlobalWorkDir())
+		if _, err := os.Stat(destFile); os.IsNotExist(err) {
+			logger.Debugf("Chart package %s does not exist. Download is required.", destFile)
+			allExist = false
+			break
+		}
+	}
+
+	if allExist {
+		logger.Info("All required Helm charts already exist locally. Step is complete.")
+		return true, nil
+	}
+
 	return false, nil
 }
 
@@ -67,24 +92,13 @@ func (s *DownloadHelmCharts2Step) Run(ctx runtime.ExecutionContext) error {
 	helmProvider := helm.NewHelmProvider(ctx)
 	chartsToDownload := helmProvider.GetCharts()
 
-	if len(chartsToDownload) == 0 {
-		logger.Info("No Helm charts need to be downloaded for this configuration.")
-		return nil
-	}
-
-	if err := os.MkdirAll(s.ChartsDir, 0755); err != nil {
-		return fmt.Errorf("failed to create base charts directory '%s': %w", s.ChartsDir, err)
-	}
-
 	addedRepos := make(map[string]bool)
 	for _, chart := range chartsToDownload {
 		if !addedRepos[chart.RepoName()] {
 			logger.Infof("Adding Helm repo: %s (%s)", chart.RepoName(), chart.RepoURL())
 			repoAddCmd := exec.Command(s.HelmBinaryPath, "repo", "add", chart.RepoName(), chart.RepoURL(), "--force-update")
-			if output, err := repoAddCmd.CombinedOutput(); err != nil {
-				if !strings.Contains(string(output), "already exists") {
-					return fmt.Errorf("failed to add helm repo '%s': %w\nOutput: %s", chart.RepoName(), err, string(output))
-				}
+			if output, err := repoAddCmd.CombinedOutput(); err != nil && !strings.Contains(string(output), "already exists") {
+				return fmt.Errorf("failed to add helm repo '%s': %w\nOutput: %s", chart.RepoName(), err, string(output))
 			}
 			addedRepos[chart.RepoName()] = true
 		}
@@ -136,7 +150,9 @@ func (s *DownloadHelmCharts2Step) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *DownloadHelmCharts2Step) pullChart(ctx runtime.ExecutionContext, chart *helm.HelmChart) error {
-	destFile := chart.LocalPath(s.ChartsDir)
+	logger := ctx.GetLogger().With("chart", chart.FullName())
+
+	destFile := chart.LocalPath(ctx.GetGlobalWorkDir())
 	destDir := filepath.Dir(destFile)
 
 	if err := os.MkdirAll(destDir, 0755); err != nil {
@@ -144,22 +160,34 @@ func (s *DownloadHelmCharts2Step) pullChart(ctx runtime.ExecutionContext, chart 
 	}
 
 	if _, err := os.Stat(destFile); err == nil {
-		ctx.GetLogger().Infof("Chart package %s already exists, skipping download.", destFile)
+		logger.Infof("Chart package already exists, skipping download.", "path", destFile)
 		return nil
 	}
 
-	ctx.GetLogger().Infof("Pulling chart %s version %s to %s", chart.FullName(), chart.Version, destDir)
-
+	logger.Infof("Pulling chart version %s...", chart.Version)
 	pullCmd := exec.Command(s.HelmBinaryPath, "pull", chart.FullName(), "--version", chart.Version, "--destination", destDir)
 	if output, err := pullCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to pull chart: %w\nOutput: %s", err, string(output))
 	}
+	logger.Info("Successfully downloaded chart.")
 	return nil
 }
 
 func (s *DownloadHelmCharts2Step) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
-	logger.Warn("Rollback for DownloadHelmChartsStep is a no-op. You can manually delete the charts directory:", "path", s.ChartsDir)
+
+	helmProvider := helm.NewHelmProvider(ctx)
+	charts := helmProvider.GetCharts()
+
+	for _, chart := range charts {
+		destFile := chart.LocalPath(ctx.GetGlobalWorkDir())
+		if _, statErr := os.Stat(destFile); statErr == nil {
+			logger.Warnf("Rolling back by deleting locally downloaded chart file: %s", destFile)
+			if err := os.Remove(destFile); err != nil {
+				logger.Errorf("Failed to remove file during rollback: %v", err)
+			}
+		}
+	}
 	return nil
 }
 

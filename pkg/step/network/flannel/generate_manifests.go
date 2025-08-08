@@ -35,14 +35,15 @@ type GenerateFlannelValuesStepBuilder struct {
 }
 
 func NewGenerateFlannelValuesStepBuilder(ctx runtime.Context, instanceName string) *GenerateFlannelValuesStepBuilder {
+	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeFlannel) {
+		return nil
+	}
+
 	imageProvider := images.NewImageProvider(&ctx)
 	flannelImage := imageProvider.GetImage("flannel")
 	cniPluginImage := imageProvider.GetImage("flannel-cni-plugin")
 
 	if flannelImage == nil || cniPluginImage == nil {
-		if ctx.GetClusterConfig().Spec.Network.Plugin == string(common.CNITypeFlannel) {
-			ctx.GetLogger().Errorf("Error: Flannel is enabled but 'flannel' or 'flannel-cni-plugin' image is not found in BOM for K8s version %s\n %v", ctx.GetClusterConfig().Spec.Kubernetes.Version, os.Stderr)
-		}
 		return nil
 	}
 
@@ -60,7 +61,6 @@ func NewGenerateFlannelValuesStepBuilder(ctx runtime.Context, instanceName strin
 
 	clusterCfg := ctx.GetClusterConfig()
 	s.PodCIDR = clusterCfg.Spec.Network.KubePodsCIDR
-
 	userFlannelCfg := clusterCfg.Spec.Network.Flannel
 	if userFlannelCfg != nil && userFlannelCfg.Backend != nil {
 		backendCfg := userFlannelCfg.Backend
@@ -68,9 +68,11 @@ func NewGenerateFlannelValuesStepBuilder(ctx runtime.Context, instanceName strin
 		s.BackendVXLAN = backendCfg.VXLAN
 		s.BackendIPsec = backendCfg.IPsec
 	}
-
 	if s.BackendType == "" {
 		s.BackendType = "vxlan"
+	}
+	if s.PodCIDR == "" {
+		s.PodCIDR = common.DefaultKubePodsCIDR
 	}
 
 	b := new(GenerateFlannelValuesStepBuilder).Init(s)
@@ -81,22 +83,40 @@ func (s *GenerateFlannelValuesStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *GenerateFlannelValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeFlannel) {
-		return true, nil
-	}
-	return false, nil
-}
-
 func (s *GenerateFlannelValuesStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeFlannel))
 	if chart == nil {
 		return "", fmt.Errorf("cannot find chart info for flannel in BOM")
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
-	chartDir := filepath.Dir(chartTgzPath)
-	return filepath.Join(chartDir, "flannel-values.yaml"), nil
+
+	chartDir := filepath.Dir(chart.LocalPath(ctx.GetGlobalWorkDir()))
+
+	valuesFileName := fmt.Sprintf("%s-values.yaml", chart.RepoName())
+
+	return filepath.Join(chartDir, chart.Version, valuesFileName), nil
+}
+
+func (s *GenerateFlannelValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
+
+	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeFlannel) {
+		logger.Info("Flannel is not enabled, skipping.")
+		return true, nil
+	}
+
+	localPath, err := s.getLocalValuesPath(ctx)
+	if err != nil {
+		logger.Infof("Skipping step, could not determine values path: %v", err)
+		return true, nil
+	}
+
+	if _, err := os.Stat(localPath); err == nil {
+		logger.Infof("Flannel values file %s already exists. Step is complete.", localPath)
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func (s *GenerateFlannelValuesStep) Run(ctx runtime.ExecutionContext) error {
@@ -136,9 +156,22 @@ func (s *GenerateFlannelValuesStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *GenerateFlannelValuesStep) Rollback(ctx runtime.ExecutionContext) error {
-	if localPath, err := s.getLocalValuesPath(ctx); err == nil {
-		os.Remove(localPath)
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+	localPath, err := s.getLocalValuesPath(ctx)
+	if err != nil {
+		logger.Infof("Skipping rollback as no values path could be determined: %v", err)
+		return nil
 	}
+
+	if _, statErr := os.Stat(localPath); statErr == nil {
+		logger.Warnf("Rolling back by deleting generated values file: %s", localPath)
+		if err := os.Remove(localPath); err != nil {
+			logger.Errorf("Failed to remove file during rollback: %v", err)
+		}
+	} else {
+		logger.Infof("Rollback unnecessary, file to be deleted does not exist: %s", localPath)
+	}
+
 	return nil
 }
 

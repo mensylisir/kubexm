@@ -1,6 +1,7 @@
 package argocd
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
+	"github.com/pkg/errors"
 )
 
 type InstallArgoCDHelmChartStep struct {
@@ -29,9 +31,7 @@ type InstallArgoCDHelmChartStepBuilder struct {
 func NewInstallArgoCDHelmChartStepBuilder(ctx runtime.Context, instanceName string) *InstallArgoCDHelmChartStepBuilder {
 	helmProvider := helm.NewHelmProvider(&ctx)
 	chart := helmProvider.GetChart("argocd")
-
 	if chart == nil {
-		// TODO: Add a check for whether argocd is enabled
 		return nil
 	}
 
@@ -50,8 +50,10 @@ func NewInstallArgoCDHelmChartStepBuilder(ctx runtime.Context, instanceName stri
 
 	s.AdminKubeconfigPath = filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
 
-	remoteDir := filepath.Join(ctx.GetUploadDir(), ctx.GetHost().GetName(), chart.RepoName(), chart.ChartName()+"-"+chart.Version)
-	s.RemoteValuesPath = filepath.Join(remoteDir, "argocd-values.yaml")
+	remoteDir := filepath.Join(ctx.GetUploadDir(), chart.RepoName(), chart.Version)
+
+	valuesFileName := fmt.Sprintf("%s-values.yaml", chart.RepoName())
+	s.RemoteValuesPath = filepath.Join(remoteDir, valuesFileName)
 	chartFileName := fmt.Sprintf("%s-%s.tgz", chart.ChartName(), chart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)
 
@@ -63,6 +65,19 @@ func (s *InstallArgoCDHelmChartStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
+type helmStatusOutput struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Info      struct {
+		Status string `json:"status"`
+	} `json:"info"`
+	Chart struct {
+		Metadata struct {
+			Version string `json:"version"`
+		} `json:"metadata"`
+	} `json:"chart"`
+}
+
 func (s *InstallArgoCDHelmChartStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	runner := ctx.GetRunner()
@@ -71,31 +86,45 @@ func (s *InstallArgoCDHelmChartStep) Precheck(ctx runtime.ExecutionContext) (isD
 		return false, err
 	}
 
-	valuesExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteValuesPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check for values file: %w", err)
-	}
-	if !valuesExists {
-		return false, fmt.Errorf("required Argo CD values file not found at path %s", s.RemoteValuesPath)
+	if _, err := runner.LookPath(ctx.GoContext(), conn, "helm"); err != nil {
+		return false, errors.Wrap(err, "helm command not found in PATH on the target host")
 	}
 
-	chartExists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteChartPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check for chart file: %w", err)
+	for _, path := range []string{s.RemoteValuesPath, s.RemoteChartPath, s.AdminKubeconfigPath} {
+		exists, err := runner.Exists(ctx.GoContext(), conn, path)
+		if err != nil {
+			return false, fmt.Errorf("failed to check for required file %s: %w", path, err)
+		}
+		if !exists {
+			return false, fmt.Errorf("required file not found at remote path %s", path)
+		}
 	}
-	if !chartExists {
-		return false, fmt.Errorf("Argo CD Helm chart .tgz file not found at path %s", s.RemoteChartPath)
+	logger.Debug("All required Argo CD artifacts found on remote host.")
+
+	statusCmd := fmt.Sprintf(
+		"helm status %s --namespace %s --kubeconfig %s -o json",
+		s.ReleaseName,
+		s.Namespace,
+		s.AdminKubeconfigPath,
+	)
+
+	output, err := runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
+	if err != nil {
+		logger.Infof("Helm release '%s' not found. Installation is required.", s.ReleaseName)
+		return false, nil
 	}
 
-	kubeconfigExists, err := runner.Exists(ctx.GoContext(), conn, s.AdminKubeconfigPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check for kubeconfig file: %w", err)
-	}
-	if !kubeconfigExists {
-		return false, fmt.Errorf("admin kubeconfig not found at %s", s.AdminKubeconfigPath)
+	var status helmStatusOutput
+	if err := json.Unmarshal([]byte(output), &status); err != nil {
+		return false, errors.Wrap(err, "failed to parse helm status JSON output")
 	}
 
-	logger.Info("All required Argo CD artifacts found on remote host.")
+	if status.Info.Status == "deployed" && status.Chart.Metadata.Version == s.Chart.Version {
+		logger.Infof("Helm release '%s' version %s is already deployed in namespace '%s'. Skipping.", s.ReleaseName, s.Chart.Version, s.Namespace)
+		return true, nil
+	}
+
+	logger.Infof("Helm release '%s' found, but its status ('%s') or version ('%s') is not as expected ('deployed', '%s'). Upgrade is required.", s.ReleaseName, status.Info.Status, status.Chart.Metadata.Version, s.Chart.Version)
 	return false, nil
 }
 

@@ -31,13 +31,14 @@ type GenerateHybridnetValuesStepBuilder struct {
 }
 
 func NewGenerateHybridnetValuesStepBuilder(ctx runtime.Context, instanceName string) *GenerateHybridnetValuesStepBuilder {
+	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeHybridnet) {
+		return nil
+	}
+
 	imageProvider := images.NewImageProvider(&ctx)
 	hybridnetImage := imageProvider.GetImage("hybridnet")
 
 	if hybridnetImage == nil {
-		if ctx.GetClusterConfig().Spec.Network.Plugin == string(common.CNITypeHybridnet) {
-			ctx.GetLogger().Errorf("Error: Hybridnet is enabled but 'hybridnet' image is not found in BOM for K8s version %s\n %v", ctx.GetClusterConfig().Spec.Kubernetes.Version, os.Stderr)
-		}
 		return nil
 	}
 
@@ -76,22 +77,40 @@ func (s *GenerateHybridnetValuesStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *GenerateHybridnetValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeHybridnet) {
-		return true, nil
-	}
-	return false, nil
-}
-
 func (s *GenerateHybridnetValuesStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeHybridnet))
 	if chart == nil {
 		return "", fmt.Errorf("cannot find chart info for hybridnet in BOM")
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
-	chartDir := filepath.Dir(chartTgzPath)
-	return filepath.Join(chartDir, "hybridnet-values.yaml"), nil
+
+	chartDir := filepath.Dir(chart.LocalPath(ctx.GetGlobalWorkDir()))
+
+	valuesFileName := fmt.Sprintf("%s-values.yaml", chart.RepoName())
+
+	return filepath.Join(chartDir, chart.Version, valuesFileName), nil
+}
+
+func (s *GenerateHybridnetValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
+
+	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeHybridnet) {
+		logger.Info("Hybridnet is not enabled, skipping.")
+		return true, nil
+	}
+
+	localPath, err := s.getLocalValuesPath(ctx)
+	if err != nil {
+		logger.Infof("Skipping step, could not determine values path: %v", err)
+		return true, nil
+	}
+
+	if _, err := os.Stat(localPath); err == nil {
+		logger.Infof("Hybridnet values file %s already exists. Step is complete.", localPath)
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func (s *GenerateHybridnetValuesStep) Run(ctx runtime.ExecutionContext) error {
@@ -131,9 +150,22 @@ func (s *GenerateHybridnetValuesStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *GenerateHybridnetValuesStep) Rollback(ctx runtime.ExecutionContext) error {
-	if localPath, err := s.getLocalValuesPath(ctx); err == nil {
-		os.Remove(localPath)
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+	localPath, err := s.getLocalValuesPath(ctx)
+	if err != nil {
+		logger.Infof("Skipping rollback as no values path could be determined: %v", err)
+		return nil
 	}
+
+	if _, statErr := os.Stat(localPath); statErr == nil {
+		logger.Warnf("Rolling back by deleting generated values file: %s", localPath)
+		if err := os.Remove(localPath); err != nil {
+			logger.Errorf("Failed to remove file during rollback: %v", err)
+		}
+	} else {
+		logger.Infof("Rollback unnecessary, file to be deleted does not exist: %s", localPath)
+	}
+
 	return nil
 }
 

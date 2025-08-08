@@ -2,7 +2,6 @@ package calico
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
+	"github.com/pkg/errors"
 )
 
 type RemoveCalicoctlStep struct {
@@ -24,6 +24,7 @@ type RemoveCalicoctlStepBuilder struct {
 
 func NewRemoveCalicoctlStepBuilder(ctx runtime.Context, instanceName string) *RemoveCalicoctlStepBuilder {
 	provider := binary.NewBinaryProvider(&ctx)
+
 	const representativeArch = "amd64"
 	binaryInfo, err := provider.GetBinary(binary.ComponentCalicoCtl, representativeArch)
 
@@ -36,7 +37,7 @@ func NewRemoveCalicoctlStepBuilder(ctx runtime.Context, instanceName string) *Re
 	}
 
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Remove calicoctl binary", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Remove calicoctl binary from system path", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 1 * time.Minute
@@ -65,13 +66,13 @@ func (s *RemoveCalicoctlStep) Precheck(ctx runtime.ExecutionContext) (isDone boo
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		return false, err
+		return false, errors.Wrap(err, "failed to get connector for precheck")
 	}
 
 	targetPath := s.getRemoteTargetPath()
 	exists, err := runner.Exists(ctx.GoContext(), conn, targetPath)
 	if err != nil {
-		return false, fmt.Errorf("failed to check for file '%s' on host %s: %w", targetPath, ctx.GetHost().GetName(), err)
+		return false, errors.Wrapf(err, "failed to check for file '%s' on host %s", targetPath, ctx.GetHost().GetName())
 	}
 
 	if !exists {
@@ -93,13 +94,8 @@ func (s *RemoveCalicoctlStep) Run(ctx runtime.ExecutionContext) error {
 
 	targetPath := s.getRemoteTargetPath()
 	logger.Infof("Removing calicoctl binary from %s", targetPath)
-
-	if err := runner.Remove(ctx.GoContext(), conn, targetPath, s.Sudo, true); err != nil {
-		if os.IsNotExist(err) {
-			logger.Warnf("File '%s' was not found, assuming it was already removed.", targetPath)
-			return nil
-		}
-		return fmt.Errorf("failed to remove '%s': %w", targetPath, err)
+	if err := runner.Remove(ctx.GoContext(), conn, targetPath, s.Sudo, false); err != nil {
+		return errors.Wrapf(err, "failed to remove '%s'", targetPath)
 	}
 
 	logger.Infof("Successfully removed calicoctl binary from %s.", targetPath)
@@ -108,7 +104,7 @@ func (s *RemoveCalicoctlStep) Run(ctx runtime.ExecutionContext) error {
 
 func (s *RemoveCalicoctlStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
-	logger.Warn("Rollback for a removal step is a no-op.")
+	logger.Warn("Rollback for a removal step is a no-op, as re-installing the binary is not the desired behavior.")
 	return nil
 }
 

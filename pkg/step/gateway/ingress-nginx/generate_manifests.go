@@ -16,7 +16,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
-// GenerateIngressNginxValuesStep is responsible for generating the Helm values file for Ingress-Nginx.
 type GenerateIngressNginxValuesStep struct {
 	step.Base
 	ImageRegistry          string
@@ -25,23 +24,17 @@ type GenerateIngressNginxValuesStep struct {
 	DefaultBackendImageTag string
 }
 
-// GenerateIngressNginxValuesStepBuilder is used to build instances.
 type GenerateIngressNginxValuesStepBuilder struct {
 	step.Builder[GenerateIngressNginxValuesStepBuilder, *GenerateIngressNginxValuesStep]
 }
 
-// NewGenerateIngressNginxValuesStepBuilder is the constructor.
 func NewGenerateIngressNginxValuesStepBuilder(ctx runtime.Context, instanceName string) *GenerateIngressNginxValuesStepBuilder {
 	imageProvider := images.NewImageProvider(&ctx)
-
-	// Assuming image names in BOM are 'ingress-nginx-controller', 'ingress-nginx-webhook', 'ingress-nginx-defaultbackend'
 	controllerImage := imageProvider.GetImage("ingress-nginx-controller")
 	webhookImage := imageProvider.GetImage("ingress-nginx-webhook")
 	defaultBackendImage := imageProvider.GetImage("ingress-nginx-defaultbackend")
 
 	if controllerImage == nil || webhookImage == nil || defaultBackendImage == nil {
-		// TODO: Add a check for whether ingress-nginx is enabled
-		fmt.Fprintf(os.Stderr, "Error: Ingress-Nginx is enabled but one or more required images are not found in BOM for K8s version %s\n", ctx.GetClusterConfig().Spec.Kubernetes.Version)
 		return nil
 	}
 
@@ -52,9 +45,7 @@ func NewGenerateIngressNginxValuesStepBuilder(ctx runtime.Context, instanceName 
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 2 * time.Minute
 
-	// By default, the registry part of the image name from BOM is used.
-	// This can be overridden by a global private registry setting.
-	s.ImageRegistry = controllerImage.Registry()
+	s.ImageRegistry = controllerImage.RegistryAddr()
 	if reg := ctx.GetClusterConfig().Spec.Registry.MirroringAndRewriting.PrivateRegistry; reg != "" {
 		s.ImageRegistry = reg
 	}
@@ -71,20 +62,35 @@ func (s *GenerateIngressNginxValuesStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *GenerateIngressNginxValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	// TODO: Add a check to see if ingress-nginx is enabled
-	return false, nil
-}
-
 func (s *GenerateIngressNginxValuesStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart("ingress-nginx")
 	if chart == nil {
 		return "", fmt.Errorf("cannot find chart info for ingress-nginx in BOM")
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetClusterArtifactsDir())
-	chartDir := filepath.Dir(chartTgzPath)
-	return filepath.Join(chartDir, "ingress-nginx-values.yaml"), nil
+
+	chartDir := filepath.Dir(chart.LocalPath(ctx.GetGlobalWorkDir()))
+
+	valuesFileName := fmt.Sprintf("%s-values.yaml", chart.RepoName())
+
+	return filepath.Join(chartDir, chart.Version, valuesFileName), nil
+}
+
+func (s *GenerateIngressNginxValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
+
+	localPath, err := s.getLocalValuesPath(ctx)
+	if err != nil {
+		logger.Infof("Skipping step, could not determine values path: %v", err)
+		return true, nil
+	}
+
+	if _, err := os.Stat(localPath); err == nil {
+		logger.Infof("Ingress-Nginx values file %s already exists. Step is complete.", localPath)
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func (s *GenerateIngressNginxValuesStep) Run(ctx runtime.ExecutionContext) error {
@@ -124,9 +130,23 @@ func (s *GenerateIngressNginxValuesStep) Run(ctx runtime.ExecutionContext) error
 }
 
 func (s *GenerateIngressNginxValuesStep) Rollback(ctx runtime.ExecutionContext) error {
-	if localPath, err := s.getLocalValuesPath(ctx); err == nil {
-		os.Remove(localPath)
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+
+	localPath, err := s.getLocalValuesPath(ctx)
+	if err != nil {
+		logger.Infof("Skipping rollback as no values path could be determined: %v", err)
+		return nil
 	}
+
+	if _, statErr := os.Stat(localPath); statErr == nil {
+		logger.Warnf("Rolling back by deleting generated values file: %s", localPath)
+		if err := os.Remove(localPath); err != nil {
+			logger.Errorf("Failed to remove file during rollback: %v", err)
+		}
+	} else {
+		logger.Infof("Rollback unnecessary, file to be deleted does not exist: %s", localPath)
+	}
+
 	return nil
 }
 

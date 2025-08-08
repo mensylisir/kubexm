@@ -37,6 +37,10 @@ type GenerateCalicoValuesStepBuilder struct {
 }
 
 func NewGenerateCalicoValuesStepBuilder(ctx runtime.Context, instanceName string) *GenerateCalicoValuesStepBuilder {
+	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeCalico) {
+		return nil
+	}
+
 	s := &GenerateCalicoValuesStep{}
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Generate Calico Helm values file from configuration", s.Base.Meta.Name)
@@ -61,13 +65,9 @@ func NewGenerateCalicoValuesStepBuilder(ctx runtime.Context, instanceName string
 
 	operatorImg := imageProvider.GetImage("tigera-operator")
 	if operatorImg == nil {
-		if clusterCfg.Spec.Network.Plugin == string(common.CNITypeCalico) {
-			ctx.GetLogger().Errorf("Error: Calico is enabled but 'tigera-operator' image is not found in BOM for K8s version %s\n %v", clusterCfg.Spec.Kubernetes.Version, os.Stderr)
-		}
 		return nil
 	}
 	s.OperatorImage = operatorImg.FullName()
-
 	defaultNat := true
 	defaultBlockSize := 26
 	defaultPool := v1alpha1.CalicoIPPool{
@@ -76,7 +76,6 @@ func NewGenerateCalicoValuesStepBuilder(ctx runtime.Context, instanceName string
 		NatOutgoing:   &defaultNat,
 		BlockSize:     &defaultBlockSize,
 	}
-
 	userCalicoCfg := clusterCfg.Spec.Network.Calico
 	if userCalicoCfg != nil {
 		if userCalicoCfg.Networking != nil {
@@ -90,7 +89,6 @@ func NewGenerateCalicoValuesStepBuilder(ctx runtime.Context, instanceName string
 				defaultPool.Encapsulation = "VXLAN"
 			}
 		}
-
 		if userCalicoCfg.IPAM != nil && len(userCalicoCfg.IPAM.Pools) > 0 {
 			s.IPPools = userCalicoCfg.IPAM.Pools
 			for i := range s.IPPools {
@@ -107,11 +105,9 @@ func NewGenerateCalicoValuesStepBuilder(ctx runtime.Context, instanceName string
 		} else {
 			s.IPPools = []v1alpha1.CalicoIPPool{defaultPool}
 		}
-
 		if userCalicoCfg.FelixConfiguration != nil && userCalicoCfg.FelixConfiguration.LogSeverityScreen != "" {
 			s.LogSeverityScreen = userCalicoCfg.FelixConfiguration.LogSeverityScreen
 		}
-
 		if userCalicoCfg.TyphaDeployment != nil {
 			if userCalicoCfg.TyphaDeployment.Replicas != nil {
 				s.TyphaReplicas = *userCalicoCfg.TyphaDeployment.Replicas
@@ -126,7 +122,6 @@ func NewGenerateCalicoValuesStepBuilder(ctx runtime.Context, instanceName string
 	} else {
 		s.IPPools = []v1alpha1.CalicoIPPool{defaultPool}
 	}
-
 	if userCalicoCfg == nil || userCalicoCfg.TyphaDeployment == nil || userCalicoCfg.TyphaDeployment.Enabled == nil {
 		if len(ctx.GetHostsByRole(common.RoleKubernetes)) > 50 {
 			s.TyphaEnabled = true
@@ -141,22 +136,36 @@ func (s *GenerateCalicoValuesStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *GenerateCalicoValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeCalico) {
-		return true, nil
-	}
-	return false, nil
-}
-
 func (s *GenerateCalicoValuesStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeCalico))
 	if chart == nil {
 		return "", fmt.Errorf("cannot find chart info for calico in BOM")
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
-	chartDir := filepath.Dir(chartTgzPath)
-	return filepath.Join(chartDir, "calico-values.yaml"), nil
+	chartDir := filepath.Dir(chart.LocalPath(ctx.GetGlobalWorkDir()))
+	return filepath.Join(chartDir, chart.Version, "calico-values.yaml"), nil
+}
+
+func (s *GenerateCalicoValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
+
+	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeCalico) {
+		logger.Info("Calico is not enabled, skipping.")
+		return true, nil
+	}
+
+	localPath, err := s.getLocalValuesPath(ctx)
+	if err != nil {
+		logger.Infof("Skipping step, could not determine values path: %v", err)
+		return true, nil
+	}
+
+	if _, err := os.Stat(localPath); err == nil {
+		logger.Infof("Calico values file %s already exists. Step is complete.", localPath)
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func (s *GenerateCalicoValuesStep) Run(ctx runtime.ExecutionContext) error {
@@ -196,9 +205,23 @@ func (s *GenerateCalicoValuesStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *GenerateCalicoValuesStep) Rollback(ctx runtime.ExecutionContext) error {
-	if localPath, err := s.getLocalValuesPath(ctx); err == nil {
-		os.Remove(localPath)
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+
+	localPath, err := s.getLocalValuesPath(ctx)
+	if err != nil {
+		logger.Infof("Skipping rollback as no values path could be determined: %v", err)
+		return nil
 	}
+
+	if _, statErr := os.Stat(localPath); statErr == nil {
+		logger.Warnf("Rolling back by deleting generated values file: %s", localPath)
+		if err := os.Remove(localPath); err != nil {
+			logger.Errorf("Failed to remove file during rollback: %v", err)
+		}
+	} else {
+		logger.Infof("Rollback unnecessary, file to be deleted does not exist: %s", localPath)
+	}
+
 	return nil
 }
 

@@ -2,7 +2,6 @@ package multus
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"path/filepath"
 	"time"
@@ -11,7 +10,9 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
+	"github.com/pkg/errors"
 )
 
 type DistributeMultusArtifactsStep struct {
@@ -25,11 +26,16 @@ type DistributeMultusArtifactsStepBuilder struct {
 }
 
 func NewDistributeMultusArtifactsStepBuilder(ctx runtime.Context, instanceName string) *DistributeMultusArtifactsStepBuilder {
+	cfg := ctx.GetClusterConfig()
+	if cfg.Spec.Network.Multus == nil || cfg.Spec.Network.Multus.Installation.Enabled == helpers.BoolPtr(false) {
+		return nil
+	}
+
 	helmProvider := helm.NewHelmProvider(&ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeMultus))
 	if chart == nil {
-		if ctx.GetClusterConfig().Spec.Network.Multus.Installation.Enabled == helpers.BoolPtr(true) {
-			ctx.GetLogger().Errorf("Error: Multus is enabled but chart info is not found for K8s version %s\n %v", ctx.GetClusterConfig().Spec.Kubernetes.Version, os.Stderr)
+		if cfg.Spec.Network.Multus.Installation.Enabled == helpers.BoolPtr(true) {
+			ctx.GetLogger().Errorf("Error: Multus is enabled but chart info is not found for K8s version %s\n %v", cfg.Spec.Kubernetes.Version, os.Stderr)
 		}
 		return nil
 	}
@@ -41,8 +47,10 @@ func NewDistributeMultusArtifactsStepBuilder(ctx runtime.Context, instanceName s
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	remoteDir := filepath.Join(ctx.GetUploadDir(), chart.RepoName(), chart.ChartName()+"-"+chart.Version)
-	s.RemoteValuesPath = filepath.Join(remoteDir, "multus-values.yaml")
+	remoteDir := filepath.Join(ctx.GetUploadDir(), chart.RepoName(), chart.Version)
+
+	valuesFileName := fmt.Sprintf("%s-values.yaml", chart.RepoName())
+	s.RemoteValuesPath = filepath.Join(remoteDir, valuesFileName)
 	chartFileName := fmt.Sprintf("%s-%s.tgz", chart.ChartName(), chart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)
 
@@ -54,45 +62,73 @@ func (s *DistributeMultusArtifactsStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *DistributeMultusArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	if ctx.GetClusterConfig().Spec.Network.Multus.Installation.Enabled == helpers.BoolPtr(false) {
-		return true, nil
-	}
-	return false, nil
-}
-
-func (s *DistributeMultusArtifactsStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
+func (s *DistributeMultusArtifactsStep) getLocalPaths(ctx runtime.ExecutionContext) (localValuesPath, localChartPath string, err error) {
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeMultus))
 	if chart == nil {
-		return "", fmt.Errorf("cannot find chart info for multus in BOM")
+		return "", "", fmt.Errorf("cannot find chart info for multus in BOM")
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
-	chartDir := filepath.Dir(chartTgzPath)
-	return filepath.Join(chartDir, "multus-values.yaml"), nil
+
+	valuesFileName := fmt.Sprintf("%s-values.yaml", chart.RepoName())
+	chartDir := filepath.Dir(chart.LocalPath(ctx.GetGlobalWorkDir()))
+	localValuesPath = filepath.Join(chartDir, chart.Version, valuesFileName)
+
+	localChartPath = chart.LocalPath(ctx.GetGlobalWorkDir())
+
+	return localValuesPath, localChartPath, nil
+}
+
+func (s *DistributeMultusArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+
+	cfg := ctx.GetClusterConfig()
+	if cfg.Spec.Network.Multus == nil || cfg.Spec.Network.Multus.Installation.Enabled == helpers.BoolPtr(false) {
+		logger.Info("Multus is not enabled, skipping.")
+		return true, nil
+	}
+
+	localValuesPath, localChartPath, err := s.getLocalPaths(ctx)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(localValuesPath); os.IsNotExist(err) {
+		return false, errors.Wrapf(err, "local source file not found: %s. Ensure GenerateMultusValuesStep ran.", localValuesPath)
+	}
+	if _, err := os.Stat(localChartPath); os.IsNotExist(err) {
+		return false, errors.Wrapf(err, "local source file not found: %s. Ensure DownloadMultusChartStep ran.", localChartPath)
+	}
+
+	valuesDone, err := helpers.CheckRemoteFileIntegrity(ctx, localValuesPath, s.RemoteValuesPath, s.Sudo)
+	if err != nil {
+		return false, err
+	}
+	chartDone, err := helpers.CheckRemoteFileIntegrity(ctx, localChartPath, s.RemoteChartPath, s.Sudo)
+	if err != nil {
+		return false, err
+	}
+
+	if valuesDone && chartDone {
+		logger.Info("All Multus artifacts already exist on the remote host and are up-to-date. Skipping.")
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func (s *DistributeMultusArtifactsStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
-	localValuesPath, err := s.getLocalValuesPath(ctx)
+	localValuesPath, localChartPath, err := s.getLocalPaths(ctx)
 	if err != nil {
 		return err
 	}
 	valuesContent, err := os.ReadFile(localValuesPath)
 	if err != nil {
-		return fmt.Errorf("failed to read generated values file from agreed path %s: %w. Ensure GenerateMultusValuesStep ran successfully.", localValuesPath, err)
+		return fmt.Errorf("failed to read local values file %s: %w", localValuesPath, err)
 	}
-
-	helmProvider := helm.NewHelmProvider(ctx)
-	chart := helmProvider.GetChart(string(common.CNITypeMultus))
-	if chart == nil {
-		return fmt.Errorf("cannot find chart info for multus in BOM")
-	}
-	localChartPath := chart.LocalPath(ctx.GetGlobalWorkDir())
 	chartContent, err := os.ReadFile(localChartPath)
 	if err != nil {
-		return fmt.Errorf("failed to read offline chart file from %s: %w. Ensure DownloadMultusChartStep ran successfully.", localChartPath, err)
+		return fmt.Errorf("failed to read local chart file %s: %w", localChartPath, err)
 	}
 
 	runner := ctx.GetRunner()

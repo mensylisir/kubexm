@@ -2,7 +2,6 @@ package calico
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"path/filepath"
 	"time"
@@ -11,7 +10,9 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/helm"
+	"github.com/pkg/errors"
 )
 
 type DistributeCalicoArtifactsStep struct {
@@ -25,12 +26,13 @@ type DistributeCalicoArtifactsStepBuilder struct {
 }
 
 func NewDistributeCalicoArtifactsStepBuilder(ctx runtime.Context, instanceName string) *DistributeCalicoArtifactsStepBuilder {
+	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeCalico) {
+		return nil
+	}
+
 	helmProvider := helm.NewHelmProvider(&ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeCalico))
 	if chart == nil {
-		if ctx.GetClusterConfig().Spec.Network.Plugin == string(common.CNITypeCalico) {
-			fmt.Fprintf(os.Stderr, "Error: Calico is enabled but chart info is not found for K8s version %s\n", ctx.GetClusterConfig().Spec.Kubernetes.Version)
-		}
 		return nil
 	}
 
@@ -41,8 +43,10 @@ func NewDistributeCalicoArtifactsStepBuilder(ctx runtime.Context, instanceName s
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	remoteDir := filepath.Join(ctx.GetUploadDir(), chart.RepoName(), chart.ChartName()+"-"+chart.Version)
-	s.RemoteValuesPath = filepath.Join(remoteDir, "calico-values.yaml")
+	remoteDir := filepath.Join(ctx.GetUploadDir(), chart.RepoName(), chart.Version)
+
+	valuesFileName := fmt.Sprintf("%s-values.yaml", chart.RepoName())
+	s.RemoteValuesPath = filepath.Join(remoteDir, valuesFileName)
 	chartFileName := fmt.Sprintf("%s-%s.tgz", chart.ChartName(), chart.Version)
 	s.RemoteChartPath = filepath.Join(remoteDir, chartFileName)
 
@@ -54,44 +58,73 @@ func (s *DistributeCalicoArtifactsStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *DistributeCalicoArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeCalico) {
-		return true, nil
-	}
-	return false, nil
-}
-
-func (s *DistributeCalicoArtifactsStep) getLocalValuesPath(ctx runtime.ExecutionContext) (string, error) {
+func (s *DistributeCalicoArtifactsStep) getLocalPaths(ctx runtime.ExecutionContext) (localValuesPath, localChartPath string, err error) {
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart(string(common.CNITypeCalico))
 	if chart == nil {
-		return "", fmt.Errorf("cannot find chart info for calico in BOM")
+		return "", "", fmt.Errorf("cannot find chart info for calico in BOM")
 	}
-	chartTgzPath := chart.LocalPath(ctx.GetGlobalWorkDir())
-	chartDir := filepath.Dir(chartTgzPath)
-	return filepath.Join(chartDir, "calico-values.yaml"), nil
+
+	k8sVersion := ctx.GetClusterConfig().Spec.Kubernetes.Version
+
+	valuesFileName := fmt.Sprintf("%s-values.yaml", chart.RepoName())
+	localValuesPath = filepath.Join(ctx.GetGlobalWorkDir(), "helm", k8sVersion, chart.RepoName(), chart.Version, valuesFileName)
+
+	localChartPath = chart.LocalPath(ctx.GetGlobalWorkDir())
+
+	return localValuesPath, localChartPath, nil
+}
+
+func (s *DistributeCalicoArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+
+	if ctx.GetClusterConfig().Spec.Network.Plugin != string(common.CNITypeCalico) {
+		logger.Info("Calico is not enabled, skipping.")
+		return true, nil
+	}
+
+	localValuesPath, localChartPath, err := s.getLocalPaths(ctx)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Stat(localValuesPath); os.IsNotExist(err) {
+		return false, errors.Wrapf(err, "local source file not found: %s. Ensure GenerateCalicoValuesStep ran.", localValuesPath)
+	}
+	if _, err := os.Stat(localChartPath); os.IsNotExist(err) {
+		return false, errors.Wrapf(err, "local source file not found: %s. Ensure DownloadCalicoChartStep ran.", localChartPath)
+	}
+
+	valuesDone, err := helpers.CheckRemoteFileIntegrity(ctx, localValuesPath, s.RemoteValuesPath, s.Sudo)
+	if err != nil {
+		return false, err
+	}
+	chartDone, err := helpers.CheckRemoteFileIntegrity(ctx, localChartPath, s.RemoteChartPath, s.Sudo)
+	if err != nil {
+		return false, err
+	}
+
+	if valuesDone && chartDone {
+		logger.Info("All Calico artifacts already exist on the remote host and are up-to-date. Skipping.")
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func (s *DistributeCalicoArtifactsStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
-	localValuesPath, err := s.getLocalValuesPath(ctx)
+
+	localValuesPath, localChartPath, err := s.getLocalPaths(ctx)
 	if err != nil {
 		return err
 	}
 	valuesContent, err := os.ReadFile(localValuesPath)
 	if err != nil {
-		return fmt.Errorf("failed to read generated values file from agreed path %s: %w. Ensure GenerateCalicoValuesStep ran successfully.", localValuesPath, err)
+		return fmt.Errorf("failed to read local values file %s: %w", localValuesPath, err)
 	}
-
-	helmProvider := helm.NewHelmProvider(ctx)
-	chart := helmProvider.GetChart(string(common.CNITypeCalico))
-	if chart == nil {
-		return fmt.Errorf("cannot find chart info for calico in BOM")
-	}
-	localChartPath := chart.LocalPath(ctx.GetGlobalWorkDir())
 	chartContent, err := os.ReadFile(localChartPath)
 	if err != nil {
-		return fmt.Errorf("failed to read offline chart file from %s: %w. Ensure DownloadCalicoChartStep ran successfully.", localChartPath, err)
+		return fmt.Errorf("failed to read local chart file %s: %w", localChartPath, err)
 	}
 
 	runner := ctx.GetRunner()
