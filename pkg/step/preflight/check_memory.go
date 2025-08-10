@@ -45,6 +45,14 @@ func (s *CheckMemoryStep) Meta() *spec.StepMeta {
 
 func (s *CheckMemoryStep) checkRequirement(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName())
+	skipChecks := ctx.GetClusterConfig().Spec.Preflight.SkipChecks
+	const checkName = "memory"
+	for _, checkToSkip := range skipChecks {
+		if checkToSkip == checkName {
+			logger.Infof("Skipping memory check because '%s' is in skipChecks list.", checkName)
+			return nil
+		}
+	}
 
 	if s.MinMemoryMB == nil {
 		logger.Info("Minimum memory requirement not configured, skipping check.")

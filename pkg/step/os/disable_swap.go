@@ -42,6 +42,9 @@ func (s *DisableSwapStep) Meta() *spec.StepMeta {
 func (s *DisableSwapStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	runner := ctx.GetRunner()
+	if !*ctx.GetClusterConfig().Spec.Preflight.DisableSwap {
+		return true, nil
+	}
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		return false, err

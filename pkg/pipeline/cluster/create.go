@@ -2,7 +2,9 @@ package cluster
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/runtime"
 
+	"github.com/mensylisir/kubexm/pkg/engine"
 	"github.com/mensylisir/kubexm/pkg/module"
 	"github.com/mensylisir/kubexm/pkg/module/addon"
 	"github.com/mensylisir/kubexm/pkg/module/infrastructure"
@@ -11,7 +13,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/module/preflight"
 	"github.com/mensylisir/kubexm/pkg/pipeline"
 	"github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/engine"
 )
 
 // CreateClusterPipeline defines the pipeline for creating a new Kubernetes cluster.
@@ -27,12 +28,12 @@ type CreateClusterPipeline struct {
 func NewCreateClusterPipeline(assumeYes bool) *CreateClusterPipeline {
 	// Create modules in logical execution order
 	modules := []module.Module{
-		preflight.NewPreflightModule(assumeYes),      // System checks, initial OS setup, kernel setup
-		infrastructure.NewInfrastructureModule(),     // ETCD (PKI + install), Container Runtime
-		kubernetes.NewControlPlaneModule(),           // Kube binaries, image pulls, kubeadm init
-		network.NewNetworkModule(),                   // CNI plugin
-		kubernetes.NewWorkerModule(),                 // Join worker nodes
-		addon.NewAddonsModule(),                      // Cluster addons
+		preflight.NewPreflightModule(assumeYes),  // System checks, initial OS setup, kernel setup
+		infrastructure.NewInfrastructureModule(), // ETCD (PKI + install), Container Runtime
+		kubernetes.NewControlPlaneModule(),       // Kube binaries, image pulls, kubeadm init
+		network.NewNetworkModule(),               // CNI plugin
+		kubernetes.NewWorkerModule(),             // Join worker nodes
+		addon.NewAddonsModule(),                  // Cluster addons
 	}
 
 	return &CreateClusterPipeline{
@@ -60,7 +61,7 @@ func (p *CreateClusterPipeline) Modules() []module.Module {
 
 // Plan generates the final ExecutionGraph for the entire pipeline.
 // It orchestrates module planning and links their ExecutionFragments.
-func (p *CreateClusterPipeline) Plan(ctx pipeline.PipelineContext) (*plan.ExecutionGraph, error) {
+func (p *CreateClusterPipeline) Plan(ctx runtime.PipelineContext) (*plan.ExecutionGraph, error) {
 	logger := ctx.GetLogger().With("pipeline", p.Name())
 	logger.Info("Planning cluster creation pipeline...")
 
@@ -68,14 +69,14 @@ func (p *CreateClusterPipeline) Plan(ctx pipeline.PipelineContext) (*plan.Execut
 	var previousModuleExitNodes []plan.NodeID
 
 	// Assert that the pipeline context can be used as a module context
-	moduleCtx, ok := ctx.(module.ModuleContext)
+	moduleCtx, ok := ctx.(runtime.ModuleContext)
 	if !ok {
 		return nil, fmt.Errorf("pipeline context cannot be asserted to module.ModuleContext for pipeline %s", p.Name())
 	}
 
 	for i, mod := range p.Modules() {
 		logger.Info("Planning module", "module_name", mod.Name(), "module_index", i)
-		
+
 		moduleFragment, err := mod.Plan(moduleCtx)
 		if err != nil {
 			logger.Error(err, "Failed to plan module", "module", mod.Name())

@@ -47,6 +47,15 @@ func (s *CheckCPUStep) Meta() *spec.StepMeta {
 func (s *CheckCPUStep) checkRequirement(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName())
 
+	skipChecks := ctx.GetClusterConfig().Spec.Preflight.SkipChecks
+	const checkName = "cpu_cores"
+	for _, checkToSkip := range skipChecks {
+		if checkToSkip == checkName {
+			logger.Infof("Skipping CPU check because '%s' is in skipChecks list.", checkName)
+			return nil
+		}
+	}
+
 	if s.MinCores == nil {
 		logger.Info("Minimum CPU core requirement not configured, skipping check.")
 		return nil

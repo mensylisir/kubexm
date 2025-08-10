@@ -1,0 +1,48 @@
+apiVersion: kubexms.io/v1alpha1
+kind: Cluster
+metadata:
+  name: ha-prod-cluster
+spec:
+  # 1. 主机定义 (现在有多个 master)
+  hosts:
+    - name: master-1
+      address: 192.168.20.11
+    - name: master-2
+      address: 192.168.20.12
+    - name: master-3
+      address: 192.168.20.13
+    - name: worker-1
+      address: 192.168.20.21
+    - name: worker-2
+      address: 192.168.20.22
+
+  # 2. 角色分配
+  roleGroups:
+    master:
+      - master-1
+      - master-2
+      - master-3
+    etcd:
+      - master-1
+      - master-2
+      - master-3
+    worker:
+      - worker-1
+      - worker-2
+
+  # 3. 控制平面端点 (HA 的核心配置)
+  #    提供一个 VIP 地址，所有组件将通过它来访问 apiserver。
+  #    kubexm 会自动在 master 节点上部署 keepalived + haproxy (或其他内部 LB) 来管理这个 VIP。
+  controlPlaneEndpoint:
+    address: 192.168.20.100 # 这是一个未被占用的、与 master 节点同网段的 IP
+    # domain 字段是可选的，如果提供，会被加入到 apiserver 证书的 SANs 中
+    # domain: k8s-api.my-company.com
+
+  # 4. Kubernetes 核心配置
+  kubernetes:
+    version: v1.28.5
+
+  # 5. 网络配置
+  network:
+    kubePodsCIDR: "10.244.0.0/16"
+    kubeServiceCIDR: "10.96.0.0/12"

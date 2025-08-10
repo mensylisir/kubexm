@@ -94,8 +94,8 @@ func Validate_IsuladConfig(cfg *Isulad, verrs *validation.ValidationErrors, path
 	if cfg.Version != "" && !helpers.IsValidRuntimeVersion(cfg.Version) {
 		verrs.Add(pathPrefix+".version", "invalid version format")
 	}
-	if cfg.CgroupManager != nil {
-		if *cfg.CgroupManager != common.CgroupDriverSystemd && *cfg.CgroupManager != common.CgroupDriverCgroupfs {
+	if cfg.CgroupDriver != nil {
+		if *cfg.CgroupDriver != common.CgroupDriverSystemd && *cfg.CgroupDriver != common.CgroupDriverCgroupfs {
 			verrs.Add(pathPrefix+".cgroupManager", "must be 'systemd' or 'cgroupfs'")
 		}
 	}
