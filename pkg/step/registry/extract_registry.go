@@ -165,7 +165,6 @@ func (s *ExtractRegistryStep) extractFileForArch(ctx runtime.ExecutionContext, a
 		return err
 	}
 
-	// 在执行前再次检查，如果已解压且有效，则跳过
 	if _, err := os.Stat(filepath.Join(destPath, "registry")); err == nil {
 		logger.Infof("Skipping extraction for arch %s, destination already exists and is valid.", arch)
 		ctx.GetTaskCache().Set(cacheKey, destPath)

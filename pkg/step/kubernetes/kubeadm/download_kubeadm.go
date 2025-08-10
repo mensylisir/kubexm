@@ -3,6 +3,7 @@ package kubeadm
 import (
 	"crypto/sha256"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"io"
 	"net/http"
 	"os"
@@ -54,23 +55,6 @@ func (s *DownloadKubeadmStep) getRequiredArchs(ctx runtime.ExecutionContext) (ma
 	return archs, nil
 }
 
-func (s *DownloadKubeadmStep) verifyChecksum(filePath string, binaryInfo *binary.Binary) (bool, error) {
-	expectedChecksum := binaryInfo.Checksum()
-	if expectedChecksum == "" || strings.HasPrefix(expectedChecksum, "dummy-") {
-		return true, nil
-	}
-	f, err := os.Open(filePath)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return false, err
-	}
-	return fmt.Sprintf("%x", h.Sum(nil)) == expectedChecksum, nil
-}
-
 func (s *DownloadKubeadmStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
 
@@ -105,9 +89,14 @@ func (s *DownloadKubeadmStep) Precheck(ctx runtime.ExecutionContext) (isDone boo
 			continue
 		}
 
-		match, _ := s.verifyChecksum(destPath, binaryInfo)
+		match, err := helpers.VerifyLocalFileChecksum(destPath, binaryInfo.Checksum())
+		if err != nil {
+			logger.Warnf("Failed to verify checksum for arch %s file (%s): %v. Re-download is required.", arch, destPath, err)
+			allDone = false
+			continue
+		}
 		if !match {
-			logger.Warnf("Checksum mismatch for arch %s file. Re-download is required.", arch)
+			logger.Warnf("Checksum mismatch for arch %s file (%s). Re-download is required.", arch, destPath)
 			allDone = false
 		}
 	}
@@ -145,7 +134,7 @@ func (s *DownloadKubeadmStep) Run(ctx runtime.ExecutionContext) error {
 
 		destPath := binaryInfo.FilePath()
 		if _, err := os.Stat(destPath); err == nil {
-			match, _ := s.verifyChecksum(destPath, binaryInfo)
+			match, _ := helpers.VerifyLocalFileChecksum(destPath, binaryInfo.Checksum())
 			if match {
 				logger.Infof("Skipping download for arch %s, file already exists and is valid.", arch)
 				continue
@@ -214,7 +203,7 @@ func (s *DownloadKubeadmStep) downloadFile(ctx runtime.ExecutionContext, binaryI
 
 	logger.Infof("Successfully downloaded to %s", binaryInfo.FilePath())
 
-	match, err := s.verifyChecksum(binaryInfo.FilePath(), binaryInfo)
+	match, err := helpers.VerifyLocalFileChecksum(binaryInfo.FilePath(), binaryInfo.Checksum())
 	if err != nil {
 		return fmt.Errorf("failed to verify checksum after download: %w", err)
 	}

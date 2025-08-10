@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/mholt/archiver/v3"
 )
@@ -234,4 +235,47 @@ func ExtractTarGz(sourcePath, destDir string) error {
 		}
 	}
 	return nil
+}
+
+func ListFilesInEtcdArchive(archivePath string) ([]string, error) {
+	file, err := os.Open(archivePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	gzr, err := gzip.NewReader(file)
+	if err != nil {
+		return nil, err
+	}
+	defer gzr.Close()
+
+	tr := tar.NewReader(gzr)
+	var files []string
+	var rootDir string
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		if rootDir == "" && header.Typeflag == tar.TypeDir {
+			rootDir = header.Name
+			continue
+		}
+
+		if strings.HasPrefix(header.Name, rootDir) {
+			relativeName := strings.TrimPrefix(header.Name, rootDir)
+			relativeName = strings.TrimLeft(relativeName, "/")
+
+			if relativeName != "" {
+				files = append(files, relativeName)
+			}
+		}
+	}
+	return files, nil
 }

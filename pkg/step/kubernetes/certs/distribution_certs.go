@@ -27,7 +27,7 @@ type DistributeKubeCertsStepBuilder struct {
 
 func NewDistributeKubeCertsStepBuilder(ctx runtime.Context, instanceName string) *DistributeKubeCertsStepBuilder {
 	s := &DistributeKubeCertsStep{
-		LocalCertsDir:  filepath.Join(ctx.GetGlobalWorkDir(), "certs", "kubernetes"),
+		LocalCertsDir:  ctx.GetKubernetesCertsDir(),
 		RemoteCertsDir: common.KubernetesPKIDir,
 		PermissionDir:  "0755",
 		PermissionFile: "0644",

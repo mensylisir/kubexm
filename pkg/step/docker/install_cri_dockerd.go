@@ -2,6 +2,7 @@ package docker
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,14 +75,14 @@ func (s *InstallCriDockerdStep) getLocalSourcePath(ctx runtime.ExecutionContext)
 		return "", fmt.Errorf("failed to get cri-dockerd binary info: %w", err)
 	}
 	if binaryInfo == nil {
-		return "", fmt.Errorf("cri-dockerd is unexpectedly disabled for arch %s", arch)
+		return "", fmt.Errorf("cri-dockerd is disabled for arch %s", arch)
 	}
 
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install cri-dockerd binary (version %s)", s.Base.Meta.Name, binaryInfo.Version)
 
-	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tgz")
-	sourcePath := filepath.Join(ctx.GetExtractDir(), destDirName, "cri-dockerd", "cri-dockerd")
-	return sourcePath, nil
+	extractedDir := filepath.Dir(binaryInfo.FilePath())
+	innerDir := "cri-dockerd"
+	return filepath.Join(extractedDir, innerDir, "cri-dockerd"), nil
 }
 
 func (s *InstallCriDockerdStep) getRemoteTargetPath() string {
@@ -90,24 +91,33 @@ func (s *InstallCriDockerdStep) getRemoteTargetPath() string {
 
 func (s *InstallCriDockerdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
-	runner := ctx.GetRunner()
-	conn, err := ctx.GetCurrentHostConnector()
+
+	localSourcePath, err := s.getLocalSourcePath(ctx)
 	if err != nil {
+		if strings.Contains(err.Error(), "disabled for arch") {
+			logger.Infof("cri-dockerd not required for this host (arch: %s), skipping.", ctx.GetHost().GetArch())
+			return true, nil
+		}
 		return false, err
 	}
 
-	targetPath := s.getRemoteTargetPath()
-	exists, err := runner.Exists(ctx.GoContext(), conn, targetPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check for file '%s' on host %s: %w", targetPath, ctx.GetHost().GetName(), err)
-	}
-	if exists {
-		logger.Infof("Target file '%s' already exists. Step is done.", targetPath)
-		return true, nil
+	if _, err := os.Stat(localSourcePath); os.IsNotExist(err) {
+		return false, fmt.Errorf("local source file '%s' not found, ensure extract step ran successfully", localSourcePath)
 	}
 
-	logger.Infof("Target file '%s' does not exist. Installation is required.", targetPath)
-	return false, nil
+	targetPath := s.getRemoteTargetPath()
+	isDone, err = helpers.CheckRemoteFileIntegrity(ctx, localSourcePath, targetPath, s.Sudo)
+	if err != nil {
+		return false, fmt.Errorf("failed to check remote file integrity for %s: %w", targetPath, err)
+	}
+
+	if isDone {
+		logger.Infof("Target file '%s' already exists and is up-to-date. Step is done.", targetPath)
+	} else {
+		logger.Infof("Target file '%s' is missing or outdated. Installation is required.", targetPath)
+	}
+
+	return isDone, nil
 }
 
 func (s *InstallCriDockerdStep) Run(ctx runtime.ExecutionContext) error {

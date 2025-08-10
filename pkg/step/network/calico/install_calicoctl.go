@@ -100,28 +100,46 @@ func (s *InstallCalicoctlStep) Precheck(ctx runtime.ExecutionContext) (isDone bo
 
 func (s *InstallCalicoctlStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
-
-	localSourcePath, err := s.getLocalSourcePath(ctx)
-	if err != nil {
-		return err
-	}
-
-	content, err := os.ReadFile(localSourcePath)
-	if err != nil {
-		return errors.Wrapf(err, "failed to read local source file %s", localSourcePath)
-	}
-
+	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		return errors.Wrap(err, "failed to get connector for Run phase")
 	}
 
-	targetPath := s.getRemoteTargetPath()
-
-	logger.Infof("Uploading and installing calicoctl to %s", targetPath)
-	err = helpers.WriteContentToRemote(ctx, conn, string(content), targetPath, s.Permission, s.Sudo)
+	localSourcePath, err := s.getLocalSourcePath(ctx)
 	if err != nil {
-		return errors.Wrapf(err, "failed to install calicoctl to %s", targetPath)
+		logger.Infof("calicoctl is not required for this host (arch: %s), skipping run phase.", ctx.GetHost().GetArch())
+		return nil
+	}
+
+	if err := runner.Mkdirp(ctx.GoContext(), conn, s.InstallPath, "0755", s.Sudo); err != nil {
+		return errors.Wrapf(err, "failed to create remote install directory '%s'", s.InstallPath)
+	}
+
+	remoteUploadTmpDir := filepath.Join(ctx.GetUploadDir(), fmt.Sprintf("calicoctl-install-%d", time.Now().UnixNano()))
+	if err := runner.Mkdirp(ctx.GoContext(), conn, remoteUploadTmpDir, "0755", false); err != nil {
+		return errors.Wrapf(err, "failed to create remote upload directory '%s'", remoteUploadTmpDir)
+	}
+	defer func() {
+		_ = runner.Remove(ctx.GoContext(), conn, remoteUploadTmpDir, false, true) // no-sudo, recursive
+	}()
+
+	remoteTempPath := filepath.Join(remoteUploadTmpDir, "calicoctl")
+	logger.Infof("Uploading calicoctl to temporary path %s:%s", ctx.GetHost().GetName(), remoteTempPath)
+	if err := runner.Upload(ctx.GoContext(), conn, localSourcePath, remoteTempPath, false); err != nil {
+		return errors.Wrapf(err, "failed to upload '%s' to '%s'", localSourcePath, remoteTempPath)
+	}
+
+	targetPath := s.getRemoteTargetPath()
+	moveCmd := fmt.Sprintf("mv %s %s", remoteTempPath, targetPath)
+	logger.Infof("Moving file to final destination %s on remote host", targetPath)
+	if _, err := runner.Run(ctx.GoContext(), conn, moveCmd, s.Sudo); err != nil {
+		return errors.Wrapf(err, "failed to move file to '%s'", targetPath)
+	}
+
+	logger.Infof("Setting permissions for %s to %s", targetPath, s.Permission)
+	if err := runner.Chmod(ctx.GoContext(), conn, targetPath, s.Permission, s.Sudo); err != nil {
+		return errors.Wrapf(err, "failed to set permission on '%s'", targetPath)
 	}
 
 	logger.Infof("Successfully installed calicoctl to %s", targetPath)

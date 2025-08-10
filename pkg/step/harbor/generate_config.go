@@ -5,7 +5,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -76,9 +75,9 @@ func NewGenerateHarborConfigStepBuilder(ctx runtime.Context, instanceName string
 		DataVolume:          dataVolume,
 	}
 
-	binaryInfoNoArch, _ := provider.GetBinary(binary.ComponentHarbor, "")
-	extractedDirName := strings.TrimSuffix(binaryInfoNoArch.FileName(), ".tgz")
-	localExtractedPath := filepath.Join(ctx.GetExtractDir(), extractedDirName, "harbor")
+	sourceDir := filepath.Dir(binaryInfo.FilePath())
+	innerDir := "harbor"
+	localExtractedPath := filepath.Join(sourceDir, innerDir)
 
 	s := &GenerateHarborConfigStep{
 		LocalExtractedPath: localExtractedPath,
@@ -160,10 +159,9 @@ func (s *GenerateHarborConfigStep) Precheck(ctx runtime.ExecutionContext) (isDon
 
 func (s *GenerateHarborConfigStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
-	finalConfigPath := filepath.Join(s.LocalExtractedPath, "harbor.yml")
-	logger.Warnf("Rolling back by removing generated config file: %s", finalConfigPath)
-	if err := os.Remove(finalConfigPath); err != nil && !os.IsNotExist(err) {
-		logger.Errorf("Failed to remove file '%s' during rollback: %v", finalConfigPath, err)
+	logger.Warnf("Rolling back by removing generated config file: %s", s.RenderedConfigPath)
+	if err := os.Remove(s.RenderedConfigPath); err != nil && !os.IsNotExist(err) {
+		logger.Errorf("Failed to remove file '%s' during rollback: %v", s.RenderedConfigPath, err)
 	}
 	return nil
 }

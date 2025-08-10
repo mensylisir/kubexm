@@ -74,12 +74,12 @@ func (s *ExtractEtcdStep) getPathsForArch(ctx runtime.ExecutionContext, arch str
 		return "", "", "", fmt.Errorf("failed to get etcd binary info for arch %s: %w", arch, err)
 	}
 	if binaryInfo == nil {
-		return "", "", "", fmt.Errorf("etcd is unexpectedly disabled for arch %s", arch)
+		return "", "", "", fmt.Errorf("etcd is disabled for arch %s", arch)
 	}
 
 	sourcePath = binaryInfo.FilePath()
-	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tar.gz")
-	destPath = filepath.Join(ctx.GetExtractDir(), destDirName)
+	innerDir := "etcd"
+	destPath = filepath.Join(filepath.Dir(sourcePath), innerDir)
 	cacheKey = sourcePath
 
 	return sourcePath, destPath, cacheKey, nil
@@ -101,6 +101,9 @@ func (s *ExtractEtcdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, e
 	for arch := range requiredArchs {
 		sourcePath, destPath, cacheKey, err := s.getPathsForArch(ctx, arch)
 		if err != nil {
+			if strings.Contains(err.Error(), "disabled for arch") {
+				continue
+			}
 			return false, err
 		}
 
@@ -108,16 +111,10 @@ func (s *ExtractEtcdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, e
 			return false, fmt.Errorf("source archive '%s' for arch %s not found, ensure download step ran successfully", sourcePath, arch)
 		}
 
-		_, err = os.Stat(destPath)
-		if os.IsNotExist(err) {
-			logger.Infof("Extraction destination '%s' for arch %s does not exist. Extraction is required.", destPath, arch)
-			allDone = false
-			continue
-		}
-
 		keyFile := filepath.Join(destPath, "etcd")
+
 		if _, err := os.Stat(keyFile); os.IsNotExist(err) {
-			logger.Warnf("Destination directory for arch %s exists, but key file '%s' is missing. Re-extracting.", arch, keyFile)
+			logger.Infof("Key file '%s' for arch %s does not exist. Extraction is required.", keyFile, arch)
 			allDone = false
 		} else {
 			ctx.GetTaskCache().Set(cacheKey, destPath)
@@ -161,16 +158,27 @@ func (s *ExtractEtcdStep) extractFileForArch(ctx runtime.ExecutionContext, arch 
 	logger := ctx.GetLogger()
 	sourcePath, destPath, cacheKey, err := s.getPathsForArch(ctx, arch)
 	if err != nil {
+		if strings.Contains(err.Error(), "disabled for arch") {
+			logger.Debugf("Skipping etcd extraction for arch %s as it's not required.", arch)
+			return nil
+		}
 		return err
 	}
 
-	if _, err := os.Stat(filepath.Join(destPath, "etcd")); err == nil {
+	keyFile := filepath.Join(destPath, "etcd")
+	if _, err := os.Stat(keyFile); err == nil {
 		logger.Infof("Skipping extraction for arch %s, destination already exists and is valid.", arch)
 		ctx.GetTaskCache().Set(cacheKey, destPath)
 		return nil
 	}
 
-	logger.Infof("Extracting archive '%s' to '%s'...", sourcePath, destPath)
+	tempExtractDir, err := os.MkdirTemp(filepath.Dir(destPath), "etcd-extract-")
+	if err != nil {
+		return fmt.Errorf("failed to create temp extraction directory: %w", err)
+	}
+	defer os.RemoveAll(tempExtractDir)
+
+	logger.Infof("Extracting archive '%s' to temporary directory '%s'...", sourcePath, tempExtractDir)
 
 	fileInfo, err := os.Stat(sourcePath)
 	if err != nil {
@@ -198,15 +206,30 @@ func (s *ExtractEtcdStep) extractFileForArch(ctx runtime.ExecutionContext, arch 
 		helpers.WithProgress(progressFunc),
 	)
 
-	if err := ar.Extract(sourcePath, destPath); err != nil {
+	if err := ar.Extract(sourcePath, tempExtractDir); err != nil {
 		_ = bar.Clear()
-		_ = os.RemoveAll(destPath)
-		return fmt.Errorf("failed to extract archive '%s': %w", sourcePath, err)
+		return fmt.Errorf("failed to extract archive '%s' to temp dir: %w", sourcePath, err)
+	}
+	_ = bar.Finish()
+
+	innerDirName := strings.TrimSuffix(filepath.Base(sourcePath), ".tar.gz")
+	sourceOfMove := filepath.Join(tempExtractDir, innerDirName)
+
+	filesToMove, err := os.ReadDir(sourceOfMove)
+	if err != nil {
+		return fmt.Errorf("failed to read temp extracted directory %s: %w", sourceOfMove, err)
 	}
 
-	_ = bar.Finish()
-	logger.Infof("Successfully extracted archive for arch %s.", arch)
+	for _, file := range filesToMove {
+		src := filepath.Join(sourceOfMove, file.Name())
+		dst := filepath.Join(destPath, file.Name())
+		logger.Debugf("Moving extracted file from %s to %s", src, dst)
+		if err := os.Rename(src, dst); err != nil {
+			return fmt.Errorf("failed to move extracted file %s: %w", file.Name(), err)
+		}
+	}
 
+	logger.Infof("Successfully extracted archive for arch %s.", arch)
 	ctx.GetTaskCache().Set(cacheKey, destPath)
 	return nil
 }
@@ -221,12 +244,28 @@ func (s *ExtractEtcdStep) Rollback(ctx runtime.ExecutionContext) error {
 	}
 
 	for arch := range requiredArchs {
-		_, destPath, _, err := s.getPathsForArch(ctx, arch)
+		sourcePath, destPath, _, err := s.getPathsForArch(ctx, arch)
 		if err != nil {
+			if strings.Contains(err.Error(), "disabled for arch") {
+				continue
+			}
+			logger.Warnf("Could not get paths for arch %s during rollback: %v", arch, err)
 			continue
 		}
-		logger.Warnf("Rolling back by deleting extracted directory: %s", destPath)
-		_ = os.RemoveAll(destPath)
+
+		filesToClean, err := helpers.ListFilesInEtcdArchive(sourcePath)
+		if err != nil {
+			logger.Errorf("Could not list files in archive %s for rollback, manual cleanup of %s may be required: %v", sourcePath, destPath, err)
+			continue
+		}
+
+		logger.Warnf("Rolling back by deleting extracted etcd files in: %s", destPath)
+		for _, fileName := range filesToClean {
+			pathToRemove := filepath.Join(destPath, fileName)
+			if err := os.RemoveAll(pathToRemove); err != nil && !os.IsNotExist(err) {
+				logger.Errorf("Failed to remove path %s during rollback: %v", pathToRemove, err)
+			}
+		}
 	}
 
 	return nil

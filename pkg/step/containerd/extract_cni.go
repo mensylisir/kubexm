@@ -2,6 +2,7 @@ package containerd
 
 import (
 	"fmt"
+	"github.com/schollz/progressbar/v3"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +13,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step"
 	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
-	"github.com/schollz/progressbar/v3"
 )
 
 type ExtractCNIPluginsStep struct {
@@ -60,22 +60,22 @@ func (s *ExtractCNIPluginsStep) getRequiredArchs(ctx runtime.ExecutionContext) (
 	return archs, nil
 }
 
-func (s *ExtractCNIPluginsStep) getPathsForArch(ctx runtime.ExecutionContext, arch string) (sourcePath, destPath, cacheKey string, err error) {
+func (s *ExtractCNIPluginsStep) getPathsForArch(ctx runtime.ExecutionContext, arch string) (sourcePath, destPath, cacheKey, innerDir string, err error) {
 	provider := binary.NewBinaryProvider(ctx)
 	binaryInfo, err := provider.GetBinary(binary.ComponentKubeCNI, arch)
 	if err != nil {
-		return "", "", "", fmt.Errorf("failed to get CNI plugins binary info for arch %s: %w", arch, err)
+		return "", "", "", "", fmt.Errorf("failed to get CNI plugins binary info for arch %s: %w", arch, err)
 	}
 	if binaryInfo == nil {
-		return "", "", "", fmt.Errorf("CNI plugins are unexpectedly disabled for arch %s", arch)
+		return "", "", "", "", fmt.Errorf("CNI plugins are disabled for arch %s", arch)
 	}
 
 	sourcePath = binaryInfo.FilePath()
-	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tgz")
-	destPath = filepath.Join(ctx.GetExtractDir(), destDirName)
+	innerDir = "cni-plugins"
+	destPath = filepath.Join(filepath.Dir(sourcePath), innerDir)
 	cacheKey = sourcePath
 
-	return sourcePath, destPath, cacheKey, nil
+	return sourcePath, destPath, cacheKey, innerDir, nil
 }
 
 func (s *ExtractCNIPluginsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
@@ -92,8 +92,11 @@ func (s *ExtractCNIPluginsStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 
 	allDone := true
 	for arch := range requiredArchs {
-		sourcePath, destPath, cacheKey, err := s.getPathsForArch(ctx, arch)
+		sourcePath, destPath, cacheKey, _, err := s.getPathsForArch(ctx, arch)
 		if err != nil {
+			if strings.Contains(err.Error(), "disabled for arch") {
+				continue
+			}
 			return false, err
 		}
 
@@ -101,16 +104,10 @@ func (s *ExtractCNIPluginsStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 			return false, fmt.Errorf("source archive '%s' for arch %s not found, ensure download step ran successfully", sourcePath, arch)
 		}
 
-		_, err = os.Stat(destPath)
-		if os.IsNotExist(err) {
-			logger.Infof("Extraction destination '%s' for arch %s does not exist. Extraction is required.", destPath, arch)
-			allDone = false
-			continue
-		}
-
 		keyFile := filepath.Join(destPath, "bridge")
+
 		if _, err := os.Stat(keyFile); os.IsNotExist(err) {
-			logger.Warnf("Destination directory for arch %s exists, but key file '%s' is missing. Re-extracting.", arch, keyFile)
+			logger.Infof("Key file '%s' for arch %s does not exist. Extraction is required.", keyFile, arch)
 			allDone = false
 		} else {
 			ctx.GetTaskCache().Set(cacheKey, destPath)
@@ -132,12 +129,8 @@ func (s *ExtractCNIPluginsStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 	if len(requiredArchs) == 0 {
-		logger.Info("No hosts found. Skipping extraction.")
+		logger.Info("No hosts require CNI plugins. Skipping extraction.")
 		return nil
-	}
-
-	if err := os.MkdirAll(ctx.GetExtractDir(), 0755); err != nil {
-		return fmt.Errorf("failed to create global extract directory '%s': %w", ctx.GetExtractDir(), err)
 	}
 
 	for arch := range requiredArchs {
@@ -151,16 +144,25 @@ func (s *ExtractCNIPluginsStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *ExtractCNIPluginsStep) extractFileForArch(ctx runtime.ExecutionContext, arch string) error {
-	logger := ctx.GetLogger()
-	sourcePath, destPath, cacheKey, err := s.getPathsForArch(ctx, arch)
+	logger := ctx.GetLogger().With("arch", arch)
+	sourcePath, destPath, cacheKey, _, err := s.getPathsForArch(ctx, arch)
 	if err != nil {
+		if strings.Contains(err.Error(), "disabled for arch") {
+			logger.Debugf("Skipping CNI plugins extraction for arch %s as it's not required.", arch)
+			return nil
+		}
 		return err
 	}
 
-	if _, err := os.Stat(filepath.Join(destPath, "bridge")); err == nil {
-		logger.Infof("Skipping extraction for arch %s, destination already exists and is valid.", arch)
+	keyFile := filepath.Join(destPath, "bridge")
+	if _, err := os.Stat(keyFile); err == nil {
+		logger.Infof("Skipping extraction, destination already exists and is valid.")
 		ctx.GetTaskCache().Set(cacheKey, destPath)
 		return nil
+	}
+
+	if err := os.MkdirAll(destPath, 0755); err != nil {
+		return fmt.Errorf("failed to create destination directory '%s': %w", destPath, err)
 	}
 
 	logger.Infof("Extracting archive '%s' to '%s'...", sourcePath, destPath)
@@ -169,7 +171,6 @@ func (s *ExtractCNIPluginsStep) extractFileForArch(ctx runtime.ExecutionContext,
 	if err != nil {
 		return fmt.Errorf("failed to get info for source file %s: %w", sourcePath, err)
 	}
-
 	bar := progressbar.NewOptions64(
 		fileInfo.Size(),
 		progressbar.OptionSetDescription(fmt.Sprintf("Extracting %s", filepath.Base(sourcePath))),
@@ -181,15 +182,8 @@ func (s *ExtractCNIPluginsStep) extractFileForArch(ctx runtime.ExecutionContext,
 		progressbar.OptionSpinnerType(14),
 		progressbar.OptionFullWidth(),
 	)
-
-	progressFunc := func(fileName string, totalBytes int64) {
-		bar.Add64(totalBytes)
-	}
-
-	ar := helpers.NewArchiver(
-		helpers.WithOverwrite(true),
-		helpers.WithProgress(progressFunc),
-	)
+	progressFunc := func(fileName string, totalBytes int64) { bar.Add64(totalBytes) }
+	ar := helpers.NewArchiver(helpers.WithOverwrite(true), helpers.WithProgress(progressFunc))
 
 	if err := ar.Extract(sourcePath, destPath); err != nil {
 		_ = bar.Clear()
@@ -214,10 +208,15 @@ func (s *ExtractCNIPluginsStep) Rollback(ctx runtime.ExecutionContext) error {
 	}
 
 	for arch := range requiredArchs {
-		_, destPath, _, err := s.getPathsForArch(ctx, arch)
+		_, destPath, _, _, err := s.getPathsForArch(ctx, arch)
 		if err != nil {
+			if strings.Contains(err.Error(), "disabled for arch") {
+				continue
+			}
+			logger.Warnf("Could not get paths for arch %s during rollback: %v", arch, err)
 			continue
 		}
+
 		logger.Warnf("Rolling back by deleting extracted directory: %s", destPath)
 		_ = os.RemoveAll(destPath)
 	}

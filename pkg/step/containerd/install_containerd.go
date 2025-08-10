@@ -66,13 +66,12 @@ func (s *InstallContainerdStep) getLocalExtractedPath(ctx runtime.ExecutionConte
 		return "", fmt.Errorf("failed to get containerd binary info: %w", err)
 	}
 	if binaryInfo == nil {
-		return "", fmt.Errorf("containerd is unexpectedly disabled for arch %s", arch)
+		return "", fmt.Errorf("containerd is disabled for arch %s", arch)
 	}
 
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install containerd binaries (version %s)", s.Base.Meta.Name, binaryInfo.Version)
 
-	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tar.gz")
-	return filepath.Join(ctx.GetExtractDir(), destDirName), nil
+	return filepath.Dir(binaryInfo.FilePath()), nil
 }
 
 func (s *InstallContainerdStep) filesToInstall() map[string]string {
@@ -90,6 +89,19 @@ func (s *InstallContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		return false, err
+	}
+
+	// 检查本地源文件是否存在
+	localExtractedPath, err := s.getLocalExtractedPath(ctx)
+	if err != nil {
+		if strings.Contains(err.Error(), "disabled for arch") {
+			logger.Infof("Containerd not required for this host (arch: %s), skipping.", ctx.GetHost().GetArch())
+			return true, nil
+		}
+		return false, err
+	}
+	if _, err := os.Stat(filepath.Join(localExtractedPath, "bin", "containerd")); os.IsNotExist(err) {
+		return false, fmt.Errorf("local containerd extracted path '%s' or key file 'bin/containerd' not found, ensure extract step ran successfully", localExtractedPath)
 	}
 
 	files := s.filesToInstall()
@@ -124,6 +136,10 @@ func (s *InstallContainerdStep) Run(ctx runtime.ExecutionContext) error {
 
 	localExtractedPath, err := s.getLocalExtractedPath(ctx)
 	if err != nil {
+		if strings.Contains(err.Error(), "disabled for arch") {
+			logger.Infof("Containerd not required for this host (arch: %s), skipping.", ctx.GetHost().GetArch())
+			return nil
+		}
 		return err
 	}
 	if _, err := os.Stat(localExtractedPath); os.IsNotExist(err) {
@@ -152,18 +168,18 @@ func (s *InstallContainerdStep) Run(ctx runtime.ExecutionContext) error {
 		}
 
 		remoteTempPath := filepath.Join(remoteUploadTmpDir, filepath.Base(localSourcePath))
-		logger.Infof("Uploading %s to %s:%s", filepath.Base(localSourcePath), ctx.GetHost().GetName(), remoteTempPath)
+		logger.Debugf("Uploading %s to %s:%s", filepath.Base(localSourcePath), ctx.GetHost().GetName(), remoteTempPath)
 		if err := runner.Upload(ctx.GoContext(), conn, localSourcePath, remoteTempPath, false); err != nil {
 			return fmt.Errorf("failed to upload '%s': %w", localSourcePath, err)
 		}
 
 		moveCmd := fmt.Sprintf("mv %s %s", remoteTempPath, remoteTargetPath)
-		logger.Infof("Moving file to %s on remote host", remoteTargetPath)
+		logger.Debugf("Moving file to %s on remote host", remoteTargetPath)
 		if _, err := runner.Run(ctx.GoContext(), conn, moveCmd, s.Sudo); err != nil {
 			return fmt.Errorf("failed to move file to '%s': %w", remoteTargetPath, err)
 		}
 
-		logger.Infof("Setting permissions for %s to %s", remoteTargetPath, s.Permission)
+		logger.Debugf("Setting permissions for %s to %s", remoteTargetPath, s.Permission)
 		if err := runner.Chmod(ctx.GoContext(), conn, remoteTargetPath, s.Permission, s.Sudo); err != nil {
 			return fmt.Errorf("failed to set permission on '%s': %w", remoteTargetPath, err)
 		}
@@ -178,6 +194,7 @@ func (s *InstallContainerdStep) Rollback(ctx runtime.ExecutionContext) error {
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
+		logger.Errorf("Failed to get connector for rollback: %v", err)
 		return nil
 	}
 

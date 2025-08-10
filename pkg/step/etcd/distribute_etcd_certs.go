@@ -2,6 +2,8 @@ package etcd
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -74,13 +76,7 @@ func (s *DistributeEtcdCertsStep) Meta() *spec.StepMeta {
 }
 
 func (s *DistributeEtcdCertsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
-	runner := ctx.GetRunner()
-
-	conn, err := ctx.GetCurrentHostConnector()
-	if err != nil {
-		return false, fmt.Errorf("failed to get connector for precheck on host %s: %w", ctx.GetHost().GetName(), err)
-	}
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 
 	nodeName := ctx.GetHost().GetName()
 	requiredFiles := []string{
@@ -93,21 +89,32 @@ func (s *DistributeEtcdCertsStep) Precheck(ctx runtime.ExecutionContext) (isDone
 		fmt.Sprintf(common.EtcdMemberKeyFileNamePattern, nodeName),
 	}
 
+	allDone := true
 	for _, fileName := range requiredFiles {
+		localPath := filepath.Join(s.LocalCertsDir, fileName)
 		remotePath := filepath.Join(s.RemoteCertsDir, fileName)
 
-		exists, err := runner.Exists(ctx.GoContext(), conn, remotePath)
-		if err != nil {
-			return false, fmt.Errorf("failed to check existence of remote file %s on node %s: %w", remotePath, nodeName, err)
+		if _, err := os.Stat(localPath); os.IsNotExist(err) {
+			return false, fmt.Errorf("local source certificate '%s' not found, ensure generation steps ran successfully", localPath)
 		}
 
-		if !exists {
-			logger.Info("Required certificate file not found on remote host. Step needs to run.", "node", nodeName, "file", remotePath)
-			return false, nil
+		isDone, err := helpers.CheckRemoteFileIntegrity(ctx, localPath, remotePath, s.Sudo)
+		if err != nil {
+			return false, fmt.Errorf("failed to check remote file integrity for %s: %w", remotePath, err)
+		}
+
+		if !isDone {
+			logger.Infof("Remote certificate '%s' is missing or outdated. Distribution is required.", remotePath)
+			allDone = false
+			break
 		}
 	}
-	logger.Info("All required etcd certificates already exist on the remote host. Step is done.", "node", nodeName)
-	return true, nil
+
+	if allDone {
+		logger.Info("All required etcd certificates already exist and are up-to-date on the remote host. Step is done.", "node", nodeName)
+	}
+
+	return allDone, nil
 }
 
 func (s *DistributeEtcdCertsStep) Run(ctx runtime.ExecutionContext) error {
@@ -140,8 +147,8 @@ func (s *DistributeEtcdCertsStep) Run(ctx runtime.ExecutionContext) error {
 		if isPrivateKey(fileName) {
 			permission = "0600"
 		}
-		chmodCmd := fmt.Sprintf("chmod %s %s", permission, remotePath)
-		if _, _, err := runner.OriginRun(ctx.GoContext(), conn, chmodCmd, s.Sudo); err != nil {
+		logger.Debugf("Setting permissions for %s to %s", remotePath, permission)
+		if err := runner.Chmod(ctx.GoContext(), conn, remotePath, permission, s.Sudo); err != nil {
 			return fmt.Errorf("failed to set permission on %s for node %s: %w", remotePath, ctx.GetHost().GetName(), err)
 		}
 	}
