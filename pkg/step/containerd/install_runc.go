@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
 )
 
@@ -65,7 +67,7 @@ func (s *InstallRuncStep) getLocalSourcePath(ctx runtime.ExecutionContext) (stri
 		return "", fmt.Errorf("failed to get runc binary info: %w", err)
 	}
 	if binaryInfo == nil {
-		return "", fmt.Errorf("runc is unexpectedly disabled for arch %s", arch)
+		return "", fmt.Errorf("runc is disabled for arch %s", arch)
 	}
 
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install runc binary (version %s)", s.Base.Meta.Name, binaryInfo.Version)
@@ -75,23 +77,32 @@ func (s *InstallRuncStep) getLocalSourcePath(ctx runtime.ExecutionContext) (stri
 
 func (s *InstallRuncStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
-	runner := ctx.GetRunner()
-	conn, err := ctx.GetCurrentHostConnector()
+
+	localSourcePath, err := s.getLocalSourcePath(ctx)
 	if err != nil {
+		if strings.Contains(err.Error(), "disabled for arch") {
+			logger.Infof("runc not required for this host (arch: %s), skipping.", ctx.GetHost().GetArch())
+			return true, nil
+		}
 		return false, err
 	}
 
-	exists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteRuncTargetPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check for file '%s' on host %s: %w", s.RemoteRuncTargetPath, ctx.GetHost().GetName(), err)
-	}
-	if exists {
-		logger.Infof("Target file '%s' already exists. Step is done.", s.RemoteRuncTargetPath)
-		return true, nil
+	if _, err := os.Stat(localSourcePath); os.IsNotExist(err) {
+		return false, fmt.Errorf("local source file '%s' not found, ensure download step ran successfully", localSourcePath)
 	}
 
-	logger.Infof("Target file '%s' does not exist. Installation is required.", s.RemoteRuncTargetPath)
-	return false, nil
+	isDone, err = helpers.CheckRemoteFileIntegrity(ctx, localSourcePath, s.RemoteRuncTargetPath, s.Sudo)
+	if err != nil {
+		return false, fmt.Errorf("failed to check remote file integrity for %s: %w", s.RemoteRuncTargetPath, err)
+	}
+
+	if isDone {
+		logger.Infof("Target file '%s' already exists and is up-to-date. Step is done.", s.RemoteRuncTargetPath)
+	} else {
+		logger.Infof("Target file '%s' is missing or outdated. Installation is required.", s.RemoteRuncTargetPath)
+	}
+
+	return isDone, nil
 }
 
 func (s *InstallRuncStep) Run(ctx runtime.ExecutionContext) error {
@@ -104,6 +115,10 @@ func (s *InstallRuncStep) Run(ctx runtime.ExecutionContext) error {
 
 	localSourcePath, err := s.getLocalSourcePath(ctx)
 	if err != nil {
+		if strings.Contains(err.Error(), "disabled for arch") {
+			logger.Infof("runc not required for this host (arch: %s), skipping.", ctx.GetHost().GetArch())
+			return nil
+		}
 		return err
 	}
 
@@ -111,8 +126,9 @@ func (s *InstallRuncStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("local source file '%s' not found, ensure download step ran successfully", localSourcePath)
 	}
 
-	if err := runner.Mkdirp(ctx.GoContext(), conn, common.DefaultBinDir, "0755", s.Sudo); err != nil {
-		return fmt.Errorf("failed to create remote install directory '%s': %w", common.DefaultBinDir, err)
+	installDir := filepath.Dir(s.RemoteRuncTargetPath)
+	if err := runner.Mkdirp(ctx.GoContext(), conn, installDir, "0755", s.Sudo); err != nil {
+		return fmt.Errorf("failed to create remote install directory '%s': %w", installDir, err)
 	}
 
 	remoteUploadTmpDir := filepath.Join(ctx.GetUploadDir(), fmt.Sprintf("runc-%d", time.Now().UnixNano()))
@@ -124,19 +140,19 @@ func (s *InstallRuncStep) Run(ctx runtime.ExecutionContext) error {
 	}()
 
 	remoteTempPath := filepath.Join(remoteUploadTmpDir, "runc")
-	logger.Infof("Uploading runc to %s:%s", ctx.GetHost().GetName(), remoteTempPath)
+	logger.Debugf("Uploading runc to %s:%s", ctx.GetHost().GetName(), remoteTempPath)
 
 	if err := runner.Upload(ctx.GoContext(), conn, localSourcePath, remoteTempPath, false); err != nil {
 		return fmt.Errorf("failed to upload '%s' to '%s': %w", localSourcePath, remoteTempPath, err)
 	}
 
 	moveCmd := fmt.Sprintf("mv %s %s", remoteTempPath, s.RemoteRuncTargetPath)
-	logger.Infof("Moving file to %s on remote host", s.RemoteRuncTargetPath)
+	logger.Debugf("Moving file to %s on remote host", s.RemoteRuncTargetPath)
 	if _, err := runner.Run(ctx.GoContext(), conn, moveCmd, s.Sudo); err != nil {
 		return fmt.Errorf("failed to move file to '%s': %w", s.RemoteRuncTargetPath, err)
 	}
 
-	logger.Infof("Setting permissions for %s to %s", s.RemoteRuncTargetPath, s.Permission)
+	logger.Debugf("Setting permissions for %s to %s", s.RemoteRuncTargetPath, s.Permission)
 	if err := runner.Chmod(ctx.GoContext(), conn, s.RemoteRuncTargetPath, s.Permission, s.Sudo); err != nil {
 		return fmt.Errorf("failed to set permission on '%s': %w", s.RemoteRuncTargetPath, err)
 	}
@@ -150,6 +166,7 @@ func (s *InstallRuncStep) Rollback(ctx runtime.ExecutionContext) error {
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
+		logger.Errorf("Failed to get connector for rollback: %v", err)
 		return nil
 	}
 

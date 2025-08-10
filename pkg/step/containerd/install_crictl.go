@@ -11,6 +11,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/binary"
 )
 
@@ -58,7 +59,7 @@ func (s *InstallCriCtlStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *InstallCriCtlStep) getLocalExtractedPath(ctx runtime.ExecutionContext) (string, error) {
+func (s *InstallCriCtlStep) getLocalSourcePath(ctx runtime.ExecutionContext) (string, error) {
 	provider := binary.NewBinaryProvider(ctx)
 	arch := ctx.GetHost().GetArch()
 	binaryInfo, err := provider.GetBinary(binary.ComponentCriCtl, arch)
@@ -66,34 +67,43 @@ func (s *InstallCriCtlStep) getLocalExtractedPath(ctx runtime.ExecutionContext) 
 		return "", fmt.Errorf("failed to get crictl binary info: %w", err)
 	}
 	if binaryInfo == nil {
-		return "", fmt.Errorf("crictl is unexpectedly disabled for arch %s", arch)
+		return "", fmt.Errorf("crictl is disabled for arch %s", arch)
 	}
 
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install crictl binary (version %s)", s.Base.Meta.Name, binaryInfo.Version)
 
-	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tar.gz")
-	return filepath.Join(ctx.GetExtractDir(), destDirName), nil
+	extractedDir := filepath.Dir(binaryInfo.FilePath())
+	return filepath.Join(extractedDir, "crictl"), nil
 }
 
 func (s *InstallCriCtlStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
-	runner := ctx.GetRunner()
-	conn, err := ctx.GetCurrentHostConnector()
+
+	localSourcePath, err := s.getLocalSourcePath(ctx)
 	if err != nil {
+		if strings.Contains(err.Error(), "disabled for arch") {
+			logger.Infof("crictl not required for this host (arch: %s), skipping.", ctx.GetHost().GetArch())
+			return true, nil
+		}
 		return false, err
 	}
 
-	exists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteCriCtlTargetPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check for file '%s' on host %s: %w", s.RemoteCriCtlTargetPath, ctx.GetHost().GetName(), err)
-	}
-	if exists {
-		logger.Infof("Target file '%s' already exists. Step is done.", s.RemoteCriCtlTargetPath)
-		return true, nil
+	if _, err := os.Stat(localSourcePath); os.IsNotExist(err) {
+		return false, fmt.Errorf("local source file '%s' not found, ensure extract step ran successfully", localSourcePath)
 	}
 
-	logger.Infof("Target file '%s' does not exist. Installation is required.", s.RemoteCriCtlTargetPath)
-	return false, nil
+	isDone, err = helpers.CheckRemoteFileIntegrity(ctx, localSourcePath, s.RemoteCriCtlTargetPath, s.Sudo)
+	if err != nil {
+		return false, fmt.Errorf("failed to check remote file integrity for %s: %w", s.RemoteCriCtlTargetPath, err)
+	}
+
+	if isDone {
+		logger.Infof("Target file '%s' already exists and is up-to-date. Step is done.", s.RemoteCriCtlTargetPath)
+	} else {
+		logger.Infof("Target file '%s' is missing or outdated. Installation is required.", s.RemoteCriCtlTargetPath)
+	}
+
+	return isDone, nil
 }
 
 func (s *InstallCriCtlStep) Run(ctx runtime.ExecutionContext) error {
@@ -104,19 +114,22 @@ func (s *InstallCriCtlStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	localExtractedPath, err := s.getLocalExtractedPath(ctx)
+	localSourcePath, err := s.getLocalSourcePath(ctx)
 	if err != nil {
+		if strings.Contains(err.Error(), "disabled for arch") {
+			logger.Infof("crictl not required for this host (arch: %s), skipping.", ctx.GetHost().GetArch())
+			return nil
+		}
 		return err
 	}
-
-	localSourcePath := filepath.Join(localExtractedPath, "crictl")
 
 	if _, err := os.Stat(localSourcePath); os.IsNotExist(err) {
 		return fmt.Errorf("local source file '%s' not found, ensure extract step ran successfully", localSourcePath)
 	}
 
-	if err := runner.Mkdirp(ctx.GoContext(), conn, common.DefaultBinDir, "0755", s.Sudo); err != nil {
-		return fmt.Errorf("failed to create remote install directory '%s': %w", common.DefaultBinDir, err)
+	installDir := filepath.Dir(s.RemoteCriCtlTargetPath)
+	if err := runner.Mkdirp(ctx.GoContext(), conn, installDir, "0755", s.Sudo); err != nil {
+		return fmt.Errorf("failed to create remote install directory '%s': %w", installDir, err)
 	}
 
 	remoteUploadTmpDir := filepath.Join(ctx.GetUploadDir(), fmt.Sprintf("crictl-%d", time.Now().UnixNano()))
@@ -128,19 +141,19 @@ func (s *InstallCriCtlStep) Run(ctx runtime.ExecutionContext) error {
 	}()
 
 	remoteTempPath := filepath.Join(remoteUploadTmpDir, "crictl")
-	logger.Infof("Uploading crictl to %s:%s", ctx.GetHost().GetName(), remoteTempPath)
+	logger.Debugf("Uploading crictl to %s:%s", ctx.GetHost().GetName(), remoteTempPath)
 
 	if err := runner.Upload(ctx.GoContext(), conn, localSourcePath, remoteTempPath, false); err != nil {
 		return fmt.Errorf("failed to upload '%s' to '%s': %w", localSourcePath, remoteTempPath, err)
 	}
 
 	moveCmd := fmt.Sprintf("mv %s %s", remoteTempPath, s.RemoteCriCtlTargetPath)
-	logger.Infof("Moving file to %s on remote host", s.RemoteCriCtlTargetPath)
+	logger.Debugf("Moving file to %s on remote host", s.RemoteCriCtlTargetPath)
 	if _, err := runner.Run(ctx.GoContext(), conn, moveCmd, s.Sudo); err != nil {
 		return fmt.Errorf("failed to move file to '%s': %w", s.RemoteCriCtlTargetPath, err)
 	}
 
-	logger.Infof("Setting permissions for %s to %s", s.RemoteCriCtlTargetPath, s.CrictlPermissions)
+	logger.Debugf("Setting permissions for %s to %s", s.RemoteCriCtlTargetPath, s.CrictlPermissions)
 	if err := runner.Chmod(ctx.GoContext(), conn, s.RemoteCriCtlTargetPath, s.CrictlPermissions, s.Sudo); err != nil {
 		return fmt.Errorf("failed to set permission on '%s': %w", s.RemoteCriCtlTargetPath, err)
 	}
@@ -154,6 +167,7 @@ func (s *InstallCriCtlStep) Rollback(ctx runtime.ExecutionContext) error {
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
+		logger.Errorf("Failed to get connector for rollback: %v", err)
 		return nil
 	}
 

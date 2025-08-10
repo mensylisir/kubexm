@@ -2,8 +2,10 @@ package kubeadm
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/common"
@@ -79,24 +81,33 @@ func (s *InstallKubeadmStep) getRemoteTargetPath() string {
 
 func (s *InstallKubeadmStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
-	runner := ctx.GetRunner()
-	conn, err := ctx.GetCurrentHostConnector()
+
+	localSourcePath, err := s.getLocalSourcePath(ctx)
 	if err != nil {
+		if strings.Contains(err.Error(), "disabled for arch") {
+			logger.Infof("kubeadm not required for this host (arch: %s), skipping.", ctx.GetHost().GetArch())
+			return true, nil
+		}
 		return false, err
 	}
 
-	targetPath := s.getRemoteTargetPath()
-	exists, err := runner.Exists(ctx.GoContext(), conn, targetPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check for file '%s' on host %s: %w", targetPath, ctx.GetHost().GetName(), err)
-	}
-	if exists {
-		logger.Infof("Target file '%s' already exists. Step is done.", targetPath)
-		return true, nil
+	if _, err := os.Stat(localSourcePath); os.IsNotExist(err) {
+		return false, fmt.Errorf("local source file '%s' not found, ensure download step ran successfully", localSourcePath)
 	}
 
-	logger.Infof("Target file '%s' does not exist. Installation is required.", targetPath)
-	return false, nil
+	targetPath := s.getRemoteTargetPath()
+	isDone, err = helpers.CheckRemoteFileIntegrity(ctx, localSourcePath, targetPath, s.Sudo)
+	if err != nil {
+		return false, fmt.Errorf("failed to check remote file integrity for %s: %w", targetPath, err)
+	}
+
+	if isDone {
+		logger.Infof("Target file '%s' already exists and is up-to-date. Step is done.", targetPath)
+	} else {
+		logger.Infof("Target file '%s' is missing or outdated. Installation is required.", targetPath)
+	}
+
+	return isDone, nil
 }
 
 func (s *InstallKubeadmStep) Run(ctx runtime.ExecutionContext) error {

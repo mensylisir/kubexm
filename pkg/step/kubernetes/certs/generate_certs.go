@@ -30,7 +30,7 @@ type GenerateKubeCertsStepBuilder struct {
 
 func NewGenerateKubeCertsStepBuilder(ctx runtime.Context, instanceName string) *GenerateKubeCertsStepBuilder {
 	s := &GenerateKubeCertsStep{
-		KubeCertsDir: filepath.Join(ctx.GetGlobalWorkDir(), "certs", "kubernetes"),
+		KubeCertsDir: ctx.GetKubernetesCertsDir(),
 		CertDuration: common.DefaultCertificateValidityDays * 24 * time.Hour,
 		ClusterSpec:  ctx.GetClusterConfig().Spec,
 	}

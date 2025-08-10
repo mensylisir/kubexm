@@ -2,8 +2,10 @@ package docker
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/common"
@@ -75,23 +77,32 @@ func (s *InstallBuildxStep) getLocalSourcePath(ctx runtime.ExecutionContext) (st
 
 func (s *InstallBuildxStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
-	runner := ctx.GetRunner()
-	conn, err := ctx.GetCurrentHostConnector()
+
+	localSourcePath, err := s.getLocalSourcePath(ctx)
 	if err != nil {
+		if strings.Contains(err.Error(), "disabled for arch") {
+			logger.Infof("buildx not required for this host (arch: %s), skipping.", ctx.GetHost().GetArch())
+			return true, nil
+		}
 		return false, err
 	}
 
-	exists, err := runner.Exists(ctx.GoContext(), conn, s.InstallPath)
-	if err != nil {
-		return false, fmt.Errorf("failed to check for file '%s' on host %s: %w", s.InstallPath, ctx.GetHost().GetName(), err)
-	}
-	if exists {
-		logger.Infof("Target file '%s' already exists. Step is done.", s.InstallPath)
-		return true, nil
+	if _, err := os.Stat(localSourcePath); os.IsNotExist(err) {
+		return false, fmt.Errorf("local source file '%s' not found, ensure download step ran successfully", localSourcePath)
 	}
 
-	logger.Infof("Target file '%s' does not exist. Installation is required.", s.InstallPath)
-	return false, nil
+	isDone, err = helpers.CheckRemoteFileIntegrity(ctx, localSourcePath, s.InstallPath, s.Sudo)
+	if err != nil {
+		return false, fmt.Errorf("failed to check remote file integrity for %s: %w", s.InstallPath, err)
+	}
+
+	if isDone {
+		logger.Infof("Target file '%s' already exists and is up-to-date. Step is done.", s.InstallPath)
+	} else {
+		logger.Infof("Target file '%s' is missing or outdated. Installation is required.", s.InstallPath)
+	}
+
+	return isDone, nil
 }
 
 func (s *InstallBuildxStep) Run(ctx runtime.ExecutionContext) error {

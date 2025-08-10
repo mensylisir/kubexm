@@ -1,13 +1,12 @@
 package registry
 
 import (
-	"crypto/sha256"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -65,23 +64,6 @@ func (s *DownloadRegistryStep) getRequiredArchs(ctx runtime.ExecutionContext) (m
 	return archs, nil
 }
 
-func (s *DownloadRegistryStep) verifyChecksum(filePath string, binaryInfo *binary.Binary) (bool, error) {
-	expectedChecksum := binaryInfo.Checksum()
-	if expectedChecksum == "" || strings.HasPrefix(expectedChecksum, "dummy-") {
-		return true, nil
-	}
-	f, err := os.Open(filePath)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return false, err
-	}
-	return fmt.Sprintf("%x", h.Sum(nil)) == expectedChecksum, nil
-}
-
 func (s *DownloadRegistryStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
 	requiredArchs, err := s.getRequiredArchs(ctx)
@@ -103,8 +85,14 @@ func (s *DownloadRegistryStep) Precheck(ctx runtime.ExecutionContext) (isDone bo
 			allDone = false
 			continue
 		}
-		match, _ := s.verifyChecksum(destPath, binaryInfo)
+		match, err := helpers.VerifyLocalFileChecksum(destPath, binaryInfo.Checksum())
+		if err != nil {
+			logger.Warnf("Failed to verify checksum for arch %s file (%s): %v. Re-download is required.", arch, destPath, err)
+			allDone = false
+			continue
+		}
 		if !match {
+			logger.Warnf("Checksum mismatch for arch %s file (%s). Re-download is required.", arch, destPath)
 			allDone = false
 		}
 	}
@@ -131,7 +119,7 @@ func (s *DownloadRegistryStep) Run(ctx runtime.ExecutionContext) error {
 		}
 		destPath := binaryInfo.FilePath()
 		if _, err := os.Stat(destPath); err == nil {
-			if match, _ := s.verifyChecksum(destPath, binaryInfo); match {
+			if match, _ := helpers.VerifyLocalFileChecksum(destPath, binaryInfo.Checksum()); match {
 				logger.Infof("Skipping download for arch %s, file already exists and is valid.", arch)
 				continue
 			}
@@ -178,12 +166,12 @@ func (s *DownloadRegistryStep) downloadFile(ctx runtime.ExecutionContext, binary
 	}
 	_ = bar.Finish()
 	logger.Infof("Successfully downloaded to %s", binaryInfo.FilePath())
-	match, err := s.verifyChecksum(binaryInfo.FilePath(), binaryInfo)
+	match, err := helpers.VerifyLocalFileChecksum(binaryInfo.FilePath(), binaryInfo.Checksum())
 	if err != nil {
 		return err
 	}
 	if !match {
-		return fmt.Errorf("checksum mismatch after download")
+		return fmt.Errorf("checksum mismatch after download for '%s'. Expected '%s'", binaryInfo.FilePath(), binaryInfo.Checksum())
 	}
 	logger.Info("Checksum verification successful.")
 	return nil

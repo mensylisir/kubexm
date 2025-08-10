@@ -74,12 +74,11 @@ func (s *ExtractCriCtlStep) getPathsForArch(ctx runtime.ExecutionContext, arch s
 		return "", "", "", fmt.Errorf("failed to get crictl binary info for arch %s: %w", arch, err)
 	}
 	if binaryInfo == nil {
-		return "", "", "", fmt.Errorf("crictl is unexpectedly disabled for arch %s", arch)
+		return "", "", "", fmt.Errorf("crictl is disabled for arch %s", arch)
 	}
 
 	sourcePath = binaryInfo.FilePath()
-	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tar.gz")
-	destPath = filepath.Join(ctx.GetExtractDir(), destDirName)
+	destPath = filepath.Dir(sourcePath)
 	cacheKey = sourcePath
 
 	return sourcePath, destPath, cacheKey, nil
@@ -101,6 +100,9 @@ func (s *ExtractCriCtlStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 	for arch := range requiredArchs {
 		sourcePath, destPath, cacheKey, err := s.getPathsForArch(ctx, arch)
 		if err != nil {
+			if strings.Contains(err.Error(), "disabled for arch") {
+				continue
+			}
 			return false, err
 		}
 
@@ -108,16 +110,10 @@ func (s *ExtractCriCtlStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 			return false, fmt.Errorf("source archive '%s' for arch %s not found, ensure download step ran successfully", sourcePath, arch)
 		}
 
-		_, err = os.Stat(destPath)
-		if os.IsNotExist(err) {
-			logger.Infof("Extraction destination '%s' for arch %s does not exist. Extraction is required.", destPath, arch)
-			allDone = false
-			continue
-		}
-
 		keyFile := filepath.Join(destPath, "crictl")
+
 		if _, err := os.Stat(keyFile); os.IsNotExist(err) {
-			logger.Warnf("Destination directory for arch %s exists, but key file '%s' is missing. Re-extracting.", arch, keyFile)
+			logger.Infof("Key file '%s' for arch %s does not exist. Extraction is required.", keyFile, arch)
 			allDone = false
 		} else {
 			ctx.GetTaskCache().Set(cacheKey, destPath)
@@ -143,10 +139,6 @@ func (s *ExtractCriCtlStep) Run(ctx runtime.ExecutionContext) error {
 		return nil
 	}
 
-	if err := os.MkdirAll(ctx.GetExtractDir(), 0755); err != nil {
-		return fmt.Errorf("failed to create global extract directory '%s': %w", ctx.GetExtractDir(), err)
-	}
-
 	for arch := range requiredArchs {
 		if err := s.extractFileForArch(ctx, arch); err != nil {
 			return err
@@ -161,10 +153,15 @@ func (s *ExtractCriCtlStep) extractFileForArch(ctx runtime.ExecutionContext, arc
 	logger := ctx.GetLogger()
 	sourcePath, destPath, cacheKey, err := s.getPathsForArch(ctx, arch)
 	if err != nil {
+		if strings.Contains(err.Error(), "disabled for arch") {
+			logger.Debugf("Skipping crictl extraction for arch %s as it's not required.", arch)
+			return nil
+		}
 		return err
 	}
 
-	if _, err := os.Stat(filepath.Join(destPath, "crictl")); err == nil {
+	keyFile := filepath.Join(destPath, "crictl")
+	if _, err := os.Stat(keyFile); err == nil {
 		logger.Infof("Skipping extraction for arch %s, destination already exists and is valid.", arch)
 		ctx.GetTaskCache().Set(cacheKey, destPath)
 		return nil
@@ -176,7 +173,6 @@ func (s *ExtractCriCtlStep) extractFileForArch(ctx runtime.ExecutionContext, arc
 	if err != nil {
 		return fmt.Errorf("failed to get info for source file %s: %w", sourcePath, err)
 	}
-
 	bar := progressbar.NewOptions64(
 		fileInfo.Size(),
 		progressbar.OptionSetDescription(fmt.Sprintf("Extracting %s", filepath.Base(sourcePath))),
@@ -188,19 +184,12 @@ func (s *ExtractCriCtlStep) extractFileForArch(ctx runtime.ExecutionContext, arc
 		progressbar.OptionSpinnerType(14),
 		progressbar.OptionFullWidth(),
 	)
-
-	progressFunc := func(fileName string, totalBytes int64) {
-		bar.Add64(totalBytes)
-	}
-
-	ar := helpers.NewArchiver(
-		helpers.WithOverwrite(true),
-		helpers.WithProgress(progressFunc),
-	)
+	progressFunc := func(fileName string, totalBytes int64) { bar.Add64(totalBytes) }
+	ar := helpers.NewArchiver(helpers.WithOverwrite(true), helpers.WithProgress(progressFunc))
 
 	if err := ar.Extract(sourcePath, destPath); err != nil {
 		_ = bar.Clear()
-		_ = os.RemoveAll(destPath)
+		_ = os.Remove(filepath.Join(destPath, "crictl"))
 		return fmt.Errorf("failed to extract archive '%s': %w", sourcePath, err)
 	}
 
@@ -223,10 +212,16 @@ func (s *ExtractCriCtlStep) Rollback(ctx runtime.ExecutionContext) error {
 	for arch := range requiredArchs {
 		_, destPath, _, err := s.getPathsForArch(ctx, arch)
 		if err != nil {
+			if strings.Contains(err.Error(), "disabled for arch") {
+				continue
+			}
+			logger.Warnf("Could not get paths for arch %s during rollback: %v", arch, err)
 			continue
 		}
-		logger.Warnf("Rolling back by deleting extracted directory: %s", destPath)
-		_ = os.RemoveAll(destPath)
+
+		fileToRemove := filepath.Join(destPath, "crictl")
+		logger.Warnf("Rolling back by deleting extracted file: %s", fileToRemove)
+		_ = os.Remove(fileToRemove)
 	}
 
 	return nil

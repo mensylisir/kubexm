@@ -2,6 +2,7 @@ package docker
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,13 +75,14 @@ func (s *InstallDockerStep) getLocalExtractedPath(ctx runtime.ExecutionContext) 
 		return "", fmt.Errorf("failed to get Docker binary info: %w", err)
 	}
 	if binaryInfo == nil {
-		return "", fmt.Errorf("Docker is unexpectedly disabled for arch %s", arch)
+		return "", fmt.Errorf("Docker is disabled for arch %s", arch)
 	}
 
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install Docker binaries (version %s)", s.Base.Meta.Name, binaryInfo.Version)
 
-	destDirName := strings.TrimSuffix(binaryInfo.FileName(), ".tgz")
-	return filepath.Join(ctx.GetExtractDir(), destDirName, "docker"), nil
+	extractedDir := filepath.Dir(binaryInfo.FilePath())
+	innerDir := "docker"
+	return filepath.Join(extractedDir, innerDir), nil
 }
 
 func (s *InstallDockerStep) filesToInstall() []string {
@@ -98,33 +100,43 @@ func (s *InstallDockerStep) filesToInstall() []string {
 
 func (s *InstallDockerStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
-	runner := ctx.GetRunner()
-	conn, err := ctx.GetCurrentHostConnector()
+
+	localSourceDir, err := s.getLocalExtractedPath(ctx)
 	if err != nil {
+		if strings.Contains(err.Error(), "disabled for arch") {
+			logger.Infof("Docker not required for this host (arch: %s), skipping.", ctx.GetHost().GetArch())
+			return true, nil
+		}
 		return false, err
 	}
 
 	files := s.filesToInstall()
-	allExist := true
+	allDone := true
 	for _, fileName := range files {
-		targetPath := filepath.Join(s.InstallPath, fileName)
-		exists, err := runner.Exists(ctx.GoContext(), conn, targetPath)
-		if err != nil {
-			return false, fmt.Errorf("failed to check for file '%s' on host %s: %w", targetPath, ctx.GetHost().GetName(), err)
+		localSourcePath := filepath.Join(localSourceDir, fileName)
+		remoteTargetPath := filepath.Join(s.InstallPath, fileName)
+
+		if _, err := os.Stat(localSourcePath); os.IsNotExist(err) {
+			return false, fmt.Errorf("local source file '%s' not found, ensure extract step ran successfully", localSourcePath)
 		}
-		if !exists {
-			logger.Infof("Target file '%s' does not exist. Installation is required.", targetPath)
-			allExist = false
+
+		isDone, err := helpers.CheckRemoteFileIntegrity(ctx, localSourcePath, remoteTargetPath, s.Sudo)
+		if err != nil {
+			return false, fmt.Errorf("failed to check remote file integrity for %s: %w", remoteTargetPath, err)
+		}
+
+		if !isDone {
+			logger.Infof("Target file '%s' is missing or outdated. Installation is required.", remoteTargetPath)
+			allDone = false
 			break
 		}
 	}
 
-	if allExist {
-		logger.Info("All required Docker files already exist on remote host. Step is done.")
-		return true, nil
+	if allDone {
+		logger.Info("All required Docker files already exist and are up-to-date. Step is done.")
 	}
 
-	return false, nil
+	return allDone, nil
 }
 
 func (s *InstallDockerStep) Run(ctx runtime.ExecutionContext) error {

@@ -26,7 +26,7 @@ type GenerateKubeCAStepBuilder struct {
 
 func NewGenerateKubeCAStepBuilder(ctx runtime.Context, instanceName string) *GenerateKubeCAStepBuilder {
 	s := &GenerateKubeCAStep{
-		LocalCertsDir: filepath.Join(ctx.GetGlobalWorkDir(), "certs", "kubernetes"),
+		LocalCertsDir: ctx.GetKubernetesCertsDir(),
 		CADuration:    common.TenYears * 24 * time.Hour,
 	}
 
