@@ -116,8 +116,8 @@ func Validate_CrioConfig(cfg *Crio, verrs *validation.ValidationErrors, pathPref
 			verrs.Add(pathPrefix+".version", "invalid version format")
 		}
 	}
-	if cfg.CgroupManager != nil {
-		if *cfg.CgroupManager != common.CgroupDriverSystemd && *cfg.CgroupManager != common.CgroupDriverCgroupfs {
+	if cfg.CgroupDriver != nil {
+		if *cfg.CgroupDriver != common.CgroupDriverSystemd && *cfg.CgroupDriver != common.CgroupDriverCgroupfs {
 			verrs.Add(pathPrefix+".cgroupManager", "must be 'systemd' or 'cgroupfs'")
 		}
 	}

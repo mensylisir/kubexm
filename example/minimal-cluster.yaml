@@ -1,0 +1,36 @@
+apiVersion: kubexms.io/v1alpha1
+kind: Cluster
+metadata:
+  name: minimal-cluster
+spec:
+  # 1. 主机定义 (最核心的信息)
+  # global 中的 user, port, privateKeyPath 等都将使用默认值
+  # (假设 'ops' 用户和 '/home/ops/.ssh/id_rsa' 是合理的默认)
+  hosts:
+    - name: master-1
+      address: 192.168.10.11
+    - name: worker-1
+      address: 192.168.10.21
+    - name: worker-2
+      address: 192.168.10.22
+
+  # 2. 角色分配
+  roleGroups:
+    master:
+      - master-1
+    etcd:
+      - master-1
+    worker:
+      - worker-1
+      - worker-2
+
+  # 3. Kubernetes 核心配置 (只需要版本号)
+  kubernetes:
+    version: v1.28.5
+    # clusterName, dnsDomain, containerRuntime 等都将使用默认值
+
+  # 4. 网络配置 (只需要 Pod 和 Service 的网段)
+  network:
+    kubePodsCIDR: "10.244.0.0/16"
+    kubeServiceCIDR: "10.96.0.0/12"
+    # plugin 将默认为 'calico'

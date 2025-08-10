@@ -1,0 +1,341 @@
+apiVersion: kubexms.io/v1alpha1
+kind: Cluster
+metadata:
+  name: ultimate-prod-cluster
+  labels:
+    environment: production
+    region: cn-north-1
+spec:
+  # 1. 全局设置
+  global:
+    user: ops
+    port: 22
+    password: "global_password" # 通常用 privateKeyPath 代替
+    privateKey: |
+      -----BEGIN OPENSSH PRIVATE KEY-----
+      ...
+      -----END OPENSSH PRIVATE KEY-----
+    privateKeyPath: /home/ops/.ssh/id_rsa_prod
+    connectionTimeout: 15s
+    workDir: /root/.kubexm-ultimate
+    hostWorkDir: /root/.kubexm-ultimate/hosts
+    verbose: true
+    ignoreErr: false
+    skipPreflight: false
+
+  # 2. 主机定义
+  hosts:
+    - name: master-1
+      address: 192.168.1.11
+      internalAddress: 10.0.0.11
+      port: 2222 # 覆盖全局端口
+      user: root  # 覆盖全局用户
+      password: "master1_specific_password"
+      labels:
+        node-role.kubernetes.io/control-plane: ""
+        topology.kubexm.io/zone: "zone-a"
+      taints:
+        - key: "node-role.kubernetes.io/control-plane"
+          effect: "NoSchedule"
+      arch: amd64
+    - name: master-2
+      address: 192.168.1.12
+      internalAddress: 10.0.0.12
+      arch: amd64
+    - name: master-3
+      address: 192.168.1.13
+      internalAddress: 10.0.0.13
+      arch: amd64
+    - name: worker-1
+      address: 192.168.1.21
+      internalAddress: 10.0.0.21
+      arch: amd64
+      labels:
+        node-type: "compute-intensive"
+        storage.kubexm.io/longhorn-node: "true"
+    - name: worker-2
+      address: 192.168.1.22
+      internalAddress: 10.0.0.22
+      arch: arm64 # 混合架构示例
+      labels:
+        storage.kubexm.io/longhorn-node: "true"
+    - name: registry-node
+      address: 192.168.1.30
+      arch: amd64
+    - name: storage-node-1
+      address: 192.168.1.41
+      arch: amd64
+    - name: storage-node-2
+      address: 192.168.1.42
+      arch: amd64
+
+  # 3. 角色分配
+  roleGroups:
+    master:
+      - master-1
+      - master-2
+      - master-3
+    etcd:
+      - master-1
+      - master-2
+      - master-3
+    worker:
+      - worker-1
+      - worker-2
+    registry:
+      - registry-node
+    storage:
+      - storage-node-1
+      - storage-node-2
+    # loadBalancer 角色在这里未分配，因为我们将使用内部模式
+
+  # 4. 系统级配置
+  system:
+    timezone: "Asia/Shanghai"
+    ntpServers:
+      - ntp.aliyun.com
+      - time.windows.com
+    packageManager: "yum" # 明确指定包管理器
+    rpms: # 仅当 packageManager 为 yum/dnf 时使用
+      - "nfs-utils"
+      - "iscsi-initiator-utils"
+    debs: [] # 此时必须为空
+    modules:
+      - br_netfilter
+      - overlay
+      - ip_vs
+    sysctlParams:
+      net.ipv4.ip_forward: "1"
+      net.bridge.bridge-nf-call-iptables: "1"
+      vm.swappiness: "0"
+    skipConfigureOS: false
+
+  # 5. Kubernetes 核心配置
+  kubernetes:
+    version: v1.28.5
+    clusterName: ultimate-prod-cluster
+    dnsDomain: cluster.local
+    containerRuntime:
+      type: containerd
+      version: "1.7.13" # 指定版本，覆盖 BOM
+      containerd:
+        pause: "registry.aliyuncs.com/google_containers/pause:3.9"
+        cgroupDriver: "systemd"
+        root: "/var/lib/containerd"
+        state: "/run/containerd"
+        configPath: "/etc/containerd/config.toml"
+        registry:
+          mirrors:
+            "docker.io":
+              endpoints:
+                - "https://docker.m.daocloud.io"
+                - "https://hub-mirror.c.163.com"
+          configs:
+            "registry.mycompany.com":
+              tls:
+                insecureSkipVerify: true
+    apiServer:
+      certExtraSans:
+        - "k8s-api.mycompany.com"
+        - "192.168.1.254"
+      serviceNodePortRange: "30000-32767"
+      authorizationModes: ["Node", "RBAC"]
+      admissionPlugins: ["NodeRestriction", "PodSecurity"]
+      bindAddress: "0.0.0.0"
+      allowPrivileged: true
+      etcdPrefix: "/registry"
+      featureGates:
+        "APIServerTracing": true
+      extraArgs:
+        "v": "4"
+        "alsologtostderr": "true"
+      audit:
+        enabled: true
+        logPath: "/var/log/kubernetes/audit.log"
+        policyFile: "/etc/kubernetes/audit-policy.yaml"
+        maxAge: 30
+        maxBackups: 10
+        maxSize: 100
+    controllerManager:
+      nodeCidrMaskSize: 24
+      featureGates:
+        "LegacyServiceAccountTokenCleanUp": true
+      extraArgs:
+        "concurrent-deployment-syncs": "10"
+    scheduler:
+      featureGates:
+        "CPUManagerInTopologyManager": true
+      extraArgs:
+        "leader-elect": "true"
+    kubelet:
+      maxPods: 110
+      cgroupDriver: "systemd"
+      cpuManagerPolicy: "static"
+      kubeReserved:
+        "cpu": "500m"
+        "memory": "512Mi"
+      systemReserved:
+        "cpu": "500m"
+        "memory": "512Mi"
+      evictionHard:
+        "memory.available": "100Mi"
+        "nodefs.available": "10%"
+      podPidsLimit: 4096
+      hairpinMode: "hairpin-veth"
+      containerLogMaxSize: "20Mi"
+      containerLogMaxFiles: 5
+      featureGates:
+        "RotateKubeletServerCertificate": true
+      extraArgs:
+        "cgroups-per-qos": "true"
+    kubeProxy:
+      enable: true
+      mode: "ipvs"
+      masqueradeAll: false
+      featureGates:
+        "IPTablesOwnershipCleanup": true
+      extraArgs:
+        "oom-score-adj": "-998"
+
+  # 6. Etcd 配置
+  etcd:
+    type: kubexm
+    version: "v3.5.9-0" # 指定版本，覆盖 BOM
+    cluster:
+      clientPort: 2379
+      peerPort: 2380
+      dataDir: "/var/lib/etcd"
+      extraArgs:
+        "max-txn-ops": "2048"
+    performance:
+      quotaBackendBytes: 8589934592 # 8 GB
+
+  # 7. 网络配置
+  network:
+    plugin: calico
+    kubePodsCIDR: "10.233.64.0/18"
+    kubeServiceCIDR: "10.233.0.0/18"
+    calico:
+      networking:
+        ipipMode: "Always"
+        vxlanMode: "Never"
+        vethMTU: 1440
+      ipam:
+        autoCreatePools: true
+        pools:
+          - name: "default-ipv4-pool"
+            cidr: "10.233.64.0/18"
+            encapsulation: "IPIPCrossSubnet"
+            natOutgoing: true
+            blockSize: 26
+
+  # 8. 控制平面端点 (HA)
+  controlPlaneEndpoint:
+    address: 192.168.1.100
+    domain: k8s-api.prod.local
+    port: 6443
+
+  # 9. 存储配置 (Longhorn & NFS)
+  storage:
+    defaultStorageClass: "longhorn"
+    longhorn:
+      enabled: true
+      version: "1.9.0"
+      defaultDataPath: "/data/longhorn/"
+    nfs:
+      enabled: true
+      server: 192.168.1.50
+      path: /exports/k8s-vols
+      storageClassName: "nfs-client"
+    openebs:
+      enabled: false
+    rookCeph:
+      enabled: false
+
+  # 10. DNS 配置
+  dns:
+    dnsEtcHosts: |
+      192.168.1.250 gitlab.mycompany.com
+      192.168.1.251 nexus.mycompany.com
+    nodeEtcHosts: |
+      127.0.0.1 localhost
+    coreDNS:
+      upstream:
+        staticServers: ["114.114.114.114", "8.8.8.8"]
+        useNodeResolvConf: false
+        policy: "sequential"
+    nodeLocalDNS:
+      enabled: true
+      ip: "169.254.20.10"
+
+  # 11. 镜像仓库配置
+  registry:
+    mirroring:
+      privateRegistry: "registry.mycompany.com:5000"
+      namespaceOverride: "library"
+    auths:
+      "registry.mycompany.com:5000":
+        username: "admin"
+        password: "MySuperSecretPassword"
+        skipTLSVerify: true
+    local:
+      type: harbor
+      dataRoot: /data/harbor
+
+  # 12. Helm 仓库配置 (可选)
+  helmRepo:
+    name: "my-charts"
+    repo: "https://charts.mycompany.com"
+
+  # 13. Addons (通用插件)
+  addons:
+    - name: "prometheus-stack"
+      enabled: true
+      sources:
+        - namespace: "monitoring"
+          chart:
+            name: "kube-prometheus-stack"
+            repo: "https://prometheus-community.github.io/helm-charts"
+            version: "50.0.0"
+            valuesFile: "/opt/kubexm/prometheus-values.yaml"
+            values:
+              - "grafana.adminPassword=MyGrafanaPassword"
+    - name: "custom-app"
+      enabled: true
+      sources:
+        - namespace: "custom-apps"
+          yaml:
+            path:
+              - "https://raw.githubusercontent.com/user/repo/main/app.yaml"
+              - "/opt/kubexm/local-patch.yaml"
+
+  # 14. 预检配置
+  preflight:
+    minCPUCores: 4
+    minMemoryMB: 8192
+    disableSwap: true
+    disableFirewalld: true
+    disableSelinux: true
+    skipChecks:
+      - "selinux_status" # 示例: 跳过 selinux 检查
+
+  # 15. 额外主机配置
+  extra:
+    hosts:
+      - ip: "192.168.1.250"
+        hostnames:
+          - "gitlab.mycompany.com"
+          - "gitlab"
+    resolves:
+      nameservers:
+        - "114.114.114.114"
+      searches:
+        - "mycompany.com"
+        - "svc.cluster.local"
+      options:
+        - "timeout:1"
+
+  # 16. 证书有效期配置
+  certs:
+    CADuration: "87600h" # 10 years
+    CertDuration: "17520h" # 2 years

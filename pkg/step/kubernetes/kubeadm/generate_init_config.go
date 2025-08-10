@@ -16,7 +16,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"github.com/mensylisir/kubexm/pkg/step/helpers/bom/images"
 	"github.com/mensylisir/kubexm/pkg/templates"
-	"github.com/mensylisir/kubexm/pkg/util" // 假设有一个包含辅助函数的 util 包
+	"github.com/mensylisir/kubexm/pkg/util"
 )
 
 type GenerateInitConfigStep struct {

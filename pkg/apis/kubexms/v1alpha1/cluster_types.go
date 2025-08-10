@@ -128,6 +128,7 @@ type GlobalSpec struct {
 	Verbose           bool          `json:"verbose,omitempty" yaml:"verbose,omitempty"`
 	IgnoreErr         bool          `json:"ignoreErr,omitempty" yaml:"ignoreErr,omitempty"`
 	SkipPreflight     bool          `json:"skipPreflight,omitempty" yaml:"skipPreflight,omitempty"`
+	OfflineMode       bool          `json:"offlineMode,omitempty" yaml:"offlineMode,omitempty"`
 }
 
 type TaintSpec struct {
@@ -221,14 +222,16 @@ func SetDefaults_GlobalSpec(spec *GlobalSpec) {
 }
 
 func SetDefaults_HostSpec(spec *HostSpec, cluster *Cluster) {
-	if spec.User == "" {
+	if spec.User == "" && cluster.Spec.Global.User != "" {
 		spec.User = cluster.Spec.Global.User
-	}
-	if spec.Port == 0 {
-		spec.Port = cluster.Spec.Global.Port
 	}
 	if spec.Password == "" && cluster.Spec.Global.Password != "" {
 		spec.Password = cluster.Spec.Global.Password
+	}
+	if spec.Port == 0 && cluster.Spec.Global.Port != 0 {
+		spec.Port = cluster.Spec.Global.Port
+	} else if spec.Port == 0 && cluster.Spec.Global.Port == 0 {
+		spec.Port = common.DefaultPort
 	}
 	if spec.PrivateKey == "" && cluster.Spec.Global.PrivateKey != "" {
 		spec.PrivateKey = cluster.Spec.Global.PrivateKey

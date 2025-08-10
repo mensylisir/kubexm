@@ -49,6 +49,13 @@ func (s *InstallPackagesStep) getRequiredPackages(ctx runtime.ExecutionContext) 
 		"ipvsadm",
 	}
 
+	switch ctx.GetClusterConfig().Spec.Kubernetes.ContainerRuntime.Type {
+	case common.RuntimeTypeCRIO:
+		packages = append(packages, "crio")
+	case common.RuntimeTypeIsula:
+		packages = append(packages, "isula")
+	}
+
 	switch facts.PackageManager.Type {
 	case runner.PackageManagerApt:
 		packages = append(packages, "open-iscsi")
