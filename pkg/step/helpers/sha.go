@@ -3,6 +3,7 @@ package helpers
 import (
 	"crypto/sha256"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/pkg/errors"
 	"io"
@@ -109,6 +110,7 @@ func CheckRemoteFileIntegrity(ctx runtime.ExecutionContext, localPath, remotePat
 
 func VerifyLocalFileChecksum(filePath string, expectedChecksum string) (bool, error) {
 	if expectedChecksum == "" || strings.HasPrefix(expectedChecksum, "dummy-") {
+		logger.Get().Debug("Checksum for %s is empty or a dummy value, skipping verification.", filePath)
 		return true, nil
 	}
 

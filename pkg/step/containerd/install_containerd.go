@@ -70,8 +70,10 @@ func (s *InstallContainerdStep) getLocalExtractedPath(ctx runtime.ExecutionConte
 	}
 
 	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Install containerd binaries (version %s)", s.Base.Meta.Name, binaryInfo.Version)
-
-	return filepath.Dir(binaryInfo.FilePath()), nil
+	sourcePath := binaryInfo.FilePath()
+	innerPath := "containerd"
+	destPath := filepath.Join(filepath.Dir(sourcePath), innerPath)
+	return destPath, nil
 }
 
 func (s *InstallContainerdStep) filesToInstall() map[string]string {

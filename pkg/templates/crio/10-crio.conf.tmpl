@@ -1,0 +1,101 @@
+# The "crio.api" table contains settings for the kubelet-cri component.
+[crio.api]
+
+  # Path to the AF_UNIX socket for the cri-o daemon.
+  listen = "/var/run/crio/crio.sock"
+  
+  # The image path that is used to scaffold the container network namespace.
+  # It is not used when the workload is configured to use host networking.
+  pause_image = "{{ .PauseImage }}"
+  
+  # The authentication path to the pause image.
+  # It is not used if the pause image is from an insecure registry.
+  pause_image_auth_file = ""
+  
+  # Path to the command for the conmon container manager.
+  # This can be set to "crun" or "runc" to use the OCI version of conmon.
+  # If that is not provided, the system PATH will be used.
+  conmon = ""
+  
+  # Cgroup manager for conmon.
+  conmon_cgroup = "system"
+  
+  # Environment variables to pass to conmon.
+  # A default of "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  # will be used if this is not specified.
+  conmon_env = [
+  "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+]
+
+  # The "crio.image" table contains settings for pulling and storing images.
+  [crio.image]
+
+  # The default transport for pulling images.
+  # This can be set to "docker://" or "oci://".
+  default_transport = "oci://"
+  
+  # Path to the file which decides what sort of policy we use to trust the image.
+  signature_policy = "{{ .SignaturePolicyPath }}"
+  
+  # The "crio.runtime" table contains settings pertaining to the OCI runtime.
+  [crio.runtime]
+  
+  # A list of ulimits to be applied to the conmon process.
+  conmon_ulimit = []
+  
+  # The cgroup management implementation used for the runtime.
+  # This can be "cgroupfs" or "systemd".
+  cgroup_manager = "{{ .CgroupDriver  }}"
+  
+  # The default OCI runtime to use.
+  default_runtime = "runc"
+  
+  # A list of ulimits to be applied to the container process.
+  default_ulimits = []
+  
+  # Path to the directory where all OCI runtime hooks are located.
+  hooks_dir = [
+  "/etc/containers/oci/hooks.d",
+]
+
+  # Path to the directory where all runtime hooks are located before the OCI runtime is called.
+  pre_hooks_dir = []
+  
+  # Path to the directory where all runtime hooks are located after the OCI runtime is called.
+  post_hooks_dir = []
+  
+  # The OCI runtime list that is used to specify which runtimes are available.
+  [crio.runtime.runc]
+  
+  # A list of annotations that are allowed to be passed to the runtime.
+  allowed_annotations = []
+  
+  # The container runtime binary to use.
+  runtime_path = ""
+  
+  # The runtime root directory.
+  runtime_root = "/run/runc"
+  
+  # The monitor binary to use for the runtime.
+  monitor_path = ""
+  
+  # Path to the host cgroup manager.
+  # This is used to setup the runtime cgroup hierarchy.
+  cgroup_path = ""
+  
+  # The "crio.runtime.runtimes" table contains settings for all OCI compliant runtimes.
+  [crio.runtime.runtimes.runc]
+  runtime_path = "{{ .RuntimePath }}/runc"
+  runtime_root = "/run/runc"
+  monitor_path = "{{ .MonitorPath }}/conmon"
+  allowed_annotations = [
+  "io.containers.trace-syscall",
+]
+
+  [crio.runtime.runtimes.crun]
+  runtime_path = "{{ .RuntimePath }}/crun"
+  runtime_root = "/run/crun"
+  monitor_path = "{{ .MonitorPath }}/conmon"
+  allowed_annotations = [
+  "io.containers.trace-syscall",
+]
