@@ -8,15 +8,37 @@ import (
 	"text/template"
 )
 
-//go:embed cni/*.tmpl
-//go:embed etcd/*.tmpl
-//go:embed kubernetes/*.tmpl
-//go:embed containerd/*.tmpl
-//go:embed os/*.tmpl
-//go:embed docker/*.tmpl
+//go:embed cd/argocd/*.tmpl
 //go:embed cni/calico/*.tmpl
 //go:embed cni/cilium/*.tmpl
 //go:embed cni/flannel/*.tmpl
+//go:embed cni/hybridnet/*.tmpl
+//go:embed cni/kubeovn/*.tmpl
+//go:embed cni/multus/*.tmpl
+//go:embed containerd/*.tmpl
+//go:embed crio/*.tmpl
+//go:embed dns/*.tmpl
+//go:embed docker/*.tmpl
+//go:embed etcd/*.tmpl
+//go:embed gateway/ingress-nginx/*.tmpl
+//go:embed isulad/*.tmpl
+//go:embed kubernetes/audit/*.tmpl
+//go:embed kubernetes/kube-apiserver/*.tmpl
+//go:embed kubernetes/kube-controller-manager/*.tmpl
+//go:embed kubernetes/kube-proxy/*.tmpl
+//go:embed kubernetes/kube-scheduler/*.tmpl
+//go:embed kubernetes/kubeadm/*.tmpl
+//go:embed kubernetes/kubeconfig/*.tmpl
+//go:embed kubernetes/kubectl/*.tmpl
+//go:embed kubernetes/kubelet/*.tmpl
+//go:embed kubernetes/rbac/*.tmpl
+//go:embed loadbalancer/haproxy/*.tmpl
+//go:embed loadbalancer/nginx/*.tmpl
+//go:embed loadbalancer/keepalived/*.tmpl
+//go:embed os/*.tmpl
+//go:embed storage/longhorn/*.tmpl
+//go:embed storage/nfs/*.tmpl
+//go:embed storage/openebs-local/*.tmpl
 var embeddedTemplates embed.FS
 
 func Get(templateName string) (string, error) {

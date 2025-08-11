@@ -75,8 +75,11 @@ func (s *CleanDockerStep) filesAndDirsToRemove() []string {
 		filepath.Join(s.InstallPath, "containerd-shim-runc-v1"),
 		filepath.Join(s.InstallPath, "containerd-shim-runc-v2"),
 		filepath.Join(s.InstallPath, "ctr"),
-		filepath.Join(s.InstallPath, "runc"),
+		filepath.Join(common.DefaultSBinDir, "runc"),
+		filepath.Join(s.InstallPath, "crictl"),
 
+		common.DefaultCNIConfDirTarget,
+		common.DefaultCNIBin,
 		common.DockerDefaultSystemdFile,
 		common.DockerDefaultDropInFile,
 		filepath.Dir(common.DockerDefaultDropInFile),
@@ -84,6 +87,7 @@ func (s *CleanDockerStep) filesAndDirsToRemove() []string {
 		filepath.Dir(common.ContainerdDefaultDropInFile),
 		common.DockerDefaultConfDirTarget,
 		common.ContainerdDefaultConfDir,
+		common.CrictlDefaultConfigFile,
 	}
 
 	if s.PurgeData {

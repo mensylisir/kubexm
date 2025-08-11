@@ -1,0 +1,41 @@
+# This is a default registries.conf file that can be used by
+# CRI-O and other tools. It is not recommended to modify this file,
+  # as it will be overwritten during updates. Instead, a file should
+  # be created in the /etc/containers/registries.conf.d directory.
+  #
+  # By default, registries are searched in the order listed in this file.
+  # The `unqualified-search-registries` field is a list of registries
+  # that are used to search for unqualified images (e.g., "fedora").
+  unqualified-search-registries = [{{- range $i, $r := .UnqualifiedSearchRegistries -}}
+  {{- if $i }}, {{ end -}}
+  "{{ $r }}"
+  {{- end -}}]
+  
+  # The `short-name-aliasing` field is used to alias short names to
+  # fully qualified image names.
+  [short-name-aliasing]
+
+
+  {{- range .Registries }}
+  [[registry]]
+  prefix = "{{ .Prefix }}"
+  location = "{{ .Location }}"
+  {{- if .Insecure }}
+  insecure = {{ .Insecure }}
+  {{- end }}
+  {{- end }}
+  
+  # The `registries.insecure` table contains a list of registries that
+  # are not secured with TLS.
+  {{- if .InsecureRegistries }}
+  [registries.insecure]
+  registries = [{{- range $i, $r := .InsecureRegistries -}}
+  {{- if $i }}, {{ end -}}
+  "{{ $r }}"
+  {{- end -}}]
+  {{- end }}
+  
+  # The `registries.block` table contains a list of registries that are
+  # blocked from being used.
+  [registries.block]
+  registries = []

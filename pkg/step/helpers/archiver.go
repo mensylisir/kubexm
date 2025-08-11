@@ -279,3 +279,32 @@ func ListFilesInEtcdArchive(archivePath string) ([]string, error) {
 	}
 	return files, nil
 }
+
+func ListFilesInTarGz(archivePath string) ([]string, error) {
+	file, err := os.Open(archivePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	gzr, err := gzip.NewReader(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gzip reader for %s: %w", archivePath, err)
+	}
+	defer gzr.Close()
+
+	tr := tar.NewReader(gzr)
+	var files []string
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, header.Name)
+	}
+	return files, nil
+}

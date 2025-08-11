@@ -26,6 +26,7 @@ const (
 	CONTAINERD BinaryType = "containerd"
 	RUNC       BinaryType = "runc"
 	CALICOCTL  BinaryType = "calicoctl"
+	CRIO       BinaryType = "crio"
 	UNKNOWN    BinaryType = "unknown"
 )
 
@@ -42,6 +43,8 @@ const (
 	ComponentHelm                  = "helm"
 	ComponentDocker                = "docker"
 	ComponentCriDockerd            = "cri-dockerd"
+	ComponentCrio                  = "crio"
+	ComponentIsulad                = "isulad"
 	ComponentCriCtl                = "crictl"
 	ComponentK3s                   = "k3s"
 	ComponentK8e                   = "k8e"
@@ -62,15 +65,13 @@ const (
 )
 
 type BinaryDetailSpec struct {
-	BinaryType           BinaryType
-	URLTemplate          string
-	CNURLTemplate        string
-	FileNameTemplate     string
-	IsArchive            bool
-	DefaultOS            string
-	ComponentNameForDir  string
-	ExpectedChecksum     string
-	ExpectedChecksumType string
+	BinaryType          BinaryType
+	URLTemplate         string
+	CNURLTemplate       string
+	FileNameTemplate    string
+	IsArchive           bool
+	DefaultOS           string
+	ComponentNameForDir string
 }
 
 // --- 核心对象模型: Binary ---
@@ -83,6 +84,7 @@ type Binary struct {
 	Version       string
 	Arch          string
 	Zone          string
+	checksum      string
 
 	// --- 元数据 (从 details map 注入) ---
 	meta BinaryDetailSpec
@@ -127,7 +129,7 @@ func (b *Binary) Type() BinaryType {
 
 // Checksum 返回预期的校验和。
 func (b *Binary) Checksum() string {
-	return b.meta.ExpectedChecksum
+	return b.checksum
 }
 
 // --- 私有辅助方法 ---

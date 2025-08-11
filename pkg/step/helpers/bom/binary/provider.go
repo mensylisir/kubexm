@@ -45,27 +45,40 @@ func (p *BinaryProvider) GetBinary(name, arch string) (*Binary, error) {
 	kubeVersion := cfg.Spec.Kubernetes.Version
 
 	finalVersion := userVersion
-	if finalVersion == "" {
+	var finalChecksum string
+
+	if userVersion != "" {
+		finalVersion = userVersion
+		p.ctx.GetLogger().Debugf("Using user-specified version '%s' for component '%s'. Checksum will not be available from BOM.", finalVersion, name)
+	} else {
 		switch name {
 		case ComponentKubeadm, ComponentKubelet, ComponentKubectl, ComponentKubeProxy,
 			ComponentKubeScheduler, ComponentKubeControllerManager, ComponentKubeApiServer,
 			ComponentK3s, ComponentK8e:
 			finalVersion = kubeVersion
 		default:
-			finalVersion = getBinaryVersionFromBOM(name, kubeVersion)
+			bomEntry := getBinaryBOMEntry(name, kubeVersion)
+			if bomEntry != nil {
+				finalVersion = bomEntry.Version
+				if bomEntry.Checksums != nil {
+					finalChecksum = bomEntry.Checksums[arch]
+				}
+			}
 		}
 	}
 	if finalVersion == "" {
 		return nil, fmt.Errorf("version for component '%s' is not specified and could not be determined", name)
 	}
 
-	// 3. 获取元数据
+	if finalChecksum == "" {
+		p.ctx.GetLogger().Warnf("Checksum for component %s (version: %s, arch: %s) not found in BOM. Verification will be skipped.", name, finalVersion, arch)
+	}
+
 	meta, ok := p.details[name]
 	if !ok {
 		return nil, fmt.Errorf("unknown binary component in metadata details: %s", name)
 	}
 
-	// 4. 创建并返回 Binary 对象
 	return &Binary{
 		ComponentName: name,
 		Version:       finalVersion,
@@ -77,7 +90,6 @@ func (p *BinaryProvider) GetBinary(name, arch string) (*Binary, error) {
 	}, nil
 }
 
-// GetBinaries 获取当前配置下所有已启用的二进制文件列表。
 func (p *BinaryProvider) GetBinaries(arch string) ([]*Binary, error) {
 	var enabledBinaries []*Binary
 	allBinaryNames := p.getManagedBinaryNames()
@@ -94,7 +106,6 @@ func (p *BinaryProvider) GetBinaries(arch string) ([]*Binary, error) {
 	return enabledBinaries, nil
 }
 
-// getManagedBinaryNames 返回所有受管理的二进制组件列表。
 func (p *BinaryProvider) getManagedBinaryNames() []string {
 	names := make([]string, 0, len(p.details))
 	for name := range p.details {
@@ -103,28 +114,6 @@ func (p *BinaryProvider) getManagedBinaryNames() []string {
 	return names
 }
 
-/*
-API 结构建议 (在 pkg/spec/cluster_types.go 中):
-
-  type ClusterSpec struct {
-      // ...
-      Tools *ToolsSpec `json:"tools,omitempty" yaml:"tools,omitempty"`
-  }
-
-  type ToolsSpec struct {
-      HelmVersion      string `json:"helmVersion,omitempty" yaml:"helmVersion,omitempty"`
-      CalicoctlVersion string `json:"calicoctlVersion,omitempty" yaml:"calicoctlVersion,omitempty"`
-      ComposeVersion   string `json:"composeVersion,omitempty" yaml:"composeVersion,omitempty"`
-      BuildxVersion    string `json:"buildxVersion,omitempty" yaml:"buildxVersion,omitempty"`
-  }
-
-  // Harbor 和 Registry 的配置可能在 Registry 结构体中
-  type LocalRegistryDeployment struct {
-      Type     string `json:"type,omitempty" yaml:"type,omitempty"` // "harbor" or "registry"
-      Version  string `json:"version,omitempty" yaml:"version,omitempty"`
-      // ...
-  }
-*/
 // getUserSpecifiedVersion 从 ClusterConfig 中获取用户为特定组件指定的版本。
 func (p *BinaryProvider) getUserSpecifiedVersion(name string) string {
 	cfg := p.ctx.GetClusterConfig().Spec
@@ -136,11 +125,15 @@ func (p *BinaryProvider) getUserSpecifiedVersion(name string) string {
 		}
 	case ComponentContainerd:
 		if cfg.Kubernetes.ContainerRuntime != nil && cfg.Kubernetes.ContainerRuntime.Type == "containerd" {
-			return cfg.Kubernetes.ContainerRuntime.Version
+			return cfg.Kubernetes.ContainerRuntime.Containerd.Version
 		}
 	case ComponentDocker:
 		if cfg.Kubernetes.ContainerRuntime != nil && cfg.Kubernetes.ContainerRuntime.Type == "docker" {
-			return cfg.Kubernetes.ContainerRuntime.Version
+			return cfg.Kubernetes.ContainerRuntime.Docker.Version
+		}
+	case ComponentCrio:
+		if cfg.Kubernetes.ContainerRuntime != nil && cfg.Kubernetes.ContainerRuntime.Type == "crio" {
+			return cfg.Kubernetes.ContainerRuntime.Crio.Version
 		}
 		// --- 工具链和应用 ---
 		//case ComponentHelm:
@@ -211,6 +204,9 @@ func (p *BinaryProvider) isBinaryEnabled(name string) (bool, error) {
 			return false, fmt.Errorf("invalid kubernetes version for cri-dockerd check: %w", err)
 		}
 		return v1_24.Check(k8sVersion), nil
+
+	case ComponentCrio: // <-- 新增
+		return cfg.Kubernetes.ContainerRuntime != nil && cfg.Kubernetes.ContainerRuntime.Type == "crio", nil
 
 	case ComponentCalicoCtl:
 		return cfg.Network.Plugin == string(common.CNITypeCalico), nil

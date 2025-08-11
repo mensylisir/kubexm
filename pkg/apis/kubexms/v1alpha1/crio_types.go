@@ -10,24 +10,24 @@ import (
 )
 
 type Crio struct {
-	Endpoint        string                               `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
-	Version         string                               `json:"version,omitempty" yaml:"version,omitempty"`
-	Conmon          *string                              `json:"conmon,omitempty" yaml:"conmon,omitempty"`
-	CgroupDriver    *string                              `json:"cgroupManager,omitempty" yaml:"cgroupManager,omitempty"`
-	StorageDriver   *string                              `json:"storageDriver,omitempty" yaml:"storageDriver,omitempty"`
-	StorageOption   []string                             `json:"storageOption,omitempty" yaml:"storageOption,omitempty"`
-	LogLevel        *string                              `json:"logLevel,omitempty" yaml:"logLevel,omitempty"`
-	LogFilter       string                               `json:"logFilter,omitempty" yaml:"logFilter,omitempty"`
-	ManageNetwork   *bool                                `json:"manageNetwork,omitempty" yaml:"manageNetwork,omitempty"`
-	NetworkDir      *string                              `json:"networkDir,omitempty" yaml:"networkDir,omitempty"`
-	PluginDirs      []string                             `json:"pluginDirs,omitempty" yaml:"pluginDirs,omitempty"`
-	Runtimes        map[string]CrioRuntime               `json:"runtimes,omitempty" yaml:"runtimes,omitempty"`
-	Registry        *CrioRegistry                        `json:"registry,omitempty" yaml:"registry,omitempty"`
-	ExtraTomlConfig string                               `json:"extraTomlConfig,omitempty" yaml:"extraTomlConfig,omitempty"`
-	Root            *string                              `json:"root,omitempty" yaml:"root,omitempty"`
-	Runroot         *string                              `json:"runroot,omitempty" yaml:"runroot,omitempty"`
-	Auths           map[ServerAddress]DockerRegistryAuth `json:"auths,omitempty" yaml:"auths,omitempty"`
-	Pause           string                               `json:"pause,omitempty" yaml:"pause,omitempty"`
+	Endpoint        string                         `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+	Version         string                         `json:"version,omitempty" yaml:"version,omitempty"`
+	Conmon          *string                        `json:"conmon,omitempty" yaml:"conmon,omitempty"`
+	CgroupDriver    *string                        `json:"cgroupManager,omitempty" yaml:"cgroupManager,omitempty"`
+	StorageDriver   *string                        `json:"storageDriver,omitempty" yaml:"storageDriver,omitempty"`
+	StorageOption   []string                       `json:"storageOption,omitempty" yaml:"storageOption,omitempty"`
+	LogLevel        *string                        `json:"logLevel,omitempty" yaml:"logLevel,omitempty"`
+	LogFilter       string                         `json:"logFilter,omitempty" yaml:"logFilter,omitempty"`
+	ManageNetwork   *bool                          `json:"manageNetwork,omitempty" yaml:"manageNetwork,omitempty"`
+	NetworkDir      *string                        `json:"networkDir,omitempty" yaml:"networkDir,omitempty"`
+	PluginDirs      []string                       `json:"pluginDirs,omitempty" yaml:"pluginDirs,omitempty"`
+	Runtimes        map[string]CrioRuntime         `json:"runtimes,omitempty" yaml:"runtimes,omitempty"`
+	Registry        *CrioRegistry                  `json:"registry,omitempty" yaml:"registry,omitempty"`
+	ExtraTomlConfig string                         `json:"extraTomlConfig,omitempty" yaml:"extraTomlConfig,omitempty"`
+	Root            *string                        `json:"root,omitempty" yaml:"root,omitempty"`
+	Runroot         *string                        `json:"runroot,omitempty" yaml:"runroot,omitempty"`
+	Auths           map[ServerAddress]RegistryAuth `json:"auths,omitempty" yaml:"auths,omitempty"`
+	Pause           string                         `json:"pause,omitempty" yaml:"pause,omitempty"`
 }
 
 type CrioRuntime struct {
@@ -100,7 +100,7 @@ func SetDefaults_CrioConfig(cfg *Crio) {
 		cfg.Runroot = helpers.StrPtr(common.CRIODefaultRunRoot)
 	}
 	if cfg.Auths == nil {
-		cfg.Auths = make(map[ServerAddress]DockerRegistryAuth)
+		cfg.Auths = make(map[ServerAddress]RegistryAuth)
 	}
 	if cfg.Pause == "" {
 		cfg.Pause = common.DefaultPauseImage

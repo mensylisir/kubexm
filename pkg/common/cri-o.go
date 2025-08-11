@@ -15,6 +15,9 @@ const (
 	RegistriesDefaultConfigFile = "/etc/containers/registries.conf"
 	CRIODefaultSystemdFile      = "/etc/systemd/system/crio.service"
 	CRIODefaultDropInFile       = "/etc/systemd/system/crio.service.d/kubexm.conf"
+	SignaturePolicyPath         = "/etc/crio/policy.json"
+	CRIORuntimePath             = "/usr/libexec/crio"
+	CRIOMonitorPath             = "/usr/libexec/crio"
 )
 
-var DefaultUnqualifiedSearchRegistries = []string{"docker.io", "quay.io"}
+var DefaultUnqualifiedSearchRegistries = []string{"registry.k8s.io", "docker.io", "quay.io"}

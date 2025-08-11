@@ -7,14 +7,12 @@ package binary
 // The key is the component name constant (e.g., ComponentEtcd) defined in binary_types.go.
 var defaultKnownBinaryDetails = map[string]BinaryDetailSpec{
 	ComponentEtcd: {
-		BinaryType:           ETCD,
-		URLTemplate:          "https://github.com/coreos/etcd/releases/download/{{.Version}}/etcd-{{.Version}}-{{.OS}}-{{.Arch}}.tar.gz",
-		CNURLTemplate:        "https://kubernetes-release.pek3b.qingstor.com/etcd/release/download/{{.Version}}/etcd-{{.Version}}-{{.OS}}-{{.Arch}}.tar.gz",
-		FileNameTemplate:     "etcd-{{.Version}}-{{.OS}}-{{.Arch}}.tar.gz",
-		IsArchive:            true,
-		DefaultOS:            "linux",
-		ExpectedChecksum:     "dummy-etcd-checksum-val",
-		ExpectedChecksumType: "sha256",
+		BinaryType:       ETCD,
+		URLTemplate:      "https://github.com/coreos/etcd/releases/download/{{.Version}}/etcd-{{.Version}}-{{.OS}}-{{.Arch}}.tar.gz",
+		CNURLTemplate:    "https://kubernetes-release.pek3b.qingstor.com/etcd/release/download/{{.Version}}/etcd-{{.Version}}-{{.OS}}-{{.Arch}}.tar.gz",
+		FileNameTemplate: "etcd-{{.Version}}-{{.OS}}-{{.Arch}}.tar.gz",
+		IsArchive:        true,
+		DefaultOS:        "linux",
 	},
 	ComponentKubeadm: {
 		BinaryType:       KUBE,
@@ -190,5 +188,14 @@ var defaultKnownBinaryDetails = map[string]BinaryDetailSpec{
 		FileNameTemplate: "buildx-{{.Version}}.{{.OS}}-{{.Arch}}",
 		IsArchive:        false,
 		DefaultOS:        "linux",
+	},
+	ComponentCrio: {
+		BinaryType:          CRIO,
+		URLTemplate:         "https://storage.googleapis.com/cri-o/artifacts/cri-o.{{.Arch}}.v{{.VersionNoV}}.tar.gz",
+		CNURLTemplate:       "https://download.kubexm.com/cri-o/cri-o/releases/download/v{{.VersionNoV}}/crio-v{{.VersionNoV}}-{{.OS}}-{{.Arch}}.tar.gz",
+		FileNameTemplate:    "crio-v{{.VersionNoV}}-{{.OS}}-{{.Arch}}.tar.gz",
+		IsArchive:           true,
+		DefaultOS:           "linux",
+		ComponentNameForDir: "crio",
 	},
 }

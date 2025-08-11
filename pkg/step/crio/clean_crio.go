@@ -1,4 +1,4 @@
-package containerd
+package crio
 
 import (
 	"fmt"
@@ -12,79 +12,66 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 
-type CleanupContainerdStep struct {
+type CleanCrioStep struct {
 	step.Base
-	InstallPath     string
-	RemoteCNIBinDir string
-	PurgeData       bool
+	PurgeData bool
 }
 
-type CleanupContainerdStepBuilder struct {
-	step.Builder[CleanupContainerdStepBuilder, *CleanupContainerdStep]
+type CleanCrioStepBuilder struct {
+	step.Builder[CleanCrioStepBuilder, *CleanCrioStep]
 }
 
-func NewCleanupContainerdStepBuilder(ctx runtime.Context, instanceName string) *CleanupContainerdStepBuilder {
-	s := &CleanupContainerdStep{
-		InstallPath:     common.DefaultBinDir,
-		RemoteCNIBinDir: common.DefaultCNIBin,
-		PurgeData:       false,
+func NewCleanCrioStepBuilder(ctx runtime.Context, instanceName string) *CleanCrioStepBuilder {
+	s := &CleanCrioStep{
+		PurgeData: false,
 	}
-
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Cleanup containerd and related components", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Clean all CRI-O related files and configurations", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	b := new(CleanupContainerdStepBuilder).Init(s)
+	b := new(CleanCrioStepBuilder).Init(s)
 	return b
 }
 
-func (b *CleanupContainerdStepBuilder) WithInstallPath(installPath string) *CleanupContainerdStepBuilder {
-	b.Step.InstallPath = installPath
-	return b
-}
-
-func (b *CleanupContainerdStepBuilder) WithRemoteCNIBinDir(remoteCNIBinDir string) *CleanupContainerdStepBuilder {
-	b.Step.RemoteCNIBinDir = remoteCNIBinDir
-	return b
-}
-
-func (b *CleanupContainerdStepBuilder) WithPurgeData(purge bool) *CleanupContainerdStepBuilder {
+func (b *CleanCrioStepBuilder) WithPurgeData(purge bool) *CleanCrioStepBuilder {
 	b.Step.PurgeData = purge
 	return b
 }
 
-func (s *CleanupContainerdStep) Meta() *spec.StepMeta {
+func (s *CleanCrioStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *CleanupContainerdStep) filesAndDirsToRemove() []string {
+func (s *CleanCrioStep) filesAndDirsToRemove() []string {
 	paths := []string{
-		filepath.Join(s.InstallPath, "containerd"),
-		filepath.Join(s.InstallPath, "containerd-shim"),
-		filepath.Join(s.InstallPath, "containerd-shim-runc-v1"),
-		filepath.Join(s.InstallPath, "containerd-shim-runc-v2"),
-		filepath.Join(s.InstallPath, "ctr"),
-		filepath.Join(common.DefaultSBinDir, "runc"),
-		filepath.Join(s.InstallPath, "crictl"),
+		filepath.Join(common.DefaultBinPath, "crio"),
+		filepath.Join(common.DefaultBinPath, "pinns"),
+		filepath.Join(common.DefaultBinPath, "crictl"),
+		filepath.Join(common.CRIORuntimePath, "conmon"),
+		filepath.Join(common.CRIORuntimePath, "conmonrs"),
+		filepath.Join(common.CRIORuntimePath, "runc"),
+		filepath.Join(common.CRIORuntimePath, "crun"),
+		common.CRIODefaultSystemdFile,
 		common.DefaultCNIConfDirTarget,
 		common.DefaultCNIBin,
-		DefaultContainerdServicePath,
-		common.ContainerdDefaultDropInFile,
-		filepath.Dir(common.ContainerdDefaultDropInFile),
-		filepath.Dir(common.ContainerdDefaultConfigFile),
 		common.CrictlDefaultConfigFile,
+		common.CRIODefaultAuthFile,
+		common.RegistriesDefaultConfigFile,
+		common.CRIODefaultConfDir,
+		"/etc/default/crio",
+		"/etc/sysconfig/crio",
 	}
 
 	if s.PurgeData {
-		paths = append(paths, common.ContainerdDefaultRoot)
+		paths = append(paths, common.CRIODefaultGraphRoot)
 	}
 
 	return paths
 }
 
-func (s *CleanupContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+func (s *CleanCrioStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
@@ -104,11 +91,11 @@ func (s *CleanupContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 		}
 	}
 
-	logger.Info("All containerd related files and directories have been removed. Step is done.")
+	logger.Info("All cri-o related files and directories have been removed. Step is done.")
 	return true, nil
 }
 
-func (s *CleanupContainerdStep) Run(ctx runtime.ExecutionContext) error {
+func (s *CleanCrioStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
@@ -142,10 +129,10 @@ func (s *CleanupContainerdStep) Run(ctx runtime.ExecutionContext) error {
 	return nil
 }
 
-func (s *CleanupContainerdStep) Rollback(ctx runtime.ExecutionContext) error {
+func (s *CleanCrioStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 	logger.Info("Cleanup step has no rollback action.")
 	return nil
 }
 
-var _ step.Step = (*CleanupContainerdStep)(nil)
+var _ step.Step = (*CleanCrioStep)(nil)

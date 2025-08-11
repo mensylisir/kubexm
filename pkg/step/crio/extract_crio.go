@@ -1,4 +1,4 @@
-package containerd
+package crio
 
 import (
 	"fmt"
@@ -15,39 +15,39 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
-type ExtractContainerdStep struct {
+type ExtractCrioStep struct {
 	step.Base
 }
 
-type ExtractContainerdStepBuilder struct {
-	step.Builder[ExtractContainerdStepBuilder, *ExtractContainerdStep]
+type ExtractCrioStepBuilder struct {
+	step.Builder[ExtractCrioStepBuilder, *ExtractCrioStep]
 }
 
-func NewExtractContainerdStepBuilder(ctx runtime.Context, instanceName string) *ExtractContainerdStepBuilder {
+func NewExtractCrioStepBuilder(ctx runtime.Context, instanceName string) *ExtractCrioStepBuilder {
 	provider := binary.NewBinaryProvider(&ctx)
 	const representativeArch = "amd64"
-	binaryInfo, err := provider.GetBinary(binary.ComponentContainerd, representativeArch)
+	binaryInfo, err := provider.GetBinary(ComponentCrio, representativeArch)
 
 	if err != nil || binaryInfo == nil {
 		return nil
 	}
 
-	s := &ExtractContainerdStep{}
+	s := &ExtractCrioStep{}
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Extract containerd archives for all required architectures", s.Base.Meta.Name)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Extract CRI-O archives for all required architectures", s.Base.Meta.Name)
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 2 * time.Minute
 
-	b := new(ExtractContainerdStepBuilder).Init(s)
+	b := new(ExtractCrioStepBuilder).Init(s)
 	return b
 }
 
-func (s *ExtractContainerdStep) Meta() *spec.StepMeta {
+func (s *ExtractCrioStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *ExtractContainerdStep) getRequiredArchs(ctx runtime.ExecutionContext) (map[string]bool, error) {
+func (s *ExtractCrioStep) getRequiredArchs(ctx runtime.ExecutionContext) (map[string]bool, error) {
 	archs := make(map[string]bool)
 	allHosts := ctx.GetHostsByRole("")
 	if len(allHosts) == 0 {
@@ -56,9 +56,9 @@ func (s *ExtractContainerdStep) getRequiredArchs(ctx runtime.ExecutionContext) (
 
 	provider := binary.NewBinaryProvider(ctx)
 	for _, host := range allHosts {
-		binaryInfo, err := provider.GetBinary(binary.ComponentContainerd, host.GetArch())
+		binaryInfo, err := provider.GetBinary(ComponentCrio, host.GetArch())
 		if err != nil {
-			return nil, fmt.Errorf("error checking if containerd is needed for host %s: %w", host.GetName(), err)
+			return nil, fmt.Errorf("error checking if CRI-O is needed for host %s: %w", host.GetName(), err)
 		}
 		if binaryInfo != nil {
 			archs[host.GetArch()] = true
@@ -67,25 +67,24 @@ func (s *ExtractContainerdStep) getRequiredArchs(ctx runtime.ExecutionContext) (
 	return archs, nil
 }
 
-func (s *ExtractContainerdStep) getPathsForArch(ctx runtime.ExecutionContext, arch string) (sourcePath, destPath, cacheKey string, err error) {
+func (s *ExtractCrioStep) getPathsForArch(ctx runtime.ExecutionContext, arch string) (sourcePath, destPath, cacheKey string, err error) {
 	provider := binary.NewBinaryProvider(ctx)
-	binaryInfo, err := provider.GetBinary(binary.ComponentContainerd, arch)
+	binaryInfo, err := provider.GetBinary(ComponentCrio, arch)
 	if err != nil {
-		return "", "", "", fmt.Errorf("failed to get containerd binary info for arch %s: %w", arch, err)
+		return "", "", "", fmt.Errorf("failed to get CRI-O binary info for arch %s: %w", arch, err)
 	}
 	if binaryInfo == nil {
-		return "", "", "", fmt.Errorf("containerd is disabled for arch %s", arch)
+		return "", "", "", fmt.Errorf("CRI-O is disabled for arch %s", arch)
 	}
 
 	sourcePath = binaryInfo.FilePath()
-	innerPath := "containerd"
-	destPath = filepath.Join(filepath.Dir(sourcePath), innerPath)
+	destPath = filepath.Dir(sourcePath)
 	cacheKey = sourcePath
 
 	return sourcePath, destPath, cacheKey, nil
 }
 
-func (s *ExtractContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+func (s *ExtractCrioStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
 
 	requiredArchs, err := s.getRequiredArchs(ctx)
@@ -93,7 +92,7 @@ func (s *ExtractContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 		return false, err
 	}
 	if len(requiredArchs) == 0 {
-		logger.Info("No hosts require containerd. Step is done.")
+		logger.Info("No hosts require CRI-O. Step is done.")
 		return true, nil
 	}
 
@@ -111,24 +110,22 @@ func (s *ExtractContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 			return false, fmt.Errorf("source archive '%s' for arch %s not found, ensure download step ran successfully", sourcePath, arch)
 		}
 
-		keyFile := filepath.Join(destPath, "bin", "containerd")
-
-		if _, err := os.Stat(keyFile); os.IsNotExist(err) {
-			logger.Infof("Key file '%s' for arch %s does not exist. Extraction is required.", keyFile, arch)
+		keyDir := destPath
+		if _, err := os.Stat(keyDir); os.IsNotExist(err) {
+			logger.Infof("Key directory '%s' for arch %s does not exist. Extraction is required.", keyDir, arch)
 			allDone = false
 		} else {
-			ctx.GetTaskCache().Set(cacheKey, destPath)
+			ctx.GetTaskCache().Set(cacheKey, keyDir)
 		}
 	}
 
 	if allDone {
-		logger.Info("All required containerd archives for all architectures already extracted and are valid.")
+		logger.Info("All required CRI-O archives for all architectures already extracted.")
 	}
-
 	return allDone, nil
 }
 
-func (s *ExtractContainerdStep) Run(ctx runtime.ExecutionContext) error {
+func (s *ExtractCrioStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
 	requiredArchs, err := s.getRequiredArchs(ctx)
@@ -136,7 +133,7 @@ func (s *ExtractContainerdStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 	if len(requiredArchs) == 0 {
-		logger.Info("No hosts require containerd. Skipping extraction.")
+		logger.Info("No hosts require CRI-O. Skipping extraction.")
 		return nil
 	}
 
@@ -146,25 +143,25 @@ func (s *ExtractContainerdStep) Run(ctx runtime.ExecutionContext) error {
 		}
 	}
 
-	logger.Info("All required containerd archives have been extracted successfully.")
+	logger.Info("All required CRI-O archives have been extracted successfully.")
 	return nil
 }
 
-func (s *ExtractContainerdStep) extractFileForArch(ctx runtime.ExecutionContext, arch string) error {
+func (s *ExtractCrioStep) extractFileForArch(ctx runtime.ExecutionContext, arch string) error {
 	logger := ctx.GetLogger()
 	sourcePath, destPath, cacheKey, err := s.getPathsForArch(ctx, arch)
 	if err != nil {
 		if strings.Contains(err.Error(), "disabled for arch") {
-			logger.Debugf("Skipping containerd extraction for arch %s as it's not required.", arch)
+			logger.Debugf("Skipping CRI-O extraction for arch %s as it's not required.", arch)
 			return nil
 		}
 		return err
 	}
 
-	keyFile := filepath.Join(destPath, "bin", "containerd")
-	if _, err := os.Stat(keyFile); err == nil {
-		logger.Infof("Skipping extraction for arch %s, destination already exists and is valid.", arch)
-		ctx.GetTaskCache().Set(cacheKey, destPath)
+	keyDir := filepath.Join(destPath, "crio")
+	if _, err := os.Stat(keyDir); err == nil {
+		logger.Infof("Skipping extraction, destination directory '%s' already exists.", keyDir)
+		ctx.GetTaskCache().Set(cacheKey, keyDir)
 		return nil
 	}
 
@@ -190,19 +187,17 @@ func (s *ExtractContainerdStep) extractFileForArch(ctx runtime.ExecutionContext,
 
 	if err := ar.Extract(sourcePath, destPath); err != nil {
 		_ = bar.Clear()
-		_ = os.RemoveAll(filepath.Join(destPath, "bin"))
-		_ = os.RemoveAll(filepath.Join(destPath, "etc"))
+		_ = os.RemoveAll(keyDir)
 		return fmt.Errorf("failed to extract archive '%s': %w", sourcePath, err)
 	}
 
 	_ = bar.Finish()
 	logger.Infof("Successfully extracted archive for arch %s.", arch)
-
-	ctx.GetTaskCache().Set(cacheKey, destPath)
+	ctx.GetTaskCache().Set(cacheKey, keyDir)
 	return nil
 }
 
-func (s *ExtractContainerdStep) Rollback(ctx runtime.ExecutionContext) error {
+func (s *ExtractCrioStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
 
 	requiredArchs, err := s.getRequiredArchs(ctx)
@@ -221,15 +216,11 @@ func (s *ExtractContainerdStep) Rollback(ctx runtime.ExecutionContext) error {
 			continue
 		}
 
-		dirToRemoveBin := filepath.Join(destPath, "bin")
-		dirToRemoveEtc := filepath.Join(destPath, "etc")
-
-		logger.Warnf("Rolling back by deleting extracted directories: %s and %s", dirToRemoveBin, dirToRemoveEtc)
-		_ = os.RemoveAll(dirToRemoveBin)
-		_ = os.RemoveAll(dirToRemoveEtc)
+		dirToRemove := filepath.Join(destPath, "crio")
+		logger.Warnf("Rolling back by deleting extracted directory: %s", dirToRemove)
+		_ = os.RemoveAll(dirToRemove)
 	}
-
 	return nil
 }
 
-var _ step.Step = (*ExtractContainerdStep)(nil)
+var _ step.Step = (*ExtractCrioStep)(nil)
