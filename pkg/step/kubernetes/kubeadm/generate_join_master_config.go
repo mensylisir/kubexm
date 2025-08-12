@@ -14,7 +14,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/templates"
 )
 
-// GenerateJoinMasterConfigStep 及其构建器
 type GenerateJoinMasterConfigStep struct {
 	step.Base
 }
