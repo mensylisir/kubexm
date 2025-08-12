@@ -53,4 +53,5 @@ type GlobalSettingsContext interface {
 	IsVerbose() bool
 	ShouldIgnoreErr() bool
 	GetGlobalConnectionTimeout() time.Duration
+	IsOfflineMode() bool
 }

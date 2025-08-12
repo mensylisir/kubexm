@@ -29,6 +29,7 @@ type Context struct {
 	GlobalVerbose           bool
 	GlobalIgnoreErr         bool
 	GlobalConnectionTimeout time.Duration
+	GlobalOfflineMode       bool
 
 	PipelineCache cache.PipelineCache
 	ModuleCache   cache.ModuleCache
@@ -99,6 +100,10 @@ func (c *Context) GetModuleCache() cache.ModuleCache     { return c.ModuleCache 
 func (c *Context) GetTaskCache() cache.TaskCache         { return c.TaskCache }
 func (c *Context) GetStepCache() cache.StepCache         { return c.StepCache }
 func (c *Context) GetHttpClient() *http.Client           { return c.httpClient }
+
+func (c *Context) IsOfflineMode() bool {
+	return c.GlobalOfflineMode
+}
 
 func (c *Context) GetHostsByRole(role string) []connector.Host {
 	var hosts []connector.Host
