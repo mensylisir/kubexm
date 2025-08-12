@@ -1,11 +1,13 @@
 package step
 
 import (
+	"fmt"
 	"time"
 )
 
 type Builder[B any, T Step] struct {
-	Step T
+	Step  T
+	Error error
 }
 
 func (b *Builder[B, T]) Init(step T) *B {
@@ -18,9 +20,15 @@ func (b *Builder[B, T]) this() *B {
 }
 
 func (b *Builder[B, T]) Build() T {
+	if b.Error != nil {
+		panic(fmt.Sprintf("failed to build step: %v", b.Error))
+	}
 	return b.Step
 }
 
+func (b *Builder[B, T]) Err() error {
+	return b.Error
+}
 func (b *Builder[B, T]) WithSudo(sudo bool) *B {
 	b.Step.GetBase().Sudo = sudo
 	return b.this()

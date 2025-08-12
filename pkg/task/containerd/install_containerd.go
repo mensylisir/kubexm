@@ -56,12 +56,8 @@ func (t *DeployContainerdTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFra
 		return nil, fmt.Errorf("no master or worker hosts found to deploy containerd")
 	}
 
-	downloadContainerd := containerd.NewDownloadContainerdStepBuilder(*runtimeCtx, "DownloadContainerd").Build()
 	extractContainerd := containerd.NewExtractContainerdStepBuilder(*runtimeCtx, "ExtractContainerd").Build()
-	downloadRunc := containerd.NewDownloadRuncStepBuilder(*runtimeCtx, "DownloadRunc").Build()
-	downloadCNI := containerd.NewDownloadCNIPluginsStepBuilder(*runtimeCtx, "DownloadCNI").Build()
 	extractCNI := containerd.NewExtractCNIPluginsStepBuilder(*runtimeCtx, "ExtractCNI").Build()
-
 	installRunc := containerd.NewInstallRuncStepBuilder(*runtimeCtx, "InstallRunc").Build()
 	installCNI := containerd.NewInstallCNIPluginsStepBuilder(*runtimeCtx, "InstallCNI").Build()
 	installContainerd := containerd.NewInstallContainerdStepBuilder(*runtimeCtx, "InstallContainerd").Build()
@@ -69,12 +65,8 @@ func (t *DeployContainerdTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFra
 	installService := containerd.NewInstallContainerdServiceStepBuilder(*runtimeCtx, "InstallContainerdService").Build()
 	startContainerd := containerd.NewStartContainerdStepBuilder(*runtimeCtx, "StartContainerd").Build() // 假设存在
 
-	fragment.AddNode(&plan.ExecutionNode{Name: "DownloadContainerd", Step: downloadContainerd, Hosts: []connector.Host{controlNode}})
 	fragment.AddNode(&plan.ExecutionNode{Name: "ExtractContainerd", Step: extractContainerd, Hosts: []connector.Host{controlNode}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "DownloadRunc", Step: downloadRunc, Hosts: []connector.Host{controlNode}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "DownloadCNI", Step: downloadCNI, Hosts: []connector.Host{controlNode}})
 	fragment.AddNode(&plan.ExecutionNode{Name: "ExtractCNI", Step: extractCNI, Hosts: []connector.Host{controlNode}})
-
 	fragment.AddNode(&plan.ExecutionNode{Name: "InstallRunc", Step: installRunc, Hosts: deployHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "InstallCNI", Step: installCNI, Hosts: deployHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "InstallContainerd", Step: installContainerd, Hosts: deployHosts})
@@ -82,13 +74,8 @@ func (t *DeployContainerdTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFra
 	fragment.AddNode(&plan.ExecutionNode{Name: "InstallContainerdService", Step: installService, Hosts: deployHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "StartContainerd", Step: startContainerd, Hosts: deployHosts})
 
-	fragment.AddDependency("DownloadContainerd", "ExtractContainerd")
-	fragment.AddDependency("DownloadCNI", "ExtractCNI")
-
-	fragment.AddDependency("DownloadRunc", "InstallRunc")
 	fragment.AddDependency("ExtractCNI", "InstallCNI")
 	fragment.AddDependency("ExtractContainerd", "InstallContainerd")
-
 	fragment.AddDependency("InstallRunc", "ConfigureContainerd")
 	fragment.AddDependency("InstallCNI", "ConfigureContainerd")
 	fragment.AddDependency("InstallContainerd", "ConfigureContainerd")
@@ -96,6 +83,25 @@ func (t *DeployContainerdTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFra
 	fragment.AddDependency("InstallContainerdService", "StartContainerd")
 
 	fragment.CalculateEntryAndExitNodes()
+
+	isOffline := ctx.IsOfflineMode()
+	if !isOffline {
+		ctx.GetLogger().Info("Online mode detected. Adding download steps for containerd dependencies.")
+
+		downloadContainerd := containerd.NewDownloadContainerdStepBuilder(*runtimeCtx, "DownloadContainerd").Build()
+		downloadRunc := containerd.NewDownloadRuncStepBuilder(*runtimeCtx, "DownloadRunc").Build()
+		downloadCNI := containerd.NewDownloadCNIPluginsStepBuilder(*runtimeCtx, "DownloadCNI").Build()
+
+		fragment.AddNode(&plan.ExecutionNode{Name: "DownloadContainerd", Step: downloadContainerd, Hosts: []connector.Host{controlNode}})
+		fragment.AddNode(&plan.ExecutionNode{Name: "DownloadRunc", Step: downloadRunc, Hosts: []connector.Host{controlNode}})
+		fragment.AddNode(&plan.ExecutionNode{Name: "DownloadCNI", Step: downloadCNI, Hosts: []connector.Host{controlNode}})
+
+		fragment.AddDependency("DownloadContainerd", "ExtractContainerd")
+		fragment.AddDependency("DownloadCNI", "ExtractCNI")
+		fragment.AddDependency("DownloadRunc", "InstallRunc")
+	} else {
+		ctx.GetLogger().Info("Offline mode detected. Skipping download steps.")
+	}
 
 	return fragment, nil
 }

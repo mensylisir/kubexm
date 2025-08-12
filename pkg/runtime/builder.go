@@ -131,6 +131,7 @@ func (b *Builder) Build(ctx context.Context) (*Context, func(), error) {
 		GlobalVerbose:           currentClusterConfig.Spec.Global.Verbose,
 		GlobalIgnoreErr:         currentClusterConfig.Spec.Global.IgnoreErr,
 		GlobalConnectionTimeout: currentClusterConfig.Spec.Global.ConnectionTimeout,
+		GlobalOfflineMode:       currentClusterConfig.Spec.Global.OfflineMode,
 
 		PipelineCache: pipelineCache,
 		ModuleCache:   moduleCache,
