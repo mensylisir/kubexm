@@ -32,13 +32,14 @@ type ClusterSpec struct {
 	Network              *Network                  `json:"network,omitempty" yaml:"network,omitempty"`
 	ControlPlaneEndpoint *ControlPlaneEndpointSpec `json:"controlPlaneEndpoint,omitempty" yaml:"controlPlaneEndpoint,omitempty"`
 
-	Storage   *Storage   `json:"storage,omitempty" yaml:"storage,omitempty"`
-	Registry  *Registry  `json:"registry,omitempty" yaml:"registry,omitempty"`
-	HelmRepo  *HelmRepo  `json:"helmRepo,omitempty" yaml:"helmRepo,omitempty"`
-	Addons    []Addon    `json:"addons,omitempty" yaml:"addons,omitempty"`
-	Preflight *Preflight `json:"preflight,omitempty" yaml:"preflight,omitempty"`
-	Extra     *Extra     `json:"extra,omitempty" yaml:"extra,omitempty"`
-	Certs     *CertSpec  `json:"certs,omitempty" yaml:"certs,omitempty"`
+	Storage   *Storage     `json:"storage,omitempty" yaml:"storage,omitempty"`
+	Registry  *Registry    `json:"registry,omitempty" yaml:"registry,omitempty"`
+	Gateway   *GatewaySpec `json:"gateway,omitempty" yaml:"gateway,omitempty"`
+	HelmRepo  *HelmRepo    `json:"helmRepo,omitempty" yaml:"helmRepo,omitempty"`
+	Addons    []Addon      `json:"addons,omitempty" yaml:"addons,omitempty"`
+	Preflight *Preflight   `json:"preflight,omitempty" yaml:"preflight,omitempty"`
+	Extra     *Extra       `json:"extra,omitempty" yaml:"extra,omitempty"`
+	Certs     *CertSpec    `json:"certs,omitempty" yaml:"certs,omitempty"`
 }
 
 type CertSpec struct {
@@ -137,6 +138,14 @@ type TaintSpec struct {
 	Effect string `json:"effect" yaml:"effect"`
 }
 
+type GatewaySpec struct {
+	IngressNginx *IngressNginxSpec `json:"ingressNginx,omitempty" yaml:"ingressNginx,omitempty"`
+}
+
+type IngressNginxSpec struct {
+	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+}
+
 func SetDefaults_Cluster(obj *Cluster) {
 	if obj.APIVersion == "" {
 		obj.APIVersion = common.DefaultAPIVersion
@@ -203,8 +212,17 @@ func SetDefaults_ClusterSpec(cluster *Cluster) {
 		cluster.Spec.Preflight = &Preflight{}
 	}
 	SetDefaults_Preflight(cluster.Spec.Preflight)
+	if cluster.Spec.Gateway == nil {
+		cluster.Spec.Gateway = &GatewaySpec{}
+	}
+	SetDefault_Gateway(cluster.Spec.Gateway)
 }
 
+func SetDefault_Gateway(spec *GatewaySpec) {
+	if spec.IngressNginx == nil {
+		spec.IngressNginx.Enabled = helpers.BoolPtr(false)
+	}
+}
 func SetDefaults_GlobalSpec(spec *GlobalSpec) {
 	if spec.User == "" {
 		spec.User = common.DefaultUser
