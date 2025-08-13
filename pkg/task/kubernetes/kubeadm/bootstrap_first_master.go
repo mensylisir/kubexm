@@ -54,44 +54,19 @@ func (t *BootstrapFirstMasterTask) Plan(ctx runtime.TaskContext) (*plan.Executio
 	firstMasterHost := masterHosts[0]
 
 	generateInitConfig := kubeadm.NewGenerateInitConfigStepBuilder(*runtimeCtx, "GenerateInitConfig").Build()
-
 	kubeadmInit := kubeadm.NewKubeadmInitStepBuilder(*runtimeCtx, "KubeadmInit").Build()
 	copyKubeconfig := kubeconfig.NewCopyKubeconfigStepBuilder(*runtimeCtx, "CopyAdminKubeconfig").Build()
 
-	nodeGenerateConfig := &plan.ExecutionNode{
-		Name:  "GenerateInitConfig",
-		Step:  generateInitConfig,
-		Hosts: []connector.Host{firstMasterHost},
-	}
-	if _, err := fragment.AddNode(nodeGenerateConfig); err != nil {
-		return nil, err
-	}
+	nodeGenerateConfig := &plan.ExecutionNode{Name: "GenerateInitConfig", Step: generateInitConfig, Hosts: []connector.Host{firstMasterHost}}
+	nodeKubeadmInit := &plan.ExecutionNode{Name: "KubeadmInit", Step: kubeadmInit, Hosts: []connector.Host{firstMasterHost}}
+	nodeCopyKubeconfig := &plan.ExecutionNode{Name: "CopyAdminKubeconfig", Step: copyKubeconfig, Hosts: []connector.Host{firstMasterHost}}
 
-	nodeKubeadmInit := &plan.ExecutionNode{
-		Name:  "KubeadmInit",
-		Step:  kubeadmInit,
-		Hosts: []connector.Host{firstMasterHost},
-	}
-	if _, err := fragment.AddNode(nodeKubeadmInit); err != nil {
-		return nil, err
-	}
+	fragment.AddNode(nodeGenerateConfig)
+	fragment.AddNode(nodeKubeadmInit)
+	fragment.AddNode(nodeCopyKubeconfig)
 
-	nodeCopyKubeconfig := &plan.ExecutionNode{
-		Name:  "CopyAdminKubeconfig",
-		Step:  copyKubeconfig,
-		Hosts: []connector.Host{firstMasterHost},
-	}
-	if _, err := fragment.AddNode(nodeCopyKubeconfig); err != nil {
-		return nil, err
-	}
-
-	if err := fragment.AddDependency("GenerateInitConfig", "KubeadmInit"); err != nil {
-		return nil, err
-	}
-
-	if err := fragment.AddDependency("KubeadmInit", "CopyAdminKubeconfig"); err != nil {
-		return nil, err
-	}
+	fragment.AddDependency("GenerateInitConfig", "KubeadmInit")
+	fragment.AddDependency("KubeadmInit", "CopyAdminKubeconfig")
 
 	fragment.CalculateEntryAndExitNodes()
 

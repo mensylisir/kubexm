@@ -3,6 +3,7 @@ package kubeconfig
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/common"
@@ -39,11 +40,11 @@ func (s *CopyKubeconfigStep) Precheck(ctx runtime.ExecutionContext) (isDone bool
 	if err != nil {
 		return false, err
 	}
-
 	srcPath := filepath.Join(common.KubernetesConfigDir, common.AdminKubeconfigFileName)
+
 	user := ctx.GetHost().GetUser()
 	if user == "" {
-		logger.Warn("No user specified for host, skipping copy of kubeconfig to home directory.")
+		logger.Warn("No user specified for host, skipping copy of kubeconfig. Step is considered done.")
 		return true, nil
 	}
 	userHomeDir := fmt.Sprintf("/home/%s", user)
@@ -53,18 +54,41 @@ func (s *CopyKubeconfigStep) Precheck(ctx runtime.ExecutionContext) (isDone bool
 	destPath := filepath.Join(userHomeDir, ".kube", "config")
 
 	srcExists, err := runner.Exists(ctx.GoContext(), conn, srcPath)
-	if err != nil || !srcExists {
-		logger.Info("Source admin.conf does not exist, pre-check fails.")
-		return false, err
+	if err != nil {
+		return false, fmt.Errorf("failed to check for source file '%s': %w", srcPath, err)
+	}
+	if !srcExists {
+		return false, fmt.Errorf("source admin.conf '%s' does not exist, ensure kubeadm init ran successfully", srcPath)
 	}
 
 	destExists, err := runner.Exists(ctx.GoContext(), conn, destPath)
-	if err != nil || !destExists {
+	if err != nil {
+		return false, fmt.Errorf("failed to check for destination file '%s': %w", destPath, err)
+	}
+	if !destExists {
 		logger.Info("Destination ~/.kube/config does not exist. Step needs to run.")
 		return false, nil
 	}
-	logger.Info("Destination ~/.kube/config already exists. Step is considered done.")
-	return true, nil
+
+	logger.Info("Source and destination files exist. Comparing their contents.")
+
+	compareCmd := fmt.Sprintf("sha256sum %s %s | cut -d' ' -f1 | uniq | wc -l", srcPath, destPath)
+
+	output, err := runner.Run(ctx.GoContext(), conn, compareCmd, s.Sudo)
+	if err != nil {
+		logger.Warnf("Failed to compare file hashes on remote host, assuming re-copy is needed. Error: %v", err)
+		return false, nil
+	}
+
+	result := strings.TrimSpace(output)
+
+	if result == "1" {
+		logger.Info("Remote kubeconfig file is up to date with admin.conf. Step is done.")
+		return true, nil
+	}
+
+	logger.Info("Remote kubeconfig file content differs from admin.conf. Step needs to run to update it.")
+	return false, nil
 }
 
 func (s *CopyKubeconfigStep) Run(ctx runtime.ExecutionContext) error {

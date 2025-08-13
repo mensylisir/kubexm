@@ -61,10 +61,8 @@ func (t *InstallKubeComponentsTask) Plan(ctx runtime.TaskContext) (*plan.Executi
 	installKubelet := kubelet.NewInstallKubeletStepBuilder(*runtimeCtx, "InstallKubelet").Build()
 	installKubeletSvc := kubelet.NewInstallKubeletServiceStepBuilder(*runtimeCtx, "InstallKubeletService").Build()
 	installKubeletDropin := kubelet.NewInstallKubeletDropInStepBuilder(*runtimeCtx, "InstallKubeletDropin").Build()
-
 	downloadKubeadm := kubeadm.NewDownloadKubeadmStepBuilder(*runtimeCtx, "DownloadKubeadm").Build()
 	installKubeadm := kubeadm.NewInstallKubeadmStepBuilder(*runtimeCtx, "InstallKubeadm").Build()
-
 	downloadKubectl := kubectl.NewDownloadKubectlStepBuilder(*runtimeCtx, "DownloadKubectl").Build()
 	installKubectl := kubectl.NewInstallKubectlStepBuilder(*runtimeCtx, "InstallKubectl").Build()
 

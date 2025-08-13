@@ -67,10 +67,11 @@ type RookCephConfig struct {
 }
 
 type LonghornConfig struct {
-	Source          AddonSource `json:"source,omitempty" yaml:"sources,omitempty"`
-	Enabled         *bool       `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	Version         string      `json:"version,omitempty" yaml:"version,omitempty"`
-	DefaultDataPath *string     `json:"defaultDataPath,omitempty" yaml:"defaultDataPath,omitempty"`
+	Source               AddonSource `json:"source,omitempty" yaml:"sources,omitempty"`
+	Enabled              *bool       `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Version              string      `json:"version,omitempty" yaml:"version,omitempty"`
+	DefaultDataPath      *string     `json:"defaultDataPath,omitempty" yaml:"defaultDataPath,omitempty"`
+	PurgeDataOnUninstall *bool       `json:"purgeDataOnUninstall,omitempty" yaml:"purgeDataOnUninstall,omitempty"`
 }
 
 func SetDefaults_Storage(cfg *Storage) {

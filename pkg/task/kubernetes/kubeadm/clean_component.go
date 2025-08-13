@@ -52,15 +52,9 @@ func (t *CleanKubeComponentsTask) Plan(ctx runtime.TaskContext) (*plan.Execution
 
 	cleanStep := kubeadm.NewCleanKubeComponentsStepBuilder(*runtimeCtx, "CleanKubeComponents").Build()
 
-	node := &plan.ExecutionNode{
-		Name:  "CleanKubeComponents",
-		Step:  cleanStep,
-		Hosts: deployHosts,
-	}
+	node := &plan.ExecutionNode{Name: "CleanKubeComponents", Step: cleanStep, Hosts: deployHosts}
 
-	if _, err := fragment.AddNode(node); err != nil {
-		return nil, err
-	}
+	fragment.AddNode(node)
 
 	fragment.CalculateEntryAndExitNodes()
 
