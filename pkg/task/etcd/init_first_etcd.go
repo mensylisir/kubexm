@@ -11,34 +11,34 @@ import (
 	"github.com/mensylisir/kubexm/pkg/task"
 )
 
-type DeployEtcdTask struct {
+type DeployFirstEtcdTask struct {
 	task.Base
 }
 
-func NewDeployEtcdTask() task.Task {
-	return &DeployEtcdTask{
+func NewDeployFirstEtcdTask() task.Task {
+	return &DeployFirstEtcdTask{
 		Base: task.Base{
 			Meta: spec.TaskMeta{
-				Name:        "DeployEtcd",
+				Name:        "DeployEtcdForFirstEtcd",
 				Description: "Download, extract, generate certs, distribute, and install etcd",
 			},
 		},
 	}
 }
 
-func (t *DeployEtcdTask) Name() string {
+func (t *DeployFirstEtcdTask) Name() string {
 	return t.Meta.Name
 }
 
-func (t *DeployEtcdTask) Description() string {
+func (t *DeployFirstEtcdTask) Description() string {
 	return t.Meta.Description
 }
 
-func (t *DeployEtcdTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
+func (t *DeployFirstEtcdTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 	return ctx.GetClusterConfig().Spec.Etcd.Type == string(common.EtcdDeploymentTypeKubexm), nil
 }
 
-func (t *DeployEtcdTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
+func (t *DeployFirstEtcdTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 
 	fragment := plan.NewExecutionFragment(t.Name())
 
@@ -56,7 +56,7 @@ func (t *DeployEtcdTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment,
 	extractEtcd := etcd.NewExtractEtcdStepBuilder(*runtimeCtx, "ExtractEtcd").Build()
 	distributeCerts := etcd.NewDistributeEtcdCertsStepBuilder(*runtimeCtx, "DistributeEtcdCerts").Build()
 	installEtcd := etcd.NewInstallEtcdStepBuilder(*runtimeCtx, "InstallEtcd").Build()
-	configureEtcd := etcd.NewConfigureEtcdStepBuilder(*runtimeCtx, "ConfigureEtcd").WithInitialClusterState("existing").Build()
+	configureEtcd := etcd.NewConfigureEtcdStepBuilder(*runtimeCtx, "ConfigureEtcd").WithInitialClusterState("new").Build()
 	installService := etcd.NewInstallEtcdServiceStepBuilder(*runtimeCtx, "InstallEtcdService").Build()
 	startEtcd := etcd.NewStartEtcdStepBuilder(*runtimeCtx, "StartEtcd").Build()
 	checkHealth := etcd.NewCheckEtcdHealthStepBuilder(*runtimeCtx, "CheckEtcdHealth").Build()

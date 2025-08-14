@@ -35,6 +35,7 @@ import (
 //go:embed loadbalancer/haproxy/*.tmpl
 //go:embed loadbalancer/nginx/*.tmpl
 //go:embed loadbalancer/keepalived/*.tmpl
+//go:embed loadbalancer/kube-vip/*.tmpl
 //go:embed os/*.tmpl
 //go:embed storage/longhorn/*.tmpl
 //go:embed storage/nfs/*.tmpl
