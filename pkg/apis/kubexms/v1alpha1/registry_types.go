@@ -23,8 +23,9 @@ type RegistryMirroringAndRewriting struct {
 }
 
 type LocalRegistryDeployment struct {
-	Type     string `json:"type,omitempty" yaml:"type,omitempty"`
-	DataRoot string `json:"dataRoot,omitempty" yaml:"registryDataDir,omitempty"`
+	Type              string `json:"type,omitempty" yaml:"type,omitempty"`
+	DeleteDataOnClean bool   `json:"deleteDataOnClean,omitempty" yaml:"deleteDataOnClean,omitempty"`
+	DataRoot          string `json:"dataRoot,omitempty" yaml:"registryDataDir,omitempty"`
 }
 
 type RegistryAuth struct {

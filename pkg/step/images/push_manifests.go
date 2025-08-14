@@ -13,7 +13,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 
-// PushManifestListStep 是一个无状态的编排步骤，在本地执行。
 type PushManifestListStep struct {
 	step.Base
 	Concurrency int
