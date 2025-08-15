@@ -818,6 +818,77 @@ func (s *SSHConnector) Download(ctx context.Context, remotePath, localPath strin
 	return nil
 }
 
+func (s *SSHConnector) DownloadDir(ctx context.Context, remoteDir, localDir string, options *FileTransferOptions) error {
+	log := logger.Get()
+
+	if err := s.ensureSftp(); err != nil {
+		return err
+	}
+
+	log.Infof("Starting recursive download from remote directory '%s' to local directory '%s'", remoteDir, localDir)
+
+	if err := os.MkdirAll(localDir, 0755); err != nil {
+		return fmt.Errorf("failed to create local root directory %s: %w", localDir, err)
+	}
+
+	walker := s.sftpClient.Walk(remoteDir)
+	for walker.Step() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if err := walker.Err(); err != nil {
+			log.Warnf("Skipping path due to walk error on remote directory '%s': %v", walker.Path(), err)
+			continue
+		}
+
+		remotePath := walker.Path()
+		info := walker.Stat()
+
+		relPath, err := filepath.Rel(remoteDir, remotePath)
+		if err != nil {
+			return fmt.Errorf("internal error: failed to calculate relative path for '%s' against base '%s': %w", remotePath, remoteDir, err)
+		}
+		localPath := filepath.Join(localDir, relPath)
+
+		if info.IsDir() {
+			log.Debugf("Creating local directory: %s", localPath)
+			if err := os.MkdirAll(localPath, info.Mode().Perm()); err != nil {
+				return fmt.Errorf("failed to create local directory '%s': %w", localPath, err)
+			}
+		} else {
+			log.Debugf("Downloading remote file: %s", remotePath)
+			srcFile, err := s.sftpClient.Open(remotePath)
+			if err != nil {
+				return fmt.Errorf("failed to open remote file '%s' for download: %w", remotePath, err)
+			}
+			defer srcFile.Close()
+			dstFile, err := os.Create(localPath)
+			if err != nil {
+				return fmt.Errorf("failed to create local file '%s' for download: %w", localPath, err)
+			}
+			defer dstFile.Close()
+
+			bytesCopied, err := io.Copy(dstFile, srcFile)
+			if err != nil {
+				_ = os.Remove(localPath)
+				return fmt.Errorf("failed to copy content from remote '%s' to local '%s': %w", remotePath, localPath, err)
+			}
+
+			if err := os.Chmod(localPath, info.Mode().Perm()); err != nil {
+				log.Warnf("Failed to set permissions on local file '%s': %v", localPath, err)
+			}
+
+			log.Debugf("Successfully downloaded %d bytes to %s", bytesCopied, localPath)
+		}
+	}
+
+	log.Infof("Finished recursive download from '%s' to '%s'", remoteDir, localDir)
+	return nil
+}
+
 func (s *SSHConnector) Copy(ctx context.Context, srcPath, dstPath string, options *FileTransferOptions) error {
 	srcStat, err := os.Stat(srcPath)
 	if err != nil {
@@ -998,7 +1069,9 @@ func (s *SSHConnector) Fetch(ctx context.Context, remotePath, localPath string, 
 	}
 
 	if stat.IsDir {
-		return fmt.Errorf("fetching directories is not yet implemented in this simplified version")
+		if err := s.DownloadDir(ctx, remoteTempPath, localPath, downloadOpts); err != nil {
+			return fmt.Errorf("failed to download directory from temporary path %s: %w", remoteTempPath, err)
+		}
 	}
 
 	if err := s.Download(ctx, remoteTempPath, localPath, downloadOpts); err != nil {

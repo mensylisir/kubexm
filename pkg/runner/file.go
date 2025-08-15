@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/runner/helpers"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,6 +13,58 @@ import (
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 )
+
+func (r *defaultRunner) Upload(ctx context.Context, conn connector.Connector, srcPath string, destPath string, sudo bool) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil")
+	}
+	info, err := os.Stat(srcPath)
+	if err != nil {
+		return fmt.Errorf("failed to access source path '%s': %w", srcPath, err)
+	}
+
+	transferOptions := helpers.GetFileMetadata(info, r.logger)
+	transferOptions.Sudo = sudo
+	connCfg := conn.GetConnectionConfig()
+
+	err = conn.Upload(ctx, srcPath, destPath, transferOptions)
+	if err != nil {
+		return fmt.Errorf("failed to upload from '%s' to '%s' on host '%s': %w",
+			srcPath, destPath, connCfg.Host, err)
+	}
+
+	r.logger.Infof("Successfully uploaded '%s' to '%s'", srcPath, destPath)
+	return nil
+}
+
+func (r *defaultRunner) Fetch(ctx context.Context, conn connector.Connector, remotePath string, localPath string, sudo bool) error {
+	if conn == nil {
+		return fmt.Errorf("connector cannot be nil for Fetch")
+	}
+
+	stat, err := conn.Stat(ctx, remotePath)
+	if err != nil {
+		return fmt.Errorf("failed to stat remote source path '%s': %w", remotePath, err)
+	}
+	if !stat.IsExist {
+		return fmt.Errorf("remote source path '%s': %w", remotePath, os.ErrNotExist)
+	}
+
+	permissionsString := fmt.Sprintf("%04o", stat.Mode.Perm())
+	transferOptions := &connector.FileTransferOptions{
+		Permissions: permissionsString,
+		Sudo:        sudo,
+	}
+	connCfg := conn.GetConnectionConfig()
+	err = conn.Fetch(ctx, remotePath, localPath, transferOptions)
+	if err != nil {
+		return fmt.Errorf("failed to fetch from '%s:%s' to '%s': %w",
+			connCfg.Host, remotePath, localPath, err)
+	}
+
+	r.logger.Infof("Successfully fetched '%s' to '%s'", remotePath, localPath)
+	return nil
+}
 
 func (r *defaultRunner) Exists(ctx context.Context, conn connector.Connector, path string) (bool, error) {
 	if conn == nil {
