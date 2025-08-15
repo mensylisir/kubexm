@@ -122,7 +122,7 @@ func (s *GenerateEtcdCertsStep) Run(ctx runtime.ExecutionContext) error {
 
 	altNames := helpers.AltNames{
 		DNSNames: []string{"localhost", "etcd", "etcd.kube-system", "etcd.kube-system.svc",
-			fmt.Sprintf("etcd.kube-system.svc.%s", ctx.GetClusterConfig().Spec.Kubernetes.ClusterName),
+			fmt.Sprintf("etcd.kube-system.svc.%s", ctx.GetClusterConfig().Spec.Kubernetes.ClusterName, ctx.GetClusterConfig().Spec.Kubernetes.DNSDomain),
 			ctx.GetClusterConfig().Spec.ControlPlaneEndpoint.Domain},
 		IPs: []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("0:0:0:0:0:0:0:1")},
 	}

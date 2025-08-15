@@ -249,6 +249,109 @@ func LoadCertificateAuthority(certPath, keyPath string) (*x509.Certificate, *ecd
 	return caCert, caKey, nil
 }
 
+func ResignCertificateAuthority(pkiPath string, caCertFileName, caKeyFileName string, duration time.Duration) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+	caCertPath := filepath.Join(pkiPath, caCertFileName)
+	caKeyPath := filepath.Join(pkiPath, caKeyFileName)
+
+	privKey, err := LoadPrivateKey(caKeyPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load existing CA private key from '%s' for re-signing: %w", caKeyPath, err)
+	}
+
+	var subject pkix.Name
+	if IsFileExist(caCertPath) {
+		oldCert, err := LoadCertificate(caCertPath)
+		if err != nil {
+			fmt.Printf("Warning: could not load old CA certificate to copy subject: %v. Using default subject.\n", err)
+			subject = pkix.Name{
+				CommonName:   "kubexm-etcd-ca",
+				Organization: []string{"KubeXM"},
+			}
+		} else {
+			subject = oldCert.Subject
+		}
+	} else {
+		return nil, nil, fmt.Errorf("original CA certificate '%s' not found for re-signing", caCertPath)
+	}
+
+	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate serial number: %w", err)
+	}
+
+	if duration == 0 {
+		duration = 10 * 365 * 24 * time.Hour
+	}
+	notAfter := time.Now().Add(duration)
+
+	template := &x509.Certificate{
+		SerialNumber:          serialNumber,
+		Subject:               subject,
+		NotBefore:             time.Now().Add(-1 * time.Hour),
+		NotAfter:              notAfter,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &privKey.PublicKey, privKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to re-sign CA certificate using existing key: %w", err)
+	}
+
+	if err := WriteCert(pkiPath, caCertFileName, certDER); err != nil {
+		return nil, nil, err
+	}
+
+	caCert, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse newly re-signed CA certificate: %w", err)
+	}
+
+	return caCert, privKey, nil
+}
+
+func LoadPrivateKey(keyPath string) (*ecdsa.PrivateKey, error) {
+	keyData, err := os.ReadFile(keyPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read private key file '%s': %w", keyPath, err)
+	}
+
+	pemBlock, _ := pem.Decode(keyData)
+	if pemBlock == nil {
+		return nil, fmt.Errorf("no PEM block found in private key file '%s'", keyPath)
+	}
+	if pemBlock.Type != "EC PRIVATE KEY" {
+		return nil, fmt.Errorf("unsupported key type in '%s': expected 'EC PRIVATE KEY', got '%s'", keyPath, pemBlock.Type)
+	}
+
+	privKey, err := x509.ParseECPrivateKey(pemBlock.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse ECDSA private key from '%s': %w", keyPath, err)
+	}
+
+	return privKey, nil
+}
+
+func LoadCertificate(certPath string) (*x509.Certificate, error) {
+	certData, err := os.ReadFile(certPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read certificate file '%s': %w", certPath, err)
+	}
+	pemBlock, _ := pem.Decode(certData)
+	if pemBlock == nil {
+		return nil, fmt.Errorf("no PEM block found in certificate file '%s'", certPath)
+	}
+	if pemBlock.Type != "CERTIFICATE" {
+		return nil, fmt.Errorf("unsupported type in '%s': expected 'CERTIFICATE', got '%s'", certPath, pemBlock.Type)
+	}
+	cert, err := x509.ParseCertificate(pemBlock.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse certificate from '%s': %w", certPath, err)
+	}
+	return cert, nil
+}
+
 func WriteCert(pkiPath, fileName string, derBytes []byte) error {
 	certOut, err := os.Create(filepath.Join(pkiPath, fileName))
 	if err != nil {

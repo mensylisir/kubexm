@@ -42,6 +42,7 @@ const (
 
 const (
 	EtcdCaPemFileName             = "ca.pem"
+	EtcdCaTimingPemFileName       = "ca-%s.pem"
 	EtcdCaKeyPemFileName          = "ca-key.pem"
 	EtcdNodeCertFileNamePattern   = "node-%s.pem"       // etcd node certificate pattern (node-aa1.pem)
 	EtcdNodeKeyFileNamePattern    = "node-%s-key.pem"   // etcd node key pattern (node-aa1-key.pem)

@@ -16,6 +16,8 @@ type ExecutionContext interface {
 	GetCurrentHostConnector() (connector.Connector, error)
 	GetStepCache() cache.StepCache
 	GetTaskCache() cache.TaskCache
+	GetModuleCache() cache.ModuleCache
+	GetPipelineCache() cache.PipelineCache
 	GetHost() connector.Host
 	GetStepExecutionID() string
 	GetExecutionStartTime() time.Time
