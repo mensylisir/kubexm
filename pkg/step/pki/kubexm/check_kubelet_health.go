@@ -14,7 +14,6 @@ type VerifyKubeletHealthStep struct {
 	step.Base
 	serviceName     string
 	healthzEndpoint string
-	retries         int
 	retryDelay      time.Duration
 }
 
@@ -26,7 +25,6 @@ func NewVerifyKubeletHealthStepBuilder(ctx runtime.Context, instanceName string)
 	s := &VerifyKubeletHealthStep{
 		serviceName:     "kubelet",
 		healthzEndpoint: "http://127.0.0.1:10248/healthz",
-		retries:         12,
 		retryDelay:      10 * time.Second,
 	}
 	s.Base.Meta.Name = instanceName
@@ -64,24 +62,31 @@ func (s *VerifyKubeletHealthStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	logger.Info("Verifying kubelet health...")
 
+	timeout := time.After(s.Base.Timeout)
+	ticker := time.NewTicker(s.retryDelay)
+	defer ticker.Stop()
+
 	var lastErr error
-	for i := 0; i < s.retries; i++ {
-		log := logger.With("attempt", i+1)
-		log.Infof("Attempting to verify kubelet health...")
+	for {
+		select {
+		case <-timeout:
+			if lastErr != nil {
+				return fmt.Errorf("kubelet health verification timed out after %v: %w", s.Base.Timeout, lastErr)
+			}
+			return fmt.Errorf("kubelet health verification timed out after %v", s.Base.Timeout)
+		case <-ticker.C:
+			logger.Info("Attempting to verify kubelet health...")
 
-		err := s.checkKubelet(ctx)
-		if err == nil {
-			logger.Info("kubelet is healthy.")
-			return nil
+			err := s.checkKubelet(ctx)
+			if err == nil {
+				logger.Info("kubelet is healthy.")
+				return nil
+			}
+
+			lastErr = err
+			logger.Warnf("Health check failed: %v. Retrying...", err)
 		}
-
-		lastErr = err
-		log.Warnf("Health check failed: %v. Retrying in %v...", err, s.retryDelay)
-		time.Sleep(s.retryDelay)
 	}
-
-	logger.Errorf("kubelet did not become healthy after %d retries.", s.retries)
-	return fmt.Errorf("kubelet health verification failed: %w", lastErr)
 }
 
 func (s *VerifyKubeletHealthStep) checkKubelet(ctx runtime.ExecutionContext) error {

@@ -12,7 +12,6 @@ import (
 type CheckSchedulerHealthStep struct {
 	step.Base
 	HealthCheckURL string
-	RetryCount     int
 	RetryDelay     time.Duration
 }
 
@@ -23,7 +22,6 @@ type CheckSchedulerHealthStepBuilder struct {
 func NewCheckSchedulerHealthStepBuilder(ctx runtime.Context, instanceName string) *CheckSchedulerHealthStepBuilder {
 	s := &CheckSchedulerHealthStep{
 		HealthCheckURL: "https://127.0.0.1:10259/healthz",
-		RetryCount:     12,
 		RetryDelay:     5 * time.Second,
 	}
 
@@ -81,26 +79,32 @@ func (s *CheckSchedulerHealthStep) Precheck(ctx runtime.ExecutionContext) (isDon
 
 func (s *CheckSchedulerHealthStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
+	logger.Info("Waiting for kube-scheduler to be healthy...")
 
-	for i := 0; i < s.RetryCount; i++ {
-		logger.Infof("Waiting for kube-scheduler to be healthy... (Attempt %d/%d)", i+1, s.RetryCount)
+	timeout := time.After(s.Base.Timeout)
+	ticker := time.NewTicker(s.RetryDelay)
+	defer ticker.Stop()
 
-		healthy, err := s.checkHealth(ctx)
-		if healthy {
-			logger.Info("kube-scheduler is healthy!")
-			return nil
-		}
-
-		if err != nil {
-			logger.Debugf("Health check attempt failed: %v", err)
-		}
-
-		if i < s.RetryCount-1 {
-			time.Sleep(s.RetryDelay)
+	var lastErr error
+	for {
+		select {
+		case <-timeout:
+			if lastErr != nil {
+				return fmt.Errorf("kube-scheduler health check timed out after %v: %w", s.Base.Timeout, lastErr)
+			}
+			return fmt.Errorf("kube-scheduler health check timed out after %v", s.Base.Timeout)
+		case <-ticker.C:
+			healthy, err := s.checkHealth(ctx)
+			if healthy {
+				logger.Info("kube-scheduler is healthy!")
+				return nil
+			}
+			if err != nil {
+				lastErr = err
+				logger.Debugf("Health check attempt failed: %v", err)
+			}
 		}
 	}
-
-	return fmt.Errorf("kube-scheduler did not become healthy after %d attempts", s.RetryCount)
 }
 
 func (s *CheckSchedulerHealthStep) Rollback(ctx runtime.ExecutionContext) error {
