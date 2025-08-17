@@ -17,7 +17,11 @@ type ResignCAStep struct {
 	certDuration     time.Duration
 }
 
-func NewResignCAStep(ctx runtime.Context, instanceName string) *ResignCAStep {
+type ResignCAStepBuilder struct {
+	step.Builder[ResignCAStepBuilder, *ResignCAStep]
+}
+
+func NewResignCAStepBuilder(ctx runtime.Context, instanceName string) *ResignCAStepBuilder {
 	localCertsDir := ctx.GetEtcdCertsDir()
 	s := &ResignCAStep{
 		localNewCertsDir: filepath.Join(localCertsDir, "certs-new"),
@@ -28,7 +32,8 @@ func NewResignCAStep(ctx runtime.Context, instanceName string) *ResignCAStep {
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 1 * time.Minute
-	return s
+	b := new(ResignCAStepBuilder).Init(s)
+	return b
 }
 
 func (s *ResignCAStep) Meta() *spec.StepMeta {

@@ -1,6 +1,7 @@
 package helpers
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -378,4 +379,37 @@ func WriteKey(pkiPath, fileName string, key *ecdsa.PrivateKey) error {
 
 func isECPrivateKey(blockType string) bool {
 	return blockType == "EC PRIVATE KEY" || blockType == "PRIVATE KEY"
+}
+
+func IsCertificateBundle(filePath string) (isBundle bool, err error) {
+	pemData, err := os.ReadFile(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, fmt.Errorf("certificate file not found at '%s'", filePath)
+		}
+		return false, fmt.Errorf("failed to read certificate file '%s': %w", filePath, err)
+	}
+
+	var certCount int
+	rest := pemData
+
+	for {
+		block, remainingData := pem.Decode(rest)
+
+		if block == nil {
+			break
+		}
+
+		if block.Type == "CERTIFICATE" {
+			certCount++
+		}
+
+		if len(remainingData) == 0 || bytes.Equal(rest, remainingData) {
+			break
+		}
+
+		rest = remainingData
+	}
+
+	return certCount > 1, nil
 }

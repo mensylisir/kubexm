@@ -24,7 +24,12 @@ type PrepareCATransitionStep struct {
 	localBundlePath string
 }
 
-func NewPrepareCATransitionStep(ctx runtime.Context, instanceName string) *PrepareCATransitionStep {
+type PrepareCATransitionStepBuilder struct {
+	step.Builder[PrepareCATransitionStepBuilder, *PrepareCATransitionStep]
+	localPackagesDir string
+}
+
+func NewPrepareCATransitionStepBuilder(ctx runtime.Context, instanceName string) *PrepareCATransitionStepBuilder {
 	localCertsDir := ctx.GetEtcdCertsDir()
 	s := &PrepareCATransitionStep{
 		localCertsDir:   localCertsDir,
@@ -38,7 +43,8 @@ func NewPrepareCATransitionStep(ctx runtime.Context, instanceName string) *Prepa
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 1 * time.Minute
-	return s
+	b := new(PrepareCATransitionStepBuilder).Init(s)
+	return b
 }
 
 func (s *PrepareCATransitionStep) Meta() *spec.StepMeta {

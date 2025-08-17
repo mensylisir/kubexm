@@ -17,7 +17,11 @@ type CleanupTransitionAssetsStep struct {
 	dirsToRemove  []string
 }
 
-func NewCleanupTransitionAssetsStep(ctx runtime.Context, instanceName string) *CleanupTransitionAssetsStep {
+type CleanupTransitionAssetsStepBuilder struct {
+	step.Builder[CleanupTransitionAssetsStepBuilder, *CleanupTransitionAssetsStep]
+}
+
+func NewCleanupTransitionAssetsStepBuilder(ctx runtime.Context, instanceName string) *CleanupTransitionAssetsStepBuilder {
 	localCertsDir := ctx.GetEtcdCertsDir()
 
 	s := &CleanupTransitionAssetsStep{
@@ -36,7 +40,8 @@ func NewCleanupTransitionAssetsStep(ctx runtime.Context, instanceName string) *C
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 1 * time.Minute
-	return s
+	b := new(CleanupTransitionAssetsStepBuilder).Init(s)
+	return b
 }
 
 func (s *CleanupTransitionAssetsStep) Meta() *spec.StepMeta {

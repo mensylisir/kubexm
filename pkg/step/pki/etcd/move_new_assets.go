@@ -19,7 +19,11 @@ type MoveNewAssetsStep struct {
 	movedFiles       map[string]string
 }
 
-func NewMoveNewAssetsStep(ctx runtime.Context, instanceName string) *MoveNewAssetsStep {
+type MoveNewAssetsStepBuilder struct {
+	step.Builder[MoveNewAssetsStepBuilder, *MoveNewAssetsStep]
+}
+
+func NewMoveNewAssetsStepBuilder(ctx runtime.Context, instanceName string) *MoveNewAssetsStepBuilder {
 	localCertsDir := ctx.GetEtcdCertsDir()
 	s := &MoveNewAssetsStep{
 		localCertsDir:    localCertsDir,
@@ -31,7 +35,8 @@ func NewMoveNewAssetsStep(ctx runtime.Context, instanceName string) *MoveNewAsse
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 2 * time.Minute
-	return s
+	b := new(MoveNewAssetsStepBuilder).Init(s)
+	return b
 }
 
 func (s *MoveNewAssetsStep) Meta() *spec.StepMeta {

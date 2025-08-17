@@ -24,8 +24,12 @@ type DistributeLeafCertsStep struct {
 	files []fileToDistribute
 }
 
-func NewDistributeLeafCertsStep(ctx runtime.Context, instanceName string) *DistributeLeafCertsStep {
-	localNewCertsDir := filepath.Join(ctx.GetEtcdCertsDir(), fmt.Sprintf("%s-%s", "certs", "new"))
+type DistributeLeafCertsStepBuilder struct {
+	step.Builder[DistributeLeafCertsStepBuilder, *DistributeLeafCertsStep]
+}
+
+func NewDistributeLeafCertsStepBuilder(ctx runtime.Context, instanceName string) *DistributeLeafCertsStepBuilder {
+	localNewCertsDir := filepath.Join(ctx.GetEtcdCertsDir())
 
 	files := []fileToDistribute{
 		{
@@ -68,7 +72,8 @@ func NewDistributeLeafCertsStep(ctx runtime.Context, instanceName string) *Distr
 	s.Base.Sudo = true
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 3 * time.Minute
-	return s
+	b := new(DistributeLeafCertsStepBuilder).Init(s)
+	return b
 }
 
 func (s *DistributeLeafCertsStep) Meta() *spec.StepMeta {

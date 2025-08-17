@@ -4,10 +4,11 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/common"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/mensylisir/kubexm/pkg/common"
 
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
@@ -32,7 +33,11 @@ type CheckLeafCertsExpirationStep struct {
 	ExpirationThreshold time.Duration
 }
 
-func NewCheckLeafCertsExpirationStep(ctx runtime.Context, instanceName string) *CheckLeafCertsExpirationStep {
+type CheckLeafCertsExpirationStepBuilder struct {
+	step.Builder[CheckLeafCertsExpirationStepBuilder, *CheckLeafCertsExpirationStep]
+}
+
+func NewCheckLeafCertsExpirationStepBuilder(ctx runtime.Context, instanceName string) *CheckLeafCertsExpirationStepBuilder {
 	s := &CheckLeafCertsExpirationStep{
 		remoteCertsDir:      common.DefaultEtcdPKIDir,
 		ExpirationThreshold: DefaultLeafCertExpirationThreshold,
@@ -42,7 +47,8 @@ func NewCheckLeafCertsExpirationStep(ctx runtime.Context, instanceName string) *
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 2 * time.Minute
-	return s
+	b := new(CheckLeafCertsExpirationStepBuilder).Init(s)
+	return b
 }
 
 func (s *CheckLeafCertsExpirationStep) Meta() *spec.StepMeta {

@@ -4,11 +4,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/x509"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"net"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -123,7 +124,7 @@ func (s *GenerateKubeCertsStep) getCertDefinitions(ctx runtime.ExecutionContext)
 }
 
 func (s *GenerateKubeCertsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 
 	defs, err := s.getCertDefinitions(ctx)
 	if err != nil {
@@ -142,7 +143,7 @@ func (s *GenerateKubeCertsStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 }
 
 func (s *GenerateKubeCertsStep) Run(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
 	type caPair struct {
 		Certificate *x509.Certificate
@@ -188,7 +189,7 @@ func (s *GenerateKubeCertsStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *GenerateKubeCertsStep) Rollback(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 
 	defs, err := s.getCertDefinitions(ctx)
 	if err != nil {
@@ -206,11 +207,10 @@ func (s *GenerateKubeCertsStep) Rollback(ctx runtime.ExecutionContext) error {
 
 func (s *GenerateKubeCertsStep) getAPIServerAltNames(ctx runtime.ExecutionContext) (*helpers.AltNames, error) {
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
-	//workerHosts := ctx.GetHostsByRole(common.RoleWorker)
-	//etcdHosts := ctx.GetHostsByRole(common.RoleEtcd)
-	//apiServerHosts := append(masterHosts, workerHosts...)
-	//apiServerHosts = append(apiServerHosts, etcdHosts...)
-	apiServerHosts := masterHosts
+	workerHosts := ctx.GetHostsByRole(common.RoleWorker)
+	etcdHosts := ctx.GetHostsByRole(common.RoleEtcd)
+	apiServerHosts := append(masterHosts, workerHosts...)
+	apiServerHosts = append(apiServerHosts, etcdHosts...)
 	altNames := &helpers.AltNames{
 		DNSNames: []string{
 			"kubernetes",

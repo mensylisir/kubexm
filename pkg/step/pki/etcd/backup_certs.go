@@ -2,10 +2,11 @@ package etcd
 
 import (
 	"fmt"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -30,10 +31,14 @@ type BackupRemoteEtcdCertsStep struct {
 	remoteFilesMap map[string]string
 }
 
-func NewBackupRemoteEtcdCertsStep(ctx runtime.Context, instanceName string) *BackupRemoteEtcdCertsStep {
+type BackupRemoteEtcdCertsStepBuilder struct {
+	step.Builder[BackupRemoteEtcdCertsStepBuilder, *BackupRemoteEtcdCertsStep]
+}
+
+func NewBackupRemoteEtcdCertsStepBuilder(ctx runtime.Context, instanceName string) *BackupRemoteEtcdCertsStepBuilder {
 	s := &BackupRemoteEtcdCertsStep{
 		remoteCertsDir: DefaultRemoteEtcdCertsDir,
-		BackupDir:      fmt.Sprintf("%s:%s", DefaultRemoteEtcdCertsDir, time.Now().Unix()),
+		BackupDir:      fmt.Sprintf("%s-%s", DefaultRemoteEtcdCertsDir, time.Now().Unix()),
 		remoteFilesMap: make(map[string]string),
 	}
 	s.Base.Meta.Name = instanceName
@@ -41,7 +46,8 @@ func NewBackupRemoteEtcdCertsStep(ctx runtime.Context, instanceName string) *Bac
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
-	return s
+	b := new(BackupRemoteEtcdCertsStepBuilder).Init(s)
+	return b
 }
 
 func (s *BackupRemoteEtcdCertsStep) Meta() *spec.StepMeta {

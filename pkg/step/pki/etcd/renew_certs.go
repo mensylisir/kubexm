@@ -16,8 +16,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step/helpers"
 )
 
-// GenerateNewLeafCertsStep 在控制节点上生成全新的 etcd 叶子证书。
-// 它能智能地判断是仅续期叶子证书，还是在 CA 续期后用新 CA 生成证书。
 type GenerateNewLeafCertsStep struct {
 	step.Base
 	etcdNodes    []connector.Host
@@ -26,8 +24,11 @@ type GenerateNewLeafCertsStep struct {
 	outputDir    string
 }
 
-// NewGenerateNewLeafCertsStep 创建一个新的 GenerateNewLeafCertsStep 实例。
-func NewGenerateNewLeafCertsStep(ctx runtime.Context, instanceName string) *GenerateNewLeafCertsStep {
+type GenerateNewLeafCertsStepBuilder struct {
+	step.Builder[GenerateNewLeafCertsStepBuilder, *GenerateNewLeafCertsStep]
+}
+
+func NewGenerateNewLeafCertsStepBuilder(ctx runtime.Context, instanceName string) *GenerateNewLeafCertsStepBuilder {
 	s := &GenerateNewLeafCertsStep{
 		etcdNodes:    ctx.GetHostsByRole(common.RoleEtcd),
 		certDuration: 10 * 365 * 24 * time.Hour,
@@ -37,7 +38,8 @@ func NewGenerateNewLeafCertsStep(ctx runtime.Context, instanceName string) *Gene
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
-	return s
+	b := new(GenerateNewLeafCertsStepBuilder).Init(s)
+	return b
 }
 
 func (s *GenerateNewLeafCertsStep) Meta() *spec.StepMeta {
