@@ -15,7 +15,6 @@ import (
 
 type KubeadmVerifyClusterHealthStep struct {
 	step.Base
-	retries    int
 	retryDelay time.Duration
 }
 
@@ -25,7 +24,6 @@ type KubeadmVerifyClusterHealthStepBuilder struct {
 
 func NewKubeadmVerifyClusterHealthStepBuilder(ctx runtime.Context, instanceName string) *KubeadmVerifyClusterHealthStepBuilder {
 	s := &KubeadmVerifyClusterHealthStep{
-		retries:    12,
 		retryDelay: 10 * time.Second,
 	}
 	s.Base.Meta.Name = instanceName
@@ -69,23 +67,31 @@ func (s *KubeadmVerifyClusterHealthStep) Run(ctx runtime.ExecutionContext) error
 		return err
 	}
 
+	timeout := time.After(s.Base.Timeout)
+	ticker := time.NewTicker(s.retryDelay)
+	defer ticker.Stop()
+
 	var lastErr error
-	for i := 0; i < s.retries; i++ {
-		log := logger.With("attempt", i+1)
-		log.Infof("Attempting to verify cluster health...")
+	for {
+		select {
+		case <-timeout:
+			if lastErr != nil {
+				return fmt.Errorf("cluster health verification timed out after %v: %w", s.Base.Timeout, lastErr)
+			}
+			return fmt.Errorf("cluster health verification timed out after %v", s.Base.Timeout)
+		case <-ticker.C:
+			logger.Info("Attempting to verify cluster health...")
 
-		err := s.checkClusterHealth(ctx, conn)
-		if err == nil {
-			logger.Info("Cluster is fully healthy and operational.")
-			return nil
+			err := s.checkClusterHealth(ctx, conn)
+			if err == nil {
+				logger.Info("Cluster is fully healthy and operational.")
+				return nil
+			}
+
+			lastErr = err
+			logger.Warnf("Cluster health check failed: %v. Retrying...", err)
 		}
-
-		lastErr = err
-		log.Warnf("Cluster health check failed: %v. Retrying in %v...", err, s.retryDelay)
-		time.Sleep(s.retryDelay)
 	}
-
-	return fmt.Errorf("cluster did not pass health checks after multiple retries: %w", lastErr)
 }
 
 func (s *KubeadmVerifyClusterHealthStep) Rollback(ctx runtime.ExecutionContext) error {

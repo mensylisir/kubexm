@@ -14,7 +14,6 @@ import (
 type KubeadmVerifyControlPlaneHealthStep struct {
 	step.Base
 	components  map[string]string
-	retries     int
 	retryDelay  time.Duration
 	maxRestarts int
 }
@@ -30,7 +29,6 @@ func NewKubeadmVerifyControlPlaneHealthStepBuilder(ctx runtime.Context, instance
 			"kube-controller-manager": "kube-controller-manager",
 			"kube-scheduler":          "kube-scheduler",
 		},
-		retries:     18,
 		retryDelay:  10 * time.Second,
 		maxRestarts: 2,
 	}
@@ -70,24 +68,31 @@ func (s *KubeadmVerifyControlPlaneHealthStep) Run(ctx runtime.ExecutionContext) 
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	logger.Info("Verifying local control plane health via container runtime...")
 
+	timeout := time.After(s.Base.Timeout)
+	ticker := time.NewTicker(s.retryDelay)
+	defer ticker.Stop()
+
 	var lastErr error
-	for i := 0; i < s.retries; i++ {
-		log := logger.With("attempt", i+1)
-		log.Infof("Attempting to verify control plane pods...")
+	for {
+		select {
+		case <-timeout:
+			if lastErr != nil {
+				return fmt.Errorf("control plane health verification timed out after %v: %w", s.Base.Timeout, lastErr)
+			}
+			return fmt.Errorf("control plane health verification timed out after %v", s.Base.Timeout)
+		case <-ticker.C:
+			logger.Info("Attempting to verify control plane pods...")
 
-		err := s.checkPodsHealth(ctx)
-		if err == nil {
-			logger.Info("All control plane pods are running and healthy.")
-			return nil
+			err := s.checkPodsHealth(ctx)
+			if err == nil {
+				logger.Info("All control plane pods are running and healthy.")
+				return nil
+			}
+
+			lastErr = err
+			logger.Warnf("Health check failed: %v. Retrying...", err)
 		}
-
-		lastErr = err
-		log.Warnf("Health check failed: %v. Retrying in %v...", err, s.retryDelay)
-		time.Sleep(s.retryDelay)
 	}
-
-	logger.Errorf("Control plane did not become healthy after %d retries.", s.retries)
-	return fmt.Errorf("control plane health verification failed: %w", lastErr)
 }
 
 func (s *KubeadmVerifyControlPlaneHealthStep) Rollback(ctx runtime.ExecutionContext) error {
