@@ -21,7 +21,11 @@ type WaitClusterHealthyStep struct {
 	checkInterval  time.Duration
 }
 
-func NewWaitClusterHealthyStep(ctx runtime.Context, instanceName string) *WaitClusterHealthyStep {
+type WaitClusterHealthyStepBuilder struct {
+	step.Builder[WaitClusterHealthyStepBuilder, *WaitClusterHealthyStep]
+}
+
+func NewWaitClusterHealthyStepBuilder(ctx runtime.Context, instanceName string) *WaitClusterHealthyStepBuilder {
 	s := &WaitClusterHealthyStep{
 		remoteCertsDir: DefaultRemoteEtcdCertsDir,
 		checkTimeout:   2 * time.Minute,
@@ -32,7 +36,8 @@ func NewWaitClusterHealthyStep(ctx runtime.Context, instanceName string) *WaitCl
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 3 * time.Minute
-	return s
+	b := new(WaitClusterHealthyStepBuilder).Init(s)
+	return b
 }
 
 func (s *WaitClusterHealthyStep) WithCheckTimeout(timeout time.Duration) *WaitClusterHealthyStep {

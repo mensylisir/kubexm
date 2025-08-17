@@ -19,7 +19,11 @@ type DistributeCABundleStep struct {
 	remoteCAPath    string
 }
 
-func NewDistributeCAStep(ctx runtime.Context, instanceName string) *DistributeCABundleStep {
+type DistributeCABundleStepBuilder struct {
+	step.Builder[DistributeCABundleStepBuilder, *DistributeCABundleStep]
+}
+
+func NewDistributeCAStepBuilder(ctx runtime.Context, instanceName string) *DistributeCABundleStepBuilder {
 	localCertsDir := ctx.GetEtcdCertsDir()
 	s := &DistributeCABundleStep{
 		localBundlePath: filepath.Join(localCertsDir, "ca.pem"),
@@ -30,7 +34,8 @@ func NewDistributeCAStep(ctx runtime.Context, instanceName string) *DistributeCA
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 2 * time.Minute
-	return s
+	b := new(DistributeCABundleStepBuilder).Init(s)
+	return b
 }
 
 func (s *DistributeCABundleStep) Meta() *spec.StepMeta {

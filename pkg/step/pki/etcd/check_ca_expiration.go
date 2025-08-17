@@ -26,7 +26,11 @@ type CheckCAExpirationStep struct {
 	ExpirationThreshold time.Duration
 }
 
-func NewCheckCAExpirationStep(ctx runtime.Context, instanceName string) *CheckCAExpirationStep {
+type CheckCAExpirationStepBuilder struct {
+	step.Builder[CheckCAExpirationStepBuilder, *CheckCAExpirationStep]
+}
+
+func NewCheckCAExpirationStepBuilder(ctx runtime.Context, instanceName string) *CheckCAExpirationStepBuilder {
 	localCertsDir := ctx.GetEtcdCertsDir()
 	s := &CheckCAExpirationStep{
 		localCaCertPath:     filepath.Join(localCertsDir, common.EtcdCaPemFileName),
@@ -37,7 +41,8 @@ func NewCheckCAExpirationStep(ctx runtime.Context, instanceName string) *CheckCA
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 1 * time.Minute
-	return s
+	b := new(CheckCAExpirationStepBuilder).Init(s)
+	return b
 }
 
 func (s *CheckCAExpirationStep) Meta() *spec.StepMeta {

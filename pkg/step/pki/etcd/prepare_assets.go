@@ -26,7 +26,11 @@ type PrepareAssetsStep struct {
 	localNewCAKeyPath string
 }
 
-func NewPrepareAssetsStep(ctx runtime.Context, instanceName string) *PrepareAssetsStep {
+type PrepareAssetsStepBuilder struct {
+	step.Builder[PrepareAssetsStepBuilder, *PrepareAssetsStep]
+}
+
+func NewPrepareAssetsStepBuilder(ctx runtime.Context, instanceName string) *PrepareAssetsStepBuilder {
 	localCertsDir := ctx.GetEtcdCertsDir()
 	certsOldDir := filepath.Join(localCertsDir, "certs-old")
 	certsNewDir := filepath.Join(localCertsDir, "certs-new")
@@ -47,7 +51,8 @@ func NewPrepareAssetsStep(ctx runtime.Context, instanceName string) *PrepareAsse
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 1 * time.Minute
-	return s
+	b := new(PrepareAssetsStepBuilder).Init(s)
+	return b
 }
 
 func (s *PrepareAssetsStep) Meta() *spec.StepMeta {

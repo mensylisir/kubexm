@@ -13,14 +13,19 @@ type RestartEtcdStep struct {
 	step.Base
 }
 
-func NewRestartEtcdStep(ctx runtime.Context, instanceName string) *RestartEtcdStep {
+type RestartEtcdStepBuilder struct {
+	step.Builder[RestartEtcdStepBuilder, *RestartEtcdStep]
+}
+
+func NewRestartEtcdStepBuilder(ctx runtime.Context, instanceName string) *RestartEtcdStepBuilder {
 	s := &RestartEtcdStep{}
 	s.Base.Meta.Name = instanceName
 	s.Base.Meta.Description = "Restart the etcd service on the current node"
 	s.Base.Sudo = true
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 1 * time.Minute
-	return s
+	b := new(RestartEtcdStepBuilder).Init(s)
+	return b
 }
 
 func (s *RestartEtcdStep) Meta() *spec.StepMeta {

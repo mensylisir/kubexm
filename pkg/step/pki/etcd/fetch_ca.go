@@ -23,7 +23,11 @@ type RestoreCAFromRemoteStep struct {
 	remoteCaKeyPath  string
 }
 
-func NewRestoreCAFromRemoteStep(ctx runtime.Context, instanceName string) *RestoreCAFromRemoteStep {
+type RestoreCAFromRemoteStepBuilder struct {
+	step.Builder[RestoreCAFromRemoteStepBuilder, *RestoreCAFromRemoteStep]
+}
+
+func NewRestoreCAFromRemoteStepBuilder(ctx runtime.Context, instanceName string) *RestoreCAFromRemoteStepBuilder {
 	localCertsDir := ctx.GetEtcdCertsDir()
 	s := &RestoreCAFromRemoteStep{
 		remoteCertsDir:   DefaultRemoteEtcdCertsDir,
@@ -38,7 +42,8 @@ func NewRestoreCAFromRemoteStep(ctx runtime.Context, instanceName string) *Resto
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 3 * time.Minute
-	return s
+	b := new(RestoreCAFromRemoteStepBuilder).Init(s)
+	return b
 }
 
 func (s *RestoreCAFromRemoteStep) Meta() *spec.StepMeta {
