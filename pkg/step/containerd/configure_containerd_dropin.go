@@ -111,7 +111,7 @@ func (s *ConfigureContainerdDropInStep) Precheck(ctx runtime.ExecutionContext) (
 			return false, err
 		}
 		if exists {
-			logger.Infof("No drop-in configuration needed, but file '%s' exists. Step needs to run to remove it.", s.TargetPath)
+			logger.Info("No drop-in configuration needed, but file exists. Step needs to run to remove it.", "path", s.TargetPath)
 			return false, nil
 		}
 		logger.Info("No drop-in configuration needed and file does not exist. Step is done.")
@@ -160,7 +160,7 @@ func (s *ConfigureContainerdDropInStep) Run(ctx runtime.ExecutionContext) error 
 		if err := runner.Mkdirp(ctx.GoContext(), conn, targetDir, "0755", s.Sudo); err != nil {
 			return fmt.Errorf("failed to create drop-in directory '%s': %w", targetDir, err)
 		}
-		logger.Infof("Writing systemd drop-in file to %s", s.TargetPath)
+		logger.Info("Writing systemd drop-in file.", "path", s.TargetPath)
 		if err := helpers.WriteContentToRemote(ctx, conn, content, s.TargetPath, "0644", s.Sudo); err != nil {
 			return fmt.Errorf("failed to write drop-in file: %w", err)
 		}
@@ -175,12 +175,19 @@ func (s *ConfigureContainerdDropInStep) Run(ctx runtime.ExecutionContext) error 
 }
 
 func (s *ConfigureContainerdDropInStep) Rollback(ctx runtime.ExecutionContext) error {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
+	logger.Info("Rolling back containerd drop-in configuration.")
+
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
+		logger.Error(err, "Failed to get connector for rollback.")
 		return nil
 	}
+	logger.Info("Removing drop-in file.", "path", s.TargetPath)
 	runner.Remove(ctx.GoContext(), conn, s.TargetPath, s.Sudo, false)
+
+	logger.Info("Reloading systemd daemon after rollback.")
 	facts, _ := runner.GatherFacts(ctx.GoContext(), conn)
 	runner.DaemonReload(ctx.GoContext(), conn, facts)
 	return nil

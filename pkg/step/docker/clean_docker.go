@@ -114,7 +114,7 @@ func (s *CleanDockerStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, e
 		for _, service := range s.servicesToManage() {
 			isActive, _ := runner.IsServiceActive(ctx.GoContext(), conn, facts, service)
 			if isActive {
-				logger.Infof("Service '%s' is still active. Cleanup is required.", service)
+				logger.Info("Service is still active. Cleanup is required.", "service", service)
 				return false, nil
 			}
 		}
@@ -127,7 +127,7 @@ func (s *CleanDockerStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, e
 			return false, fmt.Errorf("failed to check for path '%s': %w", path, err)
 		}
 		if exists {
-			logger.Infof("Path '%s' still exists. Cleanup is required.", path)
+			logger.Info("Path still exists. Cleanup is required.", "path", path)
 			return false, nil
 		}
 	}
@@ -146,12 +146,12 @@ func (s *CleanDockerStep) Run(ctx runtime.ExecutionContext) error {
 
 	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
 	if err != nil {
-		logger.Warnf("Could not gather host facts, proceeding with cleanup but might not be able to interact with services gracefully: %v", err)
+		logger.Warn(err, "Could not gather host facts, proceeding with cleanup but might not be able to interact with services gracefully.")
 	}
 
 	if facts != nil {
 		for _, service := range s.servicesToManage() {
-			logger.Infof("Stopping and disabling service: %s", service)
+			logger.Info("Stopping and disabling service.", "service", service)
 			_ = runner.StopService(ctx.GoContext(), conn, facts, service)
 			_ = runner.DisableService(ctx.GoContext(), conn, facts, service)
 		}
@@ -162,11 +162,11 @@ func (s *CleanDockerStep) Run(ctx runtime.ExecutionContext) error {
 	logger.Info("Removing all docker and containerd related files...", "purge", s.PurgeData)
 
 	for _, path := range paths {
-		logger.Infof("Removing path: %s", path)
+		logger.Info("Removing path.", "path", path)
 		if err := runner.Remove(ctx.GoContext(), conn, path, s.Sudo, true); err != nil {
 			if !errors.Is(err, os.ErrNotExist) && !strings.Contains(err.Error(), "no such file or directory") {
 				err := fmt.Errorf("failed to remove '%s': %w", path, err)
-				logger.Error(err.Error())
+				logger.Error(err, "Failed to remove path.")
 				removalErrors = append(removalErrors, err)
 			}
 		}
@@ -176,7 +176,7 @@ func (s *CleanDockerStep) Run(ctx runtime.ExecutionContext) error {
 	if facts != nil {
 		if err := runner.DaemonReload(ctx.GoContext(), conn, facts); err != nil {
 			err = fmt.Errorf("failed to reload systemd daemon: %w", err)
-			logger.Error(err.Error())
+			logger.Error(err, "Failed to reload systemd daemon.")
 			removalErrors = append(removalErrors, err)
 		}
 	}

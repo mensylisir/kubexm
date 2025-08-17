@@ -51,7 +51,7 @@ func (s *CleanNodeLocalDNSStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 			logger.Info("NodeLocal DNSCache daemonset not found. Step is done.")
 			return true, nil
 		}
-		logger.Warnf("Failed to check for NodeLocal DNSCache daemonset, assuming cleanup is required. Error: %v", err)
+		logger.Warn(err, "Failed to check for NodeLocal DNSCache daemonset, assuming cleanup is required.")
 		return false, nil
 	}
 
@@ -71,17 +71,17 @@ func (s *CleanNodeLocalDNSStep) Run(ctx runtime.ExecutionContext) error {
 
 	exists, err := runner.Exists(ctx.GoContext(), conn, remoteManifestPath)
 	if err != nil {
-		logger.Warnf("Failed to check for manifest file %s: %v. Will attempt deletion by label.", remoteManifestPath, err)
+		logger.Warn(err, "Failed to check for manifest file. Will attempt deletion by label.", "path", remoteManifestPath)
 		return s.deleteByLabel(ctx)
 	}
 
 	if exists {
 		deleteCmd := fmt.Sprintf("kubectl delete -f %s --ignore-not-found=true", remoteManifestPath)
-		logger.Infof("Cleaning up NodeLocal DNSCache using manifest: %s", deleteCmd)
+		logger.Info("Cleaning up NodeLocal DNSCache using manifest.", "command", deleteCmd)
 
 		output, err := runner.Run(ctx.GoContext(), conn, deleteCmd, s.Sudo)
 		if err != nil {
-			logger.Warnf("kubectl delete -f command failed, will attempt deletion by label as a fallback. Error: %v, Output: \n%s", err, output)
+			logger.Warn(err, "kubectl delete -f command failed, will attempt deletion by label as a fallback.", "output", output)
 			return s.deleteByLabel(ctx)
 		}
 
@@ -89,11 +89,12 @@ func (s *CleanNodeLocalDNSStep) Run(ctx runtime.ExecutionContext) error {
 		return nil
 	}
 
-	logger.Warnf("Manifest file %s not found. Attempting deletion by label.", remoteManifestPath)
+	logger.Warn("Manifest file not found. Attempting deletion by label.", "path", remoteManifestPath)
 	return s.deleteByLabel(ctx)
 }
 
 func (s *CleanNodeLocalDNSStep) deleteByLabel(ctx runtime.ExecutionContext) error {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	runner := ctx.GetRunner()
 	conn, _ := ctx.GetCurrentHostConnector()
 
@@ -104,15 +105,17 @@ func (s *CleanNodeLocalDNSStep) deleteByLabel(ctx runtime.ExecutionContext) erro
 
 	for _, resource := range resourcesToDelete {
 		deleteCmd := fmt.Sprintf("kubectl delete %s -n %s -l %s --ignore-not-found=true", resource, namespace, label)
-		ctx.GetLogger().Infof("Attempting to delete %s by label: %s", resource, deleteCmd)
+		logger.Info("Attempting to delete resource by label.", "resource", resource, "command", deleteCmd)
 		if _, err := runner.Run(ctx.GoContext(), conn, deleteCmd, s.Sudo); err != nil {
-			ctx.GetLogger().Warnf("Failed to delete %s by label (this may be ok): %v", resource, err)
+			logger.Warn(err, "Failed to delete resource by label (this may be ok).", "resource", resource)
 		}
 	}
 	return nil
 }
 
 func (s *CleanNodeLocalDNSStep) Rollback(ctx runtime.ExecutionContext) error {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
+	logger.Info("Cleanup step has no rollback action.")
 	return nil
 }
 

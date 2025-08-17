@@ -54,7 +54,7 @@ func (s *PushImagesStep) Run(ctx runtime.ExecutionContext) error {
 	containerManager := ctx.GetClusterConfig().Spec.Kubernetes.ContainerRuntime.Type
 
 	for _, img := range s.Images {
-		logger.Infof("Pushing image: %s", img)
+		logger.Info("Pushing image.", "image", img)
 
 		pushCmd, err := s.getPushCommand(img, string(containerManager))
 		if err != nil {

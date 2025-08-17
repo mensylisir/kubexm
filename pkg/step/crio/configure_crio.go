@@ -132,18 +132,18 @@ func (s *ConfigureCrioStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 	if exists {
 		remoteContent, err := runner.ReadFile(ctx.GoContext(), conn, s.TargetPath)
 		if err != nil {
-			logger.Warnf("Config file '%s' exists but failed to read, will overwrite. Error: %v", s.TargetPath, err)
+			logger.Warn(err, "Config file exists but failed to read, will overwrite.", "path", s.TargetPath)
 			return false, nil
 		}
 		if string(remoteContent) == expectedContent {
-			logger.Infof("CRI-O config file '%s' already exists and content matches. Step is done.", s.TargetPath)
+			logger.Info("CRI-O config file already exists and content matches. Step is done.", "path", s.TargetPath)
 			return true, nil
 		}
-		logger.Infof("CRI-O config file '%s' exists but content differs. Step needs to run.", s.TargetPath)
+		logger.Info("CRI-O config file exists but content differs. Step needs to run.", "path", s.TargetPath)
 		return false, nil
 	}
 
-	logger.Infof("CRI-O config file '%s' does not exist. Configuration is required.", s.TargetPath)
+	logger.Info("CRI-O config file does not exist. Configuration is required.", "path", s.TargetPath)
 	return false, nil
 }
 
@@ -165,7 +165,7 @@ func (s *ConfigureCrioStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	logger.Infof("Writing CRI-O config file to %s", s.TargetPath)
+	logger.Info("Writing CRI-O config file.", "path", s.TargetPath)
 	return helpers.WriteContentToRemote(ctx, conn, content, s.TargetPath, "0644", s.Sudo)
 }
 
@@ -174,14 +174,14 @@ func (s *ConfigureCrioStep) Rollback(ctx runtime.ExecutionContext) error {
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		logger.Errorf("Failed to get connector for rollback: %v", err)
+		logger.Error(err, "Failed to get connector for rollback.")
 		return nil
 	}
 
-	logger.Warnf("Rolling back by removing: %s", s.TargetPath)
+	logger.Warn("Rolling back by removing.", "path", s.TargetPath)
 	if err := runner.Remove(ctx.GoContext(), conn, s.TargetPath, s.Sudo, false); err != nil {
 		if !strings.Contains(err.Error(), "no such file or directory") {
-			logger.Errorf("Failed to remove '%s' during rollback: %v", s.TargetPath, err)
+			logger.Error(err, "Failed to remove path during rollback.", "path", s.TargetPath)
 		}
 	}
 	return nil

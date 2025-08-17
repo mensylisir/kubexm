@@ -123,22 +123,22 @@ func (s *InstallAddonChartStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 
 	output, err := runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
 	if err != nil {
-		logger.Infof("Helm release '%s' not found. Installation is required.", s.ReleaseName)
+		logger.Info("Helm release not found. Installation is required.", "release", s.ReleaseName)
 		return false, nil
 	}
 
 	var status helmStatusOutput
 	if err := json.Unmarshal([]byte(output), &status); err != nil {
-		logger.Warnf("Failed to parse helm status for release '%s', assuming upgrade is needed: %v", s.ReleaseName, err)
+		logger.Warn(err, "Failed to parse helm status, assuming upgrade is needed.", "release", s.ReleaseName)
 		return false, nil
 	}
 
 	if status.Info.Status == "deployed" && status.Chart.Metadata.Version == s.ChartVersion {
-		logger.Infof("Helm release '%s' version %s is already deployed and up-to-date. Skipping.", s.ReleaseName, s.ChartVersion)
+		logger.Info("Helm release is already deployed and up-to-date. Skipping.", "release", s.ReleaseName, "version", s.ChartVersion)
 		return true, nil
 	}
 
-	logger.Infof("Helm release '%s' requires upgrade (current version: %s, status: %s).", s.ReleaseName, status.Chart.Metadata.Version, status.Info.Status)
+	logger.Info("Helm release requires upgrade.", "release", s.ReleaseName, "current_version", status.Chart.Metadata.Version, "desired_version", s.ChartVersion, "status", status.Info.Status)
 	return false, nil
 }
 
@@ -166,14 +166,14 @@ func (s *InstallAddonChartStep) Run(ctx runtime.ExecutionContext) error {
 
 	cmd := cmdBuilder.String()
 
-	logger.Infof("Executing remote Helm command: %s", cmd)
+	logger.Info("Executing remote Helm command.", "command", cmd)
 	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
 		return fmt.Errorf("failed to install/upgrade addon helm chart '%s': %w\nOutput: %s", s.ReleaseName, err, output)
 	}
 
 	logger.Info("Addon Helm chart installed/upgraded successfully.")
-	logger.Debugf("Helm command output:\n%s", output)
+	logger.Debug("Helm command output.", "output", output)
 	return nil
 }
 
@@ -193,9 +193,9 @@ func (s *InstallAddonChartStep) Rollback(ctx runtime.ExecutionContext) error {
 		s.AdminKubeconfigPath,
 	)
 
-	logger.Warnf("Rolling back by uninstalling Helm release '%s'...", s.ReleaseName)
+	logger.Warn("Rolling back by uninstalling Helm release.", "release", s.ReleaseName)
 	if _, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo); err != nil {
-		logger.Errorf("Failed to uninstall Helm release: %v", err)
+		logger.Error(err, "Failed to uninstall Helm release.")
 	} else {
 		logger.Info("Successfully executed Helm uninstall command.")
 	}

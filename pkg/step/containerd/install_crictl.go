@@ -82,7 +82,7 @@ func (s *InstallCriCtlStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 	localSourcePath, err := s.getLocalSourcePath(ctx)
 	if err != nil {
 		if strings.Contains(err.Error(), "disabled for arch") {
-			logger.Infof("crictl not required for this host (arch: %s), skipping.", ctx.GetHost().GetArch())
+			logger.Info("crictl not required for this host, skipping.", "arch", ctx.GetHost().GetArch())
 			return true, nil
 		}
 		return false, err
@@ -98,9 +98,9 @@ func (s *InstallCriCtlStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 	}
 
 	if isDone {
-		logger.Infof("Target file '%s' already exists and is up-to-date. Step is done.", s.RemoteCriCtlTargetPath)
+		logger.Info("Target file already exists and is up-to-date. Step is done.", "path", s.RemoteCriCtlTargetPath)
 	} else {
-		logger.Infof("Target file '%s' is missing or outdated. Installation is required.", s.RemoteCriCtlTargetPath)
+		logger.Info("Target file is missing or outdated. Installation is required.", "path", s.RemoteCriCtlTargetPath)
 	}
 
 	return isDone, nil
@@ -117,7 +117,7 @@ func (s *InstallCriCtlStep) Run(ctx runtime.ExecutionContext) error {
 	localSourcePath, err := s.getLocalSourcePath(ctx)
 	if err != nil {
 		if strings.Contains(err.Error(), "disabled for arch") {
-			logger.Infof("crictl not required for this host (arch: %s), skipping.", ctx.GetHost().GetArch())
+			logger.Info("crictl not required for this host, skipping.", "arch", ctx.GetHost().GetArch())
 			return nil
 		}
 		return err
@@ -141,19 +141,19 @@ func (s *InstallCriCtlStep) Run(ctx runtime.ExecutionContext) error {
 	}()
 
 	remoteTempPath := filepath.Join(remoteUploadTmpDir, "crictl")
-	logger.Debugf("Uploading crictl to %s:%s", ctx.GetHost().GetName(), remoteTempPath)
+	logger.Debug("Uploading crictl.", "to", remoteTempPath)
 
 	if err := runner.Upload(ctx.GoContext(), conn, localSourcePath, remoteTempPath, false); err != nil {
 		return fmt.Errorf("failed to upload '%s' to '%s': %w", localSourcePath, remoteTempPath, err)
 	}
 
 	moveCmd := fmt.Sprintf("mv %s %s", remoteTempPath, s.RemoteCriCtlTargetPath)
-	logger.Debugf("Moving file to %s on remote host", s.RemoteCriCtlTargetPath)
+	logger.Debug("Moving file.", "to", s.RemoteCriCtlTargetPath)
 	if _, err := runner.Run(ctx.GoContext(), conn, moveCmd, s.Sudo); err != nil {
 		return fmt.Errorf("failed to move file to '%s': %w", s.RemoteCriCtlTargetPath, err)
 	}
 
-	logger.Debugf("Setting permissions for %s to %s", s.RemoteCriCtlTargetPath, s.CrictlPermissions)
+	logger.Debug("Setting permissions.", "path", s.RemoteCriCtlTargetPath, "permissions", s.CrictlPermissions)
 	if err := runner.Chmod(ctx.GoContext(), conn, s.RemoteCriCtlTargetPath, s.CrictlPermissions, s.Sudo); err != nil {
 		return fmt.Errorf("failed to set permission on '%s': %w", s.RemoteCriCtlTargetPath, err)
 	}
@@ -167,13 +167,13 @@ func (s *InstallCriCtlStep) Rollback(ctx runtime.ExecutionContext) error {
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		logger.Errorf("Failed to get connector for rollback: %v", err)
+		logger.Error(err, "Failed to get connector for rollback.")
 		return nil
 	}
 
-	logger.Warnf("Rolling back by removing: %s", s.RemoteCriCtlTargetPath)
+	logger.Warn("Rolling back by removing.", "path", s.RemoteCriCtlTargetPath)
 	if err := runner.Remove(ctx.GoContext(), conn, s.RemoteCriCtlTargetPath, s.Sudo, false); err != nil {
-		logger.Errorf("Failed to remove '%s' during rollback: %v", s.RemoteCriCtlTargetPath, err)
+		logger.Error(err, "Failed to remove path during rollback.", "path", s.RemoteCriCtlTargetPath)
 	}
 
 	return nil

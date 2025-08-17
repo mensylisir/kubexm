@@ -48,12 +48,12 @@ func (s *DisableContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 
 	enabled, err := runner.IsServiceEnabled(ctx.GoContext(), conn, facts, containerdServiceName)
 	if err != nil {
-		logger.Warnf("Failed to check if service is enabled, assuming it's disabled. Error: %v", err)
+		logger.Warn(err, "Failed to check if service is enabled, assuming it's disabled.")
 		return true, nil
 	}
 
 	if !enabled {
-		logger.Infof("Containerd service is already disabled. Step is done.")
+		logger.Info("Containerd service is already disabled. Step is done.")
 		return true, nil
 	}
 
@@ -74,7 +74,7 @@ func (s *DisableContainerdStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	logger.Infof("Disabling containerd service...")
+	logger.Info("Disabling containerd service.")
 	if err := runner.DisableService(ctx.GoContext(), conn, facts, containerdServiceName); err != nil {
 		return fmt.Errorf("failed to disable containerd service: %w", err)
 	}
@@ -93,13 +93,13 @@ func (s *DisableContainerdStep) Rollback(ctx runtime.ExecutionContext) error {
 
 	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
 	if err != nil {
-		logger.Errorf("Failed to gather facts for rollback, cannot enable service: %v", err)
+		logger.Error(err, "Failed to gather facts for rollback, cannot enable service.")
 		return nil
 	}
 
-	logger.Warnf("Rolling back by enabling containerd service...")
+	logger.Warn("Rolling back by enabling containerd service.")
 	if err := runner.EnableService(ctx.GoContext(), conn, facts, containerdServiceName); err != nil {
-		logger.Errorf("Failed to enable containerd service during rollback: %v", err)
+		logger.Error(err, "Failed to enable containerd service during rollback.")
 	}
 
 	return nil

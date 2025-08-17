@@ -124,7 +124,7 @@ func (s *DownloadAddonArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isD
 
 	artifacts, err := s.getArtifactsToDownload(ctx)
 	if err != nil {
-		logger.Infof("Skipping step, could not determine artifacts: %v", err)
+		logger.Info("Skipping step, could not determine artifacts.", "error", err)
 		return true, nil
 	}
 
@@ -135,7 +135,7 @@ func (s *DownloadAddonArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isD
 
 	for _, artifact := range artifacts {
 		if _, err := os.Stat(artifact.LocalPath); os.IsNotExist(err) {
-			logger.Debugf("Artifact %s does not exist. Download is required.", artifact.LocalPath)
+			logger.Debug("Artifact does not exist. Download is required.", "path", artifact.LocalPath)
 			return false, nil
 		}
 	}
@@ -154,7 +154,7 @@ func (s *DownloadAddonArtifactsStep) Run(ctx runtime.ExecutionContext) error {
 
 	for _, artifact := range artifacts {
 		if _, err := os.Stat(artifact.LocalPath); err == nil {
-			logger.Infof("Artifact %s already exists, skipping download.", artifact.LocalPath)
+			logger.Info("Artifact already exists, skipping download.", "path", artifact.LocalPath)
 			continue
 		}
 
@@ -168,13 +168,13 @@ func (s *DownloadAddonArtifactsStep) Run(ctx runtime.ExecutionContext) error {
 			repoURL := artifact.ChartRepoURL
 			fullName := fmt.Sprintf("%s/%s", repoName, artifact.ChartName)
 
-			logger.Infof("Adding Helm repo: %s (%s)", repoName, repoURL)
+			logger.Info("Adding Helm repo.", "name", repoName, "url", repoURL)
 			repoAddCmd := exec.Command(s.HelmBinaryPath, "repo", "add", repoName, repoURL, "--force-update")
 			if output, err := repoAddCmd.CombinedOutput(); err != nil && !strings.Contains(string(output), "already exists") {
 				return fmt.Errorf("failed to add helm repo '%s': %w\nOutput: %s", repoName, err, string(output))
 			}
 
-			logger.Infof("Pulling chart %s version %s to %s", fullName, artifact.ChartVersion, destDir)
+			logger.Info("Pulling chart.", "chart", fullName, "version", artifact.ChartVersion, "destination", destDir)
 			pullCmd := exec.Command(s.HelmBinaryPath, "pull", fullName, "--version", artifact.ChartVersion, "--destination", destDir)
 			if output, err := pullCmd.CombinedOutput(); err != nil {
 				return fmt.Errorf("failed to pull chart: %w\nOutput: %s", err, string(output))
@@ -182,7 +182,7 @@ func (s *DownloadAddonArtifactsStep) Run(ctx runtime.ExecutionContext) error {
 		}
 
 		if artifact.IsYaml {
-			logger.Infof("Downloading YAML from %s to %s", artifact.YamlURL, artifact.LocalPath)
+			logger.Info("Downloading YAML.", "from", artifact.YamlURL, "to", artifact.LocalPath)
 			resp, err := http.Get(artifact.YamlURL)
 			if err != nil {
 				return errors.Wrapf(err, "failed to download yaml from %s", artifact.YamlURL)
@@ -211,15 +211,15 @@ func (s *DownloadAddonArtifactsStep) Rollback(ctx runtime.ExecutionContext) erro
 
 	artifacts, err := s.getArtifactsToDownload(ctx)
 	if err != nil {
-		logger.Infof("Skipping rollback as artifacts could not be determined: %v", err)
+		logger.Info("Skipping rollback as artifacts could not be determined.", "error", err)
 		return nil
 	}
 
 	for _, artifact := range artifacts {
 		if _, statErr := os.Stat(artifact.LocalPath); statErr == nil {
-			logger.Warnf("Rolling back by deleting locally downloaded artifact: %s", artifact.LocalPath)
+			logger.Warn("Rolling back by deleting locally downloaded artifact.", "path", artifact.LocalPath)
 			if err := os.Remove(artifact.LocalPath); err != nil {
-				logger.Errorf("Failed to remove file during rollback: %v", err)
+				logger.Error(err, "Failed to remove file during rollback.", "path", artifact.LocalPath)
 			}
 		}
 	}

@@ -136,7 +136,7 @@ func (s *GenerateNodeLocalDNSArtifactsStep) Run(ctx runtime.ExecutionContext) er
 		return fmt.Errorf("failed to create remote dir %s: %w", remoteDir, err)
 	}
 
-	logger.Infof("Uploading NodeLocalDNS manifest to remote path: %s", s.RemoteManifestPath)
+	logger.Info("Uploading NodeLocalDNS manifest.", "path", s.RemoteManifestPath)
 	if err := helpers.WriteContentToRemote(ctx, conn, finalManifestBuffer.String(), s.RemoteManifestPath, "0644", s.Sudo); err != nil {
 		return fmt.Errorf("failed to upload NodeLocalDNS manifest: %w", err)
 	}
@@ -152,6 +152,7 @@ func (s *GenerateNodeLocalDNSArtifactsStep) Precheck(ctx runtime.ExecutionContex
 		logger.Info("NodeLocalDNS is disabled, skipping artifact generation.")
 		return true, nil
 	}
+	logger.Info("NodeLocalDNS is enabled, manifest generation will proceed if scheduled.")
 	return false, nil
 }
 
@@ -160,12 +161,13 @@ func (s *GenerateNodeLocalDNSArtifactsStep) Rollback(ctx runtime.ExecutionContex
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
+		logger.Error(err, "Failed to get connector for rollback.")
 		return nil
 	}
 
-	logger.Warnf("Rolling back by removing remote NodeLocalDNS manifest: %s", s.RemoteManifestPath)
+	logger.Warn("Rolling back by removing remote NodeLocalDNS manifest.", "path", s.RemoteManifestPath)
 	if err := runner.Remove(ctx.GoContext(), conn, s.RemoteManifestPath, s.Sudo, true); err != nil {
-		logger.Errorf("Failed to remove remote NodeLocalDNS manifest during rollback: %v", err)
+		logger.Error(err, "Failed to remove remote NodeLocalDNS manifest during rollback.")
 	}
 	return nil
 }

@@ -53,7 +53,7 @@ func (s *DownloadArgoCDChartStep) getChartAndPath(ctx runtime.ExecutionContext) 
 }
 
 func (s *DownloadArgoCDChartStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 
 	helmPath, err := exec.LookPath("helm")
 	if err != nil {
@@ -63,12 +63,12 @@ func (s *DownloadArgoCDChartStep) Precheck(ctx runtime.ExecutionContext) (isDone
 
 	_, destFile, err := s.getChartAndPath(ctx)
 	if err != nil {
-		logger.Infof("Skipping step: %v", err)
+		logger.Info("Skipping step.", "reason", err)
 		return true, nil
 	}
 
 	if _, err := os.Stat(destFile); err == nil {
-		logger.Infof("Argo CD chart package %s already exists locally. Step is complete.", destFile)
+		logger.Info("Argo CD chart package already exists locally. Step is complete.", "path", destFile)
 		return true, nil
 	}
 
@@ -76,11 +76,11 @@ func (s *DownloadArgoCDChartStep) Precheck(ctx runtime.ExecutionContext) (isDone
 }
 
 func (s *DownloadArgoCDChartStep) Run(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
 	chart, destFile, err := s.getChartAndPath(ctx)
 	if err != nil {
-		logger.Warnf("Execution was not skipped by Precheck, but chart info is still unavailable. Error: %v", err)
+		logger.Warn("Execution was not skipped by Precheck, but chart info is still unavailable.", "error", err)
 		return nil
 	}
 
@@ -90,7 +90,7 @@ func (s *DownloadArgoCDChartStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to create local destination directory %s: %w", destDir, err)
 	}
 
-	logger.Infof("Adding Helm repo: %s (%s)", chart.RepoName(), chart.RepoURL())
+	logger.Info("Adding Helm repo.", "name", chart.RepoName(), "url", chart.RepoURL())
 	repoAddCmd := exec.Command(s.HelmBinaryPath, "repo", "add", chart.RepoName(), chart.RepoURL(), "--force-update")
 	if output, err := repoAddCmd.CombinedOutput(); err != nil {
 		if !strings.Contains(string(output), "already exists") {
@@ -98,13 +98,13 @@ func (s *DownloadArgoCDChartStep) Run(ctx runtime.ExecutionContext) error {
 		}
 	}
 
-	logger.Infof("Updating Helm repo: %s", chart.RepoName())
+	logger.Info("Updating Helm repo.", "name", chart.RepoName())
 	repoUpdateCmd := exec.Command(s.HelmBinaryPath, "repo", "update", chart.RepoName())
 	if output, err := repoUpdateCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to update helm repo %s: %w\nOutput: %s", chart.RepoName(), err, string(output))
 	}
 
-	logger.Infof("Pulling Argo CD chart %s (version %s) to %s", chart.FullName(), chart.Version, destDir)
+	logger.Info("Pulling Argo CD chart.", "chart", chart.FullName(), "version", chart.Version, "destination", destDir)
 	pullCmd := exec.Command(s.HelmBinaryPath, "pull", chart.FullName(), "--version", chart.Version, "--destination", destDir)
 	if output, err := pullCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to pull Argo CD chart: %w\nOutput: %s", err, string(output))
@@ -115,21 +115,21 @@ func (s *DownloadArgoCDChartStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *DownloadArgoCDChartStep) Rollback(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 
 	_, destFile, err := s.getChartAndPath(ctx)
 	if err != nil {
-		logger.Infof("Skipping rollback as no chart path could be determined: %v", err)
+		logger.Info("Skipping rollback as no chart path could be determined.", "error", err)
 		return nil
 	}
 
 	if _, statErr := os.Stat(destFile); statErr == nil {
-		logger.Warnf("Rolling back by deleting locally downloaded chart file: %s", destFile)
+		logger.Warn("Rolling back by deleting locally downloaded chart file.", "path", destFile)
 		if err := os.Remove(destFile); err != nil {
-			logger.Errorf("Failed to remove file during rollback: %v", err)
+			logger.Error(err, "Failed to remove file during rollback.", "path", destFile)
 		}
 	} else {
-		logger.Infof("Rollback unnecessary, file to be deleted does not exist: %s", destFile)
+		logger.Info("Rollback unnecessary, file to be deleted does not exist.", "path", destFile)
 	}
 
 	return nil

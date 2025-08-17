@@ -40,22 +40,22 @@ func (s *SetHostnameStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, e
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		return false, fmt.Errorf("precheck: failed to get connector for host %s: %w", ctx.GetHost().GetName(), err)
+		return false, fmt.Errorf("precheck: failed to get connector: %w", err)
 	}
 
 	output, err := runnerSvc.Run(ctx.GoContext(), conn, "hostname", false)
 	if err != nil {
-		logger.Warnf("Failed to get current hostname, assuming it needs to be set. Error: %v", err)
+		logger.Warn(err, "Failed to get current hostname, assuming it needs to be set.")
 		return false, nil
 	}
 
 	currentHostname := strings.TrimSpace(string(output))
 	if currentHostname == s.Hostname {
-		logger.Infof("Hostname is already set to '%s'. Step considered done.", s.Hostname)
+		logger.Info("Hostname is already set to desired value.", "hostname", s.Hostname)
 		return true, nil
 	}
 
-	logger.Infof("Current hostname is '%s', but expected '%s'. Step needs to run.", currentHostname, s.Hostname)
+	logger.Info("Current hostname does not match desired value. Step needs to run.", "current", currentHostname, "desired", s.Hostname)
 	return false, nil
 }
 
@@ -64,16 +64,16 @@ func (s *SetHostnameStep) Run(ctx runtime.ExecutionContext) error {
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		return fmt.Errorf("run: failed to get connector for host %s: %w", ctx.GetHost().GetName(), err)
+		return fmt.Errorf("run: failed to get connector: %w", err)
 	}
 
-	logger.Infof("Setting hostname to '%s' on host %s...", s.Hostname, ctx.GetHost().GetName())
+	logger.Info("Setting hostname.", "hostname", s.Hostname)
 	err = runnerSvc.SetHostname(ctx.GoContext(), conn, nil, s.Hostname)
 	if err != nil {
-		return fmt.Errorf("failed to set hostname to '%s' on host %s: %w", s.Hostname, ctx.GetHost().GetName(), err)
+		return fmt.Errorf("failed to set hostname to '%s': %w", s.Hostname, err)
 	}
 
-	logger.Infof("Hostname set to '%s' successfully.", s.Hostname)
+	logger.Info("Hostname set successfully.", "hostname", s.Hostname)
 	return nil
 }
 

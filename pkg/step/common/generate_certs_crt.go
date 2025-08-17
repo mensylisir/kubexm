@@ -124,14 +124,17 @@ func (s *GenerateCertsStep) Meta() *spec.StepMeta {
 }
 
 func (s *GenerateCertsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	if !fileExists(s.LocalCertsDir, s.Cert) || !fileExists(s.LocalCertsDir, s.CertKey) {
+		logger.Info("Certificate or key not found. Generation is required.")
 		return false, nil
 	}
+	logger.Info("Certificate and key already exist. Step is done.")
 	return true, nil
 }
 
 func (s *GenerateCertsStep) Run(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	logger.Info("Loading CA...", "caCert", s.CaCertFileName, "caKey", s.CaKeyFileName)
 	caCertPath := filepath.Join(s.LocalCertsDir, s.CaCertFileName)
 	caKeyPath := filepath.Join(s.LocalCertsDir, s.CaKeyFileName)
@@ -164,7 +167,7 @@ func (s *GenerateCertsStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *GenerateCertsStep) Rollback(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 
 	filesToRemove := []string{}
 	filesToRemove = append(filesToRemove, s.Cert, s.CertKey)
