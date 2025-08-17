@@ -13,7 +13,6 @@ import (
 
 type KubeadmVerifyEtcdClusterHealthStep struct {
 	step.Base
-	retries    int
 	retryDelay time.Duration
 }
 
@@ -23,7 +22,6 @@ type KubeadmVerifyEtcdClusterHealthStepBuilder struct {
 
 func NewKubeadmVerifyEtcdClusterHealthStepBuilder(ctx runtime.Context, instanceName string) *KubeadmVerifyEtcdClusterHealthStepBuilder {
 	s := &KubeadmVerifyEtcdClusterHealthStep{
-		retries:    12,
 		retryDelay: 10 * time.Second,
 	}
 	s.Base.Meta.Name = instanceName
@@ -62,24 +60,31 @@ func (s *KubeadmVerifyEtcdClusterHealthStep) Run(ctx runtime.ExecutionContext) e
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	logger.Info("Verifying overall Etcd cluster health...")
 
+	timeout := time.After(s.Base.Timeout)
+	ticker := time.NewTicker(s.retryDelay)
+	defer ticker.Stop()
+
 	var lastErr error
-	for i := 0; i < s.retries; i++ {
-		log := logger.With("attempt", i+1)
-		log.Infof("Attempting to verify Etcd cluster health...")
+	for {
+		select {
+		case <-timeout:
+			if lastErr != nil {
+				return fmt.Errorf("etcd cluster health verification timed out after %v: %w", s.Base.Timeout, lastErr)
+			}
+			return fmt.Errorf("etcd cluster health verification timed out after %v", s.Base.Timeout)
+		case <-ticker.C:
+			logger.Info("Attempting to verify Etcd cluster health...")
 
-		err := s.checkClusterHealth(ctx)
-		if err == nil {
-			logger.Info("Etcd cluster is healthy.")
-			return nil
+			err := s.checkClusterHealth(ctx)
+			if err == nil {
+				logger.Info("Etcd cluster is healthy.")
+				return nil
+			}
+
+			lastErr = err
+			logger.Warnf("Etcd cluster health check failed: %v. Retrying...", err)
 		}
-
-		lastErr = err
-		log.Warnf("Etcd cluster health check failed: %v. Retrying in %v...", err, s.retryDelay)
-		time.Sleep(s.retryDelay)
 	}
-
-	logger.Errorf("Etcd cluster did not become healthy after %d retries.", s.retries)
-	return fmt.Errorf("etcd cluster health verification failed: %w", lastErr)
 }
 
 func (s *KubeadmVerifyEtcdClusterHealthStep) checkClusterHealth(ctx runtime.ExecutionContext) error {

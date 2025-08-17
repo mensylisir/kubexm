@@ -16,7 +16,6 @@ type EtcdVerifyMemberHealthStep struct {
 	step.Base
 	remoteCertsDir string
 	endpoint       string
-	retries        int
 	retryDelay     time.Duration
 }
 
@@ -28,7 +27,6 @@ func NewEtcdVerifyMemberHealthStepBuilder(ctx runtime.Context, instanceName stri
 	s := &EtcdVerifyMemberHealthStep{
 		remoteCertsDir: common.DefaultEtcdPKIDir,
 		endpoint:       "https://127.0.0.1:2379",
-		retries:        12,
 		retryDelay:     10 * time.Second,
 	}
 	s.Base.Meta.Name = instanceName
@@ -65,24 +63,31 @@ func (s *EtcdVerifyMemberHealthStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	logger.Info("Verifying local etcd member health...")
 
+	timeout := time.After(s.Base.Timeout)
+	ticker := time.NewTicker(s.retryDelay)
+	defer ticker.Stop()
+
 	var lastErr error
-	for i := 0; i < s.retries; i++ {
-		log := logger.With("attempt", i+1)
-		log.Infof("Attempting to verify etcd member health at %s...", s.endpoint)
+	for {
+		select {
+		case <-timeout:
+			if lastErr != nil {
+				return fmt.Errorf("etcd member health verification timed out after %v: %w", s.Base.Timeout, lastErr)
+			}
+			return fmt.Errorf("etcd member health verification timed out after %v", s.Base.Timeout)
+		case <-ticker.C:
+			logger.Infof("Attempting to verify etcd member health at %s...", s.endpoint)
 
-		err := s.checkMemberHealth(ctx)
-		if err == nil {
-			logger.Info("Local etcd member is healthy.")
-			return nil
+			err := s.checkMemberHealth(ctx)
+			if err == nil {
+				logger.Info("Local etcd member is healthy.")
+				return nil
+			}
+
+			lastErr = err
+			logger.Warnf("Health check failed: %v. Retrying...", err)
 		}
-
-		lastErr = err
-		log.Warnf("Health check failed: %v. Retrying in %v...", err, s.retryDelay)
-		time.Sleep(s.retryDelay)
 	}
-
-	logger.Errorf("Local etcd member did not become healthy after %d retries.", s.retries)
-	return fmt.Errorf("etcd member health verification failed: %w", lastErr)
 }
 
 func (s *EtcdVerifyMemberHealthStep) checkMemberHealth(ctx runtime.ExecutionContext) error {

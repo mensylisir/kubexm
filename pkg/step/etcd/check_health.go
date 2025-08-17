@@ -18,7 +18,6 @@ type CheckEtcdHealthStep struct {
 	CACertPath        string
 	CertPath          string
 	KeyPath           string
-	RetryCount        int
 	RetryDelay        time.Duration
 }
 
@@ -32,7 +31,6 @@ func NewCheckEtcdHealthStepBuilder(ctx runtime.Context, instanceName string) *Ch
 		CACertPath:        filepath.Join(common.DefaultEtcdPKIDir, common.EtcdCaPemFileName),
 		CertPath:          "",
 		KeyPath:           "",
-		RetryCount:        10,
 		RetryDelay:        6 * time.Second,
 	}
 
@@ -43,11 +41,6 @@ func NewCheckEtcdHealthStepBuilder(ctx runtime.Context, instanceName string) *Ch
 	s.Base.Timeout = 5 * time.Minute
 
 	b := new(CheckEtcdHealthStepBuilder).Init(s)
-	return b
-}
-
-func (b *CheckEtcdHealthStepBuilder) WithRetryCount(count int) *CheckEtcdHealthStepBuilder {
-	b.Step.RetryCount = count
 	return b
 }
 
@@ -88,32 +81,37 @@ func (s *CheckEtcdHealthStep) Run(ctx runtime.ExecutionContext) error {
 		s.KeyPath,
 	)
 
+	timeout := time.After(s.Base.Timeout)
+	ticker := time.NewTicker(s.RetryDelay)
+	defer ticker.Stop()
+
 	var lastErr error
-	for i := 0; i < s.RetryCount; i++ {
-		if i > 0 {
-			time.Sleep(s.RetryDelay)
+	for {
+		select {
+		case <-timeout:
+			if lastErr != nil {
+				return fmt.Errorf("etcd health check timed out after %v: %w", s.Base.Timeout, lastErr)
+			}
+			return fmt.Errorf("etcd health check timed out after %v", s.Base.Timeout)
+		case <-ticker.C:
+			logger.Info("Attempting to check etcd health...")
+
+			stdout, stderr, err := runner.OriginRun(ctx.GoContext(), conn, cmd, s.Sudo)
+			if err != nil {
+				lastErr = fmt.Errorf("etcd health check command failed: %w, stderr: %s", err, stderr)
+				logger.Warn("Health check attempt failed.", "error", lastErr)
+				continue
+			}
+
+			if isClusterHealthy(stdout) {
+				logger.Info("Etcd cluster is healthy.", "output", stdout)
+				return nil
+			}
+
+			lastErr = fmt.Errorf("etcd cluster is not healthy. Output: %s", stdout)
+			logger.Warn("Cluster is not fully healthy yet, will retry...", "output", stdout)
 		}
-
-		logger.Info("Attempting to check etcd health...", "attempt", i+1)
-
-		stdout, stderr, err := runner.OriginRun(ctx.GoContext(), conn, cmd, s.Sudo)
-		if err != nil {
-			lastErr = fmt.Errorf("etcd health check command failed: %w, stderr: %s", err, stderr)
-			logger.Warn("Health check attempt failed.", "error", lastErr)
-			continue
-		}
-
-		if isClusterHealthy(stdout) {
-			logger.Info("Etcd cluster is healthy.", "output", stdout)
-			return nil
-		}
-
-		lastErr = fmt.Errorf("etcd cluster is not healthy. Output: %s", stdout)
-		logger.Warn("Cluster is not fully healthy yet, will retry...", "output", stdout)
 	}
-
-	logger.Error(lastErr, "Etcd cluster health check failed after all retries.")
-	return lastErr
 }
 
 func (s *CheckEtcdHealthStep) Rollback(ctx runtime.ExecutionContext) error {

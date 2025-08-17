@@ -14,7 +14,6 @@ import (
 type CheckAPIServerHealthStep struct {
 	step.Base
 	HealthCheckURL string
-	RetryCount     int
 	RetryDelay     time.Duration
 	RemoteCertsDir string
 }
@@ -25,7 +24,6 @@ type CheckAPIServerHealthStepBuilder struct {
 
 func NewCheckAPIServerHealthStepBuilder(ctx runtime.Context, instanceName string) *CheckAPIServerHealthStepBuilder {
 	s := &CheckAPIServerHealthStep{
-		RetryCount:     12,
 		RetryDelay:     10 * time.Second,
 		RemoteCertsDir: common.KubernetesPKIDir,
 	}
@@ -88,26 +86,32 @@ func (s *CheckAPIServerHealthStep) Precheck(ctx runtime.ExecutionContext) (isDon
 
 func (s *CheckAPIServerHealthStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
+	logger.Info("Waiting for kube-apiserver to be healthy...")
 
-	for i := 0; i < s.RetryCount; i++ {
-		logger.Infof("Waiting for kube-apiserver to be healthy... (Attempt %d/%d)", i+1, s.RetryCount)
+	timeout := time.After(s.Base.Timeout)
+	ticker := time.NewTicker(s.RetryDelay)
+	defer ticker.Stop()
 
-		healthy, err := s.checkHealth(ctx)
-		if healthy {
-			logger.Info("kube-apiserver is healthy!")
-			return nil
-		}
-
-		if err != nil {
-			logger.Debugf("Health check attempt failed: %v", err)
-		}
-
-		if i < s.RetryCount-1 {
-			time.Sleep(s.RetryDelay)
+	var lastErr error
+	for {
+		select {
+		case <-timeout:
+			if lastErr != nil {
+				return fmt.Errorf("kube-apiserver health check timed out after %v: %w", s.Base.Timeout, lastErr)
+			}
+			return fmt.Errorf("kube-apiserver health check timed out after %v", s.Base.Timeout)
+		case <-ticker.C:
+			healthy, err := s.checkHealth(ctx)
+			if healthy {
+				logger.Info("kube-apiserver is healthy!")
+				return nil
+			}
+			if err != nil {
+				lastErr = err
+				logger.Debugf("Health check attempt failed: %v", err)
+			}
 		}
 	}
-
-	return fmt.Errorf("kube-apiserver did not become healthy after %d attempts", s.RetryCount)
 }
 
 func (s *CheckAPIServerHealthStep) Rollback(ctx runtime.ExecutionContext) error {
