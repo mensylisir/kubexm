@@ -13,7 +13,6 @@ import (
 
 type KubeadmVerifyEtcdPodHealthStep struct {
 	step.Base
-	retries     int
 	retryDelay  time.Duration
 	maxRestarts int
 }
@@ -24,7 +23,6 @@ type KubeadmVerifyEtcdPodHealthStepBuilder struct {
 
 func NewKubeadmVerifyEtcdPodHealthStepBuilder(ctx runtime.Context, instanceName string) *KubeadmVerifyEtcdPodHealthStepBuilder {
 	s := &KubeadmVerifyEtcdPodHealthStep{
-		retries:     18,
 		retryDelay:  10 * time.Second,
 		maxRestarts: 2,
 	}
@@ -64,24 +62,31 @@ func (s *KubeadmVerifyEtcdPodHealthStep) Run(ctx runtime.ExecutionContext) error
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	logger.Info("Verifying local etcd pod health via container runtime...")
 
+	timeout := time.After(s.Base.Timeout)
+	ticker := time.NewTicker(s.retryDelay)
+	defer ticker.Stop()
+
 	var lastErr error
-	for i := 0; i < s.retries; i++ {
-		log := logger.With("attempt", i+1)
-		log.Infof("Attempting to verify etcd pod container status...")
+	for {
+		select {
+		case <-timeout:
+			if lastErr != nil {
+				return fmt.Errorf("etcd pod health verification timed out after %v: %w", s.Base.Timeout, lastErr)
+			}
+			return fmt.Errorf("etcd pod health verification timed out after %v", s.Base.Timeout)
+		case <-ticker.C:
+			logger.Info("Attempting to verify etcd pod container status...")
 
-		err := s.checkPodHealth(ctx)
-		if err == nil {
-			logger.Info("Etcd pod container is Running and stable.")
-			return nil
+			err := s.checkPodHealth(ctx)
+			if err == nil {
+				logger.Info("Etcd pod container is Running and stable.")
+				return nil
+			}
+
+			lastErr = err
+			logger.Warnf("Etcd pod health check failed: %v. Retrying...", err)
 		}
-
-		lastErr = err
-		log.Warnf("Etcd pod health check failed: %v. Retrying in %v...", err, s.retryDelay)
-		time.Sleep(s.retryDelay)
 	}
-
-	logger.Errorf("Etcd pod did not become healthy after %d retries.", s.retries)
-	return fmt.Errorf("etcd pod health verification failed: %w", lastErr)
 }
 
 func (s *KubeadmVerifyEtcdPodHealthStep) checkPodHealth(ctx runtime.ExecutionContext) error {

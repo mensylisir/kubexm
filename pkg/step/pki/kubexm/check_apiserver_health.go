@@ -15,7 +15,6 @@ type VerifyAPIServerHealthStep struct {
 	serviceName     string
 	healthzEndpoint string
 	securePort      string
-	retries         int
 	retryDelay      time.Duration
 }
 
@@ -28,7 +27,6 @@ func NewVerifyAPIServerHealthStepBuilder(ctx runtime.Context, instanceName strin
 		serviceName:     "kube-apiserver",
 		healthzEndpoint: "https://127.0.0.1:6443/healthz",
 		securePort:      "6443",
-		retries:         12,
 		retryDelay:      10 * time.Second,
 	}
 	s.Base.Meta.Name = instanceName
@@ -66,24 +64,31 @@ func (s *VerifyAPIServerHealthStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	logger.Info("Verifying kube-apiserver health...")
 
+	timeout := time.After(s.Base.Timeout)
+	ticker := time.NewTicker(s.retryDelay)
+	defer ticker.Stop()
+
 	var lastErr error
-	for i := 0; i < s.retries; i++ {
-		log := logger.With("attempt", i+1)
-		log.Infof("Attempting to verify kube-apiserver health...")
+	for {
+		select {
+		case <-timeout:
+			if lastErr != nil {
+				return fmt.Errorf("kube-apiserver health verification timed out after %v: %w", s.Base.Timeout, lastErr)
+			}
+			return fmt.Errorf("kube-apiserver health verification timed out after %v", s.Base.Timeout)
+		case <-ticker.C:
+			logger.Info("Attempting to verify kube-apiserver health...")
 
-		err := s.checkAPIServer(ctx)
-		if err == nil {
-			logger.Info("kube-apiserver is healthy.")
-			return nil
+			err := s.checkAPIServer(ctx)
+			if err == nil {
+				logger.Info("kube-apiserver is healthy.")
+				return nil
+			}
+
+			lastErr = err
+			logger.Warnf("Health check failed: %v. Retrying...", err)
 		}
-
-		lastErr = err
-		log.Warnf("Health check failed: %v. Retrying in %v...", err, s.retryDelay)
-		time.Sleep(s.retryDelay)
 	}
-
-	logger.Errorf("kube-apiserver did not become healthy after %d retries.", s.retries)
-	return fmt.Errorf("kube-apiserver health verification failed: %w", lastErr)
 }
 
 func (s *VerifyAPIServerHealthStep) checkAPIServer(ctx runtime.ExecutionContext) error {
