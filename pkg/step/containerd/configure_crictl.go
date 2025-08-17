@@ -93,14 +93,17 @@ func (s *ConfigureCriCtlStep) Precheck(ctx runtime.ExecutionContext) (isDone boo
 	if exists {
 		remoteContent, err := runner.ReadFile(ctx.GoContext(), conn, s.TargetPath)
 		if err != nil {
-			logger.Warnf("Config file '%s' exists but failed to read, will overwrite. Error: %v", s.TargetPath, err)
+			logger.Warn(err, "Config file exists but failed to read, will overwrite.", "path", s.TargetPath)
 			return false, nil
 		}
 		if string(remoteContent) == expectedContent {
+			logger.Info("crictl config file already exists and content matches. Step is done.", "path", s.TargetPath)
 			return true, nil
 		}
+		logger.Info("crictl config file exists but content differs. Step needs to run.", "path", s.TargetPath)
 		return false, nil
 	}
+	logger.Info("crictl config file does not exist. Configuration is required.", "path", s.TargetPath)
 	return false, nil
 }
 
@@ -116,7 +119,7 @@ func (s *ConfigureCriCtlStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	logger.Infof("Writing crictl config file to %s", s.TargetPath)
+	logger.Info("Writing crictl config file.", "path", s.TargetPath)
 	return helpers.WriteContentToRemote(ctx, conn, content, s.TargetPath, "0644", s.Sudo)
 }
 
@@ -125,10 +128,11 @@ func (s *ConfigureCriCtlStep) Rollback(ctx runtime.ExecutionContext) error {
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
+		logger.Error(err, "Failed to get connector for rollback.")
 		return nil
 	}
 
-	logger.Warnf("Rolling back by removing: %s", s.TargetPath)
+	logger.Warn("Rolling back by removing.", "path", s.TargetPath)
 	runner.Remove(ctx.GoContext(), conn, s.TargetPath, s.Sudo, false)
 	return nil
 }

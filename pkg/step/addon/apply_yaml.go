@@ -81,6 +81,7 @@ func (s *ApplyAddonYamlStep) Meta() *spec.StepMeta {
 }
 
 func (s *ApplyAddonYamlStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
@@ -92,10 +93,11 @@ func (s *ApplyAddonYamlStep) Precheck(ctx runtime.ExecutionContext) (isDone bool
 			return false, errors.Wrapf(err, "failed to check for remote yaml %s", path)
 		}
 		if !exists {
+			logger.Warn("Required remote yaml manifest not found.", "path", path)
 			return false, fmt.Errorf("required remote yaml manifest not found: %s", path)
 		}
 	}
-
+	logger.Info("All required remote yaml manifests exist. Step will always run to ensure 'apply'.")
 	return false, nil
 }
 
@@ -124,12 +126,12 @@ func (s *ApplyAddonYamlStep) Run(ctx runtime.ExecutionContext) error {
 			)
 		}
 
-		logger.Infof("Applying YAML manifest: [%s]", cmd)
+		logger.Info("Applying YAML manifest.", "command", cmd)
 		output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 		if err != nil {
 			return errors.Wrapf(err, "failed to apply addon yaml manifest %s\nOutput:\n%s", remotePath, output)
 		}
-		logger.Debugf("Command output:\n%s", output)
+		logger.Debug("Command output.", "output", output)
 	}
 
 	logger.Info("Successfully applied all YAML manifests for this addon source.")
@@ -163,9 +165,9 @@ func (s *ApplyAddonYamlStep) Rollback(ctx runtime.ExecutionContext) error {
 			)
 		}
 
-		logger.Warnf("Rolling back by deleting manifest: [%s]", cmd)
+		logger.Warn("Rolling back by deleting manifest.", "command", cmd)
 		if _, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo); err != nil {
-			logger.Errorf("Failed to delete addon yaml manifest %s during rollback: %v", remotePath, err)
+			logger.Error(err, "Failed to delete addon yaml manifest during rollback.", "path", remotePath)
 		}
 	}
 

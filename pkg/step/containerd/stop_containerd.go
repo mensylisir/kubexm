@@ -49,12 +49,12 @@ func (s *StopContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool
 
 	active, err := runner.IsServiceActive(ctx.GoContext(), conn, facts, containerdServiceName)
 	if err != nil {
-		logger.Warnf("Failed to check service status, assuming it's not active. Error: %v", err)
+		logger.Warn(err, "Failed to check service status, assuming it's not active.")
 		return true, nil
 	}
 
 	if !active {
-		logger.Infof("Containerd service is already inactive. Step is done.")
+		logger.Info("Containerd service is already inactive. Step is done.")
 		return true, nil
 	}
 
@@ -75,7 +75,7 @@ func (s *StopContainerdStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	logger.Infof("Stopping containerd service...")
+	logger.Info("Stopping containerd service.")
 	if err := runner.StopService(ctx.GoContext(), conn, facts, containerdServiceName); err != nil {
 		return fmt.Errorf("failed to stop containerd service: %w", err)
 	}
@@ -94,13 +94,13 @@ func (s *StopContainerdStep) Rollback(ctx runtime.ExecutionContext) error {
 
 	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
 	if err != nil {
-		logger.Errorf("Failed to gather facts for rollback, cannot start service: %v", err)
+		logger.Error(err, "Failed to gather facts for rollback, cannot start service.")
 		return nil
 	}
 
-	logger.Warnf("Rolling back by starting containerd service...")
+	logger.Warn("Rolling back by starting containerd service.")
 	if err := runner.StartService(ctx.GoContext(), conn, facts, containerdServiceName); err != nil {
-		logger.Errorf("Failed to start containerd service during rollback: %v", err)
+		logger.Error(err, "Failed to start containerd service during rollback.")
 	}
 
 	return nil

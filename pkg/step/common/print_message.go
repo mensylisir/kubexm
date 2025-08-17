@@ -42,7 +42,8 @@ func (s *PrintMessageStep) Meta() *spec.StepMeta {
 }
 
 func (s *PrintMessageStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	_ = ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	logger.Info("PrintMessageStep always runs, precheck is a no-op.")
 	return false, nil
 }
 
@@ -54,7 +55,7 @@ func (s *PrintMessageStep) Run(ctx runtime.ExecutionContext) error {
 
 func (s *PrintMessageStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
-	logger.Warnf("Rolling back PrintMessageStep is a no-op.")
+	logger.Warn("Rolling back PrintMessageStep is a no-op.")
 	return nil
 }
 

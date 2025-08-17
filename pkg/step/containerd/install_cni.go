@@ -93,7 +93,7 @@ func (s *InstallCNIPluginsStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 	localExtractedPath, err := s.getLocalExtractedPath(ctx)
 	if err != nil {
 		if strings.Contains(err.Error(), "disabled for arch") {
-			logger.Infof("CNI plugins not required for this host (arch: %s), skipping.", ctx.GetHost().GetArch())
+			logger.Info("CNI plugins not required for this host, skipping.", "arch", ctx.GetHost().GetArch())
 			return true, nil
 		}
 		return false, err
@@ -111,7 +111,7 @@ func (s *InstallCNIPluginsStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 			return false, fmt.Errorf("failed to check existence of remote plugin '%s': %w", remotePath, err)
 		}
 		if !exists {
-			logger.Infof("Key CNI plugin '%s' does not exist. Installation is required.", remotePath)
+			logger.Info("Key CNI plugin does not exist. Installation is required.", "path", remotePath)
 			allExist = false
 			break
 		}
@@ -135,7 +135,7 @@ func (s *InstallCNIPluginsStep) Run(ctx runtime.ExecutionContext) error {
 	localExtractedPath, err := s.getLocalExtractedPath(ctx)
 	if err != nil {
 		if strings.Contains(err.Error(), "disabled for arch") {
-			logger.Infof("CNI plugins not required for this host (arch: %s), skipping.", ctx.GetHost().GetArch())
+			logger.Info("CNI plugins not required for this host, skipping.", "arch", ctx.GetHost().GetArch())
 			return nil
 		}
 		return err
@@ -165,18 +165,18 @@ func (s *InstallCNIPluginsStep) Run(ctx runtime.ExecutionContext) error {
 		remoteTempPath := filepath.Join(remoteUploadTmpDir, pluginName)
 		remoteTargetPath := filepath.Join(s.RemoteCNIBinDir, pluginName)
 
-		logger.Debugf("Uploading CNI plugin %s to %s:%s", pluginName, ctx.GetHost().GetName(), remoteTempPath)
+		logger.Debug("Uploading CNI plugin.", "plugin", pluginName, "to", remoteTempPath)
 		if err := runner.Upload(ctx.GoContext(), conn, localPath, remoteTempPath, false); err != nil {
 			return fmt.Errorf("failed to upload '%s': %w", localPath, err)
 		}
 
 		moveCmd := fmt.Sprintf("mv %s %s", remoteTempPath, remoteTargetPath)
-		logger.Debugf("Moving CNI plugin to %s on remote host", remoteTargetPath)
+		logger.Debug("Moving CNI plugin.", "to", remoteTargetPath)
 		if _, err := runner.Run(ctx.GoContext(), conn, moveCmd, s.Sudo); err != nil {
 			return fmt.Errorf("failed to move CNI plugin '%s': %w", pluginName, err)
 		}
 
-		logger.Debugf("Setting permissions for %s to %s", remoteTargetPath, s.Permission)
+		logger.Debug("Setting permissions.", "path", remoteTargetPath, "permissions", s.Permission)
 		if err := runner.Chmod(ctx.GoContext(), conn, remoteTargetPath, s.Permission, s.Sudo); err != nil {
 			return fmt.Errorf("failed to set permission on CNI plugin '%s': %w", pluginName, err)
 		}
@@ -195,11 +195,11 @@ func (s *InstallCNIPluginsStep) Rollback(ctx runtime.ExecutionContext) error {
 		return nil
 	}
 
-	logger.Warnf("Rolling back by removing installed CNI plugins from %s", s.RemoteCNIBinDir)
+	logger.Warn("Rolling back by removing installed CNI plugins.", "path", s.RemoteCNIBinDir)
 	for _, pluginName := range s.knownCniPlugins {
 		remotePath := filepath.Join(s.RemoteCNIBinDir, pluginName)
 		if err := runner.Remove(ctx.GoContext(), conn, remotePath, s.Sudo, false); err != nil {
-			logger.Errorf("Failed to remove CNI plugin '%s' during rollback: %v", remotePath, err)
+			logger.Error(err, "Failed to remove CNI plugin during rollback.", "path", remotePath)
 		}
 	}
 	return nil

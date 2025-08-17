@@ -49,12 +49,12 @@ func (s *StartContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone boo
 
 	active, err := runner.IsServiceActive(ctx.GoContext(), conn, facts, containerdServiceName)
 	if err != nil {
-		logger.Warnf("Failed to check if containerd service is active, assuming it needs to be started. Error: %v", err)
+		logger.Warn(err, "Failed to check if containerd service is active, assuming it needs to be started.")
 		return false, nil
 	}
 
 	if active {
-		logger.Infof("Containerd service is already active. Step is done.")
+		logger.Info("Containerd service is already active. Step is done.")
 		return true, nil
 	}
 
@@ -75,11 +75,11 @@ func (s *StartContainerdStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to gather facts to start service: %w", err)
 	}
 
-	logger.Infof("Starting containerd service...")
+	logger.Info("Starting containerd service.")
 	if err := runner.StartService(ctx.GoContext(), conn, facts, containerdServiceName); err != nil {
 		logsCmd := fmt.Sprintf("journalctl -u %s --no-pager -n 50", containerdServiceName)
 		out, _, _ := runner.OriginRun(ctx.GoContext(), conn, logsCmd, s.Sudo)
-		logger.Errorf("Failed to start containerd service. Recent logs:\n%s", out)
+		logger.Error(err, "Failed to start containerd service.", "logs", out)
 
 		return fmt.Errorf("failed to start containerd service: %w", err)
 	}
@@ -106,13 +106,13 @@ func (s *StartContainerdStep) Rollback(ctx runtime.ExecutionContext) error {
 
 	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
 	if err != nil {
-		logger.Errorf("Failed to gather facts for rollback, cannot stop service: %v", err)
+		logger.Error(err, "Failed to gather facts for rollback, cannot stop service.")
 		return nil
 	}
 
-	logger.Warnf("Rolling back by stopping containerd service...")
+	logger.Warn("Rolling back by stopping containerd service.")
 	if err := runner.StopService(ctx.GoContext(), conn, facts, containerdServiceName); err != nil {
-		logger.Errorf("Failed to stop containerd service during rollback: %v", err)
+		logger.Error(err, "Failed to stop containerd service during rollback.")
 	}
 
 	return nil

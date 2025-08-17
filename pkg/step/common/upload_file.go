@@ -3,8 +3,10 @@ package common
 import (
 	"crypto/sha256"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -66,28 +68,46 @@ func (s *UploadFileStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, er
 		return false, fmt.Errorf("failed to process local source file %s for precheck: %w", s.LocalSrcPath, err)
 	}
 
+	remoteChecksum, err := helpers.GetRemoteFileChecksum(ctx, s.RemoteDestPath, s.Sudo)
+	if err != nil {
+		logger.Infof("Failed to get remote file checksum (file likely does not exist). Step needs to run. Path: %s, Error: %v", s.RemoteDestPath, err)
+		return false, nil
+	}
+
+	if localChecksum != remoteChecksum {
+		logger.Infof("Remote file checksum does not match local file. Step needs to run. Local: %s, Remote: %s", localChecksum, remoteChecksum)
+		return false, nil
+	}
+
+	// Check permissions if checksum matches
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		return false, fmt.Errorf("precheck: failed to get connector for host %s: %w", ctx.GetHost().GetName(), err)
 	}
 
-	remoteChecksumCmd := fmt.Sprintf("sha256sum %s | awk '{print $1}'", s.RemoteDestPath)
-	output, runErr := runnerSvc.Run(ctx.GoContext(), conn, remoteChecksumCmd, s.Sudo)
-
-	if runErr != nil {
-		logger.Infof("Failed to get remote file checksum (file likely does not exist). Step needs to run. Path: %s", s.RemoteDestPath)
+	fi, err := runnerSvc.Stat(ctx.GoContext(), conn, s.RemoteDestPath)
+	if err != nil {
+		// This shouldn't happen if checksum worked, but handle it anyway
+		logger.Warnf("Could not stat remote file %s after successful checksum. Step will re-run. Error: %v", s.RemoteDestPath, err)
 		return false, nil
 	}
-	remoteChecksum := string(output)
 
-	if localChecksum == remoteChecksum {
-		logger.Infof("Remote file exists and checksum matches. Step considered done. Path: %s", s.RemoteDestPath)
-		return true, nil
+	// Convert target permissions string (e.g., "0644") to os.FileMode
+	var targetPerm os.FileMode
+	_, err = fmt.Sscanf(s.Permissions, "%o", &targetPerm)
+	if err != nil {
+		logger.Errorf("Invalid permission string format: %s. Error: %v", s.Permissions, err)
+		return false, fmt.Errorf("invalid permission string: %s", s.Permissions)
 	}
 
-	logger.Infof("Remote file checksum does not match local file. Step needs to run. Local: %s, Remote: %s", localChecksum, remoteChecksum)
-	return false, nil
+	if fi.Mode().Perm() != targetPerm {
+		logger.Infof("Remote file %s exists with correct content, but permissions are incorrect (current: %o, target: %o). Step needs to run.", s.RemoteDestPath, fi.Mode().Perm(), targetPerm)
+		return false, nil
+	}
+
+	logger.Infof("Remote file exists with correct content and permissions. Step considered done. Path: %s", s.RemoteDestPath)
+	return true, nil
 }
 
 func (s *UploadFileStep) Run(ctx runtime.ExecutionContext) error {

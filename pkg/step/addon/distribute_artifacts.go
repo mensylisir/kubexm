@@ -156,11 +156,11 @@ func (s *DistributeAddonArtifactsStep) Run(ctx runtime.ExecutionContext) error {
 	for _, artifact := range artifacts {
 		isUpToDate, _ := helpers.CheckRemoteFileIntegrity(ctx, artifact.LocalPath, artifact.RemotePath, s.Sudo)
 		if isUpToDate {
-			logger.Debugf("Artifact %s is already up-to-date on remote, skipping upload.", filepath.Base(artifact.LocalPath))
+			logger.Debug("Artifact is already up-to-date on remote, skipping upload.", "artifact", filepath.Base(artifact.LocalPath))
 			continue
 		}
 
-		logger.Infof("Uploading %s to %s:%s", artifact.LocalPath, ctx.GetHost().GetName(), artifact.RemotePath)
+		logger.Info("Uploading artifact.", "from", artifact.LocalPath, "to", artifact.RemotePath)
 
 		content, err := os.ReadFile(artifact.LocalPath)
 		if err != nil {
@@ -185,17 +185,17 @@ func (s *DistributeAddonArtifactsStep) Rollback(ctx runtime.ExecutionContext) er
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 
 	remoteAddonDir := filepath.Join(ctx.GetUploadDir(), s.AddonName)
-	logger.Warnf("Rolling back by removing remote addon artifacts directory: %s", remoteAddonDir)
+	logger.Warn("Rolling back by removing remote addon artifacts directory.", "path", remoteAddonDir)
 
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		logger.Errorf("Failed to get connector for rollback: %v", err)
+		logger.Error(err, "Failed to get connector for rollback.")
 		return nil
 	}
 
 	if err := runner.Remove(ctx.GoContext(), conn, remoteAddonDir, s.Sudo, true); err != nil {
-		logger.Errorf("Failed to remove remote artifacts directory '%s' during rollback: %v", remoteAddonDir, err)
+		logger.Error(err, "Failed to remove remote artifacts directory during rollback.", "path", remoteAddonDir)
 	}
 	return nil
 }

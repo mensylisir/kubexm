@@ -63,30 +63,30 @@ func (s *RenderTemplateStep) Precheck(ctx runtime.ExecutionContext) (isDone bool
 
 	expectedContent, errRender := util.RenderTemplate(s.TemplateContent, s.Data)
 	if errRender != nil {
-		return false, fmt.Errorf("failed to render template for precheck on step %s: %w", s.Base.Meta.Name, errRender)
+		return false, fmt.Errorf("failed to render template for precheck: %w", errRender)
 	}
 
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		return false, fmt.Errorf("precheck: failed to get connector for host %s: %w", ctx.GetHost().GetName(), err)
+		return false, fmt.Errorf("precheck: failed to get connector: %w", err)
 	}
 
 	exists, err := runnerSvc.Exists(ctx.GoContext(), conn, s.RemoteDestPath)
 	if err != nil {
-		logger.Warnf("Failed to check existence of remote file, assuming it needs to be rendered. Path: %s, Error: %v", s.RemoteDestPath, err)
+		logger.Warn(err, "Failed to check existence of remote file, assuming it needs to be rendered.", "path", s.RemoteDestPath)
 		return false, nil
 	}
 
 	if !exists {
-		logger.Infof("Remote destination file does not exist. Template needs to be rendered. Path: %s", s.RemoteDestPath)
+		logger.Info("Remote destination file does not exist. Template needs to be rendered.", "path", s.RemoteDestPath)
 		return false, nil
 	}
 
-	logger.Infof("Remote destination file exists, reading content for comparison. Path: %s", s.RemoteDestPath)
+	logger.Info("Remote destination file exists, reading content for comparison.", "path", s.RemoteDestPath)
 	remoteContentBytes, errRead := runnerSvc.ReadFile(ctx.GoContext(), conn, s.RemoteDestPath)
 	if errRead != nil {
-		logger.Warnf("Failed to read remote file for comparison, assuming it needs to be re-rendered. Path: %s, Error: %v", s.RemoteDestPath, errRead)
+		logger.Warn(errRead, "Failed to read remote file for comparison, assuming it needs to be re-rendered.", "path", s.RemoteDestPath)
 		return false, nil
 	}
 	remoteContent := string(remoteContentBytes)
@@ -95,7 +95,7 @@ func (s *RenderTemplateStep) Precheck(ctx runtime.ExecutionContext) (isDone bool
 	normalizedRemoteContent := strings.ReplaceAll(strings.TrimSpace(remoteContent), "\r\n", "\n")
 
 	if normalizedExpectedContent == normalizedRemoteContent {
-		logger.Infof("Remote file content matches rendered template. Step considered done. Path: %s", s.RemoteDestPath)
+		logger.Info("Remote file content matches rendered template. Step considered done.", "path", s.RemoteDestPath)
 		return true, nil
 	}
 
@@ -106,7 +106,7 @@ func (s *RenderTemplateStep) Precheck(ctx runtime.ExecutionContext) (isDone bool
 func (s *RenderTemplateStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
-	logger.Infof("Rendering template for destination: %s", s.RemoteDestPath)
+	logger.Info("Rendering template.", "destination", s.RemoteDestPath)
 	renderedContent, err := util.RenderTemplate(s.TemplateContent, s.Data)
 	if err != nil {
 		return fmt.Errorf("failed to render template for %s: %w", s.RemoteDestPath, err)
@@ -115,17 +115,17 @@ func (s *RenderTemplateStep) Run(ctx runtime.ExecutionContext) error {
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		return fmt.Errorf("run: failed to get connector for host %s: %w", ctx.GetHost().GetName(), err)
+		return fmt.Errorf("run: failed to get connector: %w", err)
 	}
 
-	logger.Infof("Writing rendered template to remote host. Path: %s, Permissions: %s, Sudo: %t", s.RemoteDestPath, s.Permissions, s.Sudo)
+	logger.Info("Writing rendered template to remote host.", "path", s.RemoteDestPath, "permissions", s.Permissions, "sudo", s.Sudo)
 	err = runnerSvc.WriteFile(ctx.GoContext(), conn, []byte(renderedContent), s.RemoteDestPath, s.Permissions, s.Sudo)
 	if err != nil {
 		var cmdErr *connector.CommandError
 		if errors.As(err, &cmdErr) {
-			logger.Errorf("Failed to write rendered template to remote host. Stderr: %s, Stdout: %s", cmdErr.Stderr, cmdErr.Stdout)
+			logger.Error(err, "Failed to write rendered template to remote host.", "stderr", cmdErr.Stderr, "stdout", cmdErr.Stdout)
 		}
-		return fmt.Errorf("failed to write rendered template to %s on host %s: %w", s.RemoteDestPath, ctx.GetHost().GetName(), err)
+		return fmt.Errorf("failed to write rendered template to %s: %w", s.RemoteDestPath, err)
 	}
 
 	logger.Info("Template rendered and written successfully.")
@@ -134,22 +134,22 @@ func (s *RenderTemplateStep) Run(ctx runtime.ExecutionContext) error {
 
 func (s *RenderTemplateStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
-	logger.Infof("Attempting rollback: removing remote file: %s", s.RemoteDestPath)
+	logger.Info("Attempting rollback: removing remote file.", "path", s.RemoteDestPath)
 
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		return fmt.Errorf("rollback: failed to get connector for host %s: %w", ctx.GetHost().GetName(), err)
+		return fmt.Errorf("rollback: failed to get connector: %w", err)
 	}
 
 	if err := runnerSvc.Remove(ctx.GoContext(), conn, s.RemoteDestPath, s.Sudo, false); err != nil {
 		if os.IsNotExist(err) {
-			logger.Warnf("Remote file was not present for rollback. Path: %s", s.RemoteDestPath)
+			logger.Warn("Remote file was not present for rollback.", "path", s.RemoteDestPath)
 			return nil
 		}
-		logger.Warnf("Failed to remove remote file during rollback (best effort). Path: %s, Error: %v", s.RemoteDestPath, err)
+		logger.Warn(err, "Failed to remove remote file during rollback (best effort).", "path", s.RemoteDestPath)
 	} else {
-		logger.Info("Remote file removed successfully during rollback.")
+		logger.Info("Remote file removed successfully during rollback.", "path", s.RemoteDestPath)
 	}
 	return nil
 }

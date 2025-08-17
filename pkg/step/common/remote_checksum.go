@@ -46,7 +46,7 @@ func (s *RemoteFileChecksumStep) Meta() *spec.StepMeta {
 }
 
 func (s *RemoteFileChecksumStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
@@ -69,7 +69,7 @@ func (s *RemoteFileChecksumStep) Precheck(ctx runtime.ExecutionContext) (isDone 
 }
 
 func (s *RemoteFileChecksumStep) Run(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", ctx.GetHost().GetName(), "phase", "Run")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
 	if s.ExpectedChecksum == "" {
 		logger.Info("No expected checksum provided. Step considered successful.", "file", s.FilePath)
@@ -96,7 +96,8 @@ func (s *RemoteFileChecksumStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *RemoteFileChecksumStep) Rollback(ctx runtime.ExecutionContext) error {
-	ctx.GetLogger().Info("RemoteFileChecksumStep has no rollback action.", "step", s.Meta().Name, "host", ctx.GetHost().GetName())
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
+	logger.Info("RemoteFileChecksumStep has no rollback action.")
 	return nil
 }
 

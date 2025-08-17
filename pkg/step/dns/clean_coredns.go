@@ -41,6 +41,8 @@ func (s *CleanCoreDNSStep) Meta() *spec.StepMeta {
 }
 
 func (s *CleanCoreDNSStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	logger.Info("Cleanup step will always run if scheduled to ensure resources are removed.")
 	return false, nil
 }
 
@@ -54,11 +56,11 @@ func (s *CleanCoreDNSStep) Run(ctx runtime.ExecutionContext) error {
 
 	exists, err := runner.Exists(ctx.GoContext(), conn, s.RemoteManifestPath)
 	if err != nil {
-		logger.Warnf("Failed to check for CoreDNS manifest file, skipping cleanup: %v", err)
+		logger.Warn(err, "Failed to check for CoreDNS manifest file, skipping cleanup.", "path", s.RemoteManifestPath)
 		return nil
 	}
 	if !exists {
-		logger.Infof("CoreDNS manifest %s not found on remote host, assuming resources are already cleaned up.", s.RemoteManifestPath)
+		logger.Info("CoreDNS manifest not found on remote host, assuming resources are already cleaned up.", "path", s.RemoteManifestPath)
 		return nil
 	}
 
@@ -68,23 +70,23 @@ func (s *CleanCoreDNSStep) Run(ctx runtime.ExecutionContext) error {
 		s.AdminKubeconfigPath,
 	)
 
-	logger.Warnf("Cleaning up CoreDNS resources with command: %s", cmd)
+	logger.Warn("Cleaning up CoreDNS resources.", "command", cmd)
 	if _, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo); err != nil {
-		logger.Warnf("Failed to delete CoreDNS resources: %v", err)
+		logger.Warn(err, "Failed to delete CoreDNS resources.")
 	} else {
 		logger.Info("Successfully executed kubectl delete for CoreDNS resources.")
 	}
 
-	logger.Infof("Removing remote CoreDNS manifest file: %s", s.RemoteManifestPath)
+	logger.Info("Removing remote CoreDNS manifest file.", "path", s.RemoteManifestPath)
 	if err := runner.Remove(ctx.GoContext(), conn, s.RemoteManifestPath, s.Sudo, true); err != nil {
-		logger.Warnf("Failed to remove remote CoreDNS manifest file: %v", err)
+		logger.Warn(err, "Failed to remove remote CoreDNS manifest file.")
 	}
 
 	return nil
 }
 
 func (s *CleanCoreDNSStep) Rollback(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name)
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 	logger.Info("Rollback is not applicable for a cleanup step. No action taken.")
 	return nil
 }

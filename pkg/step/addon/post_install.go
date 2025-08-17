@@ -56,6 +56,8 @@ func (s *RunAddonPostInstallHookStep) Meta() *spec.StepMeta {
 }
 
 func (s *RunAddonPostInstallHookStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	logger.Info("Post-install hooks will always run if the step is reached.")
 	return false, nil
 }
 
@@ -68,12 +70,12 @@ func (s *RunAddonPostInstallHookStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	for i, command := range s.Commands {
-		logger.Infof("Executing post-install hook command #%d: [%s]", i+1, command)
+		logger.Info("Executing post-install hook command.", "index", i+1, "command", command)
 		output, err := runner.Run(ctx.GoContext(), conn, command, s.Sudo)
 		if err != nil {
 			return errors.Wrapf(err, "failed to execute post-install hook command: [%s]\nOutput:\n%s", command, output)
 		}
-		logger.Debugf("Command output:\n%s", output)
+		logger.Debug("Command output.", "output", output)
 	}
 
 	logger.Info("Successfully executed all post-install hooks for addon.")

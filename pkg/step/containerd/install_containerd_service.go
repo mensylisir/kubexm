@@ -104,18 +104,18 @@ func (s *InstallContainerdServiceStep) Precheck(ctx runtime.ExecutionContext) (i
 	if exists {
 		remoteContent, err := runner.ReadFile(ctx.GoContext(), conn, s.TargetPath)
 		if err != nil {
-			logger.Warnf("Service file '%s' exists but failed to read, will overwrite. Error: %v", s.TargetPath, err)
+			logger.Warn(err, "Service file exists but failed to read, will overwrite.", "path", s.TargetPath)
 			return false, nil
 		}
 		if string(remoteContent) == expectedContent {
-			logger.Infof("Containerd service file '%s' already exists and content matches. Step is done.", s.TargetPath)
+			logger.Info("Containerd service file already exists and content matches. Step is done.", "path", s.TargetPath)
 			return true, nil
 		}
-		logger.Infof("Containerd service file '%s' exists but content differs. Step needs to run.", s.TargetPath)
+		logger.Info("Containerd service file exists but content differs. Step needs to run.", "path", s.TargetPath)
 		return false, nil
 	}
 
-	logger.Infof("Containerd service file '%s' does not exist. Installation is required.", s.TargetPath)
+	logger.Info("Containerd service file does not exist. Installation is required.", "path", s.TargetPath)
 	return false, nil
 }
 
@@ -132,7 +132,7 @@ func (s *InstallContainerdServiceStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	logger.Infof("Writing systemd service file to %s", s.TargetPath)
+	logger.Info("Writing systemd service file.", "path", s.TargetPath)
 	err = helpers.WriteContentToRemote(ctx, conn, content, s.TargetPath, "0644", s.Sudo)
 	if err != nil {
 		return fmt.Errorf("failed to write containerd service file: %w", err)
@@ -155,23 +155,23 @@ func (s *InstallContainerdServiceStep) Rollback(ctx runtime.ExecutionContext) er
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		logger.Errorf("Failed to get connector for rollback: %v", err)
+		logger.Error(err, "Failed to get connector for rollback.")
 		return nil
 	}
 
-	logger.Warnf("Rolling back by removing: %s", s.TargetPath)
+	logger.Warn("Rolling back by removing.", "path", s.TargetPath)
 	if err := runner.Remove(ctx.GoContext(), conn, s.TargetPath, s.Sudo, false); err != nil {
-		logger.Errorf("Failed to remove '%s' during rollback: %v", s.TargetPath, err)
+		logger.Error(err, "Failed to remove path during rollback.", "path", s.TargetPath)
 	}
 
 	logger.Info("Reloading systemd daemon after rollback")
 	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
 	if err != nil {
-		logger.Errorf("Failed to gather facts for daemon-reload during rollback: %v", err)
+		logger.Error(err, "Failed to gather facts for daemon-reload during rollback.")
 		return nil
 	}
 	if err := runner.DaemonReload(ctx.GoContext(), conn, facts); err != nil {
-		logger.Errorf("Failed to reload systemd daemon during rollback: %v", err)
+		logger.Error(err, "Failed to reload systemd daemon during rollback.")
 	}
 
 	return nil

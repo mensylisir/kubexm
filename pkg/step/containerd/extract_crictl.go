@@ -85,7 +85,7 @@ func (s *ExtractCriCtlStep) getPathsForArch(ctx runtime.ExecutionContext, arch s
 }
 
 func (s *ExtractCriCtlStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 
 	requiredArchs, err := s.getRequiredArchs(ctx)
 	if err != nil {
@@ -113,7 +113,7 @@ func (s *ExtractCriCtlStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 		keyFile := filepath.Join(destPath, "crictl")
 
 		if _, err := os.Stat(keyFile); os.IsNotExist(err) {
-			logger.Infof("Key file '%s' for arch %s does not exist. Extraction is required.", keyFile, arch)
+			logger.Info("Key file does not exist. Extraction is required.", "key_file", keyFile, "arch", arch)
 			allDone = false
 		} else {
 			ctx.GetTaskCache().Set(cacheKey, destPath)
@@ -128,7 +128,7 @@ func (s *ExtractCriCtlStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 }
 
 func (s *ExtractCriCtlStep) Run(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
 	requiredArchs, err := s.getRequiredArchs(ctx)
 	if err != nil {
@@ -150,11 +150,11 @@ func (s *ExtractCriCtlStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *ExtractCriCtlStep) extractFileForArch(ctx runtime.ExecutionContext, arch string) error {
-	logger := ctx.GetLogger()
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run", "arch", arch)
 	sourcePath, destPath, cacheKey, err := s.getPathsForArch(ctx, arch)
 	if err != nil {
 		if strings.Contains(err.Error(), "disabled for arch") {
-			logger.Debugf("Skipping crictl extraction for arch %s as it's not required.", arch)
+			logger.Debug("Skipping crictl extraction as it's not required for this arch.")
 			return nil
 		}
 		return err
@@ -162,12 +162,12 @@ func (s *ExtractCriCtlStep) extractFileForArch(ctx runtime.ExecutionContext, arc
 
 	keyFile := filepath.Join(destPath, "crictl")
 	if _, err := os.Stat(keyFile); err == nil {
-		logger.Infof("Skipping extraction for arch %s, destination already exists and is valid.", arch)
+		logger.Info("Skipping extraction, destination already exists and is valid.")
 		ctx.GetTaskCache().Set(cacheKey, destPath)
 		return nil
 	}
 
-	logger.Infof("Extracting archive '%s' to '%s'...", sourcePath, destPath)
+	logger.Info("Extracting archive.", "source", sourcePath, "destination", destPath)
 
 	fileInfo, err := os.Stat(sourcePath)
 	if err != nil {
@@ -194,18 +194,18 @@ func (s *ExtractCriCtlStep) extractFileForArch(ctx runtime.ExecutionContext, arc
 	}
 
 	_ = bar.Finish()
-	logger.Infof("Successfully extracted archive for arch %s.", arch)
+	logger.Info("Successfully extracted archive for arch.")
 
 	ctx.GetTaskCache().Set(cacheKey, destPath)
 	return nil
 }
 
 func (s *ExtractCriCtlStep) Rollback(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 
 	requiredArchs, err := s.getRequiredArchs(ctx)
 	if err != nil {
-		logger.Errorf("Failed to get required architectures during rollback: %v", err)
+		logger.Error(err, "Failed to get required architectures during rollback.")
 		return nil
 	}
 
@@ -215,12 +215,12 @@ func (s *ExtractCriCtlStep) Rollback(ctx runtime.ExecutionContext) error {
 			if strings.Contains(err.Error(), "disabled for arch") {
 				continue
 			}
-			logger.Warnf("Could not get paths for arch %s during rollback: %v", arch, err)
+			logger.Warn(err, "Could not get paths for arch during rollback.", "arch", arch)
 			continue
 		}
 
 		fileToRemove := filepath.Join(destPath, "crictl")
-		logger.Warnf("Rolling back by deleting extracted file: %s", fileToRemove)
+		logger.Warn("Rolling back by deleting extracted file.", "path", fileToRemove)
 		_ = os.Remove(fileToRemove)
 	}
 
