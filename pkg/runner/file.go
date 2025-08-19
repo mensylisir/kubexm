@@ -80,11 +80,48 @@ func (r *defaultRunner) Exists(ctx context.Context, conn connector.Connector, pa
 	return stat.IsExist, nil
 }
 
+func (r *defaultRunner) ExistsWithOptions(ctx context.Context, conn connector.Connector, path string, opts *connector.StatOptions) (bool, error) {
+	if conn == nil {
+		return false, fmt.Errorf("connector cannot be nil")
+	}
+
+	connectorOpts := &connector.StatOptions{}
+	if opts != nil {
+		connectorOpts.Sudo = opts.Sudo
+	}
+
+	stat, err := conn.StatWithOptions(ctx, path, connectorOpts)
+	if err != nil {
+		return false, fmt.Errorf("failed to stat path %s: %w", path, err)
+	}
+	return stat.IsExist, nil
+}
+
 func (r *defaultRunner) IsDir(ctx context.Context, conn connector.Connector, path string) (bool, error) {
 	if conn == nil {
 		return false, fmt.Errorf("connector cannot be nil")
 	}
 	stat, err := conn.Stat(ctx, path)
+	if err != nil {
+		return false, fmt.Errorf("failed to stat path %s: %w", path, err)
+	}
+	if !stat.IsExist {
+		return false, nil
+	}
+	return stat.IsDir, nil
+}
+
+func (r *defaultRunner) IsDirWithOptions(ctx context.Context, conn connector.Connector, path string, opts *connector.StatOptions) (bool, error) {
+	if conn == nil {
+		return false, fmt.Errorf("connector cannot be nil")
+	}
+
+	connectorOpts := &connector.StatOptions{}
+	if opts != nil {
+		connectorOpts.Sudo = opts.Sudo
+	}
+
+	stat, err := conn.StatWithOptions(ctx, path, connectorOpts)
 	if err != nil {
 		return false, fmt.Errorf("failed to stat path %s: %w", path, err)
 	}
@@ -109,6 +146,13 @@ func (r *defaultRunner) ReadFile(ctx context.Context, conn connector.Connector, 
 		return stdout, fmt.Errorf("failed to read file '%s' with cat: %w (stderr: %s)", path, err, string(stderr))
 	}
 	return stdout, nil
+}
+
+func (r *defaultRunner) ReadFileWithOptions(ctx context.Context, conn connector.Connector, path string, opts *connector.FileTransferOptions) ([]byte, error) {
+	if conn == nil {
+		return nil, fmt.Errorf("connector cannot be nil")
+	}
+	return conn.ReadFileWithOptions(ctx, path, opts)
 }
 
 func (r *defaultRunner) WriteFile(ctx context.Context, conn connector.Connector, content []byte, destPath, permissions string, sudo bool) error {
@@ -404,6 +448,14 @@ func (r *defaultRunner) LookPath(ctx context.Context, conn connector.Connector, 
 		return "", fmt.Errorf("connector cannot be nil")
 	}
 	return conn.LookPath(ctx, file)
+}
+
+func (r *defaultRunner) LookPathWithOptions(ctx context.Context, conn connector.Connector, file string, opts *connector.LookPathOptions) (string, error) {
+	connectorOpts := &connector.LookPathOptions{}
+	if opts != nil {
+		connectorOpts.Sudo = opts.Sudo
+	}
+	return conn.LookPathWithOptions(ctx, file, connectorOpts)
 }
 
 func (r *defaultRunner) EnsureMount(ctx context.Context, conn connector.Connector, device, mountPoint, fsType string, options []string, persistent bool) error {

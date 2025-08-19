@@ -48,21 +48,9 @@ func (s *KubeadmCreateKubeconfigsStep) Precheck(ctx runtime.ExecutionContext) (i
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	logger.Info("Starting precheck for kubeconfig creation...")
 
-	var caRequiresRenewal bool
-	if rawVal, ok := ctx.GetModuleCache().Get(CacheKeyK8sCARequiresRenewal); ok {
-		if val, isBool := rawVal.(bool); isBool {
-			caRequiresRenewal = val
-		}
-	}
-
 	baseCertsDir := ctx.GetKubernetesCertsDir()
-	if caRequiresRenewal {
-		s.caToUseDir = filepath.Join(baseCertsDir, "certs-new")
-		s.outputDir = filepath.Join(baseCertsDir, "certs-new")
-	} else {
-		s.caToUseDir = baseCertsDir
-		s.outputDir = baseCertsDir
-	}
+	s.caToUseDir = baseCertsDir
+	s.outputDir = baseCertsDir
 
 	if !helpers.IsFileExist(filepath.Join(s.caToUseDir, "ca.crt")) {
 		return false, fmt.Errorf("precheck failed: CA certificate not found in '%s'", s.caToUseDir)

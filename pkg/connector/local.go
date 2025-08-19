@@ -378,8 +378,73 @@ func (l *LocalConnector) Stat(ctx context.Context, path string) (*FileStat, erro
 	}, nil
 }
 
+func (l *LocalConnector) StatWithOptions(ctx context.Context, path string, opts *StatOptions) (*FileStat, error) {
+	useSudo := opts != nil && opts.Sudo
+
+	fi, err := os.Lstat(path)
+	if err == nil {
+		return &FileStat{
+			Name:    fi.Name(),
+			Size:    fi.Size(),
+			Mode:    fi.Mode(),
+			ModTime: fi.ModTime(),
+			IsDir:   fi.IsDir(),
+			IsExist: true,
+		}, nil
+	}
+
+	if os.IsNotExist(err) {
+		return &FileStat{Name: filepath.Base(path), IsExist: false}, nil
+	}
+
+	if !useSudo {
+		return nil, fmt.Errorf("failed to stat local path %s: %w", path, err)
+	}
+
+	cmdExists := fmt.Sprintf("test -e %s", path)
+	_, _, errExists := l.Exec(ctx, cmdExists, &ExecOptions{Sudo: true})
+	if errExists != nil {
+		return &FileStat{Name: filepath.Base(path), IsExist: false}, nil
+	}
+
+	cmdIsDir := fmt.Sprintf("test -d %s", path)
+	_, _, errIsDir := l.Exec(ctx, cmdIsDir, &ExecOptions{Sudo: true})
+	isDir := (errIsDir == nil)
+	return &FileStat{
+		Name:    filepath.Base(path),
+		IsDir:   isDir,
+		IsExist: true,
+	}, nil
+}
+
 func (l *LocalConnector) LookPath(ctx context.Context, file string) (string, error) {
 	return exec.LookPath(file)
+}
+
+func (l *LocalConnector) LookPathWithOptions(ctx context.Context, file string, opts *LookPathOptions) (string, error) {
+	if strings.ContainsAny(file, " \t\n\r`;&|$<>()!{}[]*?^~") {
+		return "", fmt.Errorf("invalid characters in executable name for LookPath: %q", file)
+	}
+
+	cmd := fmt.Sprintf("command -v %s", file)
+
+	useSudo := opts != nil && opts.Sudo
+
+	execOpts := &ExecOptions{
+		Sudo: useSudo,
+	}
+
+	stdout, stderr, err := l.Exec(ctx, cmd, execOpts)
+	if err != nil {
+		return "", fmt.Errorf("failed to find executable '%s' locally (sudo: %v): %s (underlying error: %w)", file, useSudo, string(stderr), err)
+	}
+
+	path := strings.TrimSpace(string(stdout))
+	if path == "" {
+		return "", fmt.Errorf("executable '%s' not found in local PATH (sudo: %v, stderr: %s)", file, useSudo, string(stderr))
+	}
+
+	return path, nil
 }
 
 func (l *LocalConnector) GetOS(ctx context.Context) (*OS, error) {
@@ -477,6 +542,34 @@ func (l *LocalConnector) ReadFile(ctx context.Context, path string) ([]byte, err
 		return nil, fmt.Errorf("failed to read local file %s: %w", path, err)
 	}
 	return data, nil
+}
+
+func (l *LocalConnector) ReadFileWithOptions(ctx context.Context, path string, opts *FileTransferOptions) ([]byte, error) {
+	useSudo := false
+	if opts != nil && opts.Sudo {
+		useSudo = true
+	}
+	if !useSudo {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read local file %s: %w", path, err)
+		}
+		return data, nil
+	}
+
+	cmd := fmt.Sprintf("cat %s", path)
+	execOpts := &ExecOptions{
+		Sudo: true,
+	}
+	if opts != nil && opts.Timeout > 0 {
+		execOpts.Timeout = opts.Timeout
+	}
+	stdout, _, err := l.Exec(ctx, cmd, execOpts)
+	if err != nil {
+		return stdout, fmt.Errorf("failed to read file '%s' with local sudo cat: %w", path, err)
+	}
+
+	return stdout, nil
 }
 
 func (l *LocalConnector) WriteFile(ctx context.Context, content []byte, destPath string, options *FileTransferOptions) error {

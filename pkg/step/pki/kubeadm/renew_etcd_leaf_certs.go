@@ -76,7 +76,7 @@ func (s *KubeadmRenewStackedEtcdLeafCertsStep) Precheck(ctx runtime.ExecutionCon
 		s.caToUseDir = baseCertsDir
 		s.outputDir = baseCertsDir
 	}
-
+	s.outputDir = filepath.Join(s.outputDir, "etcd")
 	if !helpers.IsFileExist(filepath.Join(s.caToUseDir, "etcd/ca.crt")) {
 		return false, fmt.Errorf("precheck failed: new Etcd CA not found in '%s/etcd'", s.caToUseDir)
 	}
@@ -119,47 +119,44 @@ func (s *KubeadmRenewStackedEtcdLeafCertsStep) Run(ctx runtime.ExecutionContext)
 		}
 	}
 	logger.Infof("Generating new leaf certificates and saving to '%s'...", s.outputDir)
-	for _, node := range s.etcdNodes {
-		nodeName := node.GetName()
-		logger.Debugf("Generating certificates for etcd node '%s'", nodeName)
-		serverCfg := helpers.CertConfig{
-			CommonName:   nodeName,
-			Organization: []string{"etcd"},
-			AltNames:     altNames,
-			Usages:       []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-			Duration:     s.CertDuration,
-		}
-		serverCertFile := fmt.Sprintf("server-%s.crt", nodeName)
-		serverKeyFile := fmt.Sprintf("server-%s.key", nodeName)
-		if err := helpers.NewSignedCertificate(s.outputDir, serverCertFile, serverKeyFile, serverCfg, caCert, caKey); err != nil {
-			return fmt.Errorf("failed to generate etcd server certificate for node %s: %w", nodeName, err)
-		}
+	logger.Debugf("Generating certificates for etcd node ")
+	serverCfg := helpers.CertConfig{
+		CommonName:   "kubexm-kubeadm-etcd",
+		Organization: []string{"etcd"},
+		AltNames:     altNames,
+		Usages:       []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		Duration:     s.CertDuration,
+	}
+	serverCertFile := "server.crt"
+	serverKeyFile := "server.key"
+	if err := helpers.NewSignedCertificate(s.outputDir, serverCertFile, serverKeyFile, serverCfg, caCert, caKey); err != nil {
+		return fmt.Errorf("failed to generate etcd server certificate for node: %w", err)
+	}
 
-		peerCfg := helpers.CertConfig{
-			CommonName:   nodeName,
-			Organization: []string{"etcd"},
-			AltNames:     altNames,
-			Usages:       []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-			Duration:     s.CertDuration,
-		}
-		peerCertFile := fmt.Sprintf("peer-%s.crt", nodeName)
-		peerKeyFile := fmt.Sprintf("peer-%s.key", nodeName)
-		if err := helpers.NewSignedCertificate(s.outputDir, peerCertFile, peerKeyFile, peerCfg, caCert, caKey); err != nil {
-			return fmt.Errorf("failed to generate etcd peer certificate for node %s: %w", nodeName, err)
-		}
+	peerCfg := helpers.CertConfig{
+		CommonName:   "kubexm-kubeadm-etcd",
+		Organization: []string{"etcd"},
+		AltNames:     altNames,
+		Usages:       []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		Duration:     s.CertDuration,
+	}
+	peerCertFile := "peer.crt"
+	peerKeyFile := "peer.key"
+	if err := helpers.NewSignedCertificate(s.outputDir, peerCertFile, peerKeyFile, peerCfg, caCert, caKey); err != nil {
+		return fmt.Errorf("failed to generate etcd peer certificate for node: %w", err)
+	}
 
-		healthCheckClientCfg := helpers.CertConfig{
-			CommonName:   "kube-etcd-healthcheck-client",
-			Organization: []string{"system:masters"},
-			AltNames:     altNames,
-			Usages:       []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-			Duration:     s.CertDuration,
-		}
-		healthCheckClientCertFile := fmt.Sprintf("kube-etcd-healthcheck-client-%s.crt", nodeName)
-		healthCheckClientKeyFile := fmt.Sprintf("kube-etcd-healthcheck-client-%s.key", nodeName)
-		if err := helpers.NewSignedCertificate(s.outputDir, healthCheckClientCertFile, healthCheckClientKeyFile, healthCheckClientCfg, caCert, caKey); err != nil {
-			return fmt.Errorf("failed to generate etcd healthcheck-client certificate for node %s: %w", nodeName, err)
-		}
+	healthCheckClientCfg := helpers.CertConfig{
+		CommonName:   "kube-etcd-healthcheck-client",
+		Organization: []string{"system:masters"},
+		AltNames:     altNames,
+		Usages:       []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		Duration:     s.CertDuration,
+	}
+	healthCheckClientCertFile := "healthcheck-client.crt"
+	healthCheckClientKeyFile := "healthcheck-client.key"
+	if err := helpers.NewSignedCertificate(s.outputDir, healthCheckClientCertFile, healthCheckClientKeyFile, healthCheckClientCfg, caCert, caKey); err != nil {
+		return fmt.Errorf("failed to generate etcd healthcheck-client certificate for node: %w", err)
 	}
 
 	logger.Info("All stacked Etcd leaf certificates generated successfully.")
