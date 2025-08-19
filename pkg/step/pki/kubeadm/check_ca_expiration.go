@@ -31,7 +31,7 @@ type KubeadmCheckK8sCAExpirationStepBuilder struct {
 
 func NewKubeadmCheckK8sCAExpirationStepBuilder(ctx runtime.Context, instanceName string) *KubeadmCheckK8sCAExpirationStepBuilder {
 	s := &KubeadmCheckK8sCAExpirationStep{
-		localCertsDir:       filepath.Join(ctx.GetKubernetesCertsDir(), ctx.GetHost().GetName()),
+		localCertsDir:       ctx.GetKubernetesCertsDir(),
 		expirationThreshold: DefaultK8sCertExpirationThreshold,
 		k8sCaCerts: []string{
 			"ca.crt",

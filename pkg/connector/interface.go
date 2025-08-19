@@ -62,11 +62,14 @@ type Connector interface {
 	Fetch(ctx context.Context, remotePath, localPath string, opts *FileTransferOptions) error
 	CopyContent(ctx context.Context, content []byte, destPath string, options *FileTransferOptions) error
 	Stat(ctx context.Context, path string) (*FileStat, error)
+	StatWithOptions(ctx context.Context, path string, opts *StatOptions) (*FileStat, error)
 	LookPath(ctx context.Context, file string) (string, error)
+	LookPathWithOptions(ctx context.Context, file string, opts *LookPathOptions) (string, error)
 	Close() error
 	IsConnected() bool
 	GetOS(ctx context.Context) (*OS, error)
 	ReadFile(ctx context.Context, path string) ([]byte, error)
+	ReadFileWithOptions(ctx context.Context, path string, opts *FileTransferOptions) ([]byte, error)
 	WriteFile(ctx context.Context, content []byte, destPath string, options *FileTransferOptions) error
 	Mkdir(ctx context.Context, path string, perm string) error
 	Remove(ctx context.Context, path string, opts RemoveOptions) error

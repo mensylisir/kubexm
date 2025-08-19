@@ -141,8 +141,11 @@ type Runner interface {
 	Compress(ctx context.Context, conn connector.Connector, facts *Facts, archivePath string, sources []string, sudo bool) error
 	ListArchiveContents(ctx context.Context, conn connector.Connector, facts *Facts, archivePath string, sudo bool) ([]string, error)
 	Exists(ctx context.Context, conn connector.Connector, path string) (bool, error)
+	ExistsWithOptions(ctx context.Context, conn connector.Connector, path string, opts *connector.StatOptions) (bool, error)
 	IsDir(ctx context.Context, conn connector.Connector, path string) (bool, error)
+	IsDirWithOptions(ctx context.Context, conn connector.Connector, path string, opts *connector.StatOptions) (bool, error)
 	ReadFile(ctx context.Context, conn connector.Connector, path string) ([]byte, error)
+	ReadFileWithOptions(ctx context.Context, conn connector.Connector, path string, opts *connector.FileTransferOptions) ([]byte, error)
 	Move(ctx context.Context, conn connector.Connector, src, dest string, sudo bool) error
 	CopyFile(ctx context.Context, conn connector.Connector, src, dest string, recursive bool, sudo bool) error
 	Stat(ctx context.Context, conn connector.Connector, path string) (os.FileInfo, error)
@@ -153,6 +156,7 @@ type Runner interface {
 	Chown(ctx context.Context, conn connector.Connector, path, owner, group string, recursive bool) error
 	GetSHA256(ctx context.Context, conn connector.Connector, path string) (string, error)
 	LookPath(ctx context.Context, conn connector.Connector, file string) (string, error)
+	LookPathWithOptions(ctx context.Context, conn connector.Connector, file string, opts *connector.LookPathOptions) (string, error)
 	IsPortOpen(ctx context.Context, conn connector.Connector, facts *Facts, port int) (bool, error)
 	WaitForPort(ctx context.Context, conn connector.Connector, facts *Facts, port int, timeout time.Duration) error
 	SetHostname(ctx context.Context, conn connector.Connector, facts *Facts, hostname string) error

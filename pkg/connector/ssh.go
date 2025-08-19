@@ -398,7 +398,7 @@ func (s *SSHConnector) Stat(ctx context.Context, path string) (*FileStat, error)
 	if err := s.ensureSftp(); err != nil {
 		return nil, err
 	}
-	fi, err := s.sftpClient.Lstat(path) // Lstat is correct to not follow symlinks
+	fi, err := s.sftpClient.Lstat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &FileStat{Name: filepath.Base(path), IsExist: false}, nil
@@ -415,6 +415,52 @@ func (s *SSHConnector) Stat(ctx context.Context, path string) (*FileStat, error)
 	}, nil
 }
 
+func (s *SSHConnector) StatWithOptions(ctx context.Context, path string, opts *StatOptions) (*FileStat, error) {
+	useSudo := opts != nil && opts.Sudo
+
+	if err := s.ensureSftp(); err == nil {
+		fi, err := s.sftpClient.Lstat(path)
+		if err == nil {
+			return &FileStat{
+				Name:    fi.Name(),
+				Size:    fi.Size(),
+				Mode:    fi.Mode(),
+				ModTime: fi.ModTime(),
+				IsDir:   fi.IsDir(),
+				IsExist: true,
+			}, nil
+		}
+		if os.IsNotExist(err) {
+			return &FileStat{Name: filepath.Base(path), IsExist: false}, nil
+		}
+		if !useSudo {
+			return nil, fmt.Errorf("failed to stat remote path %s: %w", path, err)
+		}
+	} else if !useSudo {
+		return nil, fmt.Errorf("sftp client not available for Stat: %w", err)
+	}
+
+	if useSudo {
+
+		cmdExists := fmt.Sprintf("test -e %s", path)
+		_, _, errExists := s.Exec(ctx, cmdExists, &ExecOptions{Sudo: true})
+		if errExists != nil {
+			return &FileStat{Name: filepath.Base(path), IsExist: false}, nil
+		}
+
+		cmdIsDir := fmt.Sprintf("test -d %s", path)
+		_, _, errIsDir := s.Exec(ctx, cmdIsDir, &ExecOptions{Sudo: true})
+		isDir := (errIsDir == nil)
+
+		return &FileStat{
+			Name:    filepath.Base(path),
+			IsDir:   isDir,
+			IsExist: true,
+		}, nil
+	}
+	return nil, fmt.Errorf("failed to stat remote path %s: sftp unavailable and sudo not requested", path)
+}
+
 func (s *SSHConnector) LookPath(ctx context.Context, file string) (string, error) {
 	if strings.ContainsAny(file, " \t\n\r`;&|$<>()!{}[]*?^~") {
 		return "", fmt.Errorf("invalid characters in executable name for LookPath: %q", file)
@@ -429,6 +475,32 @@ func (s *SSHConnector) LookPath(ctx context.Context, file string) (string, error
 	if path == "" { // Should be redundant if Exec returns error on non-zero exit
 		return "", fmt.Errorf("executable %s not found in PATH (stderr: %s)", file, string(stderr))
 	}
+	return path, nil
+}
+
+func (s *SSHConnector) LookPathWithOptions(ctx context.Context, file string, opts *LookPathOptions) (string, error) {
+	if strings.ContainsAny(file, " \t\n\r`;&|$<>()!{}[]*?^~") {
+		return "", fmt.Errorf("invalid characters in executable name for LookPath: %q", file)
+	}
+
+	cmd := fmt.Sprintf("command -v %s", shellEscape(file))
+
+	useSudo := opts != nil && opts.Sudo
+
+	execOpts := &ExecOptions{
+		Sudo: useSudo,
+	}
+
+	stdout, stderr, err := s.Exec(ctx, cmd, execOpts)
+	if err != nil {
+		return "", fmt.Errorf("failed to find executable '%s' (sudo: %v): %s (underlying error: %w)", file, useSudo, string(stderr), err)
+	}
+
+	path := strings.TrimSpace(string(stdout))
+	if path == "" {
+		return "", fmt.Errorf("executable '%s' not found in PATH (sudo: %v, stderr: %s)", file, useSudo, string(stderr))
+	}
+
 	return path, nil
 }
 
@@ -554,6 +626,37 @@ func (s *SSHConnector) ReadFile(ctx context.Context, path string) ([]byte, error
 		return nil, fmt.Errorf("failed to read remote file %s via sftp on host %s: %w", path, s.connCfg.Host, err)
 	}
 	return contentBytes, nil
+}
+
+func (s *SSHConnector) ReadFileWithOptions(ctx context.Context, path string, opts *FileTransferOptions) ([]byte, error) {
+	useSudo := false
+	if opts != nil && opts.Sudo {
+		useSudo = true
+	}
+	if !useSudo {
+		if err := s.ensureSftp(); err != nil {
+			return nil, fmt.Errorf("sftp client not available for ReadFile on host %s: %w", s.connCfg.Host, err)
+		}
+		file, err := s.sftpClient.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open remote file '%s' via sftp: %w", path, err)
+		}
+		defer file.Close()
+		return io.ReadAll(file)
+	}
+	cmd := fmt.Sprintf("cat %s", path)
+	execOpts := &ExecOptions{
+		Sudo: true,
+	}
+	if opts != nil && opts.Timeout > 0 {
+		execOpts.Timeout = opts.Timeout
+	}
+
+	stdout, _, err := s.Exec(ctx, cmd, execOpts)
+	if err != nil {
+		return stdout, fmt.Errorf("failed to read file '%s' with sudo cat: %w", path, err)
+	}
+	return stdout, nil
 }
 
 func (s *SSHConnector) Mkdir(ctx context.Context, path string, perm string) error {

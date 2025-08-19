@@ -1,11 +1,8 @@
-// FILE: pkg/kubeadm/step_fetch_full_pki.go
-
 package kubeadm
 
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/common"
@@ -46,7 +43,7 @@ func (s *KubeadmFetchFullPKIStep) Meta() *spec.StepMeta {
 
 func (s *KubeadmFetchFullPKIStep) getLocalNodePKIDir(ctx runtime.ExecutionContext) string {
 	baseLocalCertsDir := ctx.GetKubernetesCertsDir()
-	return filepath.Join(baseLocalCertsDir, ctx.GetHost().GetName())
+	return baseLocalCertsDir
 }
 
 func (s *KubeadmFetchFullPKIStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {

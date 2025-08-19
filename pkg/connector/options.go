@@ -30,3 +30,11 @@ type RemoveOptions struct {
 	IgnoreNotExist bool
 	Sudo           bool
 }
+
+type StatOptions struct {
+	Sudo bool
+}
+
+type LookPathOptions struct {
+	Sudo bool
+}
