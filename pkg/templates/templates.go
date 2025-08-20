@@ -9,6 +9,7 @@ import (
 )
 
 //go:embed cd/argocd/*.tmpl
+//go:embed chrony/*.tmpl
 //go:embed cni/calico/*.tmpl
 //go:embed cni/cilium/*.tmpl
 //go:embed cni/flannel/*.tmpl

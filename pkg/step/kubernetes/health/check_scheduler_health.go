@@ -1,4 +1,4 @@
-package kubexm
+package health
 
 import (
 	"fmt"
