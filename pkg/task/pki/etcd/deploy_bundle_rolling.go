@@ -2,6 +2,7 @@ package etcd
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/etcd"
 
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/connector"
@@ -82,7 +83,7 @@ func (t *DeployTrustBundleRollingTask) Plan(ctx runtime.TaskContext) (*plan.Exec
 		fragment.AddNode(&plan.ExecutionNode{Name: string(restartNodeID), Step: restartStep, Hosts: []connector.Host{node}})
 		fragment.AddDependency(distBundleNodeID, restartNodeID)
 
-		waitStep := etcdstep.NewWaitClusterHealthyStepBuilder(*runtimeCtx, fmt.Sprintf("WaitClusterHealthy_%s", nodeName)).Build()
+		waitStep := etcd.NewWaitClusterHealthyStepBuilder(*runtimeCtx, fmt.Sprintf("WaitClusterHealthy_%s", nodeName)).Build()
 		waitNodeID := plan.NodeID(fmt.Sprintf("WaitClusterHealthyForBundle_%s", nodeName))
 		fragment.AddNode(&plan.ExecutionNode{Name: string(waitNodeID), Step: waitStep, Hosts: []connector.Host{node}})
 		fragment.AddDependency(restartNodeID, waitNodeID)

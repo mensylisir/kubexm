@@ -7,6 +7,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
+	kubeadm2 "github.com/mensylisir/kubexm/pkg/step/kubernetes/kubeadm"
 	"github.com/mensylisir/kubexm/pkg/step/pki/kubeadm"
 	"github.com/mensylisir/kubexm/pkg/task"
 )
@@ -69,7 +70,7 @@ func (t *RolloutEtcdCertsCATask) Plan(ctx runtime.TaskContext) (*plan.ExecutionF
 		backupStep := kubeadm.NewKubeadmBackupRemotePKIStepBuilder(*runtimeCtx, fmt.Sprintf("BackupFor%s", hostName)).Build()
 		distributeStep := kubeadm.NewKubeadmDistributeStackedEtcdPKIStepBuilder(*runtimeCtx, fmt.Sprintf("DistributeCAFor%s", hostName)).Build()
 		restartStep := kubeadm.NewKubeadmRestartEtcdStepBuilder(*runtimeCtx, fmt.Sprintf("RestartEtcdFor%s", hostName)).Build()
-		verifyPodStep := kubeadm.NewKubeadmVerifyEtcdPodHealthStepBuilder(*runtimeCtx, fmt.Sprintf("VerifyEtcdPodFor%s", hostName)).Build()
+		verifyPodStep := kubeadm2.NewKubeadmVerifyEtcdPodHealthStepBuilder(*runtimeCtx, fmt.Sprintf("VerifyEtcdPodFor%s", hostName)).Build()
 
 		backupNode := &plan.ExecutionNode{Name: backupStep.Meta().Name, Step: backupStep, Hosts: hostList}
 		distributeNode := &plan.ExecutionNode{Name: distributeStep.Meta().Name, Step: distributeStep, Hosts: hostList}
@@ -92,7 +93,7 @@ func (t *RolloutEtcdCertsCATask) Plan(ctx runtime.TaskContext) (*plan.ExecutionF
 		lastNodeExitPoint = verifyPodID
 	}
 
-	verifyClusterStep := kubeadm.NewKubeadmVerifyEtcdClusterHealthStepBuilder(*runtimeCtx, "VerifyClusterHealth").Build()
+	verifyClusterStep := kubeadm2.NewKubeadmVerifyEtcdClusterHealthStepBuilder(*runtimeCtx, "VerifyClusterHealth").Build()
 	verifyClusterNode := &plan.ExecutionNode{Name: verifyClusterStep.Meta().Name, Step: verifyClusterStep, Hosts: []connector.Host{opHost}}
 	verifyClusterID, _ := fragment.AddNode(verifyClusterNode)
 

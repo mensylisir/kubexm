@@ -2,6 +2,7 @@ package etcd
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/step/pki/etcd"
 	"path/filepath"
 	"strings"
 	"time"
@@ -27,7 +28,7 @@ type WaitClusterHealthyStepBuilder struct {
 
 func NewWaitClusterHealthyStepBuilder(ctx runtime.Context, instanceName string) *WaitClusterHealthyStepBuilder {
 	s := &WaitClusterHealthyStep{
-		remoteCertsDir: DefaultRemoteEtcdCertsDir,
+		remoteCertsDir: etcd.DefaultRemoteEtcdCertsDir,
 		checkTimeout:   2 * time.Minute,
 		checkInterval:  5 * time.Second,
 	}

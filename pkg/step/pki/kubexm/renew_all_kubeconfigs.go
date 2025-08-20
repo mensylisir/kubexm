@@ -62,23 +62,11 @@ func (s *BinaryRenewAllKubeconfigsStep) Precheck(ctx runtime.ExecutionContext) (
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	logger.Info("Starting precheck for kubeconfig renewal...")
 
-	var caRequiresRenewal bool
-	if rawVal, ok := ctx.GetModuleCache().Get(CacheKeyK8sCARequiresRenewal); ok {
-		if val, isBool := rawVal.(bool); isBool {
-			caRequiresRenewal = val
-		}
-	}
-
 	baseCertsDir := ctx.GetKubernetesCertsDir()
 	baseKubeconfigDir := filepath.Join(filepath.Dir(ctx.GetKubernetesCertsDir()), "kubeconfig")
 
-	if caRequiresRenewal {
-		s.pkiDir = filepath.Join(baseCertsDir, "certs-new")
-		s.outputDir = filepath.Join(baseKubeconfigDir, "kubeconfigs-new")
-	} else {
-		s.pkiDir = baseCertsDir
-		s.outputDir = baseKubeconfigDir
-	}
+	s.pkiDir = baseCertsDir
+	s.outputDir = baseKubeconfigDir
 
 	logger.Info("Precheck passed.")
 	return false, nil

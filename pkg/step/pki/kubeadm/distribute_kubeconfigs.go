@@ -51,7 +51,7 @@ func (s *KubeadmDistributeKubeconfigsStep) Precheck(ctx runtime.ExecutionContext
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 
 	baseCertsDir := ctx.GetKubernetesCertsDir()
-	certsNewDir := filepath.Join(baseCertsDir, "certs-new")
+	certsNewDir := baseCertsDir
 	if _, err := os.Stat(certsNewDir); err == nil {
 		s.localCertsDir = certsNewDir
 	} else {

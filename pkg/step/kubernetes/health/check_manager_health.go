@@ -1,4 +1,4 @@
-package kubexm
+package health
 
 import (
 	"fmt"
@@ -10,38 +10,40 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 
-type VerifyKubeletHealthStep struct {
+type VerifyControllerManagerHealthStep struct {
 	step.Base
 	serviceName     string
 	healthzEndpoint string
+	retries         int
 	retryDelay      time.Duration
 }
 
-type VerifyKubeletHealthStepBuilder struct {
-	step.Builder[VerifyKubeletHealthStepBuilder, *VerifyKubeletHealthStep]
+type VerifyControllerManagerHealthStepBuilder struct {
+	step.Builder[VerifyControllerManagerHealthStepBuilder, *VerifyControllerManagerHealthStep]
 }
 
-func NewVerifyKubeletHealthStepBuilder(ctx runtime.Context, instanceName string) *VerifyKubeletHealthStepBuilder {
-	s := &VerifyKubeletHealthStep{
-		serviceName:     "kubelet",
-		healthzEndpoint: "http://127.0.0.1:10248/healthz",
+func NewVerifyControllerManagerHealthStepBuilder(ctx runtime.Context, instanceName string) *VerifyControllerManagerHealthStepBuilder {
+	s := &VerifyControllerManagerHealthStep{
+		serviceName:     "kube-controller-manager",
+		healthzEndpoint: "http://127.0.0.1:10257/healthz",
+		retries:         12, // 2 minutes
 		retryDelay:      10 * time.Second,
 	}
 	s.Base.Meta.Name = instanceName
-	s.Base.Meta.Description = "Verify the health of the kubelet service on the node"
+	s.Base.Meta.Description = "Verify the health of the kube-controller-manager service on the node"
 	s.Base.Sudo = false
 	s.Base.IgnoreError = false
 	s.Base.Timeout = 5 * time.Minute
 
-	b := new(VerifyKubeletHealthStepBuilder).Init(s)
+	b := new(VerifyControllerManagerHealthStepBuilder).Init(s)
 	return b
 }
 
-func (s *VerifyKubeletHealthStep) Meta() *spec.StepMeta {
+func (s *VerifyControllerManagerHealthStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
-func (s *VerifyKubeletHealthStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+func (s *VerifyControllerManagerHealthStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	logger.Info("Starting precheck: verifying required commands are available...")
 
@@ -58,38 +60,31 @@ func (s *VerifyKubeletHealthStep) Precheck(ctx runtime.ExecutionContext) (isDone
 	return false, nil
 }
 
-func (s *VerifyKubeletHealthStep) Run(ctx runtime.ExecutionContext) error {
+func (s *VerifyControllerManagerHealthStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
-	logger.Info("Verifying kubelet health...")
-
-	timeout := time.After(s.Base.Timeout)
-	ticker := time.NewTicker(s.retryDelay)
-	defer ticker.Stop()
+	logger.Info("Verifying kube-controller-manager health...")
 
 	var lastErr error
-	for {
-		select {
-		case <-timeout:
-			if lastErr != nil {
-				return fmt.Errorf("kubelet health verification timed out after %v: %w", s.Base.Timeout, lastErr)
-			}
-			return fmt.Errorf("kubelet health verification timed out after %v", s.Base.Timeout)
-		case <-ticker.C:
-			logger.Info("Attempting to verify kubelet health...")
+	for i := 0; i < s.retries; i++ {
+		log := logger.With("attempt", i+1)
+		log.Infof("Attempting to verify kube-controller-manager health...")
 
-			err := s.checkKubelet(ctx)
-			if err == nil {
-				logger.Info("kubelet is healthy.")
-				return nil
-			}
-
-			lastErr = err
-			logger.Warnf("Health check failed: %v. Retrying...", err)
+		err := s.checkControllerManager(ctx)
+		if err == nil {
+			logger.Info("kube-controller-manager is healthy.")
+			return nil
 		}
+
+		lastErr = err
+		log.Warnf("Health check failed: %v. Retrying in %v...", err, s.retryDelay)
+		time.Sleep(s.retryDelay)
 	}
+
+	logger.Errorf("kube-controller-manager did not become healthy after %d retries.", s.retries)
+	return fmt.Errorf("kube-controller-manager health verification failed: %w", lastErr)
 }
 
-func (s *VerifyKubeletHealthStep) checkKubelet(ctx runtime.ExecutionContext) error {
+func (s *VerifyControllerManagerHealthStep) checkControllerManager(ctx runtime.ExecutionContext) error {
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
@@ -118,10 +113,10 @@ func (s *VerifyKubeletHealthStep) checkKubelet(ctx runtime.ExecutionContext) err
 	return nil
 }
 
-func (s *VerifyKubeletHealthStep) Rollback(ctx runtime.ExecutionContext) error {
+func (s *VerifyControllerManagerHealthStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 	logger.Info("Rollback is not applicable for a verification-only step. Nothing to do.")
 	return nil
 }
 
-var _ step.Step = (*VerifyKubeletHealthStep)(nil)
+var _ step.Step = (*VerifyControllerManagerHealthStep)(nil)
