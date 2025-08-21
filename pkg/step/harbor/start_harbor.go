@@ -72,20 +72,19 @@ func (s *InstallAndStartHarborStep) Precheck(ctx runtime.ExecutionContext) (isDo
 		return false, fmt.Errorf("docker-compose not found in PATH on remote host, ensure it's installed first")
 	}
 
-	checkCmd := "docker ps --filter name=harbor-core --filter status=running --format '{{.Names}}'"
+	// Check for key harbor services. If they are all running, we can consider the step as done.
+	checkCmd := "docker ps --filter name=harbor-core --filter status=running --format '{{.Names}}' | grep . > /dev/null && " +
+		"docker ps --filter name=harbor-db --filter status=running --format '{{.Names}}' | grep . > /dev/null && " +
+		"docker ps --filter name=harbor-jobservice --filter status=running --format '{{.Names}}' | grep . > /dev/null && " +
+		"docker ps --filter name=harbor-portal --filter status=running --format '{{.Names}}' | grep . > /dev/null"
 
-	output, err := runner.Run(ctx.GoContext(), conn, checkCmd, s.Sudo)
-	if err != nil {
-		logger.Warnf("Failed to check for running harbor-core container, will attempt installation. Error: %v", err)
-		return false, nil
-	}
-
-	if strings.Contains(output, "harbor-core") {
-		logger.Info("Harbor core container is already running. Step is done.")
+	_, err = runner.Run(ctx.GoContext(), conn, checkCmd, s.Sudo)
+	if err == nil {
+		logger.Info("Key Harbor containers (core, db, jobservice, portal) are already running. Step is done.")
 		return true, nil
 	}
 
-	logger.Info("Harbor core container is not running. Installation/start is required.")
+	logger.Info("One or more key Harbor containers are not running. Installation/start is required.")
 	return false, nil
 }
 
