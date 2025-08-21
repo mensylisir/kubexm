@@ -88,7 +88,7 @@ func (s *KubeadmUpgradeApplyStep) Run(ctx runtime.ExecutionContext) error {
 		logger.Warn("Could not automatically detect the backup path from kubeadm output. Manual rollback might be required if subsequent steps fail.")
 	} else {
 		backupPath := matches[1]
-		cacheKey := fmt.Sprintf(common.CacheKeyKubeadmBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+		cacheKey := fmt.Sprintf(common.CacheKeyKubeadmBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), ctx.GetHost().GetName())
 		ctx.GetTaskCache().Set(cacheKey, backupPath)
 		logger.Infof("Successfully detected and saved kubeadm backup path to cache: %s (key: %s)", backupPath, cacheKey)
 	}

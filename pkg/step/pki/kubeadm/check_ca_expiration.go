@@ -107,9 +107,10 @@ func (s *KubeadmCheckK8sCAExpirationStep) Run(ctx runtime.ExecutionContext) erro
 		}
 	}
 
-	ctx.GetTaskCache().Set(common.CacheKubeadmK8sCACertRenew, anyCARequiresRenewal)
-	ctx.GetModuleCache().Set(common.CacheKubeadmK8sCACertRenew, anyCARequiresRenewal)
-	ctx.GetPipelineCache().Set(common.CacheKubeadmK8sCACertRenew, anyCARequiresRenewal)
+	cacheKey := fmt.Sprintf(common.CacheKubeadmK8sCACertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	ctx.GetTaskCache().Set(cacheKey, anyCARequiresRenewal)
+	ctx.GetModuleCache().Set(cacheKey, anyCARequiresRenewal)
+	ctx.GetPipelineCache().Set(cacheKey, anyCARequiresRenewal)
 	logger.Infof("Core K8s CA check complete. Renewal required: %v", anyCARequiresRenewal)
 
 	return nil

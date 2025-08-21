@@ -120,10 +120,11 @@ func (s *KubeadmCheckStackedEtcdLeafCertsExpirationStep) Run(ctx runtime.Executi
 	ctx.GetModuleCache().Set(fmt.Sprintf(common.CacheKubeadmEtcdLeafCertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName()), anyCertRequiresRenewal)
 	ctx.GetPipelineCache().Set(fmt.Sprintf(common.CacheKubeadmEtcdLeafCertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName()), anyCertRequiresRenewal)
 
+	cacheKey := fmt.Sprintf(common.CacheKubeadmEtcdLeafCertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
 	if anyCertRequiresRenewal {
-		logger.Warnf("One or more stacked etcd leaf certificates require renewal. Result saved to cache ('%s': true).", common.CacheKubeadmEtcdLeafCertRenew)
+		logger.Warnf("One or more stacked etcd leaf certificates require renewal. Result saved to cache ('%s': true).", cacheKey)
 	} else {
-		logger.Info("All stacked etcd leaf certificates are valid. Result saved to cache ('%s': false).", common.CacheKubeadmEtcdLeafCertRenew)
+		logger.Info("All stacked etcd leaf certificates are valid. Result saved to cache ('%s': false).", cacheKey)
 	}
 
 	return nil

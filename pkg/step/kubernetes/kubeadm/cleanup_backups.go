@@ -41,7 +41,7 @@ func (s *KubeadmCleanupBackupsStep) Precheck(ctx runtime.ExecutionContext) (isDo
 func (s *KubeadmCleanupBackupsStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
-	cacheKey := fmt.Sprintf(common.CacheKeyKubeadmBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	cacheKey := fmt.Sprintf(common.CacheKeyKubeadmBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), ctx.GetHost().GetName())
 	backupPath, ok := ctx.GetTaskCache().Get(cacheKey)
 	if !ok {
 		logger.Info("No kubeadm backup path found in cache for this node. Nothing to clean up.")

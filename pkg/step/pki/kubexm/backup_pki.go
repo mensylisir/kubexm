@@ -49,7 +49,8 @@ func (s *KubexmBackupRemotePKIStep) Meta() *spec.StepMeta {
 func (s *KubexmBackupRemotePKIStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 
-	if _, ok := ctx.GetTaskCache().Get(common.CacheKubeCertsBackupPath); ok {
+	cacheKey := fmt.Sprintf(common.CacheKubeCertsBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	if _, ok := ctx.GetTaskCache().Get(cacheKey); ok {
 		logger.Info("Remote PKI directory has already been backed up in this task. Step is done.")
 		return true, nil
 	}
@@ -80,7 +81,8 @@ func (s *KubexmBackupRemotePKIStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to back up remote PKI directory on host '%s': %w", ctx.GetHost().GetName(), err)
 	}
 
-	ctx.GetTaskCache().Set(common.CacheKubeCertsBackupPath, s.remoteBackupDir)
+	cacheKey := fmt.Sprintf(common.CacheKubeCertsBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	ctx.GetTaskCache().Set(cacheKey, s.remoteBackupDir)
 	logger.Infof("Successfully backed up PKI directory. Backup path '%s' saved to cache.", s.remoteBackupDir)
 
 	return nil
@@ -89,7 +91,8 @@ func (s *KubexmBackupRemotePKIStep) Run(ctx runtime.ExecutionContext) error {
 func (s *KubexmBackupRemotePKIStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 
-	backupPath, ok := ctx.GetTaskCache().Get(common.CacheKubeCertsBackupPath)
+	cacheKey := fmt.Sprintf(common.CacheKubeCertsBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	backupPath, ok := ctx.GetTaskCache().Get(cacheKey)
 	if !ok {
 		logger.Warn("No backup path found in cache, nothing to roll back.")
 		return nil

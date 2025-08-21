@@ -36,13 +36,15 @@ func (t *RolloutEtcdLeafCertsTask) Description() string {
 }
 
 func (t *RolloutEtcdLeafCertsTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-
-	if val, ok := ctx.GetPipelineCache().Get(common.CacheKubeadmEtcdCACertRenew); ok {
+	runtimeCtx := ctx.(*runtime.Context)
+	caCacheKey := fmt.Sprintf(common.CacheKubeadmEtcdCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
+	if val, ok := ctx.GetPipelineCache().Get(caCacheKey); ok {
 		if renew, isBool := val.(bool); isBool && renew {
 			return true, nil
 		}
 	}
-	if val, ok := ctx.GetPipelineCache().Get(common.CacheKubeadmEtcdLeafCertRenew); ok {
+	leafCacheKey := fmt.Sprintf(common.CacheKubeadmEtcdLeafCertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
+	if val, ok := ctx.GetPipelineCache().Get(leafCacheKey); ok {
 		if renew, isBool := val.(bool); isBool && renew {
 			return true, nil
 		}
@@ -66,7 +68,9 @@ func (t *RolloutEtcdLeafCertsTask) Plan(ctx runtime.TaskContext) (*plan.Executio
 	}
 
 	var caRequiresRenewal bool
-	if val, ok := ctx.GetPipelineCache().Get(common.CacheKubeadmEtcdCACertRenew); ok {
+	runtimeCtx := ctx.(*runtime.Context)
+	caCacheKey := fmt.Sprintf(common.CacheKubeadmEtcdCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
+	if val, ok := ctx.GetPipelineCache().Get(caCacheKey); ok {
 		if renew, isBool := val.(bool); isBool {
 			caRequiresRenewal = renew
 		}

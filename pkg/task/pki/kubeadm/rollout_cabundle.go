@@ -37,7 +37,9 @@ func (t *RolloutMasterCertsCATask) Description() string {
 }
 
 func (t *RolloutMasterCertsCATask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	if val, ok := ctx.GetModuleCache().Get(common.CacheKubeadmK8sCACertRenew); ok {
+	runtimeCtx := ctx.(*runtime.Context)
+	cacheKey := fmt.Sprintf(common.CacheKubeadmK8sCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
+	if val, ok := ctx.GetModuleCache().Get(cacheKey); ok {
 		if renew, isBool := val.(bool); isBool && renew {
 			return true, nil
 		}

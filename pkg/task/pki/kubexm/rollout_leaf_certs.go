@@ -41,13 +41,16 @@ func (t *RolloutLeafCertsToMastersTask) Description() string {
 
 func (t *RolloutLeafCertsToMastersTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 	var renewalTriggered bool
-	if val, ok := ctx.GetModuleCache().Get(common.CacheKubexmK8sCACertRenew); ok {
+	runtimeCtx := ctx.(*runtime.Context)
+	caCacheKey := fmt.Sprintf(common.CacheKubexmK8sCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
+	if val, ok := ctx.GetModuleCache().Get(caCacheKey); ok {
 		if renew, isBool := val.(bool); isBool && renew {
 			renewalTriggered = true
 		}
 	}
 	if !renewalTriggered {
-		if val, ok := ctx.GetModuleCache().Get(common.CacheKubexmK8sLeafCertRenew); ok {
+		leafCacheKey := fmt.Sprintf(common.CacheKubexmK8sLeafCertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
+		if val, ok := ctx.GetModuleCache().Get(leafCacheKey); ok {
 			if renew, isBool := val.(bool); isBool && renew {
 				renewalTriggered = true
 			}

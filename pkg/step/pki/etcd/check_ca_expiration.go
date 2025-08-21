@@ -94,9 +94,10 @@ func (s *CheckCAExpirationStep) Run(ctx runtime.ExecutionContext) error {
 	} else {
 		logger.Info("CA certificate validity is sufficient. No renewal required.")
 	}
-	ctx.GetTaskCache().Set(common.CacheKubexmEtcdCACertRenew, requiresRenewal)
-	ctx.GetModuleCache().Set(common.CacheKubexmEtcdCACertRenew, requiresRenewal)
-	ctx.GetPipelineCache().Set(common.CacheKubexmEtcdCACertRenew, requiresRenewal)
+	cacheKey := fmt.Sprintf(common.CacheKubexmEtcdCACertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	ctx.GetTaskCache().Set(cacheKey, requiresRenewal)
+	ctx.GetModuleCache().Set(cacheKey, requiresRenewal)
+	ctx.GetPipelineCache().Set(cacheKey, requiresRenewal)
 	logger.Infof("Result 'ca_requires_renewal' (%v) has been saved to the pipeline cache.", requiresRenewal)
 
 	return nil

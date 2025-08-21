@@ -43,7 +43,7 @@ func (s *EtcdBackupLocalDataStep) Meta() *spec.StepMeta {
 }
 
 func (s *EtcdBackupLocalDataStep) getCacheKey(ctx runtime.ExecutionContext) string {
-	return fmt.Sprintf(common.CacheKeyEtcdLocalBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	return fmt.Sprintf(common.CacheKeyEtcdLocalBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), ctx.GetHost().GetName())
 }
 
 func (s *EtcdBackupLocalDataStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {

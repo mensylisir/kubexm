@@ -35,12 +35,15 @@ func (t *GenerateKubeconfigsTask) Description() string {
 }
 
 func (t *GenerateKubeconfigsTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	if val, ok := ctx.GetModuleCache().Get(common.CacheKubeadmK8sCACertRenew); ok {
+	runtimeCtx := ctx.(*runtime.Context)
+	caCacheKey := fmt.Sprintf(common.CacheKubeadmK8sCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
+	if val, ok := ctx.GetModuleCache().Get(caCacheKey); ok {
 		if renew, isBool := val.(bool); isBool && renew {
 			return true, nil
 		}
 	}
-	if val, ok := ctx.GetModuleCache().Get(common.CacheKubeadmK8sLeafCertRenew); ok {
+	leafCacheKey := fmt.Sprintf(common.CacheKubeadmK8sLeafCertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
+	if val, ok := ctx.GetModuleCache().Get(leafCacheKey); ok {
 		if renew, isBool := val.(bool); isBool && renew {
 			return true, nil
 		}

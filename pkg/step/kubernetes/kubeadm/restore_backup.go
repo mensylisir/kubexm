@@ -41,7 +41,7 @@ func (s *RestoreKubeadmBackupStep) Precheck(ctx runtime.ExecutionContext) (isDon
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	logger.Info("Starting precheck for restoring kubeadm backup...")
 
-	cacheKey := fmt.Sprintf(common.CacheKeyKubeadmBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	cacheKey := fmt.Sprintf(common.CacheKeyKubeadmBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), ctx.GetHost().GetName())
 	backupPath, ok := ctx.GetTaskCache().Get(cacheKey)
 	if !ok {
 		return false, fmt.Errorf("precheck failed: kubeadm backup path not found in cache for key '%s'. Cannot proceed with restore", cacheKey)
@@ -68,7 +68,7 @@ func (s *RestoreKubeadmBackupStep) Precheck(ctx runtime.ExecutionContext) (isDon
 func (s *RestoreKubeadmBackupStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
-	cacheKey := fmt.Sprintf(common.CacheKeyKubeadmBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	cacheKey := fmt.Sprintf(common.CacheKeyKubeadmBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), ctx.GetHost().GetName())
 	backupPath, _ := ctx.GetTaskCache().Get(cacheKey)
 	backupDir := backupPath.(string)
 

@@ -99,20 +99,21 @@ func (s *KubeadmCheckEtcdCAExpirationStep) Run(ctx runtime.ExecutionContext) err
 	}
 
 	var previousRenewalRequired bool
-	if rawValue, ok := ctx.GetModuleCache().Get(common.CacheKubeadmEtcdCACertRenew); ok {
+	cacheKey := fmt.Sprintf(common.CacheKubeadmEtcdCACertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	if rawValue, ok := ctx.GetModuleCache().Get(cacheKey); ok {
 		if val, isBool := rawValue.(bool); isBool {
 			previousRenewalRequired = val
 		} else {
-			log.Errorf("Cache corruption: expected a bool for key '%s', but got %T", common.CacheKubeadmEtcdCACertRenew, rawValue)
-			return fmt.Errorf("cache corruption: value for key '%s' is not a boolean", common.CacheKubeadmEtcdCACertRenew)
+			log.Errorf("Cache corruption: expected a bool for key '%s', but got %T", cacheKey, rawValue)
+			return fmt.Errorf("cache corruption: value for key '%s' is not a boolean", cacheKey)
 		}
 	}
 
 	finalRenewalRequired := previousRenewalRequired || etcdCaRequiresRenewal
 
-	ctx.GetTaskCache().Set(common.CacheKubeadmEtcdCACertRenew, finalRenewalRequired)
-	ctx.GetModuleCache().Set(common.CacheKubeadmEtcdCACertRenew, finalRenewalRequired)
-	ctx.GetPipelineCache().Set(common.CacheKubeadmEtcdCACertRenew, finalRenewalRequired)
+	ctx.GetTaskCache().Set(cacheKey, finalRenewalRequired)
+	ctx.GetModuleCache().Set(cacheKey, finalRenewalRequired)
+	ctx.GetPipelineCache().Set(cacheKey, finalRenewalRequired)
 	log.Infof("Etcd CA check complete. This CA requires renewal: %v. Cumulative CA renewal required: %v", etcdCaRequiresRenewal, finalRenewalRequired)
 
 	return nil

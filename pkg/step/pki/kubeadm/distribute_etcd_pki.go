@@ -53,7 +53,8 @@ func (s *KubeadmDistributeStackedEtcdPKIStep) Precheck(ctx runtime.ExecutionCont
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	logger.Info("Starting precheck for stacked Etcd PKI distribution...")
 
-	if _, ok := ctx.GetTaskCache().Get(fmt.Sprintf(common.CacheKubeCertsBackupPath, ctx.Ge)); !ok {
+	cacheKey := fmt.Sprintf(common.CacheKubeCertsBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	if _, ok := ctx.GetTaskCache().Get(cacheKey); !ok {
 		return false, fmt.Errorf("precheck failed: remote PKI backup path not found in cache. The backup step must run first")
 	}
 
@@ -108,7 +109,8 @@ func (s *KubeadmDistributeStackedEtcdPKIStep) Run(ctx runtime.ExecutionContext) 
 
 func (s *KubeadmDistributeStackedEtcdPKIStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
-	backupPath, ok := ctx.GetTaskCache().Get(common.CacheKubeCertsBackupPath)
+	cacheKey := fmt.Sprintf(common.CacheKubeCertsBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	backupPath, ok := ctx.GetTaskCache().Get(cacheKey)
 	if !ok {
 		logger.Error("CRITICAL: No backup path found in cache. CANNOT ROLL BACK. MANUAL INTERVENTION REQUIRED.")
 		return fmt.Errorf("no backup path found for host '%s'", ctx.GetHost().GetName())

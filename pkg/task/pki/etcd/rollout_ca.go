@@ -38,8 +38,9 @@ func (t *DeployFinalCARollingTask) Description() string {
 
 func (t *DeployFinalCARollingTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 	logger := ctx.GetLogger().With("task", t.Name(), "phase", "IsRequired")
-
-	caRenewVal, _ := ctx.GetModuleCache().Get(common.CacheKubexmEtcdCACertRenew)
+	runtimeCtx := ctx.(*runtime.Context)
+	cacheKey := fmt.Sprintf(common.CacheKubexmEtcdCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
+	caRenewVal, _ := ctx.GetModuleCache().Get(cacheKey)
 	isCARenewal, _ := caRenewVal.(bool)
 	if !isCARenewal {
 		return false, nil
