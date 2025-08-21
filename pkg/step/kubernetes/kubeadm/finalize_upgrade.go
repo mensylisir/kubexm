@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
@@ -77,7 +78,9 @@ func (s *KubeadmFinalizeUpgradeStep) Run(ctx runtime.ExecutionContext) error {
 	logger.Warn("Applying `kubeadm upgrade apply` again to ensure all addons like CoreDNS are up-to-date. This is an idempotent operation.")
 
 	// We need the target version to run this command correctly.
-	targetVersion, ok := ctx.GetTaskCache().Get(CacheKeyTargetVersion)
+	targetVersion, ok := ctx.GetTaskCache().Get(
+		fmt.Sprintf(common.CacheKeyTargetVersion, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName()),
+	)
 	if !ok {
 		return fmt.Errorf("could not retrieve target version from cache, 'plan' step must run first")
 	}

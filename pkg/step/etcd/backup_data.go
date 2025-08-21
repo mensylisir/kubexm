@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 
 const (
-	CacheKeyEtcdLocalBackupPath = "etcd_local_backup_path_%s"
-	remoteDataBackupSuffix      = "etcd-data.bak"
+	remoteDataBackupSuffix = "etcd-data.bak"
 )
 
 type EtcdBackupLocalDataStep struct {
@@ -43,7 +43,7 @@ func (s *EtcdBackupLocalDataStep) Meta() *spec.StepMeta {
 }
 
 func (s *EtcdBackupLocalDataStep) getCacheKey(ctx runtime.ExecutionContext) string {
-	return fmt.Sprintf(CacheKeyEtcdLocalBackupPath, ctx.GetHost().GetName())
+	return fmt.Sprintf(common.CacheKeyEtcdLocalBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
 }
 
 func (s *EtcdBackupLocalDataStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
