@@ -37,16 +37,13 @@ func (t *DeployTrustBundleRollingTask) Description() string {
 }
 
 func (t *DeployTrustBundleRollingTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	caRenewVal, _ := ctx.GetModuleCache().Get(etcdstep.CacheKeyCARequiresRenewal)
+	caRenewVal, _ := ctx.GetModuleCache().Get(common.CacheKubexmEtcdCACertRenew)
 	caRenew, _ := caRenewVal.(bool)
 	return caRenew, nil
 }
 
 func (t *DeployTrustBundleRollingTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
-	runtimeCtx, ok := ctx.(*runtime.Context)
-	if !ok {
-		return nil, fmt.Errorf("internal error: TaskContext is not of type *runtime.Context in Plan method")
-	}
+	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
 
 	fragment := plan.NewExecutionFragment(t.Name())
 

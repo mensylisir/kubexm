@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/common"
 	"os"
 	"path/filepath"
 	"time"
@@ -14,7 +15,6 @@ import (
 )
 
 const (
-	CacheKeyK8sCARequiresRenewal      = "kubeadm_ca_requires_renewal"
 	DefaultK8sCertExpirationThreshold = 180 * 24 * time.Hour
 )
 
@@ -107,7 +107,9 @@ func (s *KubeadmCheckK8sCAExpirationStep) Run(ctx runtime.ExecutionContext) erro
 		}
 	}
 
-	ctx.GetModuleCache().Set(CacheKeyK8sCARequiresRenewal, anyCARequiresRenewal)
+	ctx.GetTaskCache().Set(common.CacheKubeadmK8sCACertRenew, anyCARequiresRenewal)
+	ctx.GetModuleCache().Set(common.CacheKubeadmK8sCACertRenew, anyCARequiresRenewal)
+	ctx.GetPipelineCache().Set(common.CacheKubeadmK8sCACertRenew, anyCARequiresRenewal)
 	logger.Infof("Core K8s CA check complete. Renewal required: %v", anyCARequiresRenewal)
 
 	return nil

@@ -1,7 +1,6 @@
 package kubeadm
 
 import (
-	"fmt"
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -40,10 +39,7 @@ func (t *CleanKubeComponentsTask) IsRequired(ctx runtime.TaskContext) (bool, err
 func (t *CleanKubeComponentsTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx, ok := ctx.(*runtime.Context)
-	if !ok {
-		return nil, fmt.Errorf("internal error: TaskContext is not of type *runtime.Context")
-	}
+	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
 
 	deployHosts := append(ctx.GetHostsByRole(common.RoleMaster), ctx.GetHostsByRole(common.RoleWorker)...)
 	if len(deployHosts) == 0 {

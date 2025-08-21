@@ -1,7 +1,7 @@
 package kubeadm
 
 import (
-	"fmt"
+	"github.com/mensylisir/kubexm/pkg/common"
 
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -34,7 +34,7 @@ func (t *GenerateK8sLeafCertsTask) Description() string {
 }
 
 func (t *GenerateK8sLeafCertsTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	rawCaRenewal, ok := ctx.GetModuleCache().Get(kubeadmstep.CacheKeyK8sCARequiresRenewal)
+	rawCaRenewal, ok := ctx.GetModuleCache().Get(common.CacheKubeadmK8sCACertRenew)
 	if !ok {
 		rawCaRenewal = false
 	}
@@ -44,7 +44,7 @@ func (t *GenerateK8sLeafCertsTask) IsRequired(ctx runtime.TaskContext) (bool, er
 		caRequiresRenewal = false
 	}
 
-	rawLeafRenewal, ok := ctx.GetModuleCache().Get(kubeadmstep.CacheKeyK8sLeafCertsRequireRenewal)
+	rawLeafRenewal, ok := ctx.GetModuleCache().Get(common.CacheKubeadmK8sLeafCertRenew)
 	if !ok {
 		rawLeafRenewal = false
 	}
@@ -64,10 +64,7 @@ func (t *GenerateK8sLeafCertsTask) IsRequired(ctx runtime.TaskContext) (bool, er
 func (t *GenerateK8sLeafCertsTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx, ok := ctx.(*runtime.Context)
-	if !ok {
-		return nil, fmt.Errorf("internal error: TaskContext's base context is not of type *runtime.Context")
-	}
+	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
 
 	renewLeafStep := kubeadmstep.NewKubeadmRenewLeafCertsStepBuilder(*runtimeCtx, "RenewK8sLeafCerts").Build()
 

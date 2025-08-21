@@ -50,7 +50,7 @@ func (s *KubeadmDistributeStackedEtcdLeafCertsStep) Precheck(ctx runtime.Executi
 		s.localCertsDir = baseCertsDir
 	}
 
-	if _, ok := ctx.GetTaskCache().Get(CacheKeyRemotePKIBackupPath); !ok {
+	if _, ok := ctx.GetTaskCache().Get(common.CacheKubeCertsBackupPath); !ok {
 		return false, fmt.Errorf("precheck failed: remote PKI backup path not found in cache")
 	}
 
@@ -119,7 +119,7 @@ func (s *KubeadmDistributeStackedEtcdLeafCertsStep) Run(ctx runtime.ExecutionCon
 func (s *KubeadmDistributeStackedEtcdLeafCertsStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 
-	backupPath, _ := ctx.GetTaskCache().Get(CacheKeyRemotePKIBackupPath)
+	backupPath, _ := ctx.GetTaskCache().Get(common.CacheKubeCertsBackupPath)
 	backupDir := backupPath.(string)
 
 	runner := ctx.GetRunner()

@@ -49,13 +49,12 @@ func (s *GenerateNewLeafCertsStep) Meta() *spec.StepMeta {
 func (s *GenerateNewLeafCertsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 
-	caRequiresRenewal1, _ := ctx.GetPipelineCache().Get(CacheKeyCARequiresRenewal)
-	caRequiresRenewal := caRequiresRenewal1.(bool)
+	caRequiresRenewal, _ := ctx.GetTaskCache().GetBool(fmt.Sprintf(common.CacheKubexmEtcdCACertRenew, ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName()))
 	anyLeafRequiresRenewal := false
 	for _, node := range s.etcdNodes {
-		cacheKey := fmt.Sprintf("%s_%s", CacheKeyLeafRequiresRenewal, node.GetName())
-		nodeRequiresRenewal, _ := ctx.GetTaskCache().Get(cacheKey)
-		if nodeRequiresRenewal.(bool) {
+		cacheKey := fmt.Sprintf("%s_%s", fmt.Sprintf(common.CacheKubeaxmEtcdLeafCertRenew, ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName()), node.GetName())
+		nodeRequiresRenewal, _ := ctx.GetTaskCache().GetBool(cacheKey)
+		if nodeRequiresRenewal {
 			anyLeafRequiresRenewal = true
 			break
 		}

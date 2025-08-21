@@ -39,7 +39,7 @@ func (t *DeployFinalCARollingTask) Description() string {
 func (t *DeployFinalCARollingTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 	logger := ctx.GetLogger().With("task", t.Name(), "phase", "IsRequired")
 
-	caRenewVal, _ := ctx.GetModuleCache().Get(etcdstep.CacheKeyCARequiresRenewal)
+	caRenewVal, _ := ctx.GetModuleCache().Get(common.CacheKubexmEtcdCACertRenew)
 	isCARenewal, _ := caRenewVal.(bool)
 	if !isCARenewal {
 		return false, nil
@@ -50,10 +50,7 @@ func (t *DeployFinalCARollingTask) IsRequired(ctx runtime.TaskContext) (bool, er
 }
 
 func (t *DeployFinalCARollingTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
-	runtimeCtx, ok := ctx.(*runtime.Context)
-	if !ok {
-		return nil, fmt.Errorf("internal error: TaskContext is not of type *runtime.Context in Plan method")
-	}
+	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
 
 	fragment := plan.NewExecutionFragment(t.Name())
 

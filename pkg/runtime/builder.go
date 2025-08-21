@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"github.com/google/uuid"
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/cache"
 	"github.com/mensylisir/kubexm/pkg/common"
@@ -27,6 +28,14 @@ type Builder struct {
 	loggerOverride         *logger.Logger
 	connectionPoolOverride *connector.ConnectionPool
 	poolConfigOverride     *connector.PoolConfig
+	runIDOverride          string
+}
+
+func (b *Builder) WithRunID(runID string) *Builder {
+	if runID != "" {
+		b.runIDOverride = runID
+	}
+	return b
 }
 
 func (b *Builder) WithHttpClient(client *http.Client) *Builder {
@@ -63,6 +72,13 @@ func (b *Builder) Build(ctx context.Context) (*Context, func(), error) {
 		log = b.loggerOverride
 	} else {
 		log = logger.Get()
+	}
+
+	var runID string
+	if b.runIDOverride != "" {
+		runID = b.runIDOverride
+	} else {
+		runID = uuid.New().String()
 	}
 
 	eventBroadcaster := record.NewBroadcaster()
@@ -146,6 +162,7 @@ func (b *Builder) Build(ctx context.Context) (*Context, func(), error) {
 
 		httpClient:               httpClient,
 		currentStepRuntimeConfig: map[string]interface{}{},
+		RunID:                    runID,
 	}
 
 	if err := b.initializeAllHosts(runtimeCtx, connectorFactory, runnerSvc); err != nil {

@@ -9,6 +9,7 @@ import (
 )
 
 type ExecutionContext interface {
+	CacheProviderContext
 	CoreServiceContext
 	ClusterQueryContext
 	FileSystemContext

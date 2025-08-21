@@ -60,13 +60,13 @@ func (s *BinaryRenewAllLeafCertsStep) Precheck(ctx runtime.ExecutionContext) (is
 	logger.Info("Starting precheck for all leaf certificate renewal...")
 
 	var caRequiresRenewal bool
-	if rawVal, ok := ctx.GetModuleCache().Get(CacheKeyK8sCARequiresRenewal); ok {
+	if rawVal, ok := ctx.GetModuleCache().Get(common.CacheKubexmK8sCACertRenew); ok {
 		if val, isBool := rawVal.(bool); isBool {
 			caRequiresRenewal = val
 		}
 	}
 	var leafRequiresRenewal bool
-	if rawVal, ok := ctx.GetModuleCache().Get(CacheKeyK8sLeafCertsRequireRenewal); ok {
+	if rawVal, ok := ctx.GetModuleCache().Get(common.CacheKubexmK8sLeafCertRenew); ok {
 		if val, isBool := rawVal.(bool); isBool {
 			leafRequiresRenewal = val
 		}

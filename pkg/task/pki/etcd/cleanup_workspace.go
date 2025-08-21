@@ -1,7 +1,7 @@
 package etcd
 
 import (
-	"fmt"
+	"github.com/mensylisir/kubexm/pkg/common"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/plan"
@@ -35,17 +35,14 @@ func (t *FinalizeWorkspaceTask) Description() string {
 }
 
 func (t *FinalizeWorkspaceTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	caRenewVal, _ := ctx.GetModuleCache().Get(etcdstep.CacheKeyCARequiresRenewal)
+	caRenewVal, _ := ctx.GetModuleCache().Get(common.CacheKubexmEtcdCACertRenew)
 	caRenew, _ := caRenewVal.(bool)
 
 	return caRenew, nil
 }
 
 func (t *FinalizeWorkspaceTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
-	runtimeCtx, ok := ctx.(*runtime.Context)
-	if !ok {
-		return nil, fmt.Errorf("internal error: TaskContext is not of type *runtime.Context in Plan method")
-	}
+	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
 
 	fragment := plan.NewExecutionFragment(t.Name())
 

@@ -1,7 +1,6 @@
 package kubexm
 
 import (
-	"fmt"
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -34,10 +33,7 @@ func (t *GenerateKubePKITask) IsRequired(ctx runtime.TaskContext) (bool, error) 
 func (t *GenerateKubePKITask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx, ok := ctx.(*runtime.Context)
-	if !ok {
-		return nil, fmt.Errorf("internal error: TaskContext is not of type *runtime.Context")
-	}
+	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
 	if err != nil {

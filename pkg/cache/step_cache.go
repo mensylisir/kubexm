@@ -1,12 +1,9 @@
 package cache
 
-type StepCache interface {
-	Get(key string) (interface{}, bool)
-	Set(key string, value interface{})
-	Delete(key string)
-	Keys() []string
-}
+import "time"
+
+type StepCache = Cache
 
 func NewStepCache(parent TaskCache) StepCache {
-	return NewGenericCache(parent)
+	return New(5*time.Minute, 1*time.Minute, parent)
 }

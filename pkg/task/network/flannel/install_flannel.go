@@ -35,10 +35,7 @@ func (t *DeployFlannelTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 
 func (t *DeployFlannelTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
-	runtimeCtx, ok := ctx.(*runtime.Context)
-	if !ok {
-		return nil, fmt.Errorf("internal error: TaskContext is not of type *runtime.Context")
-	}
+	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
 
 	controlNode, _ := ctx.GetControlNode()
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)

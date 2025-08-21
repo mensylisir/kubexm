@@ -1,7 +1,7 @@
 package kubeadm
 
 import (
-	"fmt"
+	"github.com/mensylisir/kubexm/pkg/common"
 
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -36,7 +36,7 @@ func (t *GenerateK8sCACertsTask) Description() string {
 func (t *GenerateK8sCACertsTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 	var caRequiresRenewal bool
 
-	if rawVal, ok := ctx.GetModuleCache().Get(kubeadmstep.CacheKeyK8sCARequiresRenewal); ok {
+	if rawVal, ok := ctx.GetModuleCache().Get(common.CacheKubeadmK8sCACertRenew); ok {
 		if val, isBool := rawVal.(bool); isBool {
 			caRequiresRenewal = val
 		}
@@ -48,10 +48,7 @@ func (t *GenerateK8sCACertsTask) IsRequired(ctx runtime.TaskContext) (bool, erro
 func (t *GenerateK8sCACertsTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx, ok := ctx.(*runtime.Context)
-	if !ok {
-		return nil, fmt.Errorf("internal error: TaskContext's base context is not of type *runtime.Context")
-	}
+	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
 
 	prepareAssetsStep := kubeadmstep.NewKubeadmPrepareCAAssetsStepBuilder(*runtimeCtx, "PrepareK8sCAAssets").Build()
 	renewCaStep := kubeadmstep.NewKubeadmRenewK8sCAStepBuilder(*runtimeCtx, "RenewK8sCA").Build()

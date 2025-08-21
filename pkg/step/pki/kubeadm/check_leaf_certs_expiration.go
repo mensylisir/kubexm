@@ -14,7 +14,6 @@ import (
 )
 
 const (
-	CacheKeyK8sLeafCertsRequireRenewal    = "kubeadm_leaf_certs_require_renewal"
 	DefaultK8sLeafCertExpirationThreshold = 90 * 24 * time.Hour
 )
 
@@ -113,14 +112,14 @@ func (s *KubeadmCheckLeafCertsExpirationStep) Run(ctx runtime.ExecutionContext) 
 		}
 	}
 
-	ctx.GetTaskCache().Set(CacheKeyK8sLeafCertsRequireRenewal, anyLeafRequiresRenewal)
-	ctx.GetModuleCache().Set(CacheKeyK8sLeafCertsRequireRenewal, anyLeafRequiresRenewal)
-	ctx.GetPipelineCache().Set(CacheKeyK8sLeafCertsRequireRenewal, anyLeafRequiresRenewal)
+	ctx.GetTaskCache().Set(common.CacheKubeadmK8sLeafCertRenew, anyLeafRequiresRenewal)
+	ctx.GetModuleCache().Set(common.CacheKubeadmK8sLeafCertRenew, anyLeafRequiresRenewal)
+	ctx.GetPipelineCache().Set(common.CacheKubeadmK8sLeafCertRenew, anyLeafRequiresRenewal)
 
 	if anyLeafRequiresRenewal {
-		logger.Warnf("One or more Kubernetes leaf certificates on this node require renewal. Result saved to cache ('%s': true).", CacheKeyK8sLeafCertsRequireRenewal)
+		logger.Warnf("One or more Kubernetes leaf certificates on this node require renewal. Result saved to cache ('%s': true).", common.CacheKubeadmK8sLeafCertRenew)
 	} else {
-		logger.Info("All Kubernetes leaf certificates on this node are valid. Result saved to cache ('%s': false).", CacheKeyK8sLeafCertsRequireRenewal)
+		logger.Info("All Kubernetes leaf certificates on this node are valid. Result saved to cache ('%s': false).", common.CacheKubeadmK8sLeafCertRenew)
 	}
 
 	return nil

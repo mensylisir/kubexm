@@ -17,7 +17,6 @@ import (
 
 const (
 	DefaultCertExpirationThreshold = 180 * 24 * time.Hour
-	CacheKeyCARequiresRenewal      = "ca_requires_renewal"
 )
 
 type CheckCAExpirationStep struct {
@@ -95,10 +94,9 @@ func (s *CheckCAExpirationStep) Run(ctx runtime.ExecutionContext) error {
 	} else {
 		logger.Info("CA certificate validity is sufficient. No renewal required.")
 	}
-
-	ctx.GetTaskCache().Set(CacheKeyCARequiresRenewal, requiresRenewal)
-	ctx.GetModuleCache().Set(CacheKeyCARequiresRenewal, requiresRenewal)
-	ctx.GetPipelineCache().Set(CacheKeyCARequiresRenewal, requiresRenewal)
+	ctx.GetTaskCache().Set(common.CacheKubexmEtcdCACertRenew, requiresRenewal)
+	ctx.GetModuleCache().Set(common.CacheKubexmEtcdCACertRenew, requiresRenewal)
+	ctx.GetPipelineCache().Set(common.CacheKubexmEtcdCACertRenew, requiresRenewal)
 	logger.Infof("Result 'ca_requires_renewal' (%v) has been saved to the pipeline cache.", requiresRenewal)
 
 	return nil

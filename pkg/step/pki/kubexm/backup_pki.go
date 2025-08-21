@@ -11,8 +11,7 @@ import (
 )
 
 const (
-	CacheKeyRemotePKIBackupPath = "kubexm_remote_pki_backup_path"
-	remoteBackupSuffix          = "kubexm-backup"
+	remoteBackupSuffix = "kubexm-backup"
 )
 
 type KubexmBackupRemotePKIStep struct {
@@ -50,7 +49,7 @@ func (s *KubexmBackupRemotePKIStep) Meta() *spec.StepMeta {
 func (s *KubexmBackupRemotePKIStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 
-	if _, ok := ctx.GetTaskCache().Get(CacheKeyRemotePKIBackupPath); ok {
+	if _, ok := ctx.GetTaskCache().Get(common.CacheKubeCertsBackupPath); ok {
 		logger.Info("Remote PKI directory has already been backed up in this task. Step is done.")
 		return true, nil
 	}
@@ -81,7 +80,7 @@ func (s *KubexmBackupRemotePKIStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to back up remote PKI directory on host '%s': %w", ctx.GetHost().GetName(), err)
 	}
 
-	ctx.GetTaskCache().Set(CacheKeyRemotePKIBackupPath, s.remoteBackupDir)
+	ctx.GetTaskCache().Set(common.CacheKubeCertsBackupPath, s.remoteBackupDir)
 	logger.Infof("Successfully backed up PKI directory. Backup path '%s' saved to cache.", s.remoteBackupDir)
 
 	return nil
@@ -90,7 +89,7 @@ func (s *KubexmBackupRemotePKIStep) Run(ctx runtime.ExecutionContext) error {
 func (s *KubexmBackupRemotePKIStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 
-	backupPath, ok := ctx.GetTaskCache().Get(CacheKeyRemotePKIBackupPath)
+	backupPath, ok := ctx.GetTaskCache().Get(common.CacheKubeCertsBackupPath)
 	if !ok {
 		logger.Warn("No backup path found in cache, nothing to roll back.")
 		return nil

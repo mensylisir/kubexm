@@ -2,6 +2,7 @@ package kubexm
 
 import (
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/common"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -51,14 +52,14 @@ func (s *KubeadmRemoteCleanupStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	var pkiBackupPath string
-	if rawVal, ok := ctx.GetTaskCache().Get(CacheKeyRemotePKIBackupPath); ok {
+	if rawVal, ok := ctx.GetTaskCache().Get(common.CacheKubeCertsBackupPath); ok {
 		if path, isString := rawVal.(string); isString {
 			pkiBackupPath = path
 		}
 	}
 
 	var kubeconfigBackupPath string
-	if rawVal, ok := ctx.GetTaskCache().Get(CacheKeyRemoteKubeconfigBackupPath); ok {
+	if rawVal, ok := ctx.GetTaskCache().Get(common.CacheKubeconfigsBackupPath); ok {
 		if path, isString := rawVal.(string); isString {
 			kubeconfigBackupPath = path
 		}
