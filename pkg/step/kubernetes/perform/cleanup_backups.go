@@ -35,7 +35,7 @@ func (s *CleanupBackupsStep) Meta() *spec.StepMeta {
 }
 
 func (s *CleanupBackupsStep) getCacheKey(ctx runtime.ExecutionContext) string {
-	return fmt.Sprintf(common.CacheKeyRemoteBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	return fmt.Sprintf(common.CacheKeyRemoteBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), ctx.GetHost().GetName())
 }
 
 func (s *CleanupBackupsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {

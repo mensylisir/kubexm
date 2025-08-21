@@ -98,7 +98,8 @@ func (s *KubeadmDistributeKubeletConfigStep) Run(ctx runtime.ExecutionContext) e
 func (s *KubeadmDistributeKubeletConfigStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 
-	backupPath, ok := ctx.GetTaskCache().Get(common.CacheKubeconfigsBackupPath)
+	cacheKey := fmt.Sprintf(common.CacheKubeconfigsBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	backupPath, ok := ctx.GetTaskCache().Get(cacheKey)
 	if !ok {
 		logger.Error("CRITICAL: No backup path found in cache for '/etc/kubernetes'. CANNOT ROLL BACK. MANUAL INTERVENTION REQUIRED.")
 		return fmt.Errorf("no backup path found for host '%s'", ctx.GetHost().GetName())
@@ -132,7 +133,7 @@ func (s *KubeadmDistributeKubeletConfigStep) Rollback(ctx runtime.ExecutionConte
 		return fmt.Errorf("failed to restore backup '%s' to '%s' on host '%s': %w", backupDir, targetDir, ctx.GetHost().GetName(), err)
 	}
 
-	ctx.GetTaskCache().Delete(common.CacheKubeconfigsBackupPath)
+	ctx.GetTaskCache().Delete(cacheKey)
 
 	logger.Info("Rollback completed: original '/etc/kubernetes' directory has been restored from backup.")
 	return nil

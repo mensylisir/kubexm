@@ -102,7 +102,7 @@ func (s *KubeadmUpgradeNodeStep) Run(ctx runtime.ExecutionContext) error {
 	matches := re.FindStringSubmatch(output)
 	if len(matches) >= 2 {
 		backupPath := matches[1]
-		cacheKey := fmt.Sprintf(common.CacheKeyKubeadmBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+		cacheKey := fmt.Sprintf(common.CacheKeyKubeadmBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), ctx.GetHost().GetName())
 		ctx.GetTaskCache().Set(cacheKey, backupPath)
 		logger.Infof("Detected and saved kubeadm backup path to cache: %s", backupPath)
 	}
@@ -119,7 +119,7 @@ func (s *KubeadmUpgradeNodeStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 	logger.Warn("Rollback for 'kubeadm upgrade node' is not a direct command.")
 	logger.Warn("It requires restoring the backup created by kubeadm, which should be handled by a dedicated 'RestoreKubeadmBackupStep'.")
-	cacheKey := fmt.Sprintf(common.CacheKeyKubeadmBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	cacheKey := fmt.Sprintf(common.CacheKeyKubeadmBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), ctx.GetHost().GetName())
 	if backupPath, ok := ctx.GetTaskCache().Get(cacheKey); ok {
 		logger.Warnf("If manual rollback is needed, restore the backup from: %s", backupPath)
 	}

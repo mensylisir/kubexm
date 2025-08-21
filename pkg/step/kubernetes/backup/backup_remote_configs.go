@@ -43,7 +43,7 @@ func (s *BackupRemoteConfigsStep) Meta() *spec.StepMeta {
 }
 
 func (s *BackupRemoteConfigsStep) getCacheKey(ctx runtime.ExecutionContext) string {
-	return fmt.Sprintf(common.CacheKeyRemoteBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	return fmt.Sprintf(common.CacheKeyRemoteBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), ctx.GetHost().GetName())
 }
 
 func (s *BackupRemoteConfigsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {

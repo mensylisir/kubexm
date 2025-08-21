@@ -37,9 +37,12 @@ func (t *DeployNewLeafCertsRollingTask) Description() string {
 }
 
 func (t *DeployNewLeafCertsRollingTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	caRenewVal, _ := ctx.GetModuleCache().Get(common.CacheKubexmEtcdCACertRenew)
+	runtimeCtx := ctx.(*runtime.Context)
+	caCacheKey := fmt.Sprintf(common.CacheKubexmEtcdCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
+	caRenewVal, _ := ctx.GetModuleCache().Get(caCacheKey)
 	caRenew, _ := caRenewVal.(bool)
-	leafRenewVal, _ := ctx.GetModuleCache().Get(common.CacheKubeaxmEtcdLeafCertRenew)
+	leafCacheKey := fmt.Sprintf(common.CacheKubexmEtcdLeafCertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
+	leafRenewVal, _ := ctx.GetModuleCache().Get(leafCacheKey)
 	leafRenew, _ := leafRenewVal.(bool)
 
 	return caRenew || leafRenew, nil
@@ -59,7 +62,8 @@ func (t *DeployNewLeafCertsRollingTask) Plan(ctx runtime.TaskContext) (*plan.Exe
 		return fragment, nil
 	}
 
-	caRenewVal, _ := ctx.GetModuleCache().Get(common.CacheKubexmEtcdCACertRenew)
+	caCacheKey := fmt.Sprintf(common.CacheKubexmEtcdCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
+	caRenewVal, _ := ctx.GetModuleCache().Get(caCacheKey)
 	isCARenewal, _ := caRenewVal.(bool)
 
 	var lastNodeWaitID plan.NodeID

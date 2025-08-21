@@ -41,7 +41,9 @@ func (t *RolloutK8sCABundleTask) Description() string {
 
 func (t *RolloutK8sCABundleTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 	var caRequiresRenewal bool
-	if val, ok := ctx.GetModuleCache().Get(common.CacheKubexmK8sCACertRenew); ok {
+	runtimeCtx := ctx.(*runtime.Context)
+	cacheKey := fmt.Sprintf(common.CacheKubexmK8sCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
+	if val, ok := ctx.GetModuleCache().Get(cacheKey); ok {
 		if renew, isBool := val.(bool); isBool && renew {
 			caRequiresRenewal = renew
 		}
