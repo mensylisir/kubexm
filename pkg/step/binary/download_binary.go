@@ -3,6 +3,7 @@ package binary
 import (
 	"crypto/sha256"
 	"fmt"
+	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
@@ -63,11 +64,13 @@ func (s *DownloadBinariesStep) getRequiredArchs(ctx runtime.ExecutionContext) (m
 }
 
 func (s *DownloadBinariesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	logger.Info("DownloadBinariesStep will always run to ensure binaries are up-to-date.")
 	return false, nil
 }
 
 func (s *DownloadBinariesStep) Run(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
 	requiredArchs, err := s.getRequiredArchs(ctx)
 	if err != nil {
@@ -97,14 +100,15 @@ func (s *DownloadBinariesStep) Run(ctx runtime.ExecutionContext) error {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
+			workerLogger := logger.With("worker", workerID)
 			for b := range jobs {
-				logger.Infof("Worker %d: starting download for %s (%s)", workerID, b.FileName(), b.Arch)
-				err := s.downloadAndVerify(b)
+				workerLogger.Info("Starting download.", "binary", b.FileName(), "arch", b.Arch)
+				err := s.downloadAndVerify(workerLogger, b)
 				if err != nil {
-					logger.Errorf("Worker %d: failed to download %s: %v", workerID, b.FileName(), err)
+					workerLogger.Error(err, "Failed to download.", "binary", b.FileName())
 					errChan <- fmt.Errorf("failed to download %s for %s: %w", b.FileName(), b.Arch, err)
 				} else {
-					logger.Infof("Worker %d: successfully downloaded %s", workerID, b.FileName())
+					workerLogger.Info("Successfully downloaded.", "binary", b.FileName())
 				}
 			}
 		}(i)
@@ -131,7 +135,7 @@ func (s *DownloadBinariesStep) Run(ctx runtime.ExecutionContext) error {
 	return nil
 }
 
-func (s *DownloadBinariesStep) downloadAndVerify(b *binary.Binary) error {
+func (s *DownloadBinariesStep) downloadAndVerify(logger *logger.Logger, b *binary.Binary) error {
 	destPath := b.FilePath()
 
 	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
@@ -139,8 +143,8 @@ func (s *DownloadBinariesStep) downloadAndVerify(b *binary.Binary) error {
 	}
 
 	if _, err := os.Stat(destPath); err == nil {
-		if b.Checksum() == "" || b.Checksum() == "dummy-etcd-checksum-val" { // 忽略未提供或虚拟的校验和
-			// fmt.Printf("File %s already exists, skipping download as no checksum is provided.\n", b.FileName())
+		if b.Checksum() == "" || b.Checksum() == "dummy-etcd-checksum-val" {
+			logger.Debug("File already exists, skipping download as no checksum is provided.", "file", b.FileName())
 			return nil
 		}
 
@@ -149,12 +153,14 @@ func (s *DownloadBinariesStep) downloadAndVerify(b *binary.Binary) error {
 			return fmt.Errorf("failed to verify checksum for existing file %s: %w", destPath, err)
 		}
 		if match {
-			// fmt.Printf("File %s already exists and checksum matches. Skipping download.\n", b.FileName())
+			logger.Debug("File already exists and checksum matches. Skipping download.", "file", b.FileName())
 			return nil
 		}
+		logger.Warn("File exists but checksum mismatches. Re-downloading.", "file", b.FileName())
 	}
 
 	url := b.URL()
+	logger.Debug("Downloading from URL.", "url", url)
 
 	resp, err := http.Get(url)
 	if err != nil {
@@ -188,6 +194,7 @@ func (s *DownloadBinariesStep) downloadAndVerify(b *binary.Binary) error {
 	}
 
 	if b.Checksum() != "" && b.Checksum() != "dummy-etcd-checksum-val" {
+		logger.Debug("Verifying checksum of downloaded file.", "file", b.FileName())
 		match, err := verifyChecksum(destPath, b.Checksum())
 		if err != nil {
 			return fmt.Errorf("failed to verify checksum for downloaded file %s: %w", destPath, err)
@@ -195,6 +202,7 @@ func (s *DownloadBinariesStep) downloadAndVerify(b *binary.Binary) error {
 		if !match {
 			return fmt.Errorf("checksum mismatch for downloaded file %s", destPath)
 		}
+		logger.Debug("Checksum verified successfully.", "file", b.FileName())
 	}
 
 	return nil
@@ -217,11 +225,11 @@ func verifyChecksum(filePath string, expectedChecksum string) (bool, error) {
 }
 
 func (s *DownloadBinariesStep) Rollback(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 	workDir := ctx.GetGlobalWorkDir()
 	clusterName := ctx.GetClusterConfig().Name
 	binariesDir := filepath.Join(workDir, "kubexm", clusterName)
-	logger.Warnf("Rollback is triggered. You might want to manually delete the binaries directory: %s", binariesDir)
+	logger.Warn("Rollback is triggered. You might want to manually delete the binaries directory.", "path", binariesDir)
 	return nil
 }
 

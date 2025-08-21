@@ -81,7 +81,7 @@ func (s *InstallRuncStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, e
 	localSourcePath, err := s.getLocalSourcePath(ctx)
 	if err != nil {
 		if strings.Contains(err.Error(), "disabled for arch") {
-			logger.Infof("runc not required for this host (arch: %s), skipping.", ctx.GetHost().GetArch())
+			logger.Info("runc not required for this host, skipping.", "arch", ctx.GetHost().GetArch())
 			return true, nil
 		}
 		return false, err
@@ -97,9 +97,9 @@ func (s *InstallRuncStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, e
 	}
 
 	if isDone {
-		logger.Infof("Target file '%s' already exists and is up-to-date. Step is done.", s.RemoteRuncTargetPath)
+		logger.Info("Target file already exists and is up-to-date. Step is done.", "path", s.RemoteRuncTargetPath)
 	} else {
-		logger.Infof("Target file '%s' is missing or outdated. Installation is required.", s.RemoteRuncTargetPath)
+		logger.Info("Target file is missing or outdated. Installation is required.", "path", s.RemoteRuncTargetPath)
 	}
 
 	return isDone, nil
@@ -116,7 +116,7 @@ func (s *InstallRuncStep) Run(ctx runtime.ExecutionContext) error {
 	localSourcePath, err := s.getLocalSourcePath(ctx)
 	if err != nil {
 		if strings.Contains(err.Error(), "disabled for arch") {
-			logger.Infof("runc not required for this host (arch: %s), skipping.", ctx.GetHost().GetArch())
+			logger.Info("runc not required for this host, skipping.", "arch", ctx.GetHost().GetArch())
 			return nil
 		}
 		return err
@@ -140,19 +140,19 @@ func (s *InstallRuncStep) Run(ctx runtime.ExecutionContext) error {
 	}()
 
 	remoteTempPath := filepath.Join(remoteUploadTmpDir, "runc")
-	logger.Debugf("Uploading runc to %s:%s", ctx.GetHost().GetName(), remoteTempPath)
+	logger.Debug("Uploading runc.", "to", remoteTempPath)
 
 	if err := runner.Upload(ctx.GoContext(), conn, localSourcePath, remoteTempPath, false); err != nil {
 		return fmt.Errorf("failed to upload '%s' to '%s': %w", localSourcePath, remoteTempPath, err)
 	}
 
 	moveCmd := fmt.Sprintf("mv %s %s", remoteTempPath, s.RemoteRuncTargetPath)
-	logger.Debugf("Moving file to %s on remote host", s.RemoteRuncTargetPath)
+	logger.Debug("Moving file.", "to", s.RemoteRuncTargetPath)
 	if _, err := runner.Run(ctx.GoContext(), conn, moveCmd, s.Sudo); err != nil {
 		return fmt.Errorf("failed to move file to '%s': %w", s.RemoteRuncTargetPath, err)
 	}
 
-	logger.Debugf("Setting permissions for %s to %s", s.RemoteRuncTargetPath, s.Permission)
+	logger.Debug("Setting permissions.", "path", s.RemoteRuncTargetPath, "permissions", s.Permission)
 	if err := runner.Chmod(ctx.GoContext(), conn, s.RemoteRuncTargetPath, s.Permission, s.Sudo); err != nil {
 		return fmt.Errorf("failed to set permission on '%s': %w", s.RemoteRuncTargetPath, err)
 	}
@@ -166,13 +166,13 @@ func (s *InstallRuncStep) Rollback(ctx runtime.ExecutionContext) error {
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		logger.Errorf("Failed to get connector for rollback: %v", err)
+		logger.Error(err, "Failed to get connector for rollback.")
 		return nil
 	}
 
-	logger.Warnf("Rolling back by removing: %s", s.RemoteRuncTargetPath)
+	logger.Warn("Rolling back by removing.", "path", s.RemoteRuncTargetPath)
 	if err := runner.Remove(ctx.GoContext(), conn, s.RemoteRuncTargetPath, s.Sudo, false); err != nil {
-		logger.Errorf("Failed to remove '%s' during rollback: %v", s.RemoteRuncTargetPath, err)
+		logger.Error(err, "Failed to remove path during rollback.", "path", s.RemoteRuncTargetPath)
 	}
 
 	return nil

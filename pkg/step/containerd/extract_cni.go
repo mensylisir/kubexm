@@ -79,7 +79,7 @@ func (s *ExtractCNIPluginsStep) getPathsForArch(ctx runtime.ExecutionContext, ar
 }
 
 func (s *ExtractCNIPluginsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 
 	requiredArchs, err := s.getRequiredArchs(ctx)
 	if err != nil {
@@ -107,7 +107,7 @@ func (s *ExtractCNIPluginsStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 		keyFile := filepath.Join(destPath, "bridge")
 
 		if _, err := os.Stat(keyFile); os.IsNotExist(err) {
-			logger.Infof("Key file '%s' for arch %s does not exist. Extraction is required.", keyFile, arch)
+			logger.Info("Key file does not exist. Extraction is required.", "key_file", keyFile, "arch", arch)
 			allDone = false
 		} else {
 			ctx.GetTaskCache().Set(cacheKey, destPath)
@@ -122,7 +122,7 @@ func (s *ExtractCNIPluginsStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 }
 
 func (s *ExtractCNIPluginsStep) Run(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
 	requiredArchs, err := s.getRequiredArchs(ctx)
 	if err != nil {
@@ -144,11 +144,11 @@ func (s *ExtractCNIPluginsStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *ExtractCNIPluginsStep) extractFileForArch(ctx runtime.ExecutionContext, arch string) error {
-	logger := ctx.GetLogger().With("arch", arch)
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run", "arch", arch)
 	sourcePath, destPath, cacheKey, _, err := s.getPathsForArch(ctx, arch)
 	if err != nil {
 		if strings.Contains(err.Error(), "disabled for arch") {
-			logger.Debugf("Skipping CNI plugins extraction for arch %s as it's not required.", arch)
+			logger.Debug("Skipping CNI plugins extraction as it's not required for this arch.")
 			return nil
 		}
 		return err
@@ -156,7 +156,7 @@ func (s *ExtractCNIPluginsStep) extractFileForArch(ctx runtime.ExecutionContext,
 
 	keyFile := filepath.Join(destPath, "bridge")
 	if _, err := os.Stat(keyFile); err == nil {
-		logger.Infof("Skipping extraction, destination already exists and is valid.")
+		logger.Info("Skipping extraction, destination already exists and is valid.")
 		ctx.GetTaskCache().Set(cacheKey, destPath)
 		return nil
 	}
@@ -165,7 +165,7 @@ func (s *ExtractCNIPluginsStep) extractFileForArch(ctx runtime.ExecutionContext,
 		return fmt.Errorf("failed to create destination directory '%s': %w", destPath, err)
 	}
 
-	logger.Infof("Extracting archive '%s' to '%s'...", sourcePath, destPath)
+	logger.Info("Extracting archive.", "source", sourcePath, "destination", destPath)
 
 	fileInfo, err := os.Stat(sourcePath)
 	if err != nil {
@@ -192,18 +192,18 @@ func (s *ExtractCNIPluginsStep) extractFileForArch(ctx runtime.ExecutionContext,
 	}
 
 	_ = bar.Finish()
-	logger.Infof("Successfully extracted archive for arch %s.", arch)
+	logger.Info("Successfully extracted archive for arch.")
 
 	ctx.GetTaskCache().Set(cacheKey, destPath)
 	return nil
 }
 
 func (s *ExtractCNIPluginsStep) Rollback(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 
 	requiredArchs, err := s.getRequiredArchs(ctx)
 	if err != nil {
-		logger.Errorf("Failed to get required architectures during rollback: %v", err)
+		logger.Error(err, "Failed to get required architectures during rollback.")
 		return nil
 	}
 
@@ -213,11 +213,11 @@ func (s *ExtractCNIPluginsStep) Rollback(ctx runtime.ExecutionContext) error {
 			if strings.Contains(err.Error(), "disabled for arch") {
 				continue
 			}
-			logger.Warnf("Could not get paths for arch %s during rollback: %v", arch, err)
+			logger.Warn(err, "Could not get paths for arch during rollback.", "arch", arch)
 			continue
 		}
 
-		logger.Warnf("Rolling back by deleting extracted directory: %s", destPath)
+		logger.Warn("Rolling back by deleting extracted directory.", "path", destPath)
 		_ = os.RemoveAll(destPath)
 	}
 

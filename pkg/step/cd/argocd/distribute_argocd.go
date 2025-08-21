@@ -127,14 +127,14 @@ func (s *DistributeArgoCDArtifactsStep) Run(ctx runtime.ExecutionContext) error 
 		return fmt.Errorf("failed to create remote directory %s on host %s: %w", remoteDir, ctx.GetHost().GetName(), err)
 	}
 
-	logger.Infof("Uploading rendered values.yaml to %s:%s", ctx.GetHost().GetName(), s.RemoteValuesPath)
+	logger.Info("Uploading rendered values.yaml.", "to", s.RemoteValuesPath)
 	if err := helpers.WriteContentToRemote(ctx, conn, string(valuesContent), s.RemoteValuesPath, "0644", s.Sudo); err != nil {
-		return fmt.Errorf("failed to upload values.yaml to %s: %w", ctx.GetHost().GetName(), err)
+		return fmt.Errorf("failed to upload values.yaml: %w", err)
 	}
 
-	logger.Infof("Uploading chart %s to %s:%s", filepath.Base(localChartPath), ctx.GetHost().GetName(), s.RemoteChartPath)
+	logger.Info("Uploading chart.", "chart", filepath.Base(localChartPath), "to", s.RemoteChartPath)
 	if err := helpers.WriteContentToRemote(ctx, conn, string(chartContent), s.RemoteChartPath, "0644", s.Sudo); err != nil {
-		return fmt.Errorf("failed to upload helm chart to %s: %w", ctx.GetHost().GetName(), err)
+		return fmt.Errorf("failed to upload helm chart: %w", err)
 	}
 
 	logger.Info("Successfully distributed Argo CD artifacts to remote host.")
@@ -146,14 +146,14 @@ func (s *DistributeArgoCDArtifactsStep) Rollback(ctx runtime.ExecutionContext) e
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		logger.Errorf("Failed to get connector for rollback: %v", err)
+		logger.Error(err, "Failed to get connector for rollback.")
 		return nil
 	}
 
 	remoteDir := filepath.Dir(s.RemoteValuesPath)
-	logger.Warnf("Rolling back by removing remote Helm artifacts directory: %s", remoteDir)
+	logger.Warn("Rolling back by removing remote Helm artifacts directory.", "path", remoteDir)
 	if err := runner.Remove(ctx.GoContext(), conn, remoteDir, s.Sudo, true); err != nil {
-		logger.Errorf("Failed to remove remote artifacts directory '%s' during rollback: %v", remoteDir, err)
+		logger.Error(err, "Failed to remove remote artifacts directory during rollback.", "path", remoteDir)
 	}
 	return nil
 }

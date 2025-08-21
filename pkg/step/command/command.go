@@ -62,7 +62,7 @@ func (s *CommandStep) Meta() *spec.StepMeta {
 }
 
 func (s *CommandStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 
 	if s.CheckCmd == "" {
 		logger.Debug("No CheckCmd defined, main command will run")
@@ -108,12 +108,12 @@ func (s *CommandStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err e
 }
 
 func (s *CommandStep) Run(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", ctx.GetHost().GetName(), "phase", "Run")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		logger.Error("Failed to get connector for host", "error", err)
-		return fmt.Errorf("failed to get connector for host %s for step %s: %w", ctx.GetHost().GetName(), s.Meta().Name, err)
+		logger.Error(err, "Failed to get connector for host")
+		return fmt.Errorf("failed to get connector for host %s for step %s: %w", ctx.GetHost().GetName(), s.Base.Meta.Name, err)
 	}
 
 	opts := &connector.ExecOptions{
@@ -135,11 +135,11 @@ func (s *CommandStep) Run(ctx runtime.ExecutionContext) error {
 				logger.Info("Command completed with expected (non-zero) exit code.", "exitCode", cmdErr.ExitCode, "stdout", string(stdoutBytes), "stderr", string(stderrBytes))
 				return nil
 			}
-			logger.Error("Command failed with unexpected exit code.", "exitCode", cmdErr.ExitCode, "expected", s.ExpectedExitCode, "stdout", string(stdoutBytes), "stderr", string(stderrBytes))
+			logger.Error(cmdErr, "Command failed with unexpected exit code.", "exitCode", cmdErr.ExitCode, "expected", s.ExpectedExitCode, "stdout", string(stdoutBytes), "stderr", string(stderrBytes))
 			return cmdErr
 		}
-		logger.Error("Failed to execute command (non-CommandError).", "error", runErr, "stdout", string(stdoutBytes), "stderr", string(stderrBytes))
-		return fmt.Errorf("command '%s' failed for step %s on host %s (non-CommandError): %w. Stdout: %s, Stderr: %s", s.Cmd, s.Meta().Name, ctx.GetHost().GetName(), runErr, string(stdoutBytes), string(stderrBytes))
+		logger.Error(runErr, "Failed to execute command (non-CommandError).", "stdout", string(stdoutBytes), "stderr", string(stderrBytes))
+		return fmt.Errorf("command '%s' failed for step %s on host %s (non-CommandError): %w. Stdout: %s, Stderr: %s", s.Cmd, s.Base.Meta.Name, ctx.GetHost().GetName(), runErr, string(stdoutBytes), string(stderrBytes))
 	}
 
 	if s.ExpectedExitCode == 0 {
@@ -147,11 +147,12 @@ func (s *CommandStep) Run(ctx runtime.ExecutionContext) error {
 		return nil
 	}
 
-	errMsg := fmt.Sprintf("command '%s' exited 0 (stdout: %s, stderr: %s), but expected exit code %d for step %s on host %s", s.Cmd, string(stdoutBytes), string(stderrBytes), s.ExpectedExitCode, s.Meta().Name, ctx.GetHost().GetName())
-	logger.Error(errMsg)
+	errMsg := fmt.Sprintf("command '%s' exited 0 (stdout: %s, stderr: %s), but expected exit code %d for step %s on host %s", s.Cmd, string(stdoutBytes), string(stderrBytes), s.ExpectedExitCode, s.Base.Meta.Name, ctx.GetHost().GetName())
+	err = errors.New(errMsg)
+	logger.Error(err, "Command exited with 0, but expected non-zero.")
 	return &connector.CommandError{
 		Cmd:        s.Cmd,
-		Underlying: errors.New(errMsg),
+		Underlying: err,
 		ExitCode:   0,
 		Stdout:     string(stdoutBytes),
 		Stderr:     string(stderrBytes),
@@ -159,7 +160,7 @@ func (s *CommandStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *CommandStep) Rollback(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 
 	if s.RollbackCmd == "" {
 		logger.Debug("No RollbackCmd defined for this command step.")
@@ -170,8 +171,8 @@ func (s *CommandStep) Rollback(ctx runtime.ExecutionContext) error {
 
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		logger.Error("Failed to get connector for host during rollback", "error", err)
-		return fmt.Errorf("failed to get connector for host %s for rollback of step %s: %w", ctx.GetHost().GetName(), s.Meta().Name, err)
+		logger.Error(err, "Failed to get connector for host during rollback")
+		return fmt.Errorf("failed to get connector for host %s for rollback of step %s: %w", ctx.GetHost().GetName(), s.Base.Meta.Name, err)
 	}
 
 	opts := &connector.ExecOptions{
@@ -183,12 +184,12 @@ func (s *CommandStep) Rollback(ctx runtime.ExecutionContext) error {
 	stdoutBytes, stderrBytes, runErr := conn.Exec(ctx.GoContext(), s.RollbackCmd, opts)
 
 	if runErr != nil {
-		logger.Error("Rollback command failed.", "command", s.RollbackCmd, "error", runErr, "stdout", string(stdoutBytes), "stderr", string(stderrBytes))
+		logger.Error(runErr, "Rollback command failed.", "command", s.RollbackCmd, "stdout", string(stdoutBytes), "stderr", string(stderrBytes))
 		var cmdErr *connector.CommandError
 		if errors.As(runErr, &cmdErr) {
-			return fmt.Errorf("rollback command '%s' failed for step %s on host %s: %w", s.RollbackCmd, s.Meta().Name, ctx.GetHost().GetName(), cmdErr)
+			return fmt.Errorf("rollback command '%s' failed for step %s on host %s: %w", s.RollbackCmd, s.Base.Meta.Name, ctx.GetHost().GetName(), cmdErr)
 		}
-		return fmt.Errorf("rollback command '%s' failed for step %s on host %s: %w. Stdout: %s, Stderr: %s", s.RollbackCmd, s.Meta().Name, ctx.GetHost().GetName(), runErr, string(stdoutBytes), string(stderrBytes))
+		return fmt.Errorf("rollback command '%s' failed for step %s on host %s: %w. Stdout: %s, Stderr: %s", s.RollbackCmd, s.Base.Meta.Name, ctx.GetHost().GetName(), runErr, string(stdoutBytes), string(stderrBytes))
 	}
 
 	logger.Info("Rollback command executed successfully.", "command", s.RollbackCmd, "stdout", string(stdoutBytes), "stderr", string(stderrBytes))

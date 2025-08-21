@@ -110,7 +110,7 @@ func (s *InstallArgoCDHelmChartStep) Precheck(ctx runtime.ExecutionContext) (isD
 
 	output, err := runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
 	if err != nil {
-		logger.Infof("Helm release '%s' not found. Installation is required.", s.ReleaseName)
+		logger.Info("Helm release not found. Installation is required.", "release", s.ReleaseName)
 		return false, nil
 	}
 
@@ -120,11 +120,11 @@ func (s *InstallArgoCDHelmChartStep) Precheck(ctx runtime.ExecutionContext) (isD
 	}
 
 	if status.Info.Status == "deployed" && status.Chart.Metadata.Version == s.Chart.Version {
-		logger.Infof("Helm release '%s' version %s is already deployed in namespace '%s'. Skipping.", s.ReleaseName, s.Chart.Version, s.Namespace)
+		logger.Info("Helm release is already deployed and up-to-date. Skipping.", "release", s.ReleaseName, "version", s.Chart.Version, "namespace", s.Namespace)
 		return true, nil
 	}
 
-	logger.Infof("Helm release '%s' found, but its status ('%s') or version ('%s') is not as expected ('deployed', '%s'). Upgrade is required.", s.ReleaseName, status.Info.Status, status.Chart.Metadata.Version, s.Chart.Version)
+	logger.Info("Helm release found, but needs upgrade.", "release", s.ReleaseName, "current_status", status.Info.Status, "current_version", status.Chart.Metadata.Version, "desired_version", s.Chart.Version)
 	return false, nil
 }
 
@@ -151,14 +151,14 @@ func (s *InstallArgoCDHelmChartStep) Run(ctx runtime.ExecutionContext) error {
 		s.AdminKubeconfigPath,
 	)
 
-	logger.Infof("Executing remote Helm command: %s", cmd)
+	logger.Info("Executing remote Helm command.", "command", cmd)
 	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
 		return fmt.Errorf("failed to install/upgrade Argo CD Helm chart: %w\nOutput: %s", err, output)
 	}
 
 	logger.Info("Argo CD Helm chart installed/upgraded successfully.")
-	logger.Debugf("Helm command output:\n%s", output)
+	logger.Debug("Helm command output.", "output", output)
 	return nil
 }
 
@@ -178,9 +178,9 @@ func (s *InstallArgoCDHelmChartStep) Rollback(ctx runtime.ExecutionContext) erro
 		s.AdminKubeconfigPath,
 	)
 
-	logger.Warnf("Rolling back by uninstalling Helm release '%s' from namespace '%s'...", s.ReleaseName, s.Namespace)
+	logger.Warn("Rolling back by uninstalling Helm release.", "release", s.ReleaseName, "namespace", s.Namespace)
 	if _, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo); err != nil {
-		logger.Errorf("Failed to uninstall Argo CD Helm release: %v", err)
+		logger.Error(err, "Failed to uninstall Argo CD Helm release.")
 	} else {
 		logger.Info("Successfully executed Helm uninstall command for Argo CD.")
 	}
