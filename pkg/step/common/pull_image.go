@@ -43,7 +43,7 @@ func (s *PullImagesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, er
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	existingImages, err := s.listExistingImages(ctx)
 	if err != nil {
-		logger.Warnf("Failed to list existing images, assuming they need to be pulled. Error: %v", err)
+		logger.Warn(err, "Failed to list existing images, assuming they need to be pulled.")
 		return false, nil
 	}
 
@@ -54,7 +54,7 @@ func (s *PullImagesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, er
 
 	for _, imgToCheck := range s.Images {
 		if _, found := existingImagesSet[imgToCheck]; !found {
-			logger.Infof("Image not found on host, step needs to run: %s", imgToCheck)
+			logger.Info("Image not found on host, step needs to run.", "image", imgToCheck)
 			return false, nil
 		}
 	}
@@ -75,7 +75,7 @@ func (s *PullImagesStep) Run(ctx runtime.ExecutionContext) error {
 	arch := ctx.GetHost().GetArch()
 
 	for _, img := range s.Images {
-		logger.Infof("Pulling image: %s", img)
+		logger.Info("Pulling image.", "image", img)
 
 		pullCmd, err := s.getPullCommand(img, arch, string(containerManager))
 		if err != nil {
@@ -83,7 +83,7 @@ func (s *PullImagesStep) Run(ctx runtime.ExecutionContext) error {
 		}
 
 		if _, err := runnerSvc.Run(ctx.GoContext(), conn, pullCmd, s.Sudo); err != nil {
-			return fmt.Errorf("failed to pull image %s on host %s: %w", img, ctx.GetHost().GetName(), err)
+			return fmt.Errorf("failed to pull image %s: %w", img, err)
 		}
 	}
 	logger.Info("All required images for this host pulled successfully.")

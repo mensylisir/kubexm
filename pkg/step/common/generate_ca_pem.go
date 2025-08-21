@@ -84,7 +84,7 @@ func (s *GenerateCAPEMStep) Meta() *spec.StepMeta {
 }
 
 func (s *GenerateCAPEMStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 
 	caCertPath := filepath.Join(s.LocalCertsDir, s.CertFileName)
 	caKeyPath := filepath.Join(s.LocalCertsDir, s.KeyFileName)
@@ -103,7 +103,7 @@ func (s *GenerateCAPEMStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 }
 
 func (s *GenerateCAPEMStep) Run(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
 	perm, err := strconv.ParseUint(s.Permission, 8, 32)
 	if err != nil {
@@ -124,7 +124,7 @@ func (s *GenerateCAPEMStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *GenerateCAPEMStep) Rollback(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 
 	caCertPath := filepath.Join(s.LocalCertsDir, s.CertFileName)
 	caKeyPath := filepath.Join(s.LocalCertsDir, s.KeyFileName)

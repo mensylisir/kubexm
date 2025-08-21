@@ -70,7 +70,7 @@ func (s *DownloadContainerdStep) getRequiredArchs(ctx runtime.ExecutionContext) 
 }
 
 func (s *DownloadContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 
 	requiredArchs, err := s.getRequiredArchs(ctx)
 	if err != nil {
@@ -95,22 +95,22 @@ func (s *DownloadContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone 
 		}
 
 		destPath := binaryInfo.FilePath()
-		logger.Infof("Checking for containerd (arch: %s) at: %s", arch, destPath)
+		logger.Debug("Checking for containerd.", "arch", arch, "path", destPath)
 
 		if _, err := os.Stat(destPath); os.IsNotExist(err) {
-			logger.Infof("File for arch %s does not exist. Download is required.", arch)
+			logger.Info("File for arch does not exist. Download is required.", "arch", arch)
 			allDone = false
 			continue
 		}
 
 		match, err := helpers.VerifyLocalFileChecksum(destPath, binaryInfo.Checksum())
 		if err != nil {
-			logger.Warnf("Failed to verify checksum for arch %s file (%s): %v. Re-download is required.", arch, destPath, err)
+			logger.Warn(err, "Failed to verify checksum, re-download is required.", "arch", arch, "path", destPath)
 			allDone = false
 			continue
 		}
 		if !match {
-			logger.Warnf("Checksum mismatch for arch %s file (%s). Re-download is required.", arch, destPath)
+			logger.Warn("Checksum mismatch, re-download is required.", "arch", arch, "path", destPath)
 			allDone = false
 		}
 	}
@@ -123,7 +123,7 @@ func (s *DownloadContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone 
 }
 
 func (s *DownloadContainerdStep) Run(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
 	requiredArchs, err := s.getRequiredArchs(ctx)
 	if err != nil {
@@ -150,7 +150,7 @@ func (s *DownloadContainerdStep) Run(ctx runtime.ExecutionContext) error {
 		if _, err := os.Stat(destPath); err == nil {
 			match, _ := helpers.VerifyLocalFileChecksum(destPath, binaryInfo.Checksum())
 			if match {
-				logger.Infof("Skipping download for arch %s, file already exists and is valid.", arch)
+				logger.Info("Skipping download, file already exists and is valid.", "arch", arch)
 				continue
 			}
 		}
@@ -165,7 +165,7 @@ func (s *DownloadContainerdStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *DownloadContainerdStep) downloadFile(ctx runtime.ExecutionContext, binaryInfo *binary.Binary) error {
-	logger := ctx.GetLogger()
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
 	destDir := filepath.Dir(binaryInfo.FilePath())
 	if err := os.MkdirAll(destDir, 0755); err != nil {
@@ -177,7 +177,7 @@ func (s *DownloadContainerdStep) downloadFile(ctx runtime.ExecutionContext, bina
 		return fmt.Errorf("failed to create http request: %w", err)
 	}
 
-	logger.Infof("Downloading containerd (arch: %s, version: %s) from %s ...", binaryInfo.Arch, binaryInfo.Version, binaryInfo.URL())
+	logger.Info("Downloading containerd.", "arch", binaryInfo.Arch, "version", binaryInfo.Version, "url", binaryInfo.URL())
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to download file: %w", err)
@@ -215,7 +215,7 @@ func (s *DownloadContainerdStep) downloadFile(ctx runtime.ExecutionContext, bina
 	}
 	_ = bar.Finish()
 
-	logger.Infof("Successfully downloaded to %s", binaryInfo.FilePath())
+	logger.Info("Successfully downloaded.", "path", binaryInfo.FilePath())
 
 	match, err := helpers.VerifyLocalFileChecksum(binaryInfo.FilePath(), binaryInfo.Checksum())
 	if err != nil {
@@ -230,11 +230,11 @@ func (s *DownloadContainerdStep) downloadFile(ctx runtime.ExecutionContext, bina
 }
 
 func (s *DownloadContainerdStep) Rollback(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 
 	requiredArchs, err := s.getRequiredArchs(ctx)
 	if err != nil {
-		logger.Errorf("Failed to get required architectures during rollback: %v", err)
+		logger.Error(err, "Failed to get required architectures during rollback.")
 		return nil
 	}
 
@@ -244,7 +244,7 @@ func (s *DownloadContainerdStep) Rollback(ctx runtime.ExecutionContext) error {
 		if err != nil || binaryInfo == nil {
 			continue
 		}
-		logger.Warnf("Rolling back by deleting downloaded file: %s", binaryInfo.FilePath())
+		logger.Warn("Rolling back by deleting downloaded file.", "path", binaryInfo.FilePath())
 		_ = os.Remove(binaryInfo.FilePath())
 	}
 	return nil

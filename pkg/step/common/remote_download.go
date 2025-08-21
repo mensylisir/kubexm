@@ -45,7 +45,7 @@ func (s *RemoteDownloadFileStep) Meta() *spec.StepMeta {
 }
 
 func (s *RemoteDownloadFileStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
@@ -85,7 +85,7 @@ func (s *RemoteDownloadFileStep) Precheck(ctx runtime.ExecutionContext) (isDone 
 }
 
 func (s *RemoteDownloadFileStep) Run(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", ctx.GetHost().GetName(), "phase", "Run")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
@@ -128,7 +128,7 @@ func (s *RemoteDownloadFileStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *RemoteDownloadFileStep) Rollback(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Meta().Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {

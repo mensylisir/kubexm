@@ -74,14 +74,14 @@ func (s *InstallCoreDNSStep) Run(ctx runtime.ExecutionContext) error {
 		s.AdminKubeconfigPath,
 	)
 
-	logger.Infof("Executing remote command to apply CoreDNS manifest: %s", cmd)
+	logger.Info("Executing remote command to apply CoreDNS manifest.", "command", cmd)
 	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
 		return fmt.Errorf("failed to apply CoreDNS manifest: %w\nOutput: %s", err, output)
 	}
 
 	logger.Info("CoreDNS manifest applied successfully.")
-	logger.Debugf("kubectl apply output:\n%s", output)
+	logger.Debug("kubectl apply output.", "output", output)
 	return nil
 }
 
@@ -100,9 +100,9 @@ func (s *InstallCoreDNSStep) Rollback(ctx runtime.ExecutionContext) error {
 		s.AdminKubeconfigPath,
 	)
 
-	logger.Warnf("Rolling back by deleting resources from CoreDNS manifest...")
+	logger.Warn("Rolling back by deleting resources from CoreDNS manifest.")
 	if _, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo); err != nil {
-		logger.Errorf("Failed to delete CoreDNS resources (this may be expected if installation failed): %v", err)
+		logger.Error(err, "Failed to delete CoreDNS resources (this may be expected if installation failed).")
 	} else {
 		logger.Info("Successfully executed kubectl delete for CoreDNS resources.")
 	}

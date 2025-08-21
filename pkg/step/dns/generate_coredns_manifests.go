@@ -114,6 +114,8 @@ func (s *GenerateCoreDNSArtifactsStep) Meta() *spec.StepMeta {
 }
 
 func (s *GenerateCoreDNSArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	logger.Info("Manifest generation step will always run if scheduled to ensure it's up-to-date.")
 	return false, nil
 }
 
@@ -177,7 +179,7 @@ func (s *GenerateCoreDNSArtifactsStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to create remote dir %s: %w", remoteDir, err)
 	}
 
-	logger.Infof("Uploading CoreDNS manifest to remote path: %s", s.RemoteManifestPath)
+	logger.Info("Uploading CoreDNS manifest.", "path", s.RemoteManifestPath)
 	if err := helpers.WriteContentToRemote(ctx, conn, finalManifestBuffer.String(), s.RemoteManifestPath, "0644", s.Sudo); err != nil {
 		return fmt.Errorf("failed to upload CoreDNS manifest: %w", err)
 	}
@@ -191,12 +193,13 @@ func (s *GenerateCoreDNSArtifactsStep) Rollback(ctx runtime.ExecutionContext) er
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
+		logger.Error(err, "Failed to get connector for rollback.")
 		return nil
 	}
 
-	logger.Warnf("Rolling back by removing remote CoreDNS manifest: %s", s.RemoteManifestPath)
+	logger.Warn("Rolling back by removing remote CoreDNS manifest.", "path", s.RemoteManifestPath)
 	if err := runner.Remove(ctx.GoContext(), conn, s.RemoteManifestPath, s.Sudo, true); err != nil {
-		logger.Errorf("Failed to remove remote CoreDNS manifest during rollback: %v", err)
+		logger.Error(err, "Failed to remove remote CoreDNS manifest during rollback.")
 	}
 	return nil
 }

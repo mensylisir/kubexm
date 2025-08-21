@@ -105,7 +105,8 @@ func (s *FileChecksumStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *FileChecksumStep) Rollback(ctx runtime.ExecutionContext) error {
-	ctx.GetLogger().Info("FileChecksumStep has no rollback action.", "step", s.Base.Meta.Name, "host", ctx.GetHost().GetName())
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
+	logger.Info("FileChecksumStep has no rollback action.")
 	return nil
 }
 

@@ -77,15 +77,15 @@ func (s *GenerateArgoCDValuesStep) getLocalValuesPath(ctx runtime.ExecutionConte
 }
 
 func (s *GenerateArgoCDValuesStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	localPath, err := s.getLocalValuesPath(ctx)
 	if err != nil {
-		logger.Infof("Skipping step, could not determine values path: %v", err)
+		logger.Info("Skipping step, could not determine values path.", "error", err)
 		return true, nil
 	}
 
 	if _, err := os.Stat(localPath); err == nil {
-		logger.Infof("Argo CD values file %s already exists. Step is complete.", localPath)
+		logger.Info("Argo CD values file already exists. Step is complete.", "path", localPath)
 		return true, nil
 	}
 
@@ -93,7 +93,7 @@ func (s *GenerateArgoCDValuesStep) Precheck(ctx runtime.ExecutionContext) (isDon
 }
 
 func (s *GenerateArgoCDValuesStep) Run(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
 	valuesTemplateContent, err := templates.Get("cd/argocd/values.yaml.tmpl")
 	if err != nil {
@@ -114,7 +114,7 @@ func (s *GenerateArgoCDValuesStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	logger.Infof("Generating Argo CD Helm values file to: %s", localPath)
+	logger.Info("Generating Argo CD Helm values file.", "path", localPath)
 
 	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
 		return fmt.Errorf("failed to create local directory for values file: %w", err)
@@ -129,21 +129,21 @@ func (s *GenerateArgoCDValuesStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *GenerateArgoCDValuesStep) Rollback(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 
 	localPath, err := s.getLocalValuesPath(ctx)
 	if err != nil {
-		logger.Infof("Skipping rollback as no values path could be determined: %v", err)
+		logger.Info("Skipping rollback as no values path could be determined.", "error", err)
 		return nil
 	}
 
 	if _, statErr := os.Stat(localPath); statErr == nil {
-		logger.Warnf("Rolling back by deleting generated values file: %s", localPath)
+		logger.Warn("Rolling back by deleting generated values file.", "path", localPath)
 		if err := os.Remove(localPath); err != nil {
-			logger.Errorf("Failed to remove file during rollback: %v", err)
+			logger.Error(err, "Failed to remove file during rollback.", "path", localPath)
 		}
 	} else {
-		logger.Infof("Rollback unnecessary, file to be deleted does not exist: %s", localPath)
+		logger.Info("Rollback unnecessary, file to be deleted does not exist.", "path", localPath)
 	}
 
 	return nil

@@ -86,7 +86,7 @@ func (s *CleanCrioStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err
 			return false, err
 		}
 		if exists {
-			logger.Infof("Path '%s' still exists. Cleanup is required.", path)
+			logger.Info("Path still exists. Cleanup is required.", "path", path)
 			return false, nil
 		}
 	}
@@ -106,10 +106,10 @@ func (s *CleanCrioStep) Run(ctx runtime.ExecutionContext) error {
 	paths := s.filesAndDirsToRemove()
 
 	for _, path := range paths {
-		logger.Warnf("Removing path: %s", path)
+		logger.Warn("Removing path.", "path", path)
 		if err := runner.Remove(ctx.GoContext(), conn, path, s.Sudo, true); err != nil {
 			if !strings.Contains(err.Error(), "no such file or directory") {
-				logger.Errorf("Failed to remove '%s', manual cleanup may be required. Error: %v", path, err)
+				logger.Error(err, "Failed to remove path, manual cleanup may be required.", "path", path)
 			}
 		}
 	}
@@ -118,11 +118,11 @@ func (s *CleanCrioStep) Run(ctx runtime.ExecutionContext) error {
 	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
 	if err != nil {
 		if _, _, err := runner.OriginRun(ctx.GoContext(), conn, "systemctl daemon-reload", s.Sudo); err != nil {
-			logger.Errorf("Failed to reload systemd daemon during cleanup: %v", err)
+			logger.Error(err, "Failed to reload systemd daemon during cleanup.")
 		}
 	} else {
 		if err := runner.DaemonReload(ctx.GoContext(), conn, facts); err != nil {
-			logger.Errorf("Failed to reload systemd daemon during cleanup: %v", err)
+			logger.Error(err, "Failed to reload systemd daemon during cleanup.")
 		}
 	}
 

@@ -56,6 +56,8 @@ func (s *RunAddonPreInstallHookStep) Meta() *spec.StepMeta {
 }
 
 func (s *RunAddonPreInstallHookStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	logger.Info("Pre-install hooks will always run if the step is reached.")
 	return false, nil
 }
 
@@ -68,12 +70,12 @@ func (s *RunAddonPreInstallHookStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	for i, command := range s.Commands {
-		logger.Infof("Executing pre-install hook command #%d: [%s]", i+1, command)
+		logger.Info("Executing pre-install hook command.", "index", i+1, "command", command)
 		output, err := runner.Run(ctx.GoContext(), conn, command, s.Sudo)
 		if err != nil {
 			return errors.Wrapf(err, "failed to execute pre-install hook command: [%s]\nOutput:\n%s", command, output)
 		}
-		logger.Debugf("Command output:\n%s", output)
+		logger.Debug("Command output.", "output", output)
 	}
 
 	logger.Info("Successfully executed all pre-install hooks for addon.")

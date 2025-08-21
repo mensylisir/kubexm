@@ -138,7 +138,8 @@ func (s *ExtractArchiveStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *ExtractArchiveStep) extractTar(ctx runtime.ExecutionContext, tarReader *tar.Reader) error {
-	ctx.GetLogger().Info("Extracting tar archive contents.", "source", s.SourceArchivePath, "destination", s.DestinationDir)
+	logger := ctx.GetLogger().With("step", s.GetBase().Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
+	logger.Info("Extracting tar archive contents.", "source", s.SourceArchivePath, "destination", s.DestinationDir)
 	for {
 		header, err := tarReader.Next()
 		if err == io.EOF {
@@ -176,21 +177,21 @@ func (s *ExtractArchiveStep) extractTar(ctx runtime.ExecutionContext, tarReader 
 				return fmt.Errorf("failed to create symlink %s -> %s during tar extraction: %w", targetPath, header.Linkname, err)
 			}
 		default:
-			ctx.GetLogger().Debug("Skipping unsupported tar entry type.", "name", header.Name, "type", header.Typeflag)
+			logger.Debug("Skipping unsupported tar entry type.", "name", header.Name, "type", header.Typeflag)
 		}
 	}
-	ctx.GetLogger().Info("Tar archive extracted successfully.", "destination", s.DestinationDir)
+	logger.Info("Tar archive extracted successfully.", "destination", s.DestinationDir)
 	if s.RemoveArchiveAfterExtract {
-		ctx.GetLogger().Info("Removing source tar archive after extraction.", "path", s.SourceArchivePath)
+		logger.Info("Removing source tar archive after extraction.", "path", s.SourceArchivePath)
 		if err := os.Remove(s.SourceArchivePath); err != nil {
-			ctx.GetLogger().Warn("Failed to remove source tar archive post-extraction.", "path", s.SourceArchivePath, "error", err)
+			logger.Warn("Failed to remove source tar archive post-extraction.", "path", s.SourceArchivePath, "error", err)
 		}
 	}
 	return nil
 }
 
 func (s *ExtractArchiveStep) extractZip(ctx runtime.ExecutionContext, zipFile *os.File, size int64) error {
-	logger := ctx.GetLogger()
+	logger := ctx.GetLogger().With("step", s.GetBase().Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	logger.Info("Extracting zip archive contents.", "source", s.SourceArchivePath, "destination", s.DestinationDir)
 
 	zipReader, err := zip.NewReader(zipFile, size)

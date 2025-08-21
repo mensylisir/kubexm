@@ -159,7 +159,7 @@ func (s *ManageModulesStep) moduleExists(ctx runtime.ExecutionContext, module st
 }
 
 func (s *ManageModulesStep) loadModule(ctx runtime.ExecutionContext, module string) bool {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName())
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	runner := ctx.GetRunner()
 	conn, _ := ctx.GetCurrentHostConnector()
 	if conn == nil {

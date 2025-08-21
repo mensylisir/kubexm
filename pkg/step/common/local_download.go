@@ -57,9 +57,9 @@ func (s *DownloadFileStep) Meta() *spec.StepMeta {
 }
 
 func (s *DownloadFileStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	logger := ctx.GetLogger()
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	if _, err := os.Stat(s.DestPath); err == nil {
-		logger.Infof("Destination file already exists. path: %s", s.DestPath)
+		logger.Info("Destination file already exists.", "path", s.DestPath)
 		if errVerify := s.verifyChecksum(s.DestPath); errVerify != nil {
 			logger.Warnf("Existing file checksum verification failed for path %s, will re-download. error: %v", s.DestPath, errVerify)
 			if removeErr := os.Remove(s.DestPath); removeErr != nil {
@@ -79,18 +79,18 @@ func (s *DownloadFileStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, 
 }
 
 func (s *DownloadFileStep) Run(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger()
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	if s.Sudo {
-		logger.Warnf("Sudo is true for DownloadFileStep (step: %s, host: %s). This is unusual for control-node work_dir operations.", s.Base.Meta.Name, ctx.GetHost().GetName())
+		logger.Warn("Sudo is true for this step. This is unusual for control-node work_dir operations.")
 	}
 
 	destDir := filepath.Dir(s.DestPath)
-	logger.Infof("Ensuring destination directory exists for step %s on host %s. path: %s", s.Base.Meta.Name, ctx.GetHost().GetName(), destDir)
+	logger.Info("Ensuring destination directory exists.", "path", destDir)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return fmt.Errorf("failed to create destination directory %s: %w", destDir, err)
 	}
 
-	logger.Infof("Starting download for step %s on host %s. url: %s, destination: %s", s.Base.Meta.Name, ctx.GetHost().GetName(), s.URL, s.DestPath)
+	logger.Info("Starting download.", "url", s.URL, "destination", s.DestPath)
 
 	req, err := http.NewRequestWithContext(ctx.GoContext(), http.MethodGet, s.URL, nil)
 	if err != nil {
@@ -147,19 +147,19 @@ func (s *DownloadFileStep) Run(ctx runtime.ExecutionContext) error {
 			return err
 		}
 	}
-	logger.Infof("File downloaded successfully for step %s on host %s. path: %s", s.Base.Meta.Name, ctx.GetHost().GetName(), s.DestPath)
+	logger.Info("File downloaded successfully.", "path", s.DestPath)
 	return nil
 }
 
 func (s *DownloadFileStep) Rollback(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger()
-	logger.Infof("Attempting to remove downloaded file for step %s on host %s. path: %s", s.Base.Meta.Name, ctx.GetHost().GetName(), s.DestPath)
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
+	logger.Info("Attempting to remove downloaded file.", "path", s.DestPath)
 	err := os.Remove(s.DestPath)
 	if err != nil && !os.IsNotExist(err) {
-		logger.Errorf("Failed to remove downloaded file %s during rollback for step %s on host %s: %v", s.DestPath, s.Base.Meta.Name, ctx.GetHost().GetName(), err)
+		logger.Error(err, "Failed to remove downloaded file during rollback.", "path", s.DestPath)
 		return fmt.Errorf("failed to remove %s during rollback: %w", s.DestPath, err)
 	}
-	logger.Infof("Downloaded file %s removed or was not present for step %s on host %s.", s.DestPath, s.Base.Meta.Name, ctx.GetHost().GetName())
+	logger.Info("Downloaded file removed or was not present.", "path", s.DestPath)
 	return nil
 }
 

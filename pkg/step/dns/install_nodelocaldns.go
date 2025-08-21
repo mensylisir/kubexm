@@ -81,14 +81,14 @@ func (s *InstallNodeLocalDNSStep) Run(ctx runtime.ExecutionContext) error {
 		s.AdminKubeconfigPath,
 	)
 
-	logger.Infof("Executing remote command to apply NodeLocalDNS manifest: %s", cmd)
+	logger.Info("Executing remote command to apply NodeLocalDNS manifest.", "command", cmd)
 	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
 		return fmt.Errorf("failed to apply NodeLocalDNS manifest: %w\nOutput: %s", err, output)
 	}
 
 	logger.Info("NodeLocalDNS manifest applied successfully.")
-	logger.Debugf("kubectl apply output:\n%s", output)
+	logger.Debug("kubectl apply output.", "output", output)
 	return nil
 }
 
@@ -104,7 +104,7 @@ func (s *InstallNodeLocalDNSStep) Rollback(ctx runtime.ExecutionContext) error {
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		logger.Errorf("Failed to get connector for rollback: %v", err)
+		logger.Error(err, "Failed to get connector for rollback.")
 		return nil
 	}
 
@@ -114,9 +114,9 @@ func (s *InstallNodeLocalDNSStep) Rollback(ctx runtime.ExecutionContext) error {
 		s.AdminKubeconfigPath,
 	)
 
-	logger.Warnf("Rolling back by deleting resources from NodeLocalDNS manifest...")
+	logger.Warn("Rolling back by deleting resources from NodeLocalDNS manifest.")
 	if _, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo); err != nil {
-		logger.Errorf("Failed to delete NodeLocalDNS resources (this may be expected if installation failed): %v", err)
+		logger.Error(err, "Failed to delete NodeLocalDNS resources (this may be expected if installation failed).")
 	} else {
 		logger.Info("Successfully executed kubectl delete for NodeLocalDNS resources.")
 	}

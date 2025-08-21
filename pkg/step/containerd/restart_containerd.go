@@ -35,6 +35,8 @@ func (s *RestartContainerdStep) Meta() *spec.StepMeta {
 }
 
 func (s *RestartContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	logger.Info("Restart step will always run if scheduled.")
 	return false, nil
 }
 
@@ -51,11 +53,11 @@ func (s *RestartContainerdStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to gather facts to restart service: %w", err)
 	}
 
-	logger.Infof("Restarting containerd service...")
+	logger.Info("Restarting containerd service.")
 	if err := runner.RestartService(ctx.GoContext(), conn, facts, containerdServiceName); err != nil {
 		logsCmd := fmt.Sprintf("journalctl -u %s --no-pager -n 50", containerdServiceName)
 		out, _, _ := runner.OriginRun(ctx.GoContext(), conn, logsCmd, s.Sudo)
-		logger.Errorf("Failed to restart containerd service. Recent logs:\n%s", out)
+		logger.Error(err, "Failed to restart containerd service.", "logs", out)
 		return fmt.Errorf("failed to restart containerd service: %w", err)
 	}
 

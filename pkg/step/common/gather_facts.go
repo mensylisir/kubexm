@@ -78,6 +78,8 @@ func (s *GatherFactsStep) Run(ctx runtime.ExecutionContext) error {
 	return nil
 }
 func (s *GatherFactsStep) Rollback(ctx runtime.ExecutionContext) error {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
+	logger.Info("GatherFactsStep has nothing to rollback.")
 	return nil
 }
 

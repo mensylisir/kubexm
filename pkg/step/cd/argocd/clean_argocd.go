@@ -58,7 +58,7 @@ func (s *CleanArgoCDStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, e
 	}
 
 	if _, err := runner.LookPath(ctx.GoContext(), conn, "helm"); err != nil {
-		logger.Warnf("helm command not found on the target host. Assuming cleanup is not possible or done. %v", err)
+		logger.Warn(err, "helm command not found on the target host. Assuming cleanup is not possible or done.")
 		return true, nil
 	}
 	exists, err := runner.Exists(ctx.GoContext(), conn, s.AdminKubeconfigPath)
@@ -66,7 +66,7 @@ func (s *CleanArgoCDStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, e
 		return false, fmt.Errorf("failed to check for admin.conf: %w", err)
 	}
 	if !exists {
-		logger.Warnf("admin.conf not found at %s. Assuming cleanup is not possible or done.", s.AdminKubeconfigPath)
+		logger.Warn("admin.conf not found. Assuming cleanup is not possible or done.", "path", s.AdminKubeconfigPath)
 		return true, nil
 	}
 
@@ -79,11 +79,11 @@ func (s *CleanArgoCDStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, e
 
 	_, err = runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
 	if err != nil {
-		logger.Infof("Helm release '%s' not found. Cleanup step is considered complete.", s.ReleaseName)
+		logger.Info("Helm release not found. Cleanup step is considered complete.", "release", s.ReleaseName)
 		return true, nil
 	}
 
-	logger.Infof("Helm release '%s' found. Cleanup is required.", s.ReleaseName)
+	logger.Info("Helm release found. Cleanup is required.", "release", s.ReleaseName)
 	return false, nil
 }
 
@@ -102,10 +102,10 @@ func (s *CleanArgoCDStep) Run(ctx runtime.ExecutionContext) error {
 		s.AdminKubeconfigPath,
 	)
 
-	logger.Infof("Executing remote Helm uninstall command: %s", cmd)
+	logger.Info("Executing remote Helm uninstall command.", "command", cmd)
 	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
-		logger.Errorf("Failed to uninstall Argo CD Helm chart: %v\nOutput: %s", err, output)
+		logger.Error(err, "Failed to uninstall Argo CD Helm chart.", "output", output)
 	}
 
 	logger.Info("Argo CD Helm chart uninstalled successfully.")
@@ -113,7 +113,7 @@ func (s *CleanArgoCDStep) Run(ctx runtime.ExecutionContext) error {
 }
 
 func (s *CleanArgoCDStep) Rollback(ctx runtime.ExecutionContext) error {
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name)
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 	logger.Info("Rollback is not applicable for a cleanup step. No action taken.")
 	return nil
 }
