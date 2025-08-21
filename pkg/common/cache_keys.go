@@ -31,4 +31,8 @@ const (
 	CacheKubeCertsBackupPath         = "kubexm.run[%s].pipeline[%s].module[%s].task[%s].kubecerts.backup.path"
 	CacheEtcdCertsIsBackup           = "kubexm.run[%s].pipeline[%s].module[%s].task[%s].etcdcerts.backup"
 	CacheEtcdCertsBackupPath         = "kubexm.run[%s].pipeline[%s].module[%s].task[%s].etcdcerts.backup.path"
+	CacheKeyEtcdLocalBackupPath      = "kubexm.run[%s].pipeline[%s].module[%s].task[%s].etcd.local.backup.path"
+	CacheKeyRemoteBackupPath         = "kubexm.run[%s].pipeline[%s].module[%s].task[%s].k8s.remote.backup.path"
+	CacheKeyKubeadmBackupPath        = "kubexm.run[%s].pipeline[%s].module[%s].task[%s].kubeadm.upgrade.backup.path"
+	CacheKeyTargetVersion            = "kubexm.run[%s].pipeline[%s].module[%s].task[%s].kubeadm.upgrade.target.version"
 )

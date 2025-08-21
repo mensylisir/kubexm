@@ -57,12 +57,16 @@ func (s *BackupRemoteEtcdCertsStep) Meta() *spec.StepMeta {
 func (s *BackupRemoteEtcdCertsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 
-	requiredRenewCerts, ok := ctx.GetTaskCache().Get(CacheKeyLeafRequiresRenewal)
+	requiredRenewCerts, ok := ctx.GetTaskCache().Get(
+		fmt.Sprintf(common.CacheKubeadmEtcdLeafCertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName()),
+	)
 	if !ok {
 		return false, fmt.Errorf("requiresRenewal not found in task cache")
 	}
 
-	requiredRenewCA, ok := ctx.GetTaskCache().Get(CacheKeyCARequiresRenewal)
+	requiredRenewCA, ok := ctx.GetTaskCache().Get(
+		fmt.Sprintf(common.CacheKubeadmEtcdCACertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName()),
+	)
 	if !ok {
 		return false, fmt.Errorf("requiresRenewal not found in task cache")
 	}

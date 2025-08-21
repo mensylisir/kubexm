@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
@@ -34,7 +35,7 @@ func (s *EtcdCleanupBackupsStep) Meta() *spec.StepMeta {
 }
 
 func (s *EtcdCleanupBackupsStep) getCacheKey(ctx runtime.ExecutionContext) string {
-	return fmt.Sprintf(CacheKeyEtcdLocalBackupPath, ctx.GetHost().GetName())
+	return fmt.Sprintf(common.CacheKeyEtcdLocalBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
 }
 
 func (s *EtcdCleanupBackupsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
