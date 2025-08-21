@@ -54,7 +54,7 @@ func (s *KubeadmDistributeK8sPKIStep) Meta() *spec.StepMeta {
 func (s *KubeadmDistributeK8sPKIStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 
-	if _, ok := ctx.GetTaskCache().Get(CacheKeyRemotePKIBackupPath); !ok {
+	if _, ok := ctx.GetTaskCache().Get(common.CacheKubeCertsBackupPath); !ok {
 		return false, fmt.Errorf("precheck failed: remote PKI backup path not found in cache. The backup step must run first")
 	}
 
@@ -108,7 +108,7 @@ func (s *KubeadmDistributeK8sPKIStep) Run(ctx runtime.ExecutionContext) error {
 func (s *KubeadmDistributeK8sPKIStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 
-	backupPath, ok := ctx.GetTaskCache().Get(CacheKeyRemotePKIBackupPath)
+	backupPath, ok := ctx.GetTaskCache().Get(common.CacheKubeCertsBackupPath)
 	if !ok {
 		logger.Error("CRITICAL: No backup path found in cache. CANNOT ROLL BACK. MANUAL INTERVENTION REQUIRED.")
 		return fmt.Errorf("no backup path found in cache for host '%s', cannot restore PKI", ctx.GetHost().GetName())
@@ -140,7 +140,7 @@ func (s *KubeadmDistributeK8sPKIStep) Rollback(ctx runtime.ExecutionContext) err
 		return err
 	}
 
-	ctx.GetTaskCache().Delete(CacheKeyRemotePKIBackupPath)
+	ctx.GetTaskCache().Delete(common.CacheKubeCertsBackupPath)
 
 	logger.Info("Rollback completed: original PKI directory has been restored.")
 	return nil

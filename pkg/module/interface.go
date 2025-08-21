@@ -9,7 +9,7 @@ import (
 type Module interface {
 	Name() string
 	Description() string
-	GetTasks(ctx runtime.ModuleContext) ([]task.Task, error)
+	Tasks() []task.Task
 	Plan(ctx runtime.ModuleContext) (*plan.ExecutionFragment, error)
 	GetBase() *Base
 }

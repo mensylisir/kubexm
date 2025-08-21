@@ -37,12 +37,12 @@ func (t *RolloutEtcdLeafCertsTask) Description() string {
 
 func (t *RolloutEtcdLeafCertsTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 
-	if val, ok := ctx.GetPipelineCache().Get(kubeadm.CacheKeyK8sCARequiresRenewal); ok {
+	if val, ok := ctx.GetPipelineCache().Get(common.CacheKubeadmEtcdCACertRenew); ok {
 		if renew, isBool := val.(bool); isBool && renew {
 			return true, nil
 		}
 	}
-	if val, ok := ctx.GetPipelineCache().Get(kubeadm.CacheKeyStackedEtcdLeafCertsRequireRenewal); ok {
+	if val, ok := ctx.GetPipelineCache().Get(common.CacheKubeadmEtcdLeafCertRenew); ok {
 		if renew, isBool := val.(bool); isBool && renew {
 			return true, nil
 		}
@@ -54,10 +54,7 @@ func (t *RolloutEtcdLeafCertsTask) IsRequired(ctx runtime.TaskContext) (bool, er
 func (t *RolloutEtcdLeafCertsTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx, ok := ctx.(*runtime.Context)
-	if !ok {
-		return nil, fmt.Errorf("internal error: TaskContext is not of type *runtime.Context")
-	}
+	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
 
 	etcdHosts := ctx.GetHostsByRole(common.RoleEtcd)
 	if len(etcdHosts) == 0 {
@@ -69,7 +66,7 @@ func (t *RolloutEtcdLeafCertsTask) Plan(ctx runtime.TaskContext) (*plan.Executio
 	}
 
 	var caRequiresRenewal bool
-	if val, ok := ctx.GetPipelineCache().Get(kubeadm.CacheKeyK8sCARequiresRenewal); ok {
+	if val, ok := ctx.GetPipelineCache().Get(common.CacheKubeadmEtcdCACertRenew); ok {
 		if renew, isBool := val.(bool); isBool {
 			caRequiresRenewal = renew
 		}

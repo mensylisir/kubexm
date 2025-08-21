@@ -1,12 +1,9 @@
 package cache
 
-type PipelineCache interface {
-	Get(key string) (interface{}, bool)
-	Set(key string, value interface{})
-	Delete(key string)
-	Keys() []string
-}
+import "time"
+
+type PipelineCache = Cache
 
 func NewPipelineCache() PipelineCache {
-	return NewGenericCache(nil)
+	return New(24*time.Hour, 1*time.Hour, nil)
 }

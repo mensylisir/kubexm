@@ -37,7 +37,7 @@ func (t *RolloutMasterCertsCATask) Description() string {
 }
 
 func (t *RolloutMasterCertsCATask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	if val, ok := ctx.GetModuleCache().Get(kubeadmstep.CacheKeyK8sCARequiresRenewal); ok {
+	if val, ok := ctx.GetModuleCache().Get(common.CacheKubeadmK8sCACertRenew); ok {
 		if renew, isBool := val.(bool); isBool && renew {
 			return true, nil
 		}
@@ -48,10 +48,7 @@ func (t *RolloutMasterCertsCATask) IsRequired(ctx runtime.TaskContext) (bool, er
 func (t *RolloutMasterCertsCATask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx, ok := ctx.(*runtime.Context)
-	if !ok {
-		return nil, fmt.Errorf("internal error: TaskContext's base context is not of type *runtime.Context")
-	}
+	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
 
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
 	if len(masterHosts) == 0 {

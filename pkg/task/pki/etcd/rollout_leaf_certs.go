@@ -37,19 +37,16 @@ func (t *DeployNewLeafCertsRollingTask) Description() string {
 }
 
 func (t *DeployNewLeafCertsRollingTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	caRenewVal, _ := ctx.GetModuleCache().Get(etcdstep.CacheKeyCARequiresRenewal)
+	caRenewVal, _ := ctx.GetModuleCache().Get(common.CacheKubexmEtcdCACertRenew)
 	caRenew, _ := caRenewVal.(bool)
-	leafRenewVal, _ := ctx.GetModuleCache().Get(etcdstep.CacheKeyLeafRequiresRenewal)
+	leafRenewVal, _ := ctx.GetModuleCache().Get(common.CacheKubeaxmEtcdLeafCertRenew)
 	leafRenew, _ := leafRenewVal.(bool)
 
 	return caRenew || leafRenew, nil
 }
 
 func (t *DeployNewLeafCertsRollingTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
-	runtimeCtx, ok := ctx.(*runtime.Context)
-	if !ok {
-		return nil, fmt.Errorf("internal error: TaskContext is not of type *runtime.Context in Plan method")
-	}
+	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
 
 	fragment := plan.NewExecutionFragment(t.Name())
 
@@ -62,7 +59,7 @@ func (t *DeployNewLeafCertsRollingTask) Plan(ctx runtime.TaskContext) (*plan.Exe
 		return fragment, nil
 	}
 
-	caRenewVal, _ := ctx.GetModuleCache().Get(etcdstep.CacheKeyCARequiresRenewal)
+	caRenewVal, _ := ctx.GetModuleCache().Get(common.CacheKubexmEtcdCACertRenew)
 	isCARenewal, _ := caRenewVal.(bool)
 
 	var lastNodeWaitID plan.NodeID

@@ -46,6 +46,12 @@ type Context struct {
 
 	httpClient               *http.Client
 	currentStepRuntimeConfig map[string]interface{}
+
+	currentPipelineName string
+	currentModuleName   string
+	currentTaskName     string
+
+	RunID string
 }
 
 type HostRuntimeInfo struct {
@@ -64,6 +70,24 @@ func ForHost(rootCtx *Context, host connector.Host) ExecutionContext {
 	newCtx.currentHost = host
 	newCtx.stepExecutionID = ""
 	newCtx.executionStartTime = time.Time{}
+	return &newCtx
+}
+
+func (c *Context) ForPipeline(pipelineName string) *Context {
+	newCtx := *c
+	newCtx.currentPipelineName = pipelineName
+	return &newCtx
+}
+
+func (c *Context) ForModule(moduleName string) *Context {
+	newCtx := *c
+	newCtx.currentModuleName = moduleName
+	return &newCtx
+}
+
+func (c *Context) ForTask(taskName string) *Context {
+	newCtx := *c
+	newCtx.currentTaskName = taskName
 	return &newCtx
 }
 
@@ -101,8 +125,23 @@ func (c *Context) GetTaskCache() cache.TaskCache         { return c.TaskCache }
 func (c *Context) GetStepCache() cache.StepCache         { return c.StepCache }
 func (c *Context) GetHttpClient() *http.Client           { return c.httpClient }
 
+func (c *Context) GetPipelineName() string {
+	return c.currentPipelineName
+}
+
+func (c *Context) GetModuleName() string {
+	return c.currentModuleName
+}
+
+func (c *Context) GetTaskName() string {
+	return c.currentTaskName
+}
 func (c *Context) IsOfflineMode() bool {
 	return c.GlobalOfflineMode
+}
+
+func (c *Context) GetRunID() string {
+	return c.RunID
 }
 
 func (c *Context) GetHostsByRole(role string) []connector.Host {

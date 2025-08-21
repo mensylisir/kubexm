@@ -58,7 +58,7 @@ func (s *KubeadmDistributeKubeconfigsStep) Precheck(ctx runtime.ExecutionContext
 		s.localCertsDir = baseCertsDir
 	}
 
-	if _, ok := ctx.GetTaskCache().Get(CacheKeyRemoteKubeconfigBackupPath); !ok {
+	if _, ok := ctx.GetTaskCache().Get(common.CacheKubeconfigsBackupPath); !ok {
 		logger.Warn("Remote kubeconfig backup path not found in cache. Rollback might not be possible.")
 	}
 
@@ -105,7 +105,7 @@ func (s *KubeadmDistributeKubeconfigsStep) Run(ctx runtime.ExecutionContext) err
 func (s *KubeadmDistributeKubeconfigsStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 
-	backupPath, ok := ctx.GetTaskCache().Get(CacheKeyRemoteKubeconfigBackupPath)
+	backupPath, ok := ctx.GetTaskCache().Get(common.CacheKubeconfigsBackupPath)
 	if !ok {
 		logger.Error("CRITICAL: No kubeconfig backup path found in cache. CANNOT ROLL BACK. MANUAL INTERVENTION REQUIRED.")
 		return fmt.Errorf("no backup path found in cache for host '%s', cannot restore /etc/kubernetes", ctx.GetHost().GetName())
@@ -137,7 +137,7 @@ func (s *KubeadmDistributeKubeconfigsStep) Rollback(ctx runtime.ExecutionContext
 		return fmt.Errorf("failed to restore backup '%s' to '%s' on host '%-s': %w", backupDir, s.remoteKubeconfigDir, ctx.GetHost().GetName(), err)
 	}
 
-	ctx.GetTaskCache().Delete(CacheKeyRemoteKubeconfigBackupPath)
+	ctx.GetTaskCache().Delete(common.CacheKubeconfigsBackupPath)
 	logger.Info("Rollback completed: original '/etc/kubernetes' directory has been restored from backup.")
 	return nil
 }

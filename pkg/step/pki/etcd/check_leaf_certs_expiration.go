@@ -17,8 +17,6 @@ import (
 
 const (
 	DefaultLeafCertExpirationThreshold = 90 * 24 * time.Hour
-
-	CacheKeyLeafRequiresRenewal = "leaf_certs_require_renewal"
 )
 
 var patternsToCheck = []string{
@@ -118,14 +116,14 @@ func (s *CheckLeafCertsExpirationStep) Run(ctx runtime.ExecutionContext) error {
 		}
 	}
 
-	ctx.GetTaskCache().Set(CacheKeyLeafRequiresRenewal, anyCertRequiresRenewal)
-	ctx.GetModuleCache().Set(CacheKeyLeafRequiresRenewal, anyCertRequiresRenewal)
-	ctx.GetPipelineCache().Set(CacheKeyLeafRequiresRenewal, anyCertRequiresRenewal)
+	ctx.GetTaskCache().Set(common.CacheKubeaxmEtcdLeafCertRenew, anyCertRequiresRenewal)
+	ctx.GetModuleCache().Set(common.CacheKubeaxmEtcdLeafCertRenew, anyCertRequiresRenewal)
+	ctx.GetPipelineCache().Set(common.CacheKubeaxmEtcdLeafCertRenew, anyCertRequiresRenewal)
 
 	if anyCertRequiresRenewal {
-		logger.Warnf("One or more leaf certificates on this node require renewal. Result has been saved to cache ('%s': true).", CacheKeyLeafRequiresRenewal)
+		logger.Warnf("One or more leaf certificates on this node require renewal. Result has been saved to cache ('%s': true).", common.CacheKubeaxmEtcdLeafCertRenew)
 	} else {
-		logger.Info("All leaf certificates on this node are valid. Result has been saved to cache ('%s': false).", CacheKeyLeafRequiresRenewal)
+		logger.Info("All leaf certificates on this node are valid. Result has been saved to cache ('%s': false).", common.CacheKubeaxmEtcdLeafCertRenew)
 	}
 
 	return nil

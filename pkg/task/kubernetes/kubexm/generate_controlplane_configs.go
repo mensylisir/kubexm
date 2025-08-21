@@ -1,7 +1,6 @@
 package kubexm
 
 import (
-	"fmt"
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -42,10 +41,7 @@ func (t *GenerateControlPlaneConfigsTask) IsRequired(ctx runtime.TaskContext) (b
 func (t *GenerateControlPlaneConfigsTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx, ok := ctx.(*runtime.Context)
-	if !ok {
-		return nil, fmt.Errorf("internal error: TaskContext is not of type *runtime.Context")
-	}
+	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
 
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
 	if len(masterHosts) == 0 {
@@ -59,7 +55,7 @@ func (t *GenerateControlPlaneConfigsTask) Plan(ctx runtime.TaskContext) (*plan.E
 	fragment.AddNode(&plan.ExecutionNode{Name: "ConfigureKubeAPIServer", Step: configureApiServer, Hosts: masterHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "ConfigureKubeControllerManager", Step: configureControllerManager, Hosts: masterHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "ConfigureKubeScheduler", Step: configureScheduler, Hosts: masterHosts})
-	
+
 	fragment.CalculateEntryAndExitNodes()
 	return fragment, nil
 }

@@ -38,13 +38,13 @@ func (t *RolloutMasterLeafCertsTask) Description() string {
 
 func (t *RolloutMasterLeafCertsTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 	var renewalTriggered bool
-	if val, ok := ctx.GetModuleCache().Get(kubeadmstep.CacheKeyK8sCARequiresRenewal); ok {
+	if val, ok := ctx.GetModuleCache().Get(common.CacheKubeadmK8sCACertRenew); ok {
 		if renew, isBool := val.(bool); isBool && renew {
 			renewalTriggered = true
 		}
 	}
 	if !renewalTriggered {
-		if val, ok := ctx.GetModuleCache().Get(kubeadmstep.CacheKeyK8sLeafCertsRequireRenewal); ok {
+		if val, ok := ctx.GetModuleCache().Get(common.CacheKubeadmK8sLeafCertRenew); ok {
 			if renew, isBool := val.(bool); isBool && renew {
 				renewalTriggered = true
 			}
@@ -56,10 +56,7 @@ func (t *RolloutMasterLeafCertsTask) IsRequired(ctx runtime.TaskContext) (bool, 
 func (t *RolloutMasterLeafCertsTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx, ok := ctx.(*runtime.Context)
-	if !ok {
-		return nil, fmt.Errorf("internal error: TaskContext is not of type *runtime.Context")
-	}
+	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
 
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
 	if len(masterHosts) == 0 {

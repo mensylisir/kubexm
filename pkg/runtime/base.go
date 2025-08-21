@@ -47,6 +47,10 @@ type CacheProviderContext interface {
 	GetModuleCache() cache.ModuleCache
 	GetTaskCache() cache.TaskCache
 	GetStepCache() cache.StepCache
+	GetPipelineName() string
+	GetModuleName() string
+	GetTaskName() string
+	GetRunID() string
 }
 
 type GlobalSettingsContext interface {

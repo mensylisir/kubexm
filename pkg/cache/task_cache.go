@@ -1,12 +1,9 @@
 package cache
 
-type TaskCache interface {
-	Get(key string) (interface{}, bool)
-	Set(key string, value interface{})
-	Delete(key string)
-	Keys() []string
-}
+import "time"
+
+type TaskCache = Cache
 
 func NewTaskCache(parent ModuleCache) TaskCache {
-	return NewGenericCache(parent)
+	return New(30*time.Minute, 5*time.Minute, parent)
 }

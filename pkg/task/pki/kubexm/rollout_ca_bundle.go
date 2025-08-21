@@ -41,7 +41,7 @@ func (t *RolloutK8sCABundleTask) Description() string {
 
 func (t *RolloutK8sCABundleTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 	var caRequiresRenewal bool
-	if val, ok := ctx.GetModuleCache().Get(kubexmstep.CacheKeyK8sCARequiresRenewal); ok {
+	if val, ok := ctx.GetModuleCache().Get(common.CacheKubexmK8sCACertRenew); ok {
 		if renew, isBool := val.(bool); isBool && renew {
 			caRequiresRenewal = renew
 		}
@@ -52,10 +52,7 @@ func (t *RolloutK8sCABundleTask) IsRequired(ctx runtime.TaskContext) (bool, erro
 func (t *RolloutK8sCABundleTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx, ok := ctx.(*runtime.Context)
-	if !ok {
-		return nil, fmt.Errorf("internal error: TaskContext is not of type *runtime.Context")
-	}
+	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
 
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
 	if len(masterHosts) == 0 {

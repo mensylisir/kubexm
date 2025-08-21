@@ -13,10 +13,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/step"
 )
 
-const (
-	CacheKeyStackedEtcdLeafCertsRequireRenewal = "kubeadm_stacked_etcd_leaf_certs_require_renewal"
-)
-
 type KubeadmCheckStackedEtcdLeafCertsExpirationStep struct {
 	step.Base
 	remoteKubePkiDir    string
@@ -120,14 +116,14 @@ func (s *KubeadmCheckStackedEtcdLeafCertsExpirationStep) Run(ctx runtime.Executi
 		}
 	}
 
-	ctx.GetTaskCache().Set(CacheKeyStackedEtcdLeafCertsRequireRenewal, anyCertRequiresRenewal)
-	ctx.GetModuleCache().Set(CacheKeyStackedEtcdLeafCertsRequireRenewal, anyCertRequiresRenewal)
-	ctx.GetPipelineCache().Set(CacheKeyStackedEtcdLeafCertsRequireRenewal, anyCertRequiresRenewal)
+	ctx.GetTaskCache().Set(fmt.Sprintf(common.CacheKubeadmEtcdLeafCertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName()), anyCertRequiresRenewal)
+	ctx.GetModuleCache().Set(fmt.Sprintf(common.CacheKubeadmEtcdLeafCertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName()), anyCertRequiresRenewal)
+	ctx.GetPipelineCache().Set(fmt.Sprintf(common.CacheKubeadmEtcdLeafCertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName()), anyCertRequiresRenewal)
 
 	if anyCertRequiresRenewal {
-		logger.Warnf("One or more stacked etcd leaf certificates require renewal. Result saved to cache ('%s': true).", CacheKeyStackedEtcdLeafCertsRequireRenewal)
+		logger.Warnf("One or more stacked etcd leaf certificates require renewal. Result saved to cache ('%s': true).", common.CacheKubeadmEtcdLeafCertRenew)
 	} else {
-		logger.Info("All stacked etcd leaf certificates are valid. Result saved to cache ('%s': false).", CacheKeyStackedEtcdLeafCertsRequireRenewal)
+		logger.Info("All stacked etcd leaf certificates are valid. Result saved to cache ('%s': false).", common.CacheKubeadmEtcdLeafCertRenew)
 	}
 
 	return nil

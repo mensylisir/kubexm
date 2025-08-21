@@ -1,94 +1,44 @@
 package cache
 
-import (
-	"sync"
+import "time"
+
+const (
+	NoExpiration      time.Duration = -1
+	DefaultExpiration time.Duration = 0
 )
 
-type parentCache interface {
+type item struct {
+	Value      interface{}
+	Expiration int64
+}
+
+func (i item) Expired() bool {
+	if i.Expiration == 0 {
+		return false
+	}
+	return time.Now().UnixNano() > i.Expiration
+}
+
+type Cache interface {
 	Get(key string) (interface{}, bool)
-}
-type GenericCache struct {
-	store  sync.Map
-	parent parentCache
-}
-
-func NewGenericCache(parent parentCache) *GenericCache {
-	return &GenericCache{
-		parent: parent,
-	}
-}
-
-func (c *GenericCache) Get(key string) (interface{}, bool) {
-	if val, ok := c.store.Load(key); ok {
-		return val, true
-	}
-	if c.parent != nil {
-		return c.parent.Get(key)
-	}
-	return nil, false
-}
-
-func (c *GenericCache) Keys() []string {
-	var keys []string
-	c.store.Range(func(key interface{}, value interface{}) bool {
-		if kStr, ok := key.(string); ok {
-			keys = append(keys, kStr)
-		}
-		return true
-	})
-	return keys
-}
-
-func (c *GenericCache) Set(k string, v interface{}) {
-	c.store.Store(k, v)
-}
-
-func (c *GenericCache) Delete(k string) {
-	c.store.Delete(k)
-}
-
-func (c *GenericCache) GetMustString(k string) (string, bool) {
-	v, ok := c.Get(k)
-	if !ok {
-		return "", false
-	}
-	res, assert := v.(string)
-	return res, assert
-}
-
-func (c *GenericCache) SetParent(parent *GenericCache) {
-	c.parent = parent
-}
-
-func (c *GenericCache) GetOrSet(k string, v interface{}) (interface{}, bool) {
-	return c.store.LoadOrStore(k, v)
-}
-
-func (c *GenericCache) Range(f func(key, value interface{}) bool) {
-	c.store.Range(f)
-}
-
-func (c *GenericCache) Clean() {
-	c.store.Range(func(key, value interface{}) bool {
-		c.store.Delete(key)
-		return true
-	})
-}
-
-func (c *GenericCache) GetMustInt(k string) (int, bool) {
-	v, ok := c.Get(k)
-	res, assert := v.(int)
-	if !assert {
-		return res, false
-	}
-	return res, ok
-}
-
-func (c *GenericCache) GetMustBool(k string) (bool, bool) {
-	v, ok := c.Get(k)
-	res, assert := v.(bool)
-	if !assert {
-		return res, false
-	}
-	return res, ok
+	Set(key string, value interface{})
+	SetWithTTL(key string, value interface{}, ttl time.Duration)
+	Delete(key string)
+	Has(key string) bool
+	Keys() []string
+	Count() int
+	Flush()
+	GetOrSet(k string, v interface{}) (interface{}, bool)
+	GetString(k string) (string, bool)
+	GetInt(k string) (int, bool)
+	GetInt64(k string) (int64, bool)
+	GetBool(k string) (bool, bool)
+	GetFloat64(k string) (float64, bool)
+	GetTime(k string) (time.Time, bool)
+	GetStringOrDefault(k string, defaultValue string) string
+	GetIntOrDefault(k string, defaultValue int) int
+	GetBoolOrDefault(k string, defaultValue bool) bool
+	IncrementInt(k string, n int) (int, error)
+	DecrementInt(k string, n int) (int, error)
+	Range(f func(key string, value interface{}) bool)
 }

@@ -40,10 +40,7 @@ func (t *GreetingTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 func (t *GreetingTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx, ok := ctx.(*runtime.Context)
-	if !ok {
-		return nil, fmt.Errorf("internal error: TaskContext is not of type *runtime.Context")
-	}
+	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
 	if err != nil {

@@ -2,7 +2,7 @@ package etcd
 
 import (
 	"fmt"
-
+	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -35,19 +35,16 @@ func (t *GenerateNewCertificatesTask) Description() string {
 }
 
 func (t *GenerateNewCertificatesTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	caRenewVal, _ := ctx.GetModuleCache().Get(etcdstep.CacheKeyCARequiresRenewal)
+	caRenewVal, _ := ctx.GetModuleCache().Get(common.CacheKubexmEtcdCACertRenew)
 	caRenew, _ := caRenewVal.(bool)
-	leafRenewVal, _ := ctx.GetModuleCache().Get(etcdstep.CacheKeyLeafRequiresRenewal)
+	leafRenewVal, _ := ctx.GetModuleCache().Get(common.CacheKubeaxmEtcdLeafCertRenew)
 	leafRenew, _ := leafRenewVal.(bool)
 
 	return caRenew || leafRenew, nil
 }
 
 func (t *GenerateNewCertificatesTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
-	runtimeCtx, ok := ctx.(*runtime.Context)
-	if !ok {
-		return nil, fmt.Errorf("internal error: TaskContext is not of type *runtime.Context in Plan method")
-	}
+	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
 	fragment := plan.NewExecutionFragment(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
@@ -55,11 +52,20 @@ func (t *GenerateNewCertificatesTask) Plan(ctx runtime.TaskContext) (*plan.Execu
 		return nil, fmt.Errorf("failed to get control node for task %s: %w", t.Name(), err)
 	}
 
+	prepareAssetsStep := etcdstep.NewPrepareAssetsStepBuilder(*runtimeCtx, "PrepareEtcdCARenewalAssets").Build()
 	resignCaStep := etcdstep.NewResignCAStepBuilder(*runtimeCtx, "ResignEtcdCA").Build()
-	genLeafsStep := etcdstep.NewGenerateNewLeafCertsStepBuilder(*runtimeCtx, "GenerateNewEtcdLeafCerts").Build()
+	resignCertStep := etcdstep.NewGenerateNewLeafCertsStepBuilder(*runtimeCtx, "ResignEtcdCerts").Build()
+	createBundleStep := etcdstep.NewPrepareCATransitionStepBuilder(*runtimeCtx, "CreateCABundle").Build()
+
+	fragment.AddNode(&plan.ExecutionNode{Name: "PrepareAssets", Step: prepareAssetsStep, Hosts: []connector.Host{controlNode}})
 	fragment.AddNode(&plan.ExecutionNode{Name: "ResignEtcdCA", Step: resignCaStep, Hosts: []connector.Host{controlNode}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "GenerateNewEtcdLeafCerts", Step: genLeafsStep, Hosts: []connector.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "GenerateNewEtcdLeafCerts", Step: resignCertStep, Hosts: []connector.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "CreateCABundle", Step: createBundleStep, Hosts: []connector.Host{controlNode}})
+
+	fragment.AddDependency("PrepareAssets", "ResignEtcdCA")
+	fragment.AddDependency("PrepareAssets", "CreateCABundle")
 	fragment.AddDependency("ResignEtcdCA", "GenerateNewEtcdLeafCerts")
+	fragment.AddDependency("ResignEtcdCA", "CreateCABundle")
 	fragment.CalculateEntryAndExitNodes()
 
 	return fragment, nil
