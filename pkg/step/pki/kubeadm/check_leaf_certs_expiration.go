@@ -112,14 +112,15 @@ func (s *KubeadmCheckLeafCertsExpirationStep) Run(ctx runtime.ExecutionContext) 
 		}
 	}
 
-	ctx.GetTaskCache().Set(common.CacheKubeadmK8sLeafCertRenew, anyLeafRequiresRenewal)
-	ctx.GetModuleCache().Set(common.CacheKubeadmK8sLeafCertRenew, anyLeafRequiresRenewal)
-	ctx.GetPipelineCache().Set(common.CacheKubeadmK8sLeafCertRenew, anyLeafRequiresRenewal)
+	cacheKey := fmt.Sprintf(common.CacheKubeadmK8sLeafCertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	ctx.GetTaskCache().Set(cacheKey, anyLeafRequiresRenewal)
+	ctx.GetModuleCache().Set(cacheKey, anyLeafRequiresRenewal)
+	ctx.GetPipelineCache().Set(cacheKey, anyLeafRequiresRenewal)
 
 	if anyLeafRequiresRenewal {
-		logger.Warnf("One or more Kubernetes leaf certificates on this node require renewal. Result saved to cache ('%s': true).", common.CacheKubeadmK8sLeafCertRenew)
+		logger.Warnf("One or more Kubernetes leaf certificates on this node require renewal. Result saved to cache ('%s': true).", cacheKey)
 	} else {
-		logger.Info("All Kubernetes leaf certificates on this node are valid. Result saved to cache ('%s': false).", common.CacheKubeadmK8sLeafCertRenew)
+		logger.Info("All Kubernetes leaf certificates on this node are valid. Result saved to cache ('%s': false).", cacheKey)
 	}
 
 	return nil

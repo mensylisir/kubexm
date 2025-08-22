@@ -45,7 +45,8 @@ func (s *BackupKubeconfigsStep) Meta() *spec.StepMeta {
 func (s *BackupKubeconfigsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 
-	if _, ok := ctx.GetTaskCache().Get(common.CacheKubeconfigsBackupPath); ok {
+	cacheKey := fmt.Sprintf(common.CacheKubeconfigsBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	if _, ok := ctx.GetTaskCache().Get(cacheKey); ok {
 		logger.Info("Remote kubeconfig directory has already been backed up in this task execution. Step is done.")
 		return true, nil
 	}
@@ -77,7 +78,8 @@ func (s *BackupKubeconfigsStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to back up remote directory on host '%s': %w", ctx.GetHost().GetName(), err)
 	}
 
-	ctx.GetTaskCache().Set(common.CacheKubeconfigsBackupPath, s.remoteBackupDir)
+	cacheKey := fmt.Sprintf(common.CacheKubeconfigsBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	ctx.GetTaskCache().Set(cacheKey, s.remoteBackupDir)
 	logger.Infof("Successfully backed up directory. Backup path '%s' saved to cache.", s.remoteBackupDir)
 
 	return nil
@@ -86,7 +88,8 @@ func (s *BackupKubeconfigsStep) Run(ctx runtime.ExecutionContext) error {
 func (s *BackupKubeconfigsStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 
-	backupPath, ok := ctx.GetTaskCache().Get(common.CacheKubeconfigsBackupPath)
+	cacheKey := fmt.Sprintf(common.CacheKubeconfigsBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	backupPath, ok := ctx.GetTaskCache().Get(cacheKey)
 	if !ok {
 		logger.Warn("No backup path found in cache for this task execution. Assuming Run did not complete, nothing to roll back.")
 		return nil
@@ -116,7 +119,7 @@ func (s *BackupKubeconfigsStep) Rollback(ctx runtime.ExecutionContext) error {
 		logger.Errorf("Failed to remove backup directory '%s' during rollback. Manual cleanup may be needed on host '%s'. Error: %v", backupDir, ctx.GetHost().GetName(), err)
 	}
 
-	ctx.GetTaskCache().Delete(common.CacheKubeconfigsBackupPath)
+	ctx.GetTaskCache().Delete(cacheKey)
 
 	logger.Info("Rollback of backup step completed: temporary backup directory removed.")
 	return nil

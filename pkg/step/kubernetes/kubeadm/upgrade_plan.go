@@ -5,14 +5,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
 	"k8s.io/apimachinery/pkg/util/version"
-)
-
-const (
-	CacheKeyTargetVersion = "kubeadm_upgrade_target_version"
 )
 
 type KubeadmUpgradePlanStep struct {
@@ -110,7 +107,10 @@ func (s *KubeadmUpgradePlanStep) Run(ctx runtime.ExecutionContext) error {
 	if !strings.Contains(output, "You can now apply the upgrade by executing the following command") {
 		return fmt.Errorf("could not find success message in 'kubeadm upgrade plan' output. The plan might have warnings that need attention")
 	}
-	ctx.GetTaskCache().Set(CacheKeyTargetVersion, s.TargetVersion)
+	ctx.GetTaskCache().Set(
+		fmt.Sprintf(common.CacheKeyTargetVersion, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName()),
+		s.TargetVersion,
+	)
 	logger.Infof("Successfully verified upgrade plan. Target version '%s' saved to cache.", s.TargetVersion)
 
 	return nil

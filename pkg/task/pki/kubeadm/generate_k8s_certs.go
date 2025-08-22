@@ -34,7 +34,10 @@ func (t *GenerateK8sLeafCertsTask) Description() string {
 }
 
 func (t *GenerateK8sLeafCertsTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	rawCaRenewal, ok := ctx.GetModuleCache().Get(common.CacheKubeadmK8sCACertRenew)
+	runtimeCtx := ctx.(*runtime.Context)
+
+	caCacheKey := fmt.Sprintf(common.CacheKubeadmK8sCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
+	rawCaRenewal, ok := ctx.GetModuleCache().Get(caCacheKey)
 	if !ok {
 		rawCaRenewal = false
 	}
@@ -44,7 +47,8 @@ func (t *GenerateK8sLeafCertsTask) IsRequired(ctx runtime.TaskContext) (bool, er
 		caRequiresRenewal = false
 	}
 
-	rawLeafRenewal, ok := ctx.GetModuleCache().Get(common.CacheKubeadmK8sLeafCertRenew)
+	leafCacheKey := fmt.Sprintf(common.CacheKubeadmK8sLeafCertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
+	rawLeafRenewal, ok := ctx.GetModuleCache().Get(leafCacheKey)
 	if !ok {
 		rawLeafRenewal = false
 	}

@@ -37,7 +37,9 @@ func (t *DeployTrustBundleRollingTask) Description() string {
 }
 
 func (t *DeployTrustBundleRollingTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	caRenewVal, _ := ctx.GetModuleCache().Get(common.CacheKubexmEtcdCACertRenew)
+	runtimeCtx := ctx.(*runtime.Context)
+	cacheKey := fmt.Sprintf(common.CacheKubexmEtcdCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
+	caRenewVal, _ := ctx.GetModuleCache().Get(cacheKey)
 	caRenew, _ := caRenewVal.(bool)
 	return caRenew, nil
 }
