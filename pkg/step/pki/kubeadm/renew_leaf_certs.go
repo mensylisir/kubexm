@@ -59,13 +59,15 @@ func (s *KubeadmRenewLeafCertsStep) Precheck(ctx runtime.ExecutionContext) (isDo
 	logger.Info("Starting precheck for leaf certificate renewal...")
 
 	var caRequiresRenewal bool
-	if rawVal, ok := ctx.GetModuleCache().Get(common.CacheKubeadmK8sCACertRenew); ok {
+	caCacheKey := fmt.Sprintf(common.CacheKubeadmK8sCACertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	if rawVal, ok := ctx.GetModuleCache().Get(caCacheKey); ok {
 		if val, isBool := rawVal.(bool); isBool {
 			caRequiresRenewal = val
 		}
 	}
 	var leafRequiresRenewal bool
-	if rawVal, ok := ctx.GetModuleCache().Get(common.CacheKubeadmK8sLeafCertRenew); ok {
+	leafCacheKey := fmt.Sprintf(common.CacheKubeadmK8sLeafCertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	if rawVal, ok := ctx.GetModuleCache().Get(leafCacheKey); ok {
 		if val, isBool := rawVal.(bool); isBool {
 			leafRequiresRenewal = val
 		}

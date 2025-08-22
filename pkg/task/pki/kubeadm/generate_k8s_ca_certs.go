@@ -35,8 +35,9 @@ func (t *GenerateK8sCACertsTask) Description() string {
 
 func (t *GenerateK8sCACertsTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 	var caRequiresRenewal bool
-
-	if rawVal, ok := ctx.GetModuleCache().Get(common.CacheKubeadmK8sCACertRenew); ok {
+	runtimeCtx := ctx.(*runtime.Context)
+	cacheKey := fmt.Sprintf(common.CacheKubeadmK8sCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
+	if rawVal, ok := ctx.GetModuleCache().Get(cacheKey); ok {
 		if val, isBool := rawVal.(bool); isBool {
 			caRequiresRenewal = val
 		}

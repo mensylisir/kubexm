@@ -88,9 +88,12 @@ func (s *KubeadmInitStep) Run(ctx runtime.ExecutionContext) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse ca cert hash from cached output: %w", err)
 	}
-	ctx.GetTaskCache().Set(common.CacheKubeadmInitToken, token)
-	ctx.GetTaskCache().Set(common.CacheKubeadmInitCertKey, certKey)
-	ctx.GetTaskCache().Set(common.CacheKubeadmInitCACertHash, caCertHash)
+	cacheKey := fmt.Sprintf(common.CacheKubeadmInitToken, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	ctx.GetTaskCache().Set(cacheKey, token)
+	cacheKey = fmt.Sprintf(common.CacheKubeadmInitCertKey, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	ctx.GetTaskCache().Set(cacheKey, certKey)
+	cacheKey = fmt.Sprintf(common.CacheKubeadmInitCACertHash, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	ctx.GetTaskCache().Set(cacheKey, caCertHash)
 	logger.Info("Kubeadm init completed successfully.")
 	return nil
 }

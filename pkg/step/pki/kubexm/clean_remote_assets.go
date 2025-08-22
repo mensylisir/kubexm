@@ -52,14 +52,16 @@ func (s *KubeadmRemoteCleanupStep) Run(ctx runtime.ExecutionContext) error {
 	}
 
 	var pkiBackupPath string
-	if rawVal, ok := ctx.GetTaskCache().Get(common.CacheKubeCertsBackupPath); ok {
+	pkiCacheKey := fmt.Sprintf(common.CacheKubeCertsBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	if rawVal, ok := ctx.GetTaskCache().Get(pkiCacheKey); ok {
 		if path, isString := rawVal.(string); isString {
 			pkiBackupPath = path
 		}
 	}
 
 	var kubeconfigBackupPath string
-	if rawVal, ok := ctx.GetTaskCache().Get(common.CacheKubeconfigsBackupPath); ok {
+	kubeconfigCacheKey := fmt.Sprintf(common.CacheKubeconfigsBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	if rawVal, ok := ctx.GetTaskCache().Get(kubeconfigCacheKey); ok {
 		if path, isString := rawVal.(string); isString {
 			kubeconfigBackupPath = path
 		}

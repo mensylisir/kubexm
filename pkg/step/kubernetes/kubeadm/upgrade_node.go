@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
@@ -40,7 +41,9 @@ func (s *KubeadmUpgradeNodeStep) Precheck(ctx runtime.ExecutionContext) (isDone 
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	logger.Info("Starting precheck for 'kubeadm upgrade node'...")
 
-	targetVersion, ok := ctx.GetTaskCache().Get(CacheKeyTargetVersion)
+	targetVersion, ok := ctx.GetTaskCache().Get(
+		fmt.Sprintf(common.CacheKeyTargetVersion, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName()),
+	)
 	if !ok {
 		return false, fmt.Errorf("precheck failed: target version not found in cache")
 	}
@@ -99,7 +102,7 @@ func (s *KubeadmUpgradeNodeStep) Run(ctx runtime.ExecutionContext) error {
 	matches := re.FindStringSubmatch(output)
 	if len(matches) >= 2 {
 		backupPath := matches[1]
-		cacheKey := fmt.Sprintf(CacheKeyKubeadmBackupPath, ctx.GetHost().GetName())
+		cacheKey := fmt.Sprintf(common.CacheKeyKubeadmBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), ctx.GetHost().GetName())
 		ctx.GetTaskCache().Set(cacheKey, backupPath)
 		logger.Infof("Detected and saved kubeadm backup path to cache: %s", backupPath)
 	}
@@ -116,7 +119,7 @@ func (s *KubeadmUpgradeNodeStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
 	logger.Warn("Rollback for 'kubeadm upgrade node' is not a direct command.")
 	logger.Warn("It requires restoring the backup created by kubeadm, which should be handled by a dedicated 'RestoreKubeadmBackupStep'.")
-	cacheKey := fmt.Sprintf(CacheKeyKubeadmBackupPath, ctx.GetHost().GetName())
+	cacheKey := fmt.Sprintf(common.CacheKeyKubeadmBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), ctx.GetHost().GetName())
 	if backupPath, ok := ctx.GetTaskCache().Get(cacheKey); ok {
 		logger.Warnf("If manual rollback is needed, restore the backup from: %s", backupPath)
 	}

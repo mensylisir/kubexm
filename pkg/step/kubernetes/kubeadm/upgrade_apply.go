@@ -6,13 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-)
-
-const (
-	CacheKeyKubeadmBackupPath = "kubeadm_upgrade_backup_path_%s" // %s = hostname
 )
 
 type KubeadmUpgradeApplyStep struct {
@@ -42,7 +39,9 @@ func (s *KubeadmUpgradeApplyStep) Meta() *spec.StepMeta {
 func (s *KubeadmUpgradeApplyStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	logger.Info("Starting precheck for kubeadm upgrade apply...")
-	_, ok := ctx.GetTaskCache().Get(CacheKeyTargetVersion)
+	_, ok := ctx.GetTaskCache().Get(
+		fmt.Sprintf(common.CacheKeyTargetVersion, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName()),
+	)
 	if !ok {
 		return false, fmt.Errorf("precheck failed: target version not found in cache. The 'upgrade plan' step must run first")
 	}
@@ -60,7 +59,9 @@ func (s *KubeadmUpgradeApplyStep) Run(ctx runtime.ExecutionContext) error {
 		return err
 	}
 
-	targetVersion, ok := ctx.GetTaskCache().Get(CacheKeyTargetVersion)
+	targetVersion, ok := ctx.GetTaskCache().Get(
+		fmt.Sprintf(common.CacheKeyTargetVersion, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName()),
+	)
 	if !ok {
 		return fmt.Errorf("could not retrieve target version from cache")
 	}
@@ -87,7 +88,7 @@ func (s *KubeadmUpgradeApplyStep) Run(ctx runtime.ExecutionContext) error {
 		logger.Warn("Could not automatically detect the backup path from kubeadm output. Manual rollback might be required if subsequent steps fail.")
 	} else {
 		backupPath := matches[1]
-		cacheKey := fmt.Sprintf(CacheKeyKubeadmBackupPath, ctx.GetHost().GetName())
+		cacheKey := fmt.Sprintf(common.CacheKeyKubeadmBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), ctx.GetHost().GetName())
 		ctx.GetTaskCache().Set(cacheKey, backupPath)
 		logger.Infof("Successfully detected and saved kubeadm backup path to cache: %s (key: %s)", backupPath, cacheKey)
 	}

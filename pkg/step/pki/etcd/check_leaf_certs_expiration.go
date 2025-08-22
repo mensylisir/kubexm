@@ -116,14 +116,15 @@ func (s *CheckLeafCertsExpirationStep) Run(ctx runtime.ExecutionContext) error {
 		}
 	}
 
-	ctx.GetTaskCache().Set(common.CacheKubeaxmEtcdLeafCertRenew, anyCertRequiresRenewal)
-	ctx.GetModuleCache().Set(common.CacheKubeaxmEtcdLeafCertRenew, anyCertRequiresRenewal)
-	ctx.GetPipelineCache().Set(common.CacheKubeaxmEtcdLeafCertRenew, anyCertRequiresRenewal)
+	cacheKey := fmt.Sprintf(common.CacheKubexmEtcdLeafCertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	ctx.GetTaskCache().Set(cacheKey, anyCertRequiresRenewal)
+	ctx.GetModuleCache().Set(cacheKey, anyCertRequiresRenewal)
+	ctx.GetPipelineCache().Set(cacheKey, anyCertRequiresRenewal)
 
 	if anyCertRequiresRenewal {
-		logger.Warnf("One or more leaf certificates on this node require renewal. Result has been saved to cache ('%s': true).", common.CacheKubeaxmEtcdLeafCertRenew)
+		logger.Warnf("One or more leaf certificates on this node require renewal. Result has been saved to cache ('%s': true).", cacheKey)
 	} else {
-		logger.Info("All leaf certificates on this node are valid. Result has been saved to cache ('%s': false).", common.CacheKubeaxmEtcdLeafCertRenew)
+		logger.Info("All leaf certificates on this node are valid. Result has been saved to cache ('%s': false).", cacheKey)
 	}
 
 	return nil
