@@ -73,7 +73,7 @@ func (s *ExtractCNIPluginsStep) getPathsForArch(ctx runtime.ExecutionContext, ar
 	sourcePath = binaryInfo.FilePath()
 	innerDir = "cni-plugins"
 	destPath = filepath.Join(filepath.Dir(sourcePath), innerDir)
-	cacheKey = sourcePath
+	cacheKey = fmt.Sprintf(common.CacheKeyCNIPluginsExtractedDir, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), arch)
 
 	return sourcePath, destPath, cacheKey, innerDir, nil
 }

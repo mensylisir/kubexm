@@ -162,7 +162,8 @@ func (s *PushImagesStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("failed to push some images:\n- %s", strings.Join(allErrors, "\n- "))
 	}
 
-	ctx.GetTaskCache().Set("manifestList", manifestList)
+	cacheKey := fmt.Sprintf(common.CacheKeyManifestList, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	ctx.GetTaskCache().Set(cacheKey, manifestList)
 	logger.Info("All saved images have been pushed to the private registry successfully.")
 	return nil
 }

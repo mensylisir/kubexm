@@ -80,7 +80,7 @@ func (s *ExtractEtcdStep) getPathsForArch(ctx runtime.ExecutionContext, arch str
 	sourcePath = binaryInfo.FilePath()
 	innerDir := "etcd"
 	destPath = filepath.Join(filepath.Dir(sourcePath), innerDir)
-	cacheKey = sourcePath
+	cacheKey = fmt.Sprintf(common.CacheKeyEtcdExtractedDir, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), arch)
 
 	return sourcePath, destPath, cacheKey, nil
 }

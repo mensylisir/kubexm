@@ -78,7 +78,7 @@ func (s *ExtractCriDockerdStep) getPathsForArch(ctx runtime.ExecutionContext, ar
 
 	sourcePath = binaryInfo.FilePath()
 	destPath = filepath.Dir(sourcePath)
-	cacheKey = sourcePath
+	cacheKey = fmt.Sprintf(common.CacheKeyCriDockerdExtractedDir, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), arch)
 
 	return sourcePath, destPath, cacheKey, nil
 }

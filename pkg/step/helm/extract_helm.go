@@ -80,7 +80,7 @@ func (s *ExtractHelmStep) getPathsForArch(ctx runtime.ExecutionContext, arch str
 
 	destPath = filepath.Dir(sourcePath)
 
-	cacheKey = sourcePath
+	cacheKey = fmt.Sprintf(common.CacheKeyHelmExtractedDir, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), arch)
 
 	return sourcePath, destPath, cacheKey, nil
 }

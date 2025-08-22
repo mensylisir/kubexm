@@ -79,7 +79,7 @@ func (s *ExtractCriCtlStep) getPathsForArch(ctx runtime.ExecutionContext, arch s
 
 	sourcePath = binaryInfo.FilePath()
 	destPath = filepath.Dir(sourcePath)
-	cacheKey = sourcePath
+	cacheKey = fmt.Sprintf(common.CacheKeyCriCtlExtractedDir, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), arch)
 
 	return sourcePath, destPath, cacheKey, nil
 }

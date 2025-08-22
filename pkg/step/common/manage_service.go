@@ -155,12 +155,14 @@ func (s *ManageServiceStep) Run(ctx runtime.ExecutionContext) error {
 		if cmdErr, ok := err.(*connector.CommandError); ok {
 			if s.Action == ActionIsActive {
 				logger.Info("Service is-active check result.", "exit_code", cmdErr.ExitCode, "stdout", string(stdout), "stderr", string(stderr))
-				ctx.GetTaskCache().Set(fmt.Sprintf("service.%s.isActive", s.ServiceName), cmdErr.ExitCode == 0)
+				cacheKey := fmt.Sprintf(common.CacheKeyServiceIsActive, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), s.ServiceName)
+				ctx.GetTaskCache().Set(cacheKey, cmdErr.ExitCode == 0)
 				return nil
 			}
 			if s.Action == ActionIsEnabled {
 				logger.Info("Service is-enabled check result.", "exit_code", cmdErr.ExitCode, "stdout", string(stdout), "stderr", string(stderr))
-				ctx.GetTaskCache().Set(fmt.Sprintf("service.%s.isEnabled", s.ServiceName), strings.TrimSpace(string(stdout)) == "enabled")
+				cacheKey := fmt.Sprintf(common.CacheKeyServiceIsEnabled, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), s.ServiceName)
+				ctx.GetTaskCache().Set(cacheKey, strings.TrimSpace(string(stdout)) == "enabled")
 				return nil
 			}
 		}
@@ -168,10 +170,12 @@ func (s *ManageServiceStep) Run(ctx runtime.ExecutionContext) error {
 		return fmt.Errorf("systemctl command '%s' failed: %w. Stderr: %s", cmd, err, string(stderr))
 	}
 	if s.Action == ActionIsActive {
-		ctx.GetTaskCache().Set(fmt.Sprintf("service.%s.isActive", s.ServiceName), true)
+		cacheKey := fmt.Sprintf(common.CacheKeyServiceIsActive, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), s.ServiceName)
+		ctx.GetTaskCache().Set(cacheKey, true)
 	}
 	if s.Action == ActionIsEnabled {
-		ctx.GetTaskCache().Set(fmt.Sprintf("service.%s.isEnabled", s.ServiceName), strings.TrimSpace(string(stdout)) == "enabled")
+		cacheKey := fmt.Sprintf(common.CacheKeyServiceIsEnabled, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), s.ServiceName)
+		ctx.GetTaskCache().Set(cacheKey, strings.TrimSpace(string(stdout)) == "enabled")
 	}
 
 	logger.Info("Systemctl command executed successfully.", "command", cmd, "stdout", string(stdout))

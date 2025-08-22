@@ -137,12 +137,13 @@ func (s *DownloadFileStep) Run(ctx runtime.ExecutionContext) error {
 		_ = os.Remove(s.DestPath)
 		return fmt.Errorf("downloaded file checksum verification failed for %s: %w", s.DestPath, err)
 	}
-	if outputKeyVal, ok := ctx.GetFromRuntimeConfig("outputCacheKey"); ok {
-		if outputKey, isString := outputKeyVal.(string); isString && outputKey != "" {
-			ctx.GetTaskCache().Set(outputKey, s.DestPath)
-			logger.Info("Stored downloaded path in cache", "key", outputKey)
+	if outputKeyTmplVal, ok := ctx.GetFromRuntimeConfig("outputCacheKeyTemplate"); ok {
+		if outputKeyTmpl, isString := outputKeyTmplVal.(string); isString && outputKeyTmpl != "" {
+			cacheKey := fmt.Sprintf(outputKeyTmpl, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+			ctx.GetTaskCache().Set(cacheKey, s.DestPath)
+			logger.Info("Stored downloaded path in cache", "key", cacheKey)
 		} else {
-			err := fmt.Errorf("invalid 'outputCacheKey' in RuntimeConfig: expected a non-empty string, but got type %T", outputKeyVal)
+			err := fmt.Errorf("invalid 'outputCacheKeyTemplate' in RuntimeConfig: expected a non-empty string, but got type %T", outputKeyTmplVal)
 			logger.Error(err, "Configuration error for step output.")
 			return err
 		}

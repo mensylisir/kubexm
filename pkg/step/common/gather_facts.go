@@ -73,7 +73,7 @@ func (s *GatherFactsStep) Run(ctx runtime.ExecutionContext) error {
 		"cores", cores)
 
 	cache := ctx.GetTaskCache()
-	cacheKey := fmt.Sprintf(common.CacheKeyHostFactsTemplate, ctx.GetHost().GetName())
+	cacheKey := fmt.Sprintf(common.CacheKeyHostFactsTemplate, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), ctx.GetHost().GetName())
 	cache.Set(cacheKey, facts)
 	return nil
 }

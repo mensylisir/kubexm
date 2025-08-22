@@ -57,7 +57,8 @@ func (s *PushManifestListStep) Precheck(ctx runtime.ExecutionContext) (isDone bo
 	if _, err := exec.LookPath("skopeo"); err != nil {
 		return false, fmt.Errorf("skopeo command not found in PATH, please install it first")
 	}
-	if _, ok := ctx.GetTaskCache().Get("manifestList"); !ok {
+	cacheKey := fmt.Sprintf(common.CacheKeyManifestList, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	if _, ok := ctx.GetTaskCache().Get(cacheKey); !ok {
 		return false, fmt.Errorf("manifestList not found in cache, ensure push images step ran successfully")
 	}
 	return false, nil
@@ -66,7 +67,8 @@ func (s *PushManifestListStep) Precheck(ctx runtime.ExecutionContext) (isDone bo
 func (s *PushManifestListStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
-	val, ok := ctx.GetTaskCache().Get("manifestList")
+	cacheKey := fmt.Sprintf(common.CacheKeyManifestList, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	val, ok := ctx.GetTaskCache().Get(cacheKey)
 	if !ok {
 		return fmt.Errorf("manifestList not found in cache, cannot proceed")
 	}

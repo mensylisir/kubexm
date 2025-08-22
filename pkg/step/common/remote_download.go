@@ -114,12 +114,13 @@ func (s *RemoteDownloadFileStep) Run(ctx runtime.ExecutionContext) error {
 		}
 		logger.Info("Checksum verified successfully.", "path", s.DestPath)
 	}
-	if outputKeyVal, ok := ctx.GetFromRuntimeConfig("outputCacheKey"); ok {
-		if outputKey, isString := outputKeyVal.(string); isString && outputKey != "" {
-			ctx.GetTaskCache().Set(outputKey, s.DestPath)
-			logger.Info("Stored remote downloaded path in cache.", "key", outputKey, "path", s.DestPath)
+	if outputKeyTmplVal, ok := ctx.GetFromRuntimeConfig("outputCacheKeyTemplate"); ok {
+		if outputKeyTmpl, isString := outputKeyTmplVal.(string); isString && outputKeyTmpl != "" {
+			cacheKey := fmt.Sprintf(outputKeyTmpl, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+			ctx.GetTaskCache().Set(cacheKey, s.DestPath)
+			logger.Info("Stored remote downloaded path in cache.", "key", cacheKey, "path", s.DestPath)
 		} else {
-			return fmt.Errorf("invalid 'outputCacheKey' in RuntimeConfig: not a non-empty string")
+			return fmt.Errorf("invalid 'outputCacheKeyTemplate' in RuntimeConfig: not a non-empty string")
 		}
 	}
 

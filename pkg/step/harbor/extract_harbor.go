@@ -80,7 +80,7 @@ func (s *ExtractHarborStep) getPathsForArch(ctx runtime.ExecutionContext, arch s
 
 	sourcePath = binaryInfo.FilePath()
 	destPath = filepath.Dir(sourcePath)
-	cacheKey = sourcePath
+	cacheKey = fmt.Sprintf(common.CacheKeyHarborExtractedDir, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), arch)
 
 	return sourcePath, destPath, cacheKey, nil
 }

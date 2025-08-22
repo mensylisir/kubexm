@@ -80,7 +80,7 @@ func (s *ExtractContainerdStep) getPathsForArch(ctx runtime.ExecutionContext, ar
 	sourcePath = binaryInfo.FilePath()
 	innerPath := "containerd"
 	destPath = filepath.Join(filepath.Dir(sourcePath), innerPath)
-	cacheKey = sourcePath
+	cacheKey = fmt.Sprintf(common.CacheKeyContainerdExtractedDir, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), arch)
 
 	return sourcePath, destPath, cacheKey, nil
 }

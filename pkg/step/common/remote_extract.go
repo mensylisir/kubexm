@@ -57,15 +57,16 @@ func (s *ExtractArchiverStep) Precheck(ctx runtime.ExecutionContext) (isDone boo
 	if s.ExtractionDir == "" {
 		return false, fmt.Errorf("ExtractionDir not set for step %s on host %s", s.GetBase().Meta.Name, ctx.GetHost().GetName())
 	}
-	extractKeyVal, ok := ctx.GetFromRuntimeConfig("extract_path_key")
+	extractKeyTmplVal, ok := ctx.GetFromRuntimeConfig("extract_path_key_template")
 	if !ok {
-		logger.Debug("No 'extract_path_key' in RuntimeConfig. Precheck assumes not done.")
+		logger.Debug("No 'extract_path_key_template' in RuntimeConfig. Precheck assumes not done.")
 		return false, nil
 	}
-	extractKey, isString := extractKeyVal.(string)
-	if !isString || extractKey == "" {
+	extractKeyTmpl, isString := extractKeyTmplVal.(string)
+	if !isString || extractKeyTmpl == "" {
 		return false, nil
 	}
+	extractKey := fmt.Sprintf(extractKeyTmpl, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
 
 	extractedPathVal, pathOk := ctx.GetTaskCache().Get(extractKey)
 	if !pathOk {
@@ -102,14 +103,15 @@ func (s *ExtractArchiverStep) Precheck(ctx runtime.ExecutionContext) (isDone boo
 func (s *ExtractArchiverStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.GetBase().Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
-	inputKeyVal, ok := ctx.GetFromRuntimeConfig("download_path_key")
+	inputKeyTmplVal, ok := ctx.GetFromRuntimeConfig("download_path_key_template")
 	if !ok {
-		return fmt.Errorf("'download_path_key' is required but not provided in RuntimeConfig")
+		return fmt.Errorf("'download_path_key_template' is required but not provided in RuntimeConfig")
 	}
-	inputKey, isString := inputKeyVal.(string)
-	if !isString || inputKey == "" {
-		return fmt.Errorf("invalid 'download_path_key' in RuntimeConfig: expected a non-empty string, got %T", inputKeyVal)
+	inputKeyTmpl, isString := inputKeyTmplVal.(string)
+	if !isString || inputKeyTmpl == "" {
+		return fmt.Errorf("invalid 'download_path_key_template' in RuntimeConfig: expected a non-empty string, got %T", inputKeyTmplVal)
 	}
+	inputKey := fmt.Sprintf(inputKeyTmpl, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
 
 	archivePathVal, archiveOk := ctx.GetTaskCache().Get(inputKey)
 	if !archiveOk {
@@ -144,12 +146,13 @@ func (s *ExtractArchiverStep) Run(ctx runtime.ExecutionContext) error {
 	}
 	logger.Info("Archive extracted successfully.")
 	determinedExtractedPath := s.ExtractionDir
-	if outputKeyVal, ok := ctx.GetFromRuntimeConfig("extract_path_key"); ok {
-		if outputKey, isString := outputKeyVal.(string); isString && outputKey != "" {
-			ctx.GetTaskCache().Set(outputKey, determinedExtractedPath)
-			logger.Info("Stored extracted path in Task Cache.", "key", outputKey, "path", determinedExtractedPath)
+	if outputKeyTmplVal, ok := ctx.GetFromRuntimeConfig("extract_path_key_template"); ok {
+		if outputKeyTmpl, isString := outputKeyTmplVal.(string); isString && outputKeyTmpl != "" {
+			cacheKey := fmt.Sprintf(outputKeyTmpl, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+			ctx.GetTaskCache().Set(cacheKey, determinedExtractedPath)
+			logger.Info("Stored extracted path in Task Cache.", "key", cacheKey, "path", determinedExtractedPath)
 		} else {
-			logger.Error(fmt.Errorf("invalid 'extract_path_key' in RuntimeConfig: not a non-empty string"), "configuration error")
+			logger.Error(fmt.Errorf("invalid 'extract_path_key_template' in RuntimeConfig: not a non-empty string"), "configuration error")
 		}
 	}
 	return nil
