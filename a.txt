@@ -1,0 +1,1139 @@
+.
+├── a.txt
+├── cmd
+│   └── kubexm
+│       ├── cmd
+│       │   ├── certs
+│       │   │   ├── certs.go
+│       │   │   ├── check_expiration.go
+│       │   │   ├── rotate.go
+│       │   │   └── update.go
+│       │   ├── cluster
+│       │   │   ├── add_nodes.go
+│       │   │   ├── cluster.go
+│       │   │   ├── create.go
+│       │   │   ├── delete.go
+│       │   │   ├── delete_nodes.go
+│       │   │   ├── get.go
+│       │   │   ├── kubeconfig.go
+│       │   │   ├── list.go
+│       │   │   ├── scale.go
+│       │   │   └── upgrade.go
+│       │   ├── completion.go
+│       │   ├── config
+│       │   │   ├── config.go
+│       │   │   ├── set.go
+│       │   │   ├── use_context.go
+│       │   │   └── view.go
+│       │   ├── node
+│       │   │   ├── cordon.go
+│       │   │   ├── drain.go
+│       │   │   ├── get.go
+│       │   │   ├── list.go
+│       │   │   └── node.go
+│       │   ├── root.go
+│       │   └── version.go
+│       └── main.go
+├── docs
+│   ├── 1-总体设计.md
+│   ├── 10-module设计.md
+│   ├── 11-pipeline设计.md
+│   ├── 12-plan设计.md
+│   ├── 13-runtime设计.md
+│   ├── 14-engine设计.md
+│   ├── 15-cmd设计.md
+│   ├── 16-resource设计.md
+│   ├── 17-logger设计.md
+│   ├── 18-config设计.md
+│   ├── 19-调用链条.md
+│   ├── 2-api设计.md
+│   ├── 20-kubernetes流程设计.md
+│   ├── 21-其他说明.md
+│   ├── 22-额外要求.md
+│   ├── 23-二进制下载地址.md
+│   ├── 24-声明式配置文件.md
+│   ├── 25-总体约束.md
+│   ├── 26-kubernetes部署蓝图.md
+│   ├── 27-restapi设计.md
+│   ├── 28-流程方案.md
+│   ├── 29-kubeadm-first-init.md
+│   ├── 3-缓存设计.md
+│   ├── 30-join-master.md
+│   ├── 31-join-worker.md
+│   ├── 32-etcd的配置.md
+│   ├── 33-kubernetes最佳实践.md
+│   ├── 34-prompt.md
+│   ├── 35-模板.md
+│   ├── 36-keepalived结构体设计.md
+│   ├── 37-kubernetes部署矩阵和执行路径.md
+│   ├── 38-air-gap.md
+│   ├── 4-common常量.md
+│   ├── 5-util设计.md
+│   ├── 6-connector设计.md
+│   ├── 7-runner设计.md
+│   ├── 8-step设计.md
+│   └── 9-task设计.md
+├── example
+│   ├── all.yaml
+│   ├── ha-cluster.yaml
+│   └── minimal-cluster.yaml
+├── go.mod
+├── go.sum
+├── pkg
+│   ├── apis
+│   │   └── kubexms
+│   │       └── v1alpha1
+│   │           ├── addon_types.go
+│   │           ├── calico_types.go
+│   │           ├── cilium_types.go
+│   │           ├── cluster_types.go
+│   │           ├── container_runtime_types.go
+│   │           ├── containerd_types.go
+│   │           ├── crio_types.go
+│   │           ├── dns_types.go
+│   │           ├── doc.go
+│   │           ├── docker_types.go
+│   │           ├── endpoint_types.go
+│   │           ├── etcd_types.go
+│   │           ├── extra_types.go
+│   │           ├── flannel_types.go
+│   │           ├── ha_types.go
+│   │           ├── haproxy_types.go
+│   │           ├── helm_types.go
+│   │           ├── helpers
+│   │           │   ├── helper.go
+│   │           │   ├── host.go
+│   │           │   ├── pointer.go
+│   │           │   ├── strings.go
+│   │           │   └── validation.go
+│   │           ├── hybridnet_types.go
+│   │           ├── isulad_types.go
+│   │           ├── keepalived_types.go
+│   │           ├── kubeovn_types.go
+│   │           ├── kubernetes_types.go
+│   │           ├── kubevip_types.go
+│   │           ├── multus_types.go
+│   │           ├── network_types.go
+│   │           ├── nginx_lb_types.go
+│   │           ├── preflight_types.go
+│   │           ├── register.go
+│   │           ├── registry_types.go
+│   │           └── storage_types.go
+│   ├── cache
+│   │   ├── cache.go
+│   │   ├── error.go
+│   │   ├── generic_cache.go
+│   │   ├── janitor.go
+│   │   ├── module_cache.go
+│   │   ├── pipeline_cache.go
+│   │   ├── step_cache.go
+│   │   └── task_cache.go
+│   ├── common
+│   │   ├── cache_keys.go
+│   │   ├── calico.go
+│   │   ├── cilium.go
+│   │   ├── cni.go
+│   │   ├── components.go
+│   │   ├── container_runtime.go
+│   │   ├── containerd.go
+│   │   ├── cri-o.go
+│   │   ├── directory.go
+│   │   ├── dns.go
+│   │   ├── docker.go
+│   │   ├── etcd.go
+│   │   ├── flannel.go
+│   │   ├── haproxy.go
+│   │   ├── hybridnet.go
+│   │   ├── images.go
+│   │   ├── isulad.go
+│   │   ├── keepalived.go
+│   │   ├── kube-vip.go
+│   │   ├── kubeovn.go
+│   │   ├── kubernetes.go
+│   │   ├── loadbalancer.go
+│   │   ├── logo.go
+│   │   ├── module.go
+│   │   ├── multus.go
+│   │   ├── nginx.go
+│   │   ├── permissions.go
+│   │   ├── pipeline.go
+│   │   ├── pki.go
+│   │   ├── preflight.go
+│   │   ├── registry.go
+│   │   ├── roles_labels.go
+│   │   ├── ssh.go
+│   │   ├── storage.go
+│   │   ├── system.go
+│   │   ├── task.go
+│   │   └── version.go
+│   ├── config
+│   │   ├── config.go
+│   │   └── helpers.go
+│   ├── connector
+│   │   ├── errors.go
+│   │   ├── factory.go
+│   │   ├── host_impl.go
+│   │   ├── interface.go
+│   │   ├── local.go
+│   │   ├── options.go
+│   │   ├── pool.go
+│   │   └── ssh.go
+│   ├── engine
+│   │   ├── executor.go
+│   │   └── interface.go
+│   ├── errors
+│   │   └── validation
+│   │       └── validation.go
+│   ├── logger
+│   │   ├── console_encoder.go
+│   │   └── logger.go
+│   ├── module
+│   │   ├── addon
+│   │   │   └── addons_module.go
+│   │   ├── cni
+│   │   │   ├── calico_module.go
+│   │   │   └── cni_cleanup_module.go
+│   │   ├── containerd
+│   │   │   ├── containerd_cleanup_module.go
+│   │   │   └── containerd_module.go
+│   │   ├── docker
+│   │   │   └── docker_module.go
+│   │   ├── etcd
+│   │   │   ├── etcd_cleanup_module.go
+│   │   │   └── etcd_module.go
+│   │   ├── infrastructure
+│   │   │   └── infrastructure_module.go
+│   │   ├── interface.go
+│   │   ├── iscsi
+│   │   │   └── iscsi_module.go
+│   │   ├── kubernetes
+│   │   │   ├── cluster_bootstrap_module.go
+│   │   │   ├── cluster_ready_module.go
+│   │   │   ├── controlplane_cleanup_module.go
+│   │   │   ├── controlplane_module.go
+│   │   │   ├── core_components_module.go
+│   │   │   ├── kubelet_module.go
+│   │   │   ├── node_reset_module.go
+│   │   │   └── worker_module.go
+│   │   ├── module.go
+│   │   ├── network
+│   │   │   └── network_module.go
+│   │   └── preflight
+│   │       └── preflight_module.go
+│   ├── pipeline
+│   │   ├── cluster
+│   │   │   ├── create.go
+│   │   │   ├── delete_cluster_pipeline.go
+│   │   │   └── upgrade_cluster_pipeline.go
+│   │   ├── interface.go
+│   │   └── pipeline.go
+│   ├── plan
+│   │   ├── fragment.go
+│   │   ├── graph.go
+│   │   ├── plan.go
+│   │   ├── result.go
+│   │   └── utils.go
+│   ├── runner
+│   │   ├── archive.go
+│   │   ├── command.go
+│   │   ├── containerd.go
+│   │   ├── docker.go
+│   │   ├── file.go
+│   │   ├── helm.go
+│   │   ├── helpers
+│   │   │   ├── helpers.go
+│   │   │   ├── json.go
+│   │   │   ├── metadata_posix.go
+│   │   │   ├── metadata_windows.go
+│   │   │   ├── path.go
+│   │   │   ├── toml.go
+│   │   │   └── yaml.go
+│   │   ├── interface.go
+│   │   ├── kubectl.go
+│   │   ├── network.go
+│   │   ├── package.go
+│   │   ├── qemu.go
+│   │   ├── runner.go
+│   │   ├── service.go
+│   │   ├── system.go
+│   │   ├── template.go
+│   │   └── user.go
+│   ├── runtime
+│   │   ├── base.go
+│   │   ├── builder.go
+│   │   ├── context.go
+│   │   ├── errors.go
+│   │   ├── execution.go
+│   │   └── orchestration.go
+│   ├── spec
+│   │   └── spec.go
+│   ├── step
+│   │   ├── addon
+│   │   │   ├── apply_yaml.go
+│   │   │   ├── distribute_artifacts.go
+│   │   │   ├── download_artifacts.go
+│   │   │   ├── install_chart.go
+│   │   │   ├── post_install.go
+│   │   │   └── pre_install.go
+│   │   ├── binary
+│   │   │   └── download_binary.go
+│   │   ├── builder.go
+│   │   ├── cd
+│   │   │   └── argocd
+│   │   │       ├── clean_argocd.go
+│   │   │       ├── distribute_argocd.go
+│   │   │       ├── download_argocd.go
+│   │   │       ├── generate_manifests.go
+│   │   │       └── install_argocd.go
+│   │   ├── chrony
+│   │   │   ├── check_time_sync.go
+│   │   │   ├── configure_chrony_client.go
+│   │   │   ├── configure_chrony_server.go
+│   │   │   ├── disable_chrony.go
+│   │   │   ├── enable_chrony.go
+│   │   │   ├── restart_chrony.go
+│   │   │   ├── start_chrony.go
+│   │   │   └── stop_chrony.go
+│   │   ├── command
+│   │   │   └── command.go
+│   │   ├── common
+│   │   │   ├── delete_file.go
+│   │   │   ├── gather_facts.go
+│   │   │   ├── generate_ca_crt.go
+│   │   │   ├── generate_ca_pem.go
+│   │   │   ├── generate_certs_crt.go
+│   │   │   ├── generate_certs_pem.go
+│   │   │   ├── install_packages.go
+│   │   │   ├── local_checksum.go
+│   │   │   ├── local_download.go
+│   │   │   ├── local_extract.go
+│   │   │   ├── manage_firewall_rules.go
+│   │   │   ├── manage_firewall_status.go
+│   │   │   ├── manage_host.go
+│   │   │   ├── manage_limits.go
+│   │   │   ├── manage_module.go
+│   │   │   ├── manage_selinux.go
+│   │   │   ├── manage_service.go
+│   │   │   ├── manage_swap.go
+│   │   │   ├── manage_sysctl.go
+│   │   │   ├── mkdir_step.go
+│   │   │   ├── noop.go
+│   │   │   ├── print_message.go
+│   │   │   ├── pull_image.go
+│   │   │   ├── push_image.go
+│   │   │   ├── remote_checksum.go
+│   │   │   ├── remote_download.go
+│   │   │   ├── remote_extract.go
+│   │   │   ├── render_template.go
+│   │   │   ├── report_table.go
+│   │   │   ├── set_hostname.go
+│   │   │   ├── transform_image.go
+│   │   │   ├── uninstall_package.go
+│   │   │   ├── upload_file.go
+│   │   │   ├── user_input.go
+│   │   │   └── wait_for_port.go
+│   │   ├── containerd
+│   │   │   ├── clean_containerd.go
+│   │   │   ├── configure_containerd.go
+│   │   │   ├── configure_containerd_dropin.go
+│   │   │   ├── configure_crictl.go
+│   │   │   ├── disable_containerd.go
+│   │   │   ├── download_cni.go
+│   │   │   ├── download_containerd.go
+│   │   │   ├── download_crictl.go
+│   │   │   ├── download_runc.go
+│   │   │   ├── enable_containerd.go
+│   │   │   ├── extract_cni.go
+│   │   │   ├── extract_containerd.go
+│   │   │   ├── extract_crictl.go
+│   │   │   ├── install_cni.go
+│   │   │   ├── install_containerd.go
+│   │   │   ├── install_containerd_service.go
+│   │   │   ├── install_crictl.go
+│   │   │   ├── install_runc.go
+│   │   │   ├── restart_containerd.go
+│   │   │   ├── start_containerd.go
+│   │   │   └── stop_containerd.go
+│   │   ├── crio
+│   │   │   ├── clean_crio.go
+│   │   │   ├── configure_auth.go
+│   │   │   ├── configure_crictl.go
+│   │   │   ├── configure_crio.go
+│   │   │   ├── configure_registries.go
+│   │   │   ├── disable_crio.go
+│   │   │   ├── download_crio.go
+│   │   │   ├── enable_crio.go
+│   │   │   ├── extract_crio.go
+│   │   │   ├── install_cni.go
+│   │   │   ├── install_crictl.go
+│   │   │   ├── install_crio.go
+│   │   │   ├── install_crio_env.go
+│   │   │   ├── install_crio_service.go
+│   │   │   ├── install_policy_json.go
+│   │   │   ├── restart_crio.go
+│   │   │   ├── start_crio.go
+│   │   │   └── stop_crio.go
+│   │   ├── dns
+│   │   │   ├── clean_coredns.go
+│   │   │   ├── clean_nodelocaldns.go
+│   │   │   ├── generate_coredns_manifests.go
+│   │   │   ├── generate_nodelocadns_manifests.go
+│   │   │   ├── install_coredns.go
+│   │   │   └── install_nodelocaldns.go
+│   │   ├── docker
+│   │   │   ├── clean_docker.go
+│   │   │   ├── configure_crictl.go
+│   │   │   ├── configure_docker.go
+│   │   │   ├── configure_docker_dropin.go
+│   │   │   ├── disable_cri_dockerd.go
+│   │   │   ├── disable_docker.go
+│   │   │   ├── download_buildx.go
+│   │   │   ├── download_compose.go
+│   │   │   ├── download_cri_dockerd.go
+│   │   │   ├── download_crictl.go
+│   │   │   ├── download_docker.go
+│   │   │   ├── enable_cri_dockerd.go
+│   │   │   ├── enable_docker.go
+│   │   │   ├── extract_cri_dockerd.go
+│   │   │   ├── extract_docker.go
+│   │   │   ├── install_buildx.go
+│   │   │   ├── install_compose.go
+│   │   │   ├── install_cri_docker_socket.go
+│   │   │   ├── install_cri_dockerd.go
+│   │   │   ├── install_cri_dockerd_service.go
+│   │   │   ├── install_crictl.go
+│   │   │   ├── install_docker.go
+│   │   │   ├── install_docker_service.go
+│   │   │   ├── remove_buildx.go
+│   │   │   ├── remove_cri_dockerd.go
+│   │   │   ├── remove_crictl.go
+│   │   │   ├── remove_docker.go
+│   │   │   ├── restart_cri_dockerd.go
+│   │   │   ├── restart_docker.go
+│   │   │   ├── start_cri_dockerd.go
+│   │   │   ├── start_docker.go
+│   │   │   ├── stop_cri_dockerd.go
+│   │   │   ├── stop_docker.go
+│   │   │   └── verify_crictl.go
+│   │   ├── etcd
+│   │   │   ├── add_member.go
+│   │   │   ├── backup_data.go
+│   │   │   ├── backup_etcd.go
+│   │   │   ├── backup_to_local.go
+│   │   │   ├── check_cluster_health.go
+│   │   │   ├── check_health.go
+│   │   │   ├── check_single_health.go
+│   │   │   ├── check_status.go
+│   │   │   ├── clean_etcd.go
+│   │   │   ├── cleanup_backups.go
+│   │   │   ├── collect_log.go
+│   │   │   ├── configure_etcd.go
+│   │   │   ├── configure_etcd_dropin.go
+│   │   │   ├── defrag_etcd.go
+│   │   │   ├── disable_etcd.go
+│   │   │   ├── distribute_etcd_certs.go
+│   │   │   ├── download_etcd.go
+│   │   │   ├── enable_etcd.go
+│   │   │   ├── extract_etcd.go
+│   │   │   ├── finalize_upgrade.go
+│   │   │   ├── generate_ca.go
+│   │   │   ├── generate_cert.go
+│   │   │   ├── install_etcd.go
+│   │   │   ├── install_etcd_service.go
+│   │   │   ├── remove_member.go
+│   │   │   ├── restart_etcd.go
+│   │   │   ├── restore_etcd.go
+│   │   │   ├── setup_etcd_dir.go
+│   │   │   ├── start_etcd.go
+│   │   │   ├── stop_etcd.go
+│   │   │   └── wait_cluster_healthy.go
+│   │   ├── gateway
+│   │   │   └── ingress-nginx
+│   │   │       ├── clean_ingress_nginx.go
+│   │   │       ├── distribute_ingress_nginx.go
+│   │   │       ├── download_ingress_nginx.go
+│   │   │       ├── generate_manifests.go
+│   │   │       └── install_ingress_nginx.go
+│   │   ├── harbor
+│   │   │   ├── configure_harbor.go
+│   │   │   ├── distribution_certs.go
+│   │   │   ├── download_harbor.go
+│   │   │   ├── extract_harbor.go
+│   │   │   ├── generate_certs.go
+│   │   │   ├── generate_config.go
+│   │   │   ├── remote_extract_harbor.go
+│   │   │   ├── remove_certs.go
+│   │   │   ├── remove_harbor.go
+│   │   │   ├── restart_harbor.go
+│   │   │   ├── start_harbor.go
+│   │   │   ├── stop_harbor.go
+│   │   │   ├── stop_harbor_service.go
+│   │   │   ├── upload_config.go
+│   │   │   └── upload_harbor.go
+│   │   ├── helm
+│   │   │   ├── add_repo.go
+│   │   │   ├── download_charts.go
+│   │   │   ├── download_charts2.go
+│   │   │   ├── download_helm.go
+│   │   │   ├── extract_helm.go
+│   │   │   ├── install_chart.go
+│   │   │   ├── install_helm.go
+│   │   │   ├── uninstall_chart.go
+│   │   │   └── uninstall_helm.go
+│   │   ├── helpers
+│   │   │   ├── archiver.go
+│   │   │   ├── bom
+│   │   │   │   ├── binary
+│   │   │   │   │   ├── bom.go
+│   │   │   │   │   ├── metadata.go
+│   │   │   │   │   ├── provider.go
+│   │   │   │   │   └── types.go
+│   │   │   │   ├── helm
+│   │   │   │   │   ├── bom.go
+│   │   │   │   │   ├── provider.go
+│   │   │   │   │   └── types.go
+│   │   │   │   └── images
+│   │   │   │       ├── bom.go
+│   │   │   │       ├── provider.go
+│   │   │   │       └── types.go
+│   │   │   ├── certs.go
+│   │   │   ├── file.go
+│   │   │   ├── helpers.go
+│   │   │   ├── net.go
+│   │   │   ├── pointer.go
+│   │   │   ├── rand.go
+│   │   │   ├── remote_helpers.go
+│   │   │   ├── sha.go
+│   │   │   ├── string.go
+│   │   │   ├── util.go
+│   │   │   └── yaml_info.go
+│   │   ├── images
+│   │   │   ├── push_images.go
+│   │   │   ├── push_manifests.go
+│   │   │   └── save_images.go
+│   │   ├── interface.go
+│   │   ├── kubernetes
+│   │   │   ├── backup
+│   │   │   │   ├── backup_configs.go
+│   │   │   │   ├── backup_objects.go
+│   │   │   │   └── backup_remote_configs.go
+│   │   │   ├── certs
+│   │   │   │   ├── distribution_ca.go
+│   │   │   │   ├── distribution_certs.go
+│   │   │   │   ├── distribution_kubeconfig.go
+│   │   │   │   ├── generate_ca.go
+│   │   │   │   ├── generate_certs.go
+│   │   │   │   └── generate_kubeconfig.go
+│   │   │   ├── health
+│   │   │   │   ├── check_apiserver_health.go
+│   │   │   │   ├── check_cluster_health.go
+│   │   │   │   ├── check_kubelet_health.go
+│   │   │   │   ├── check_manager_health.go
+│   │   │   │   ├── check_proxy_health.go
+│   │   │   │   ├── check_scheduler_health.go
+│   │   │   │   └── wait_cluster_heathy.go
+│   │   │   ├── kube-apiserver
+│   │   │   │   ├── check_kube_apiserver_health.go
+│   │   │   │   ├── configure_kube_apiserver.go
+│   │   │   │   ├── disable_kube_apiserver.go
+│   │   │   │   ├── download_kube_apiserver.go
+│   │   │   │   ├── enable_kube_apiserver.go
+│   │   │   │   ├── install_kube_apiserver.go
+│   │   │   │   ├── install_kube_apiserver_service.go
+│   │   │   │   ├── restart_kube_apiserver.go
+│   │   │   │   ├── start_kube_apiserver.go
+│   │   │   │   └── stop_kube_apiserver.go
+│   │   │   ├── kube-controller-manager
+│   │   │   │   ├── check_controller_manager_health.go
+│   │   │   │   ├── configure_kube_controller_manager.go
+│   │   │   │   ├── disable_kube_controller_manager.go
+│   │   │   │   ├── download_kube_controller_manager.go
+│   │   │   │   ├── enable_kube_controller_manager.go
+│   │   │   │   ├── generate_kubeconfig.go
+│   │   │   │   ├── install_kube_controller_manager.go
+│   │   │   │   ├── install_kube_controller_manager_service.go
+│   │   │   │   ├── restart_kube_controller_manager.go
+│   │   │   │   ├── start_kube_controller_manager.go
+│   │   │   │   └── stop_kube_controller_manager.go
+│   │   │   ├── kube-proxy
+│   │   │   │   ├── disable_kube_proxy.go
+│   │   │   │   ├── download_kube_proxy.go
+│   │   │   │   ├── enable_kube_proxy.go
+│   │   │   │   ├── generate_cert.go
+│   │   │   │   ├── generate_config.go
+│   │   │   │   ├── generate_kubeconfig.go
+│   │   │   │   ├── install_kube_proxy.go
+│   │   │   │   ├── install_kube_proxy_service.go
+│   │   │   │   ├── restart_kube_proxy.go
+│   │   │   │   ├── start_kube_proxy.go
+│   │   │   │   └── stop_kube_proxy.go
+│   │   │   ├── kube-scheduler
+│   │   │   │   ├── check_scheduler_health.go
+│   │   │   │   ├── configure_kube_scheduler.go
+│   │   │   │   ├── disable_kube_scheduler.go
+│   │   │   │   ├── download_kube_scheduler.go
+│   │   │   │   ├── enable_kube_scheduler.go
+│   │   │   │   ├── generate_kubeconfig.go
+│   │   │   │   ├── install_kube_scheduler.go
+│   │   │   │   ├── install_kube_scheduler_service.go
+│   │   │   │   ├── restart_kube_scheduler.go
+│   │   │   │   ├── start_kube_scheduler.go
+│   │   │   │   └── stop_kube_scheduler.go
+│   │   │   ├── kubeadm
+│   │   │   │   ├── backup_etcd.go
+│   │   │   │   ├── check_cluster_health.go
+│   │   │   │   ├── check_control_plane_health.go
+│   │   │   │   ├── check_etcd_cluster_health.go
+│   │   │   │   ├── check_etcd_pod_health.go
+│   │   │   │   ├── check_worker_health.go
+│   │   │   │   ├── clean_component.go
+│   │   │   │   ├── cleanup_backups.go
+│   │   │   │   ├── download_kubeadm.go
+│   │   │   │   ├── finalize_upgrade.go
+│   │   │   │   ├── generate_init_config.go
+│   │   │   │   ├── generate_join_master_config.go
+│   │   │   │   ├── generate_join_worker_config.go
+│   │   │   │   ├── install_kubeadm.go
+│   │   │   │   ├── join_master.go
+│   │   │   │   ├── join_worker.go
+│   │   │   │   ├── kubeadm_init.go
+│   │   │   │   ├── reset.go
+│   │   │   │   ├── restore_backup.go
+│   │   │   │   ├── upgrade_apply.go
+│   │   │   │   ├── upgrade_node.go
+│   │   │   │   ├── upgrade_plan.go
+│   │   │   │   └── wait_cluster_healthy.go
+│   │   │   ├── kubeconfig
+│   │   │   │   ├── copy_kubeconfig.go
+│   │   │   │   └── generate_kubeconfig.go
+│   │   │   ├── kubectl
+│   │   │   │   ├── configure_kubectl.go
+│   │   │   │   ├── download_kubectl.go
+│   │   │   │   └── install_kubectl.go
+│   │   │   ├── kubelet
+│   │   │   │   ├── disable_kubelet.go
+│   │   │   │   ├── distribution_certs.go
+│   │   │   │   ├── download_kubelet.go
+│   │   │   │   ├── enable_service.go
+│   │   │   │   ├── generate_certs.go
+│   │   │   │   ├── generate_config.go
+│   │   │   │   ├── generate_kubeconfig.go
+│   │   │   │   ├── install_kubelet.go
+│   │   │   │   ├── install_kubelet_dropin.go
+│   │   │   │   ├── install_kubelet_service.go
+│   │   │   │   ├── restart_kubelet.go
+│   │   │   │   ├── start_kubelet.go
+│   │   │   │   └── stop_kubelet.go
+│   │   │   ├── labels
+│   │   │   │   ├── label_master.go
+│   │   │   │   ├── label_nodes.go
+│   │   │   │   └── label_worker.go
+│   │   │   ├── perform
+│   │   │   │   ├── cleanup_all_backups.go
+│   │   │   │   ├── cleanup_backups.go
+│   │   │   │   ├── cordon_node.go
+│   │   │   │   ├── drain_node.go
+│   │   │   │   └── uncordon_node.go
+│   │   │   └── rbac
+│   │   │       └── configure_rbac.go
+│   │   ├── loadbalancer
+│   │   │   ├── haproxy
+│   │   │   │   ├── clean_haproxy.go
+│   │   │   │   ├── clean_haproxy_static_pod.go
+│   │   │   │   ├── disable_haproxy.go
+│   │   │   │   ├── enable_haproxy.go
+│   │   │   │   ├── generate_config.go
+│   │   │   │   ├── generate_haproxy_pod.go
+│   │   │   │   ├── install_haproxy.go
+│   │   │   │   ├── restart_haproxy.go
+│   │   │   │   ├── start_haproxy.go
+│   │   │   │   └── stop_haproxy.go
+│   │   │   ├── keepalived
+│   │   │   │   ├── clean_keepalived.go
+│   │   │   │   ├── disable_keepalived.go
+│   │   │   │   ├── enable_keepalived.go
+│   │   │   │   ├── generate_config.go
+│   │   │   │   ├── install_keepalived.go
+│   │   │   │   ├── restart_keepalived.go
+│   │   │   │   ├── start_keepalived.go
+│   │   │   │   └── stop_keepalived.go
+│   │   │   ├── kube-vip
+│   │   │   │   ├── clean_kubevip.go
+│   │   │   │   └── generate_manifests.go
+│   │   │   └── nginx
+│   │   │       ├── clean_nginx.go
+│   │   │       ├── clean_nginx_pod.go
+│   │   │       ├── disable_nginx.go
+│   │   │       ├── enable_nginx.go
+│   │   │       ├── generate_config.go
+│   │   │       ├── generate_nginx_pod.go
+│   │   │       ├── install_nginx.go
+│   │   │       ├── restart_nginx.go
+│   │   │       ├── start_nginx.go
+│   │   │       └── stop_nginx.go
+│   │   ├── network
+│   │   │   ├── calico
+│   │   │   │   ├── distribution_calico.go
+│   │   │   │   ├── download_calico.go
+│   │   │   │   ├── download_calicoctl.go
+│   │   │   │   ├── generate_manifests.go
+│   │   │   │   ├── install_calico.go
+│   │   │   │   ├── install_calicoctl.go
+│   │   │   │   ├── remove_calico.go
+│   │   │   │   └── remove_calicoctl.go
+│   │   │   ├── cilium
+│   │   │   │   ├── clean_cilium.go
+│   │   │   │   ├── distribute_cilium.go
+│   │   │   │   ├── download_cilium.go
+│   │   │   │   ├── generate_manifests.go
+│   │   │   │   ├── install_cilium.go
+│   │   │   │   └── uninstall_cilium.go
+│   │   │   ├── cni
+│   │   │   │   ├── clean_cni.go
+│   │   │   │   ├── download_cni.go
+│   │   │   │   ├── extract_cni.go
+│   │   │   │   └── install_cni.go
+│   │   │   ├── flannel
+│   │   │   │   ├── clean_flannel.go
+│   │   │   │   ├── distribute_flannel.go
+│   │   │   │   ├── download_flannel.go
+│   │   │   │   ├── generate_manifests.go
+│   │   │   │   ├── install_flannel.go
+│   │   │   │   └── uninstall_flannel.go
+│   │   │   ├── hybridnet
+│   │   │   │   ├── clean_hybridnet.go
+│   │   │   │   ├── distribute_hybridnet.go
+│   │   │   │   ├── download_hybridnet.go
+│   │   │   │   ├── generate_manifests.go
+│   │   │   │   └── install_hybridnet.go
+│   │   │   ├── kubeovn
+│   │   │   │   ├── clean_kubeovn.go
+│   │   │   │   ├── distribute_kubeovn.go
+│   │   │   │   ├── download_kubeovn.go
+│   │   │   │   ├── generate_manifests.go
+│   │   │   │   └── install_kubeovn.go
+│   │   │   └── multus
+│   │   │       ├── clean_multus.go
+│   │   │       ├── distribute_multus.go
+│   │   │       ├── download_multus.go
+│   │   │       ├── generate_manifests.go
+│   │   │       └── install_multus.go
+│   │   ├── offline
+│   │   │   ├── compress_bundle.go
+│   │   │   └── extract_bundle.go
+│   │   ├── os
+│   │   │   ├── add_hosts.go
+│   │   │   ├── add_modules.go
+│   │   │   ├── add_security.go
+│   │   │   ├── add_sysctl.go
+│   │   │   ├── configure_timezone.go
+│   │   │   ├── disable_firewall.go
+│   │   │   ├── disable_selinux.go
+│   │   │   ├── disable_swap.go
+│   │   │   ├── enable_firewall.go
+│   │   │   ├── enable_selinux.go
+│   │   │   ├── enable_swap.go
+│   │   │   ├── remove_hosts.go
+│   │   │   ├── remove_modules.go
+│   │   │   ├── remove_security.go
+│   │   │   ├── remove_sysctl.go
+│   │   │   └── set_hostname.go
+│   │   ├── packages
+│   │   │   ├── distribute_packages.go
+│   │   │   ├── extract_packages.go
+│   │   │   ├── install_airgap_packages.go
+│   │   │   └── install_packages.go
+│   │   ├── pki
+│   │   │   ├── etcd
+│   │   │   │   ├── backup_certs.go
+│   │   │   │   ├── check_ca_expiration.go
+│   │   │   │   ├── check_leaf_certs_expiration.go
+│   │   │   │   ├── cleanup_transition_assets.go
+│   │   │   │   ├── distribute_ca.go
+│   │   │   │   ├── distribute_leaf_certs.go
+│   │   │   │   ├── fetch_ca.go
+│   │   │   │   ├── generate_bundle.go
+│   │   │   │   ├── move_new_assets.go
+│   │   │   │   ├── prepare_assets.go
+│   │   │   │   ├── renew_ca.go
+│   │   │   │   ├── renew_certs.go
+│   │   │   │   └── restart_etcd.go
+│   │   │   ├── kubeadm
+│   │   │   │   ├── backup_kubeconfigs.go
+│   │   │   │   ├── backup_pki.go
+│   │   │   │   ├── check_ca_expiration.go
+│   │   │   │   ├── check_etcd_ca_expiration.go
+│   │   │   │   ├── check_etcd_leaf_certs_expiration.go
+│   │   │   │   ├── check_leaf_certs_expiration.go
+│   │   │   │   ├── cleanup_assets.go
+│   │   │   │   ├── cleanup_remote_assets.go
+│   │   │   │   ├── distribute_etcd_leaf_certs.go
+│   │   │   │   ├── distribute_etcd_pki.go
+│   │   │   │   ├── distribute_kubeconfigs.go
+│   │   │   │   ├── distribute_kubelet_config.go
+│   │   │   │   ├── distribute_leaf_certs.go
+│   │   │   │   ├── distribute_pki.go
+│   │   │   │   ├── fetch_pki.go
+│   │   │   │   ├── generate_bundle.go
+│   │   │   │   ├── generate_etcd_bundle.go
+│   │   │   │   ├── generate_kubeconfig.go
+│   │   │   │   ├── move_new_certs.go
+│   │   │   │   ├── prepare_ca_assets.go
+│   │   │   │   ├── prepare_etcd_ca_assets.go
+│   │   │   │   ├── renew_ca.go
+│   │   │   │   ├── renew_etcd_ca.go
+│   │   │   │   ├── renew_etcd_leaf_certs.go
+│   │   │   │   ├── renew_leaf_certs.go
+│   │   │   │   ├── restart_control_plane.go
+│   │   │   │   ├── restart_etcd.go
+│   │   │   │   └── restart_worker.go
+│   │   │   └── kubexm
+│   │   │       ├── backup_kubeconfigs.go
+│   │   │       ├── backup_pki.go
+│   │   │       ├── check_ca_expiration.go
+│   │   │       ├── check_leaf_certs_expiration.go
+│   │   │       ├── clean_remote_assets.go
+│   │   │       ├── cleanup_workspace.go
+│   │   │       ├── distribute_kubeconfigs.go
+│   │   │       ├── distribute_leaf_kubeconfigs.go
+│   │   │       ├── distribute_leaf_pki.go
+│   │   │       ├── distribute_pki.go
+│   │   │       ├── fetch_pki.go
+│   │   │       ├── generate_bundle.go
+│   │   │       ├── move_assets.go
+│   │   │       ├── prepare_ca_assets.go
+│   │   │       ├── renew_all_kubeconfigs.go
+│   │   │       ├── renew_ca.go
+│   │   │       └── renew_leaf_certs.go
+│   │   ├── preflight
+│   │   │   ├── check_cpu.go
+│   │   │   ├── check_dns.go
+│   │   │   ├── check_host_connectivity.go
+│   │   │   ├── check_memory.go
+│   │   │   ├── check_required_commands.go
+│   │   │   ├── check_time_sync.go
+│   │   │   ├── lint_cluster_spec.go
+│   │   │   └── print_logo.go
+│   │   ├── registry
+│   │   │   ├── clean_registry.go
+│   │   │   ├── disable_registry.go
+│   │   │   ├── distribute_config.go
+│   │   │   ├── download_registry.go
+│   │   │   ├── enable_registry.go
+│   │   │   ├── extract_registry.go
+│   │   │   ├── generate_config.go
+│   │   │   ├── install_registry.go
+│   │   │   ├── install_registry_service.go
+│   │   │   ├── remove_registry.go
+│   │   │   ├── restart_registry.go
+│   │   │   ├── start_registry.go
+│   │   │   └── stop_registry.go
+│   │   ├── result.go
+│   │   ├── step.go
+│   │   └── storage
+│   │       ├── longhorn
+│   │       │   ├── clean_longhorn.go
+│   │       │   ├── distribute_longhorn.go
+│   │       │   ├── download_longhorn.go
+│   │       │   ├── generate_manifests.go
+│   │       │   └── install_longhorn.go
+│   │       ├── nfs
+│   │       │   ├── clean_nfs.go
+│   │       │   ├── distribute_nfs.go
+│   │       │   ├── download_nfs.go
+│   │       │   ├── generate_manifests.go
+│   │       │   └── install_nfs.go
+│   │       └── openebs-local
+│   │           ├── clean_openebs_local.go
+│   │           ├── distribute_openebs_local.go
+│   │           ├── download_openebs_local.go
+│   │           ├── generate_manifests.go
+│   │           └── install_openebs_local.go
+│   ├── task
+│   │   ├── addon
+│   │   ├── cd
+│   │   │   └── argocd
+│   │   │       ├── clean_argocd.go
+│   │   │       └── install_argocd.go
+│   │   ├── cni
+│   │   │   ├── clean_cni.go
+│   │   │   └── install_cni.go
+│   │   ├── containerd
+│   │   │   ├── clean_containerd.go
+│   │   │   └── install_containerd.go
+│   │   ├── crio
+│   │   │   ├── clean_crio.go
+│   │   │   └── install_crio.go
+│   │   ├── dns
+│   │   │   ├── coredns
+│   │   │   │   ├── clean_coredns.go
+│   │   │   │   └── install_coredns.go
+│   │   │   └── nodelocandns
+│   │   │       ├── clean_nodelocaldns.go
+│   │   │       └── install_nodelocaldns.go
+│   │   ├── docker
+│   │   │   ├── clean_docker.go
+│   │   │   └── install_docker.go
+│   │   ├── etcd
+│   │   │   ├── add_other_etcd.go
+│   │   │   ├── clean_etcd_cluster.go
+│   │   │   ├── generate_etcd_pki.go
+│   │   │   ├── init_first_etcd.go
+│   │   │   └── install_etcd_cluster.go
+│   │   ├── gateway
+│   │   │   └── ingress-nginx
+│   │   │       ├── clean_ingress_nginx.go
+│   │   │       └── install_ingress_nginx.go
+│   │   ├── interface.go
+│   │   ├── kubernetes
+│   │   │   ├── kubeadm
+│   │   │   │   ├── bootstrap_first_master.go
+│   │   │   │   ├── clean_component.go
+│   │   │   │   ├── clean_kubernetes.go
+│   │   │   │   ├── install_component.go
+│   │   │   │   ├── join_masters.go
+│   │   │   │   └── join_workers.go
+│   │   │   └── kubexm
+│   │   │       ├── cluster
+│   │   │       ├── configure_controlplane.go
+│   │   │       ├── controll_plane
+│   │   │       ├── deploy_first_master.go
+│   │   │       ├── deploy_nodes.go
+│   │   │       ├── distribute_controlplane_assets.go
+│   │   │       ├── finalize_cluster_setup.go
+│   │   │       ├── generate_admin_kubeconfig.go
+│   │   │       ├── generate_controlplane_configs.go
+│   │   │       ├── generate_controlplane_kubeconfigs.go
+│   │   │       ├── generate_kube_pki.go
+│   │   │       ├── generate_node_configs.go
+│   │   │       ├── generate_node_kubeconfigs.go
+│   │   │       ├── generate_node_pki.go
+│   │   │       ├── prepare_components.go
+│   │   │       ├── start_controlplane.go
+│   │   │       └── worker
+│   │   ├── loadbalancer
+│   │   │   ├── haproxy
+│   │   │   │   ├── clean_haproxy.go
+│   │   │   │   ├── clean_static_pod.go
+│   │   │   │   ├── install_haproxy.go
+│   │   │   │   └── install_static_pod.go
+│   │   │   ├── keepalived
+│   │   │   │   ├── clean_keepalived.go
+│   │   │   │   └── install_keepalived.go
+│   │   │   ├── kube-vip
+│   │   │   │   ├── clean_kubevip.go
+│   │   │   │   └── install_kubevip.go
+│   │   │   └── nginx
+│   │   │       ├── clean_nginx.go
+│   │   │       ├── clean_static_pod.go
+│   │   │       ├── install_nginx.go
+│   │   │       └── install_static_pod.go
+│   │   ├── network
+│   │   │   ├── calico
+│   │   │   │   ├── clean_calico.go
+│   │   │   │   └── install_calico.go
+│   │   │   ├── cilium
+│   │   │   │   ├── clean_cilium.go
+│   │   │   │   └── install_cilium.go
+│   │   │   ├── flannel
+│   │   │   │   ├── clean_flannel.go
+│   │   │   │   └── install_flannel.go
+│   │   │   ├── hybridnet
+│   │   │   │   ├── clean_hybridnet.go
+│   │   │   │   └── install_hybridnet.go
+│   │   │   ├── kubeovn
+│   │   │   │   ├── clean_kubeovn.go
+│   │   │   │   └── install_kubeovn.go
+│   │   │   └── multus
+│   │   │       ├── clean_multus.go
+│   │   │       └── install_multus.go
+│   │   ├── os
+│   │   │   ├── clean_nodes.go
+│   │   │   ├── install_prerequisites.go
+│   │   │   └── prepare_nodes.go
+│   │   ├── pki
+│   │   │   ├── etcd
+│   │   │   │   ├── check_certificates_status.go
+│   │   │   │   ├── cleanup_workspace.go
+│   │   │   │   ├── generate_certs.go
+│   │   │   │   ├── rollout_ca.go
+│   │   │   │   ├── rollout_ca_bundle.go
+│   │   │   │   └── rollout_leaf_certs.go
+│   │   │   ├── kubeadm
+│   │   │   │   ├── check_etcd_certs_expiration.go
+│   │   │   │   ├── check_k8s_certificates.go
+│   │   │   │   ├── cleanup_all.go
+│   │   │   │   ├── cleanup_workspace.go
+│   │   │   │   ├── generate_etcd_ca_certs.go
+│   │   │   │   ├── generate_etcd_certs.go
+│   │   │   │   ├── generate_k8s_ca_certs.go
+│   │   │   │   ├── generate_k8s_certs.go
+│   │   │   │   ├── generate_kubeconfigs.go
+│   │   │   │   ├── rollout_ca.go
+│   │   │   │   ├── rollout_cabundle.go
+│   │   │   │   ├── rollout_etcd_ca.go
+│   │   │   │   ├── rollout_etcd_certs.go
+│   │   │   │   ├── rollout_leaf_certs.go
+│   │   │   │   └── update_leaf_nodes.go
+│   │   │   └── kubexm
+│   │   │       ├── check_cluster_certificates.go
+│   │   │       ├── cleanup_all.go
+│   │   │       ├── generate_certs.go
+│   │   │       ├── generate_kubeconfigs.go
+│   │   │       ├── rollout_ca.go
+│   │   │       ├── rollout_ca_bundle.go
+│   │   │       ├── rollout_leaf_certs.go
+│   │   │       └── rollout_leaf_nodes.go
+│   │   ├── preflight
+│   │   │   ├── configure_time.go
+│   │   │   ├── extract_bundle.go
+│   │   │   ├── greeting.go
+│   │   │   ├── package_assets.go
+│   │   │   ├── preflight_checks.go
+│   │   │   ├── preflight_precheck.go
+│   │   │   ├── prepare_assets.go
+│   │   │   └── push_images.go
+│   │   ├── registry
+│   │   │   ├── harbor
+│   │   │   │   ├── clean_harbor.go
+│   │   │   │   └── install_harbor.go
+│   │   │   └── registry
+│   │   │       ├── clean_registry.go
+│   │   │       └── install_registry.go
+│   │   ├── storage
+│   │   │   ├── longhorn
+│   │   │   │   ├── clean_longhorn.go
+│   │   │   │   └── install_longhorn.go
+│   │   │   ├── nfs
+│   │   │   │   ├── clean_nfs.go
+│   │   │   │   └── install_nfs.go
+│   │   │   └── openebs-local
+│   │   │       ├── clean_openebs_local.go
+│   │   │       └── install_openebs_local.go
+│   │   └── task.go
+│   ├── templates
+│   │   ├── cd
+│   │   │   └── argocd
+│   │   │       └── values.yaml.tmpl
+│   │   ├── chrony
+│   │   │   ├── chrony.client.conf.tmpl
+│   │   │   └── chrony.server.conf.tmpl
+│   │   ├── cni
+│   │   │   ├── calico
+│   │   │   │   └── values.yaml.tmpl
+│   │   │   ├── cilium
+│   │   │   │   └── values.yaml.tmpl
+│   │   │   ├── flannel
+│   │   │   │   └── values.yaml.tmpl
+│   │   │   ├── hybridnet
+│   │   │   │   └── values.yaml.tmpl
+│   │   │   ├── kubeovn
+│   │   │   │   └── values.yaml.tmpl
+│   │   │   └── multus
+│   │   │       └── values.yaml.tmpl
+│   │   ├── containerd
+│   │   │   ├── config.toml.tmpl
+│   │   │   ├── containerd.service.tmpl
+│   │   │   ├── crictl.yaml.tmpl
+│   │   │   └── kubexm.conf.tmpl
+│   │   ├── crio
+│   │   │   ├── 10-crio.conf.tmpl
+│   │   │   └── registries.conf.tmpl
+│   │   ├── dns
+│   │   │   ├── Corefile.tmpl
+│   │   │   ├── coredns.yaml.tmpl
+│   │   │   ├── nodelocaldns.Corefile.tmpl
+│   │   │   └── nodelocaldns.yaml.tmpl
+│   │   ├── docker
+│   │   │   ├── cri-dockerd.service.tmpl
+│   │   │   ├── cri-dockerd.socket.tmpl
+│   │   │   ├── crictl.yaml.tmpl
+│   │   │   ├── docker.service.tmpl
+│   │   │   └── kubexm-docker-dropin.conf.tmpl
+│   │   ├── etcd
+│   │   │   ├── etcd-drop-in.conf.tmpl
+│   │   │   ├── etcd.conf.yaml.tmpl
+│   │   │   └── etcd.service.tmpl
+│   │   ├── gateway
+│   │   │   └── ingress-nginx
+│   │   │       └── values.yaml.tmpl
+│   │   ├── isulad
+│   │   │   └── isulad.server.tmpl
+│   │   ├── kubernetes
+│   │   │   ├── audit
+│   │   │   │   └── audit-policy.yaml.tmpl
+│   │   │   ├── kube-apiserver
+│   │   │   │   ├── kube-apiserver.service.tmpl
+│   │   │   │   └── kube-apiserver.yaml.tmpl
+│   │   │   ├── kube-controller-manager
+│   │   │   │   ├── kube-controller-manager.service.tmpl
+│   │   │   │   └── kube-controller-manager.yaml.tmpl
+│   │   │   ├── kube-proxy
+│   │   │   │   ├── kube-proxy-config.yaml.tmpl
+│   │   │   │   └── kube-proxy.service.tmpl
+│   │   │   ├── kube-scheduler
+│   │   │   │   ├── kube-scheduler.service.tmpl
+│   │   │   │   └── kube-scheduler.yaml.tmpl
+│   │   │   ├── kubeadm
+│   │   │   │   ├── kubeadm-init-config.tmpl
+│   │   │   │   ├── kubeadm-join-master-config.tmpl
+│   │   │   │   └── kubeadm-join-worker-config.tmpl
+│   │   │   ├── kubeconfig
+│   │   │   │   └── kubeconfig.tmpl
+│   │   │   ├── kubectl
+│   │   │   │   └── kubectl-completion.sh.tmpl
+│   │   │   ├── kubelet
+│   │   │   │   ├── kubelet-config.yaml.tmpl
+│   │   │   │   ├── kubelet-dropin-10-kubexm.conf.tmpl
+│   │   │   │   └── kubelet.service.tmpl
+│   │   │   └── rbac
+│   │   │       └── essential-rbac.yaml.tmpl
+│   │   ├── loadbalancer
+│   │   │   ├── haproxy
+│   │   │   │   ├── haproxy-static-pod.yaml.tmpl
+│   │   │   │   └── haproxy.cfg.tmpl
+│   │   │   ├── keepalived
+│   │   │   │   └── keepalived.conf.tmpl
+│   │   │   ├── kube-vip
+│   │   │   │   └── kube-vip-yaml.tmpl
+│   │   │   └── nginx
+│   │   │       ├── nginx-static-pod.yaml.tmpl
+│   │   │       └── nginx.conf.tmpl
+│   │   ├── os
+│   │   │   ├── modules.conf.tpl
+│   │   │   └── sysctl.conf.tmpl
+│   │   ├── storage
+│   │   │   ├── longhorn
+│   │   │   │   └── values.yaml.tmpl
+│   │   │   ├── nfs
+│   │   │   │   └── values.yaml.tmpl
+│   │   │   └── openebs-local
+│   │   │       └── values.yaml.tmpl
+│   │   └── templates.go
+│   └── util
+│       ├── binary_info.go
+│       ├── containerd.go
+│       ├── docker.go
+│       ├── filesystem.go
+│       ├── hash.go
+│       ├── host.go
+│       ├── image.go
+│       ├── image_info.go
+│       ├── image_resolver.go
+│       ├── json.go
+│       ├── network.go
+│       ├── path.go
+│       ├── podman.go
+│       ├── resource.go
+│       ├── slice.go
+│       ├── strings.go
+│       ├── template.go
+│       ├── text.go
+│       ├── toml.go
+│       ├── utils.go
+│       └── yaml.go
+├── script
+│   └── make_packages.sh
+└── test_id_rsa
+
+191 directories, 945 files
