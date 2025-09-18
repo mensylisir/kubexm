@@ -58,7 +58,7 @@ func (m *NetworkModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment,
 	}
 
 	logger.Info("Planning task", "task_name", installPluginTask.Name())
-	taskFrag, err := installPluginTask.Plan(taskCtx)
+	taskFrag, err := installPluginTask.Plan(ctx)
 	if err != nil { return nil, fmt.Errorf("failed to plan task %s: %w", installPluginTask.Name(), err) }
 
 	if err := moduleFragment.MergeFragment(taskFrag); err != nil { return nil, err }
