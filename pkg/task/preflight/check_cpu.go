@@ -1,0 +1,60 @@
+package preflight
+
+import (
+	"github.com/mensylisir/kubexm/pkg/plan"
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/spec"
+	preflightstep "github.com/mensylisir/kubexm/pkg/step/preflight"
+	"github.com/mensylisir/kubexm/pkg/task"
+)
+
+type CheckCPUTask struct {
+	task.Base
+}
+
+func NewCheckCPUTask() task.Task {
+	return &CheckCPUTask{
+		Base: task.Base{
+			Meta: spec.TaskMeta{
+				Name:        "CheckCPU",
+				Description: "Check for the minimum required number of CPU cores",
+			},
+		},
+	}
+}
+
+func (t *CheckCPUTask) Name() string {
+	return t.Meta.Name
+}
+
+func (t *CheckCPUTask) Description() string {
+	return t.Meta.Description
+}
+
+func (t *CheckCPUTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
+	// This check can be skipped via the preflight configuration.
+	// The step itself handles the logic of checking that config.
+	return true, nil
+}
+
+func (t *CheckCPUTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
+	fragment := plan.NewExecutionFragment(t.Name())
+	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+
+	allHosts := ctx.GetHostsByRole("")
+	if len(allHosts) == 0 {
+		return fragment, nil
+	}
+
+	checkCPUStep := preflightstep.NewCheckCPUStepBuilder(*runtimeCtx, "CheckMinCPUCores").Build()
+
+	node := &plan.ExecutionNode{
+		Name:  "CheckMinCPUCores",
+		Step:  checkCPUStep,
+		Hosts: allHosts,
+	}
+
+	fragment.AddNode(node)
+	fragment.CalculateEntryAndExitNodes()
+	return fragment, nil
+}
