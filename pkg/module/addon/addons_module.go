@@ -33,11 +33,15 @@ func (m *AddonsModule) GetTasks(ctx module.ModuleContext) ([]task.Task, error) {
 	}
 
 	addonTasks := make([]task.Task, 0, len(clusterCfg.Spec.Addons))
-	for i := range clusterCfg.Spec.Addons {
-		addon := &clusterCfg.Spec.Addons[i] // Get a pointer to the addon struct
-		logger.Debug("Creating task for addon", "addon_name", addon.Name)
-		// Pass the addon struct pointer to the task constructor
-		addonTasks = append(addonTasks, taskAddon.NewInstallAddonTask(addon))
+	for _, addonName := range clusterCfg.Spec.Addons {
+		// TODO: Fetch specific configuration for this addon if ClusterSpec.AddonConfigs exists.
+		// For now, passing nil for addonSpecificConfig.
+		var addonSpecificConfig map[string]interface{} // Placeholder
+		// Example: if clusterCfg.Spec.AddonConfigs != nil {
+		//     addonSpecificConfig = clusterCfg.Spec.AddonConfigs[addonName]
+		// }
+		logger.Debug("Creating task for addon", "addon_name", addonName)
+		addonTasks = append(addonTasks, taskAddon.NewInstallAddonTask(addonName, addonSpecificConfig))
 	}
 	return addonTasks, nil
 }
@@ -46,6 +50,9 @@ func (m *AddonsModule) GetTasks(ctx module.ModuleContext) ([]task.Task, error) {
 func (m *AddonsModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("module", m.Name())
 	moduleFragment := task.NewExecutionFragment(m.Name() + "-Fragment")
+
+	// runtime.Context implements both module.ModuleContext and task.TaskContext
+	// so direct use of ctx for task methods is fine.
 
 	definedTasks, err := m.GetTasks(ctx)
 	if err != nil {
@@ -61,7 +68,12 @@ func (m *AddonsModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, 
 	var allAddonExitNodes []plan.NodeID
 
 	for _, addonTask := range definedTasks {
-		addonInstanceName := addonTask.Name()
+		// Note: addonTask.Name() might be generic like "InstallAddon".
+		// Logging with a more specific identifier if possible, e.g., from task's internal state if it stores addonName.
+		// For now, addonTask.Name() is what BaseTask provides.
+		// The NewInstallAddonTask should ideally set a unique name in its StepMeta.
+		// Let's assume NewInstallAddonTask sets a descriptive name.
+		addonInstanceName := addonTask.Name() // Or get specific addon name from the task if available
 
 		isRequired, err := addonTask.IsRequired(ctx)
 		if err != nil { return nil, fmt.Errorf("failed to check IsRequired for addon task %s: %w", addonInstanceName, err) }
@@ -75,12 +87,15 @@ func (m *AddonsModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, 
 		if err != nil { return nil, fmt.Errorf("failed to plan addon task %s: %w", addonInstanceName, err) }
 
 		if taskFrag.IsEmpty() {
-			logger.Info("Addon task returned an empty fragment, skipping merge.", "addon_name", addonInstanceName)
+			logger.Info("Addon task returned an empty fragment, skipping merge.", "addon_name", addonName)
 			continue
 		}
 
-		if err := moduleFragment.MergeFragment(taskFrag); err != nil { return nil, fmt.Errorf("failed to merge fragment from addon task %s: %w", addonInstanceName, err) }
+		if err := moduleFragment.MergeFragment(taskFrag); err != nil { return nil, fmt.Errorf("failed to merge fragment from addon task %s: %w", addonName, err) }
 
+		// Addons can typically be installed in parallel.
+		// Their entry nodes become part of the module's entry nodes (if not dependent on prior module stages).
+		// Their exit nodes all contribute to the module's exit nodes.
 		allAddonEntryNodes = append(allAddonEntryNodes, taskFrag.EntryNodes...)
 		allAddonExitNodes = append(allAddonExitNodes, taskFrag.ExitNodes...)
 	}
@@ -90,10 +105,10 @@ func (m *AddonsModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, 
 
 	if len(moduleFragment.Nodes) == 0 {
 		logger.Info("AddonsModule planned no executable nodes.")
-	} else {
-		logger.Info("Addons module planning complete.", "total_nodes", len(moduleFragment.Nodes))
+		return task.NewEmptyFragment(), nil
 	}
 
+	logger.Info("Addons module planning complete.", "total_nodes", len(moduleFragment.Nodes))
 	return moduleFragment, nil
 }
 
