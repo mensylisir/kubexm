@@ -32,7 +32,7 @@ func (m *PreflightModule) GetTasks(ctx module.ModuleContext) ([]task.Task, error
 		taskpre.NewConfirmTask("InitialConfirmation", "Proceed with KubeXM operations?", m.assumeYes),
 		taskpreflight.NewPreflightChecksTask(), // The new balanced task
 		taskpre.NewVerifyArtifactsTask(),
-		// CreateRepositoryTask is now deferred until the user wants to implement it fully
+		taskpre.NewCreateRepositoryTask(),
 	}, nil
 }
 
