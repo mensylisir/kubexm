@@ -7,7 +7,6 @@ import (
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
-	taskos "github.com/mensylisir/kubexm/pkg/task/os"
 	taskpre "github.com/mensylisir/kubexm/pkg/task/pre"
 	taskpreflight "github.com/mensylisir/kubexm/pkg/task/preflight"
 )
@@ -21,7 +20,7 @@ type PreflightModule struct {
 // NewPreflightModule creates a new PreflightModule.
 func NewPreflightModule(assumeYes bool) module.Module {
 	return &PreflightModule{
-		BaseModule: module.NewBaseModule("PreflightChecksAndSetup", nil), // Tasks are now fetched via GetTasks
+		BaseModule: module.NewBaseModule("PreflightChecksAndSetup", nil),
 		assumeYes:  assumeYes,
 	}
 }
@@ -31,8 +30,12 @@ func (m *PreflightModule) GetTasks(ctx module.ModuleContext) ([]task.Task, error
 	return []task.Task{
 		taskpreflight.NewGreetingTask(),
 		taskpre.NewConfirmTask("InitialConfirmation", "Proceed with KubeXM operations?", m.assumeYes),
-		taskpreflight.NewPreflightChecksTask(),
-		taskos.NewPrepareOSNodesTask(),
+		taskpreflight.NewCheckCPUTask(),
+		taskpreflight.NewCheckMemoryTask(),
+		taskpreflight.NewCheckDNSTask(),
+		taskpreflight.NewCheckHostConnectivityTask(),
+		taskpreflight.NewCheckRequiredCommandsTask(),
+		taskpreflight.NewCheckTimeSyncTask(),
 		taskpre.NewVerifyArtifactsTask(),
 		taskpre.NewCreateRepositoryTask(),
 	}, nil
@@ -87,7 +90,7 @@ func (m *PreflightModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragmen
 	if len(moduleFragment.Nodes) == 0 {
 		logger.Info("Preflight module planned no executable nodes.")
 	} else {
-		logger.Info("Preflight module planning complete.", "totalNodes", len(moduleFragment.Nodes), "entryNodes", moduleFragment.EntryNodes, "exitNodes", moduleFragment.ExitNodes)
+		logger.Info("Preflight module planning complete.", "totalNodes", len(moduleFragment.Nodes))
 	}
 
 	return moduleFragment, nil
