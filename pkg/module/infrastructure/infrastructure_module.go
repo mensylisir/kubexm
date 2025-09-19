@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
-	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/module"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -33,20 +32,16 @@ func (m *InfrastructureModule) Plan(ctx module.ModuleContext) (*task.ExecutionFr
 	logger := ctx.GetLogger().With("module", m.Name())
 	moduleFragment := task.NewExecutionFragment(m.Name() + "-Fragment")
 
-	// 1. OS Preparation
+	// Phase 1: OS Preparation (grouped by function)
 	osTasks := []task.Task{
-		taskos.NewSetHostnameTask(),
-		taskos.NewUpdateEtcHostsTask(),
-		taskpackages.NewInstallPackagesTask(),
-		taskos.NewDisableSwapTask(),
-		taskos.NewDisableFirewallTask(),
-		taskos.NewDisableSelinuxTask(),
-		taskos.NewLoadKernelModulesTask(),
-		taskos.NewConfigureSysctlTask(),
+		taskos.NewConfigureHostTask(),      // SetHostname + UpdateEtcHosts
+		taskpackages.NewInstallPackagesTask(), // Install prerequisite packages
+		taskos.NewDisableServicesTask(),    // DisableSwap, DisableFirewall, DisableSelinux
+		taskos.NewConfigureKernelTask(),    // LoadKernelModules, ConfigureSysctl
 	}
 
 	var lastOsTaskExitNodes []plan.NodeID
-	for i, t := range osTasks {
+	for _, t := range osTasks {
 		frag, err := planTask(ctx, t)
 		if err != nil {
 			return nil, err
@@ -57,13 +52,15 @@ func (m *InfrastructureModule) Plan(ctx module.ModuleContext) (*task.ExecutionFr
 		if err := moduleFragment.MergeFragment(frag); err != nil {
 			return nil, err
 		}
+		// Create a sequential dependency chain for the OS setup tasks
 		if len(lastOsTaskExitNodes) > 0 {
 			plan.LinkFragments(moduleFragment, lastOsTaskExitNodes, frag.EntryNodes)
 		}
 		lastOsTaskExitNodes = frag.ExitNodes
 	}
 
-	// 2. ETCD Setup (PKI Generation + Installation)
+	// Phase 2: ETCD Setup
+	// Depends on OS setup being complete
 	etcdPkiTask := taskEtcd.NewGenerateEtcdPkiTask()
 	installEtcdTask := taskEtcd.NewInstallETCDTask()
 
@@ -87,7 +84,8 @@ func (m *InfrastructureModule) Plan(ctx module.ModuleContext) (*task.ExecutionFr
 
 	etcdExitNodes := installEtcdFrag.ExitNodes
 
-	// 3. Container Runtime Setup
+	// Phase 3: Container Runtime Setup
+	// Also depends on OS setup being complete, can run in parallel with ETCD setup
 	var containerRuntimeTask task.Task
 	clusterCfg := ctx.GetClusterConfig()
 	if clusterCfg.Spec.ContainerRuntime == nil {
