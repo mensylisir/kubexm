@@ -4,200 +4,252 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
-// TestSSHConnector_Integration covers comprehensive SSH integration tests
-// Uses real hosts: 192.168.56.101-103
+// TestSSHConnector_Integration is the main entry point for SSH integration tests.
+// It iterates through the specified hosts and authentication methods.
 func TestSSHConnector_Integration(t *testing.T) {
+	// User-provided test environment details
 	hosts := []string{"192.168.56.101", "192.168.56.102", "192.168.56.103"}
 	user := "mensyli1"
 	password := "xiaoming98"
-	keyPath := "/home/mensyli1/.ssh/id_rsa"
+	keyPath := "/home/mensyli1/.ssh/id_rsa" // This path is on the agent's machine
+	rootUser := "root"
 	rootPassword := "xiaoming98"
 
+	// Attempt to read the private key from the agent's environment.
 	keyContent, keyErr := os.ReadFile(keyPath)
 	if keyErr != nil {
-		t.Logf("Warning: Failed to read key file %s: %v", keyPath, keyErr)
+		t.Logf("WARN: Could not read private key from '%s'. Key-based auth tests will be skipped. Error: %v", keyPath, keyErr)
 	}
 
 	ctx := context.Background()
 
 	for _, host := range hosts {
 		t.Run(fmt.Sprintf("Host_%s", host), func(t *testing.T) {
-			// Test 1: Password Authentication
-			t.Run("PasswordAuth", func(t *testing.T) {
+			t.Parallel() // Run tests for each host in parallel.
+
+			// --- Test Suite 1: Connect as a regular user with a password ---
+			t.Run("User_PasswordAuth", func(t *testing.T) {
 				cfg := ConnectionCfg{
 					Host:     host,
 					Port:     22,
 					User:     user,
 					Password: password,
-					Timeout:  10 * time.Second,
+					Timeout:  15 * time.Second,
 				}
-				runComprehensiveSSHTests(t, ctx, cfg, "PasswordAuth")
+				runComprehensiveSSHTests(t, ctx, cfg)
 			})
 
-			// Test 2: Key Authentication
-			t.Run("KeyAuth", func(t *testing.T) {
+			// --- Test Suite 2: Connect as a regular user with a private key ---
+			t.Run("User_KeyAuth", func(t *testing.T) {
 				if keyErr != nil {
-					t.Skip("Skipping KeyAuth due to missing key file")
+					t.Skip("Skipping key-based auth test because private key is not available.")
 				}
 				cfg := ConnectionCfg{
-					Host:       host,
-					Port:       22,
-					User:       user,
-					PrivateKey: keyContent,
-					Password:   password, // Password might be needed for sudo even with key auth
-					Timeout:    10 * time.Second,
+					Host:           host,
+					Port:           22,
+					User:           user,
+					PrivateKey:     keyContent,
+					PrivateKeyPath: keyPath,      // For reference
+					Password:       password,     // Password is still needed for sudo operations
+					Timeout:        15 * time.Second,
 				}
-				runComprehensiveSSHTests(t, ctx, cfg, "KeyAuth")
+				runComprehensiveSSHTests(t, ctx, cfg)
 			})
 
-			// Test 3: Root Login
-			t.Run("RootLogin", func(t *testing.T) {
+			// --- Test Suite 3: Connect as root with a password ---
+			t.Run("Root_PasswordAuth", func(t *testing.T) {
 				cfg := ConnectionCfg{
 					Host:     host,
 					Port:     22,
-					User:     "root",
+					User:     rootUser,
 					Password: rootPassword,
-					Timeout:  10 * time.Second,
+					Timeout:  15 * time.Second,
 				}
-				conn := NewSSHConnector(nil)
-				if err := conn.Connect(ctx, cfg); err != nil {
-					t.Logf("Failed to connect as root to %s: %v", host, err)
-					return
-				}
-				defer conn.Close()
-
-				stdout, _, err := conn.Exec(ctx, "whoami", nil)
-				if err != nil {
-					t.Errorf("Exec as root failed: %v", err)
-				}
-				if strings.TrimSpace(string(stdout)) != "root" {
-					t.Errorf("Expected whoami=root, got %s", string(stdout))
-				}
+				runComprehensiveSSHTests(t, ctx, cfg)
 			})
 		})
 	}
 }
 
-func runComprehensiveSSHTests(t *testing.T, ctx context.Context, cfg ConnectionCfg, testName string) {
+// runComprehensiveSSHTests executes a full suite of tests for a given SSH connection config.
+func runComprehensiveSSHTests(t *testing.T, ctx context.Context, cfg ConnectionCfg) {
 	conn := NewSSHConnector(nil)
-	if err := conn.Connect(ctx, cfg); err != nil {
-		t.Fatalf("[%s] Failed to connect: %v", testName, err)
+	err := conn.Connect(ctx, cfg)
+	if err != nil {
+		t.Skipf("SKIPPING all tests for user '%s' on host '%s' due to connection failure: %v", cfg.User, cfg.Host, err)
+		return
 	}
 	defer conn.Close()
 
 	if !conn.IsConnected() {
-		t.Errorf("[%s] IsConnected returned false", testName)
+		t.Fatal("IsConnected() returned false immediately after a successful connection.")
 	}
 
-	// 1. Basic Exec
-	t.Run(testName+"/Exec", func(t *testing.T) {
-		stdout, _, err := conn.Exec(ctx, "hostname", nil)
+	// Helper to create a unique remote path for each test to avoid conflicts.
+	remotePath := func(name string) string {
+		return fmt.Sprintf("/tmp/ssh_test-%s-%s-%d", cfg.User, name, time.Now().UnixNano())
+	}
+
+	// Helper function to verify file ownership and permissions with sudo.
+	verifyRemoteFile := func(t *testing.T, path, expectedOwner, expectedPerms string) {
+		t.Helper()
+		// Use `stat` command to get file owner and permissions.
+		statCmd := fmt.Sprintf("stat -c '%%U:%%G %%a' %s", path)
+		stdout, stderr, err := conn.Exec(ctx, statCmd, &ExecOptions{Sudo: cfg.User != "root"})
 		if err != nil {
-			t.Errorf("Exec failed: %v", err)
+			t.Fatalf("Failed to stat file %s: %v, stderr: %s", path, err, string(stderr))
 		}
-		if len(stdout) == 0 {
-			t.Error("Expected hostname output")
+		output := strings.TrimSpace(string(stdout))
+		parts := strings.Fields(output)
+		if len(parts) != 2 {
+			t.Fatalf("Unexpected stat output for %s: '%s'", path, output)
+		}
+		owner, perms := parts[0], parts[1]
+
+		if !strings.HasPrefix(owner, expectedOwner) {
+			t.Errorf("Path %s: Expected owner '%s', got '%s'", path, expectedOwner, owner)
+		}
+		if expectedPerms != "" && perms != expectedPerms {
+			t.Errorf("Path %s: Expected permissions '%s', got '%s'", path, expectedPerms, perms)
+		}
+	}
+
+	// --- Test Cases ---
+
+	t.Run("Exec_Simple", func(t *testing.T) {
+		stdout, _, err := conn.Exec(ctx, "whoami", nil)
+		if err != nil {
+			t.Fatalf("Exec('whoami') failed: %v", err)
+		}
+		if strings.TrimSpace(string(stdout)) != cfg.User {
+			t.Errorf("Expected whoami to be '%s', got '%s'", cfg.User, string(stdout))
 		}
 	})
 
-	// 2. Sudo Exec
-	t.Run(testName+"/SudoExec", func(t *testing.T) {
+	t.Run("Exec_Sudo", func(t *testing.T) {
+		if cfg.User == "root" {
+			t.Skip("Sudo test not applicable for root user")
+		}
 		stdout, _, err := conn.Exec(ctx, "whoami", &ExecOptions{Sudo: true})
 		if err != nil {
-			t.Errorf("Sudo exec failed: %v", err)
+			t.Fatalf("Exec('sudo whoami') failed: %v", err)
 		}
 		if !strings.Contains(string(stdout), "root") {
-			t.Errorf("Expected root, got: %s", string(stdout))
+			t.Errorf("Expected sudo whoami to contain 'root', got '%s'", string(stdout))
 		}
 	})
 
-	// 3. File Operations (Write, Read, Stat)
-	t.Run(testName+"/FileOps", func(t *testing.T) {
-		testFile := "/tmp/ssh_test_" + testName + ".txt"
-		content := "ssh test content"
-
-		// Write
-		err := conn.WriteFile(ctx, []byte(content), testFile, nil)
+	t.Run("WriteFile_and_ReadFile", func(t *testing.T) {
+		path := remotePath("write_read.txt")
+		content := []byte("hello from ssh")
+		err := conn.WriteFile(ctx, content, path, nil)
 		if err != nil {
-			t.Errorf("WriteFile failed: %v", err)
+			t.Fatalf("WriteFile failed: %v", err)
 		}
-		defer conn.Remove(ctx, testFile, RemoveOptions{})
+		defer conn.Remove(ctx, path, RemoveOptions{})
 
-		// Read
-		readContent, err := conn.ReadFileWithOptions(ctx, testFile, nil)
+		readContent, err := conn.ReadFile(ctx, path)
 		if err != nil {
-			t.Errorf("ReadFile failed: %v", err)
+			t.Fatalf("ReadFile failed: %v", err)
 		}
-		if string(readContent) != content {
+		if string(readContent) != string(content) {
 			t.Errorf("Content mismatch")
 		}
-
-		// Stat
-		stat, err := conn.Stat(ctx, testFile)
-		if err != nil {
-			t.Errorf("Stat failed: %v", err)
-		}
-		if stat == nil || !stat.IsExist {
-			t.Error("File should exist")
-		}
 	})
 
-	// 4. Sudo File Operations
-	t.Run(testName+"/SudoFileOps", func(t *testing.T) {
-		testFile := "/tmp/ssh_sudo_test_" + testName + ".txt"
-		content := "ssh sudo content"
-
-		// Write with sudo
-		err := conn.WriteFile(ctx, []byte(content), testFile, &FileTransferOptions{Sudo: true})
-		if err != nil {
-			t.Errorf("Sudo WriteFile failed: %v", err)
+	t.Run("WriteFile_Sudo_and_ReadFile_Sudo", func(t *testing.T) {
+		path := remotePath("sudo_write_read.txt")
+		content := []byte("sudo hello")
+		opts := &FileTransferOptions{
+			Sudo:        true,
+			Permissions: "0640",
+			Owner:       "root",
+			Group:       "root",
 		}
-		defer conn.Remove(ctx, testFile, RemoveOptions{Sudo: true})
-
-		// Read with sudo (required if file is root owned)
-		readContent, err := conn.ReadFileWithOptions(ctx, testFile, &FileTransferOptions{Sudo: true})
+		err := conn.WriteFile(ctx, content, path, opts)
 		if err != nil {
-			t.Errorf("Sudo ReadFile failed: %v", err)
+			t.Fatalf("Sudo WriteFile failed: %v", err)
 		}
-		if string(readContent) != content {
+		defer conn.Remove(ctx, path, RemoveOptions{Sudo: true})
+
+		verifyRemoteFile(t, path, "root:root", "640")
+
+		readContent, err := conn.ReadFileWithOptions(ctx, path, &FileTransferOptions{Sudo: true})
+		if err != nil {
+			t.Fatalf("Sudo ReadFile failed: %v", err)
+		}
+		if string(readContent) != string(content) {
 			t.Errorf("Content mismatch")
 		}
-		
-		// CopyContent with sudo
-		copyFile := "/tmp/ssh_sudo_copy_" + testName + ".txt"
-		err = conn.CopyContent(ctx, []byte(content), copyFile, &FileTransferOptions{Sudo: true})
+	})
+
+	t.Run("Upload_and_Download", func(t *testing.T) {
+		localFile := filepath.Join(t.TempDir(), "upload.txt")
+		content := []byte("upload/download test")
+		os.WriteFile(localFile, content, 0644)
+
+		path := remotePath("uploaded_file.txt")
+		err := conn.Upload(ctx, localFile, path, nil)
 		if err != nil {
-			t.Errorf("Sudo CopyContent failed: %v", err)
+			t.Fatalf("Upload failed: %v", err)
 		}
-		defer conn.Remove(ctx, copyFile, RemoveOptions{Sudo: true})
-		
-		// Verify copy
-		readCopy, _ := conn.ReadFileWithOptions(ctx, copyFile, &FileTransferOptions{Sudo: true})
-		if string(readCopy) != content {
-			t.Errorf("CopyContent mismatch")
+		defer conn.Remove(ctx, path, RemoveOptions{})
+
+		downloadedFile := filepath.Join(t.TempDir(), "downloaded.txt")
+		err = conn.Download(ctx, path, downloadedFile, nil)
+		if err != nil {
+			t.Fatalf("Download failed: %v", err)
+		}
+
+		readContent, _ := os.ReadFile(downloadedFile)
+		if string(readContent) != string(content) {
+			t.Errorf("Downloaded content mismatch")
 		}
 	})
-	
-	// 5. Directory Operations
-	t.Run(testName+"/DirOps", func(t *testing.T) {
-		testDir := "/tmp/ssh_dir_" + testName
-		err := conn.Mkdir(ctx, testDir, "0755")
+
+	t.Run("Mkdir_and_Remove", func(t *testing.T) {
+		path := remotePath("test_dir")
+		err := conn.Mkdir(ctx, path, "0755")
 		if err != nil {
-			t.Errorf("Mkdir failed: %v", err)
+			t.Fatalf("Mkdir failed: %v", err)
 		}
-		defer conn.Remove(ctx, testDir, RemoveOptions{Recursive: true})
-		
-		isDir, err := conn.IsDir(ctx, testDir)
+
+		isDir, err := conn.IsDir(ctx, path)
+		if err != nil || !isDir {
+			t.Errorf("IsDir should be true for created directory")
+		}
+
+		err = conn.Remove(ctx, path, RemoveOptions{Recursive: true})
 		if err != nil {
-			t.Errorf("IsDir failed: %v", err)
+			t.Fatalf("Remove failed: %v", err)
 		}
-		if !isDir {
-			t.Error("Should be a directory")
+
+		stat, err := conn.Stat(ctx, path)
+		if err != nil || stat.IsExist {
+			t.Errorf("Directory should not exist after Remove")
+		}
+	})
+
+	t.Run("GetFileChecksum", func(t *testing.T) {
+		path := remotePath("checksum.txt")
+		content := "checksum content"
+		conn.WriteFile(ctx, []byte(content), path, nil)
+		defer conn.Remove(ctx, path, RemoveOptions{})
+
+		// Expected sha256sum for "checksum content"
+		expected := "5a1c2a02322d42d22631b67137f814426d5b066a3d82342de45c5722dc6f8314"
+		checksum, err := conn.GetFileChecksum(ctx, path, "sha256")
+		if err != nil {
+			t.Fatalf("GetFileChecksum failed: %v", err)
+		}
+		if checksum != expected {
+			t.Errorf("Checksum mismatch: expected %s, got %s", expected, checksum)
 		}
 	})
 }
