@@ -22,7 +22,7 @@ type EnableSwapStepBuilder struct {
 	step.Builder[EnableSwapStepBuilder, *EnableSwapStep]
 }
 
-func NewEnableSwapStepBuilder(ctx runtime.Context, instanceName string) *EnableSwapStepBuilder {
+func NewEnableSwapStepBuilder(ctx runtime.ExecutionContext, instanceName string) *EnableSwapStepBuilder {
 	s := &EnableSwapStep{}
 
 	s.Base.Meta.Name = instanceName

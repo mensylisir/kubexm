@@ -23,7 +23,7 @@ type RemoveSecurityLimitsStepBuilder struct {
 	step.Builder[RemoveSecurityLimitsStepBuilder, *RemoveSecurityLimitsStep]
 }
 
-func NewRemoveSecurityLimitsStepBuilder(ctx runtime.Context, instanceName string) *RemoveSecurityLimitsStepBuilder {
+func NewRemoveSecurityLimitsStepBuilder(ctx runtime.ExecutionContext, instanceName string) *RemoveSecurityLimitsStepBuilder {
 	s := &RemoveSecurityLimitsStep{}
 
 	s.Base.Meta.Name = instanceName

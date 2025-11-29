@@ -1,6 +1,8 @@
 package etcd
 
 import (
+	"fmt"
+
 	"github.com/mensylisir/kubexm/pkg/common"
 
 	"github.com/mensylisir/kubexm/pkg/connector"

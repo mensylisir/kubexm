@@ -2,10 +2,11 @@ package common
 
 import (
 	"fmt"
+	"time"
+
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/util"
-	"time"
 
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
@@ -47,10 +48,12 @@ func (s *PrintMessageStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, 
 	return false, nil
 }
 
-func (s *PrintMessageStep) Run(ctx runtime.ExecutionContext) error {
+func (s *PrintMessageStep) Run(ctx runtime.ExecutionContext) (*step.StepResult, error) {
+	result := step.NewStepResult(s.Meta().Name, ctx.GetStepExecutionID(), ctx.GetHost())
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	logger.Info(s.Message)
-	return nil
+	result.MarkCompleted("Message printed")
+	return result, nil
 }
 
 func (s *PrintMessageStep) Rollback(ctx runtime.ExecutionContext) error {

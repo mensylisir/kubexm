@@ -2,8 +2,10 @@ package kubernetes
 
 import (
 	"fmt"
+
 	"github.com/mensylisir/kubexm/pkg/module"
 	"github.com/mensylisir/kubexm/pkg/plan"
+	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
 	// taskK8s "github.com/mensylisir/kubexm/pkg/task/kubernetes" // For actual tasks later
 )
@@ -32,11 +34,11 @@ func NewNodeResetModule() module.Module {
 }
 
 // Plan generates the execution fragment for the NodeReset module.
-func (m *NodeResetModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, error) {
+func (m *NodeResetModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("module", m.Name())
 	logger.Info("Planning Kubernetes Node Reset module (stub implementation)...")
 
-	moduleFragment := task.NewExecutionFragment()
+	moduleFragment := plan.NewExecutionFragment(m.Name() + "-Fragment")
 	var previousTaskExitNodes []plan.NodeID
 	firstTaskProcessed := false // Renamed from isFirstEffectiveTask for clarity
 
@@ -46,9 +48,14 @@ func (m *NodeResetModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragmen
 	// For now, assuming m.Tasks() provides the static list.
 	allTasks := m.BaseModule.Tasks() // Get tasks from embedded BaseModule
 
+	taskCtx, ok := ctx.(runtime.TaskContext)
+	if !ok {
+		return nil, fmt.Errorf("module context cannot be asserted to runtime.TaskContext for %s", m.Name())
+	}
+
 	for _, currentTask := range allTasks {
 		// ModuleContext (ctx) is passed directly as it satisfies task.TaskContext
-		taskIsRequired, err := currentTask.IsRequired(ctx)
+		taskIsRequired, err := currentTask.IsRequired(taskCtx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check if task %s is required in module %s: %w", currentTask.Name(), m.Name(), err)
 		}
@@ -58,7 +65,7 @@ func (m *NodeResetModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragmen
 		}
 
 		logger.Info("Planning task", "task", currentTask.Name())
-		taskFrag, err := currentTask.Plan(ctx)
+		taskFrag, err := currentTask.Plan(taskCtx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to plan task %s in module %s: %w", currentTask.Name(), m.Name(), err)
 		}

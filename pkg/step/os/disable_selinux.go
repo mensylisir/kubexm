@@ -23,7 +23,7 @@ type DisableSelinuxStepBuilder struct {
 	step.Builder[DisableSelinuxStepBuilder, *DisableSelinuxStep]
 }
 
-func NewDisableSelinuxStepBuilder(ctx runtime.Context, instanceName string) *DisableSelinuxStepBuilder {
+func NewDisableSelinuxStepBuilder(ctx runtime.ExecutionContext, instanceName string) *DisableSelinuxStepBuilder {
 	s := &DisableSelinuxStep{}
 
 	s.Base.Meta.Name = instanceName

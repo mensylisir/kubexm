@@ -23,7 +23,7 @@ type EnableSelinuxStepBuilder struct {
 	step.Builder[EnableSelinuxStepBuilder, *EnableSelinuxStep]
 }
 
-func NewEnableSelinuxStepBuilder(ctx runtime.Context, instanceName string) *EnableSelinuxStepBuilder {
+func NewEnableSelinuxStepBuilder(ctx runtime.ExecutionContext, instanceName string) *EnableSelinuxStepBuilder {
 	s := &EnableSelinuxStep{}
 
 	s.Base.Meta.Name = instanceName

@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/pkg/module"
+	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/task"
 	// taskK8s "github.com/mensylisir/kubexm/pkg/task/kubernetes" // For actual tasks later
@@ -34,16 +35,16 @@ func NewControlPlaneCleanupModule() module.Module {
 }
 
 // Plan generates the execution fragment for the ControlPlaneCleanup module.
-func (m *ControlPlaneCleanupModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, error) {
+func (m *ControlPlaneCleanupModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("module", m.Name())
 	logger.Info("Planning Kubernetes Control Plane Cleanup module (stub implementation)...")
 
-	moduleFragment := task.NewExecutionFragment()
+	moduleFragment := plan.NewExecutionFragment(m.Name() + "-Fragment")
 	var previousTaskExitNodes []plan.NodeID
 	isFirstEffectiveTask := true
 
 	for _, currentTask := range m.Tasks() {
-		taskCtx, ok := ctx.(task.TaskContext)
+		taskCtx, ok := ctx.(runtime.TaskContext)
 		if !ok {
 			return nil, fmt.Errorf("module context cannot be asserted to task context for module %s, task %s", m.Name(), currentTask.Name())
 		}
@@ -93,7 +94,8 @@ func (m *ControlPlaneCleanupModule) Plan(ctx module.ModuleContext) (*task.Execut
 		}
 	}
 	moduleFragment.ExitNodes = append(moduleFragment.ExitNodes, previousTaskExitNodes...)
-	moduleFragment.RemoveDuplicateNodeIDs()
+	moduleFragment.EntryNodes = plan.UniqueNodeIDs(moduleFragment.EntryNodes)
+	moduleFragment.ExitNodes = plan.UniqueNodeIDs(moduleFragment.ExitNodes)
 
 	if len(moduleFragment.Nodes) == 0 {
 		logger.Info("Kubernetes Control Plane Cleanup module planned no executable nodes (stub).")

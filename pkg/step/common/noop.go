@@ -1,10 +1,11 @@
 package common
 
 import (
+	"time"
+
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"time"
 )
 
 type NoOpStep struct {
@@ -31,8 +32,10 @@ func (s *NoOpStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err erro
 	return true, nil
 }
 
-func (s *NoOpStep) Run(ctx runtime.ExecutionContext) error {
-	return nil
+func (s *NoOpStep) Run(ctx runtime.ExecutionContext) (*step.StepResult, error) {
+	result := step.NewStepResult(s.Meta().Name, ctx.GetStepExecutionID(), ctx.GetHost())
+	result.MarkCompleted("NoOp step completed")
+	return result, nil
 }
 
 func (s *NoOpStep) Rollback(ctx runtime.ExecutionContext) error {

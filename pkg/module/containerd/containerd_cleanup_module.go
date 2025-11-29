@@ -3,6 +3,7 @@ package containerd
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/pkg/module"
+	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/task"
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // For runtime type check
@@ -32,7 +33,7 @@ func NewContainerdCleanupModule() module.Module {
 }
 
 // Plan generates the execution fragment for the ContainerdCleanup module.
-func (m *ContainerdCleanupModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, error) {
+func (m *ContainerdCleanupModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("module", m.Name())
 	clusterConfig := ctx.GetClusterConfig()
 
@@ -41,17 +42,17 @@ func (m *ContainerdCleanupModule) Plan(ctx module.ModuleContext) (*task.Executio
 	// but if it's separate, this check is important.
 	if clusterConfig.Spec.ContainerRuntime == nil || clusterConfig.Spec.ContainerRuntime.Type != v1alpha1.ContainerdRuntime {
 		logger.Info("Container runtime is not containerd or not specified. Skipping Containerd Cleanup module planning.")
-		return task.NewEmptyFragment(), nil
+		return plan.NewEmptyFragment(m.Name()), nil
 	}
 	logger.Info("Planning Containerd Cleanup module (stub implementation)...")
 
 
-	moduleFragment := task.NewExecutionFragment()
+	moduleFragment := plan.NewExecutionFragment(m.Name() + "-Fragment")
 	var previousTaskExitNodes []plan.NodeID
 	isFirstEffectiveTask := true
 
 	for _, currentTask := range m.Tasks() {
-		taskCtx, ok := ctx.(task.TaskContext)
+		taskCtx, ok := ctx.(runtime.TaskContext)
 		if !ok {
 			return nil, fmt.Errorf("module context cannot be asserted to task context for module %s, task %s", m.Name(), currentTask.Name())
 		}
@@ -101,7 +102,8 @@ func (m *ContainerdCleanupModule) Plan(ctx module.ModuleContext) (*task.Executio
 		}
 	}
 	moduleFragment.ExitNodes = append(moduleFragment.ExitNodes, previousTaskExitNodes...)
-	moduleFragment.RemoveDuplicateNodeIDs()
+	moduleFragment.EntryNodes = plan.UniqueNodeIDs(moduleFragment.EntryNodes)
+	moduleFragment.ExitNodes = plan.UniqueNodeIDs(moduleFragment.ExitNodes)
 
 	if len(moduleFragment.Nodes) == 0 {
 		logger.Info("Containerd Cleanup module planned no executable nodes (stub).")

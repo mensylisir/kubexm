@@ -58,10 +58,53 @@ func (s *RenderTemplateStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
+func (s *RenderTemplateStep) aggregateData(ctx runtime.ExecutionContext) map[string]interface{} {
+	data := make(map[string]interface{})
+	// Merge scopes: Global -> Pipeline -> Module -> Task (Task wins)
+	if ctx.GetGlobalState() != nil {
+		for k, v := range ctx.GetGlobalState().GetAll() {
+			data[k] = v
+		}
+	}
+	if ctx.GetPipelineState() != nil {
+		for k, v := range ctx.GetPipelineState().GetAll() {
+			data[k] = v
+		}
+	}
+	if ctx.GetModuleState() != nil {
+		for k, v := range ctx.GetModuleState().GetAll() {
+			data[k] = v
+		}
+	}
+	if ctx.GetTaskState() != nil {
+		for k, v := range ctx.GetTaskState().GetAll() {
+			data[k] = v
+		}
+	}
+
+	// Add Host info
+	data["Host"] = ctx.GetHost()
+
+	// Merge step-specific data (overrides context)
+	if s.Data != nil {
+		if mapData, ok := s.Data.(map[string]interface{}); ok {
+			for k, v := range mapData {
+				data[k] = v
+			}
+		} else {
+			// If Data is not a map, we can't easily merge.
+			// We might wrap it or just use it as "Extra".
+			data["Extra"] = s.Data
+		}
+	}
+	return data
+}
+
 func (s *RenderTemplateStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 
-	expectedContent, errRender := util.RenderTemplate(s.TemplateContent, s.Data)
+	data := s.aggregateData(ctx)
+	expectedContent, errRender := util.RenderTemplate(s.TemplateContent, data)
 	if errRender != nil {
 		return false, fmt.Errorf("failed to render template for precheck: %w", errRender)
 	}
@@ -103,19 +146,30 @@ func (s *RenderTemplateStep) Precheck(ctx runtime.ExecutionContext) (isDone bool
 	return false, nil
 }
 
-func (s *RenderTemplateStep) Run(ctx runtime.ExecutionContext) error {
+func (s *RenderTemplateStep) Run(ctx runtime.ExecutionContext) (*step.StepResult, error) {
+	result := step.NewStepResult(s.Meta().Name, ctx.GetStepExecutionID(), ctx.GetHost())
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
 	logger.Info("Rendering template.", "destination", s.RemoteDestPath)
-	renderedContent, err := util.RenderTemplate(s.TemplateContent, s.Data)
+
+	data := s.aggregateData(ctx)
+	// We use util.RenderTemplate here to keep consistency with Precheck and avoid re-parsing if util does it efficiently.
+	// Alternatively we could use runnerSvc.Render if we want to use the Runner's template engine.
+	// But runnerSvc.Render takes *template.Template.
+	// Let's stick to util.RenderTemplate for now as it returns string, which we can write.
+	// Wait, runnerSvc.Render writes the file directly.
+	// But we already have WriteFile logic below.
+	// Using util.RenderTemplate is fine.
+
+	renderedContent, err := util.RenderTemplate(s.TemplateContent, data)
 	if err != nil {
-		return fmt.Errorf("failed to render template for %s: %w", s.RemoteDestPath, err)
+		return nil, fmt.Errorf("failed to render template for %s: %w", s.RemoteDestPath, err)
 	}
 
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		return fmt.Errorf("run: failed to get connector: %w", err)
+		return nil, fmt.Errorf("run: failed to get connector: %w", err)
 	}
 
 	logger.Info("Writing rendered template to remote host.", "path", s.RemoteDestPath, "permissions", s.Permissions, "sudo", s.Sudo)
@@ -125,11 +179,12 @@ func (s *RenderTemplateStep) Run(ctx runtime.ExecutionContext) error {
 		if errors.As(err, &cmdErr) {
 			logger.Error(err, "Failed to write rendered template to remote host.", "stderr", cmdErr.Stderr, "stdout", cmdErr.Stdout)
 		}
-		return fmt.Errorf("failed to write rendered template to %s: %w", s.RemoteDestPath, err)
+		return nil, fmt.Errorf("failed to write rendered template to %s: %w", s.RemoteDestPath, err)
 	}
 
 	logger.Info("Template rendered and written successfully.")
-	return nil
+	result.MarkCompleted("Template rendered and written successfully")
+	return result, nil
 }
 
 func (s *RenderTemplateStep) Rollback(ctx runtime.ExecutionContext) error {

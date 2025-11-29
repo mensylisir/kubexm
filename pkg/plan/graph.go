@@ -2,9 +2,11 @@ package plan
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/connector"
-	"github.com/mensylisir/kubexm/pkg/step"
 	"sort"
+
+	"github.com/mensylisir/kubexm/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/step"
 )
 
 type NodeID string
@@ -29,6 +31,14 @@ type ExecutionNode struct {
 	StepName      string                 `json:"stepName"`
 	Hostnames     []string               `json:"hostnames"`
 	RuntimeConfig map[string]interface{} `json:"runtimeConfig,omitempty"`
+
+	PipelineName string `json:"pipelineName,omitempty"`
+	ModuleName   string `json:"moduleName,omitempty"`
+	TaskName     string `json:"taskName,omitempty"`
+
+	// Condition is a function that determines if this node should be executed.
+	// It is not serialized to JSON.
+	Condition func(ctx runtime.ExecutionContext) (bool, error) `json:"-"`
 
 	// TODO: Add fields for retry strategy, timeout overrides for this specific node, etc.
 }
@@ -68,8 +78,39 @@ func (g *ExecutionGraph) IsEmpty() bool {
 	return len(g.Nodes) == 0
 }
 
-func LinkFragments(graph *ExecutionGraph, fromNodeIDs []NodeID, toNodeIDs []NodeID) error {
-	if graph == nil || graph.Nodes == nil {
+type Graph interface {
+	AddDependency(from, to NodeID) error
+	GetNode(id NodeID) *ExecutionNode
+	HasNode(id NodeID) bool
+}
+
+func (g *ExecutionGraph) GetNode(id NodeID) *ExecutionNode {
+	return g.Nodes[id]
+}
+
+func (g *ExecutionGraph) HasNode(id NodeID) bool {
+	_, exists := g.Nodes[id]
+	return exists
+}
+
+func (g *ExecutionGraph) MergeFragment(fragment *ExecutionFragment) error {
+	if fragment == nil {
+		return nil
+	}
+	for id, node := range fragment.Nodes {
+		if _, exists := g.Nodes[id]; exists {
+			return fmt.Errorf("MergeFragment: node with ID '%s' already exists in graph", id)
+		}
+		g.Nodes[id] = node
+	}
+	// Merge dependencies? They are inside nodes.
+	// Merge entry/exit nodes?
+	// Usually MergeFragment just adds nodes.
+	return nil
+}
+
+func LinkFragments(graph Graph, fromNodeIDs []NodeID, toNodeIDs []NodeID) error {
+	if graph == nil {
 		return fmt.Errorf("cannot link fragments in a nil or uninitialized graph")
 	}
 	if len(fromNodeIDs) == 0 || len(toNodeIDs) == 0 {
@@ -77,12 +118,12 @@ func LinkFragments(graph *ExecutionGraph, fromNodeIDs []NodeID, toNodeIDs []Node
 	}
 
 	for _, id := range fromNodeIDs {
-		if _, exists := graph.Nodes[id]; !exists {
+		if !graph.HasNode(id) {
 			return fmt.Errorf("LinkFragments: source node ID '%s' not found in graph", id)
 		}
 	}
 	for _, id := range toNodeIDs {
-		if _, exists := graph.Nodes[id]; !exists {
+		if !graph.HasNode(id) {
 			return fmt.Errorf("LinkFragments: target node ID '%s' not found in graph", id)
 		}
 	}

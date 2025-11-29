@@ -23,7 +23,7 @@ type RemoveSysctlStepBuilder struct {
 	step.Builder[RemoveSysctlStepBuilder, *RemoveSysctlStep]
 }
 
-func NewRemoveSysctlStepBuilder(ctx runtime.Context, instanceName string) *RemoveSysctlStepBuilder {
+func NewRemoveSysctlStepBuilder(ctx runtime.ExecutionContext, instanceName string) *RemoveSysctlStepBuilder {
 	s := &RemoveSysctlStep{}
 
 	s.Base.Meta.Name = instanceName

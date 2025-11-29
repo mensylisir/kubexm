@@ -7,7 +7,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
-	taskKube "github.com/mensylisir/kubexm/pkg/task/kubernetes"
+	taskKube "github.com/mensylisir/kubexm/pkg/task/kubernetes/kubeadm"
 )
 
 // WorkerModule is responsible for setting up Kubernetes worker nodes.
@@ -18,71 +18,83 @@ type WorkerModule struct {
 // NewWorkerModule creates a new WorkerModule.
 func NewWorkerModule() module.Module {
 	// Tasks for worker nodes.
-	// Note: InstallKubeBinariesTask and PullImagesTask might have already run on all nodes
+	// Note: InstallKubeComponentsTask might have already run on all nodes
 	// as part of ControlPlaneModule or an earlier "all nodes setup" module.
 	// If so, their IsRequired methods or Prechecks should make them no-ops on nodes where already done.
 	tasks := []task.Task{
-		taskKube.NewInstallKubeBinariesTask(nil), // Ensure binaries on workers
-		taskKube.NewPullImagesTask(nil),          // Ensure core images on workers (e.g. kube-proxy, pause, CNI)
-		taskKube.NewJoinWorkerNodesTask(),        // The main task for joining workers
+		taskKube.NewInstallKubeComponentsTask(), // Ensure binaries on workers
+		// taskKube.NewPullImagesTask(nil),          // Ensure core images on workers (e.g. kube-proxy, pause, CNI)
+		taskKube.NewJoinWorkersTask(), // The main task for joining workers
 	}
 	base := module.NewBaseModule("KubernetesWorkerSetup", tasks)
 	return &WorkerModule{BaseModule: base}
 }
 
-func (m *WorkerModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, error) {
+func (m *WorkerModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("module", m.Name())
-	moduleFragment := task.NewExecutionFragment(m.Name() + "-Fragment")
+	moduleFragment := plan.NewExecutionFragment(m.Name() + "-Fragment")
 
-	taskCtx, ok := ctx.(task.TaskContext)
+	taskCtx, ok := ctx.(runtime.TaskContext)
 	if !ok {
-		return nil, fmt.Errorf("module context cannot be asserted to task.TaskContext for %s", m.Name())
+		return nil, fmt.Errorf("module context cannot be asserted to runtime.TaskContext for %s", m.Name())
 	}
 
 	// Define task instances
-	installBinariesTask := taskKube.NewInstallKubeBinariesTask([]string{common.RoleWorker})
-	pullImagesTask := taskKube.NewPullImagesTask([]string{common.RoleWorker})
-	joinWorkersTask := taskKube.NewJoinWorkerNodesTask()
+	installBinariesTask := taskKube.NewInstallKubeComponentsTask()
+	// pullImagesTask := taskKube.NewPullImagesTask([]string{common.RoleWorker})
+	joinWorkersTask := taskKube.NewJoinWorkersTask()
 
-	var lastBinariesExits, lastImagesExits []plan.NodeID
+	var lastBinariesExits []plan.NodeID
 
 	// 1. Install Kube Binaries on workers (might be a no-op if already done)
 	binariesRequired, err := installBinariesTask.IsRequired(taskCtx)
-	if err != nil { return nil, fmt.Errorf("failed to check IsRequired for %s: %w", installBinariesTask.Name(), err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to check IsRequired for %s: %w", installBinariesTask.Name(), err)
+	}
 	if binariesRequired {
 		logger.Info("Planning task", "task_name", installBinariesTask.Name())
 		binariesFrag, err := installBinariesTask.Plan(taskCtx)
-		if err != nil { return nil, fmt.Errorf("failed to plan %s: %w", installBinariesTask.Name(), err) }
-		if err := moduleFragment.MergeFragment(binariesFrag); err != nil { return nil, err }
+		if err != nil {
+			return nil, fmt.Errorf("failed to plan %s: %w", installBinariesTask.Name(), err)
+		}
+		if err := moduleFragment.MergeFragment(binariesFrag); err != nil {
+			return nil, err
+		}
 		moduleFragment.EntryNodes = append(moduleFragment.EntryNodes, binariesFrag.EntryNodes...)
 		lastBinariesExits = binariesFrag.ExitNodes
 	}
 
 	// 2. Pull Core K8s Images on workers (might be a no-op)
-	imagesRequired, err := pullImagesTask.IsRequired(taskCtx)
-	if err != nil { return nil, fmt.Errorf("failed to check IsRequired for %s: %w", pullImagesTask.Name(), err) }
-	if imagesRequired {
-		logger.Info("Planning task", "task_name", pullImagesTask.Name())
-		imagesFrag, err := pullImagesTask.Plan(taskCtx)
-		if err != nil { return nil, fmt.Errorf("failed to plan %s: %w", pullImagesTask.Name(), err) }
-		if err := moduleFragment.MergeFragment(imagesFrag); err != nil { return nil, err }
-		moduleFragment.EntryNodes = append(moduleFragment.EntryNodes, imagesFrag.EntryNodes...)
-		lastImagesExits = imagesFrag.ExitNodes
-	}
+	// imagesRequired, err := pullImagesTask.IsRequired(taskCtx)
+	// if err != nil { return nil, fmt.Errorf("failed to check IsRequired for %s: %w", pullImagesTask.Name(), err) }
+	// if imagesRequired {
+	// 	logger.Info("Planning task", "task_name", pullImagesTask.Name())
+	// 	imagesFrag, err := pullImagesTask.Plan(taskCtx)
+	// 	if err != nil { return nil, fmt.Errorf("failed to plan %s: %w", pullImagesTask.Name(), err) }
+	// 	if err := moduleFragment.MergeFragment(imagesFrag); err != nil { return nil, err }
+	// 	moduleFragment.EntryNodes = append(moduleFragment.EntryNodes, imagesFrag.EntryNodes...)
+	// 	lastImagesExits = imagesFrag.ExitNodes
+	// }
 
 	// Combine exits from binaries and images tasks as dependencies for joining
 	joinDependencies := append([]plan.NodeID{}, lastBinariesExits...)
-	joinDependencies = append(joinDependencies, lastImagesExits...)
+	// joinDependencies = append(joinDependencies, lastImagesExits...)
 	joinDependencies = plan.UniqueNodeIDs(joinDependencies)
 
 	// 3. Join Worker Nodes
 	joinWorkersRequired, err := joinWorkersTask.IsRequired(taskCtx)
-	if err != nil { return nil, fmt.Errorf("failed to check IsRequired for %s: %w", joinWorkersTask.Name(), err) }
+	if err != nil {
+		return nil, fmt.Errorf("failed to check IsRequired for %s: %w", joinWorkersTask.Name(), err)
+	}
 	if joinWorkersRequired {
 		logger.Info("Planning task", "task_name", joinWorkersTask.Name())
 		joinWorkersFrag, err := joinWorkersTask.Plan(taskCtx)
-		if err != nil { return nil, fmt.Errorf("failed to plan %s: %w", joinWorkersTask.Name(), err) }
-		if err := moduleFragment.MergeFragment(joinWorkersFrag); err != nil { return nil, err }
+		if err != nil {
+			return nil, fmt.Errorf("failed to plan %s: %w", joinWorkersTask.Name(), err)
+		}
+		if err := moduleFragment.MergeFragment(joinWorkersFrag); err != nil {
+			return nil, err
+		}
 		if len(joinWorkersFrag.EntryNodes) > 0 { // Only link if join task has entry nodes
 			plan.LinkFragments(moduleFragment, joinDependencies, joinWorkersFrag.EntryNodes)
 			moduleFragment.ExitNodes = append(moduleFragment.ExitNodes, joinWorkersFrag.ExitNodes...)
@@ -90,17 +102,17 @@ func (m *WorkerModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, 
 			moduleFragment.ExitNodes = append(moduleFragment.ExitNodes, joinDependencies...)
 		}
 	} else {
-	    // If join worker task is not required, the exits are from image/binary tasks
+		// If join worker task is not required, the exits are from image/binary tasks
 		moduleFragment.ExitNodes = append(moduleFragment.ExitNodes, joinDependencies...)
 		logger.Info("Skipping task as it's not required", "task_name", joinWorkersTask.Name())
 	}
 
-	moduleFragment.EntryNodes = task.UniqueNodeIDs(moduleFragment.EntryNodes)
-	moduleFragment.ExitNodes = task.UniqueNodeIDs(moduleFragment.ExitNodes)
+	moduleFragment.EntryNodes = plan.UniqueNodeIDs(moduleFragment.EntryNodes)
+	moduleFragment.ExitNodes = plan.UniqueNodeIDs(moduleFragment.ExitNodes)
 
 	if len(moduleFragment.Nodes) == 0 {
 		logger.Info("WorkerModule planned no executable nodes.")
-		return task.NewEmptyFragment(), nil
+		return plan.NewEmptyFragment(m.Name()), nil
 	}
 
 	logger.Info("Worker module planning complete.", "total_nodes", len(moduleFragment.Nodes))

@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"github.com/mensylisir/kubexm/pkg/module"
+	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
 	// kubernetestask "github.com/mensylisir/kubexm/pkg/task/kubernetes"
@@ -28,7 +29,7 @@ func NewClusterBootstrapModule() module.Module {
 }
 
 // Plan orchestrates the planning of tasks within this module.
-func (m *ClusterBootstrapModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragment, error) {
+func (m *ClusterBootstrapModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionFragment, error) {
 	// 1. Instantiate tasks: InitMaster, JoinMasters, JoinWorkers.
 	// 2. Plan each task.
 	// 3. Link task fragments:
@@ -36,7 +37,7 @@ func (m *ClusterBootstrapModule) Plan(ctx runtime.ModuleContext) (*task.Executio
 	//    - JoinWorkers depends on InitMaster.
 	//    - JoinMasters and JoinWorkers can run in parallel after InitMaster.
 	// 4. This module typically depends on CoreComponentsModule (runtime, etcd, k8s binaries ready).
-	return task.NewEmptyFragment(), nil // Placeholder
+	return plan.NewEmptyFragment(m.Name()), nil // Placeholder
 }
 
 var _ module.Module = (*ClusterBootstrapModule)(nil)

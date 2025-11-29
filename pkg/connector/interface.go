@@ -2,10 +2,11 @@ package connector
 
 import (
 	"context"
-	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
-	"golang.org/x/crypto/ssh"
 	"io/fs"
 	"time"
+
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
+	"golang.org/x/crypto/ssh"
 )
 
 type OS struct {
@@ -75,6 +76,20 @@ type Connector interface {
 	Remove(ctx context.Context, path string, opts RemoveOptions) error
 	GetFileChecksum(ctx context.Context, path string, checksumType string) (string, error)
 	GetConnectionConfig() ConnectionCfg
+
+
+	// Additional convenience methods
+	Run(ctx context.Context, cmd string, opts *RunOptions) (RunResult, error)
+	Read(ctx context.Context, path string, opts *ReadOptions) ([]byte, error)
+	Write(ctx context.Context, content []byte, path string, opts *WriteOptions) error
+	Copy(ctx context.Context, src, dst string, opts *FileTransferOptions) error
+
+	// Convenience methods
+	IsFile(ctx context.Context, path string) (bool, error)
+	IsDir(ctx context.Context, path string) (bool, error)
+	GetFileMode(ctx context.Context, path string) (fs.FileMode, error)
+	GetFileOwner(ctx context.Context, path string) (string, string, error)
+	GetOSRelease(ctx context.Context) (map[string]string, error)
 }
 
 type Host interface {

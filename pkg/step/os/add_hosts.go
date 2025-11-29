@@ -3,13 +3,14 @@ package os
 import (
 	"bytes"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/common"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"os"
 	"regexp"
 	"strings"
 	"text/template"
 	"time"
+
+	"github.com/mensylisir/kubexm/pkg/common"
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
@@ -39,7 +40,7 @@ type UpdateEtcHostsStepBuilder struct {
 	step.Builder[UpdateEtcHostsStepBuilder, *UpdateEtcHostsStep]
 }
 
-func NewUpdateEtcHostsStepBuilder(ctx runtime.Context, instanceName string) *UpdateEtcHostsStepBuilder {
+func NewUpdateEtcHostsStepBuilder(ctx runtime.ExecutionContext, instanceName string) *UpdateEtcHostsStepBuilder {
 	s := &UpdateEtcHostsStep{}
 
 	s.Base.Meta.Name = instanceName

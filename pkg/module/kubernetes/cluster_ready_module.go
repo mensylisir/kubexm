@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"github.com/mensylisir/kubexm/pkg/module"
+	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
 	// networktask "github.com/mensylisir/kubexm/pkg/task/network"
@@ -30,7 +31,7 @@ func NewClusterReadyModule() module.Module {
 }
 
 // Plan orchestrates the planning of tasks within this module.
-func (m *ClusterReadyModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragment, error) {
+func (m *ClusterReadyModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionFragment, error) {
 	// 1. Instantiate tasks: InstallNetworkPlugin, PostScriptTask, InstallAddons.
 	// 2. Plan each task.
 	// 3. Link task fragments:
@@ -38,7 +39,7 @@ func (m *ClusterReadyModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFra
 	//    - InstallAddons might depend on PostScriptTask or InstallNetworkPlugin.
 	//    - Some addons might be installable in parallel.
 	// 4. This module depends on ClusterBootstrapModule (cluster is joined).
-	return task.NewEmptyFragment(), nil // Placeholder
+	return plan.NewEmptyFragment(m.Name()), nil // Placeholder
 }
 
 var _ module.Module = (*ClusterReadyModule)(nil)

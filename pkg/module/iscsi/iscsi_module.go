@@ -1,52 +1,34 @@
 package iscsi
 
 import (
-	// "github.com/kubexms/kubexms/pkg/config" // No longer used
-	"github.com/mensylisir/kubexm/pkg/runtime" // For ClusterRuntime
-	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // For v1alpha1.Cluster type
-	"github.com/mensylisir/kubexm/pkg/spec"
-	// taskISCSI "github.com/mensylisir/kubexm/pkg/task/iscsi" // Temporarily commented out
-	// No direct step imports needed if tasks encapsulate all steps
+	"github.com/mensylisir/kubexm/pkg/module"
+	"github.com/mensylisir/kubexm/pkg/plan"
+	"github.com/mensylisir/kubexm/pkg/runtime"
+	"github.com/mensylisir/kubexm/pkg/task"
 )
 
-// NewISCSIModule creates a module specification for managing iSCSI client tools and services.
-func NewISCSIModule(clusterRt *runtime.ClusterRuntime) *spec.ModuleSpec {
-	if clusterRt == nil || clusterRt.ClusterConfig == nil {
-		return &spec.ModuleSpec{
-			Name:      "iSCSI Client Management (Error: Missing Configuration)",
-			IsEnabled: func(_ *runtime.ClusterRuntime) bool { return false },
-			Tasks:     []*spec.TaskSpec{},
-		}
-	}
-	// cfg := clusterRt.ClusterConfig // cfg is *v1alpha1.Cluster
-
-	allTasks := []*spec.TaskSpec{}
-
-	// TODO: Implement iSCSI tasks and uncomment the following lines.
-	// // Install and Enable iSCSI Client Task
-	// installTask := taskISCSI.NewInstallAndEnableISCSITask(cfg)
-	// if installTask != nil {
-	// 	allTasks = append(allTasks, installTask)
-	// }
-
-	// // Disable and Uninstall iSCSI Client Task
-	// uninstallTask := taskISCSI.NewDisableAndUninstallISCSITask(cfg)
-	// if uninstallTask != nil {
-	// 	allTasks = append(allTasks, uninstallTask)
-	// }
-
-	return &spec.ModuleSpec{
-		Name: "iSCSI Client Management",
-		IsEnabled: func(cr *runtime.ClusterRuntime) bool {
-			// TODO: This module is currently disabled as v1alpha1.ClusterSpec
-			// does not have a dedicated iSCSI client management configuration section.
-			// To enable this module, add appropriate fields to v1alpha1.ClusterSpec
-			// (e.g., Spec.Storage.ISCSIClient.Enabled or similar) and update this logic.
-			// Also, ensure cr and cr.ClusterConfig are not nil if used.
-			return false
-		},
-		Tasks:   allTasks,
-		PreRun:  nil,
-		PostRun: nil,
-	}
+// ISCSIModule defines the module for managing iSCSI client tools.
+type ISCSIModule struct {
+	module.BaseModule
 }
+
+// NewISCSIModule creates a new ISCSIModule.
+func NewISCSIModule() module.Module {
+	// Stub implementation for now
+	base := module.NewBaseModule("ISCSIClientManagement", nil)
+	return &ISCSIModule{BaseModule: base}
+}
+
+func (m *ISCSIModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionFragment, error) {
+	logger := ctx.GetLogger().With("module", m.Name())
+	// Stub: always return empty fragment for now as it was disabled in original code
+	logger.Info("ISCSI module is currently disabled/stubbed.")
+	return plan.NewEmptyFragment(m.Name()), nil
+}
+
+// GetTasks returns the list of tasks for the ISCSIModule.
+func (m *ISCSIModule) GetTasks(ctx runtime.ModuleContext) ([]task.Task, error) {
+	return []task.Task{}, nil
+}
+
+var _ module.Module = (*ISCSIModule)(nil)

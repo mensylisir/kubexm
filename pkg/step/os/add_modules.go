@@ -25,7 +25,7 @@ type LoadKernelModulesStepBuilder struct {
 	step.Builder[LoadKernelModulesStepBuilder, *LoadKernelModulesStep]
 }
 
-func NewLoadKernelModulesStepBuilder(ctx runtime.Context, instanceName string) *LoadKernelModulesStepBuilder {
+func NewLoadKernelModulesStepBuilder(ctx runtime.ExecutionContext, instanceName string) *LoadKernelModulesStepBuilder {
 	s := &LoadKernelModulesStep{}
 
 	s.Base.Meta.Name = instanceName

@@ -3,6 +3,7 @@ package cni
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/pkg/module"
+	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/task"
 	// "github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // For CNI type check if needed
@@ -32,7 +33,7 @@ func NewCNICleanupModule() module.Module {
 }
 
 // Plan generates the execution fragment for the CNI Cleanup module.
-func (m *CNICleanupModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, error) {
+func (m *CNICleanupModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("module", m.Name())
 	clusterConfig := ctx.GetClusterConfig()
 
@@ -40,17 +41,17 @@ func (m *CNICleanupModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragme
 	// Specific logic for which CNI to cleanup would be inside the tasks or a more specific module.
 	if clusterConfig.Spec.Network == nil || clusterConfig.Spec.Network.Plugin == "" {
 		logger.Info("CNI plugin not specified or network spec missing. Skipping CNI Cleanup module planning.")
-		return task.NewEmptyFragment(), nil
+		return plan.NewEmptyFragment(m.Name()), nil
 	}
 	logger.Infof("Planning CNI Cleanup module for plugin: %s (stub implementation)...", clusterConfig.Spec.Network.Plugin)
 
 
-	moduleFragment := task.NewExecutionFragment()
+	moduleFragment := plan.NewExecutionFragment(m.Name() + "-Fragment")
 	var previousTaskExitNodes []plan.NodeID
 	isFirstEffectiveTask := true
 
 	for _, currentTask := range m.Tasks() {
-		taskCtx, ok := ctx.(task.TaskContext)
+		taskCtx, ok := ctx.(runtime.TaskContext)
 		if !ok {
 			return nil, fmt.Errorf("module context cannot be asserted to task context for module %s, task %s", m.Name(), currentTask.Name())
 		}
@@ -100,7 +101,8 @@ func (m *CNICleanupModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragme
 		}
 	}
 	moduleFragment.ExitNodes = append(moduleFragment.ExitNodes, previousTaskExitNodes...)
-	moduleFragment.RemoveDuplicateNodeIDs()
+	moduleFragment.EntryNodes = plan.UniqueNodeIDs(moduleFragment.EntryNodes)
+	moduleFragment.ExitNodes = plan.UniqueNodeIDs(moduleFragment.ExitNodes)
 
 	if len(moduleFragment.Nodes) == 0 {
 		logger.Info("CNI Cleanup module planned no executable nodes (stub).")

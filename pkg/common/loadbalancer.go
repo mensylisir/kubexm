@@ -5,6 +5,7 @@ type InternalLoadBalancerType string
 const (
 	InternalLBTypeHAProxy InternalLoadBalancerType = "haproxy"
 	InternalLBTypeNginx   InternalLoadBalancerType = "nginx"
+	InternalLBTypeKubeVIP InternalLoadBalancerType = "kube-vip"
 )
 
 type ExternalLoadBalancerType string

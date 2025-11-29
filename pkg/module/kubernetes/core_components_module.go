@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"github.com/mensylisir/kubexm/pkg/module"
+	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
 	// containerdtask "github.com/mensylisir/kubexm/pkg/task/containerd"
@@ -34,7 +35,7 @@ func NewCoreComponentsModule() module.Module {
 }
 
 // Plan orchestrates the planning of tasks within this module.
-func (m *CoreComponentsModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragment, error) {
+func (m *CoreComponentsModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionFragment, error) {
 	// 1. Determine container runtime task (containerd or docker) based on ctx.GetClusterConfig().
 	// 2. Instantiate tasks:
 	//    - Container Runtime Install Task
@@ -48,7 +49,7 @@ func (m *CoreComponentsModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionF
 	//    - Pulling images usually depends on container runtime being ready.
 	//    - All these might depend on preflight/resource tasks from a previous module.
 	// 5. Return the combined ExecutionFragment.
-	return task.NewEmptyFragment(), nil // Placeholder
+	return plan.NewEmptyFragment(m.Name()), nil // Placeholder
 }
 
 var _ module.Module = (*CoreComponentsModule)(nil)

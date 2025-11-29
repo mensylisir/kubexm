@@ -135,6 +135,15 @@ func (ef *ExecutionFragment) CalculateEntryAndExitNodes() {
 	ef.ExitNodes = UniqueNodeIDs(ef.ExitNodes)
 }
 
+func (ef *ExecutionFragment) GetNode(id NodeID) *ExecutionNode {
+	return ef.Nodes[id]
+}
+
+func (ef *ExecutionFragment) HasNode(id NodeID) bool {
+	_, exists := ef.Nodes[id]
+	return exists
+}
+
 func (ef *ExecutionFragment) MergeFragment(other *ExecutionFragment) error {
 	if other == nil {
 		return nil // Nothing to merge

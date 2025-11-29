@@ -12,6 +12,17 @@ import (
 	"github.com/pkg/errors"
 )
 
+var knownFirewallServices = []string{"firewalld", "ufw"}
+
+func IsIn(target string, list []string) bool {
+	for _, item := range list {
+		if item == target {
+			return true
+		}
+	}
+	return false
+}
+
 type EnableFirewallStep struct {
 	step.Base
 	serviceEnabledInRun string
@@ -21,7 +32,7 @@ type EnableFirewallStepBuilder struct {
 	step.Builder[EnableFirewallStepBuilder, *EnableFirewallStep]
 }
 
-func NewEnableFirewallStepBuilder(ctx runtime.Context, instanceName string) *EnableFirewallStepBuilder {
+func NewEnableFirewallStepBuilder(ctx runtime.ExecutionContext, instanceName string) *EnableFirewallStepBuilder {
 	s := &EnableFirewallStep{}
 
 	s.Base.Meta.Name = instanceName

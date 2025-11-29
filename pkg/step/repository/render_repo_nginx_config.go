@@ -52,6 +52,10 @@ func (s *RenderRepoNginxConfigStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
 }
 
+func (s *RenderRepoNginxConfigStep) Precheck(ctx runtime.ExecutionContext) (bool, error) {
+	return false, nil
+}
+
 func (s *RenderRepoNginxConfigStep) renderContent(ctx runtime.ExecutionContext) ([]byte, error) {
 	templateContent, err := templates.Get("repository/nginx.conf.tmpl")
 	if err != nil {

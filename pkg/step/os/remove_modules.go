@@ -23,7 +23,7 @@ type RemoveKernelModulesStepBuilder struct {
 	step.Builder[RemoveKernelModulesStepBuilder, *RemoveKernelModulesStep]
 }
 
-func NewRemoveKernelModulesStepBuilder(ctx runtime.Context, instanceName string) *RemoveKernelModulesStepBuilder {
+func NewRemoveKernelModulesStepBuilder(ctx runtime.ExecutionContext, instanceName string) *RemoveKernelModulesStepBuilder {
 	s := &RemoveKernelModulesStep{}
 
 	s.Base.Meta.Name = instanceName

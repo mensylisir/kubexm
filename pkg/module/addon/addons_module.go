@@ -23,7 +23,7 @@ func NewAddonsModule() module.Module {
 
 // GetTasks dynamically generates a list of InstallAddonTask instances
 // based on the addons specified in the cluster configuration.
-func (m *AddonsModule) GetTasks(ctx module.ModuleContext) ([]task.Task, error) {
+func (m *AddonsModule) GetTasks(ctx runtime.ModuleContext) ([]task.Task, error) {
 	logger := ctx.GetLogger().With("module", m.Name(), "phase", "GetTasks")
 	clusterCfg := ctx.GetClusterConfig()
 
@@ -33,26 +33,29 @@ func (m *AddonsModule) GetTasks(ctx module.ModuleContext) ([]task.Task, error) {
 	}
 
 	addonTasks := make([]task.Task, 0, len(clusterCfg.Spec.Addons))
-	for _, addonName := range clusterCfg.Spec.Addons {
-		// TODO: Fetch specific configuration for this addon if ClusterSpec.AddonConfigs exists.
-		// For now, passing nil for addonSpecificConfig.
-		var addonSpecificConfig map[string]interface{} // Placeholder
-		// Example: if clusterCfg.Spec.AddonConfigs != nil {
-		//     addonSpecificConfig = clusterCfg.Spec.AddonConfigs[addonName]
-		// }
-		logger.Debug("Creating task for addon", "addon_name", addonName)
-		addonTasks = append(addonTasks, taskAddon.NewInstallAddonTask(addonName, addonSpecificConfig))
+	for i := range clusterCfg.Spec.Addons {
+		addon := &clusterCfg.Spec.Addons[i]
+		logger.Debug("Creating task for addon", "addon_name", addon.Name)
+		// Ensure Enabled is set if nil, though SetDefaults should handle this.
+		if addon.Enabled == nil {
+			enabled := true
+			addon.Enabled = &enabled
+		}
+		addonTasks = append(addonTasks, taskAddon.NewInstallAddonTask(addon))
 	}
 	return addonTasks, nil
 }
 
-
-func (m *AddonsModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, error) {
+func (m *AddonsModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("module", m.Name())
-	moduleFragment := task.NewExecutionFragment(m.Name() + "-Fragment")
+	moduleFragment := plan.NewExecutionFragment(m.Name() + "-Fragment")
 
-	// runtime.Context implements both module.ModuleContext and task.TaskContext
+	// runtime.Context implements both module.ModuleContext and runtime.TaskContext
 	// so direct use of ctx for task methods is fine.
+	taskCtx, ok := ctx.(runtime.TaskContext)
+	if !ok {
+		return nil, fmt.Errorf("module context cannot be asserted to runtime.TaskContext for %s", m.Name())
+	}
 
 	definedTasks, err := m.GetTasks(ctx)
 	if err != nil {
@@ -61,7 +64,7 @@ func (m *AddonsModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, 
 
 	if len(definedTasks) == 0 {
 		logger.Info("No addon tasks to plan. Skipping addons deployment.")
-		return task.NewEmptyFragment(), nil
+		return plan.NewEmptyFragment(m.Name()), nil
 	}
 
 	var allAddonEntryNodes []plan.NodeID
@@ -75,23 +78,29 @@ func (m *AddonsModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, 
 		// Let's assume NewInstallAddonTask sets a descriptive name.
 		addonInstanceName := addonTask.Name() // Or get specific addon name from the task if available
 
-		isRequired, err := addonTask.IsRequired(ctx)
-		if err != nil { return nil, fmt.Errorf("failed to check IsRequired for addon task %s: %w", addonInstanceName, err) }
+		isRequired, err := addonTask.IsRequired(taskCtx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check IsRequired for addon task %s: %w", addonInstanceName, err)
+		}
 		if !isRequired {
 			logger.Info("Skipping addon task as it's not required", "addon_task_name", addonInstanceName)
 			continue
 		}
 
 		logger.Info("Planning addon task", "addon_task_name", addonInstanceName)
-		taskFrag, err := addonTask.Plan(ctx)
-		if err != nil { return nil, fmt.Errorf("failed to plan addon task %s: %w", addonInstanceName, err) }
+		taskFrag, err := addonTask.Plan(taskCtx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to plan addon task %s: %w", addonInstanceName, err)
+		}
 
 		if taskFrag.IsEmpty() {
-			logger.Info("Addon task returned an empty fragment, skipping merge.", "addon_name", addonName)
+			logger.Info("Addon task returned an empty fragment, skipping merge.", "addon_name", addonInstanceName)
 			continue
 		}
 
-		if err := moduleFragment.MergeFragment(taskFrag); err != nil { return nil, fmt.Errorf("failed to merge fragment from addon task %s: %w", addonName, err) }
+		if err := moduleFragment.MergeFragment(taskFrag); err != nil {
+			return nil, fmt.Errorf("failed to merge fragment from addon task %s: %w", addonInstanceName, err)
+		}
 
 		// Addons can typically be installed in parallel.
 		// Their entry nodes become part of the module's entry nodes (if not dependent on prior module stages).
@@ -100,12 +109,12 @@ func (m *AddonsModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, 
 		allAddonExitNodes = append(allAddonExitNodes, taskFrag.ExitNodes...)
 	}
 
-	moduleFragment.EntryNodes = task.UniqueNodeIDs(allAddonEntryNodes)
-	moduleFragment.ExitNodes = task.UniqueNodeIDs(allAddonExitNodes)
+	moduleFragment.EntryNodes = plan.UniqueNodeIDs(allAddonEntryNodes)
+	moduleFragment.ExitNodes = plan.UniqueNodeIDs(allAddonExitNodes)
 
 	if len(moduleFragment.Nodes) == 0 {
 		logger.Info("AddonsModule planned no executable nodes.")
-		return task.NewEmptyFragment(), nil
+		return plan.NewEmptyFragment(m.Name()), nil
 	}
 
 	logger.Info("Addons module planning complete.", "total_nodes", len(moduleFragment.Nodes))

@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
-	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"

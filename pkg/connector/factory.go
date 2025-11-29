@@ -3,14 +3,15 @@ package connector
 import (
 	"encoding/base64"
 	"fmt"
-	"golang.org/x/crypto/ssh"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 type Factory interface {
 	NewSSHConnector(pool *ConnectionPool) Connector
-	NewLocalConnector() Connector
+	NewLocalConnector() (Connector, error)
 	NewConnectionCfg(host Host, globalTimeout time.Duration) (ConnectionCfg, error)
 	NewConnectorForHost(host Host, pool *ConnectionPool) (Connector, error)
 }
@@ -24,8 +25,8 @@ func (f *defaultFactory) NewSSHConnector(pool *ConnectionPool) Connector {
 	return NewSSHConnector(pool)
 }
 
-func (f *defaultFactory) NewLocalConnector() Connector {
-	return &LocalConnector{}
+func (f *defaultFactory) NewLocalConnector() (Connector, error) {
+	return NewLocalConnector()
 }
 
 func (f *defaultFactory) NewConnectorForHost(host Host, pool *ConnectionPool) (Connector, error) {
@@ -33,12 +34,10 @@ func (f *defaultFactory) NewConnectorForHost(host Host, pool *ConnectionPool) (C
 	isLocal := strings.ToLower(address) == "localhost" || address == "127.0.0.1"
 
 	if isLocal {
-		return f.NewLocalConnector(), nil
+		return f.NewLocalConnector()
 	}
 
-	if pool == nil {
-		return nil, fmt.Errorf("connection pool is required for non-local host %s", host.GetName())
-	}
+	// Allow nil pool for direct connections
 	return f.NewSSHConnector(pool), nil
 }
 
