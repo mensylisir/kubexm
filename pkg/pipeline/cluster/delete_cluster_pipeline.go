@@ -3,13 +3,13 @@ package cluster
 import (
 	"fmt"
 
+	"github.com/mensylisir/kubexm/pkg/engine"
 	"github.com/mensylisir/kubexm/pkg/module"
 	// TODO: Define and import actual Teardown/Cleanup modules
 	// "github.com/mensylisir/kubexm/pkg/module/cleanup"
 	// "github.com/mensylisir/kubexm/pkg/module/kubernetes" // For NodeResetModule potentially
 	"github.com/mensylisir/kubexm/pkg/pipeline"
 	"github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 )
 
 // DeleteClusterPipeline defines the pipeline for deleting an existing Kubernetes cluster.
@@ -39,7 +39,7 @@ func NewDeleteClusterPipeline(assumeYes bool) pipeline.Pipeline {
 		PipelineName: "DeleteCluster",
 		PipelineModules: []module.Module{
 			// Define actual teardown modules here in correct order
-			placeholderTeardownModule,
+			&placeholderTeardownModule,
 		},
 		AssumeYes: assumeYes,
 	}
@@ -71,13 +71,12 @@ func (p *DeleteClusterPipeline) Plan(ctx pipeline.PipelineContext) (*plan.Execut
 	}
 
 	if len(p.Modules()) == 0 || (len(p.Modules()) == 1 && p.Modules()[0].Name() == "PlaceholderTeardown") {
-	    logger.Warn("DeleteClusterPipeline has no effective modules defined. Returning empty graph.")
-	    // Return an empty plan.ExecutionGraph
+		logger.Warn("DeleteClusterPipeline has no effective modules defined. Returning empty graph.")
+		// Return an empty plan.ExecutionGraph
 		emptyGraph := plan.NewExecutionGraph(p.Name())
 		emptyGraph.CalculateEntryAndExitNodes() // Should result in empty entry/exit
-	    return emptyGraph, nil
+		return emptyGraph, nil
 	}
-
 
 	for i, mod := range p.Modules() {
 		logger.Info("Planning module for deletion", "module_name", mod.Name(), "module_index", i)
@@ -93,7 +92,7 @@ func (p *DeleteClusterPipeline) Plan(ctx pipeline.PipelineContext) (*plan.Execut
 			continue
 		}
 		if err := finalGraph.MergeFragment(moduleFragment); err != nil { // Assuming ExecutionGraph has MergeFragment
-		    return nil, fmt.Errorf("failed to merge fragment from module %s: %w", mod.Name(), err)
+			return nil, fmt.Errorf("failed to merge fragment from module %s: %w", mod.Name(), err)
 		}
 
 		if len(previousModuleExitNodes) > 0 {
@@ -141,7 +140,9 @@ func (p *DeleteClusterPipeline) Run(ctx pipeline.PipelineContext, graph *plan.Ex
 
 	result, execErr := ctx.GetEngine().Execute(engineCtx, currentGraph, dryRun)
 	if execErr != nil {
-		if result == nil { result = &plan.GraphExecutionResult{GraphName: p.Name(), Status: plan.StatusFailed} }
+		if result == nil {
+			result = &plan.GraphExecutionResult{GraphName: p.Name(), Status: plan.StatusFailed}
+		}
 		return result, fmt.Errorf("execution phase for pipeline %s failed: %w", p.Name(), execErr)
 	}
 	logger.Info("Cluster deletion pipeline run completed.", "status", result.Status)

@@ -1,8 +1,9 @@
 package step
 
 import (
-	"github.com/mensylisir/kubexm/pkg/spec"
 	"time"
+
+	"github.com/mensylisir/kubexm/pkg/spec"
 )
 
 type Base struct {

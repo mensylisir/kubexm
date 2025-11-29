@@ -25,7 +25,7 @@ type RemoveEtcHostsStepBuilder struct {
 	step.Builder[RemoveEtcHostsStepBuilder, *RemoveEtcHostsStep]
 }
 
-func NewRemoveEtcHostsStepBuilder(ctx runtime.Context, instanceName string) *RemoveEtcHostsStepBuilder {
+func NewRemoveEtcHostsStepBuilder(ctx runtime.ExecutionContext, instanceName string) *RemoveEtcHostsStepBuilder {
 	s := &RemoveEtcHostsStep{}
 
 	s.Base.Meta.Name = instanceName

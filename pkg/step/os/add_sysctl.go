@@ -23,7 +23,7 @@ type ConfigureSysctlStepBuilder struct {
 	step.Builder[ConfigureSysctlStepBuilder, *ConfigureSysctlStep]
 }
 
-func NewConfigureSysctlStepBuilder(ctx runtime.Context, instanceName string) *ConfigureSysctlStepBuilder {
+func NewConfigureSysctlStepBuilder(ctx runtime.ExecutionContext, instanceName string) *ConfigureSysctlStepBuilder {
 	s := &ConfigureSysctlStep{}
 
 	s.Base.Meta.Name = instanceName

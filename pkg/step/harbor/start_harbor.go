@@ -3,7 +3,6 @@ package harbor
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -21,7 +20,7 @@ type InstallAndStartHarborStepBuilder struct {
 	step.Builder[InstallAndStartHarborStepBuilder, *InstallAndStartHarborStep]
 }
 
-func NewInstallAndStartHarborStepBuilder(ctx runtime.Context, instanceName string) *InstallAndStartHarborStepBuilder {
+func NewInstallAndStartHarborStepBuilder(ctx runtime.ExecutionContext, instanceName string) *InstallAndStartHarborStepBuilder {
 	provider := binary.NewBinaryProvider(&ctx)
 	const representativeArch = "amd64"
 	binaryInfo, err := provider.GetBinary(binary.ComponentHarbor, representativeArch)

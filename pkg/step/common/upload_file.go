@@ -3,11 +3,11 @@ package common
 import (
 	"crypto/sha256"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"io"
 	"os"
-	"strings"
 	"time"
+
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
@@ -110,32 +110,35 @@ func (s *UploadFileStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, er
 	return true, nil
 }
 
-func (s *UploadFileStep) Run(ctx runtime.ExecutionContext) error {
+func (s *UploadFileStep) Run(ctx runtime.ExecutionContext) (*step.StepResult, error) {
+	result := step.NewStepResult(s.Meta().Name, ctx.GetStepExecutionID(), ctx.GetHost())
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	content, err := os.ReadFile(s.LocalSrcPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			if s.AllowMissingSrc {
 				logger.Infof("Local source file does not exist, but AllowMissingSrc is true. Skipping upload. Path: %s", s.LocalSrcPath)
-				return nil
+				result.MarkSkipped("Local source file missing (allowed)")
+				return result, nil
 			}
 		}
-		return fmt.Errorf("run: failed to read local source file %s: %w", s.LocalSrcPath, err)
+		return nil, fmt.Errorf("run: failed to read local source file %s: %w", s.LocalSrcPath, err)
 	}
 
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		return fmt.Errorf("run: failed to get connector for host %s: %w", ctx.GetHost().GetName(), err)
+		return nil, fmt.Errorf("run: failed to get connector for host %s: %w", ctx.GetHost().GetName(), err)
 	}
 
 	logger.Infof("Uploading file from %s to %s on host %s...", s.LocalSrcPath, s.RemoteDestPath, ctx.GetHost().GetName())
 	err = runnerSvc.WriteFile(ctx.GoContext(), conn, content, s.RemoteDestPath, s.Permissions, s.Sudo)
 	if err != nil {
-		return fmt.Errorf("failed to upload file to %s on host %s: %w", s.RemoteDestPath, ctx.GetHost().GetName(), err)
+		return nil, fmt.Errorf("failed to upload file to %s on host %s: %w", s.RemoteDestPath, ctx.GetHost().GetName(), err)
 	}
 	logger.Info("File uploaded successfully.")
-	return nil
+	result.MarkCompleted("File uploaded successfully")
+	return result, nil
 }
 
 func (s *UploadFileStep) Rollback(ctx runtime.ExecutionContext) error {

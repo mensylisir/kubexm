@@ -1,7 +1,6 @@
 package repository
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"path/filepath"
@@ -48,6 +47,10 @@ func (b *DeployRepoNginxPodStepBuilder) WithConfigPath(path string) *DeployRepoN
 
 func (s *DeployRepoNginxPodStep) Meta() *spec.StepMeta {
 	return &s.Base.Meta
+}
+
+func (s *DeployRepoNginxPodStep) Precheck(ctx runtime.ExecutionContext) (bool, error) {
+	return false, nil
 }
 
 type NginxStaticPodTemplateData struct {

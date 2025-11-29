@@ -3,13 +3,13 @@ package cluster
 import (
 	"fmt"
 
+	"github.com/mensylisir/kubexm/pkg/engine"
 	"github.com/mensylisir/kubexm/pkg/module"
 	// TODO: Define and import actual Upgrade modules
 	// "github.com/mensylisir/kubexm/pkg/module/preflight"
 	// "github.com/mensylisir/kubexm/pkg/module/kubernetes"
 	"github.com/mensylisir/kubexm/pkg/pipeline"
 	"github.com/mensylisir/kubexm/pkg/plan"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 )
 
 // UpgradeClusterPipeline defines the pipeline for upgrading an existing Kubernetes cluster.
@@ -37,7 +37,7 @@ func NewUpgradeClusterPipeline(targetVersion string, assumeYes bool) pipeline.Pi
 		TargetVersion: targetVersion, // Store target version for modules to use
 		PipelineModules: []module.Module{
 			// Define actual upgrade modules here
-			placeholderUpgradeModule,
+			&placeholderUpgradeModule,
 		},
 		AssumeYes: assumeYes,
 	}
@@ -69,10 +69,10 @@ func (p *UpgradeClusterPipeline) Plan(ctx pipeline.PipelineContext) (*plan.Execu
 	}
 
 	if len(p.Modules()) == 0 || (len(p.Modules()) == 1 && p.Modules()[0].Name() == "PlaceholderUpgrade") {
-	    logger.Warn("UpgradeClusterPipeline has no effective modules defined. Returning empty graph.")
+		logger.Warn("UpgradeClusterPipeline has no effective modules defined. Returning empty graph.")
 		emptyGraph := plan.NewExecutionGraph(p.Name())
 		emptyGraph.CalculateEntryAndExitNodes()
-	    return emptyGraph, nil
+		return emptyGraph, nil
 	}
 
 	for i, mod := range p.Modules() {
@@ -88,7 +88,7 @@ func (p *UpgradeClusterPipeline) Plan(ctx pipeline.PipelineContext) (*plan.Execu
 			continue
 		}
 		if err := finalGraph.MergeFragment(moduleFragment); err != nil {
-		    return nil, fmt.Errorf("failed to merge fragment from module %s: %w", mod.Name(), err)
+			return nil, fmt.Errorf("failed to merge fragment from module %s: %w", mod.Name(), err)
 		}
 
 		if len(previousModuleExitNodes) > 0 {
@@ -136,7 +136,9 @@ func (p *UpgradeClusterPipeline) Run(ctx pipeline.PipelineContext, graph *plan.E
 
 	result, execErr := ctx.GetEngine().Execute(engineCtx, currentGraph, dryRun)
 	if execErr != nil {
-		if result == nil { result = &plan.GraphExecutionResult{GraphName: p.Name(), Status: plan.StatusFailed} }
+		if result == nil {
+			result = &plan.GraphExecutionResult{GraphName: p.Name(), Status: plan.StatusFailed}
+		}
 		return result, fmt.Errorf("execution phase for pipeline %s failed: %w", p.Name(), execErr)
 	}
 	logger.Info("Cluster upgrade pipeline run completed.", "status", result.Status)

@@ -19,7 +19,7 @@ type ConfigureTimezoneStepBuilder struct {
 	step.Builder[ConfigureTimezoneStepBuilder, *ConfigureTimezoneStep]
 }
 
-func NewConfigureTimezoneStepBuilder(ctx runtime.Context, instanceName string) *ConfigureTimezoneStepBuilder {
+func NewConfigureTimezoneStepBuilder(ctx runtime.ExecutionContext, instanceName string) *ConfigureTimezoneStepBuilder {
 	var timezone string
 	if ctx.GetClusterConfig().Spec.System != nil && ctx.GetClusterConfig().Spec.System.Timezone != "" {
 		timezone = ctx.GetClusterConfig().Spec.System.Timezone

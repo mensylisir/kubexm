@@ -14,6 +14,7 @@ import (
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/runner"
+	"github.com/mensylisir/kubexm/pkg/types"
 	"k8s.io/client-go/tools/record"
 )
 
@@ -44,12 +45,18 @@ type Context struct {
 	stepExecutionID    string
 	executionStartTime time.Time
 
-	httpClient               *http.Client
-	currentStepRuntimeConfig map[string]interface{}
+	httpClient *http.Client
+
+	// StateBags for different scopes
+	GlobalState   StateBag
+	PipelineState StateBag
+	ModuleState   StateBag
+	TaskState     StateBag
 
 	currentPipelineName string
 	currentModuleName   string
 	currentTaskName     string
+	stepResult          *types.StepResult
 
 	RunID string
 }
@@ -76,18 +83,27 @@ func ForHost(rootCtx *Context, host connector.Host) ExecutionContext {
 func (c *Context) ForPipeline(pipelineName string) *Context {
 	newCtx := *c
 	newCtx.currentPipelineName = pipelineName
+	if newCtx.PipelineState == nil {
+		newCtx.PipelineState = NewStateBag()
+	}
 	return &newCtx
 }
 
 func (c *Context) ForModule(moduleName string) *Context {
 	newCtx := *c
 	newCtx.currentModuleName = moduleName
+	if newCtx.ModuleState == nil {
+		newCtx.ModuleState = NewStateBag()
+	}
 	return &newCtx
 }
 
 func (c *Context) ForTask(taskName string) *Context {
 	newCtx := *c
 	newCtx.currentTaskName = taskName
+	if newCtx.TaskState == nil {
+		newCtx.TaskState = NewStateBag()
+	}
 	return &newCtx
 }
 
@@ -98,18 +114,108 @@ func (c *Context) WithGoContext(goCtx context.Context) ExecutionContext {
 }
 
 func (c *Context) GetFromRuntimeConfig(key string) (interface{}, bool) {
-	if c.currentStepRuntimeConfig == nil {
+	if c.TaskState == nil {
 		return nil, false
 	}
-	val, ok := c.currentStepRuntimeConfig[key]
-	return val, ok
+	return c.TaskState.Get(key)
 }
 
 func (c *Context) SetRuntimeConfig(config map[string]interface{}) *Context {
 	newCtx := *c
-	newCtx.currentStepRuntimeConfig = config
+	if c.TaskState == nil {
+		newCtx.TaskState = NewStateBag()
+	}
+	for k, v := range config {
+		newCtx.TaskState.Set(k, v)
+	}
 	return &newCtx
 }
+
+// Data Bus Implementation
+
+// Export exports a key-value pair to the specified scope.
+// scope: "global", "pipeline", "module", "task"
+func (c *Context) Export(scope string, key string, value interface{}) error {
+	switch scope {
+	case "global":
+		if c.GlobalState == nil {
+			return fmt.Errorf("global state not initialized")
+		}
+		c.GlobalState.Set(key, value)
+	case "pipeline":
+		if c.PipelineState == nil {
+			return fmt.Errorf("pipeline state not initialized")
+		}
+		c.PipelineState.Set(key, value)
+	case "module":
+		if c.ModuleState == nil {
+			return fmt.Errorf("module state not initialized")
+		}
+		c.ModuleState.Set(key, value)
+	case "task":
+		if c.TaskState == nil {
+			return fmt.Errorf("task state not initialized")
+		}
+		c.TaskState.Set(key, value)
+	default:
+		return fmt.Errorf("unknown scope: %s", scope)
+	}
+	return nil
+}
+
+// Import imports a value from the specified scope.
+// If scope is empty, it searches from Task -> Module -> Pipeline -> Global.
+func (c *Context) Import(scope string, key string) (interface{}, bool) {
+	if scope != "" {
+		switch scope {
+		case "global":
+			if c.GlobalState != nil {
+				return c.GlobalState.Get(key)
+			}
+		case "pipeline":
+			if c.PipelineState != nil {
+				return c.PipelineState.Get(key)
+			}
+		case "module":
+			if c.ModuleState != nil {
+				return c.ModuleState.Get(key)
+			}
+		case "task":
+			if c.TaskState != nil {
+				return c.TaskState.Get(key)
+			}
+		}
+		return nil, false
+	}
+
+	// Search hierarchy
+	if c.TaskState != nil {
+		if v, ok := c.TaskState.Get(key); ok {
+			return v, true
+		}
+	}
+	if c.ModuleState != nil {
+		if v, ok := c.ModuleState.Get(key); ok {
+			return v, true
+		}
+	}
+	if c.PipelineState != nil {
+		if v, ok := c.PipelineState.Get(key); ok {
+			return v, true
+		}
+	}
+	if c.GlobalState != nil {
+		if v, ok := c.GlobalState.Get(key); ok {
+			return v, true
+		}
+	}
+	return nil, false
+}
+
+func (c *Context) GetGlobalState() StateBag   { return c.GlobalState }
+func (c *Context) GetPipelineState() StateBag { return c.PipelineState }
+func (c *Context) GetModuleState() StateBag   { return c.ModuleState }
+func (c *Context) GetTaskState() StateBag     { return c.TaskState }
 
 func (c *Context) GoContext() context.Context        { return c.GoCtx }
 func (c *Context) GetLogger() *logger.Logger         { return c.Logger }
@@ -298,4 +404,12 @@ func (c *Context) GetCurrentHostConnector() (connector.Connector, error) {
 		return nil, fmt.Errorf("connector not available for current host: %s", c.currentHost.GetName())
 	}
 	return hri.Conn, nil
+}
+
+func (c *Context) SetStepResult(result *types.StepResult) {
+	c.stepResult = result
+}
+
+func (c *Context) GetStepResult() *types.StepResult {
+	return c.stepResult
 }

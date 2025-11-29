@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/logger"
 	"io"
 	"io/fs"
 	"net"
@@ -16,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mensylisir/kubexm/pkg/logger"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -157,6 +158,10 @@ func (s *SSHConnector) Exec(ctx context.Context, cmd string, options *ExecOption
 		}
 
 		finalCmd := cmd
+		if effectiveOptions.Dir != "" {
+			finalCmd = fmt.Sprintf("cd %s && %s", shellEscape(effectiveOptions.Dir), cmd)
+		}
+
 		if effectiveOptions.Sudo {
 			if s.connCfg.Password != "" {
 				finalCmd = "sudo -S -p '' -E -- " + cmd
@@ -349,6 +354,16 @@ func (s *SSHConnector) sudoWrite(ctx context.Context, content io.Reader, dstPath
 		if chownErr != nil {
 			return fmt.Errorf("failed to set ownership on %s with sudo: %s (underlying error %w)", dstPath, string(stderr), chownErr)
 		}
+	} else {
+		// If Sudo is true and no owner specified, default to root:root (or just root)
+		// This mimics 'sudo tee' behavior which creates file as root.
+		// Since 'mv' might preserve ownership (if rename), we must force it.
+		chownCmd := fmt.Sprintf("chown root %s", shellEscape(dstPath))
+		_, stderr, chownErr := s.Exec(ctx, chownCmd, &ExecOptions{Sudo: true})
+		if chownErr != nil {
+			// Try chown 0 if root fails? No, root should exist.
+			return fmt.Errorf("failed to set default root ownership on %s with sudo: %s (underlying error %w)", dstPath, string(stderr), chownErr)
+		}
 	}
 
 	return nil
@@ -466,7 +481,7 @@ func (s *SSHConnector) LookPath(ctx context.Context, file string) (string, error
 		return "", fmt.Errorf("invalid characters in executable name for LookPath: %q", file)
 	}
 
-	cmd := fmt.Sprintf("command -v %s", shellEscape(file))
+	cmd := fmt.Sprintf("which %s", shellEscape(file))
 	stdout, stderr, err := s.Exec(ctx, cmd, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to find executable '%s': %s (underlying error: %w)", file, string(stderr), err)
@@ -483,7 +498,7 @@ func (s *SSHConnector) LookPathWithOptions(ctx context.Context, file string, opt
 		return "", fmt.Errorf("invalid characters in executable name for LookPath: %q", file)
 	}
 
-	cmd := fmt.Sprintf("command -v %s", shellEscape(file))
+	cmd := fmt.Sprintf("which %s", shellEscape(file))
 
 	useSudo := opts != nil && opts.Sudo
 
@@ -505,110 +520,54 @@ func (s *SSHConnector) LookPathWithOptions(ctx context.Context, file string, opt
 }
 
 func (s *SSHConnector) GetOS(ctx context.Context) (*OS, error) {
-	log := logger.Get()
-	if s.cachedOS != nil {
-		return s.cachedOS, nil
-	}
+if s.cachedOS != nil {
+return s.cachedOS, nil
+}
 
-	osInfo := &OS{}
-	var errs []string
+osInfo := &OS{}
 
-	infoCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
+// Try to get OS info from os-release file via GetOSRelease
+vars, err := s.GetOSRelease(ctx)
+if err == nil {
+osInfo.ID = vars["ID"]
+osInfo.VersionID = vars["VERSION_ID"]
+osInfo.PrettyName = vars["PRETTY_NAME"]
+osInfo.Codename = vars["VERSION_CODENAME"]
+} else {
+// Fallback to lsb_release if GetOSRelease fails
+lsbCtx, lsbCancel := context.WithTimeout(ctx, 10*time.Second)
+defer lsbCancel()
+content, _, err := s.Exec(lsbCtx, "lsb_release -a", nil)
+if err == nil {
+lsbVars := parseKeyValues(string(content), ":", "")
+if osInfo.ID == "" {
+osInfo.ID = strings.ToLower(lsbVars["Distributor ID"])
+}
+if osInfo.VersionID == "" {
+osInfo.VersionID = lsbVars["Release"]
+}
+if osInfo.Codename == "" {
+osInfo.Codename = lsbVars["Codename"]
+}
+}
+}
 
-	content, _, err := s.Exec(infoCtx, "cat /etc/os-release", nil)
-	if err == nil {
-		vars := parseKeyValues(string(content), "=", "\"")
-		osInfo.ID = vars["ID"]
-		osInfo.VersionID = vars["VERSION_ID"]
-		osInfo.PrettyName = vars["PRETTY_NAME"]
-		osInfo.Codename = vars["VERSION_CODENAME"]
-	} else {
-		errs = append(errs, fmt.Sprintf("/etc/os-release failed: %v", err))
-	}
+// If we still don't have ID, try uname
+if osInfo.ID == "" {
+unameCtx, unameCancel := context.WithTimeout(ctx, 10*time.Second)
+defer unameCancel()
+content, _, err := s.Exec(unameCtx, "uname -s", nil)
+if err == nil {
+osInfo.ID = strings.ToLower(strings.TrimSpace(string(content)))
+}
+}
 
-	if osInfo.ID == "" {
-		lsbCtx, lsbCancel := context.WithTimeout(ctx, 10*time.Second)
-		defer lsbCancel()
-		content, _, err = s.Exec(lsbCtx, "lsb_release -a", nil)
-		if err == nil {
-			vars := parseKeyValues(string(content), ":", "")
-			osInfo.ID = strings.ToLower(vars["Distributor ID"])
-			osInfo.VersionID = vars["Release"]
-			osInfo.PrettyName = vars["Description"]
-			osInfo.Codename = vars["Codename"]
-		} else {
-			errs = append(errs, fmt.Sprintf("lsb_release -a failed: %v", err))
-		}
-	}
+if osInfo.ID == "" {
+return nil, fmt.Errorf("failed to determine OS: %v", err)
+}
 
-	if osInfo.ID == "" {
-		unameCtx, unameCancel := context.WithTimeout(ctx, 5*time.Second)
-		defer unameCancel()
-		unameS, _, unameErr := s.Exec(unameCtx, "uname -s", nil)
-		if unameErr == nil {
-			osName := strings.ToLower(strings.TrimSpace(string(unameS)))
-			if strings.HasPrefix(osName, "linux") {
-				osInfo.ID = "linux"
-			} else if strings.HasPrefix(osName, "darwin") {
-				osInfo.ID = "darwin"
-				swVerCtx, swVerCancel := context.WithTimeout(ctx, 10*time.Second)
-				defer swVerCancel()
-				pn, _, _ := s.Exec(swVerCtx, "sw_vers -productName", nil)
-				pv, _, _ := s.Exec(swVerCtx, "sw_vers -productVersion", nil)
-				osInfo.PrettyName = strings.TrimSpace(string(pn))
-				osInfo.VersionID = strings.TrimSpace(string(pv))
-			}
-		} else {
-			errs = append(errs, fmt.Sprintf("uname -s failed: %v", unameErr))
-		}
-	}
-
-	archCtx, archCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer archCancel()
-	arch, _, archErr := s.Exec(archCtx, "uname -m", nil)
-	if archErr == nil {
-		osInfo.Arch = strings.TrimSpace(string(arch))
-	} else {
-		errs = append(errs, fmt.Sprintf("uname -m failed: %v", archErr))
-	}
-
-	kernelCtx, kernelCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer kernelCancel()
-	kernel, _, kernelErr := s.Exec(kernelCtx, "uname -r", nil)
-	if kernelErr == nil {
-		osInfo.Kernel = strings.TrimSpace(string(kernel))
-	} else {
-		errs = append(errs, fmt.Sprintf("uname -r failed: %v", kernelErr))
-	}
-
-	if osInfo.ID == "" {
-		if osInfo.Kernel != "" && strings.Contains(strings.ToLower(osInfo.Kernel), "linux") {
-			osInfo.ID = "linux"
-		} else if osInfo.Arch != "" {
-			return nil, fmt.Errorf("failed to determine OS ID, errors: %s", strings.Join(errs, "; "))
-		}
-	}
-
-	osInfo.ID = strings.ToLower(strings.TrimSpace(osInfo.ID))
-	osInfo.VersionID = strings.TrimSpace(osInfo.VersionID)
-	osInfo.PrettyName = strings.TrimSpace(osInfo.PrettyName)
-	osInfo.Codename = strings.TrimSpace(osInfo.Codename)
-
-	if osInfo.ID == "" && osInfo.Arch == "" && osInfo.Kernel == "" {
-		return nil, fmt.Errorf("failed to determine any OS info, errors: %s", strings.Join(errs, "; "))
-	}
-
-	if osInfo.ID != "" {
-		s.cachedOS = osInfo
-		if osInfo.VersionID == "" {
-			log.Errorf("%v Warning: Could not determine OS VersionID for host %s\n", os.Stderr, s.connCfg.Host)
-		}
-		if osInfo.PrettyName == "" {
-			log.Errorf("%v Warning: Could not determine OS PrettyName for host %s\n", os.Stderr, s.connCfg.Host)
-		}
-	}
-	return s.cachedOS, nil
+s.cachedOS = osInfo
+return osInfo, nil
 }
 
 func (s *SSHConnector) ReadFile(ctx context.Context, path string) ([]byte, error) {
@@ -735,23 +694,6 @@ type readOnlyStream struct {
 
 func (s readOnlyStream) Write(p []byte) (int, error) { return len(p), nil }
 
-func parseKeyValues(content, delimiter, quoteChar string) map[string]string {
-	vars := make(map[string]string)
-	lines := strings.Split(string(content), "\n")
-	for _, line := range lines {
-		parts := strings.SplitN(line, delimiter, 2)
-		if len(parts) == 2 {
-			key := strings.TrimSpace(parts[0])
-			val := strings.TrimSpace(parts[1])
-			if quoteChar != "" {
-				val = strings.Trim(val, quoteChar)
-			}
-			vars[key] = val
-		}
-	}
-	return vars
-}
-
 func dialSSH(ctx context.Context, cfg ConnectionCfg, connectTimeout time.Duration) (*ssh.Client, *ssh.Client, error) {
 	log := logger.Get()
 	targetAuthMethods, err := buildAuthMethods(cfg)
@@ -775,7 +717,7 @@ func dialSSH(ctx context.Context, cfg ConnectionCfg, connectTimeout time.Duratio
 	}
 
 	if targetSSHConfig.HostKeyCallback == nil {
-		log.Errorf("%v Warning: HostKeyCallback is not set for target host %s. Using InsecureIgnoreHostKey(). This is NOT recommended for production.\n", os.Stderr, cfg.Host)
+		log.Errorf("Warning: HostKeyCallback is not set for target host %s. Using InsecureIgnoreHostKey(). This is NOT recommended for production.", cfg.Host)
 		targetSSHConfig.HostKeyCallback = ssh.InsecureIgnoreHostKey()
 	}
 
@@ -825,7 +767,7 @@ func dialViaBastion(ctx context.Context, targetDialAddr string, targetSSHConfig 
 	}
 
 	if bastionSSHConfig.HostKeyCallback == nil {
-		log.Errorf("%v Warning: HostKeyCallback is not set for bastion host %s. Using InsecureIgnoreHostKey(). This is NOT recommended for production.\n", os.Stderr, bastionOverallCfg.Host)
+		log.Errorf("Warning: HostKeyCallback is not set for bastion host %s. Using InsecureIgnoreHostKey(). This is NOT recommended for production.", bastionOverallCfg.Host)
 		bastionSSHConfig.HostKeyCallback = ssh.InsecureIgnoreHostKey()
 	}
 
@@ -1187,3 +1129,106 @@ func (s *SSHConnector) Fetch(ctx context.Context, remotePath, localPath string, 
 func (s *SSHConnector) GetConnectionConfig() ConnectionCfg {
 	return s.connCfg
 }
+
+// Run executes a command and returns structured result
+func (s *SSHConnector) Run(ctx context.Context, cmd string, opts *RunOptions) (RunResult, error) {
+	stdout, stderr, err := s.Exec(ctx, cmd, opts)
+	exitCode := 0
+	if err != nil {
+		exitCode = -1
+		if cmdErr, ok := err.(*CommandError); ok {
+			exitCode = cmdErr.ExitCode
+		}
+	}
+	return RunResult{Stdout: stdout, Stderr: stderr, ExitCode: exitCode}, err
+}
+
+// Read reads file content from the specified path
+func (s *SSHConnector) Read(ctx context.Context, path string, opts *ReadOptions) ([]byte, error) {
+	if opts == nil {
+		return s.ReadFile(ctx, path)
+	}
+	return s.ReadFileWithOptions(ctx, path, &CopyOptions{Timeout: opts.Timeout, Sudo: opts.Sudo})
+}
+
+// Write writes content to the specified path
+func (s *SSHConnector) Write(ctx context.Context, content []byte, path string, opts *WriteOptions) error {
+	if opts == nil {
+		return s.WriteFile(ctx, content, path, nil)
+	}
+	return s.WriteFile(ctx, content, path, &CopyOptions{
+		Permissions: opts.Permissions,
+		Owner:       opts.Owner,
+		Group:       opts.Group,
+		Timeout:     opts.Timeout,
+		Sudo:        opts.Sudo,
+	})
+}
+
+func (s *SSHConnector) IsFile(ctx context.Context, path string) (bool, error) {
+	if err := s.ensureSftp(); err != nil {
+		return false, err
+	}
+	fi, err := s.sftpClient.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to stat remote path %s: %w", path, err)
+	}
+	return !fi.IsDir(), nil
+}
+
+func (s *SSHConnector) IsDir(ctx context.Context, path string) (bool, error) {
+	if err := s.ensureSftp(); err != nil {
+		return false, err
+	}
+	fi, err := s.sftpClient.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to stat remote path %s: %w", path, err)
+	}
+	return fi.IsDir(), nil
+}
+
+func (s *SSHConnector) GetFileMode(ctx context.Context, path string) (fs.FileMode, error) {
+	if err := s.ensureSftp(); err != nil {
+		return 0, err
+	}
+	fi, err := s.sftpClient.Lstat(path)
+	if err != nil {
+		return 0, fmt.Errorf("failed to stat remote path %s: %w", path, err)
+	}
+	return fi.Mode(), nil
+}
+
+func (s *SSHConnector) GetFileOwner(ctx context.Context, path string) (string, string, error) {
+	cmd := fmt.Sprintf("stat -c '%%U %%G' %s", shellEscape(path))
+	stdout, _, err := s.Exec(ctx, cmd, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get file owner for %s: %w", path, err)
+	}
+	parts := strings.Fields(string(stdout))
+	if len(parts) < 2 {
+		return "", "", fmt.Errorf("unexpected output from stat command: %s", string(stdout))
+	}
+	return parts[0], parts[1], nil
+}
+
+func (s *SSHConnector) GetOSRelease(ctx context.Context) (map[string]string, error) {
+var content []byte
+var err error
+
+for _, path := range osReleasePaths {
+content, err = s.ReadFile(ctx, path)
+if err == nil {
+return parseKeyValues(string(content), "=", "\""), nil
+}
+}
+
+return nil, fmt.Errorf("failed to read os-release file from any known location: %w", err)
+}
+
+var _ Connector = &SSHConnector{}

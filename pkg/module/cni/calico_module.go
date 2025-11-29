@@ -2,11 +2,12 @@ package cni
 
 import (
 	"fmt"
+
+	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/module"
 	"github.com/mensylisir/kubexm/pkg/plan"
+	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/task"
-	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1" // For CNI type check
-	// taskCNI "github.com/mensylisir/kubexm/pkg/task/cni" // For actual tasks later
 )
 
 // CalicoModule defines the module for installing Calico CNI.
@@ -29,24 +30,24 @@ func NewCalicoModule() module.Module {
 }
 
 // Plan generates the execution fragment for the Calico CNI module.
-func (m *CalicoModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, error) {
+func (m *CalicoModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("module", m.Name())
 	clusterConfig := ctx.GetClusterConfig()
 
 	// Enablement Check: Only run if CNI is Calico
-	if clusterConfig.Spec.Network == nil || clusterConfig.Spec.Network.Plugin != v1alpha1.CNIPluginCalico {
+	if clusterConfig.Spec.Network == nil || clusterConfig.Spec.Network.Plugin != string(common.CNITypeCalico) {
 		logger.Info("CNI plugin is not Calico, or CNI not specified. Skipping Calico module planning.", "configured_plugin", clusterConfig.Spec.Network.Plugin)
-		return task.NewEmptyFragment(), nil
+		return plan.NewEmptyFragment(m.Name()), nil
 	}
 
 	logger.Info("Planning Calico CNI module (stub implementation)...")
 
-	moduleFragment := task.NewExecutionFragment()
+	moduleFragment := plan.NewExecutionFragment(m.Name() + "-Fragment")
 	var previousTaskExitNodes []plan.NodeID
 	isFirstEffectiveTask := true
 
 	for _, currentTask := range m.Tasks() {
-		taskCtx, ok := ctx.(task.TaskContext)
+		taskCtx, ok := ctx.(runtime.TaskContext)
 		if !ok {
 			return nil, fmt.Errorf("module context cannot be asserted to task context for module %s, task %s", m.Name(), currentTask.Name())
 		}
@@ -71,21 +72,12 @@ func (m *CalicoModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, 
 			continue
 		}
 
-		for id, node := range taskFrag.Nodes {
-			if _, exists := moduleFragment.Nodes[id]; exists {
-				return nil, fmt.Errorf("duplicate NodeID '%s' from task '%s' in module '%s'", id, currentTask.Name(), m.Name())
-			}
-			moduleFragment.Nodes[id] = node
+		if err := moduleFragment.MergeFragment(taskFrag); err != nil {
+			return nil, err
 		}
 
 		if !isFirstEffectiveTask && len(previousTaskExitNodes) > 0 {
-			for _, entryNodeID := range taskFrag.EntryNodes {
-				if entryNode, ok := moduleFragment.Nodes[entryNodeID]; ok {
-					entryNode.Dependencies = plan.UniqueNodeIDs(append(entryNode.Dependencies, previousTaskExitNodes...))
-				} else {
-					return nil, fmt.Errorf("entry node ID '%s' from task '%s' not found in module fragment", entryNodeID, currentTask.Name())
-				}
-			}
+			plan.LinkFragments(moduleFragment, previousTaskExitNodes, taskFrag.EntryNodes)
 		} else if isFirstEffectiveTask {
 			moduleFragment.EntryNodes = append(moduleFragment.EntryNodes, taskFrag.EntryNodes...)
 		}
@@ -96,7 +88,8 @@ func (m *CalicoModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, 
 		}
 	}
 	moduleFragment.ExitNodes = append(moduleFragment.ExitNodes, previousTaskExitNodes...)
-	moduleFragment.RemoveDuplicateNodeIDs()
+	moduleFragment.EntryNodes = plan.UniqueNodeIDs(moduleFragment.EntryNodes)
+	moduleFragment.ExitNodes = plan.UniqueNodeIDs(moduleFragment.ExitNodes)
 
 	if len(moduleFragment.Nodes) == 0 {
 		logger.Info("Calico CNI module planned no executable nodes (stub).")

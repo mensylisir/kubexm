@@ -46,6 +46,7 @@ type NodeResult struct {
 	EndTime     time.Time              `json:"endTime,omitempty" yaml:"endTime,omitempty"`
 	Message     string                 `json:"message,omitempty" yaml:"message,omitempty"`
 	HostResults map[string]*HostResult `json:"hostResults,omitempty" yaml:"hostResults,omitempty"`
+	Output      map[string]interface{} `json:"output,omitempty" yaml:"output,omitempty"`
 }
 
 func NewNodeResult(nodeName, stepName string) *NodeResult {
@@ -77,13 +78,14 @@ func (nr *NodeResult) AggregateStatus() {
 }
 
 type HostResult struct {
-	HostName  string    `json:"hostName,omitempty" yaml:"hostName"`
-	Status    Status    `json:"status,omitempty" yaml:"status,omitempty"`
-	Message   string    `json:"message,omitempty" yaml:"message,omitempty"`
-	Stdout    string    `json:"stdout,omitempty" yaml:"stdout,omitempty"`
-	Stderr    string    `json:"stderr,omitempty" yaml:"stderr,omitempty"`
-	StartTime time.Time `json:"startTime,omitempty" yaml:"startTime,omitempty"`
-	EndTime   time.Time `json:"endTime,omitempty" yaml:"endTime,omitempty"`
+	HostName  string                 `json:"hostName,omitempty" yaml:"hostName"`
+	Status    Status                 `json:"status,omitempty" yaml:"status,omitempty"`
+	Message   string                 `json:"message,omitempty" yaml:"message,omitempty"`
+	Stdout    string                 `json:"stdout,omitempty" yaml:"stdout,omitempty"`
+	Stderr    string                 `json:"stderr,omitempty" yaml:"stderr,omitempty"`
+	Metadata  map[string]interface{} `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	StartTime time.Time              `json:"startTime,omitempty" yaml:"startTime,omitempty"`
+	EndTime   time.Time              `json:"endTime,omitempty" yaml:"endTime,omitempty"`
 }
 
 func NewHostResult(hostName string) *HostResult {

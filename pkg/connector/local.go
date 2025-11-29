@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/logger"
 	"io"
 	"io/fs"
 	"os"
@@ -18,6 +17,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/mensylisir/kubexm/pkg/logger"
 )
 
 func shellEscape(s string) string {
@@ -27,6 +28,10 @@ func shellEscape(s string) string {
 type LocalConnector struct {
 	connCfg  ConnectionCfg
 	cachedOS *OS
+}
+
+func NewLocalConnector() (*LocalConnector, error) {
+	return &LocalConnector{}, nil
 }
 
 func (l *LocalConnector) Connect(ctx context.Context, cfg ConnectionCfg) error {
@@ -79,6 +84,10 @@ func (l *LocalConnector) Exec(ctx context.Context, cmd string, options *ExecOpti
 		} else {
 			actualCmd.Stdout = &stdoutBuf
 			actualCmd.Stderr = &stderrBuf
+		}
+
+		if effectiveOptions.Dir != "" {
+			actualCmd.Dir = effectiveOptions.Dir
 		}
 
 		err := actualCmd.Run()
@@ -156,6 +165,12 @@ func (l *LocalConnector) Copy(ctx context.Context, srcPath, dstPath string, opti
 		return fmt.Errorf("source path %s does not exist or is not accessible: %w", srcPath, err)
 	}
 
+	if dstStat, err := os.Stat(dstPath); err == nil {
+		if os.SameFile(srcStat, dstStat) {
+			return fmt.Errorf("source and destination are the same file: %s", srcPath)
+		}
+	}
+
 	if !opts.Sudo {
 		if srcStat.IsDir() {
 			return l.copyDir(srcPath, dstPath, opts)
@@ -171,15 +186,21 @@ func (l *LocalConnector) Copy(ctx context.Context, srcPath, dstPath string, opti
 
 	stagedPath := filepath.Join(tmpDir, filepath.Base(srcPath))
 
-	stagingOpts := FileTransferOptions{}
+
 
 	if srcStat.IsDir() {
-		if err := l.copyDir(srcPath, stagedPath, stagingOpts); err != nil {
-			return fmt.Errorf("failed to stage directory %s to %s: %w", srcPath, stagedPath, err)
+		// Use sudo cp -r for directories
+		cpCmd := fmt.Sprintf("cp -r %s %s", shellEscape(srcPath), shellEscape(stagedPath))
+		_, stderr, err := l.Exec(ctx, cpCmd, &ExecOptions{Sudo: true})
+		if err != nil {
+			return fmt.Errorf("failed to stage directory %s to %s with sudo: %s (underlying error %w)", srcPath, stagedPath, string(stderr), err)
 		}
 	} else {
-		if err := l.copyFile(srcPath, stagedPath, stagingOpts); err != nil {
-			return fmt.Errorf("failed to stage file %s to %s: %w", srcPath, stagedPath, err)
+		// Use sudo cp for files
+		cpCmd := fmt.Sprintf("cp %s %s", shellEscape(srcPath), shellEscape(stagedPath))
+		_, stderr, err := l.Exec(ctx, cpCmd, &ExecOptions{Sudo: true})
+		if err != nil {
+			return fmt.Errorf("failed to stage file %s to %s with sudo: %s (underlying error %w)", srcPath, stagedPath, string(stderr), err)
 		}
 	}
 
@@ -276,25 +297,31 @@ func (l *LocalConnector) applySudoPermissions(ctx context.Context, path string, 
 			return fmt.Errorf("failed to set permissions on %s with sudo chmod: %s (underlying error %w)", path, string(stderr), err)
 		}
 	}
-	if opts.Owner != "" {
-		ownerAndGroup := opts.Owner
-		if opts.Group != "" {
-			ownerAndGroup = fmt.Sprintf("%s:%s", opts.Owner, opts.Group)
-		}
-		targetStat, statErr := os.Stat(path)
-		chownFlags := ""
-		if statErr == nil && targetStat.IsDir() {
-			chownFlags = "-R"
-		}
-
-		chownCmd := fmt.Sprintf("chown %s %s %s", chownFlags, shellEscape(ownerAndGroup), shellEscape(path))
-		chownCmd = strings.TrimSpace(strings.ReplaceAll(chownCmd, "  ", " "))
-
-		_, stderr, err := l.Exec(ctx, chownCmd, &ExecOptions{Sudo: true})
-		if err != nil {
-			return fmt.Errorf("failed to set ownership on %s with sudo chown: %s (underlying error %w)", path, string(stderr), err)
-		}
+	
+	// Set ownership - default to root if not specified
+	ownerAndGroup := opts.Owner
+	if opts.Group != "" {
+		ownerAndGroup = fmt.Sprintf("%s:%s", opts.Owner, opts.Group)
 	}
+	// If no owner specified, default to root for sudo operations
+	if ownerAndGroup == "" {
+		ownerAndGroup = "root"
+	}
+	
+	targetStat, statErr := os.Stat(path)
+	chownFlags := ""
+	if statErr == nil && targetStat.IsDir() {
+		chownFlags = "-R"
+	}
+
+	chownCmd := fmt.Sprintf("chown %s %s %s", chownFlags, shellEscape(ownerAndGroup), shellEscape(path))
+	chownCmd = strings.TrimSpace(strings.ReplaceAll(chownCmd, "  ", " "))
+
+	_, stderr, err := l.Exec(ctx, chownCmd, &ExecOptions{Sudo: true})
+	if err != nil {
+		return fmt.Errorf("failed to set ownership on %s with sudo chown: %s (underlying error %w)", path, string(stderr), err)
+	}
+	
 	return nil
 }
 
@@ -426,7 +453,7 @@ func (l *LocalConnector) LookPathWithOptions(ctx context.Context, file string, o
 		return "", fmt.Errorf("invalid characters in executable name for LookPath: %q", file)
 	}
 
-	cmd := fmt.Sprintf("command -v %s", file)
+	cmd := fmt.Sprintf("which %s", file)
 
 	useSudo := opts != nil && opts.Sudo
 
@@ -598,26 +625,27 @@ func (l *LocalConnector) WriteFile(ctx context.Context, content []byte, destPath
 			}
 		}
 
-		shell := []string{"/bin/sh", "-c"}
-		var finalCmdStr string
-		var stdinPipe io.Reader
+		// Write to a temporary file first (as current user)
+		tmpFile, err := os.CreateTemp("", "localconnector-sudo-write-")
+		if err != nil {
+			return fmt.Errorf("failed to create temporary file for sudo write: %w", err)
+		}
+		tmpPath := tmpFile.Name()
+		defer os.Remove(tmpPath)
 
-		if l.connCfg.Password != "" {
-			finalCmdStr = fmt.Sprintf("sudo -S -p '' -E -- tee %s > /dev/null", shellEscape(destPath))
-			stdinPipe = strings.NewReader(l.connCfg.Password + "\n" + string(content))
-		} else {
-			finalCmdStr = fmt.Sprintf("sudo -E -- tee %s > /dev/null", shellEscape(destPath))
-			stdinPipe = bytes.NewReader(content)
+		if _, err := tmpFile.Write(content); err != nil {
+			tmpFile.Close()
+			return fmt.Errorf("failed to write content to temporary file %s: %w", tmpPath, err)
+		}
+		if err := tmpFile.Close(); err != nil {
+			return fmt.Errorf("failed to close temporary file %s: %w", tmpPath, err)
 		}
 
-		actualCmd := exec.CommandContext(ctx, shell[0], append(shell[1:], finalCmdStr)...)
-		actualCmd.Stdin = stdinPipe
-
-		var stderrBuf bytes.Buffer
-		actualCmd.Stderr = &stderrBuf
-
-		if err := actualCmd.Run(); err != nil {
-			return fmt.Errorf("failed to write to %s with sudo tee: %s (underlying error: %w)", destPath, stderrBuf.String(), err)
+		// Move the temporary file to the destination with sudo
+		mvCmd := fmt.Sprintf("mv %s %s", shellEscape(tmpPath), shellEscape(destPath))
+		_, stderr, mvErr := l.Exec(ctx, mvCmd, &ExecOptions{Sudo: true})
+		if mvErr != nil {
+			return fmt.Errorf("failed to move temporary file from %s to %s with sudo: %s (underlying error: %w)", tmpPath, destPath, string(stderr), mvErr)
 		}
 		return l.applySudoPermissions(ctx, destPath, opts)
 
@@ -739,4 +767,127 @@ func (l *LocalConnector) GetConnectionConfig() ConnectionCfg {
 	return l.connCfg
 }
 
+// Run executes a command and returns structured result
+func (l *LocalConnector) Run(ctx context.Context, cmd string, opts *RunOptions) (RunResult, error) {
+	stdout, stderr, err := l.Exec(ctx, cmd, opts)
+	exitCode := 0
+	if err != nil {
+		exitCode = -1
+		if cmdErr, ok := err.(*CommandError); ok {
+			exitCode = cmdErr.ExitCode
+		}
+	}
+	return RunResult{Stdout: stdout, Stderr: stderr, ExitCode: exitCode}, err
+}
+
+// Read reads file content from the specified path
+func (l *LocalConnector) Read(ctx context.Context, path string, opts *ReadOptions) ([]byte, error) {
+	if opts == nil {
+		return l.ReadFile(ctx, path)
+	}
+	return l.ReadFileWithOptions(ctx, path, &CopyOptions{Timeout: opts.Timeout, Sudo: opts.Sudo})
+}
+
+// Write writes content to the specified path
+func (l *LocalConnector) Write(ctx context.Context, content []byte, path string, opts *WriteOptions) error {
+	if opts == nil {
+		return l.WriteFile(ctx, content, path, nil)
+	}
+	return l.WriteFile(ctx, content, path, &CopyOptions{
+		Permissions: opts.Permissions,
+		Owner:       opts.Owner,
+		Group:       opts.Group,
+		Timeout:     opts.Timeout,
+		Sudo:        opts.Sudo,
+	})
+}
+
+func (l *LocalConnector) IsFile(ctx context.Context, path string) (bool, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return !fi.IsDir(), nil
+}
+
+func (l *LocalConnector) IsDir(ctx context.Context, path string) (bool, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return fi.IsDir(), nil
+}
+
+func (l *LocalConnector) GetFileMode(ctx context.Context, path string) (fs.FileMode, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	return fi.Mode(), nil
+}
+
+func (l *LocalConnector) GetFileOwner(ctx context.Context, path string) (string, string, error) {
+	if runtime.GOOS == "windows" {
+		return "unknown", "unknown", nil
+	}
+	// Use stat command to get user and group names
+	// GNU stat: stat -c "%U %G"
+	// BSD stat: stat -f "%Su %Sg"
+	var cmd string
+	if runtime.GOOS == "darwin" { // BSD stat
+		cmd = fmt.Sprintf("stat -f '%%Su %%Sg' %s", shellEscape(path))
+	} else { // Assume GNU stat (Linux)
+		cmd = fmt.Sprintf("stat -c '%%U %%G' %s", shellEscape(path))
+	}
+
+	stdout, _, err := l.Exec(ctx, cmd, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get file owner for %s: %w", path, err)
+	}
+	parts := strings.Fields(string(stdout))
+	if len(parts) < 2 {
+		return "", "", fmt.Errorf("unexpected output from stat command: %s", string(stdout))
+	}
+	return parts[0], parts[1], nil
+}
+
+func (l *LocalConnector) GetOSRelease(ctx context.Context) (map[string]string, error) {
+var content []byte
+var err error
+
+for _, path := range osReleasePaths {
+content, err = l.ReadFile(ctx, path)
+if err == nil {
+return parseKeyValues(string(content), "=", "\""), nil
+}
+}
+
+return nil, fmt.Errorf("failed to read os-release file from any known location: %w", err)
+}
+
+func parseKeyValues(content, delimiter, quoteChar string) map[string]string {
+	vars := make(map[string]string)
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		parts := strings.SplitN(line, delimiter, 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			val := strings.TrimSpace(parts[1])
+			if quoteChar != "" {
+				val = strings.Trim(val, quoteChar)
+			}
+			vars[key] = val
+		}
+	}
+	return vars
+}
+
 var _ Connector = &LocalConnector{}
+
+var osReleasePaths = []string{"/etc/os-release", "/usr/lib/os-release"}

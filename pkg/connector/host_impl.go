@@ -44,7 +44,7 @@ func (h *hostImpl) GetInternalIPv4Address() string {
 func (h *hostImpl) GetInternalIPv6Address() string {
 	internalIPv6Address := ""
 	nodeAddresses := strings.Split(h.spec.InternalAddress, ",")
-	if len(nodeAddresses) == 2 {
+	if len(nodeAddresses) >= 2 {
 		internalIPv6Address = nodeAddresses[1]
 	}
 	return internalIPv6Address

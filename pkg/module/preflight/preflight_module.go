@@ -37,7 +37,7 @@ func (m *PreflightModule) GetTasks(ctx module.ModuleContext) ([]task.Task, error
 }
 
 // Plan generates the execution fragment for the preflight module.
-func (m *PreflightModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, error) {
+func (m *PreflightModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("module", m.Name())
 	moduleFragment := task.NewExecutionFragment(m.Name() + "-Fragment")
 

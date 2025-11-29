@@ -45,13 +45,13 @@ func (t *PrepareOSNodesTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragm
 		return fragment, nil
 	}
 
-	disableSwap := osstep.NewDisableSwapStepBuilder(*runtimeCtx, "DisableSwap").Build()
-	disableSelinux := osstep.NewDisableSelinuxStepBuilder(*runtimeCtx, "DisableSelinux").Build()
-	disableFirewall := osstep.NewDisableFirewallStepBuilder(*runtimeCtx, "DisableFirewall").Build()
-	updateEtcHosts := osstep.NewUpdateEtcHostsStepBuilder(*runtimeCtx, "UpdateEtcHosts").Build()
-	loadKernelModules := osstep.NewLoadKernelModulesStepBuilder(*runtimeCtx, "LoadKernelModules").Build()
-	configureSysctl := osstep.NewConfigureSysctlStepBuilder(*runtimeCtx, "ConfigureSysctl").Build()
-	configureSecurityLimits := osstep.NewConfigureSecurityLimitsStepBuilder(*runtimeCtx, "ConfigureSecurityLimits").Build()
+	disableSwap := osstep.NewDisableSwapStepBuilder(runtimeCtx, "DisableSwap").Build()
+	disableSelinux := osstep.NewDisableSelinuxStepBuilder(runtimeCtx, "DisableSelinux").Build()
+	disableFirewall := osstep.NewDisableFirewallStepBuilder(runtimeCtx, "DisableFirewall").Build()
+	updateEtcHosts := osstep.NewUpdateEtcHostsStepBuilder(runtimeCtx, "UpdateEtcHosts").Build()
+	loadKernelModules := osstep.NewLoadKernelModulesStepBuilder(runtimeCtx, "LoadKernelModules").Build()
+	configureSysctl := osstep.NewConfigureSysctlStepBuilder(runtimeCtx, "ConfigureSysctl").Build()
+	configureSecurityLimits := osstep.NewConfigureSecurityLimitsStepBuilder(runtimeCtx, "ConfigureSecurityLimits").Build()
 
 	fragment.AddNode(&plan.ExecutionNode{Name: "DisableSwap", Step: disableSwap, Hosts: allHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "DisableSelinux", Step: disableSelinux, Hosts: allHosts})

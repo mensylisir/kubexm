@@ -2,11 +2,12 @@ package common
 
 import (
 	"fmt"
+	"strings"
+	"time"
+
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
 	"github.com/mensylisir/kubexm/pkg/step"
-	"strings"
-	"time"
 )
 
 type InstallPackagesStep struct {
@@ -73,28 +74,31 @@ func (s *InstallPackagesStep) Precheck(ctx runtime.ExecutionContext) (isDone boo
 	return false, nil
 }
 
-func (s *InstallPackagesStep) Run(ctx runtime.ExecutionContext) error {
+func (s *InstallPackagesStep) Run(ctx runtime.ExecutionContext) (*step.StepResult, error) {
+	result := step.NewStepResult(s.Meta().Name, ctx.GetStepExecutionID(), ctx.GetHost())
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	if len(s.packagesToInstall) == 0 {
 		logger.Info("No new packages to install.")
-		return nil
+		result.MarkSkipped("No new packages to install")
+		return result, nil
 	}
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		return fmt.Errorf("failed to get connector for host %s: %w", ctx.GetHost().GetName(), err)
+		return nil, fmt.Errorf("failed to get connector for host %s: %w", ctx.GetHost().GetName(), err)
 	}
 	facts, err := ctx.GetHostFacts(ctx.GetHost())
 	if err != nil {
-		return fmt.Errorf("failed to get host facts for %s: %w", ctx.GetHost().GetName(), err)
+		return nil, fmt.Errorf("failed to get host facts for %s: %w", ctx.GetHost().GetName(), err)
 	}
 
 	logger.Info("Installing packages.", "packages", s.packagesToInstall)
 	err = runnerSvc.InstallPackages(ctx.GoContext(), conn, facts, s.packagesToInstall...)
 	if err != nil {
-		return fmt.Errorf("failed to install packages %v on %s: %w", s.packagesToInstall, ctx.GetHost().GetName(), err)
+		return nil, fmt.Errorf("failed to install packages %v on %s: %w", s.packagesToInstall, ctx.GetHost().GetName(), err)
 	}
-	return nil
+	result.MarkCompleted(fmt.Sprintf("Installed packages: %v", s.packagesToInstall))
+	return result, nil
 }
 
 func (s *InstallPackagesStep) Rollback(ctx runtime.ExecutionContext) error {

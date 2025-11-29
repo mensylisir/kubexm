@@ -2,12 +2,13 @@ package etcd
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
@@ -123,17 +124,19 @@ func (s *DownloadEtcdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, 
 	return false, nil
 }
 
-func (s *DownloadEtcdStep) Run(ctx runtime.ExecutionContext) error {
+func (s *DownloadEtcdStep) Run(ctx runtime.ExecutionContext) (*step.StepResult, error) {
+	result := step.NewStepResult(s.Meta().Name, ctx.GetStepExecutionID(), ctx.GetHost())
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
 	requiredArchs, err := s.getRequiredArchs(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if len(requiredArchs) == 0 {
 		logger.Info("No hosts require etcd binaries in this cluster configuration. Skipping download.")
-		return nil
+		result.MarkSkipped("No hosts require etcd binaries")
+		return result, nil
 	}
 
 	provider := binary.NewBinaryProvider(ctx)
@@ -141,7 +144,7 @@ func (s *DownloadEtcdStep) Run(ctx runtime.ExecutionContext) error {
 	for arch := range requiredArchs {
 		binaryInfo, err := provider.GetBinary(binary.ComponentEtcd, arch)
 		if err != nil {
-			return fmt.Errorf("failed to get etcd info for arch %s: %w", arch, err)
+			return nil, fmt.Errorf("failed to get etcd info for arch %s: %w", arch, err)
 		}
 		if binaryInfo == nil {
 			continue
@@ -157,12 +160,13 @@ func (s *DownloadEtcdStep) Run(ctx runtime.ExecutionContext) error {
 		}
 
 		if err := s.downloadFile(ctx, binaryInfo); err != nil {
-			return fmt.Errorf("failed to download etcd for arch %s: %w", arch, err)
+			return nil, fmt.Errorf("failed to download etcd for arch %s: %w", arch, err)
 		}
 	}
 
 	logger.Info("All required etcd binaries have been downloaded successfully.")
-	return nil
+	result.MarkCompleted("All required etcd binaries have been downloaded successfully")
+	return result, nil
 }
 
 func (s *DownloadEtcdStep) downloadFile(ctx runtime.ExecutionContext, binaryInfo *binary.Binary) error {

@@ -49,17 +49,17 @@ func (m *ContainerdModule) GetTasks(ctx module.ModuleContext) ([]task.Task, erro
 }
 
 // Plan generates the execution fragment for the containerd module.
-func (m *ContainerdModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, error) {
+func (m *ContainerdModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("module", m.Name())
 	clusterConfig := ctx.GetClusterConfig()
 
 	// Enablement Check
 	if clusterConfig.Spec.ContainerRuntime == nil || clusterConfig.Spec.ContainerRuntime.Type != v1alpha1.ContainerRuntimeContainerd { // Use v1alpha1 constant
 		logger.Info("Containerd module is not enabled (ContainerRuntime.Type is not 'containerd'). Skipping.")
-		return task.NewEmptyFragment(), nil
+		return plan.NewEmptyFragment(m.Name()), nil
 	}
 
-	moduleFragment := task.NewExecutionFragment() // Initialize correctly
+	moduleFragment := plan.NewExecutionFragment(m.Name() + "-Fragment") // Initialize correctly
 
 	var previousTaskExitNodes []plan.NodeID
 	isFirstEffectiveTask := true
@@ -73,7 +73,7 @@ func (m *ContainerdModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragme
 	for _, currentTask := range tasks {
 		// The ModuleContext should also implement TaskContext
 		// since it has all the required methods
-		taskCtx, ok := ctx.(task.TaskContext)
+		taskCtx, ok := ctx.(runtime.TaskContext)
 		if !ok {
 			return nil, fmt.Errorf("module context does not implement TaskContext for module %s, task %s", m.Name(), currentTask.Name())
 		}
@@ -132,7 +132,8 @@ func (m *ContainerdModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragme
 	}
 
 	moduleFragment.ExitNodes = append(moduleFragment.ExitNodes, previousTaskExitNodes...)
-	moduleFragment.RemoveDuplicateNodeIDs() // Use helper method on ExecutionFragment
+	moduleFragment.EntryNodes = plan.UniqueNodeIDs(moduleFragment.EntryNodes)
+	moduleFragment.ExitNodes = plan.UniqueNodeIDs(moduleFragment.ExitNodes) // Use helper method on ExecutionFragment
 
 	logger.Info("Containerd module planning complete.", "total_nodes", len(moduleFragment.Nodes))
 	return moduleFragment, nil

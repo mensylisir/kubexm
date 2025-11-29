@@ -36,12 +36,26 @@ func (r *defaultRunner) StartService(ctx context.Context, conn connector.Connect
 	if facts == nil || facts.InitSystem == nil {
 		return fmt.Errorf("init system facts not available for StartService")
 	}
+	active, err := r.IsServiceActive(ctx, conn, facts, serviceName)
+	if err != nil {
+		return fmt.Errorf("failed to check service status for %s: %w", serviceName, err)
+	}
+	if active {
+		return nil
+	}
 	return r.manageService(ctx, conn, facts, serviceName, facts.InitSystem.StartCmd, true)
 }
 
 func (r *defaultRunner) StopService(ctx context.Context, conn connector.Connector, facts *Facts, serviceName string) error {
 	if facts == nil || facts.InitSystem == nil {
 		return fmt.Errorf("init system facts not available for StopService")
+	}
+	active, err := r.IsServiceActive(ctx, conn, facts, serviceName)
+	if err != nil {
+		return fmt.Errorf("failed to check service status for %s: %w", serviceName, err)
+	}
+	if !active {
+		return nil
 	}
 	return r.manageService(ctx, conn, facts, serviceName, facts.InitSystem.StopCmd, true)
 }
@@ -57,6 +71,18 @@ func (r *defaultRunner) EnableService(ctx context.Context, conn connector.Connec
 	if facts == nil || facts.InitSystem == nil {
 		return fmt.Errorf("init system facts not available for EnableService")
 	}
+	enabled, err := r.IsServiceEnabled(ctx, conn, facts, serviceName)
+	if err != nil {
+		// Some init systems might return error if service is not found or other issues,
+		// but we should probably try to enable if check fails, or return error?
+		// For safety, let's try to enable if check fails, assuming it might be "disabled" or "unknown".
+		// But IsServiceEnabled implementation returns false on error usually.
+		// Let's log and proceed? We don't have logger here.
+		// We'll proceed with enable.
+	} else if enabled {
+		return nil
+	}
+
 	svcInfo := facts.InitSystem
 	if svcInfo.Type == InitSystemSysV && (svcInfo.EnableCmd == "" || !strings.Contains(svcInfo.EnableCmd, "%s")) {
 		return fmt.Errorf("enabling service '%s' is not reliably supported for detected SysV init variant (command: '%s')", serviceName, svcInfo.EnableCmd)
@@ -68,6 +94,13 @@ func (r *defaultRunner) DisableService(ctx context.Context, conn connector.Conne
 	if facts == nil || facts.InitSystem == nil {
 		return fmt.Errorf("init system facts not available for DisableService")
 	}
+	enabled, err := r.IsServiceEnabled(ctx, conn, facts, serviceName)
+	if err != nil {
+		// Proceed if check fails
+	} else if !enabled {
+		return nil
+	}
+
 	svcInfo := facts.InitSystem
 	if svcInfo.Type == InitSystemSysV && (svcInfo.DisableCmd == "" || !strings.Contains(svcInfo.DisableCmd, "%s")) {
 		return fmt.Errorf("disabling service '%s' is not reliably supported for detected SysV init variant (command: '%s')", serviceName, svcInfo.DisableCmd)

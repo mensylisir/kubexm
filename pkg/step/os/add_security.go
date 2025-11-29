@@ -24,7 +24,7 @@ type ConfigureSecurityLimitsStepBuilder struct {
 	step.Builder[ConfigureSecurityLimitsStepBuilder, *ConfigureSecurityLimitsStep]
 }
 
-func NewConfigureSecurityLimitsStepBuilder(ctx runtime.Context, instanceName string) *ConfigureSecurityLimitsStepBuilder {
+func NewConfigureSecurityLimitsStepBuilder(ctx runtime.ExecutionContext, instanceName string) *ConfigureSecurityLimitsStepBuilder {
 	s := &ConfigureSecurityLimitsStep{}
 
 	s.Base.Meta.Name = instanceName

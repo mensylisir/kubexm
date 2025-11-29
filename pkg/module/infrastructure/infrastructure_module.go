@@ -28,7 +28,7 @@ func NewInfrastructureModule() module.Module {
 	return &InfrastructureModule{BaseModule: base}
 }
 
-func (m *InfrastructureModule) Plan(ctx module.ModuleContext) (*task.ExecutionFragment, error) {
+func (m *InfrastructureModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("module", m.Name())
 	moduleFragment := task.NewExecutionFragment(m.Name() + "-Fragment")
 
@@ -127,14 +127,14 @@ func (m *InfrastructureModule) Plan(ctx module.ModuleContext) (*task.ExecutionFr
 }
 
 // planTask is a helper to reduce repetition.
-func planTask(ctx module.ModuleContext, t task.Task) (*task.ExecutionFragment, error) {
+func planTask(ctx module.ModuleContext, t task.Task) (*plan.ExecutionFragment, error) {
 	isRequired, err := t.IsRequired(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check if task %s is required: %w", t.Name(), err)
 	}
 	if !isRequired {
 		ctx.GetLogger().Debug("Skipping non-required task", "task", t.Name())
-		return task.NewEmptyFragment(), nil
+		return plan.NewEmptyFragment(m.Name()), nil
 	}
 
 	ctx.GetLogger().Info("Planning task", "task_name", t.Name())

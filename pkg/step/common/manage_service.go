@@ -2,9 +2,10 @@ package common
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/runtime"
 	"strings"
 	"time"
+
+	"github.com/mensylisir/kubexm/pkg/runtime"
 
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/spec"
@@ -131,12 +132,13 @@ func (s *ManageServiceStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 	}
 }
 
-func (s *ManageServiceStep) Run(ctx runtime.ExecutionContext) error {
+func (s *ManageServiceStep) Run(ctx runtime.ExecutionContext) (*step.StepResult, error) {
+	result := step.NewStepResult(s.Meta().Name, ctx.GetStepExecutionID(), ctx.GetHost())
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		return fmt.Errorf("failed to get connector for host %s: %w", ctx.GetHost().GetName(), err)
+		return nil, fmt.Errorf("failed to get connector for host %s: %w", ctx.GetHost().GetName(), err)
 	}
 
 	var cmd string
@@ -155,27 +157,32 @@ func (s *ManageServiceStep) Run(ctx runtime.ExecutionContext) error {
 		if cmdErr, ok := err.(*connector.CommandError); ok {
 			if s.Action == ActionIsActive {
 				logger.Info("Service is-active check result.", "exit_code", cmdErr.ExitCode, "stdout", string(stdout), "stderr", string(stderr))
-				ctx.GetTaskCache().Set(fmt.Sprintf("service.%s.isActive", s.ServiceName), cmdErr.ExitCode == 0)
-				return nil
+				isActive := cmdErr.ExitCode == 0
+				result.SetMetadata(fmt.Sprintf("service.%s.isActive", s.ServiceName), isActive)
+				result.MarkCompleted(fmt.Sprintf("Service active check: %v", isActive))
+				return result, nil
 			}
 			if s.Action == ActionIsEnabled {
 				logger.Info("Service is-enabled check result.", "exit_code", cmdErr.ExitCode, "stdout", string(stdout), "stderr", string(stderr))
-				ctx.GetTaskCache().Set(fmt.Sprintf("service.%s.isEnabled", s.ServiceName), strings.TrimSpace(string(stdout)) == "enabled")
-				return nil
+				isEnabled := strings.TrimSpace(string(stdout)) == "enabled"
+				result.SetMetadata(fmt.Sprintf("service.%s.isEnabled", s.ServiceName), isEnabled)
+				result.MarkCompleted(fmt.Sprintf("Service enabled check: %v", isEnabled))
+				return result, nil
 			}
 		}
 		logger.Error("Systemctl command failed.", "command", cmd, "error", err, "stdout", string(stdout), "stderr", string(stderr))
-		return fmt.Errorf("systemctl command '%s' failed: %w. Stderr: %s", cmd, err, string(stderr))
+		return nil, fmt.Errorf("systemctl command '%s' failed: %w. Stderr: %s", cmd, err, string(stderr))
 	}
 	if s.Action == ActionIsActive {
-		ctx.GetTaskCache().Set(fmt.Sprintf("service.%s.isActive", s.ServiceName), true)
+		result.SetMetadata(fmt.Sprintf("service.%s.isActive", s.ServiceName), true)
 	}
 	if s.Action == ActionIsEnabled {
-		ctx.GetTaskCache().Set(fmt.Sprintf("service.%s.isEnabled", s.ServiceName), strings.TrimSpace(string(stdout)) == "enabled")
+		result.SetMetadata(fmt.Sprintf("service.%s.isEnabled", s.ServiceName), strings.TrimSpace(string(stdout)) == "enabled")
 	}
 
 	logger.Info("Systemctl command executed successfully.", "command", cmd, "stdout", string(stdout))
-	return nil
+	result.MarkCompleted("Service action completed successfully")
+	return result, nil
 }
 
 func (s *ManageServiceStep) Rollback(ctx runtime.ExecutionContext) error {

@@ -1,12 +1,13 @@
 package util
 
 import (
+	"sort"
+	"strings"
+
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	versionutil "k8s.io/apimachinery/pkg/util/version"
-	"sort"
-	"strings"
 )
 
 var k8sVersionToPauseTag = map[string]string{
@@ -201,7 +202,7 @@ func GetImage(context runtime.Context, name string) Image {
 		"linux-utils":               {RepoAddr: privateRegistry, Namespace: "openebs", Repo: "linux-utils", Tag: "3.3.0", Group: common.RoleWorker, Enable: *context.GetClusterConfig().Spec.Storage.OpenEBS.Enabled && *context.GetClusterConfig().Spec.Storage.OpenEBS.Engines.LocalHostpath.Enabled},
 		"haproxy":                   {RepoAddr: privateRegistry, Namespace: "library", Repo: "haproxy", Tag: "2.9.6-alpine", Group: common.RoleWorker, Enable: context.GetClusterConfig().Spec.ControlPlaneEndpoint.InternalLoadBalancerType == common.InternalLBTypeHAProxy},
 		"nginx":                     {RepoAddr: privateRegistry, Namespace: "library", Repo: "nginx", Tag: "2.9.6-alpine", Group: common.RoleWorker, Enable: context.GetClusterConfig().Spec.ControlPlaneEndpoint.InternalLoadBalancerType == common.InternalLBTypeNginx},
-		"kubevip":                   {RepoAddr: privateRegistry, Namespace: "plndr", Repo: "kube-vip", Tag: "v0.7.2", Group: common.RoleMaster, Enable: context.GetClusterConfig().Spec.ControlPlaneEndpoint.InternalLoadBalancerType == common.InternalLBTypeKubeVIP},
+		"kubevip":                   {RepoAddr: privateRegistry, Namespace: "plndr", Repo: "kube-vip", Tag: "v0.7.2", Group: common.RoleMaster, Enable: context.GetClusterConfig().Spec.ControlPlaneEndpoint.InternalLoadBalancerType == common.InternalLBTypeKubeVIP || context.GetClusterConfig().Spec.ControlPlaneEndpoint.ExternalLoadBalancerType == common.ExternalLBTypeKubeVIP},
 		"kata-deploy":               {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "kata-deploy", Tag: "stable", Group: common.RoleWorker, Enable: *context.GetClusterConfig().Spec.Kubernetes.Addons.Kata.Enabled},
 		"node-feature-discovery":    {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "node-feature-discovery", Tag: "v0.10.0", Group: common.RoleKubernetes, Enable: *context.GetClusterConfig().Spec.Kubernetes.Addons.NodeFeatureDiscovery.Enabled},
 		"nfs-plugin":                {RepoAddr: privateRegistry, Namespace: "sig-storage", Repo: "nfs-plugin", Tag: "3.3.0", Group: common.RoleWorker, Enable: *context.GetClusterConfig().Spec.Storage.NFS.Enabled},

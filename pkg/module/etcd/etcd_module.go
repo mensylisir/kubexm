@@ -37,7 +37,7 @@ func NewEtcdModule() module.Module {
 
 // Plan generates the execution fragment for the ETCD module.
 // It calls the Plan method of its constituent tasks and links them if necessary.
-func (m *EtcdModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragment, error) {
+func (m *EtcdModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("module", m.Name())
 	clusterConfig := ctx.GetClusterConfig()
 
@@ -45,7 +45,7 @@ func (m *EtcdModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragment, e
 	// The InstallETCDTask itself will further check if it's an internal type.
 	if clusterConfig.Spec.Etcd == nil {
 		logger.Info("ETCD module is not required (ETCD spec is nil). Skipping.")
-		return task.NewEmptyFragment(), nil
+		return plan.NewEmptyFragment(m.Name()), nil
 	}
 	// If type is external, InstallETCDTask.IsRequired will be false, and this module will produce an empty fragment.
 	// A more advanced EtcdModule could include tasks for setting up etcd client certs on masters even for external etcd.
@@ -64,9 +64,9 @@ func (m *EtcdModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragment, e
 	generatePkiTask := taskEtcd.NewGenerateEtcdPkiTask(etcdHostsForAltNames, clusterConfig.Spec.ControlPlaneEndpoint.Domain, "lb.kubexm.internal") // Example values
 
 	// Assert ModuleContext to TaskContext for calling Task methods
-	taskCtx, ok := ctx.(task.TaskContext)
+	taskCtx, ok := ctx.(runtime.TaskContext)
 	if !ok {
-		return nil, fmt.Errorf("module context cannot be asserted to task.TaskContext for EtcdModule")
+		return nil, fmt.Errorf("module context cannot be asserted to runtime.TaskContext for EtcdModule")
 	}
 
 	pkiTaskRequired, err := generatePkiTask.IsRequired(taskCtx)
@@ -132,7 +132,7 @@ func (m *EtcdModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragment, e
 
 	if len(moduleFragment.Nodes) == 0 {
 		logger.Info("EtcdModule planned no executable nodes (e.g., external etcd and no local PKI actions).")
-		return task.NewEmptyFragment(), nil
+		return plan.NewEmptyFragment(m.Name()), nil
 	}
 
 	logger.Info("ETCD module planning complete.", "total_nodes", len(moduleFragment.Nodes), "entry_nodes", len(moduleFragment.EntryNodes), "exit_nodes", len(moduleFragment.ExitNodes))

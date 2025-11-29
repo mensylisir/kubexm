@@ -11,5 +11,5 @@ type Module interface {
 	Description() string
 	Tasks() []task.Task
 	Plan(ctx runtime.ModuleContext) (*plan.ExecutionFragment, error)
-	GetBase() *Base
+	GetBase() *BaseModule
 }

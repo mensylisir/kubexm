@@ -2,6 +2,7 @@ package os
 
 import (
 	"fmt"
+
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/plan"
 	"github.com/mensylisir/kubexm/pkg/runtime"
@@ -53,18 +54,20 @@ func (t *ConfigureHostTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragme
 		stepName := fmt.Sprintf("SetHostnameFor_%s", hostname)
 		nodeName := fmt.Sprintf("SetHostnameFor_%s_node", hostname)
 
-		setHostnameStep := osstep.NewSetHostnameStepBuilder(*runtimeCtx, stepName, hostname).Build()
+		setHostnameStep := osstep.NewSetHostnameStepBuilder(runtimeCtx, stepName, hostname).Build()
 		node := &plan.ExecutionNode{Name: nodeName, Step: setHostnameStep, Hosts: []connector.Host{host}}
 		nodeID, _ := fragment.AddNode(node)
 		setHostnameExitNodes = append(setHostnameExitNodes, nodeID)
 	}
 
 	// Step 2: Update /etc/hosts on all nodes, depending on all hostnames being set
-	updateEtcHostsStep := osstep.NewUpdateEtcHostsStepBuilder(*runtimeCtx, "UpdateEtcHosts").Build()
+	updateEtcHostsStep := osstep.NewUpdateEtcHostsStepBuilder(runtimeCtx, "UpdateEtcHosts").Build()
 	updateEtcHostsNode := &plan.ExecutionNode{Name: "UpdateEtcHosts", Step: updateEtcHostsStep, Hosts: allHosts}
 	updateEtcHostsNodeID, _ := fragment.AddNode(updateEtcHostsNode)
 
-	fragment.AddDependency(setHostnameExitNodes, updateEtcHostsNodeID)
+	for _, exitNodeID := range setHostnameExitNodes {
+		fragment.AddDependency(exitNodeID, updateEtcHostsNodeID)
+	}
 
 	fragment.CalculateEntryAndExitNodes()
 	return fragment, nil

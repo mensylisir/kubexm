@@ -22,7 +22,7 @@ type DisableSwapStepBuilder struct {
 	step.Builder[DisableSwapStepBuilder, *DisableSwapStep]
 }
 
-func NewDisableSwapStepBuilder(ctx runtime.Context, instanceName string) *DisableSwapStepBuilder {
+func NewDisableSwapStepBuilder(ctx runtime.ExecutionContext, instanceName string) *DisableSwapStepBuilder {
 	s := &DisableSwapStep{}
 
 	s.Base.Meta.Name = instanceName

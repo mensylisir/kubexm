@@ -44,9 +44,9 @@ func (t *DisableServicesTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFrag
 		return fragment, nil
 	}
 
-	disableSwapStep := osstep.NewDisableSwapStepBuilder(*runtimeCtx, "DisableSwap").Build()
-	disableSelinuxStep := osstep.NewDisableSelinuxStepBuilder(*runtimeCtx, "DisableSelinux").Build()
-	disableFirewallStep := osstep.NewDisableFirewallStepBuilder(*runtimeCtx, "DisableFirewall").Build()
+	disableSwapStep := osstep.NewDisableSwapStepBuilder(runtimeCtx, "DisableSwap").Build()
+	disableSelinuxStep := osstep.NewDisableSelinuxStepBuilder(runtimeCtx, "DisableSelinux").Build()
+	disableFirewallStep := osstep.NewDisableFirewallStepBuilder(runtimeCtx, "DisableFirewall").Build()
 
 	// These steps can run in parallel
 	fragment.AddNode(&plan.ExecutionNode{Name: "DisableSwap", Step: disableSwapStep, Hosts: allHosts})

@@ -3,6 +3,10 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"sync"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/cache"
@@ -16,9 +20,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
-	"net/http"
-	"sync"
-	"time"
 )
 
 type Builder struct {
@@ -160,9 +161,12 @@ func (b *Builder) Build(ctx context.Context) (*Context, func(), error) {
 		stepExecutionID:    "",
 		executionStartTime: time.Now(),
 
-		httpClient:               httpClient,
-		currentStepRuntimeConfig: map[string]interface{}{},
-		RunID:                    runID,
+		httpClient:    httpClient,
+		GlobalState:   NewStateBag(),
+		PipelineState: NewStateBag(),
+		ModuleState:   NewStateBag(),
+		TaskState:     NewStateBag(),
+		RunID:         runID,
 	}
 
 	if err := b.initializeAllHosts(runtimeCtx, connectorFactory, runnerSvc); err != nil {

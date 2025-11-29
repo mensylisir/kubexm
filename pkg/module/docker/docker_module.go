@@ -31,17 +31,17 @@ func NewDockerModule() module.Module {
 }
 
 // Plan generates the execution fragment for the Docker module.
-func (m *DockerModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragment, error) {
+func (m *DockerModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionFragment, error) {
 	logger := ctx.GetLogger().With("module", m.Name())
 	clusterConfig := ctx.GetClusterConfig()
 
 	// Enablement Check
 	if clusterConfig.Spec.ContainerRuntime == nil || clusterConfig.Spec.ContainerRuntime.Type != v1alpha1.DockerRuntime {
 		logger.Info("Docker module is not enabled (ContainerRuntime.Type is not 'docker'). Skipping.")
-		return task.NewEmptyFragment(), nil
+		return plan.NewEmptyFragment(m.Name()), nil
 	}
 
-	moduleFragment := task.NewExecutionFragment()
+	moduleFragment := plan.NewExecutionFragment(m.Name() + "-Fragment")
 	var lastTaskExitNodes []plan.NodeID
 	firstTask := true
 
@@ -103,7 +103,8 @@ func (m *DockerModule) Plan(ctx runtime.ModuleContext) (*task.ExecutionFragment,
 	}
 
 	moduleFragment.ExitNodes = append(moduleFragment.ExitNodes, lastTaskExitNodes...)
-	moduleFragment.RemoveDuplicateNodeIDs()
+	moduleFragment.EntryNodes = plan.UniqueNodeIDs(moduleFragment.EntryNodes)
+	moduleFragment.ExitNodes = plan.UniqueNodeIDs(moduleFragment.ExitNodes)
 
 	logger.Info("Docker module planning complete.", "total_nodes", len(moduleFragment.Nodes))
 	return moduleFragment, nil

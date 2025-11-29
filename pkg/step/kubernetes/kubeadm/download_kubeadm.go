@@ -1,15 +1,14 @@
 package kubeadm
 
 import (
-	"crypto/sha256"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/step/helpers"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
+
+	"github.com/mensylisir/kubexm/pkg/step/helpers"
 
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	"github.com/mensylisir/kubexm/pkg/spec"
