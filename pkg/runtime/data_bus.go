@@ -2,14 +2,13 @@ package runtime
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/common"
 )
 
 // DataPublisher is an interface for publishing data to different scopes
 type DataPublisher interface {
 	// Publish publishes data to the specified scope with a simple key
 	Publish(scope string, key string, value interface{}) error
-	
+
 	// PublishWithTTL publishes data with a time-to-live
 	PublishWithTTL(scope string, key string, value interface{}, ttl int64) error
 }
@@ -18,16 +17,16 @@ type DataPublisher interface {
 type DataSubscriber interface {
 	// Subscribe retrieves data by key, searching through scopes hierarchically
 	Subscribe(key string) (interface{}, bool)
-	
+
 	// SubscribeFromScope retrieves data from a specific scope
 	SubscribeFromScope(scope string, key string) (interface{}, bool)
-	
+
 	// SubscribeString retrieves data as a string
 	SubscribeString(key string) (string, bool)
-	
+
 	// SubscribeInt retrieves data as an int
 	SubscribeInt(key string) (int, bool)
-	
+
 	// SubscribeBool retrieves data as a bool
 	SubscribeBool(key string) (bool, bool)
 }
@@ -105,11 +104,11 @@ func (db *SimpleDataBus) SubscribeBool(key string) (bool, bool) {
 
 // buildFullKey constructs a full key with context information
 func (db *SimpleDataBus) buildFullKey(key string) string {
-	return fmt.Sprintf("%s.%s.%s.%s.%s", 
-		db.ctx.GetRunID(), 
-		db.ctx.GetPipelineName(), 
-		db.ctx.GetModuleName(), 
-		db.ctx.GetTaskName(), 
+	return fmt.Sprintf("%s.%s.%s.%s.%s",
+		db.ctx.GetRunID(),
+		db.ctx.GetPipelineName(),
+		db.ctx.GetModuleName(),
+		db.ctx.GetTaskName(),
 		key)
 }
 

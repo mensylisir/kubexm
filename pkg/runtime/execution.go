@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/mensylisir/kubexm/pkg/cache"
 	"github.com/mensylisir/kubexm/pkg/connector"
 	"github.com/mensylisir/kubexm/pkg/types"
 )
@@ -13,11 +12,10 @@ import (
 type ExecutionContext interface {
 	FileSystemContext
 	GlobalSettingsContext
+	CacheProviderContext
+	CoreServiceContext
+	ClusterQueryContext
 	GetCurrentHostConnector() (connector.Connector, error)
-	GetStepCache() cache.StepCache
-	GetTaskCache() cache.TaskCache
-	GetModuleCache() cache.ModuleCache
-	GetPipelineCache() cache.PipelineCache
 	GetHost() connector.Host
 	GetStepExecutionID() string
 	GetExecutionStartTime() time.Time
@@ -30,4 +28,6 @@ type ExecutionContext interface {
 	GetTaskState() StateBag
 	SetStepResult(result *types.StepResult)
 	GetStepResult() *types.StepResult
+	Export(scope string, key string, value interface{}) error
+	Import(scope string, key string) (interface{}, bool)
 }

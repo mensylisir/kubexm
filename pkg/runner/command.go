@@ -53,12 +53,12 @@ func (r *defaultRunner) OriginRun(ctx context.Context, conn connector.Connector,
 	return string(stdout), string(stderr), nil
 }
 
-func (r *defaultRunner) MustRun(ctx context.Context, conn connector.Connector, cmd string, sudo bool) string {
+func (r *defaultRunner) MustRun(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (string, error) {
 	output, err := r.Run(ctx, conn, cmd, sudo)
 	if err != nil {
-		panic(fmt.Errorf("command '%s' (sudo: %v) failed: %w. Output: %s", cmd, sudo, err, output))
+		return output, fmt.Errorf("command '%s' (sudo: %v) failed: %w. Output: %s", cmd, sudo, err, output)
 	}
-	return output
+	return output, nil
 }
 
 func (r *defaultRunner) Check(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (bool, error) {
