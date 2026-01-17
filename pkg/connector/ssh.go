@@ -197,7 +197,7 @@ func (s *SSHConnector) Exec(ctx context.Context, cmd string, options *ExecOption
 			_ = session.Signal(ssh.SIGKILL)
 			select {
 			case <-doneCh:
-			case <-time.After(1 * time.Second):
+			case <-time.After(100 * time.Millisecond):
 			}
 			return stdoutBuf.Bytes(), stderrBuf.Bytes(), runCtx.Err()
 		case err := <-doneCh:
@@ -520,54 +520,54 @@ func (s *SSHConnector) LookPathWithOptions(ctx context.Context, file string, opt
 }
 
 func (s *SSHConnector) GetOS(ctx context.Context) (*OS, error) {
-if s.cachedOS != nil {
-return s.cachedOS, nil
-}
+	if s.cachedOS != nil {
+		return s.cachedOS, nil
+	}
 
-osInfo := &OS{}
+	osInfo := &OS{}
 
-// Try to get OS info from os-release file via GetOSRelease
-vars, err := s.GetOSRelease(ctx)
-if err == nil {
-osInfo.ID = vars["ID"]
-osInfo.VersionID = vars["VERSION_ID"]
-osInfo.PrettyName = vars["PRETTY_NAME"]
-osInfo.Codename = vars["VERSION_CODENAME"]
-} else {
-// Fallback to lsb_release if GetOSRelease fails
-lsbCtx, lsbCancel := context.WithTimeout(ctx, 10*time.Second)
-defer lsbCancel()
-content, _, err := s.Exec(lsbCtx, "lsb_release -a", nil)
-if err == nil {
-lsbVars := parseKeyValues(string(content), ":", "")
-if osInfo.ID == "" {
-osInfo.ID = strings.ToLower(lsbVars["Distributor ID"])
-}
-if osInfo.VersionID == "" {
-osInfo.VersionID = lsbVars["Release"]
-}
-if osInfo.Codename == "" {
-osInfo.Codename = lsbVars["Codename"]
-}
-}
-}
+	// Try to get OS info from os-release file via GetOSRelease
+	vars, err := s.GetOSRelease(ctx)
+	if err == nil {
+		osInfo.ID = vars["ID"]
+		osInfo.VersionID = vars["VERSION_ID"]
+		osInfo.PrettyName = vars["PRETTY_NAME"]
+		osInfo.Codename = vars["VERSION_CODENAME"]
+	} else {
+		// Fallback to lsb_release if GetOSRelease fails
+		lsbCtx, lsbCancel := context.WithTimeout(ctx, 10*time.Second)
+		defer lsbCancel()
+		content, _, err := s.Exec(lsbCtx, "lsb_release -a", nil)
+		if err == nil {
+			lsbVars := parseKeyValues(string(content), ":", "")
+			if osInfo.ID == "" {
+				osInfo.ID = strings.ToLower(lsbVars["Distributor ID"])
+			}
+			if osInfo.VersionID == "" {
+				osInfo.VersionID = lsbVars["Release"]
+			}
+			if osInfo.Codename == "" {
+				osInfo.Codename = lsbVars["Codename"]
+			}
+		}
+	}
 
-// If we still don't have ID, try uname
-if osInfo.ID == "" {
-unameCtx, unameCancel := context.WithTimeout(ctx, 10*time.Second)
-defer unameCancel()
-content, _, err := s.Exec(unameCtx, "uname -s", nil)
-if err == nil {
-osInfo.ID = strings.ToLower(strings.TrimSpace(string(content)))
-}
-}
+	// If we still don't have ID, try uname
+	if osInfo.ID == "" {
+		unameCtx, unameCancel := context.WithTimeout(ctx, 10*time.Second)
+		defer unameCancel()
+		content, _, err := s.Exec(unameCtx, "uname -s", nil)
+		if err == nil {
+			osInfo.ID = strings.ToLower(strings.TrimSpace(string(content)))
+		}
+	}
 
-if osInfo.ID == "" {
-return nil, fmt.Errorf("failed to determine OS: %v", err)
-}
+	if osInfo.ID == "" {
+		return nil, fmt.Errorf("failed to determine OS: %v", err)
+	}
 
-s.cachedOS = osInfo
-return osInfo, nil
+	s.cachedOS = osInfo
+	return osInfo, nil
 }
 
 func (s *SSHConnector) ReadFile(ctx context.Context, path string) ([]byte, error) {
@@ -1218,17 +1218,17 @@ func (s *SSHConnector) GetFileOwner(ctx context.Context, path string) (string, s
 }
 
 func (s *SSHConnector) GetOSRelease(ctx context.Context) (map[string]string, error) {
-var content []byte
-var err error
+	var content []byte
+	var err error
 
-for _, path := range osReleasePaths {
-content, err = s.ReadFile(ctx, path)
-if err == nil {
-return parseKeyValues(string(content), "=", "\""), nil
-}
-}
+	for _, path := range osReleasePaths {
+		content, err = s.ReadFile(ctx, path)
+		if err == nil {
+			return parseKeyValues(string(content), "=", "\""), nil
+		}
+	}
 
-return nil, fmt.Errorf("failed to read os-release file from any known location: %w", err)
+	return nil, fmt.Errorf("failed to read os-release file from any known location: %w", err)
 }
 
 var _ Connector = &SSHConnector{}

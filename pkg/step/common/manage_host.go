@@ -168,13 +168,17 @@ func (s *ManageHostsStep) Rollback(ctx runtime.ExecutionContext) error {
 
 	logger.Infof("Rolling back by performing the opposite action: '%s'", oppositeAction)
 
-	rollbackStep := NewManageHostsStepBuilder(
+	rollbackStep, err := NewManageHostsStepBuilder(
 		ctx,
 		fmt.Sprintf("rollback-%s", s.Base.Meta.Name),
 		oppositeAction,
 		s.IP,
 		s.Hostnames...,
 	).Build()
+	if err != nil {
+		logger.Warnf("Failed to build rollback step: %v", err)
+		return err
+	}
 	return rollbackStep.Run(ctx)
 }
 

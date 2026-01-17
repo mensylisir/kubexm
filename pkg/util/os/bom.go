@@ -1,7 +1,6 @@
 package os
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 )
@@ -10,36 +9,36 @@ import (
 type OSComponent string
 
 const (
-	ComponentKubernetes  OSComponent = "kubernetes"
-	ComponentEtcd        OSComponent = "etcd"
-	ComponentDocker      OSComponent = "docker"
-	ComponentContainerd  OSComponent = "containerd"
-	ComponentRunc        OSComponent = "runc"
-	ComponentCriDockerd  OSComponent = "cri-dockerd"
-	ComponentCrio        OSComponent = "crio"
-	ComponentCalico      OSComponent = "calico"
-	ComponentCilium      OSComponent = "cilium"
-	ComponentFlannel     OSComponent = "flannel"
-	ComponentKubeOVN     OSComponent = "kubeovn"
-	ComponentHybridnet   OSComponent = "hybridnet"
-	ComponentMultus      OSComponent = "multus"
-	ComponentHelm        OSComponent = "helm"
-	ComponentOpenEBS     OSComponent = "openebs"
-	ComponentLonghorn    OSComponent = "longhorn"
-	ComponentNFS         OSComponent = "nfs"
-	ComponentPodman      OSComponent = "podman"
-	ComponentKeepalived  OSComponent = "keepalived"
-	ComponentHAProxy     OSComponent = "haproxy"
+	ComponentKubernetes OSComponent = "kubernetes"
+	ComponentEtcd       OSComponent = "etcd"
+	ComponentDocker     OSComponent = "docker"
+	ComponentContainerd OSComponent = "containerd"
+	ComponentRunc       OSComponent = "runc"
+	ComponentCriDockerd OSComponent = "cri-dockerd"
+	ComponentCrio       OSComponent = "crio"
+	ComponentCalico     OSComponent = "calico"
+	ComponentCilium     OSComponent = "cilium"
+	ComponentFlannel    OSComponent = "flannel"
+	ComponentKubeOVN    OSComponent = "kubeovn"
+	ComponentHybridnet  OSComponent = "hybridnet"
+	ComponentMultus     OSComponent = "multus"
+	ComponentHelm       OSComponent = "helm"
+	ComponentOpenEBS    OSComponent = "openebs"
+	ComponentLonghorn   OSComponent = "longhorn"
+	ComponentNFS        OSComponent = "nfs"
+	ComponentPodman     OSComponent = "podman"
+	ComponentKeepalived OSComponent = "keepalived"
+	ComponentHAProxy    OSComponent = "haproxy"
 )
 
 // RuntimeType represents the container runtime type
 type RuntimeType string
 
 const (
-	RuntimeDocker   RuntimeType = "docker"
+	RuntimeDocker     RuntimeType = "docker"
 	RuntimeContainerd RuntimeType = "containerd"
-	RuntimeCrio     RuntimeType = "crio"
-	RuntimePodman   RuntimeType = "podman"
+	RuntimeCrio       RuntimeType = "crio"
+	RuntimePodman     RuntimeType = "podman"
 )
 
 // osComponentBOMs defines the OS-specific package dependencies for each component

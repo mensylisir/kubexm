@@ -176,7 +176,10 @@ var _ step.Step = (*RestoreEtcdStep)(nil)
 //目的: 确保所有 etcd 进程都已停止，以便我们可以安全地替换它们的数据目录。
 //构建与调用:
 //Generated go
-//stopStep := NewStopEtcdStepBuilder(ctx, "stop-etcd-before-restore").Build()
+//stopStep, err := NewStopEtcdStepBuilder(ctx, "stop-etcd-before-restore").Build()
+//if err != nil {
+//	return fmt.Errorf("failed to build stop step: %v", err)
+//}
 //Use code with caution.
 //Go
 //关键参数:
@@ -227,7 +230,10 @@ var _ step.Step = (*RestoreEtcdStep)(nil)
 //目的: 确保恢复后的服务被设置为开机自启。这是一个好习惯，即使它之前可能已经被启用了。
 //构建与调用:
 //Generated go
-//enableStep := NewEnableEtcdStepBuilder(ctx, "enable-etcd-after-restore").Build()
+//enableStep, err := NewEnableEtcdStepBuilder(ctx, "enable-etcd-after-restore").Build()
+//if err != nil {
+//	return fmt.Errorf("failed to build enable step: %v", err)
+//}
 //Use code with caution.
 //Go
 //关键参数: 无需修改，默认值即可。
@@ -235,7 +241,10 @@ var _ step.Step = (*RestoreEtcdStep)(nil)
 //目的: 启动所有 etcd 节点，让它们基于恢复的数据和新配置组成集群。
 //构建与调用:
 //Generated go
-//startStep := NewStartEtcdStepBuilder(ctx, "start-etcd-after-restore").Build()
+//startStep, err := NewStartEtcdStepBuilder(ctx, "start-etcd-after-restore").Build()
+//if err != nil {
+//	return fmt.Errorf("failed to build start step: %v", err)
+//}
 //Use code with caution.
 //Go
 //关键参数: 无需修改，默认值即可。

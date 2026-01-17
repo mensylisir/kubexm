@@ -19,11 +19,12 @@ func (b *Builder[B, T]) this() *B {
 	return any(b).(*B)
 }
 
-func (b *Builder[B, T]) Build() T {
+func (b *Builder[B, T]) Build() (T, error) {
 	if b.Error != nil {
-		panic(fmt.Sprintf("failed to build step: %v", b.Error))
+		var zero T
+		return zero, fmt.Errorf("failed to build step: %v", b.Error)
 	}
-	return b.Step
+	return b.Step, nil
 }
 
 func (b *Builder[B, T]) Err() error {
