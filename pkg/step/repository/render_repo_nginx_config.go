@@ -76,7 +76,6 @@ func (s *RenderRepoNginxConfigStep) renderContent(ctx runtime.ExecutionContext) 
 
 func (s *RenderRepoNginxConfigStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName())
-	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		return err

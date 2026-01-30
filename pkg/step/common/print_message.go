@@ -48,12 +48,10 @@ func (s *PrintMessageStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, 
 	return false, nil
 }
 
-func (s *PrintMessageStep) Run(ctx runtime.ExecutionContext) (*step.StepResult, error) {
-	result := step.NewStepResult(s.Meta().Name, ctx.GetStepExecutionID(), ctx.GetHost())
+func (s *PrintMessageStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	logger.Info(s.Message)
-	result.MarkCompleted("Message printed")
-	return result, nil
+	return nil
 }
 
 func (s *PrintMessageStep) Rollback(ctx runtime.ExecutionContext) error {

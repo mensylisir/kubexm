@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/mensylisir/kubexm/pkg/logger"
-	"github.com/mensylisir/kubexm/pkg/runner/helpers"
+	"github.com/mensylisir/kubexm/pkg/tool"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"os"
 	"path/filepath"
@@ -89,7 +89,7 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 		if execErr != nil {
 			return fmt.Errorf("failed to exec CPU command '%s' on OS %s: %w", cpuCmd, facts.OS.ID, execErr)
 		}
-		cpuQuantity, parseErr := helpers.ParseCPU(string(cpuBytes))
+		cpuQuantity, parseErr := tool.ParseCPU(string(cpuBytes))
 		if parseErr != nil {
 			return fmt.Errorf("failed to parse CPU output '%s': %w", string(cpuBytes), parseErr)
 		}
@@ -120,7 +120,7 @@ func (r *defaultRunner) GatherFacts(ctx context.Context, conn connector.Connecto
 		if memIsKb {
 			memStr += "Ki"
 		}
-		memQuantity, parseErr := helpers.ParseMemory(memStr)
+		memQuantity, parseErr := tool.ParseMemory(memStr)
 		if parseErr != nil {
 			return fmt.Errorf("failed to parse Memory output '%s': %w", memStr, parseErr)
 		}

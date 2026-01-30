@@ -197,7 +197,7 @@ func (r *defaultRunner) ListArchiveContents(ctx context.Context, conn connector.
 				return nil, fmt.Errorf("failed to list contents of '%s' using both 'unzip -Z1' and 'unzip -l': %w", archivePath, err)
 			}
 		} else {
-			return nil, fmt.Errorf("failed to list contents of '%s' using command '%s': %w", archivePath, err)
+			return nil, fmt.Errorf("failed to list contents of '%s' using command '%s': %w", archivePath, cmd, err)
 		}
 	}
 

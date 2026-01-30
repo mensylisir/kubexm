@@ -6,6 +6,10 @@ import (
 	"github.com/mensylisir/kubexm/pkg/connector"
 )
 
+// ===================================================================
+// Step Result Types
+// ===================================================================
+
 // StepStatus represents the execution status of a step
 type StepStatus string
 

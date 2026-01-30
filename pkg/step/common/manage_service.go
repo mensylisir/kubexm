@@ -132,13 +132,12 @@ func (s *ManageServiceStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 	}
 }
 
-func (s *ManageServiceStep) Run(ctx runtime.ExecutionContext) (*step.StepResult, error) {
-	result := step.NewStepResult(s.Meta().Name, ctx.GetStepExecutionID(), ctx.GetHost())
+func (s *ManageServiceStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get connector for host %s: %w", ctx.GetHost().GetName(), err)
+		return fmt.Errorf("failed to get connector for host %s: %w", ctx.GetHost().GetName(), err)
 	}
 
 	var cmd string
@@ -155,34 +154,17 @@ func (s *ManageServiceStep) Run(ctx runtime.ExecutionContext) (*step.StepResult,
 
 	if err != nil {
 		if cmdErr, ok := err.(*connector.CommandError); ok {
-			if s.Action == ActionIsActive {
-				logger.Info("Service is-active check result.", "exit_code", cmdErr.ExitCode, "stdout", string(stdout), "stderr", string(stderr))
-				isActive := cmdErr.ExitCode == 0
-				result.SetMetadata(fmt.Sprintf("service.%s.isActive", s.ServiceName), isActive)
-				result.MarkCompleted(fmt.Sprintf("Service active check: %v", isActive))
-				return result, nil
-			}
-			if s.Action == ActionIsEnabled {
-				logger.Info("Service is-enabled check result.", "exit_code", cmdErr.ExitCode, "stdout", string(stdout), "stderr", string(stderr))
-				isEnabled := strings.TrimSpace(string(stdout)) == "enabled"
-				result.SetMetadata(fmt.Sprintf("service.%s.isEnabled", s.ServiceName), isEnabled)
-				result.MarkCompleted(fmt.Sprintf("Service enabled check: %v", isEnabled))
-				return result, nil
+			if s.Action == ActionIsActive || s.Action == ActionIsEnabled {
+				logger.Info("Service check result.", "exit_code", cmdErr.ExitCode, "stdout", string(stdout), "stderr", string(stderr))
+				return nil
 			}
 		}
 		logger.Error("Systemctl command failed.", "command", cmd, "error", err, "stdout", string(stdout), "stderr", string(stderr))
-		return nil, fmt.Errorf("systemctl command '%s' failed: %w. Stderr: %s", cmd, err, string(stderr))
-	}
-	if s.Action == ActionIsActive {
-		result.SetMetadata(fmt.Sprintf("service.%s.isActive", s.ServiceName), true)
-	}
-	if s.Action == ActionIsEnabled {
-		result.SetMetadata(fmt.Sprintf("service.%s.isEnabled", s.ServiceName), strings.TrimSpace(string(stdout)) == "enabled")
+		return fmt.Errorf("systemctl command '%s' failed: %w. Stderr: %s", cmd, err, string(stderr))
 	}
 
 	logger.Info("Systemctl command executed successfully.", "command", cmd, "stdout", string(stdout))
-	result.MarkCompleted("Service action completed successfully")
-	return result, nil
+	return nil
 }
 
 func (s *ManageServiceStep) Rollback(ctx runtime.ExecutionContext) error {

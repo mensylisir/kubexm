@@ -3,7 +3,6 @@ package util
 import (
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"net"
 	"net/url"
 	"regexp"
@@ -12,8 +11,7 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/reference/docker"
-	"github.com/mensylisir/kubexm/pkg/common"
-	"github.com/pkg/errors"
+	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
 

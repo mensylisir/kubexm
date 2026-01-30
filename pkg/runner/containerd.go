@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/logger"
-	"github.com/mensylisir/kubexm/pkg/runner/helpers"
 	"github.com/mensylisir/kubexm/pkg/templates"
+	"github.com/mensylisir/kubexm/pkg/tool"
 	"github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v3"
 	"os"
@@ -610,7 +610,7 @@ func (r *defaultRunner) ConfigureContainerd(ctx context.Context, conn connector.
 			value = v.Elem().Interface()
 		}
 
-		newBytes, err := helpers.SetTomlValue(modifiedContentBytes, path, value)
+		newBytes, err := tool.SetTomlValue(modifiedContentBytes, path, value)
 		if err != nil {
 			return errors.Wrapf(err, "failed to set containerd config value for path '%s'", path)
 		}
@@ -743,7 +743,7 @@ func (r *defaultRunner) ConfigureCrictl(ctx context.Context, conn connector.Conn
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal new crictl options")
 	}
-	newOptsMap, err := helpers.YamlToMap(newOptsBytes)
+	newOptsMap, err := tool.YamlToMap(newOptsBytes)
 	if err != nil {
 		return errors.Wrap(err, "failed to convert new crictl options to map")
 	}
@@ -753,7 +753,7 @@ func (r *defaultRunner) ConfigureCrictl(ctx context.Context, conn connector.Conn
 	}
 	var modifiedContentBytes = currentContentBytes
 	for k, v := range newOptsMap {
-		newBytes, err := helpers.SetYamlValue(modifiedContentBytes, k, v)
+		newBytes, err := tool.SetYamlValue(modifiedContentBytes, k, v)
 		if err != nil {
 			return errors.Wrapf(err, "failed to set crictl config value for key '%s'", k)
 		}

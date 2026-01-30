@@ -1,14 +1,43 @@
 package util
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/logger"
 	"github.com/mensylisir/kubexm/pkg/runtime"
 	versionutil "k8s.io/apimachinery/pkg/util/version"
 )
+
+type Image struct {
+	RepoAddr          string
+	Namespace         string
+	NamespaceOverride string
+	Repo              string
+	Tag               string
+	Group             string
+	Enable            bool
+	NamespaceRewrite  *v1alpha1.NamespaceRewrite
+	OriginalRepoAddr  string `json:"-"`
+}
+
+type Images struct {
+	Images []Image
+}
+
+func (image Image) ImageRepo() string {
+	if image.Namespace != "" {
+		return fmt.Sprintf("%s/%s", image.Namespace, image.Repo)
+	}
+	return image.Repo
+}
+
+func (image Image) ImageName() string {
+	return fmt.Sprintf("%s:%s", image.ImageRepo(), image.Tag)
+}
 
 var k8sVersionToPauseTag = map[string]string{
 	"1.30.0":  "3.9",
@@ -158,8 +187,8 @@ func GetImages(ctx runtime.Context) []Image {
 	return i.Images
 }
 
-func GetImage(context runtime.Context, name string) Image {
-	kubeVersionStr := context.ClusterConfig.Spec.Kubernetes.Version
+func GetImage(ctx runtime.Context, name string) Image {
+	kubeVersionStr := ctx.ClusterConfig.Spec.Kubernetes.Version
 	currentKubeVersion := versionutil.MustParseSemantic(kubeVersionStr)
 
 	pauseTag := getTagFromVersionMap(kubeVersionStr, k8sVersionToPauseTag)
@@ -167,57 +196,57 @@ func GetImage(context runtime.Context, name string) Image {
 	v1_21_0 := versionutil.MustParseSemantic("v1.21.0")
 	isV1_21_0 := !currentKubeVersion.LessThan(v1_21_0) && !v1_21_0.LessThan(currentKubeVersion)
 	if isV1_21_0 &&
-		context.ClusterConfig.Spec.Kubernetes.ContainerRuntime.Type != "" &&
-		context.ClusterConfig.Spec.Kubernetes.ContainerRuntime.Type != "docker" {
+		ctx.ClusterConfig.Spec.Kubernetes.ContainerRuntime.Type != "" &&
+		ctx.ClusterConfig.Spec.Kubernetes.ContainerRuntime.Type != "docker" {
 		pauseTag = "3.4.1"
 	}
 	logger.Debug("pauseTag: %s, corednsTag: %s", pauseTag, corednsTag)
-	cfg := context.GetClusterConfig().Spec
+	cfg := ctx.GetClusterConfig().Spec
 	privateRegistry := cfg.Registry.MirroringAndRewriting.PrivateRegistry
 
 	logger.Debug("pauseTag: %s, corednsTag: %s", pauseTag, corednsTag)
 
 	ImageList := map[string]Image{
 		"pause":                     {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "pause", Tag: pauseTag, Group: common.RoleKubernetes, Enable: true},
-		"etcd":                      {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "etcd", Tag: common.DefaultEtcdVersion, Group: common.RoleMaster, Enable: strings.EqualFold(context.GetClusterConfig().Spec.Etcd.Type, string(common.EtcdDeploymentTypeKubeadm))},
-		"kube-apiserver":            {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "kube-apiserver", Tag: context.GetClusterConfig().Spec.Kubernetes.Version, Group: common.RoleRegistry, Enable: true},
-		"kube-controller-manager":   {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "kube-controller-manager", Tag: context.GetClusterConfig().Spec.Kubernetes.Version, Group: common.RoleMaster, Enable: true},
-		"kube-scheduler":            {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "kube-scheduler", Tag: context.GetClusterConfig().Spec.Kubernetes.Version, Group: common.RoleMaster, Enable: true},
-		"kube-proxy":                {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "kube-proxy", Tag: context.GetClusterConfig().Spec.Kubernetes.Version, Group: common.RoleKubernetes, Enable: *context.GetClusterConfig().Spec.Kubernetes.KubeProxy.Enable},
+		"etcd":                      {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "etcd", Tag: common.DefaultEtcdVersion, Group: common.RoleMaster, Enable: strings.EqualFold(ctx.GetClusterConfig().Spec.Etcd.Type, string(common.EtcdDeploymentTypeKubeadm))},
+		"kube-apiserver":            {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "kube-apiserver", Tag: ctx.GetClusterConfig().Spec.Kubernetes.Version, Group: common.RoleRegistry, Enable: true},
+		"kube-controller-manager":   {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "kube-controller-manager", Tag: ctx.GetClusterConfig().Spec.Kubernetes.Version, Group: common.RoleMaster, Enable: true},
+		"kube-scheduler":            {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "kube-scheduler", Tag: ctx.GetClusterConfig().Spec.Kubernetes.Version, Group: common.RoleMaster, Enable: true},
+		"kube-proxy":                {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "kube-proxy", Tag: ctx.GetClusterConfig().Spec.Kubernetes.Version, Group: common.RoleKubernetes, Enable: *ctx.GetClusterConfig().Spec.Kubernetes.KubeProxy.Enable},
 		"coredns":                   {RepoAddr: privateRegistry, Namespace: "coredns", Repo: "coredns", Tag: corednsTag, Group: common.RoleKubernetes, Enable: true},
-		"k8s-dns-node-cache":        {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "k8s-dns-node-cache", Tag: "1.22.20", Group: common.RoleKubernetes, Enable: *context.GetClusterConfig().Spec.DNS.NodeLocalDNS.Enabled},
-		"calico-kube-controllers":   {RepoAddr: privateRegistry, Namespace: "calico", Repo: "kube-controllers", Tag: common.DefaultCalicoVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(context.GetClusterConfig().Spec.Network.Plugin, "calico")},
-		"calico-cni":                {RepoAddr: privateRegistry, Namespace: "calico", Repo: "cni", Tag: common.DefaultCalicoVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(context.GetClusterConfig().Spec.Network.Plugin, "calico")},
-		"calico-node":               {RepoAddr: privateRegistry, Namespace: "calico", Repo: "node", Tag: common.DefaultCalicoVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(context.GetClusterConfig().Spec.Network.Plugin, "calico")},
-		"calico-flexvol":            {RepoAddr: privateRegistry, Namespace: "calico", Repo: "pod2daemon-flexvol", Tag: common.DefaultCalicoVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(context.GetClusterConfig().Spec.Network.Plugin, "calico")},
-		"calico-typha":              {RepoAddr: privateRegistry, Namespace: "calico", Repo: "typha", Tag: common.DefaultCalicoVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(context.GetClusterConfig().Spec.Network.Plugin, "calico") && len(context.GetHostsByRole(common.RoleKubernetes)) > 50},
-		"flannel":                   {RepoAddr: privateRegistry, Namespace: "flannel", Repo: "flannel", Tag: common.DefaultFlannelVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(context.GetClusterConfig().Spec.Network.Plugin, "flannel")},
-		"flannel-cni-plugin":        {RepoAddr: privateRegistry, Namespace: "flannel", Repo: "flannel-cni-plugin", Tag: common.DefaultCNIPluginsVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(context.GetClusterConfig().Spec.Network.Plugin, "flannel")},
-		"cilium":                    {RepoAddr: privateRegistry, Namespace: "cilium", Repo: "cilium", Tag: common.DefaultCiliumVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(context.GetClusterConfig().Spec.Network.Plugin, "cilium")},
-		"cilium-operator-generic":   {RepoAddr: privateRegistry, Namespace: "cilium", Repo: "operator-generic", Tag: common.DefaultCiliumVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(context.GetClusterConfig().Spec.Network.Plugin, "cilium")},
-		"hybridnet":                 {RepoAddr: privateRegistry, Namespace: "hybridnetdev", Repo: "hybridnet", Tag: common.DefaulthybridnetVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(context.GetClusterConfig().Spec.Network.Plugin, "hybridnet")},
-		"kubeovn":                   {RepoAddr: privateRegistry, Namespace: "kubeovn", Repo: "kube-ovn", Tag: common.DefaultKubeovnVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(context.GetClusterConfig().Spec.Network.Plugin, "kubeovn")},
-		"multus":                    {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "multus-cni", Tag: common.DefalutMultusVersion, Group: common.RoleKubernetes, Enable: strings.Contains(context.GetClusterConfig().Spec.Network.Plugin, "multus")},
-		"provisioner-localpv":       {RepoAddr: privateRegistry, Namespace: "openebs", Repo: "provisioner-localpv", Tag: "3.3.0", Group: common.RoleWorker, Enable: *context.GetClusterConfig().Spec.Storage.OpenEBS.Enabled && *context.GetClusterConfig().Spec.Storage.OpenEBS.Engines.LocalHostpath.Enabled},
-		"linux-utils":               {RepoAddr: privateRegistry, Namespace: "openebs", Repo: "linux-utils", Tag: "3.3.0", Group: common.RoleWorker, Enable: *context.GetClusterConfig().Spec.Storage.OpenEBS.Enabled && *context.GetClusterConfig().Spec.Storage.OpenEBS.Engines.LocalHostpath.Enabled},
-		"haproxy":                   {RepoAddr: privateRegistry, Namespace: "library", Repo: "haproxy", Tag: "2.9.6-alpine", Group: common.RoleWorker, Enable: context.GetClusterConfig().Spec.ControlPlaneEndpoint.InternalLoadBalancerType == common.InternalLBTypeHAProxy},
-		"nginx":                     {RepoAddr: privateRegistry, Namespace: "library", Repo: "nginx", Tag: "2.9.6-alpine", Group: common.RoleWorker, Enable: context.GetClusterConfig().Spec.ControlPlaneEndpoint.InternalLoadBalancerType == common.InternalLBTypeNginx},
-		"kubevip":                   {RepoAddr: privateRegistry, Namespace: "plndr", Repo: "kube-vip", Tag: "v0.7.2", Group: common.RoleMaster, Enable: context.GetClusterConfig().Spec.ControlPlaneEndpoint.InternalLoadBalancerType == common.InternalLBTypeKubeVIP || context.GetClusterConfig().Spec.ControlPlaneEndpoint.ExternalLoadBalancerType == common.ExternalLBTypeKubeVIP},
-		"kata-deploy":               {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "kata-deploy", Tag: "stable", Group: common.RoleWorker, Enable: *context.GetClusterConfig().Spec.Kubernetes.Addons.Kata.Enabled},
-		"node-feature-discovery":    {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "node-feature-discovery", Tag: "v0.10.0", Group: common.RoleKubernetes, Enable: *context.GetClusterConfig().Spec.Kubernetes.Addons.NodeFeatureDiscovery.Enabled},
-		"nfs-plugin":                {RepoAddr: privateRegistry, Namespace: "sig-storage", Repo: "nfs-plugin", Tag: "3.3.0", Group: common.RoleWorker, Enable: *context.GetClusterConfig().Spec.Storage.NFS.Enabled},
-		"csi-provisioner":           {RepoAddr: privateRegistry, Namespace: "sig-storage", Repo: "csi-provisioner", Tag: "v4.6.0", Group: common.RoleWorker, Enable: *context.GetClusterConfig().Spec.Storage.NFS.Enabled},
-		"csi-node-driver-registrar": {RepoAddr: privateRegistry, Namespace: "sig-storage", Repo: "csi-node-driver-registrar", Tag: "v2.10.0", Group: common.RoleWorker, Enable: *context.GetClusterConfig().Spec.Storage.NFS.Enabled},
-		"csi-resizer":               {RepoAddr: privateRegistry, Namespace: "sig-storage", Repo: "csi-resizer", Tag: "v1.10.0", Group: common.RoleWorker, Enable: *context.GetClusterConfig().Spec.Storage.NFS.Enabled},
-		"csi-snapshotter":           {RepoAddr: privateRegistry, Namespace: "sig-storage", Repo: "csi-snapshotter", Tag: "v7.0.1", Group: common.RoleWorker, Enable: *context.GetClusterConfig().Spec.Storage.NFS.Enabled},
-		"tigera-operator":           {RepoAddr: privateRegistry, Namespace: "tigera", Repo: "operator", Tag: "v1.38.3", Group: common.RoleKubernetes, Enable: context.GetClusterConfig().Spec.Network.Plugin == string(common.CNITypeCalico)},
+		"k8s-dns-node-cache":        {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "k8s-dns-node-cache", Tag: "1.22.20", Group: common.RoleKubernetes, Enable: *ctx.GetClusterConfig().Spec.DNS.NodeLocalDNS.Enabled},
+		"calico-kube-controllers":   {RepoAddr: privateRegistry, Namespace: "calico", Repo: "kube-controllers", Tag: common.DefaultCalicoVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(ctx.GetClusterConfig().Spec.Network.Plugin, "calico")},
+		"calico-cni":                {RepoAddr: privateRegistry, Namespace: "calico", Repo: "cni", Tag: common.DefaultCalicoVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(ctx.GetClusterConfig().Spec.Network.Plugin, "calico")},
+		"calico-node":               {RepoAddr: privateRegistry, Namespace: "calico", Repo: "node", Tag: common.DefaultCalicoVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(ctx.GetClusterConfig().Spec.Network.Plugin, "calico")},
+		"calico-flexvol":            {RepoAddr: privateRegistry, Namespace: "calico", Repo: "pod2daemon-flexvol", Tag: common.DefaultCalicoVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(ctx.GetClusterConfig().Spec.Network.Plugin, "calico")},
+		"calico-typha":              {RepoAddr: privateRegistry, Namespace: "calico", Repo: "typha", Tag: common.DefaultCalicoVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(ctx.GetClusterConfig().Spec.Network.Plugin, "calico") && len(ctx.GetHostsByRole(common.RoleKubernetes)) > 50},
+		"flannel":                   {RepoAddr: privateRegistry, Namespace: "flannel", Repo: "flannel", Tag: common.DefaultFlannelVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(ctx.GetClusterConfig().Spec.Network.Plugin, "flannel")},
+		"flannel-cni-plugin":        {RepoAddr: privateRegistry, Namespace: "flannel", Repo: "flannel-cni-plugin", Tag: common.DefaultCNIPluginsVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(ctx.GetClusterConfig().Spec.Network.Plugin, "flannel")},
+		"cilium":                    {RepoAddr: privateRegistry, Namespace: "cilium", Repo: "cilium", Tag: common.DefaultCiliumVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(ctx.GetClusterConfig().Spec.Network.Plugin, "cilium")},
+		"cilium-operator-generic":   {RepoAddr: privateRegistry, Namespace: "cilium", Repo: "operator-generic", Tag: common.DefaultCiliumVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(ctx.GetClusterConfig().Spec.Network.Plugin, "cilium")},
+		"hybridnet":                 {RepoAddr: privateRegistry, Namespace: "hybridnetdev", Repo: "hybridnet", Tag: common.DefaulthybridnetVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(ctx.GetClusterConfig().Spec.Network.Plugin, "hybridnet")},
+		"kubeovn":                   {RepoAddr: privateRegistry, Namespace: "kubeovn", Repo: "kube-ovn", Tag: common.DefaultKubeovnVersion, Group: common.RoleKubernetes, Enable: strings.EqualFold(ctx.GetClusterConfig().Spec.Network.Plugin, "kubeovn")},
+		"multus":                    {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "multus-cni", Tag: common.DefalutMultusVersion, Group: common.RoleKubernetes, Enable: strings.Contains(ctx.GetClusterConfig().Spec.Network.Plugin, "multus")},
+		"provisioner-localpv":       {RepoAddr: privateRegistry, Namespace: "openebs", Repo: "provisioner-localpv", Tag: "3.3.0", Group: common.RoleWorker, Enable: *ctx.GetClusterConfig().Spec.Storage.OpenEBS.Enabled && *ctx.GetClusterConfig().Spec.Storage.OpenEBS.Engines.LocalHostpath.Enabled},
+		"linux-utils":               {RepoAddr: privateRegistry, Namespace: "openebs", Repo: "linux-utils", Tag: "3.3.0", Group: common.RoleWorker, Enable: *ctx.GetClusterConfig().Spec.Storage.OpenEBS.Enabled && *ctx.GetClusterConfig().Spec.Storage.OpenEBS.Engines.LocalHostpath.Enabled},
+		"haproxy":                   {RepoAddr: privateRegistry, Namespace: "library", Repo: "haproxy", Tag: "2.9.6-alpine", Group: common.RoleWorker, Enable: ctx.GetClusterConfig().Spec.ControlPlaneEndpoint.InternalLoadBalancerType == common.InternalLBTypeHAProxy},
+		"nginx":                     {RepoAddr: privateRegistry, Namespace: "library", Repo: "nginx", Tag: "2.9.6-alpine", Group: common.RoleWorker, Enable: ctx.GetClusterConfig().Spec.ControlPlaneEndpoint.InternalLoadBalancerType == common.InternalLBTypeNginx},
+		"kubevip":                   {RepoAddr: privateRegistry, Namespace: "plndr", Repo: "kube-vip", Tag: "v0.7.2", Group: common.RoleMaster, Enable: ctx.GetClusterConfig().Spec.ControlPlaneEndpoint.InternalLoadBalancerType == common.InternalLBTypeKubeVIP || ctx.GetClusterConfig().Spec.ControlPlaneEndpoint.ExternalLoadBalancerType == common.ExternalLBTypeKubeVIP},
+		"kata-deploy":               {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "kata-deploy", Tag: "stable", Group: common.RoleWorker, Enable: *ctx.GetClusterConfig().Spec.Kubernetes.Addons.Kata.Enabled},
+		"node-feature-discovery":    {RepoAddr: privateRegistry, Namespace: common.DefaultKubeImageNamespace, Repo: "node-feature-discovery", Tag: "v0.10.0", Group: common.RoleKubernetes, Enable: *ctx.GetClusterConfig().Spec.Kubernetes.Addons.NodeFeatureDiscovery.Enabled},
+		"nfs-plugin":                {RepoAddr: privateRegistry, Namespace: "sig-storage", Repo: "nfs-plugin", Tag: "3.3.0", Group: common.RoleWorker, Enable: *ctx.GetClusterConfig().Spec.Storage.NFS.Enabled},
+		"csi-provisioner":           {RepoAddr: privateRegistry, Namespace: "sig-storage", Repo: "csi-provisioner", Tag: "v4.6.0", Group: common.RoleWorker, Enable: *ctx.GetClusterConfig().Spec.Storage.NFS.Enabled},
+		"csi-node-driver-registrar": {RepoAddr: privateRegistry, Namespace: "sig-storage", Repo: "csi-node-driver-registrar", Tag: "v2.10.0", Group: common.RoleWorker, Enable: *ctx.GetClusterConfig().Spec.Storage.NFS.Enabled},
+		"csi-resizer":               {RepoAddr: privateRegistry, Namespace: "sig-storage", Repo: "csi-resizer", Tag: "v1.10.0", Group: common.RoleWorker, Enable: *ctx.GetClusterConfig().Spec.Storage.NFS.Enabled},
+		"csi-snapshotter":           {RepoAddr: privateRegistry, Namespace: "sig-storage", Repo: "csi-snapshotter", Tag: "v7.0.1", Group: common.RoleWorker, Enable: *ctx.GetClusterConfig().Spec.Storage.NFS.Enabled},
+		"tigera-operator":           {RepoAddr: privateRegistry, Namespace: "tigera", Repo: "operator", Tag: "v1.38.3", Group: common.RoleKubernetes, Enable: ctx.GetClusterConfig().Spec.Network.Plugin == string(common.CNITypeCalico)},
 	}
 
 	image := ImageList[name]
-	if context.ClusterConfig.Spec.Registry.MirroringAndRewriting.NamespaceOverride != "" {
-		image.NamespaceOverride = context.ClusterConfig.Spec.Registry.MirroringAndRewriting.NamespaceOverride
-	} else if context.ClusterConfig.Spec.Registry.MirroringAndRewriting.NamespaceRewrite != nil {
-		image.NamespaceRewrite = context.ClusterConfig.Spec.Registry.MirroringAndRewriting.NamespaceRewrite
+	if ctx.ClusterConfig.Spec.Registry.MirroringAndRewriting.NamespaceOverride != "" {
+		image.NamespaceOverride = ctx.ClusterConfig.Spec.Registry.MirroringAndRewriting.NamespaceOverride
+	} else if ctx.ClusterConfig.Spec.Registry.MirroringAndRewriting.NamespaceRewrite != nil {
+		image.NamespaceRewrite = ctx.ClusterConfig.Spec.Registry.MirroringAndRewriting.NamespaceRewrite
 	}
 	return image
 }

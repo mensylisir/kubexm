@@ -1290,7 +1290,7 @@ func (r *defaultRunner) KubectlCreateClusterRoleBinding(ctx context.Context, con
 		if len(saParts) != 2 {
 			return errors.New("serviceAccount for ClusterRoleBinding must be in format 'namespace:name'")
 		}
-		cmdArgs = append(cmdArgs, fmt.Sprintf("--serviceaccount=%s:%s", saParts[0]), saParts[1])
+		cmdArgs = append(cmdArgs, fmt.Sprintf("--serviceaccount=%s:%s", saParts[0], saParts[1]))
 	}
 	for _, u := range users {
 		cmdArgs = append(cmdArgs, fmt.Sprintf("--user=%s", u))

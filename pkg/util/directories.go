@@ -1,22 +1,12 @@
 package util
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/pkg/errors"
 )
-
-func IsInStringSlice(slice []string, str string) bool {
-	for _, item := range slice {
-		if item == str {
-			return true
-		}
-	}
-	return false
-}
 
 func GenerateWorkDir() (string, error) {
 	currentDir, err := filepath.Abs(filepath.Dir(os.Args[0]))
@@ -43,23 +33,4 @@ func GenerateHostWorkDir(clusterName string, workdir string, hostName string) (s
 	}
 
 	return hostWorkDir, nil
-}
-
-func CreateDir(path string) error {
-	fileInfo, err := os.Stat(path)
-	if err == nil {
-		if fileInfo.IsDir() {
-			return nil // Already exists as a directory, success
-		}
-		return fmt.Errorf("path %s exists but is not a directory", path)
-	}
-
-	if os.IsNotExist(err) {
-		if mkdirErr := os.MkdirAll(path, 0755); mkdirErr != nil {
-			return fmt.Errorf("failed to create directory %s: %w", path, mkdirErr)
-		}
-		return nil
-	}
-
-	return fmt.Errorf("failed to stat path %s: %w", path, err)
 }
