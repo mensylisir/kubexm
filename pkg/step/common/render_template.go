@@ -146,8 +146,7 @@ func (s *RenderTemplateStep) Precheck(ctx runtime.ExecutionContext) (isDone bool
 	return false, nil
 }
 
-func (s *RenderTemplateStep) Run(ctx runtime.ExecutionContext) (*step.StepResult, error) {
-	result := step.NewStepResult(s.Meta().Name, ctx.GetStepExecutionID(), ctx.GetHost())
+func (s *RenderTemplateStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 
 	logger.Info("Rendering template.", "destination", s.RemoteDestPath)
@@ -163,13 +162,13 @@ func (s *RenderTemplateStep) Run(ctx runtime.ExecutionContext) (*step.StepResult
 
 	renderedContent, err := util.RenderTemplate(s.TemplateContent, data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to render template for %s: %w", s.RemoteDestPath, err)
+		return fmt.Errorf("failed to render template for %s: %w", s.RemoteDestPath, err)
 	}
 
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		return nil, fmt.Errorf("run: failed to get connector: %w", err)
+		return fmt.Errorf("run: failed to get connector: %w", err)
 	}
 
 	logger.Info("Writing rendered template to remote host.", "path", s.RemoteDestPath, "permissions", s.Permissions, "sudo", s.Sudo)
@@ -179,12 +178,11 @@ func (s *RenderTemplateStep) Run(ctx runtime.ExecutionContext) (*step.StepResult
 		if errors.As(err, &cmdErr) {
 			logger.Error(err, "Failed to write rendered template to remote host.", "stderr", cmdErr.Stderr, "stdout", cmdErr.Stdout)
 		}
-		return nil, fmt.Errorf("failed to write rendered template to %s: %w", s.RemoteDestPath, err)
+		return fmt.Errorf("failed to write rendered template to %s: %w", s.RemoteDestPath, err)
 	}
 
 	logger.Info("Template rendered and written successfully.")
-	result.MarkCompleted("Template rendered and written successfully")
-	return result, nil
+	return nil
 }
 
 func (s *RenderTemplateStep) Rollback(ctx runtime.ExecutionContext) error {

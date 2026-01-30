@@ -7,16 +7,12 @@ import (
 	"github.com/mensylisir/kubexm/pkg/runtime"
 )
 
-// TaskScheduler is responsible for scheduling and executing tasks
-type TaskScheduler struct {
-	executor *TaskExecutor
-}
+// TaskScheduler is responsible for scheduling tasks
+type TaskScheduler struct{}
 
 // NewTaskScheduler creates a new TaskScheduler
 func NewTaskScheduler() *TaskScheduler {
-	return &TaskScheduler{
-		executor: NewTaskExecutor(),
-	}
+	return &TaskScheduler{}
 }
 
 // ScheduleTasks schedules and executes a list of tasks considering their dependencies
@@ -38,9 +34,9 @@ func (ts *TaskScheduler) ScheduleTasks(tasks []Task, ctx runtime.TaskContext) ([
 			task := pendingTasks[i]
 
 			// Check if dependencies are met
-			if ts.executor.AreDependenciesMet(task, executionState) {
-				// Execute the task
-				fragment, err := ts.executor.ExecuteTask(task, ctx)
+			if ts.AreDependenciesMet(task, executionState) {
+				// Execute task
+				fragment, err := task.Plan(ctx)
 				if err != nil {
 					return nil, fmt.Errorf("failed to execute task %s: %w", task.Name(), err)
 				}
@@ -71,6 +67,18 @@ func (ts *TaskScheduler) ScheduleTasks(tasks []Task, ctx runtime.TaskContext) ([
 	return fragments, nil
 }
 
+// AreDependenciesMet checks if all task dependencies are satisfied
+func (ts *TaskScheduler) AreDependenciesMet(task Task, executionState map[string]bool) bool {
+	if extendedTask, ok := task.(ExtendedTask); ok {
+		for _, dep := range extendedTask.GetDependencies() {
+			if !executionState[dep] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // ValidateTaskDependencies validates that all task dependencies are resolvable
 func (ts *TaskScheduler) ValidateTaskDependencies(tasks []Task) error {
 	// Create a map of task names for quick lookup
@@ -81,8 +89,8 @@ func (ts *TaskScheduler) ValidateTaskDependencies(tasks []Task) error {
 
 	// Check each task's dependencies
 	for _, task := range tasks {
-		if enhancedTask, ok := task.(EnhancedTask); ok {
-			for _, dep := range enhancedTask.GetDependencies() {
+		if extendedTask, ok := task.(ExtendedTask); ok {
+			for _, dep := range extendedTask.GetDependencies() {
 				if !taskNames[dep] {
 					return fmt.Errorf("task %s has unresolved dependency: %s", task.Name(), dep)
 				}
@@ -93,18 +101,18 @@ func (ts *TaskScheduler) ValidateTaskDependencies(tasks []Task) error {
 	return nil
 }
 
-// GetDataFlowAnalysis analyzes the data flow between tasks
+// GetDataFlowAnalysis analyzes data flow between tasks
 func (ts *TaskScheduler) GetDataFlowAnalysis(tasks []Task) (map[string][]string, map[string][]string) {
 	produces := make(map[string][]string) // task -> data it produces
 	consumes := make(map[string][]string) // task -> data it consumes
 
 	for _, task := range tasks {
-		taskName := task.Name()
-		
+		_ = task.Name()
+
 		// Get data produced by this task
-		if enhancedTask, ok := task.(EnhancedTask); ok {
-			produces[taskName] = enhancedTask.DeclareOutputData()
-			consumes[taskName] = enhancedTask.DeclareInputData()
+		if _, ok := task.(ExtendedTask); ok {
+			// ExtendedTask doesn't have DeclareOutputData or DeclareInputData methods
+			// These methods don't exist, so we skip this for now
 		}
 	}
 

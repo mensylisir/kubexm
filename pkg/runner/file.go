@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/runner/helpers"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,13 +17,14 @@ func (r *defaultRunner) Upload(ctx context.Context, conn connector.Connector, sr
 	if conn == nil {
 		return fmt.Errorf("connector cannot be nil")
 	}
-	info, err := os.Stat(srcPath)
+	_, err := os.Stat(srcPath)
 	if err != nil {
 		return fmt.Errorf("failed to access source path '%s': %w", srcPath, err)
 	}
 
-	transferOptions := helpers.GetFileMetadata(info, r.logger)
-	transferOptions.Sudo = sudo
+	transferOptions := &connector.FileTransferOptions{
+		Sudo: sudo,
+	}
 	connCfg := conn.GetConnectionConfig()
 
 	err = conn.Upload(ctx, srcPath, destPath, transferOptions)

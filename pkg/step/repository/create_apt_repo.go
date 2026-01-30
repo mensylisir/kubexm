@@ -39,8 +39,6 @@ func (s *CreateAptRepoStep) Meta() *spec.StepMeta {
 }
 
 func (s *CreateAptRepoStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	// The operation is idempotent, so we just check for the command's existence.
-	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {

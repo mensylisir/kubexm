@@ -124,19 +124,17 @@ func (s *DownloadEtcdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, 
 	return false, nil
 }
 
-func (s *DownloadEtcdStep) Run(ctx runtime.ExecutionContext) (*step.StepResult, error) {
-	result := step.NewStepResult(s.Meta().Name, ctx.GetStepExecutionID(), ctx.GetHost())
+func (s *DownloadEtcdStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
 
 	requiredArchs, err := s.getRequiredArchs(ctx)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if len(requiredArchs) == 0 {
 		logger.Info("No hosts require etcd binaries in this cluster configuration. Skipping download.")
-		result.MarkSkipped("No hosts require etcd binaries")
-		return result, nil
+		return nil
 	}
 
 	provider := binary.NewBinaryProvider(ctx)
@@ -144,7 +142,7 @@ func (s *DownloadEtcdStep) Run(ctx runtime.ExecutionContext) (*step.StepResult, 
 	for arch := range requiredArchs {
 		binaryInfo, err := provider.GetBinary(binary.ComponentEtcd, arch)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get etcd info for arch %s: %w", arch, err)
+			return fmt.Errorf("failed to get etcd info for arch %s: %w", arch, err)
 		}
 		if binaryInfo == nil {
 			continue
@@ -160,13 +158,12 @@ func (s *DownloadEtcdStep) Run(ctx runtime.ExecutionContext) (*step.StepResult, 
 		}
 
 		if err := s.downloadFile(ctx, binaryInfo); err != nil {
-			return nil, fmt.Errorf("failed to download etcd for arch %s: %w", arch, err)
+			return fmt.Errorf("failed to download etcd for arch %s: %w", arch, err)
 		}
 	}
 
 	logger.Info("All required etcd binaries have been downloaded successfully.")
-	result.MarkCompleted("All required etcd binaries have been downloaded successfully")
-	return result, nil
+	return nil
 }
 
 func (s *DownloadEtcdStep) downloadFile(ctx runtime.ExecutionContext, binaryInfo *binary.Binary) error {

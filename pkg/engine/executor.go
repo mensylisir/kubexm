@@ -297,7 +297,7 @@ func (e *dagExecutor) runStepOnHost(ctx runtime.ExecutionContext, s step.Step) *
 
 	hr.Status = plan.StatusRunning
 	log.Info("Running step...")
-	stepRes, runErr := s.Run(ctx)
+	runErr := s.Run(ctx)
 	hr.EndTime = time.Now()
 
 	if runErr != nil {
@@ -320,23 +320,8 @@ func (e *dagExecutor) runStepOnHost(ctx runtime.ExecutionContext, s step.Step) *
 		return hr
 	}
 
-	if stepRes != nil {
-		hr.Message = stepRes.Message
-		hr.Metadata = stepRes.Metadata
-		switch stepRes.Status {
-		case step.StepStatusCompleted:
-			hr.Status = plan.StatusSuccess
-		case step.StepStatusSkipped:
-			hr.Status = plan.StatusSkipped
-		case step.StepStatusFailed:
-			hr.Status = plan.StatusFailed
-		default:
-			hr.Status = plan.StatusSuccess
-		}
-	} else {
-		hr.Status = plan.StatusSuccess
-		hr.Message = "Step executed successfully (no result returned)."
-	}
+	hr.Status = plan.StatusSuccess
+	hr.Message = "Step executed successfully."
 
 	log.Info("Step executed successfully.", "status", hr.Status)
 	return hr

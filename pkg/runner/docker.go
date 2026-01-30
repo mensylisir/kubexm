@@ -6,10 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/mensylisir/kubexm/pkg/common"
-	"github.com/mensylisir/kubexm/pkg/logger"
-	"github.com/mensylisir/kubexm/pkg/runner/helpers"
-	"github.com/mensylisir/kubexm/pkg/templates"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,9 +15,12 @@ import (
 	"time"
 
 	"github.com/Masterminds/semver/v3"
-	"github.com/pkg/errors"
-
+	"github.com/mensylisir/kubexm/pkg/common"
 	"github.com/mensylisir/kubexm/pkg/connector"
+	"github.com/mensylisir/kubexm/pkg/logger"
+	"github.com/mensylisir/kubexm/pkg/templates"
+	"github.com/mensylisir/kubexm/pkg/tool"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -131,14 +130,14 @@ func (r *defaultRunner) ConfigureDockerDaemon(ctx context.Context, conn connecto
 	var modifiedContentBytes = currentContentBytes
 
 	newOptsBytes, _ := json.Marshal(newOpts)
-	newOptsMap, _ := helpers.JsonToMap(newOptsBytes)
+	newOptsMap, _ := tool.JsonToMap(newOptsBytes)
 
 	if len(newOptsMap) == 0 {
 		return nil
 	}
 
 	for key, value := range newOptsMap {
-		newBytes, err := helpers.SetJsonValue(modifiedContentBytes, key, value)
+		newBytes, err := tool.SetJsonValue(modifiedContentBytes, key, value)
 		if err != nil {
 			return errors.Wrapf(err, "failed to set docker daemon config value for key '%s'", key)
 		}

@@ -74,31 +74,28 @@ func (s *InstallPackagesStep) Precheck(ctx runtime.ExecutionContext) (isDone boo
 	return false, nil
 }
 
-func (s *InstallPackagesStep) Run(ctx runtime.ExecutionContext) (*step.StepResult, error) {
-	result := step.NewStepResult(s.Meta().Name, ctx.GetStepExecutionID(), ctx.GetHost())
+func (s *InstallPackagesStep) Run(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	if len(s.packagesToInstall) == 0 {
 		logger.Info("No new packages to install.")
-		result.MarkSkipped("No new packages to install")
-		return result, nil
+		return nil
 	}
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get connector for host %s: %w", ctx.GetHost().GetName(), err)
+		return fmt.Errorf("failed to get connector for host %s: %w", ctx.GetHost().GetName(), err)
 	}
 	facts, err := ctx.GetHostFacts(ctx.GetHost())
 	if err != nil {
-		return nil, fmt.Errorf("failed to get host facts for %s: %w", ctx.GetHost().GetName(), err)
+		return fmt.Errorf("failed to get host facts for %s: %w", ctx.GetHost().GetName(), err)
 	}
 
 	logger.Info("Installing packages.", "packages", s.packagesToInstall)
 	err = runnerSvc.InstallPackages(ctx.GoContext(), conn, facts, s.packagesToInstall...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to install packages %v on %s: %w", s.packagesToInstall, ctx.GetHost().GetName(), err)
+		return fmt.Errorf("failed to install packages %v on %s: %w", s.packagesToInstall, ctx.GetHost().GetName(), err)
 	}
-	result.MarkCompleted(fmt.Sprintf("Installed packages: %v", s.packagesToInstall))
-	return result, nil
+	return nil
 }
 
 func (s *InstallPackagesStep) Rollback(ctx runtime.ExecutionContext) error {

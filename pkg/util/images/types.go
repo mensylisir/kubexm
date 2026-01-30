@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"path"
 
-	"github.com/mensylisir/kubexm/pkg/types"
+	"github.com/mensylisir/kubexm/pkg/apis/kubexms/v1alpha1"
 )
 
 type Image struct {
@@ -13,15 +13,14 @@ type Image struct {
 	OriginalRepo      string // 原始仓库名, e.g., "node"
 	OriginalTag       string // 原始标签, e.g., "v3.28.0"
 
-	// --- 目标信息 (用于私有仓库) ---
 	privateRepoAddr   string
 	namespaceOverride string
-	namespaceRewrite  *types.NamespaceRewrite
+	namespaceRewrite  *v1alpha1.NamespaceRewrite
 }
 
 // NewImage 创建一个新的 Image 实例。
 // 这是创建 Image 对象的唯一入口，确保了所有必要信息都被填充。
-func newImage(bom *ImageBOM, cfg *types.RegistryMirroringAndRewriting) *Image {
+func newImage(bom *ImageBOM, cfg *v1alpha1.RegistryMirroringAndRewriting) *Image {
 	return &Image{
 		OriginalRepoAddr:  bom.RepoAddr,
 		OriginalNamespace: bom.Namespace,

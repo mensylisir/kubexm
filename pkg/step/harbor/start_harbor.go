@@ -21,7 +21,7 @@ type InstallAndStartHarborStepBuilder struct {
 }
 
 func NewInstallAndStartHarborStepBuilder(ctx runtime.ExecutionContext, instanceName string) *InstallAndStartHarborStepBuilder {
-	provider := binary.NewBinaryProvider(&ctx)
+	provider := binary.NewBinaryProvider(ctx)
 	const representativeArch = "amd64"
 	binaryInfo, err := provider.GetBinary(binary.ComponentHarbor, representativeArch)
 
