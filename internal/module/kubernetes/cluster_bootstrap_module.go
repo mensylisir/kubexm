@@ -1,0 +1,43 @@
+package kubernetes
+
+import (
+	"github.com/mensylisir/kubexm/internal/module"
+	"github.com/mensylisir/kubexm/internal/plan"
+	"github.com/mensylisir/kubexm/internal/runtime"
+	"github.com/mensylisir/kubexm/internal/task"
+	// kubernetestask "github.com/mensylisir/kubexm/internal/task/kubernetes"
+)
+
+// ClusterBootstrapModule groups tasks for bootstrapping the Kubernetes cluster
+// using kubeadm (init master, join other masters, join workers).
+type ClusterBootstrapModule struct {
+	module.BaseModule
+}
+
+// NewClusterBootstrapModule creates a new ClusterBootstrapModule.
+func NewClusterBootstrapModule() module.Module {
+	return &ClusterBootstrapModule{
+		BaseModule: module.NewBaseModule(
+			"KubernetesClusterBootstrap",
+			[]task.Task{
+				// kubernetestask.NewInitMasterTask(),
+				// kubernetestask.NewJoinMastersTask(),
+				// kubernetestask.NewJoinWorkerNodesTask(),
+			},
+		),
+	}
+}
+
+// Plan orchestrates the planning of tasks within this module.
+func (m *ClusterBootstrapModule) Plan(ctx runtime.ModuleContext) (*plan.ExecutionFragment, error) {
+	// 1. Instantiate tasks: InitMaster, JoinMasters, JoinWorkers.
+	// 2. Plan each task.
+	// 3. Link task fragments:
+	//    - JoinMasters depends on InitMaster.
+	//    - JoinWorkers depends on InitMaster.
+	//    - JoinMasters and JoinWorkers can run in parallel after InitMaster.
+	// 4. This module typically depends on CoreComponentsModule (runtime, etcd, k8s binaries ready).
+	return plan.NewEmptyFragment(m.Name()), nil // Placeholder
+}
+
+var _ module.Module = (*ClusterBootstrapModule)(nil)

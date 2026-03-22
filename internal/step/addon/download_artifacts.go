@@ -1,0 +1,240 @@
+package addon
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/mensylisir/kubexm/internal/apis/kubexms/v1alpha1"
+	"github.com/mensylisir/kubexm/internal/runtime"
+	"github.com/mensylisir/kubexm/internal/spec"
+	"github.com/mensylisir/kubexm/internal/step"
+	"github.com/mensylisir/kubexm/internal/types"
+	"github.com/pkg/errors"
+)
+
+type artifactToDownload struct {
+	LocalPath    string
+	IsChart      bool
+	ChartRepoURL string
+	ChartName    string
+	ChartVersion string
+
+	IsYaml  bool
+	YamlURL string
+}
+
+type DownloadAddonArtifactsStep struct {
+	step.Base
+	AddonName      string
+	HelmBinaryPath string
+}
+
+type DownloadAddonArtifactsStepBuilder struct {
+	step.Builder[DownloadAddonArtifactsStepBuilder, *DownloadAddonArtifactsStep]
+}
+
+func NewDownloadAddonArtifactsStepBuilder(ctx runtime.ExecutionContext, addonName string) *DownloadAddonArtifactsStepBuilder {
+	var targetAddon *v1alpha1.Addon
+	for i := range ctx.GetClusterConfig().Spec.Addons {
+		if ctx.GetClusterConfig().Spec.Addons[i].Name == addonName {
+			targetAddon = &ctx.GetClusterConfig().Spec.Addons[i]
+			break
+		}
+	}
+	if targetAddon == nil || (targetAddon.Enabled != nil && !*targetAddon.Enabled) {
+		return nil
+	}
+
+	s := &DownloadAddonArtifactsStep{
+		AddonName: addonName,
+	}
+	s.Base.Meta.Name = fmt.Sprintf("DownloadAddonArtifacts-%s", addonName)
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Download all artifacts for addon '%s'", s.Base.Meta.Name, addonName)
+	s.Base.Sudo = false
+	s.Base.IgnoreError = false
+	s.Base.Timeout = 10 * time.Minute
+
+	b := new(DownloadAddonArtifactsStepBuilder).Init(s)
+	return b
+}
+
+func (s *DownloadAddonArtifactsStep) Meta() *spec.StepMeta {
+	return &s.Base.Meta
+}
+
+func (s *DownloadAddonArtifactsStep) getArtifactsToDownload(ctx runtime.ExecutionContext) ([]artifactToDownload, error) {
+	var artifacts []artifactToDownload
+	cfg := ctx.GetClusterConfig()
+
+	var targetAddon *v1alpha1.Addon
+	for i := range cfg.Spec.Addons {
+		if cfg.Spec.Addons[i].Name == s.AddonName {
+			targetAddon = &cfg.Spec.Addons[i]
+			break
+		}
+	}
+	if targetAddon == nil {
+		return nil, fmt.Errorf("addon '%s' not found in cluster spec", s.AddonName)
+	}
+
+	for i, source := range targetAddon.Sources {
+		if source.Chart != nil {
+			chart := source.Chart
+			chartFileName := fmt.Sprintf("%s-%s.tgz", chart.Name, chart.Version)
+			localPath := filepath.Join(ctx.GetGlobalWorkDir(), "helm", cfg.Spec.Kubernetes.Version, s.AddonName, chartFileName)
+			artifacts = append(artifacts, artifactToDownload{
+				LocalPath:    localPath,
+				IsChart:      true,
+				ChartRepoURL: chart.Repo,
+				ChartName:    chart.Name,
+				ChartVersion: chart.Version,
+			})
+		}
+		if source.Yaml != nil {
+			for j, yamlPath := range source.Yaml.Path {
+				if _, err := url.ParseRequestURI(yamlPath); err == nil {
+					fileName := filepath.Base(yamlPath)
+					localPath := filepath.Join(ctx.GetGlobalWorkDir(), "addons", s.AddonName, fmt.Sprintf("source-%d", i), fmt.Sprintf("yaml-%d-%s", j, fileName))
+					artifacts = append(artifacts, artifactToDownload{
+						LocalPath: localPath,
+						IsYaml:    true,
+						YamlURL:   yamlPath,
+					})
+				}
+			}
+		}
+	}
+	return artifacts, nil
+}
+
+func (s *DownloadAddonArtifactsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Precheck")
+
+	helmPath, err := exec.LookPath("helm")
+	if err != nil {
+		return false, errors.Wrap(err, "helm command not found in local PATH, please install it first")
+	}
+	s.HelmBinaryPath = helmPath
+
+	artifacts, err := s.getArtifactsToDownload(ctx)
+	if err != nil {
+		logger.Info("Skipping step, could not determine artifacts.", "error", err)
+		return true, nil
+	}
+
+	if len(artifacts) == 0 {
+		logger.Info("No remote artifacts to download for this addon. Step is complete.")
+		return true, nil
+	}
+
+	for _, artifact := range artifacts {
+		if _, err := os.Stat(artifact.LocalPath); os.IsNotExist(err) {
+			logger.Debug("Artifact does not exist. Download is required.", "path", artifact.LocalPath)
+			return false, nil
+		}
+	}
+
+	logger.Info("All required artifacts for this addon already exist locally. Step is complete.")
+	return true, nil
+}
+
+func (s *DownloadAddonArtifactsStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, error) {
+	result := types.NewStepResult(s.Base.Meta.Name, ctx.GetStepExecutionID(), ctx.GetHost())
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Run")
+
+	artifacts, err := s.getArtifactsToDownload(ctx)
+	if err != nil {
+		result.MarkFailed(err, "failed to get artifacts to download")
+		return result, err
+	}
+
+	for _, artifact := range artifacts {
+		if _, err := os.Stat(artifact.LocalPath); err == nil {
+			logger.Info("Artifact already exists, skipping download.", "path", artifact.LocalPath)
+			continue
+		}
+
+		destDir := filepath.Dir(artifact.LocalPath)
+		if err := os.MkdirAll(destDir, 0755); err != nil {
+			result.MarkFailed(err, fmt.Sprintf("failed to create destination directory %s", destDir))
+			return result, err
+		}
+
+		if artifact.IsChart {
+			repoName := s.AddonName
+			repoURL := artifact.ChartRepoURL
+			fullName := fmt.Sprintf("%s/%s", repoName, artifact.ChartName)
+
+			logger.Info("Adding Helm repo.", "name", repoName, "url", repoURL)
+			repoAddCmd := exec.Command(s.HelmBinaryPath, "repo", "add", repoName, repoURL, "--force-update")
+			if output, err := repoAddCmd.CombinedOutput(); err != nil && !strings.Contains(string(output), "already exists") {
+				result.MarkFailed(err, fmt.Sprintf("failed to add helm repo '%s'", repoName))
+				return result, err
+			}
+
+			logger.Info("Pulling chart.", "chart", fullName, "version", artifact.ChartVersion, "destination", destDir)
+			pullCmd := exec.Command(s.HelmBinaryPath, "pull", fullName, "--version", artifact.ChartVersion, "--destination", destDir)
+			if _, err := pullCmd.CombinedOutput(); err != nil {
+				result.MarkFailed(err, "failed to pull chart")
+				return result, err
+			}
+		}
+
+		if artifact.IsYaml {
+			logger.Info("Downloading YAML.", "from", artifact.YamlURL, "to", artifact.LocalPath)
+			resp, err := http.Get(artifact.YamlURL)
+			if err != nil {
+				result.MarkFailed(err, fmt.Sprintf("failed to download yaml from %s", artifact.YamlURL))
+				return result, err
+			}
+			defer resp.Body.Close()
+
+			out, err := os.Create(artifact.LocalPath)
+			if err != nil {
+				result.MarkFailed(err, fmt.Sprintf("failed to create local file %s", artifact.LocalPath))
+				return result, err
+			}
+			defer out.Close()
+
+			_, err = io.Copy(out, resp.Body)
+			if err != nil {
+				result.MarkFailed(err, "failed to write yaml content to file")
+				return result, err
+			}
+		}
+	}
+
+	logger.Info("All required addon artifacts have been downloaded successfully.")
+	result.MarkCompleted("all artifacts downloaded successfully")
+	return result, nil
+}
+
+func (s *DownloadAddonArtifactsStep) Rollback(ctx runtime.ExecutionContext) error {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "phase", "Rollback")
+
+	artifacts, err := s.getArtifactsToDownload(ctx)
+	if err != nil {
+		logger.Info("Skipping rollback as artifacts could not be determined.", "error", err)
+		return nil
+	}
+
+	for _, artifact := range artifacts {
+		if _, statErr := os.Stat(artifact.LocalPath); statErr == nil {
+			logger.Warn("Rolling back by deleting locally downloaded artifact.", "path", artifact.LocalPath)
+			if err := os.Remove(artifact.LocalPath); err != nil {
+				logger.Error(err, "Failed to remove file during rollback.", "path", artifact.LocalPath)
+			}
+		}
+	}
+
+	return nil
+}
+
+var _ step.Step = (*DownloadAddonArtifactsStep)(nil)

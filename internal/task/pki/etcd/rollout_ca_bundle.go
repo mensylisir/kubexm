@@ -1,0 +1,112 @@
+package etcd
+
+import (
+	"fmt"
+	"github.com/mensylisir/kubexm/internal/step/etcd"
+
+	"github.com/mensylisir/kubexm/internal/common"
+	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/plan"
+	"github.com/mensylisir/kubexm/internal/runtime"
+	"github.com/mensylisir/kubexm/internal/spec"
+	etcdstep "github.com/mensylisir/kubexm/internal/step/pki/etcd"
+	"github.com/mensylisir/kubexm/internal/task"
+)
+
+type DeployTrustBundleRollingTask struct {
+	task.Base
+}
+
+func NewDeployTrustBundleRollingTask() task.Task {
+	return &DeployTrustBundleRollingTask{
+		Base: task.Base{
+			Meta: spec.TaskMeta{
+				Name:        "DeployTrustBundleRolling",
+				Description: "Deploys the CA trust bundle to the ETCD cluster using a rolling update strategy",
+			},
+		},
+	}
+}
+
+func (t *DeployTrustBundleRollingTask) Name() string {
+	return t.Meta.Name
+}
+
+func (t *DeployTrustBundleRollingTask) Description() string {
+	return t.Meta.Description
+}
+
+func (t *DeployTrustBundleRollingTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
+	runtimeCtx := ctx.(*runtime.Context)
+	cacheKey := fmt.Sprintf(common.CacheKubexmEtcdCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
+	caRenewVal, _ := ctx.GetModuleCache().Get(cacheKey)
+	caRenew, _ := caRenewVal.(bool)
+	return caRenew, nil
+}
+
+func (t *DeployTrustBundleRollingTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
+	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+
+	fragment := plan.NewExecutionFragment(t.Name())
+
+	controlNode, err := ctx.GetControlNode()
+	if err != nil {
+		return nil, err
+	}
+	etcdNodes := ctx.GetHostsByRole(common.RoleEtcd)
+	if len(etcdNodes) == 0 {
+		return fragment, nil
+	}
+
+	prepareBundleStep, err := etcdstep.NewPrepareCATransitionStepBuilder(runtimeCtx, "PrepareCATransitionBundle").Build()
+	if err != nil {
+		return nil, err
+	}
+	prepareBundleNodeID := plan.NodeID("PrepareCATransitionBundle")
+	fragment.AddNode(&plan.ExecutionNode{Name: string(prepareBundleNodeID), Step: prepareBundleStep, Hosts: []connector.Host{controlNode}})
+
+	lastNodeWaitID := prepareBundleNodeID
+
+	for _, node := range etcdNodes {
+		nodeName := node.GetName()
+
+		backupStep, err := etcdstep.NewBackupRemoteEtcdCertsStepBuilder(runtimeCtx, fmt.Sprintf("BackupRemoteCerts_%s", nodeName)).Build()
+		if err != nil {
+			return nil, err
+		}
+		backupNodeID := plan.NodeID(fmt.Sprintf("BackupRemoteCertsForBundle_%s", nodeName))
+		fragment.AddNode(&plan.ExecutionNode{Name: string(backupNodeID), Step: backupStep, Hosts: []connector.Host{node}})
+		fragment.AddDependency(lastNodeWaitID, backupNodeID)
+
+		distBundleStep, err := etcdstep.NewDistributeCAStepBuilder(runtimeCtx, fmt.Sprintf("DistributeCABundle_%s", nodeName)).Build()
+		if err != nil {
+			return nil, err
+		}
+		distBundleNodeID := plan.NodeID(fmt.Sprintf("DistributeCABundle_%s", nodeName))
+		fragment.AddNode(&plan.ExecutionNode{Name: string(distBundleNodeID), Step: distBundleStep, Hosts: []connector.Host{node}})
+		fragment.AddDependency(backupNodeID, distBundleNodeID)
+
+		restartStep, err := etcdstep.NewRestartEtcdStepBuilder(runtimeCtx, fmt.Sprintf("RestartEtcd_%s", nodeName)).Build()
+		if err != nil {
+			return nil, err
+		}
+		restartNodeID := plan.NodeID(fmt.Sprintf("RestartEtcdForBundle_%s", nodeName))
+		fragment.AddNode(&plan.ExecutionNode{Name: string(restartNodeID), Step: restartStep, Hosts: []connector.Host{node}})
+		fragment.AddDependency(distBundleNodeID, restartNodeID)
+
+		waitStep, err := etcd.NewWaitClusterHealthyStepBuilder(runtimeCtx, fmt.Sprintf("WaitClusterHealthy_%s", nodeName)).Build()
+		if err != nil {
+			return nil, err
+		}
+		waitNodeID := plan.NodeID(fmt.Sprintf("WaitClusterHealthyForBundle_%s", nodeName))
+		fragment.AddNode(&plan.ExecutionNode{Name: string(waitNodeID), Step: waitStep, Hosts: []connector.Host{node}})
+		fragment.AddDependency(restartNodeID, waitNodeID)
+
+		lastNodeWaitID = waitNodeID
+	}
+
+	fragment.CalculateEntryAndExitNodes()
+	return fragment, nil
+}
+
+var _ task.Task = (*DeployTrustBundleRollingTask)(nil)

@@ -1,0 +1,118 @@
+package etcd
+
+import (
+	"crypto/x509"
+	"encoding/pem"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/mensylisir/kubexm/internal/common"
+	"github.com/mensylisir/kubexm/internal/runtime"
+	"github.com/mensylisir/kubexm/internal/spec"
+	"github.com/mensylisir/kubexm/internal/step"
+	"github.com/mensylisir/kubexm/internal/step/helpers"
+	"github.com/mensylisir/kubexm/internal/types"
+)
+
+const (
+	DefaultCertExpirationThreshold = 180 * 24 * time.Hour
+)
+
+type CheckCAExpirationStep struct {
+	step.Base
+	localCaCertPath     string
+	ExpirationThreshold time.Duration
+}
+
+type CheckCAExpirationStepBuilder struct {
+	step.Builder[CheckCAExpirationStepBuilder, *CheckCAExpirationStep]
+}
+
+func NewCheckCAExpirationStepBuilder(ctx runtime.ExecutionContext, instanceName string) *CheckCAExpirationStepBuilder {
+	localCertsDir := ctx.GetEtcdCertsDir()
+	s := &CheckCAExpirationStep{
+		localCaCertPath:     filepath.Join(localCertsDir, common.EtcdCaPemFileName),
+		ExpirationThreshold: DefaultCertExpirationThreshold,
+	}
+	s.Base.Meta.Name = instanceName
+	s.Base.Meta.Description = "Check the expiration of the etcd CA certificate in the local workspace"
+	s.Base.Sudo = false
+	s.Base.IgnoreError = false
+	s.Base.Timeout = 1 * time.Minute
+	b := new(CheckCAExpirationStepBuilder).Init(s)
+	return b
+}
+
+func (s *CheckCAExpirationStep) Meta() *spec.StepMeta {
+	return &s.Base.Meta
+}
+
+func (s *CheckCAExpirationStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	logger.Debugf("Checking CA expiration")
+	if !helpers.IsFileExist(s.localCaCertPath) {
+		logger.Warnf("CA certificate not found. Assuming that it requires renewal.")
+		return false, fmt.Errorf("etcd CA certificate not found at '%s'", s.localCaCertPath)
+	}
+	return false, nil
+}
+
+func (s *CheckCAExpirationStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, error) {
+	result := types.NewStepResult(s.Base.Meta.Name, ctx.GetStepExecutionID(), ctx.GetHost())
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
+
+	logger.Infof("Checking expiration for CA certificate: %s", s.localCaCertPath)
+
+	certData, err := os.ReadFile(s.localCaCertPath)
+	if err != nil {
+		result.MarkFailed(err, "failed to read CA certificate file")
+		return result, err
+	}
+
+	pemBlock, _ := pem.Decode(certData)
+	if pemBlock == nil {
+		result.MarkFailed(fmt.Errorf("failed to decode PEM block"), "failed to decode PEM block from CA certificate file")
+		return result, fmt.Errorf("failed to decode PEM block from CA certificate file")
+	}
+
+	cert, err := x509.ParseCertificate(pemBlock.Bytes)
+	if err != nil {
+		result.MarkFailed(err, "failed to parse CA certificate")
+		return result, err
+	}
+
+	remaining := time.Until(cert.NotAfter)
+	remainingDays := int(remaining.Hours() / 24)
+
+	logger.Infof("CA certificate expires on: %s (in %d days)", cert.NotAfter.Format("2006-01-02"), remainingDays)
+
+	requiresRenewal := false
+
+	if remaining <= 0 {
+		errMsg := fmt.Sprintf("FATAL: ETCD CA certificate has already expired on %s", cert.NotAfter.Format("2006-01-02"))
+		logger.Error(nil, errMsg)
+	} else if remaining < s.ExpirationThreshold {
+		logger.Warnf("CA certificate is expiring soon (in %d days). Renewal is required.", remainingDays)
+		requiresRenewal = true
+	} else {
+		logger.Info("CA certificate validity is sufficient. No renewal required.")
+	}
+	cacheKey := fmt.Sprintf(common.CacheKubexmEtcdCACertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	ctx.GetTaskCache().Set(cacheKey, requiresRenewal)
+	ctx.GetModuleCache().Set(cacheKey, requiresRenewal)
+	ctx.GetPipelineCache().Set(cacheKey, requiresRenewal)
+	logger.Infof("Result 'ca_requires_renewal' (%v) has been saved to the pipeline cache.", requiresRenewal)
+
+	result.MarkCompleted("CA expiration check completed")
+	return result, nil
+}
+
+func (s *CheckCAExpirationStep) Rollback(ctx runtime.ExecutionContext) error {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
+	logger.Debugf("No rollback required for CheckCAExpirationStep")
+	return nil
+}
+
+var _ step.Step = (*CheckCAExpirationStep)(nil)

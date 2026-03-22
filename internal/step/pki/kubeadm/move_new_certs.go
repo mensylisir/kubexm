@@ -1,0 +1,151 @@
+package kubeadm
+
+import (
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/mensylisir/kubexm/internal/runtime"
+	"github.com/mensylisir/kubexm/internal/spec"
+	"github.com/mensylisir/kubexm/internal/step"
+	"github.com/mensylisir/kubexm/internal/step/helpers"
+	"github.com/mensylisir/kubexm/internal/types"
+)
+
+type KubeadmMoveNewAssetsStep struct {
+	step.Base
+	localKubeCertsDir string
+	localNewCertsDir  string
+	movedFiles        map[string]string
+}
+
+type KubeadmMoveNewAssetsStepBuilder struct {
+	step.Builder[KubeadmMoveNewAssetsStepBuilder, *KubeadmMoveNewAssetsStep]
+}
+
+func NewKubeadmMoveNewAssetsStepBuilder(ctx runtime.ExecutionContext, instanceName string) *KubeadmMoveNewAssetsStepBuilder {
+	localCertsDir := ctx.GetKubernetesCertsDir()
+	s := &KubeadmMoveNewAssetsStep{
+		localKubeCertsDir: localCertsDir,
+		localNewCertsDir:  filepath.Join(localCertsDir, "certs-new"),
+		movedFiles:        make(map[string]string),
+	}
+	s.Base.Meta.Name = instanceName
+	s.Base.Meta.Description = "Activate new assets by moving them from 'certs-new' to the main pki directory"
+	s.Base.Sudo = false
+	s.Base.IgnoreError = false
+	s.Base.Timeout = 2 * time.Minute
+
+	b := new(KubeadmMoveNewAssetsStepBuilder).Init(s)
+	return b
+}
+
+func (s *KubeadmMoveNewAssetsStep) Meta() *spec.StepMeta {
+	return &s.Base.Meta
+}
+
+func (s *KubeadmMoveNewAssetsStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+
+	if !helpers.IsDirExist(s.localNewCertsDir) {
+		logger.Info("Source directory 'certs-new' not found. Assuming no renewal was performed, step is done.")
+		return true, nil
+	}
+
+	entries, err := os.ReadDir(s.localNewCertsDir)
+	if err != nil {
+		return false, fmt.Errorf("failed to read 'certs-new' directory: %w", err)
+	}
+
+	if len(entries) == 0 {
+		logger.Info("'certs-new' directory is empty, nothing to move. Step is done.")
+		return true, nil
+	}
+
+	logger.Info("Precheck passed: 'certs-new' directory contains assets to be moved.")
+	return false, nil
+}
+
+func (s *KubeadmMoveNewAssetsStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, error) {
+	result := types.NewStepResult(s.Base.Meta.Name, ctx.GetStepExecutionID(), ctx.GetHost())
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
+	logger.Infof("Moving all assets from '%s' to '%s'...", s.localNewCertsDir, s.localKubeCertsDir)
+
+	walkErr := filepath.WalkDir(s.localNewCertsDir, func(srcPath string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath, err := filepath.Rel(s.localNewCertsDir, srcPath)
+		if err != nil {
+			return fmt.Errorf("could not determine relative path for '%s': %w", srcPath, err)
+		}
+		dstPath := filepath.Join(s.localKubeCertsDir, relPath)
+
+		if srcPath == s.localNewCertsDir {
+			return nil
+		}
+
+		log := logger.With("path", relPath)
+
+		if d.IsDir() {
+			log.Debugf("Ensuring destination directory exists: '%s'", dstPath)
+			if err := os.MkdirAll(dstPath, d.Type().Perm()); err != nil {
+				return fmt.Errorf("failed to create destination directory '%s': %w", dstPath, err)
+			}
+		} else {
+			log.Debugf("Moving file to '%s'", dstPath)
+			if err := os.Rename(srcPath, dstPath); err != nil {
+				return fmt.Errorf("failed to move file '%s': %w", relPath, err)
+			}
+			s.movedFiles[dstPath] = srcPath
+		}
+		return nil
+	})
+
+	if walkErr != nil {
+		logger.Errorf("An error occurred while moving assets: %v. Triggering rollback.", walkErr)
+		s.rollbackInternal(ctx)
+		result.MarkFailed(walkErr, "failed to move assets from certs-new to pki directory")
+		return result, walkErr
+	}
+
+	logger.Info("All new assets have been moved successfully.")
+	result.MarkCompleted("assets moved successfully")
+	return result, nil
+}
+
+func (s *KubeadmMoveNewAssetsStep) Rollback(ctx runtime.ExecutionContext) error {
+	s.rollbackInternal(ctx)
+	return nil
+}
+
+func (s *KubeadmMoveNewAssetsStep) rollbackInternal(ctx runtime.ExecutionContext) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
+
+	if len(s.movedFiles) == 0 {
+		logger.Info("No files were moved, nothing to roll back.")
+		return
+	}
+
+	logger.Warnf("Rolling back by moving %d file(s) back to '%s'...", len(s.movedFiles), s.localNewCertsDir)
+
+	for newPath, oldPath := range s.movedFiles {
+		oldParentDir := filepath.Dir(oldPath)
+		if err := os.MkdirAll(oldParentDir, 0755); err != nil {
+			logger.Errorf("CRITICAL: Failed to create directory '%s' for rollback. File '%s' cannot be restored. MANUAL INTERVENTION REQUIRED. Error: %v", oldParentDir, newPath, err)
+			continue
+		}
+
+		if err := os.Rename(newPath, oldPath); err != nil {
+			logger.Errorf("CRITICAL: Failed to move file '%s' back to '%s' during rollback. The pki directory is in an inconsistent state. MANUAL INTERVENTION REQUIRED. Error: %v", newPath, oldPath, err)
+		}
+	}
+
+	s.movedFiles = make(map[string]string)
+	logger.Info("Rollback attempt finished.")
+}
+
+var _ step.Step = (*KubeadmMoveNewAssetsStep)(nil)

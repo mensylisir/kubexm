@@ -1,0 +1,108 @@
+package kubexm
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/mensylisir/kubexm/internal/common"
+	"github.com/mensylisir/kubexm/internal/runtime"
+	"github.com/mensylisir/kubexm/internal/spec"
+	"github.com/mensylisir/kubexm/internal/step"
+	"github.com/mensylisir/kubexm/internal/types"
+)
+
+type KubeadmRemoteCleanupStep struct {
+	step.Base
+}
+
+type RemoteCleanupStepBuilder struct {
+	step.Builder[RemoteCleanupStepBuilder, *KubeadmRemoteCleanupStep]
+}
+
+func NewRemoteCleanupStepBuilder(ctx runtime.ExecutionContext, instanceName string) *RemoteCleanupStepBuilder {
+	s := &KubeadmRemoteCleanupStep{}
+	s.Base.Meta.Name = instanceName
+	s.Base.Meta.Description = "Clean up temporary backup directories from the remote node"
+	s.Base.Sudo = false
+	s.Base.IgnoreError = false
+	s.Base.Timeout = 3 * time.Minute
+
+	b := new(RemoteCleanupStepBuilder).Init(s)
+	return b
+}
+
+func (s *KubeadmRemoteCleanupStep) Meta() *spec.StepMeta {
+	return &s.Base.Meta
+}
+
+func (s *KubeadmRemoteCleanupStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	logger.Info("Starting precheck for remote cleanup...")
+	logger.Info("Precheck passed: Cleanup will always be attempted if the step is reached.")
+	return false, nil
+}
+
+func (s *KubeadmRemoteCleanupStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, error) {
+	result := types.NewStepResult(s.Base.Meta.Name, ctx.GetStepExecutionID(), ctx.GetHost())
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
+	logger.Info("Starting remote backup cleanup...")
+
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		result.MarkFailed(err, "cannot connect to host for cleanup")
+		return result, err
+	}
+
+	var pkiBackupPath string
+	pkiCacheKey := fmt.Sprintf(common.CacheKubeCertsBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	if rawVal, ok := ctx.GetTaskCache().Get(pkiCacheKey); ok {
+		if path, isString := rawVal.(string); isString {
+			pkiBackupPath = path
+		}
+	}
+
+	var kubeconfigBackupPath string
+	kubeconfigCacheKey := fmt.Sprintf(common.CacheKubeconfigsBackupPath, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	if rawVal, ok := ctx.GetTaskCache().Get(kubeconfigCacheKey); ok {
+		if path, isString := rawVal.(string); isString {
+			kubeconfigBackupPath = path
+		}
+	}
+
+	pathsToClean := []string{pkiBackupPath, kubeconfigBackupPath}
+	var cleanedCount int
+
+	for _, path := range pathsToClean {
+		if path == "" {
+			continue
+		}
+
+		log := logger.With("path", path)
+		log.Info("Removing remote backup directory...")
+
+		cleanupCmd := fmt.Sprintf("rm -rf %s", path)
+		if _, err := runner.Run(ctx.GoContext(), conn, cleanupCmd, s.Sudo); err != nil {
+			log.Errorf("Failed to remove remote backup directory. Manual cleanup may be needed. Error: %v", err)
+		} else {
+			cleanedCount++
+		}
+	}
+
+	if cleanedCount > 0 {
+		logger.Infof("Successfully cleaned up %d remote backup director(y/ies).", cleanedCount)
+	} else {
+		logger.Info("No remote backup paths found in cache for this host, nothing to clean up.")
+	}
+
+	result.MarkCompleted("remote cleanup completed")
+	return result, nil
+}
+
+func (s *KubeadmRemoteCleanupStep) Rollback(ctx runtime.ExecutionContext) error {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
+	logger.Info("Rollback is not applicable for a cleanup step.")
+	return nil
+}
+
+var _ step.Step = (*KubeadmRemoteCleanupStep)(nil)

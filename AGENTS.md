@@ -10,17 +10,20 @@ This file provides guidelines for AI coding agents working on kubexm codebase.
 # Build the entire project
 go build ./...
 
+# Build kubexm CLI
+go build ./bin/kubexm
+
 # Build specific packages
-go build ./pkg/tool/...
-go build ./pkg/runtime/...
-go build ./pkg/runner/...
-go build ./pkg/step/...
-go build ./pkg/task/...
-go build ./pkg/module/...
-go build ./pkg/util/...
+go build ./internal/tool/...
+go build ./internal/runtime/...
+go build ./internal/runner/...
+go build ./internal/step/...
+go build ./internal/task/...
+go build ./internal/module/...
+go build ./internal/util/...
 
 # Build specific files
-go build ./pkg/tool/json.go
+go build ./internal/tool/json.go
 ```
 
 ### Test Commands
@@ -30,24 +33,24 @@ go build ./pkg/tool/json.go
 go test ./...
 
 # Run tests for specific package
-go test ./pkg/tool/...
-go test ./pkg/runtime/...
-go test ./pkg/runner/...
-go test ./pkg/step/...
-go test ./pkg/task/...
+go test ./internal/tool/...
+go test ./internal/runtime/...
+go test ./internal/runner/...
+go test ./internal/step/...
+go test ./internal/task/...
 
 # Run tests with verbose output
-go test -v ./pkg/tool/...
+go test -v ./internal/tool/...
 
 # Run tests with coverage
 go test -cover ./...
-go test -cover ./pkg/tool/...
+go test -cover ./internal/tool/...
 
 # Run single test function (go 1.21+)
-go test -run TestFunctionName ./pkg/tool/json.go
+go test -run TestFunctionName ./internal/tool/json.go
 
 # Run specific test with coverage
-go test -cover ./pkg/tool/...
+go test -cover ./internal/tool/...
 ```
 
 ### Lint Commands
@@ -57,7 +60,7 @@ go test -cover ./pkg/tool/...
 go vet ./...
 
 # Run go vet on specific package
-go vet ./pkg/tool/...
+go vet ./internal/tool/...
 
 # Run golangci-lint (if installed)
 golangci-lint run ./...
@@ -83,9 +86,9 @@ import (
 
 // Internal kubexm imports (grouped, blank line after)
 import (
-    "github.com/mensylisir/kubexm/pkg/common"
-    "github.com/mensylisir/kubexm/pkg/runtime"
-    "github.com/mensylisir/kubexm/pkg/spec"
+    "github.com/mensylisir/kubexm/internal/common"
+    "github.com/mensylisir/kubexm/internal/runtime"
+    "github.com/mensylisir/kubexm/internal/spec"
 )
 ```
 
@@ -337,7 +340,7 @@ func process() {
 ### Package Organization
 
 ```
-pkg/
+internal/
 ├── tool/          # Pure utility functions, no internal dependencies
 │   ├── json.go
 │   ├── yaml.go
@@ -350,7 +353,7 @@ pkg/
 ├── runner/        # Operations layer (command, file, service, container)
 │   ├── interface.go
 │   ├── runner.go
-│   └── helpers/      # Delegates to pkg/tool
+│   └── helpers/      # Delegates to internal/tool
 ├── step/          # Atomic, idempotent operations
 │   ├── interface.go
 │   ├── base.go
@@ -479,7 +482,7 @@ type Runner interface {
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                    pkg/                              │
+│                    internal/                              │
 ├─────────────────────────────────────────────────────┤
 │  tool/    │  Pure parsing utilities (JSON, YAML, TOML, path)  │
 ├─────────────────────────────────────────────────────┤
@@ -497,7 +500,7 @@ type Runner interface {
 │  pipeline/  │  Module orchestration                    │
 │  util/     │ │ Delegates to: tool, runtime              │
 └─────────────────────────────────────────────────────┘
-                    pkg/apis/                               │
+                    internal/apis/                               │
 ├─────────────────────────────────────────────────────┤
 │  kubexms/  │  CRD types, configuration specs              │
 │             │  │                                            │
@@ -520,8 +523,8 @@ type Runner interface {
 ### Working with Codebase
 
 **Before Making Changes**
-1. Build the target package: `go build ./pkg/tool/...`
-2. Run tests for the package: `go test ./pkg/tool/...`
+1. Build the target package: `go build ./internal/tool/...`
+2. Run tests for the package: `go test ./internal/tool/...`
 3. Check existing similar code patterns in codebase
 4. Update imports if moving code between packages
 5. Follow import ordering conventions
@@ -556,7 +559,7 @@ type Runner interface {
    - `tool` package has NO internal dependencies
 
 2. **God Interfaces**: The `Runner` interface has 200+ methods
-   - When working with `pkg/runner`, use only what you need
+   - When working with `internal/runner`, use only what you need
    - Don't create new "Extended" interfaces
    - Small, focused interfaces are preferred
 
@@ -572,11 +575,11 @@ type Runner interface {
    - Mix of return patterns (error, tuple, error)
 
 5. **Package Organization Confusion**: Code scattered across `util`, `helpers`, `runner/helpers`
-   - Use `pkg/tool` for pure utilities (no dependencies)
-   - Use `pkg/util` for runtime-dependent utilities
-   - Use `pkg/runner/helpers` to delegate to `pkg/tool`
+   - Use `internal/tool` for pure utilities (no dependencies)
+   - Use `internal/util` for runtime-dependent utilities
+   - Use `internal/runner/helpers` to delegate to `internal/tool`
 
-### Tool Package (pkg/tool)
+### Tool Package (internal/tool)
 
 **Purpose**: Pure utility functions with NO internal dependencies
 
@@ -592,7 +595,7 @@ type Runner interface {
 
 **Usage**:
 ```go
-import "github.com/mensylisir/kubexm/pkg/tool"
+import "github.com/mensylisir/kubexm/internal/tool"
 
 // All functions are directly exported, no interfaces needed
 data, err := tool.JsonToMap(jsonBytes)
@@ -600,7 +603,7 @@ config, err := tool.GetTomlValue(tomlData, "key")
 content, err := tool.SetYamlValue(yamlData, "key.path", value)
 ```
 
-### Utility Package (pkg/util)
+### Utility Package (internal/util)
 
 **Purpose**: General utilities, some may depend on `runtime`
 
@@ -610,16 +613,16 @@ content, err := tool.SetYamlValue(yamlData, "key.path", value)
 - Helper functions that need execution context
 
 **What Does NOT Go Here**:
-- Pure parsing utilities (put these in `pkg/tool`)
-- Pure string/array operations (put these in `pkg/tool`)
+- Pure parsing utilities (put these in `internal/tool`)
+- Pure string/array operations (put these in `internal/tool`)
 
 **Usage**:
 ```go
-import "github.com/mensylisir/kubexm/pkg/util"
-import "github.com/mensylisir/kubexm/pkg/runtime"
+import "github.com/mensylisir/kubexm/internal/util"
+import "github.com/mensylisir/kubexm/internal/runtime"
 
-// Delegates to pkg/tool for pure parsing
-import tool "github.com/mensylisir/kubexm/pkg/tool"
+// Delegates to internal/tool for pure parsing
+import tool "github.com/mensylisir/kubexm/internal/tool"
 
 data, err := tool.JsonToMap(jsonBytes)
 
@@ -629,23 +632,23 @@ func UploadFile(ctx runtime.ExecutionContext, ...) error {
 }
 ```
 
-### Runner Helpers Package (pkg/runner/helpers)
+### Runner Helpers Package (internal/runner/helpers)
 
-**Purpose**: Compatibility layer to delegate to `pkg/tool`
+**Purpose**: Compatibility layer to delegate to `internal/tool`
 
 **What Goes Here**:
-- Wrapper functions that delegate to `pkg/tool` functions
+- Wrapper functions that delegate to `internal/tool` functions
 - Maintains backward compatibility
 
 **What Does NOT Go Here**:
-- Core operation logic (put in `pkg/runner/*.go`)
-- Functions that need runtime context directly (use `pkg/util` instead)
+- Core operation logic (put in `internal/runner/*.go`)
+- Functions that need runtime context directly (use `internal/util` instead)
 
 **Usage**:
 ```go
-import "github.com/mensylisir/kubexm/pkg/runner/helpers"
+import "github.com/mensylisir/kubexm/internal/runner/helpers"
 
-// Delegates to pkg/tool
+// Delegates to internal/tool
 func JsonToMap(jsonData []byte) (map[string]interface{}, error) {
     return tool.JsonToMap(jsonData)
 }
@@ -674,33 +677,77 @@ Based on codebase analysis, these packages have highest reference centrality:
 
 | Package | References | Priority |
 |---------|-----------|----------|
-| pkg/runtime | 670 | CRITICAL |
-| pkg/spec | 629 | CRITICAL |
-| pkg/step | 525 | HIGH |
-| pkg/common | 400 | HIGH |
-| pkg/plan | 154 | MEDIUM |
-| pkg/task | 147 | MEDIUM |
-| pkg/connector | 126 | MEDIUM |
-| pkg/apis | 73 | MEDIUM |
-| pkg/templates | 63 | LOW |
+| internal/runtime | 670 | CRITICAL |
+| internal/spec | 629 | CRITICAL |
+| internal/step | 525 | HIGH |
+| internal/common | 400 | HIGH |
+| internal/plan | 154 | MEDIUM |
+| internal/task | 147 | MEDIUM |
+| internal/connector | 126 | MEDIUM |
+| internal/apis | 73 | MEDIUM |
+| internal/templates | 63 | LOW |
 
 ### Current AGENTS.md Coverage
 
 | Directory | Files | Score | Status |
 |-----------|-------|-------|--------|
-| pkg/step | 527 | 1649 | ✅ Existing |
-| pkg/task | 130 | 438 | ✅ Existing |
-| pkg/runtime | 13 | ~750 | 🔲 Needed (highest reference centrality) |
-| pkg/spec | 1 | ~650 | 🔲 Needed (high reference centrality) |
-| pkg/common | 37 | 116 | 🔲 Needed |
-| pkg/apis | 35 | 112 | 🔲 Needed |
-| pkg/module | 22 | 91 | 🔲 Needed |
-| pkg/runner | 26 | 87 | 🔲 Needed |
-| pkg/util | 45 | 148 | 🔲 Needed |
-| pkg/connector | 15 | 48 | 🔲 Consider |
-| pkg/pipeline | 5 | 20 | 🔲 Consider |
-| pkg/plan | 5 | 17 | 🔲 Consider |
-| pkg/cache | 8 | 26 | 🔲 Consider |
-| pkg/tool | 4 | 13 | ✅ Covered (root) |
+| internal/step | 527 | 1649 | ✅ Existing |
+| internal/task | 130 | 438 | ✅ Existing |
+| internal/runtime | 13 | ~750 | 🔲 Needed (highest reference centrality) |
+| internal/spec | 1 | ~650 | 🔲 Needed (high reference centrality) |
+| internal/common | 37 | 116 | 🔲 Needed |
+| internal/apis | 35 | 112 | 🔲 Needed |
+| internal/module | 22 | 91 | 🔲 Needed |
+| internal/runner | 26 | 87 | 🔲 Needed |
+| internal/util | 45 | 148 | 🔲 Needed |
+| internal/connector | 15 | 48 | 🔲 Consider |
+| internal/pipeline | 5 | 20 | 🔲 Consider |
+| internal/plan | 5 | 17 | 🔲 Consider |
+| internal/cache | 8 | 26 | 🔲 Consider |
+| internal/tool | 4 | 13 | ✅ Covered (root) |
 
 This file provides comprehensive guidelines for AI coding agents. Follow these conventions to maintain code quality and consistency across the kubexm codebase.
+
+# cc-connect Integration
+
+This project is managed via cc-connect, a bridge to messaging platforms.
+
+## Scheduled tasks (cron)
+
+When the user asks you to do something on a schedule (e.g. "every day at 6am", "every Monday morning"), use the Bash/shell tool to run:
+
+```
+cc-connect cron add --cron " " --prompt "" --desc ""
+```
+
+Environment variables `CC_PROJECT` and `CC_SESSION_KEY` are already set — do NOT specify `--project` or `--session-key`.
+
+Examples:
+
+```
+cc-connect cron add --cron "0 6 * * *" --prompt "Collect GitHub trending repos and send a summary" --desc "Daily GitHub Trending"
+cc-connect cron add --cron "0 9 * * 1" --prompt "Generate a weekly project status report" --desc "Weekly Report"
+```
+
+To list or delete cron jobs:
+
+```
+cc-connect cron list
+cc-connect cron del
+```
+
+## Send message to current chat
+
+To proactively send a message back to the user's chat session (use --stdin heredoc for long/multi-line messages):
+
+```
+cc-connect send --stdin <<'CCEOF'
+your message here (any special characters are safe)
+CCEOF
+```
+
+For short single-line messages:
+
+```
+cc-connect send -m "short message"
+```

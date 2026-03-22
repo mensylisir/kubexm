@@ -1,0 +1,115 @@
+package containerd
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/mensylisir/kubexm/internal/runtime"
+	"github.com/mensylisir/kubexm/internal/spec"
+	"github.com/mensylisir/kubexm/internal/step"
+	"github.com/mensylisir/kubexm/internal/types"
+)
+
+type StopContainerdStep struct {
+	step.Base
+}
+
+type StopContainerdStepBuilder struct {
+	step.Builder[StopContainerdStepBuilder, *StopContainerdStep]
+}
+
+func NewStopContainerdStepBuilder(ctx runtime.ExecutionContext, instanceName string) *StopContainerdStepBuilder {
+	s := &StopContainerdStep{}
+
+	s.Base.Meta.Name = instanceName
+	s.Base.Meta.Description = fmt.Sprintf("[%s]>>Stop containerd service", s.Base.Meta.Name)
+	s.Base.Sudo = false
+	s.Base.IgnoreError = false
+	s.Base.Timeout = 2 * time.Minute
+
+	b := new(StopContainerdStepBuilder).Init(s)
+	return b
+}
+
+func (s *StopContainerdStep) Meta() *spec.StepMeta {
+	return &s.Base.Meta
+}
+
+func (s *StopContainerdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		return false, err
+	}
+
+	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
+	if err != nil {
+		return false, err
+	}
+
+	active, err := runner.IsServiceActive(ctx.GoContext(), conn, facts, containerdServiceName)
+	if err != nil {
+		logger.Warn(err, "Failed to check service status, assuming it's not active.")
+		return true, nil
+	}
+
+	if !active {
+		logger.Info("Containerd service is already inactive. Step is done.")
+		return true, nil
+	}
+
+	logger.Info("Containerd service is currently active. Step needs to run.")
+	return false, nil
+}
+
+func (s *StopContainerdStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, error) {
+	result := types.NewStepResult(s.Base.Meta.Name, ctx.GetStepExecutionID(), ctx.GetHost())
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		result.MarkFailed(err, "failed to get current host connector")
+		return result, err
+	}
+
+	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
+	if err != nil {
+		result.MarkFailed(err, "failed to gather facts")
+		return result, err
+	}
+
+	logger.Info("Stopping containerd service.")
+	if err := runner.StopService(ctx.GoContext(), conn, facts, containerdServiceName); err != nil {
+		result.MarkFailed(err, "failed to stop containerd service")
+		return result, fmt.Errorf("failed to stop containerd service: %w", err)
+	}
+
+	logger.Info("Containerd service stopped successfully.")
+	result.MarkCompleted("containerd stopped successfully")
+	return result, nil
+}
+
+func (s *StopContainerdStep) Rollback(ctx runtime.ExecutionContext) error {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		return nil
+	}
+
+	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
+	if err != nil {
+		logger.Error(err, "Failed to gather facts for rollback, cannot start service.")
+		return nil
+	}
+
+	logger.Warn("Rolling back by starting containerd service.")
+	if err := runner.StartService(ctx.GoContext(), conn, facts, containerdServiceName); err != nil {
+		logger.Error(err, "Failed to start containerd service during rollback.")
+	}
+
+	return nil
+}
+
+var _ step.Step = (*StopContainerdStep)(nil)
