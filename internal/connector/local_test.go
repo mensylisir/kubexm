@@ -444,8 +444,8 @@ func TestLocalConnector_EdgeCases(t *testing.T) {
 	})
 }
 
-// TestLocalConnector_ConvenienceMethods tests Run, Read, Write, Copy wrapper methods
-func TestLocalConnector_ConvenienceMethods(t *testing.T) {
+// TestLocalConnector_ConvenienceMethods_Local tests Run, Read, Write, Copy wrapper methods
+func TestLocalConnector_ConvenienceMethods_Local(t *testing.T) {
 	ctx := context.Background()
 	conn, err := NewLocalConnector()
 	if err != nil {
