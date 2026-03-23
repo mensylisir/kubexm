@@ -107,7 +107,7 @@ func (s *DistributePackagesStep) Run(ctx runtime.ExecutionContext) (*types.StepR
 
 	localPackagePath, err := s.getPathsForPackages(ctx)
 	if err != nil {
-		logger.Errorf("Failed to get paths for packages: %w", err)
+		logger.With("error", err).Error("Failed to get paths for packages")
 		result.MarkFailed(err, "failed to get paths for packages")
 		return result, err
 	}

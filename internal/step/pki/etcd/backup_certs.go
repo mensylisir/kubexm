@@ -39,7 +39,7 @@ type BackupRemoteEtcdCertsStepBuilder struct {
 func NewBackupRemoteEtcdCertsStepBuilder(ctx runtime.ExecutionContext, instanceName string) *BackupRemoteEtcdCertsStepBuilder {
 	s := &BackupRemoteEtcdCertsStep{
 		remoteCertsDir: DefaultRemoteEtcdCertsDir,
-		BackupDir:      fmt.Sprintf("%s-%s", DefaultRemoteEtcdCertsDir, time.Now().Unix()),
+		BackupDir:      fmt.Sprintf("%s-%d", DefaultRemoteEtcdCertsDir, time.Now().Unix()),
 		remoteFilesMap: make(map[string]string),
 	}
 	s.Base.Meta.Name = instanceName

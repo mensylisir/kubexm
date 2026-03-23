@@ -218,7 +218,7 @@ func (b *Builder) getOrParseConfig() (*v1alpha1.Cluster, error) {
 		verrs := validation.ValidationErrors{}
 		v1alpha1.Validate_Cluster(b.clusterConfig, &verrs)
 		if verrs.HasErrors() {
-			return nil, fmt.Errorf("validation failed for pre-loaded cluster configuration: %w", verrs.Error())
+			return nil, fmt.Errorf("validation failed for pre-loaded cluster configuration: %s", verrs.Error())
 		}
 		return b.clusterConfig, nil
 	}

@@ -52,15 +52,8 @@ func (s *GenerateNewLeafCertsStep) Precheck(ctx runtime.ExecutionContext) (isDon
 
 	caCacheKey := fmt.Sprintf(common.CacheKubexmEtcdCACertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
 	caRequiresRenewal, _ := ctx.GetTaskCache().GetBool(caCacheKey)
-	anyLeafRequiresRenewal := false
-	for _, node := range s.etcdNodes {
-		cacheKey := fmt.Sprintf(common.CacheKubexmEtcdLeafCertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), node.GetName())
-		nodeRequiresRenewal, _ := ctx.GetTaskCache().GetBool(cacheKey)
-		if nodeRequiresRenewal {
-			anyLeafRequiresRenewal = true
-			break
-		}
-	}
+	leafCacheKey := fmt.Sprintf(common.CacheKubexmEtcdLeafCertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	anyLeafRequiresRenewal, _ := ctx.GetTaskCache().GetBool(leafCacheKey)
 
 	if !caRequiresRenewal && !anyLeafRequiresRenewal {
 		logger.Info("Neither CA nor any leaf certificates require renewal. Step is done.")
@@ -107,7 +100,7 @@ func (s *GenerateNewLeafCertsStep) Run(ctx runtime.ExecutionContext) (*types.Ste
 
 	altNames := helpers.AltNames{
 		DNSNames: []string{"localhost", "etcd", "etcd.kube-system", "etcd.kube-system.svc",
-			fmt.Sprintf("etcd.kube-system.svc.%s", ctx.GetClusterConfig().Spec.Kubernetes.ClusterName, ctx.GetClusterConfig().Spec.Kubernetes.DNSDomain),
+			fmt.Sprintf("etcd.kube-system.svc.%s.%s", ctx.GetClusterConfig().Spec.Kubernetes.ClusterName, ctx.GetClusterConfig().Spec.Kubernetes.DNSDomain),
 			ctx.GetClusterConfig().Spec.ControlPlaneEndpoint.Domain},
 		IPs: []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
 	}

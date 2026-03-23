@@ -20,7 +20,7 @@ const (
 	CacheKubeadmK8sCACertRenew       = "kubexm.run[%s].pipeline[%s].module[%s].task[%s].kubeadm.kubernetes.cacert.renew"
 	CacheKubeadmK8sLeafCertRenew     = "kubexm.run[%s].pipeline[%s].module[%s].task[%s].kubeadm.kubernetes.leaftcert.renew"
 	CacheKubeadmEtcdCACertRenew      = "kubexm.run[%s].pipeline[%s].module[%s].task[%s].kubeadm.etcd.cacert.renew"
-	CacheKubeadmEtcdLeafCertRenew    = "kubexm.run[%s].pipeline[%s].module[%s].task[%s].kubeadm.etcd.leafcert.renew.%s"
+	CacheKubeadmEtcdLeafCertRenew    = "kubexm.run[%s].pipeline[%s].module[%s].task[%s].kubeadm.etcd.leafcert.renew"
 	CacheKubexmK8sCACertRenew        = "kubexm.run[%s].pipeline[%s].module[%s].task[%s].kubexm.kubernetes.cacert.renew"
 	CacheKubexmK8sLeafCertRenew      = "kubexm.run[%s].pipeline[%s].module[%s].task[%s].kubexm.kubernetes.leaftcert.renew"
 	CacheKubexmEtcdCACertRenew       = "kubexm.run[%s].pipeline[%s].module[%s].task[%s].kubexm.etcd.cacert.renew"

@@ -44,7 +44,7 @@ func NewManageServiceStepBuilder(ctx runtime.ExecutionContext, instanceName, ser
 		Action:      action,
 	}
 	cs.Base.Meta.Name = instanceName
-	cs.Base.Meta.Description = fmt.Sprintf("[%s]>>%s [%s]", string(action), serviceName)
+	cs.Base.Meta.Description = fmt.Sprintf("[%s]>>[%s]", string(action), serviceName)
 	cs.Base.Sudo = false
 	cs.Base.IgnoreError = false
 	cs.Base.Timeout = 30 * time.Second

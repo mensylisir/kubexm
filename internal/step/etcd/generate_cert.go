@@ -119,14 +119,14 @@ func (s *GenerateEtcdCertsStep) Run(ctx runtime.ExecutionContext) (*types.StepRe
 	caKeyPath := filepath.Join(s.LocalCertsDir, s.CaKeyFileName)
 	caCert, caKey, err := helpers.LoadCertificateAuthority(caCertPath, caKeyPath)
 	if err != nil {
-		err = fmt.Errorf("failed to load ETCD CA (cert: %s), please ensure CA generation step ran successfully: %w", caCertPath, caKeyPath, err)
+		err = fmt.Errorf("failed to load ETCD CA (cert: %s, key: %s), please ensure CA generation step ran successfully: %w", caCertPath, caKeyPath, err)
 		result.MarkFailed(err, "Failed to load ETCD CA")
 		return result, err
 	}
 
 	altNames := helpers.AltNames{
 		DNSNames: []string{"localhost", "etcd", "etcd.kube-system", "etcd.kube-system.svc",
-			fmt.Sprintf("etcd.kube-system.svc.%s", ctx.GetClusterConfig().Spec.Kubernetes.ClusterName, ctx.GetClusterConfig().Spec.Kubernetes.DNSDomain),
+			fmt.Sprintf("etcd.kube-system.svc.%s.%s", ctx.GetClusterConfig().Spec.Kubernetes.ClusterName, ctx.GetClusterConfig().Spec.Kubernetes.DNSDomain),
 			ctx.GetClusterConfig().Spec.ControlPlaneEndpoint.Domain},
 		IPs: []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("0:0:0:0:0:0:0:1")},
 	}

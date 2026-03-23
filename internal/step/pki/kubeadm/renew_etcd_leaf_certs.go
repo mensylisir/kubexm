@@ -54,15 +54,9 @@ func (s *KubeadmRenewStackedEtcdLeafCertsStep) Precheck(ctx runtime.ExecutionCon
 	caCacheKey := fmt.Sprintf(common.CacheKubeadmEtcdCACertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
 	caRequiresRenewal1, _ := ctx.GetPipelineCache().Get(caCacheKey)
 	caRequiresRenewal := caRequiresRenewal1.(bool)
-	anyLeafRequiresRenewal := false
-	for _, node := range s.etcdNodes {
-		cacheKey := fmt.Sprintf(common.CacheKubeadmEtcdLeafCertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), node.GetName())
-		nodeRequiresRenewal, _ := ctx.GetTaskCache().Get(cacheKey)
-		if nodeRequiresRenewal.(bool) {
-			anyLeafRequiresRenewal = true
-			break
-		}
-	}
+	leafCacheKey := fmt.Sprintf(common.CacheKubeadmEtcdLeafCertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	anyLeafRequiresRenewal1, _ := ctx.GetPipelineCache().Get(leafCacheKey)
+	anyLeafRequiresRenewal := anyLeafRequiresRenewal1.(bool)
 	if !caRequiresRenewal && !anyLeafRequiresRenewal {
 		logger.Info("Neither CA nor any leaf certificates require renewal. Step is done.")
 		return true, nil

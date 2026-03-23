@@ -81,7 +81,7 @@ func (s *GatherFactsStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, 
 		"cores", cores)
 
 	cache := ctx.GetTaskCache()
-	cacheKey := fmt.Sprintf(common.CacheKeyHostFactsTemplate, ctx.GetHost().GetName())
+	cacheKey := fmt.Sprintf(common.CacheKeyHostFactsTemplate, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName(), ctx.GetHost().GetName())
 	cache.Set(cacheKey, facts)
 
 	result.MarkCompleted(fmt.Sprintf("Gathered facts for %s: OS=%s, Arch=%s", ctx.GetHost().GetName(), facts.OS.PrettyName, facts.CPU.Architecture))

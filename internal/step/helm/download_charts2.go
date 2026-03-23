@@ -210,7 +210,7 @@ func (s *DownloadHelmCharts2Step) pullChart(ctx runtime.ExecutionContext, chart 
 	}
 
 	if _, err := os.Stat(destFile); err == nil {
-		logger.Infof("Chart package already exists, skipping download.", "path", destFile)
+		logger.With("path", destFile).Info("Chart package already exists, skipping download.")
 		return nil
 	}
 
