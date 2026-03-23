@@ -1,6 +1,7 @@
 package etcd
 
 import (
+	"github.com/mensylisir/kubexm/internal/common"
 	"github.com/mensylisir/kubexm/internal/connector"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
@@ -26,7 +27,9 @@ func NewGenerateEtcdPKITask() task.Task {
 
 func (t *GenerateEtcdPKITask) Name() string                                     { return t.Meta.Name }
 func (t *GenerateEtcdPKITask) Description() string                              { return t.Meta.Description }
-func (t *GenerateEtcdPKITask) IsRequired(ctx runtime.TaskContext) (bool, error) { return true, nil }
+func (t *GenerateEtcdPKITask) IsRequired(ctx runtime.TaskContext) (bool, error) {
+	return ctx.GetClusterConfig().Spec.Etcd.Type != string(common.EtcdDeploymentTypeExternal), nil
+}
 
 func (t *GenerateEtcdPKITask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
