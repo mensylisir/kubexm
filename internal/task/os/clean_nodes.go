@@ -38,7 +38,7 @@ func (t *CleanOSNodesTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 func (t *CleanOSNodesTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	allHosts := ctx.GetHostsByRole("")
 	if len(allHosts) == 0 {
@@ -82,6 +82,15 @@ func (t *CleanOSNodesTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragmen
 	fragment.AddNode(&plan.ExecutionNode{Name: "RemoveSysctl", Step: removeSysctl, Hosts: allHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "RemoveSecurityLimits", Step: removeSecurityLimits, Hosts: allHosts})
 
-	fragment.CalculateEntryAndExitNodes()
+	// Set up dependencies for safe cleanup order:
+	// 1. Remove hosts entries first (most important cluster cleanup)
+	// 2. Re-enable services (swap, selinux, firewall) can run in parallel
+	// 3. Remove kernel modules, sysctl, and security limits can run in parallel after services
+	fragment.AddDependency("RemoveEtcHosts", "EnableSwap")
+	fragment.AddDependency("RemoveEtcHosts", "EnableSelinux")
+	fragment.AddDependency("RemoveEtcHosts", "EnableFirewall")
+	fragment.AddDependency("EnableSwap", "RemoveKernelModules")
+	fragment.AddDependency("EnableSelinux", "RemoveSysctl")
+	fragment.AddDependency("EnableFirewall", "RemoveSecurityLimits")
 	return fragment, nil
 }

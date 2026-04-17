@@ -47,10 +47,13 @@ func (s *GenerateJoinWorkerConfigStep) renderContent(ctx runtime.ExecutionContex
 	data := JoinWorkerTemplateData{}
 
 	data.Discovery.APIServerEndpoint = fmt.Sprintf("%s:%d", cluster.Spec.ControlPlaneEndpoint.Domain, cluster.Spec.ControlPlaneEndpoint.Port)
-	cacheKey := fmt.Sprintf(common.CacheKubeadmInitToken, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	// IMPORTANT: Use fixed task name "KubeadmInit" for cache keys, not the current task name.
+	// The token is written by BootstrapFirstMasterTask.KubeadmInit step,
+	// and read by JoinWorkersTask.GenerateJoinWorkerConfig step.
+	cacheKey := fmt.Sprintf(common.CacheKubeadmInitToken, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), "KubeadmInit")
 	tokenVal, found := ctx.GetTaskCache().Get(cacheKey)
 	if !found {
-		return nil, fmt.Errorf("bootstrap token not found in task cache with key '%s'", cacheKey)
+		return nil, fmt.Errorf("bootstrap token not found in task cache with key '%s' (did KubeadmInit step run successfully?)", cacheKey)
 	}
 	token, ok := tokenVal.(string)
 	if !ok {

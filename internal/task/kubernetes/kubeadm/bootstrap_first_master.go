@@ -3,7 +3,7 @@ package kubeadm
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -42,7 +42,7 @@ func (t *BootstrapFirstMasterTask) IsRequired(ctx runtime.TaskContext) (bool, er
 func (t *BootstrapFirstMasterTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
 	if len(masterHosts) == 0 {
@@ -58,21 +58,35 @@ func (t *BootstrapFirstMasterTask) Plan(ctx runtime.TaskContext) (*plan.Executio
 	if err != nil {
 		return nil, err
 	}
+	checkControlPlane, err := kubeadm.NewKubeadmVerifyControlPlaneHealthStepBuilder(runtimeCtx, "CheckControlPlaneHealth").Build()
+	if err != nil {
+		return nil, err
+	}
+	waitClusterHealthy, err := kubeadm.NewKubeadmWaitClusterHealthyStepBuilder(runtimeCtx, "WaitClusterHealthy").Build()
+	if err != nil {
+		return nil, err
+	}
 	copyKubeconfig, err := kubeconfig.NewCopyKubeconfigStepBuilder(runtimeCtx, "CopyAdminKubeconfig").Build()
 	if err != nil {
 		return nil, err
 	}
 
-	nodeGenerateConfig := &plan.ExecutionNode{Name: "GenerateInitConfig", Step: generateInitConfig, Hosts: []connector.Host{firstMasterHost}}
-	nodeKubeadmInit := &plan.ExecutionNode{Name: "KubeadmInit", Step: kubeadmInit, Hosts: []connector.Host{firstMasterHost}}
-	nodeCopyKubeconfig := &plan.ExecutionNode{Name: "CopyAdminKubeconfig", Step: copyKubeconfig, Hosts: []connector.Host{firstMasterHost}}
+	nodeGenerateConfig := &plan.ExecutionNode{Name: "GenerateInitConfig", Step: generateInitConfig, Hosts: []remotefw.Host{firstMasterHost}}
+	nodeKubeadmInit := &plan.ExecutionNode{Name: "KubeadmInit", Step: kubeadmInit, Hosts: []remotefw.Host{firstMasterHost}}
+	nodeCheckControlPlane := &plan.ExecutionNode{Name: "CheckControlPlaneHealth", Step: checkControlPlane, Hosts: []remotefw.Host{firstMasterHost}}
+	nodeWaitClusterHealthy := &plan.ExecutionNode{Name: "WaitClusterHealthy", Step: waitClusterHealthy, Hosts: []remotefw.Host{firstMasterHost}}
+	nodeCopyKubeconfig := &plan.ExecutionNode{Name: "CopyAdminKubeconfig", Step: copyKubeconfig, Hosts: []remotefw.Host{firstMasterHost}}
 
 	fragment.AddNode(nodeGenerateConfig)
 	fragment.AddNode(nodeKubeadmInit)
+	fragment.AddNode(nodeCheckControlPlane)
+	fragment.AddNode(nodeWaitClusterHealthy)
 	fragment.AddNode(nodeCopyKubeconfig)
 
 	fragment.AddDependency("GenerateInitConfig", "KubeadmInit")
-	fragment.AddDependency("KubeadmInit", "CopyAdminKubeconfig")
+	fragment.AddDependency("KubeadmInit", "CheckControlPlaneHealth")
+	fragment.AddDependency("CheckControlPlaneHealth", "WaitClusterHealthy")
+	fragment.AddDependency("WaitClusterHealthy", "CopyAdminKubeconfig")
 
 	fragment.CalculateEntryAndExitNodes()
 

@@ -10,7 +10,7 @@ import (
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
-	"github.com/mensylisir/kubexm/internal/step/helpers/bom/helm"
+	"github.com/mensylisir/kubexm/internal/util/helm"
 	"github.com/mensylisir/kubexm/internal/types"
 	"github.com/pkg/errors"
 )
@@ -109,14 +109,14 @@ func (s *InstallArgoCDHelmChartStep) Precheck(ctx runtime.ExecutionContext) (isD
 		s.AdminKubeconfigPath,
 	)
 
-	output, err := runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
 	if err != nil {
 		logger.Info("Helm release not found. Installation is required.", "release", s.ReleaseName)
 		return false, nil
 	}
 
 	var status helmStatusOutput
-	if err := json.Unmarshal([]byte(output), &status); err != nil {
+	if err := json.Unmarshal([]byte(runResult.Stdout), &status); err != nil {
 		return false, errors.Wrap(err, "failed to parse helm status JSON output")
 	}
 
@@ -155,14 +155,14 @@ func (s *InstallArgoCDHelmChartStep) Run(ctx runtime.ExecutionContext) (*types.S
 	)
 
 	logger.Info("Executing remote Helm command.", "command", cmd)
-	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
-		result.MarkFailed(fmt.Errorf("failed to install/upgrade Argo CD Helm chart: %w\nOutput: %s", err, output), "Failed to install/upgrade Argo CD Helm chart")
+		result.MarkFailed(fmt.Errorf("failed to install/upgrade Argo CD Helm chart: %w\nOutput: %s", err, runResult.Stdout), "Failed to install/upgrade Argo CD Helm chart")
 		return result, err
 	}
 
 	logger.Info("Argo CD Helm chart installed/upgraded successfully.")
-	logger.Debug("Helm command output.", "output", output)
+	logger.Debug("Helm command output.", "output", runResult.Stdout)
 	result.MarkCompleted("Argo CD Helm chart installed/upgraded successfully")
 	return result, nil
 }

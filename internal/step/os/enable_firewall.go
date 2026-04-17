@@ -23,6 +23,8 @@ func IsIn(target string, list []string) bool {
 	return false
 }
 
+var _ step.Step = (*EnableFirewallStep)(nil)
+
 type EnableFirewallStep struct {
 	step.Base
 	serviceEnabledInRun string
@@ -58,8 +60,8 @@ func (s *EnableFirewallStep) Precheck(ctx runtime.ExecutionContext) (isDone bool
 	}
 
 	for _, service := range knownFirewallServices {
-		status, _ := runner.Run(ctx.GoContext(), conn, fmt.Sprintf("systemctl is-active %s", service), s.Sudo)
-		if strings.TrimSpace(status) == "active" {
+		runResult, _ := runner.Run(ctx.GoContext(), conn, fmt.Sprintf("systemctl is-active %s", service), s.Sudo)
+		if strings.TrimSpace(runResult.Stdout) == "active" {
 			logger.Infof("Firewall service '%s' is already active. Nothing to do.", service)
 			return true, nil
 		}

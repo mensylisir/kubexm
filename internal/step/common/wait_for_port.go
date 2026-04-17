@@ -10,6 +10,8 @@ import (
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
+var _ step.Step = (*WaitForPortStep)(nil)
+
 type WaitForPortStep struct {
 	step.Base
 	Port int

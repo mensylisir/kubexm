@@ -3,7 +3,7 @@ package ingress_nginx
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -47,7 +47,7 @@ func (t *DeployIngressNginxTask) IsRequired(ctx runtime.TaskContext) (bool, erro
 
 func (t *DeployIngressNginxTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
 	if err != nil {
@@ -72,9 +72,9 @@ func (t *DeployIngressNginxTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionF
 		return nil, err
 	}
 
-	nodeGenerate := &plan.ExecutionNode{Name: "GenerateIngressNginxManifests", Step: generateStep, Hosts: []connector.Host{executionHost}}
-	nodeDistribute := &plan.ExecutionNode{Name: "DistributeIngressNginxArtifacts", Step: distributeStep, Hosts: []connector.Host{controlNode}}
-	nodeInstall := &plan.ExecutionNode{Name: "InstallIngressNginx", Step: installStep, Hosts: []connector.Host{executionHost}}
+	nodeGenerate := &plan.ExecutionNode{Name: "GenerateIngressNginxManifests", Step: generateStep, Hosts: []remotefw.Host{executionHost}}
+	nodeDistribute := &plan.ExecutionNode{Name: "DistributeIngressNginxArtifacts", Step: distributeStep, Hosts: []remotefw.Host{controlNode}}
+	nodeInstall := &plan.ExecutionNode{Name: "InstallIngressNginx", Step: installStep, Hosts: []remotefw.Host{executionHost}}
 
 	fragment.AddNode(nodeGenerate)
 	fragment.AddNode(nodeDistribute)

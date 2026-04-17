@@ -92,20 +92,20 @@ func (s *BackupRemoteEtcdCertsStep) Precheck(ctx runtime.ExecutionContext) (isDo
 	for _, pattern := range filesToBackup {
 		remotePathPattern := filepath.Join(s.remoteCertsDir, pattern)
 		findCmd := fmt.Sprintf("find %s -type f 2>/dev/null", remotePathPattern)
-		stdout, err := runner.Run(ctx.GoContext(), conn, findCmd, s.Sudo)
+		runResult, err := runner.Run(ctx.GoContext(), conn, findCmd, s.Sudo)
 		if err != nil {
 			logger.Warnf("Could not find files for pattern '%s' on %s. This may be expected.", remotePathPattern, ctx.GetHost().GetName())
 			continue
 		}
 
-		remoteFiles := strings.Fields(stdout)
+		remoteFiles := strings.Fields(runResult.Stdout)
 		for _, remoteFile := range remoteFiles {
 			sumCmd := fmt.Sprintf("sha256sum %s", remoteFile)
-			sumOut, err := runner.Run(ctx.GoContext(), conn, sumCmd, s.Sudo)
+			runResult, err := runner.Run(ctx.GoContext(), conn, sumCmd, s.Sudo)
 			if err != nil {
 				return false, fmt.Errorf("failed to get checksum for remote file '%s': %w", remoteFile, err)
 			}
-			s.remoteFilesMap[remoteFile] = strings.Fields(string(sumOut))[0]
+			s.remoteFilesMap[remoteFile] = strings.Fields(string(runResult.Stdout))[0]
 		}
 	}
 

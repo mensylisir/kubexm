@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
@@ -20,7 +20,7 @@ import (
 type KubeadmRenewStackedEtcdLeafCertsStep struct {
 	step.Base
 	CertDuration time.Duration
-	etcdNodes    []connector.Host
+	etcdNodes    []remotefw.Host
 	caToUseDir   string
 	outputDir    string
 }

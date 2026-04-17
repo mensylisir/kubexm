@@ -15,6 +15,8 @@ import (
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
+var _ step.Step = (*RemoveDockerStep)(nil)
+
 type RemoveDockerStep struct {
 	step.Base
 	FilesToRemove []string
@@ -104,7 +106,11 @@ func (s *RemoveDockerStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, 
 
 	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
 	if err == nil {
-		isActive, _ := runner.IsServiceActive(ctx.GoContext(), conn, facts, common.DefaultDockerServiceName)
+		isActive, err := runner.IsServiceActive(ctx.GoContext(), conn, facts, common.DefaultDockerServiceName)
+		if err != nil {
+			logger.Warn("Failed to check Docker service status", "error", err)
+			return false, nil // safest: assume cleanup needed
+		}
 		if isActive {
 			logger.Info("Docker service is still active. Cleanup is required.")
 			return false, nil

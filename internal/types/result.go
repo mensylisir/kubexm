@@ -3,7 +3,7 @@ package types
 import (
 	"time"
 
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 )
 
 // ===================================================================
@@ -29,7 +29,7 @@ type StepResult struct {
 	StartTime    time.Time              `json:"start_time"`
 	EndTime      time.Time              `json:"end_time"`
 	Duration     time.Duration          `json:"duration"`
-	Host         connector.Host         `json:"-"`
+	Host         remotefw.Host          `json:"-"`
 	HostName     string                 `json:"host_name"`
 	Message      string                 `json:"message,omitempty"`
 	Error        string                 `json:"error,omitempty"`
@@ -39,7 +39,7 @@ type StepResult struct {
 	RollbackDone bool                   `json:"rollback_done,omitempty"`
 }
 
-func NewStepResult(stepName, executionID string, host connector.Host) *StepResult {
+func NewStepResult(stepName, executionID string, host remotefw.Host) *StepResult {
 	return &StepResult{
 		StepName:    stepName,
 		ExecutionID: executionID,

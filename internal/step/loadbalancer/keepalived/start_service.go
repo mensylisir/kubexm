@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/mensylisir/kubexm/internal/runner"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
@@ -37,12 +38,21 @@ func (s *StartKeepalivedService) Precheck(ctx runtime.ExecutionContext) (bool, e
 
 func (s *StartKeepalivedService) Run(ctx runtime.ExecutionContext) (*types.StepResult, error) {
 	result := types.NewStepResult(s.Base.Meta.Name, ctx.GetStepExecutionID(), ctx.GetHost())
-	facts, _ := ctx.GetHostFacts(ctx.GetHost())
-	conn, _ := ctx.GetCurrentHostConnector()
-	cmd := fmt.Sprintf(facts.InitSystem.StartCmd, "keepalived")
-	_, _, err := conn.Exec(ctx.GoContext(), cmd, nil)
+	runnerSvc := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		result.MarkFailed(err, "failed to start keepalived service")
+		result.MarkFailed(err, fmt.Sprintf("failed to get connector for host %s", ctx.GetHost().GetName()))
+		return result, err
+	}
+	facts, err := ctx.GetHostFacts(ctx.GetHost())
+	if err != nil {
+		result.MarkFailed(err, "failed to get host facts")
+		return result, err
+	}
+	cmd := fmt.Sprintf(facts.InitSystem.StartCmd, "keepalived")
+	_, stderr, err := runnerSvc.RunWithOptions(ctx.GoContext(), conn, cmd, &runner.ExecOptions{Sudo: s.Base.Sudo})
+	if err != nil {
+		result.MarkFailed(err, fmt.Sprintf("failed to start keepalived service: %s", string(stderr)))
 		return result, err
 	}
 	result.MarkCompleted("Keepalived service started successfully")
@@ -82,12 +92,21 @@ func (s *RestartKeepalivedService) Precheck(ctx runtime.ExecutionContext) (bool,
 
 func (s *RestartKeepalivedService) Run(ctx runtime.ExecutionContext) (*types.StepResult, error) {
 	result := types.NewStepResult(s.Base.Meta.Name, ctx.GetStepExecutionID(), ctx.GetHost())
-	facts, _ := ctx.GetHostFacts(ctx.GetHost())
-	conn, _ := ctx.GetCurrentHostConnector()
-	cmd := fmt.Sprintf(facts.InitSystem.RestartCmd, "keepalived")
-	_, _, err := conn.Exec(ctx.GoContext(), cmd, nil)
+	runnerSvc := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		result.MarkFailed(err, "failed to restart keepalived service")
+		result.MarkFailed(err, fmt.Sprintf("failed to get connector for host %s", ctx.GetHost().GetName()))
+		return result, err
+	}
+	facts, err := ctx.GetHostFacts(ctx.GetHost())
+	if err != nil {
+		result.MarkFailed(err, "failed to get host facts")
+		return result, err
+	}
+	cmd := fmt.Sprintf(facts.InitSystem.RestartCmd, "keepalived")
+	_, stderr, err := runnerSvc.RunWithOptions(ctx.GoContext(), conn, cmd, &runner.ExecOptions{Sudo: s.Base.Sudo})
+	if err != nil {
+		result.MarkFailed(err, fmt.Sprintf("failed to restart keepalived service: %s", string(stderr)))
 		return result, err
 	}
 	result.MarkCompleted("Keepalived service restarted successfully")

@@ -63,9 +63,16 @@ func NewInstallKubeletDropInStepBuilder(ctx runtime.ExecutionContext, instanceNa
 		s.ContainerRuntimeEndpoint = k8sSpec.ContainerRuntime.Crio.Endpoint
 		s.PodInfraContainerImage = k8sSpec.ContainerRuntime.Crio.Pause
 	} else if k8sSpec.ContainerRuntime.Type == common.RuntimeTypeIsula {
-		s.CgroupDriver = *k8sSpec.ContainerRuntime.Isulad.CgroupDriver
-		s.ContainerRuntimeEndpoint = k8sSpec.ContainerRuntime.Crio.Endpoint
-		s.PodInfraContainerImage = k8sSpec.ContainerRuntime.Crio.Pause
+		if k8sSpec.ContainerRuntime.Isulad == nil {
+			ctx.GetLogger().Warn("isulad runtime configuration is nil, using default endpoint")
+			s.CgroupDriver = "systemd"
+			s.ContainerRuntimeEndpoint = "unix:///var/run/isulbd.sock"
+			s.PodInfraContainerImage = "registry.k8s.io/pause:3.9"
+		} else {
+			s.CgroupDriver = *k8sSpec.ContainerRuntime.Isulad.CgroupDriver
+			s.ContainerRuntimeEndpoint = k8sSpec.ContainerRuntime.Isulad.Endpoint
+			s.PodInfraContainerImage = k8sSpec.ContainerRuntime.Isulad.Pause
+		}
 	}
 
 	s.Base.Meta.Name = instanceName
@@ -89,12 +96,15 @@ func (s *InstallKubeletDropInStep) render(ctx runtime.ExecutionContext) (string,
 	if s.NodeIP == "" {
 		s.NodeIP = host.GetAddress()
 	}
-
-	if host.IsRole(common.RoleMaster) {
-		s.KubeconfigArgs = fmt.Sprintf("--kubeconfig=%s", common.KubeletKubeconfigPathTarget)
-	} else {
-		s.KubeconfigArgs = fmt.Sprintf("--bootstrap-kubeconfig=%s --kubeconfig=%s", common.KubeletBootstrapKubeconfigPathTarget, common.KubeletKubeconfigPathTarget)
+	// Validate NodeIP is not empty to prevent kubelet registration failures
+	if s.NodeIP == "" {
+		return "", fmt.Errorf("node IP address is empty for host %s, cannot configure kubelet", host.GetName())
 	}
+
+	// For kubexm binary deployment mode, workers use pre-generated client certificates
+	// and a static kubeconfig (NOT TLS bootstrap with bootstrap-kubeconfig)
+	// This is consistent with the kubexm deployment model where all certs are pre-generated
+	s.KubeconfigArgs = fmt.Sprintf("--kubeconfig=%s", common.KubeletKubeconfigPathTarget)
 
 	tmplContent, err := templates.Get("kubernetes/kubelet-dropin-10-kubexm.conf.tmpl")
 	if err != nil {

@@ -1,7 +1,7 @@
 package kubexm
 
 import (
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -33,13 +33,13 @@ func (t *GenerateKubePKITask) IsRequired(ctx runtime.TaskContext) (bool, error) 
 func (t *GenerateKubePKITask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
 	if err != nil {
 		return nil, err
 	}
-	executionHost := []connector.Host{controlNode}
+	executionHost := []remotefw.Host{controlNode}
 
 	generateKubeCA, err := kubecertsstep.NewGenerateKubeCAStepBuilder(runtimeCtx, "GenerateKubeCAs").Build()
 	if err != nil {

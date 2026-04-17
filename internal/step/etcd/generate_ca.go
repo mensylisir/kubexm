@@ -34,12 +34,12 @@ func NewGenerateEtcdCAStepBuilder(ctx runtime.ExecutionContext, instanceName str
 		Permission:    "0755",
 	}
 
-	if ctx.GetClusterConfig().Spec.Certs.CADuration != "" {
-		parsedDuration, err := time.ParseDuration(ctx.GetClusterConfig().Spec.Certs.CADuration)
+	if certsSpec := ctx.GetClusterConfig().Spec.Certs; certsSpec != nil && certsSpec.CADuration != "" {
+		parsedDuration, err := time.ParseDuration(certsSpec.CADuration)
 		if err == nil {
 			s.CADuration = parsedDuration
 		} else {
-			ctx.GetLogger().Warnf("Failed to parse user-provided CA duration '%s', using default. Error: %v", ctx.GetClusterConfig().Spec.Certs.CADuration, err)
+			ctx.GetLogger().Warnf("Failed to parse user-provided CA duration '%s', using default. Error: %v", certsSpec.CADuration, err)
 		}
 	}
 

@@ -11,7 +11,7 @@ import (
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
-	"github.com/mensylisir/kubexm/internal/step/helpers/bom/helm"
+	"github.com/mensylisir/kubexm/internal/util/helm"
 	"github.com/mensylisir/kubexm/internal/types"
 	"github.com/pkg/errors"
 )
@@ -45,7 +45,11 @@ func (s *DownloadArgoCDChartStep) getChartAndPath(ctx runtime.ExecutionContext) 
 	helmProvider := helm.NewHelmProvider(ctx)
 	chart := helmProvider.GetChart("argocd")
 	if chart == nil {
-		return nil, "", fmt.Errorf("could not get Argo CD chart info for Kubernetes version %s", ctx.GetClusterConfig().Spec.Kubernetes.Version)
+	k8sVersion := "v1.24.0"
+	if cfg := ctx.GetClusterConfig(); cfg != nil && cfg.Spec.Kubernetes != nil && cfg.Spec.Kubernetes.Version != "" {
+		k8sVersion = cfg.Spec.Kubernetes.Version
+	}
+	return nil, "", fmt.Errorf("could not get Argo CD chart info for Kubernetes version %s", k8sVersion)
 	}
 
 	destFile := chart.LocalPath(ctx.GetGlobalWorkDir())

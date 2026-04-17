@@ -2,7 +2,7 @@ package preflight
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -43,7 +43,7 @@ func (t *PackageAssetsTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 func (t *PackageAssetsTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
 	if err != nil {
@@ -64,7 +64,7 @@ func (t *PackageAssetsTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragme
 		return nil, err
 	}
 
-	fragment.AddNode(&plan.ExecutionNode{Name: "CompressBundle", Step: compressStep, Hosts: []connector.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "CompressBundle", Step: compressStep, Hosts: []remotefw.Host{controlNode}})
 
 	fragment.CalculateEntryAndExitNodes()
 	return fragment, nil

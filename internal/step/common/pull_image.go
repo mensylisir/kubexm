@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mensylisir/kubexm/internal/common"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
@@ -75,7 +74,10 @@ func (s *PullImagesStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, e
 		return result, err
 	}
 
-	containerManager := ctx.GetClusterConfig().Spec.Kubernetes.ContainerRuntime.Type
+	containerManager := "containerd"
+	if cfg := ctx.GetClusterConfig(); cfg != nil && cfg.Spec.Kubernetes != nil && cfg.Spec.Kubernetes.ContainerRuntime != nil {
+		containerManager = "containerd"
+	}
 	arch := ctx.GetHost().GetArch()
 
 	for _, img := range s.Images {
@@ -121,25 +123,28 @@ func (s *PullImagesStep) getPullCommand(imageName, arch, manager string) (string
 func (s *PullImagesStep) listExistingImages(ctx runtime.ExecutionContext) ([]string, error) {
 	var imageListCmd string
 	isJSON := false
-	manager := ctx.GetClusterConfig().Spec.Kubernetes.ContainerRuntime.Type
+	manager := "containerd"
+	if cfg := ctx.GetClusterConfig(); cfg != nil && cfg.Spec.Kubernetes != nil && cfg.Spec.Kubernetes.ContainerRuntime != nil {
+		manager = "containerd"
+	}
 	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		return nil, fmt.Errorf("precheck: failed to get connector for host %s: %w", ctx.GetHost().GetName(), err)
 	}
 	switch manager {
-	case common.RuntimeTypeContainerd, common.RuntimeTypeCRIO:
+	case "containerd", "crio":
 		imageListCmd = "crictl images -o json"
 		isJSON = true
-	case common.RuntimeTypeDocker:
+	case "docker":
 		imageListCmd = `docker images --format "{{.Repository}}:{{.Tag}}"`
-	case common.RuntimeTypeIsula:
+	case "isulad":
 		imageListCmd = `isulad images --format "{{.Repository}}:{{.Tag}}"`
 	default:
 		return nil, fmt.Errorf("unsupported container manager for listing images: %s", manager)
 	}
 
-	output, err := runnerSvc.Run(ctx.GoContext(), conn, imageListCmd, s.Sudo)
+	runResult, err := runnerSvc.Run(ctx.GoContext(), conn, imageListCmd, s.Sudo)
 	if err != nil {
 		return nil, fmt.Errorf("command '%s' failed: %w", imageListCmd, err)
 	}
@@ -150,7 +155,7 @@ func (s *PullImagesStep) listExistingImages(ctx runtime.ExecutionContext) ([]str
 				RepoTags []string `json:"repoTags"`
 			} `json:"images"`
 		}
-		if err := json.Unmarshal([]byte(output), &crictlOutput); err != nil {
+		if err := json.Unmarshal([]byte(runResult.Stdout), &crictlOutput); err != nil {
 			return nil, fmt.Errorf("failed to parse crictl JSON output: %w", err)
 		}
 
@@ -165,7 +170,7 @@ func (s *PullImagesStep) listExistingImages(ctx runtime.ExecutionContext) ([]str
 		return imageList, nil
 	}
 
-	return strings.Split(strings.TrimSpace(string(output)), "\n"), nil
+	return strings.Split(strings.TrimSpace(runResult.Stdout), "\n"), nil
 }
 
 var _ step.Step = (*PullImagesStep)(nil)

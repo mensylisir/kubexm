@@ -2,7 +2,7 @@ package harbor
 
 import (
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -42,7 +42,7 @@ func (t *CleanHarborTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 
 func (t *CleanHarborTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	registryHosts := ctx.GetHostsByRole(common.RoleRegistry)
 	if len(registryHosts) == 0 {
@@ -64,8 +64,8 @@ func (t *CleanHarborTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment
 		return nil, err
 	}
 
-	fragment.AddNode(&plan.ExecutionNode{Name: "StopAndRemoveHarbor", Step: stopAndRemove, Hosts: []connector.Host{executionHost}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "RemoveHarborArtifacts", Step: removeArtifacts, Hosts: []connector.Host{executionHost}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "StopAndRemoveHarbor", Step: stopAndRemove, Hosts: []remotefw.Host{executionHost}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "RemoveHarborArtifacts", Step: removeArtifacts, Hosts: []remotefw.Host{executionHost}})
 	fragment.AddNode(&plan.ExecutionNode{Name: "RemoveHarborCACerts", Step: removeCACerts, Hosts: allClusterHosts})
 
 	fragment.AddDependency("StopAndRemoveHarbor", "RemoveHarborArtifacts")

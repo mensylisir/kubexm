@@ -35,6 +35,29 @@ func (s *RestartCrioStep) Meta() *spec.StepMeta {
 }
 
 func (s *RestartCrioStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		return false, err
+	}
+
+	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
+	if err != nil {
+		return false, err
+	}
+
+	active, err := runner.IsServiceActive(ctx.GoContext(), conn, facts, crioServiceName)
+	if err != nil {
+		return false, fmt.Errorf("failed to determine CRI-O service status: %w", err)
+	}
+
+	if !active {
+		logger.Infof("CRI-O service is not active. Nothing to restart, skipping.")
+		return true, nil
+	}
+
+	logger.Info("CRI-O service is active. Step needs to run to restart it.")
 	return false, nil
 }
 

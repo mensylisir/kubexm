@@ -3,7 +3,7 @@ package multus
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -47,7 +47,7 @@ func (t *DeployMultusTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 func (t *DeployMultusTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
 	if len(masterHosts) == 0 {
@@ -78,9 +78,9 @@ func (t *DeployMultusTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragmen
 		return fragment, nil
 	}
 
-	fragment.AddNode(&plan.ExecutionNode{Name: "GenerateMultusValues", Step: generateValues, Hosts: []connector.Host{executionHost}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "DistributeMultusArtifacts", Step: distributeArtifacts, Hosts: []connector.Host{executionHost}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "InstallMultusChart", Step: installChart, Hosts: []connector.Host{executionHost}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "GenerateMultusValues", Step: generateValues, Hosts: []remotefw.Host{executionHost}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "DistributeMultusArtifacts", Step: distributeArtifacts, Hosts: []remotefw.Host{executionHost}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "InstallMultusChart", Step: installChart, Hosts: []remotefw.Host{executionHost}})
 
 	fragment.AddDependency("GenerateMultusValues", "DistributeMultusArtifacts")
 	fragment.AddDependency("DistributeMultusArtifacts", "InstallMultusChart")

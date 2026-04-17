@@ -2,7 +2,7 @@ package multus
 
 import (
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -46,7 +46,7 @@ func (t *CleanMultusTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 func (t *CleanMultusTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
 	if len(masterHosts) == 0 {
@@ -58,7 +58,7 @@ func (t *CleanMultusTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment
 	if err != nil {
 		return nil, err
 	}
-	fragment.AddNode(&plan.ExecutionNode{Name: "UninstallMultusRelease", Step: cleanStep, Hosts: []connector.Host{executionHost}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "UninstallMultusRelease", Step: cleanStep, Hosts: []remotefw.Host{executionHost}})
 
 	fragment.CalculateEntryAndExitNodes()
 	return fragment, nil

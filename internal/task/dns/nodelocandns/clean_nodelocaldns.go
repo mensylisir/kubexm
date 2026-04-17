@@ -2,7 +2,7 @@ package nodelocandns
 
 import (
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -42,7 +42,7 @@ func (t *CleanNodeLocalDNSTask) IsRequired(ctx runtime.TaskContext) (bool, error
 
 func (t *CleanNodeLocalDNSTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
 	if len(masterHosts) == 0 {
@@ -57,7 +57,7 @@ func (t *CleanNodeLocalDNSTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFr
 		return nil, err
 	}
 
-	node := &plan.ExecutionNode{Name: "CleanNodeLocalDNSResources", Step: cleanStep, Hosts: []connector.Host{executionHost}}
+	node := &plan.ExecutionNode{Name: "CleanNodeLocalDNSResources", Step: cleanStep, Hosts: []remotefw.Host{executionHost}}
 	fragment.AddNode(node)
 
 	fragment.CalculateEntryAndExitNodes()

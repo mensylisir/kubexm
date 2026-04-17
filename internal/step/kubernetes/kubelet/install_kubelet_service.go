@@ -20,6 +20,8 @@ const (
 	KubeletServiceTemplatePath = "kubernetes/kubelet.service.tmpl"
 )
 
+var _ step.Step = (*InstallKubeletServiceStep)(nil)
+
 type InstallKubeletServiceStep struct {
 	step.Base
 	TargetPath           string

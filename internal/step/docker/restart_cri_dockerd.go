@@ -10,6 +10,8 @@ import (
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
+var _ step.Step = (*RestartCriDockerdStep)(nil)
+
 type RestartCriDockerdStep struct {
 	step.Base
 }
@@ -36,6 +38,29 @@ func (s *RestartCriDockerdStep) Meta() *spec.StepMeta {
 }
 
 func (s *RestartCriDockerdStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		return false, err
+	}
+
+	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
+	if err != nil {
+		return false, err
+	}
+
+	active, err := runner.IsServiceActive(ctx.GoContext(), conn, facts, CriDockerdServiceName)
+	if err != nil {
+		return false, fmt.Errorf("failed to determine cri-dockerd service status: %w", err)
+	}
+
+	if !active {
+		logger.Infof("Cri-dockerd service is not active. Nothing to restart, skipping.")
+		return true, nil
+	}
+
+	logger.Info("Cri-dockerd service is active. Step needs to run to restart it.")
 	return false, nil
 }
 

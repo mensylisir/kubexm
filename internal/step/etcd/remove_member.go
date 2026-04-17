@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
@@ -17,7 +17,7 @@ import (
 
 type RemoveEtcdMemberStep struct {
 	step.Base
-	NodeToRemove      connector.Host
+	NodeToRemove      remotefw.Host
 	EtcdctlBinaryPath string
 }
 
@@ -40,7 +40,7 @@ func NewRemoveEtcdMemberStepBuilder(ctx runtime.ExecutionContext, instanceName s
 	return b
 }
 
-func (b *RemoveEtcdMemberStepBuilder) WithNodeToRemove(host connector.Host) *RemoveEtcdMemberStepBuilder {
+func (b *RemoveEtcdMemberStepBuilder) WithNodeToRemove(host remotefw.Host) *RemoveEtcdMemberStepBuilder {
 	b.Step.NodeToRemove = host
 	return b
 }
@@ -67,7 +67,7 @@ func (s *RemoveEtcdMemberStep) Precheck(ctx runtime.ExecutionContext) (isDone bo
 		return false, err
 	}
 
-	caPath, certPath, keyPath := getEtcdctlCertPaths(ctx.GetHost().GetName())
+	caPath, certPath, keyPath := getEtcdctlCertPaths(ctx, ctx.GetHost().GetName())
 	listCmd := fmt.Sprintf("ETCDCTL_API=3 %s member list --cacert %s --cert %s --key %s",
 		s.EtcdctlBinaryPath, caPath, certPath, keyPath)
 
@@ -104,7 +104,7 @@ func (s *RemoveEtcdMemberStep) Run(ctx runtime.ExecutionContext) (*types.StepRes
 		return result, err
 	}
 
-	caPath, certPath, keyPath := getEtcdctlCertPaths(ctx.GetHost().GetName())
+	caPath, certPath, keyPath := getEtcdctlCertPaths(ctx, ctx.GetHost().GetName())
 
 	logger.Info("Listing members to find the ID of the member to remove...", "member", s.NodeToRemove.GetName())
 	listCmd := fmt.Sprintf("ETCDCTL_API=3 %s member list --cacert %s --cert %s --key %s --write-out=json",
@@ -185,7 +185,7 @@ func (s *RemoveEtcdMemberStep) Rollback(ctx runtime.ExecutionContext) error {
 	nodeToAddBack := s.NodeToRemove
 	nodeToAddBackName := nodeToAddBack.GetName()
 	nodeToAddBackPeerURL := getPeerURL(nodeToAddBack)
-	caPath, certPath, keyPath := getEtcdctlCertPaths(ctx.GetHost().GetName())
+	caPath, certPath, keyPath := getEtcdctlCertPaths(ctx, ctx.GetHost().GetName())
 
 	addCmd := fmt.Sprintf("ETCDCTL_API=3 %s member add %s --peer-urls=%s --cacert %s --cert %s --key %s",
 		s.EtcdctlBinaryPath, nodeToAddBackName, nodeToAddBackPeerURL, caPath, certPath, keyPath)

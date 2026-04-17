@@ -3,7 +3,7 @@ package flannel
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -30,14 +30,21 @@ func (t *DeployFlannelTask) Name() string        { return t.Meta.Name }
 func (t *DeployFlannelTask) Description() string { return t.Meta.Description }
 
 func (t *DeployFlannelTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	return ctx.GetClusterConfig().Spec.Network.Plugin == string(common.CNITypeFlannel), nil
+	netSpec := ctx.GetClusterConfig().Spec.Network
+	if netSpec == nil {
+		return false, nil
+	}
+	return netSpec.Plugin == string(common.CNITypeFlannel), nil
 }
 
 func (t *DeployFlannelTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
-	controlNode, _ := ctx.GetControlNode()
+	controlNode, err := ctx.GetControlNode()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get control node for flannel deployment: %w", err)
+	}
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
 	if len(masterHosts) == 0 {
 		return nil, fmt.Errorf("no master hosts found to deploy flannel")
@@ -57,9 +64,9 @@ func (t *DeployFlannelTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragme
 		return nil, err
 	}
 
-	nodeGenerate := &plan.ExecutionNode{Name: "GenerateFlannelManifest", Step: generateStep, Hosts: []connector.Host{controlNode}}
-	nodeDistribute := &plan.ExecutionNode{Name: "DistributeFlannelManifest", Step: distributeStep, Hosts: []connector.Host{executionHost}}
-	nodeInstall := &plan.ExecutionNode{Name: "InstallFlannel", Step: installStep, Hosts: []connector.Host{executionHost}}
+	nodeGenerate := &plan.ExecutionNode{Name: "GenerateFlannelManifest", Step: generateStep, Hosts: []remotefw.Host{controlNode}}
+	nodeDistribute := &plan.ExecutionNode{Name: "DistributeFlannelManifest", Step: distributeStep, Hosts: []remotefw.Host{executionHost}}
+	nodeInstall := &plan.ExecutionNode{Name: "InstallFlannel", Step: installStep, Hosts: []remotefw.Host{executionHost}}
 
 	fragment.AddNode(nodeGenerate)
 	fragment.AddNode(nodeDistribute)
@@ -68,7 +75,6 @@ func (t *DeployFlannelTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragme
 	fragment.AddDependency("GenerateFlannelManifest", "DistributeFlannelManifest")
 	fragment.AddDependency("DistributeFlannelManifest", "InstallFlannel")
 
-	_ = controlNode
 	// Downloads are handled centrally in Preflight PrepareAssets/ExtractBundle.
 
 	fragment.CalculateEntryAndExitNodes()

@@ -60,11 +60,11 @@ func (s *KubeadmUpgradeNodeStep) Precheck(ctx runtime.ExecutionContext) (isDone 
 	}
 
 	versionCmd := "kubelet --version | awk '{print $2}'"
-	stdout, err := runner.Run(ctx.GoContext(), conn, versionCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, versionCmd, s.Sudo)
 	if err != nil {
 		return false, fmt.Errorf("precheck failed: could not get current kubelet version: %w", err)
 	}
-	currentKubeletVerStr := strings.TrimSpace(string(stdout))
+	currentKubeletVerStr := strings.TrimSpace(runResult.Stdout)
 	currentKubeletVer, err := version.ParseGeneric(currentKubeletVerStr)
 	if err != nil {
 		return false, fmt.Errorf("failed to parse current kubelet version '%s': %w", currentKubeletVerStr, err)
@@ -93,14 +93,14 @@ func (s *KubeadmUpgradeNodeStep) Run(ctx runtime.ExecutionContext) (*types.StepR
 
 	upgradeNodeCmd := "kubeadm upgrade node"
 
-	stdout, err := runner.Run(ctx.GoContext(), conn, upgradeNodeCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, upgradeNodeCmd, s.Sudo)
 	if err != nil {
-		err = fmt.Errorf("'kubeadm upgrade node' failed. Output:\n%s\nError: %w", string(stdout), err)
+		err = fmt.Errorf("'kubeadm upgrade node' failed. Output:\n%s\nError: %w", runResult.Stdout, err)
 		result.MarkFailed(err, "kubeadm upgrade node failed")
 		return result, err
 	}
 
-	output := string(stdout)
+	output := runResult.Stdout
 	logger.Infof("`kubeadm upgrade node` output:\n%s", output)
 
 	re := regexp.MustCompile(`backed up to (/etc/kubernetes/tmp/kubeadm-backup-etcd-[a-z0-9-]+)`)

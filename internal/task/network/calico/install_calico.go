@@ -3,7 +3,7 @@ package calico
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -35,14 +35,18 @@ func (t *DeployCalicoTask) Description() string {
 }
 
 func (t *DeployCalicoTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	return ctx.GetClusterConfig().Spec.Network.Plugin == string(common.CNITypeCalico), nil
+	netSpec := ctx.GetClusterConfig().Spec.Network
+	if netSpec == nil {
+		return false, nil
+	}
+	return netSpec.Plugin == string(common.CNITypeCalico), nil
 }
 
 func (t *DeployCalicoTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
-	controlNode, err := ctx.GetControlNode()
+	_, err := ctx.GetControlNode()
 	if err != nil {
 		return nil, err
 	}
@@ -70,15 +74,14 @@ func (t *DeployCalicoTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragmen
 		return nil, err
 	}
 
-	fragment.AddNode(&plan.ExecutionNode{Name: "GenerateCalicoValues", Step: generateConfig, Hosts: []connector.Host{executionHost}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "DistributeCalico", Step: distributeCalico, Hosts: []connector.Host{executionHost}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "InstallCalico", Step: installCalico, Hosts: []connector.Host{executionHost}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "GenerateCalicoValues", Step: generateConfig, Hosts: []remotefw.Host{executionHost}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "DistributeCalico", Step: distributeCalico, Hosts: []remotefw.Host{executionHost}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "InstallCalico", Step: installCalico, Hosts: []remotefw.Host{executionHost}})
 	fragment.AddNode(&plan.ExecutionNode{Name: "InstallCalicoctl", Step: installCalicoctl, Hosts: masterHosts})
 
 	fragment.AddDependency("GenerateCalicoValues", "DistributeCalico")
 	fragment.AddDependency("DistributeCalico", "InstallCalico")
 
-	_ = controlNode
 	// Downloads are handled centrally in Preflight PrepareAssets/ExtractBundle.
 
 	fragment.CalculateEntryAndExitNodes()

@@ -15,6 +15,8 @@ import (
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
+var _ step.Step = (*CleanDockerStep)(nil)
+
 type CleanDockerStep struct {
 	step.Base
 	InstallPath string
@@ -113,7 +115,11 @@ func (s *CleanDockerStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, e
 
 	if err == nil {
 		for _, service := range s.servicesToManage() {
-			isActive, _ := runner.IsServiceActive(ctx.GoContext(), conn, facts, service)
+			isActive, svcErr := runner.IsServiceActive(ctx.GoContext(), conn, facts, service)
+			if svcErr != nil {
+				logger.Warn("Failed to check service status, assuming cleanup needed", "service", service, "error", svcErr)
+				return false, nil
+			}
 			if isActive {
 				logger.Info("Service is still active. Cleanup is required.", "service", service)
 				return false, nil

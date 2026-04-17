@@ -60,11 +60,11 @@ func (s *KubeadmUpgradePlanStep) Precheck(ctx runtime.ExecutionContext) (isDone 
 	getVerCmd := "kubectl --kubeconfig /etc/kubernetes/admin.conf version -o json | jq -r '.serverVersion.gitVersion'"
 	shellCmd := fmt.Sprintf("bash -c \"%s\"", getVerCmd)
 
-	stdout, err := runner.Run(ctx.GoContext(), conn, shellCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, shellCmd, s.Sudo)
 	if err != nil {
 		return false, fmt.Errorf("precheck failed: could not get current Kubernetes server version: %w", err)
 	}
-	currentVerStr := strings.TrimSpace(string(stdout))
+	currentVerStr := strings.TrimSpace(runResult.Stdout)
 
 	currentVer, err := version.ParseGeneric(currentVerStr)
 	if err != nil {
@@ -99,14 +99,14 @@ func (s *KubeadmUpgradePlanStep) Run(ctx runtime.ExecutionContext) (*types.StepR
 
 	planCmd := fmt.Sprintf("kubeadm upgrade plan %s --config /etc/kubernetes/kubeadm-config.yaml", s.TargetVersion)
 
-	stdout, err := runner.Run(ctx.GoContext(), conn, planCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, planCmd, s.Sudo)
 	if err != nil {
-		err = fmt.Errorf("'kubeadm upgrade plan' failed. This indicates the cluster is not ready for upgrade or the target version is invalid. Output:\n%s\nError: %w", string(stdout), err)
+		err = fmt.Errorf("'kubeadm upgrade plan' failed. This indicates the cluster is not ready for upgrade or the target version is invalid. Output:\n%s\nError: %w", runResult.Stdout, err)
 		result.MarkFailed(err, "kubeadm upgrade plan failed")
 		return result, err
 	}
 
-	output := string(stdout)
+	output := runResult.Stdout
 	logger.Infof("`kubeadm upgrade plan` output:\n%s", output)
 
 	if !strings.Contains(output, "You can now apply the upgrade by executing the following command") {

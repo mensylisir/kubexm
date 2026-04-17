@@ -3,7 +3,7 @@ package crio
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -41,7 +41,7 @@ func (t *DeployCrioTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 func (t *DeployCrioTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
 	if err != nil {
@@ -52,56 +52,93 @@ func (t *DeployCrioTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment,
 		return nil, fmt.Errorf("no master or worker hosts found to deploy CRI-O")
 	}
 
+	// Build steps with nil checks to prevent panic on missing BOM entries
 	extractCrio, err := crio.NewExtractCrioStepBuilder(runtimeCtx, "ExtractCrio").Build()
 	if err != nil {
 		return nil, err
+	}
+	if extractCrio == nil {
+		return nil, fmt.Errorf("extract_crio step returned nil - ensure CRI-O assets were prepared (kubexm download)")
 	}
 	installCrio, err := crio.NewInstallCrioStepBuilder(runtimeCtx, "InstallCrio").Build()
 	if err != nil {
 		return nil, err
 	}
+	if installCrio == nil {
+		return nil, fmt.Errorf("install_crio step returned nil - ensure CRI-O assets were prepared (kubexm download)")
+	}
 	installCni, err := crio.NewInstallCniStepBuilder(runtimeCtx, "InstallCni").Build()
 	if err != nil {
 		return nil, err
+	}
+	if installCni == nil {
+		return nil, fmt.Errorf("install_cni step returned nil - ensure CRI-O assets were prepared (kubexm download)")
 	}
 	installCrictl, err := crio.NewInstallCrictlStepBuilder(runtimeCtx, "InstallCrictl").Build()
 	if err != nil {
 		return nil, err
 	}
+	if installCrictl == nil {
+		return nil, fmt.Errorf("install_crictl step returned nil - ensure CRI-O assets were prepared (kubexm download)")
+	}
 	installPolicyJson, err := crio.NewInstallPolicyJsonStepBuilder(runtimeCtx, "InstallPolicyJson").Build()
 	if err != nil {
 		return nil, err
+	}
+	if installPolicyJson == nil {
+		return nil, fmt.Errorf("install_policy_json step returned nil - ensure CRI-O assets were prepared (kubexm download)")
 	}
 	installCrioEnv, err := crio.NewInstallCrioEnvStepBuilder(runtimeCtx, "InstallCrioEnv").Build()
 	if err != nil {
 		return nil, err
 	}
+	if installCrioEnv == nil {
+		return nil, fmt.Errorf("install_crio_env step returned nil - ensure CRI-O assets were prepared (kubexm download)")
+	}
 	configureCrio, err := crio.NewConfigureCrioStepBuilder(runtimeCtx, "ConfigureCrio").Build()
 	if err != nil {
 		return nil, err
+	}
+	if configureCrio == nil {
+		return nil, fmt.Errorf("configure_crio step returned nil - ensure CRI-O assets were prepared (kubexm download)")
 	}
 	configureRegistries, err := crio.NewConfigureRegistriesStepBuilder(runtimeCtx, "ConfigureRegistries").Build()
 	if err != nil {
 		return nil, err
 	}
+	if configureRegistries == nil {
+		return nil, fmt.Errorf("configure_registries step returned nil - ensure CRI-O assets were prepared (kubexm download)")
+	}
 	configureAuth, err := crio.NewConfigureAuthStepBuilder(runtimeCtx, "ConfigureAuth").Build()
 	if err != nil {
 		return nil, err
+	}
+	if configureAuth == nil {
+		return nil, fmt.Errorf("configure_auth step returned nil - ensure CRI-O assets were prepared (kubexm download)")
 	}
 	installService, err := crio.NewInstallCrioServiceStepBuilder(runtimeCtx, "InstallCrioService").Build()
 	if err != nil {
 		return nil, err
 	}
+	if installService == nil {
+		return nil, fmt.Errorf("install_crio_service step returned nil - ensure CRI-O assets were prepared (kubexm download)")
+	}
 	enableCrio, err := crio.NewEnableCrioStepBuilder(runtimeCtx, "EnableCrio").Build()
 	if err != nil {
 		return nil, err
+	}
+	if enableCrio == nil {
+		return nil, fmt.Errorf("enable_crio step returned nil - ensure CRI-O assets were prepared (kubexm download)")
 	}
 	startCrio, err := crio.NewStartCrioStepBuilder(runtimeCtx, "StartCrio").Build()
 	if err != nil {
 		return nil, err
 	}
+	if startCrio == nil {
+		return nil, fmt.Errorf("start_crio step returned nil - ensure CRI-O assets were prepared (kubexm download)")
+	}
 
-	fragment.AddNode(&plan.ExecutionNode{Name: "ExtractCrio", Step: extractCrio, Hosts: []connector.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "ExtractCrio", Step: extractCrio, Hosts: []remotefw.Host{controlNode}})
 	fragment.AddNode(&plan.ExecutionNode{Name: "InstallCrio", Step: installCrio, Hosts: deployHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "InstallCni", Step: installCni, Hosts: deployHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "InstallCrictl", Step: installCrictl, Hosts: deployHosts})

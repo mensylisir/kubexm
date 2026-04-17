@@ -26,6 +26,8 @@ type helmStatusOutput struct {
 	} `json:"chart"`
 }
 
+var _ step.Step = (*InstallChartStep)(nil)
+
 type InstallChartStep struct {
 	step.Base
 	RepoName    string
@@ -118,14 +120,14 @@ func (s *InstallChartStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, 
 	}
 	statusCmd += " -o json"
 
-	output, err := runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
 	if err != nil {
 		logger.Infof("Helm release '%s' not found. Installation is required.", s.ReleaseName)
 		return false, nil
 	}
 
 	var status helmStatusOutput
-	if err := json.Unmarshal([]byte(output), &status); err != nil {
+	if err := json.Unmarshal([]byte(runResult.Stdout), &status); err != nil {
 		logger.Warnf("Failed to parse helm status for release '%s', assuming upgrade is needed: %v", s.ReleaseName, err)
 		return false, nil
 	}
@@ -178,15 +180,15 @@ func (s *InstallChartStep) Run(ctx runtime.ExecutionContext) (*types.StepResult,
 	cmd := cmdBuilder.String()
 
 	logger.Infof("Installing/upgrading helm chart with command: %s", cmd)
-	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
-		err := fmt.Errorf("failed to install/upgrade helm chart: %w\nOutput: %s", err, output)
+		err := fmt.Errorf("failed to install/upgrade helm chart: %w\nOutput: %s", err, runResult.Stdout)
 		result.MarkFailed(err, "failed to install helm chart")
 		return result, err
 	}
 
 	logger.Info("Helm chart installed/upgraded successfully.")
-	logger.Debugf("Command output:\n%s", output)
+	logger.Debugf("Command output:\n%s", runResult.Stdout)
 	result.MarkCompleted("helm chart installed successfully")
 	return result, nil
 }

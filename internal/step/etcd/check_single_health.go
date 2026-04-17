@@ -116,12 +116,12 @@ func (s *EtcdVerifyMemberHealthStep) checkMemberHealth(ctx runtime.ExecutionCont
 		filepath.Join(s.remoteCertsDir, fmt.Sprintf(common.EtcdAdminKeyFileNamePattern, nodeName)),
 	)
 
-	stdout, err := runner.Run(ctx.GoContext(), conn, healthCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, healthCmd, s.Sudo)
 	if err != nil {
-		return fmt.Errorf("health check command failed for endpoint '%s': %w. Output: %s", s.endpoint, err, string(stdout))
+		return fmt.Errorf("health check command failed for endpoint '%s': %w. Output: %s", s.endpoint, err, runResult.Stdout)
 	}
 
-	output := string(stdout)
+	output := runResult.Stdout
 	
 	if !strings.Contains(output, "is healthy") {
 		return fmt.Errorf("endpoint '%s' reported as unhealthy. Output: %s", s.endpoint, output)

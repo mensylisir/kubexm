@@ -33,14 +33,18 @@ func (t *CleanEtcdTask) Description() string {
 }
 
 func (t *CleanEtcdTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	return ctx.GetClusterConfig().Spec.Etcd.Type == string(common.EtcdDeploymentTypeKubexm), nil
+	etcdSpec := ctx.GetClusterConfig().Spec.Etcd
+	if etcdSpec == nil {
+		return false, nil
+	}
+	return etcdSpec.Type == string(common.EtcdDeploymentTypeKubexm), nil
 }
 
 func (t *CleanEtcdTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	etcdHosts := ctx.GetHostsByRole(common.RoleEtcd)
 	if len(etcdHosts) == 0 {

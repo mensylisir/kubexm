@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/containerd/containerd/reference/docker"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
@@ -27,6 +26,12 @@ var (
 	k8sNameRegex              = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 	k8sLabelRegex             = regexp.MustCompile(`^[a-z0-9A-Z]([-a-z0-9A-Z_.]*[a-z0-9A-Z])?$`)
 	emailRegex                = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+	// imageReferenceRegex validates OCI/Docker image reference format:
+	// - Optional registry: host[:port]
+	// - Optional path components (user/repo/...)
+	// - Required name component
+	// - Optional tag (:tag) or digest (@sha256:hex64)
+	imageReferenceRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*((:[a-zA-Z0-9_][a-zA-Z0-9_.-]*)|(@sha256:[a-fA-F0-9]{64}))?$|^([a-zA-Z0-9.-]+(:[0-9]+)?/)?([a-zA-Z0-9][a-zA-Z0-9_.-]*/)*[a-zA-Z0-9][a-zA-Z0-9_.-]*((:[a-zA-Z0-9_][a-zA-Z0-9_.-]*)|(@sha256:[a-fA-F0-9]{64}))?$`)
 )
 
 func IsValidK8sName(name string) bool {
@@ -282,8 +287,10 @@ func IsValidK8sLabel(label string) bool {
 }
 
 func IsValidImageReference(imageRef string) bool {
-	_, err := docker.ParseAnyReference(imageRef)
-	return err == nil
+	if imageRef == "" {
+		return false
+	}
+	return imageReferenceRegex.MatchString(imageRef)
 }
 
 func IsValidBase64(base64Str string) bool {

@@ -9,12 +9,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mensylisir/kubexm/internal/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/internal/common"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
 	"github.com/mensylisir/kubexm/internal/step/helpers"
-	"github.com/mensylisir/kubexm/internal/step/helpers/bom/images"
+	"github.com/mensylisir/kubexm/internal/util/images"
 	"github.com/mensylisir/kubexm/internal/templates"
 	"github.com/mensylisir/kubexm/internal/types"
 	"github.com/mensylisir/kubexm/internal/util"
@@ -81,8 +82,9 @@ type NetworkingTemplate struct {
 }
 
 type ApiServerTemplate struct {
-	ExtraArgs map[string]string
-	CertSANs  []string
+	ExtraArgs    map[string]string
+	CertSANs     []string
+	ExtraVolumes []VolumeTemplate
 }
 
 type ControllerManagerTemplate struct {
@@ -158,50 +160,77 @@ func (s *GenerateInitConfigStep) renderContent(ctx runtime.ExecutionContext) ([]
 		KubeletConfiguration:   KubeletConfigurationTemplate{},
 	}
 
-	data.KubernetesVersion = helpers.FirstNonEmpty(cluster.Spec.Kubernetes.Version, common.DefaultK8sVersion)
+	// Safe access to spec fields
+	k8sSpec := &v1alpha1.Kubernetes{}
+	if cluster.Spec.Kubernetes != nil {
+		k8sSpec = cluster.Spec.Kubernetes
+	}
+	networkSpec := &v1alpha1.Network{}
+	if cluster.Spec.Network != nil {
+		networkSpec = cluster.Spec.Network
+	}
+	etcdSpec := &v1alpha1.Etcd{}
+	if cluster.Spec.Etcd != nil {
+		etcdSpec = cluster.Spec.Etcd
+	}
+	cpEndpoint := &v1alpha1.ControlPlaneEndpointSpec{}
+	if cluster.Spec.ControlPlaneEndpoint != nil {
+		cpEndpoint = cluster.Spec.ControlPlaneEndpoint
+	}
+
+	data.KubernetesVersion = helpers.FirstNonEmpty(k8sSpec.Version, common.DefaultK8sVersion)
 	data.ClusterConfiguration.KubernetesVersion = data.KubernetesVersion
-	data.ClusterName = helpers.FirstNonEmpty(cluster.Spec.Kubernetes.ClusterName, common.DefaultClusterLocal)
+	data.ClusterName = helpers.FirstNonEmpty(k8sSpec.ClusterName, common.DefaultClusterLocal)
 	data.ClusterConfiguration.CertificatesDir = common.DefaultKubernetesPKIDir
-	data.ClusterConfiguration.ControlPlaneEndpoint = fmt.Sprintf("%s:%d", cluster.Spec.ControlPlaneEndpoint.Domain, cluster.Spec.ControlPlaneEndpoint.Port)
+	data.ClusterConfiguration.ControlPlaneEndpoint = fmt.Sprintf("%s:%d", cpEndpoint.Domain, cpEndpoint.Port)
 
 	imageProvider := images.NewImageProvider(ctx)
 	corednsImage := imageProvider.GetImage("coredns")
 	data.ImageRepository = imageProvider.GetImage("kube-apiserver").RegistryAddrWithNamespace()
 	data.ClusterConfiguration.DNS.ImageTag = corednsImage.Tag()
 
-	data.ClusterConfiguration.Networking.PodSubnet = helpers.FirstNonEmpty(cluster.Spec.Network.KubePodsCIDR, common.DefaultKubePodsCIDR)
-	data.ClusterConfiguration.Networking.ServiceSubnet = helpers.FirstNonEmpty(cluster.Spec.Network.KubeServiceCIDR, common.DefaultKubeServiceCIDR)
+	data.ClusterConfiguration.Networking.PodSubnet = helpers.FirstNonEmpty(networkSpec.KubePodsCIDR, common.DefaultKubePodsCIDR)
+	data.ClusterConfiguration.Networking.ServiceSubnet = helpers.FirstNonEmpty(networkSpec.KubeServiceCIDR, common.DefaultKubeServiceCIDR)
 
 	var defaultCRISocket, cgroupDriver string
-	switch cluster.Spec.Kubernetes.ContainerRuntime.Type {
-	case common.RuntimeTypeContainerd:
-		defaultCRISocket = common.ContainerdDefaultEndpoint
-		cgroupDriver = *cluster.Spec.Kubernetes.ContainerRuntime.Containerd.CgroupDriver
-	case common.RuntimeTypeCRIO:
-		defaultCRISocket = common.CRIODefaultEndpoint
-		cgroupDriver = *cluster.Spec.Kubernetes.ContainerRuntime.Crio.CgroupDriver
-	case common.RuntimeTypeDocker:
-		defaultCRISocket = common.CriDockerdSocketPath
-		cgroupDriver = *cluster.Spec.Kubernetes.ContainerRuntime.Docker.CgroupDriver
-	case common.RuntimeTypeIsula:
-		defaultCRISocket = common.IsuladDefaultEndpoint
-		cgroupDriver = *cluster.Spec.Kubernetes.ContainerRuntime.Isulad.CgroupDriver
-	default:
-		cgroupDriver = common.CgroupDriverSystemd
+	crSpec := k8sSpec.ContainerRuntime
+	if crSpec != nil {
+		switch crSpec.Type {
+		case common.RuntimeTypeContainerd:
+			defaultCRISocket = common.ContainerdDefaultEndpoint
+			if crSpec.Containerd != nil && crSpec.Containerd.CgroupDriver != nil {
+				cgroupDriver = *crSpec.Containerd.CgroupDriver
+			}
+		case common.RuntimeTypeCRIO:
+			defaultCRISocket = common.CRIODefaultEndpoint
+			if crSpec.Crio != nil && crSpec.Crio.CgroupDriver != nil {
+				cgroupDriver = *crSpec.Crio.CgroupDriver
+			}
+		case common.RuntimeTypeDocker:
+			defaultCRISocket = common.CriDockerdSocketPath
+			if crSpec.Docker != nil && crSpec.Docker.CgroupDriver != nil {
+				cgroupDriver = *crSpec.Docker.CgroupDriver
+			}
+		case common.RuntimeTypeIsula:
+			defaultCRISocket = common.IsuladDefaultEndpoint
+			if crSpec.Isulad != nil && crSpec.Isulad.CgroupDriver != nil {
+				cgroupDriver = *crSpec.Isulad.CgroupDriver
+			}
+		}
 	}
 	data.InitConfiguration.NodeRegistration.CRISocket = defaultCRISocket
 	data.InitConfiguration.NodeRegistration.CgroupDriver = cgroupDriver
 
 	etcdNodes := ctx.GetHostsByRole(common.RoleEtcd)
 	data.ClusterConfiguration.Etcd.IsExternal = false
-	if cluster.Spec.Etcd.Type == string(common.EtcdDeploymentTypeExternal) && cluster.Spec.Etcd.External != nil {
+	if etcdSpec.Type == string(common.EtcdDeploymentTypeExternal) && etcdSpec.External != nil {
 		data.ClusterConfiguration.Etcd.IsExternal = true
-		ext := cluster.Spec.Etcd.External
+		ext := etcdSpec.External
 		data.ClusterConfiguration.Etcd.Endpoints = ext.Endpoints
 		data.ClusterConfiguration.Etcd.CaFile = ext.CAFile
 		data.ClusterConfiguration.Etcd.CertFile = ext.CertFile
 		data.ClusterConfiguration.Etcd.KeyFile = ext.KeyFile
-	} else if cluster.Spec.Etcd.Type == string(common.EtcdDeploymentTypeKubexm) {
+	} else if etcdSpec.Type == string(common.EtcdDeploymentTypeKubexm) {
 		data.ClusterConfiguration.Etcd.IsExternal = true
 		endpoints := make([]string, len(etcdNodes))
 		for i, node := range etcdNodes {
@@ -211,6 +240,18 @@ func (s *GenerateInitConfigStep) renderContent(ctx runtime.ExecutionContext) ([]
 		data.ClusterConfiguration.Etcd.CaFile = filepath.Join(common.DefaultEtcdPKIDir, common.EtcdCaPemFileName)
 		data.ClusterConfiguration.Etcd.CertFile = filepath.Join(common.DefaultEtcdPKIDir, fmt.Sprintf(common.EtcdNodeCertFileNamePattern, currentHost.GetName()))
 		data.ClusterConfiguration.Etcd.KeyFile = filepath.Join(common.DefaultEtcdPKIDir, fmt.Sprintf(common.EtcdNodeKeyFileNamePattern, currentHost.GetName()))
+
+		// CRITICAL: When using kubexm-deployed etcd, the apiserver pod needs to mount
+		// the /etc/etcd/pki directory from the host filesystem. Without this extraVolume,
+		// the apiserver pod cannot read the etcd client certificates.
+		data.ClusterConfiguration.ApiServer.ExtraVolumes = []VolumeTemplate{
+			{
+				Name:      "etcd-certs",
+				HostPath:  common.DefaultEtcdPKIDir,
+				MountPath: common.DefaultEtcdPKIDir,
+				ReadOnly:  true,
+			},
+		}
 	}
 
 	mergeFeatureGates := func(defaults string, overrides map[string]bool) string {
@@ -242,24 +283,37 @@ func (s *GenerateInitConfigStep) renderContent(ctx runtime.ExecutionContext) ([]
 		"bind-address":        "0.0.0.0",
 		"feature-gates":       "RotateKubeletServerCertificate=true,ExpandCSIVolumes=true,CSIStorageCapacity=true",
 	}
-	data.ClusterConfiguration.ApiServer.ExtraArgs = helpers.MergeStringMaps(apiServerDefaultArgs, cluster.Spec.Kubernetes.APIServer.ExtraArgs)
-	if cluster.Spec.Kubernetes.APIServer.AuditConfig.Enabled == helpers.BoolPtr(true) {
-		data.ClusterConfiguration.ApiServer.ExtraArgs["audit-log-path"] = cluster.Spec.Kubernetes.APIServer.AuditConfig.LogPath
-		data.ClusterConfiguration.ApiServer.ExtraArgs["audit-log-maxage"] = strconv.Itoa(*cluster.Spec.Kubernetes.APIServer.AuditConfig.MaxAge)
-		data.ClusterConfiguration.ApiServer.ExtraArgs["audit-log-maxbackup"] = strconv.Itoa(*cluster.Spec.Kubernetes.APIServer.AuditConfig.MaxBackups)
-		data.ClusterConfiguration.ApiServer.ExtraArgs["audit-log-maxsize"] = strconv.Itoa(*cluster.Spec.Kubernetes.APIServer.AuditConfig.MaxSize)
-		data.ClusterConfiguration.ApiServer.ExtraArgs["audit-policy-file"] = cluster.Spec.Kubernetes.APIServer.AuditConfig.PolicyFile
+	data.ClusterConfiguration.ApiServer.ExtraArgs = helpers.MergeStringMaps(apiServerDefaultArgs, k8sSpec.APIServer.ExtraArgs)
+	if k8sSpec.APIServer.AuditConfig != nil && k8sSpec.APIServer.AuditConfig.Enabled != nil && *k8sSpec.APIServer.AuditConfig.Enabled {
+		audit := k8sSpec.APIServer.AuditConfig
+		if audit.LogPath != "" {
+			data.ClusterConfiguration.ApiServer.ExtraArgs["audit-log-path"] = audit.LogPath
+		}
+		if audit.MaxAge != nil {
+			data.ClusterConfiguration.ApiServer.ExtraArgs["audit-log-maxage"] = strconv.Itoa(*audit.MaxAge)
+		}
+		if audit.MaxBackups != nil {
+			data.ClusterConfiguration.ApiServer.ExtraArgs["audit-log-maxbackup"] = strconv.Itoa(*audit.MaxBackups)
+		}
+		if audit.MaxSize != nil {
+			data.ClusterConfiguration.ApiServer.ExtraArgs["audit-log-maxsize"] = strconv.Itoa(*audit.MaxSize)
+		}
+		if audit.PolicyFile != "" {
+			data.ClusterConfiguration.ApiServer.ExtraArgs["audit-policy-file"] = audit.PolicyFile
+		}
 	}
-	data.ClusterConfiguration.ApiServer.ExtraArgs["feature-gates"] = mergeFeatureGates(apiServerDefaultArgs["feature-gates"], cluster.Spec.Kubernetes.APIServer.FeatureGates)
+	data.ClusterConfiguration.ApiServer.ExtraArgs["feature-gates"] = mergeFeatureGates(apiServerDefaultArgs["feature-gates"], k8sSpec.APIServer.FeatureGates)
 
-	sans := []string{"kubernetes", "kubernetes.default", "kubernetes.default.svc", "127.0.0.1", "localhost", cluster.Spec.ControlPlaneEndpoint.Domain}
+	sans := []string{"kubernetes", "kubernetes.default", "kubernetes.default.svc", "127.0.0.1", "localhost", cpEndpoint.Domain}
 	sans = append(sans, fmt.Sprintf("kubernetes.default.svc.%s", data.ClusterName))
 	kubernetesServiceIP, _ := helpers.GetFirstIPFromCIDR(data.ClusterConfiguration.Networking.ServiceSubnet)
 	sans = append(sans, kubernetesServiceIP)
 	for _, node := range ctx.GetHostsByRole("") {
 		sans = append(sans, node.GetInternalAddress(), node.GetName())
 	}
-	sans = append(sans, cluster.Spec.Kubernetes.APIServer.CertExtraSans...)
+	if k8sSpec.APIServer.CertExtraSans != nil {
+		sans = append(sans, k8sSpec.APIServer.CertExtraSans...)
+	}
 	data.ClusterConfiguration.ApiServer.CertSANs = helpers.UniqueStringSlice(sans)
 
 	controllerManagerDefaultArgs := map[string]string{
@@ -268,32 +322,32 @@ func (s *GenerateInitConfigStep) renderContent(ctx runtime.ExecutionContext) ([]
 		"cluster-signing-duration": "87600h",
 		"feature-gates":            "RotateKubeletServerCertificate=true,ExpandCSIVolumes=true,CSIStorageCapacity=true",
 	}
-	data.ClusterConfiguration.ControllerManager.ExtraArgs = helpers.MergeStringMaps(controllerManagerDefaultArgs, cluster.Spec.Kubernetes.ControllerManager.ExtraArgs)
-	if cluster.Spec.Kubernetes.ControllerManager.NodeCidrMaskSize != nil {
-		data.ClusterConfiguration.ControllerManager.ExtraArgs["node-cidr-mask-size"] = strconv.Itoa(*cluster.Spec.Kubernetes.ControllerManager.NodeCidrMaskSize)
+	data.ClusterConfiguration.ControllerManager.ExtraArgs = helpers.MergeStringMaps(controllerManagerDefaultArgs, k8sSpec.ControllerManager.ExtraArgs)
+	if k8sSpec.ControllerManager.NodeCidrMaskSize != nil {
+		data.ClusterConfiguration.ControllerManager.ExtraArgs["node-cidr-mask-size"] = strconv.Itoa(*k8sSpec.ControllerManager.NodeCidrMaskSize)
 	}
-	data.ClusterConfiguration.ControllerManager.ExtraArgs["feature-gates"] = mergeFeatureGates(controllerManagerDefaultArgs["feature-gates"], cluster.Spec.Kubernetes.ControllerManager.FeatureGates)
+	data.ClusterConfiguration.ControllerManager.ExtraArgs["feature-gates"] = mergeFeatureGates(controllerManagerDefaultArgs["feature-gates"], k8sSpec.ControllerManager.FeatureGates)
 
 	schedulerDefaultArgs := map[string]string{
 		"bind-address":  "0.0.0.0",
 		"feature-gates": "RotateKubeletServerCertificate=true,ExpandCSIVolumes=true,CSIStorageCapacity=true",
 	}
-	data.ClusterConfiguration.Scheduler.ExtraArgs = helpers.MergeStringMaps(schedulerDefaultArgs, cluster.Spec.Kubernetes.Scheduler.ExtraArgs)
-	data.ClusterConfiguration.Scheduler.ExtraArgs["feature-gates"] = mergeFeatureGates(schedulerDefaultArgs["feature-gates"], cluster.Spec.Kubernetes.Scheduler.FeatureGates)
+	data.ClusterConfiguration.Scheduler.ExtraArgs = helpers.MergeStringMaps(schedulerDefaultArgs, k8sSpec.Scheduler.ExtraArgs)
+	data.ClusterConfiguration.Scheduler.ExtraArgs["feature-gates"] = mergeFeatureGates(schedulerDefaultArgs["feature-gates"], k8sSpec.Scheduler.FeatureGates)
 
 	data.InitConfiguration.LocalAPIEndpoint.AdvertiseAddress = currentHost.GetInternalAddress()
 	data.InitConfiguration.LocalAPIEndpoint.BindPort = common.DefaultAPIServerPort
-	data.InitConfiguration.NodeRegistration.KubeletExtraArgs = cluster.Spec.Kubernetes.Kubelet.ExtraArgs
+	data.InitConfiguration.NodeRegistration.KubeletExtraArgs = k8sSpec.Kubelet.ExtraArgs
 
-	data.KubeProxyConfiguration.Mode = util.FirstNonEmpty(cluster.Spec.Kubernetes.KubeProxy.Mode, common.KubeProxyModeIPVS)
+	data.KubeProxyConfiguration.Mode = util.FirstNonEmpty(k8sSpec.KubeProxy.Mode, common.KubeProxyModeIPVS)
 	data.KubeProxyConfiguration.Iptables.MasqueradeBit = 14
 	data.KubeProxyConfiguration.Iptables.SyncPeriod = "30s"
 	data.KubeProxyConfiguration.Iptables.MinSyncPeriod = "0s"
-	if cluster.Spec.Kubernetes.KubeProxy.MasqueradeAll != nil {
-		data.KubeProxyConfiguration.Iptables.MasqueradeAll = *cluster.Spec.Kubernetes.KubeProxy.MasqueradeAll
+	if k8sSpec.KubeProxy.MasqueradeAll != nil {
+		data.KubeProxyConfiguration.Iptables.MasqueradeAll = *k8sSpec.KubeProxy.MasqueradeAll
 	}
 
-	kubeletSpec := cluster.Spec.Kubernetes.Kubelet
+	kubeletSpec := k8sSpec.Kubelet
 	data.KubeletConfiguration.MaxPods = 110
 	if kubeletSpec.MaxPods != nil {
 		data.KubeletConfiguration.MaxPods = *kubeletSpec.MaxPods
@@ -322,7 +376,11 @@ func (s *GenerateInitConfigStep) renderContent(ctx runtime.ExecutionContext) ([]
 	data.KubeletConfiguration.SystemReserved = kubeletSpec.SystemReserved                                                                                                                                   // No defaults specified in original code
 	data.KubeletConfiguration.FeatureGates = helpers.MergeBoolMaps(map[string]bool{"CSIStorageCapacity": true, "ExpandCSIVolumes": true, "RotateKubeletServerCertificate": true}, kubeletSpec.FeatureGates) // Assuming util.MergeBoolMaps exists
 
-	if cluster.Spec.DNS.NodeLocalDNS.Enabled == helpers.BoolPtr(true) {
+	dnsSpec := &v1alpha1.DNS{}
+	if cluster.Spec.DNS != nil {
+		dnsSpec = cluster.Spec.DNS
+	}
+	if dnsSpec.NodeLocalDNS != nil && dnsSpec.NodeLocalDNS.Enabled != nil && *dnsSpec.NodeLocalDNS.Enabled {
 		data.KubeletConfiguration.ClusterDNS = common.DefaultLocalDNS
 	} else {
 		dnsIP, err := helpers.GetDNSIPFromCIDR(data.ClusterConfiguration.Networking.ServiceSubnet)

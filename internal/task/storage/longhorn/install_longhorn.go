@@ -3,7 +3,7 @@ package longhorn
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -43,7 +43,7 @@ func (t *DeployLonghornTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 
 func (t *DeployLonghornTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
 	if err != nil {
@@ -69,9 +69,9 @@ func (t *DeployLonghornTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragm
 		return nil, err
 	}
 
-	nodeGenManifests := &plan.ExecutionNode{Name: "GenerateLonghornManifests", Step: generateManifests, Hosts: []connector.Host{executionHost}}
-	nodeDistribute := &plan.ExecutionNode{Name: "DistributeLonghorn", Step: distributeLonghorn, Hosts: []connector.Host{executionHost}}
-	nodeInstall := &plan.ExecutionNode{Name: "InstallLonghorn", Step: installLonghorn, Hosts: []connector.Host{executionHost}}
+	nodeGenManifests := &plan.ExecutionNode{Name: "GenerateLonghornManifests", Step: generateManifests, Hosts: []remotefw.Host{executionHost}}
+	nodeDistribute := &plan.ExecutionNode{Name: "DistributeLonghorn", Step: distributeLonghorn, Hosts: []remotefw.Host{executionHost}}
+	nodeInstall := &plan.ExecutionNode{Name: "InstallLonghorn", Step: installLonghorn, Hosts: []remotefw.Host{executionHost}}
 
 	fragment.AddNode(nodeGenManifests)
 	fragment.AddNode(nodeDistribute)

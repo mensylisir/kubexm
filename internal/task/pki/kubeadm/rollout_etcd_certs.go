@@ -3,7 +3,7 @@ package kubeadm
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -36,7 +36,10 @@ func (t *RolloutEtcdLeafCertsTask) Description() string {
 }
 
 func (t *RolloutEtcdLeafCertsTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	runtimeCtx := ctx.(*runtime.Context)
+	runtimeCtx, ok := ctx.(*runtime.Context)
+	if !ok {
+		return false, fmt.Errorf("ctx is not *runtime.Context")
+	}
 	caCacheKey := fmt.Sprintf(common.CacheKubeadmEtcdCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
 	if val, ok := ctx.GetPipelineCache().Get(caCacheKey); ok {
 		if renew, isBool := val.(bool); isBool && renew {
@@ -56,7 +59,7 @@ func (t *RolloutEtcdLeafCertsTask) IsRequired(ctx runtime.TaskContext) (bool, er
 func (t *RolloutEtcdLeafCertsTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	etcdHosts := ctx.GetHostsByRole(common.RoleEtcd)
 	if len(etcdHosts) == 0 {
@@ -82,7 +85,7 @@ func (t *RolloutEtcdLeafCertsTask) Plan(ctx runtime.TaskContext) (*plan.Executio
 		if err != nil {
 			return nil, err
 		}
-		moveNode := &plan.ExecutionNode{Name: "MoveNewEtcdAssets", Step: moveStep, Hosts: []connector.Host{opHost}}
+		moveNode := &plan.ExecutionNode{Name: "MoveNewEtcdAssets", Step: moveStep, Hosts: []remotefw.Host{opHost}}
 		moveID, err := fragment.AddNode(moveNode)
 		if err != nil {
 			return nil, err
@@ -92,7 +95,7 @@ func (t *RolloutEtcdLeafCertsTask) Plan(ctx runtime.TaskContext) (*plan.Executio
 
 	for _, host := range etcdHosts {
 		hostName := host.GetName()
-		hostList := []connector.Host{host}
+		hostList := []remotefw.Host{host}
 
 		backupStep, err := kubeadm.NewKubeadmBackupRemotePKIStepBuilder(runtimeCtx, fmt.Sprintf("BackupFor%s", hostName)).Build()
 		if err != nil {
@@ -135,7 +138,7 @@ func (t *RolloutEtcdLeafCertsTask) Plan(ctx runtime.TaskContext) (*plan.Executio
 	if err != nil {
 		return nil, err
 	}
-	verifyClusterNode := &plan.ExecutionNode{Name: verifyClusterStep.Meta().Name, Step: verifyClusterStep, Hosts: []connector.Host{opHost}}
+	verifyClusterNode := &plan.ExecutionNode{Name: verifyClusterStep.Meta().Name, Step: verifyClusterStep, Hosts: []remotefw.Host{opHost}}
 	verifyClusterID, _ := fragment.AddNode(verifyClusterNode)
 
 	if lastNodeExitPoint != "" {

@@ -5,7 +5,7 @@ import (
 	"github.com/mensylisir/kubexm/internal/step/etcd"
 
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -37,7 +37,10 @@ func (t *DeployNewLeafCertsRollingTask) Description() string {
 }
 
 func (t *DeployNewLeafCertsRollingTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	runtimeCtx := ctx.(*runtime.Context)
+	runtimeCtx, ok := ctx.(*runtime.Context)
+	if !ok {
+		return false, fmt.Errorf("ctx is not *runtime.Context")
+	}
 	caCacheKey := fmt.Sprintf(common.CacheKubexmEtcdCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
 	caRenewVal, _ := ctx.GetModuleCache().Get(caCacheKey)
 	caRenew, _ := caRenewVal.(bool)
@@ -49,7 +52,7 @@ func (t *DeployNewLeafCertsRollingTask) IsRequired(ctx runtime.TaskContext) (boo
 }
 
 func (t *DeployNewLeafCertsRollingTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	fragment := plan.NewExecutionFragment(t.Name())
 
@@ -74,7 +77,7 @@ func (t *DeployNewLeafCertsRollingTask) Plan(ctx runtime.TaskContext) (*plan.Exe
 			return nil, err
 		}
 		moveAssetsNodeID := plan.NodeID("MoveNewAssets")
-		fragment.AddNode(&plan.ExecutionNode{Name: string(moveAssetsNodeID), Step: moveAssetsStep, Hosts: []connector.Host{controlNode}})
+		fragment.AddNode(&plan.ExecutionNode{Name: string(moveAssetsNodeID), Step: moveAssetsStep, Hosts: []remotefw.Host{controlNode}})
 		lastNodeWaitID = moveAssetsNodeID
 	}
 
@@ -86,7 +89,7 @@ func (t *DeployNewLeafCertsRollingTask) Plan(ctx runtime.TaskContext) (*plan.Exe
 			return nil, err
 		}
 		backupNodeID := plan.NodeID(fmt.Sprintf("BackupRemoteCertsForLeafs_%s", nodeName))
-		fragment.AddNode(&plan.ExecutionNode{Name: string(backupNodeID), Step: backupStep, Hosts: []connector.Host{node}})
+		fragment.AddNode(&plan.ExecutionNode{Name: string(backupNodeID), Step: backupStep, Hosts: []remotefw.Host{node}})
 		if lastNodeWaitID != "" {
 			fragment.AddDependency(lastNodeWaitID, backupNodeID)
 		}
@@ -96,7 +99,7 @@ func (t *DeployNewLeafCertsRollingTask) Plan(ctx runtime.TaskContext) (*plan.Exe
 			return nil, err
 		}
 		distLeafsNodeID := plan.NodeID(fmt.Sprintf("DistributeLeafCerts_%s", nodeName))
-		fragment.AddNode(&plan.ExecutionNode{Name: string(distLeafsNodeID), Step: distLeafsStep, Hosts: []connector.Host{node}})
+		fragment.AddNode(&plan.ExecutionNode{Name: string(distLeafsNodeID), Step: distLeafsStep, Hosts: []remotefw.Host{node}})
 		fragment.AddDependency(backupNodeID, distLeafsNodeID)
 
 		restartStep, err := etcdstep.NewRestartEtcdStepBuilder(runtimeCtx, fmt.Sprintf("RestartEtcd_%s", nodeName)).Build()
@@ -104,7 +107,7 @@ func (t *DeployNewLeafCertsRollingTask) Plan(ctx runtime.TaskContext) (*plan.Exe
 			return nil, err
 		}
 		restartNodeID := plan.NodeID(fmt.Sprintf("RestartEtcdForLeafs_%s", nodeName))
-		fragment.AddNode(&plan.ExecutionNode{Name: string(restartNodeID), Step: restartStep, Hosts: []connector.Host{node}})
+		fragment.AddNode(&plan.ExecutionNode{Name: string(restartNodeID), Step: restartStep, Hosts: []remotefw.Host{node}})
 		fragment.AddDependency(distLeafsNodeID, restartNodeID)
 
 		waitStep, err := etcd.NewWaitClusterHealthyStepBuilder(runtimeCtx, fmt.Sprintf("WaitClusterHealthy_%s", nodeName)).Build()
@@ -112,7 +115,7 @@ func (t *DeployNewLeafCertsRollingTask) Plan(ctx runtime.TaskContext) (*plan.Exe
 			return nil, err
 		}
 		waitNodeID := plan.NodeID(fmt.Sprintf("WaitClusterHealthyForLeafs_%s", nodeName))
-		fragment.AddNode(&plan.ExecutionNode{Name: string(waitNodeID), Step: waitStep, Hosts: []connector.Host{node}})
+		fragment.AddNode(&plan.ExecutionNode{Name: string(waitNodeID), Step: waitStep, Hosts: []remotefw.Host{node}})
 		fragment.AddDependency(restartNodeID, waitNodeID)
 
 		if lastNodeWaitID == "" {

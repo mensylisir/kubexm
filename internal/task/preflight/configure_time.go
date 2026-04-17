@@ -5,7 +5,7 @@ import (
 	"github.com/mensylisir/kubexm/internal/step"
 	"github.com/mensylisir/kubexm/internal/step/os"
 
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -48,7 +48,7 @@ func (t *ConfigureTimeTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 func (t *ConfigureTimeTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	allHosts := ctx.GetHostsByRole("")
 	ntpServers := ctx.GetClusterConfig().Spec.System.NTPServers
@@ -62,7 +62,7 @@ func (t *ConfigureTimeTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragme
 
 	for _, host := range allHosts {
 		hostName := host.GetName()
-		hostList := []connector.Host{host}
+		hostList := []remotefw.Host{host}
 
 		configureTimezoneStep, err := os.NewConfigureTimezoneStepBuilder(runtimeCtx, fmt.Sprintf("ConfigureTimezoneFor%s", hostName)).Build()
 		if err != nil {

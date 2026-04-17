@@ -10,26 +10,29 @@ import (
 	"github.com/mensylisir/kubexm/internal/connector"
 )
 
-func (r *defaultRunner) Run(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (string, error) {
+func (r *defaultRunner) Run(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (*CommandResult, error) {
 	if conn == nil {
-		return "", fmt.Errorf("connector cannot be nil")
+		return NewCommandResult(-1, "", "", false, 0), fmt.Errorf("connector cannot be nil")
 	}
 	opts := &connector.ExecOptions{
 		Sudo: sudo,
 	}
+	start := time.Now()
 	stdout, stderr, err := conn.Exec(ctx, cmd, opts)
-	output := string(stdout)
-	if len(stderr) > 0 {
-		if len(output) > 0 {
-			output += "\n"
-		}
-		output += string(stderr)
-	}
+	duration := time.Since(start)
 
+	result := NewCommandResult(0, string(stdout), string(stderr), err == nil, duration)
 	if err != nil {
-		return output, err
+		var cmdErr *connector.CommandError
+		if errors.As(err, &cmdErr) {
+			result.ExitCode = cmdErr.ExitCode
+		} else {
+			result.ExitCode = -1
+		}
+		result.Success = false
+		return result, err
 	}
-	return output, nil
+	return result, nil
 }
 
 func (r *defaultRunner) OriginRun(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (string, string, error) {
@@ -53,12 +56,12 @@ func (r *defaultRunner) OriginRun(ctx context.Context, conn connector.Connector,
 	return string(stdout), string(stderr), nil
 }
 
-func (r *defaultRunner) MustRun(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (string, error) {
-	output, err := r.Run(ctx, conn, cmd, sudo)
+func (r *defaultRunner) MustRun(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (*CommandResult, error) {
+	result, err := r.Run(ctx, conn, cmd, sudo)
 	if err != nil {
-		return output, fmt.Errorf("command '%s' (sudo: %v) failed: %w. Output: %s", cmd, sudo, err, output)
+		return result, fmt.Errorf("command '%s' (sudo: %v) failed: %w. Output: %s", cmd, sudo, err, result.Stdout)
 	}
-	return output, nil
+	return result, nil
 }
 
 func (r *defaultRunner) Check(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (bool, error) {
@@ -127,7 +130,7 @@ func (r *defaultRunner) RunRetry(ctx context.Context, conn connector.Connector, 
 	}
 
 	var lastErr error
-	var output string
+	var lastResult *CommandResult
 
 	totalAttempts := 1 + retries
 
@@ -135,15 +138,15 @@ func (r *defaultRunner) RunRetry(ctx context.Context, conn connector.Connector, 
 		select {
 		case <-ctx.Done():
 			if lastErr != nil {
-				return output, fmt.Errorf("context cancelled during retries for command '%s': %w (last error: %s)", cmd, ctx.Err(), lastErr.Error())
+				return lastResult.Stdout, fmt.Errorf("context cancelled during retries for command '%s': %w (last error: %s)", cmd, ctx.Err(), lastErr.Error())
 			}
 			return "", fmt.Errorf("context cancelled before command '%s' could complete: %w", cmd, ctx.Err())
 		default:
 		}
 
-		output, lastErr = r.Run(ctx, conn, cmd, sudo)
+		lastResult, lastErr = r.Run(ctx, conn, cmd, sudo)
 		if lastErr == nil {
-			return output, nil // Success
+			return lastResult.Stdout, nil // Success
 		}
 
 		if attempt == totalAttempts-1 {
@@ -154,10 +157,10 @@ func (r *defaultRunner) RunRetry(ctx context.Context, conn connector.Connector, 
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():
-				return output, fmt.Errorf("context cancelled during delay for command '%s': %w (last error: %s)", cmd, ctx.Err(), lastErr.Error())
+				return lastResult.Stdout, fmt.Errorf("context cancelled during delay for command '%s': %w (last error: %s)", cmd, ctx.Err(), lastErr.Error())
 			}
 		}
 	}
 
-	return output, fmt.Errorf("command '%s' failed after %d attempts: %w (last output: %s)", cmd, totalAttempts, lastErr, output)
+	return lastResult.Stdout, fmt.Errorf("command '%s' failed after %d attempts: %w", cmd, totalAttempts, lastErr)
 }

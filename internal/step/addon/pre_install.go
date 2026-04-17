@@ -73,12 +73,12 @@ func (s *RunAddonPreInstallHookStep) Run(ctx runtime.ExecutionContext) (*types.S
 
 	for i, command := range s.Commands {
 		logger.Info("Executing pre-install hook command.", "index", i+1, "command", command)
-		output, err := runner.Run(ctx.GoContext(), conn, command, s.Sudo)
+		runResult, err := runner.Run(ctx.GoContext(), conn, command, s.Sudo)
 		if err != nil {
 			result.MarkFailed(err, fmt.Sprintf("failed to execute pre-install hook command: [%s]", command))
 			return result, err
 		}
-		logger.Debug("Command output.", "output", output)
+		logger.Debug("Command output.", "output", runResult.Stdout)
 	}
 
 	logger.Info("Successfully executed all pre-install hooks for addon.")

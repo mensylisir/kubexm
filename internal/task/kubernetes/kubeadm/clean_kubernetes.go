@@ -38,7 +38,7 @@ func (t *CleanKubernetesTask) IsRequired(ctx runtime.TaskContext) (bool, error) 
 
 func (t *CleanKubernetesTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	allHosts := append(ctx.GetHostsByRole(common.RoleMaster), ctx.GetHostsByRole(common.RoleWorker)...)
 	if len(allHosts) == 0 {

@@ -1,14 +1,25 @@
 package haproxy
 
 import (
-	"github.com/mensylisir/kubexm/internal/common"
+	"fmt"
+
+	pkgcommon "github.com/mensylisir/kubexm/internal/common"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
+	lbcommon "github.com/mensylisir/kubexm/internal/step/loadbalancer/common"
 	haproxystep "github.com/mensylisir/kubexm/internal/step/loadbalancer/haproxy"
 	"github.com/mensylisir/kubexm/internal/task"
 )
 
+// DeployHAProxyOnWorkersTask deploys HAProxy as a systemd service on worker nodes.
+// This task composes atomic steps:
+// 1. prepare_dirs - create necessary directories
+// 2. render_config - render HAProxy configuration
+// 3. copy_config - copy config to remote hosts
+// 4. copy_service - copy systemd service file
+// 5. enable_service - enable haproxy service
+// 6. restart_service - restart haproxy service
 type DeployHAProxyOnWorkersTask struct {
 	task.Base
 }
@@ -18,19 +29,14 @@ func NewDeployHAProxyOnWorkersTask() task.Task {
 		Base: task.Base{
 			Meta: spec.TaskMeta{
 				Name:        "DeployHAProxyOnWorkers",
-				Description: "Deploy HAProxy as a system service on worker nodes for internal load balancing",
+				Description: "Deploy HAProxy as a systemd service on worker nodes",
 			},
 		},
 	}
 }
 
-func (t *DeployHAProxyOnWorkersTask) Name() string {
-	return t.Meta.Name
-}
-
-func (t *DeployHAProxyOnWorkersTask) Description() string {
-	return t.Meta.Description
-}
+func (t *DeployHAProxyOnWorkersTask) Name() string        { return t.Meta.Name }
+func (t *DeployHAProxyOnWorkersTask) Description() string { return t.Meta.Description }
 
 func (t *DeployHAProxyOnWorkersTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 	cfg := ctx.GetClusterConfig()
@@ -44,53 +50,98 @@ func (t *DeployHAProxyOnWorkersTask) IsRequired(ctx runtime.TaskContext) (bool, 
 	if ha.Internal == nil || ha.Internal.Enabled == nil || !*ha.Internal.Enabled {
 		return false, nil
 	}
-	if ha.Internal.Type != string(common.InternalLBTypeHAProxy) {
+	if ha.Internal.Type != string(pkgcommon.InternalLBTypeHAProxy) {
 		return false, nil
 	}
-	if cfg.Spec.Kubernetes == nil || cfg.Spec.Kubernetes.Type != string(common.KubernetesDeploymentTypeKubexm) {
+	if cfg.Spec.Kubernetes == nil || cfg.Spec.Kubernetes.Type != string(pkgcommon.KubernetesDeploymentTypeKubexm) {
 		return false, nil
 	}
-	if len(ctx.GetHostsByRole(common.RoleMaster)) <= 1 {
+	if len(ctx.GetHostsByRole(pkgcommon.RoleMaster)) <= 1 {
 		return false, nil
 	}
-	return len(ctx.GetHostsByRole(common.RoleWorker)) > 0, nil
+	return len(ctx.GetHostsByRole(pkgcommon.RoleWorker)) > 0, nil
 }
 
-func (t *DeployHAProxyOnWorkersTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
-	fragment := plan.NewExecutionFragment(t.Name())
+func (h *DeployHAProxyOnWorkersTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
+	fragment := plan.NewExecutionFragment(h.Name())
+	runtimeCtx := ctx.ForTask(h.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
-
-	workerHosts := ctx.GetHostsByRole(common.RoleWorker)
+	workerHosts := ctx.GetHostsByRole(pkgcommon.RoleWorker)
 	if len(workerHosts) == 0 {
 		return fragment, nil
 	}
 
-	generateConfig, err := haproxystep.NewGenerateHAProxyConfigStepBuilder(runtimeCtx, "GenerateHAProxyWorkerConfig").Build()
+	// Step 1: Prepare directories
+	dirs := []string{pkgcommon.HAProxyDefaultConfDirTarget}
+	prepareDirs, err := lbcommon.NewPrepareLBDirsStepBuilder(runtimeCtx, "PrepareHaproxyWorkerDirs", dirs).Build()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create prepare dirs step: %w", err)
 	}
+
+	// Step 2: Render HAProxy config
+	renderConfig, err := haproxystep.NewRenderHAProxyConfigStepBuilder(runtimeCtx, "RenderHAProxyWorkerConfig").Build()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create render config step: %w", err)
+	}
+
+	// Step 3: Copy config to remote
+	copyConfig, err := lbcommon.NewCopyFileStepBuilder(
+		runtimeCtx,
+		"CopyHAProxyWorkerConfig",
+		pkgcommon.HAProxyDefaultConfigFileTarget,
+		"haproxy_rendered_config",
+		"0644",
+	).Build()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create copy config step: %w", err)
+	}
+
+	// Step 4: Render systemd service file
+	renderService, err := haproxystep.NewRenderHAProxyServiceStepBuilder(runtimeCtx, "RenderHAProxyWorkerService").Build()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create render service step: %w", err)
+	}
+
+	// Step 5: Copy systemd service to remote
+	copyService, err := lbcommon.NewCopyFileStepBuilder(
+		runtimeCtx,
+		"CopyHAProxyWorkerService",
+		pkgcommon.HAProxyDefaultSystemdFile,
+		"haproxy_worker_service",
+		"0644",
+	).Build()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create copy service step: %w", err)
+	}
+
+	// Step 6: Enable service (using existing step)
 	enableService, err := haproxystep.NewEnableHAProxyStepBuilder(runtimeCtx, "EnableHAProxyWorkerService").Build()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create enable service step: %w", err)
 	}
+
+	// Step 7: Restart service (using existing step)
 	restartService, err := haproxystep.NewRestartHAProxyStepBuilder(runtimeCtx, "RestartHAProxyWorkerService").Build()
 	if err != nil {
-		return nil, err
-	}
-	installPackage, err := haproxystep.NewInstallHAProxyStepBuilder(runtimeCtx, "InstallHAProxyWorkerPackage").Build()
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create restart service step: %w", err)
 	}
 
-	fragment.AddNode(&plan.ExecutionNode{Name: "GenerateHAProxyWorkerConfig", Step: generateConfig, Hosts: workerHosts})
+	// Add nodes
+	fragment.AddNode(&plan.ExecutionNode{Name: "PrepareHaproxyWorkerDirs", Step: prepareDirs, Hosts: workerHosts})
+	fragment.AddNode(&plan.ExecutionNode{Name: "RenderHAProxyWorkerConfig", Step: renderConfig, Hosts: workerHosts})
+	fragment.AddNode(&plan.ExecutionNode{Name: "CopyHAProxyWorkerConfig", Step: copyConfig, Hosts: workerHosts})
+	fragment.AddNode(&plan.ExecutionNode{Name: "RenderHAProxyWorkerService", Step: renderService, Hosts: workerHosts})
+	fragment.AddNode(&plan.ExecutionNode{Name: "CopyHAProxyWorkerService", Step: copyService, Hosts: workerHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "EnableHAProxyWorkerService", Step: enableService, Hosts: workerHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "RestartHAProxyWorkerService", Step: restartService, Hosts: workerHosts})
-	fragment.AddNode(&plan.ExecutionNode{Name: "InstallHAProxyWorkerPackage", Step: installPackage, Hosts: workerHosts})
 
-	fragment.AddDependency("InstallHAProxyWorkerPackage", "GenerateHAProxyWorkerConfig")
-	fragment.AddDependency("GenerateHAProxyWorkerConfig", "EnableHAProxyWorkerService")
-	fragment.AddDependency("EnableHAProxyWorkerService", "RestartHAProxyWorkerService")
+	// Dependencies: config chain and service chain
+	fragment.AddDependency("RenderHAProxyWorkerConfig", "PrepareHaproxyWorkerDirs")
+	fragment.AddDependency("CopyHAProxyWorkerConfig", "RenderHAProxyWorkerConfig")
+	fragment.AddDependency("RenderHAProxyWorkerService", "CopyHAProxyWorkerConfig")
+	fragment.AddDependency("CopyHAProxyWorkerService", "RenderHAProxyWorkerService")
+	fragment.AddDependency("EnableHAProxyWorkerService", "CopyHAProxyWorkerService")
+	fragment.AddDependency("RestartHAProxyWorkerService", "EnableHAProxyWorkerService")
 
 	fragment.CalculateEntryAndExitNodes()
 	return fragment, nil

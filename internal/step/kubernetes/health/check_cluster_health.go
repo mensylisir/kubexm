@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mensylisir/kubexm/internal/connector"
 	"github.com/mensylisir/kubexm/internal/runtime"
+	"github.com/mensylisir/kubexm/internal/runner"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
 	"github.com/mensylisir/kubexm/internal/types"
@@ -106,7 +106,7 @@ func (s *CheckClusterHealthStep) Rollback(ctx runtime.ExecutionContext) error {
 	return nil
 }
 
-func (s *CheckClusterHealthStep) checkClusterHealth(ctx runtime.ExecutionContext, conn connector.Connector) error {
+func (s *CheckClusterHealthStep) checkClusterHealth(ctx runtime.ExecutionContext, conn runner.Connector) error {
 	runner := ctx.GetRunner()
 	logger := ctx.GetLogger()
 	currentHostName := ctx.GetHost().GetName()
@@ -114,11 +114,11 @@ func (s *CheckClusterHealthStep) checkClusterHealth(ctx runtime.ExecutionContext
 	logger.Info("Checking node status...")
 	getNodesCmd := "kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes --no-headers"
 	logger.Debugf("Executing command: %s", getNodesCmd)
-	stdout, err := runner.Run(ctx.GoContext(), conn, getNodesCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, getNodesCmd, s.Sudo)
 	if err != nil {
-		return fmt.Errorf("failed to execute 'kubectl get nodes': %w. Output: %s", err, string(stdout))
+		return fmt.Errorf("failed to execute 'kubectl get nodes': %w. Output: %s", err, runResult.Stdout)
 	}
-	for _, line := range strings.Split(string(stdout), "\n") {
+	for _, line := range strings.Split(runResult.Stdout, "\n") {
 		if strings.Contains(line, "NotReady") {
 			return fmt.Errorf("found a node in 'NotReady' state: %s", line)
 		}
@@ -128,11 +128,11 @@ func (s *CheckClusterHealthStep) checkClusterHealth(ctx runtime.ExecutionContext
 	logger.Info("Checking kube-system pods...")
 	getPodsCmd := "kubectl --kubeconfig /etc/kubernetes/admin.conf get pods -n kube-system --no-headers"
 	logger.Debugf("Executing command: %s", getPodsCmd)
-	stdout, err = runner.Run(ctx.GoContext(), conn, getPodsCmd, s.Sudo)
+	runResult, err = runner.Run(ctx.GoContext(), conn, getPodsCmd, s.Sudo)
 	if err != nil {
-		return fmt.Errorf("failed to execute 'kubectl get pods': %w. Output: %s", err, string(stdout))
+		return fmt.Errorf("failed to execute 'kubectl get pods': %w. Output: %s", err, runResult.Stdout)
 	}
-	for _, line := range strings.Split(string(stdout), "\n") {
+	for _, line := range strings.Split(runResult.Stdout, "\n") {
 		if len(strings.TrimSpace(line)) == 0 {
 			continue
 		}
@@ -154,12 +154,12 @@ func (s *CheckClusterHealthStep) checkClusterHealth(ctx runtime.ExecutionContext
 		etcdPodName,
 	)
 	logger.Debugf("Executing command for etcd health on pod %s", etcdPodName)
-	stdout, err = runner.Run(ctx.GoContext(), conn, etcdHealthCmd, s.Sudo)
+	runResult, err = runner.Run(ctx.GoContext(), conn, etcdHealthCmd, s.Sudo)
 	if err != nil {
-		return fmt.Errorf("failed to execute etcd health check: %w. Output: %s", err, string(stdout))
+		return fmt.Errorf("failed to execute etcd health check: %w. Output: %s", err, runResult.Stdout)
 	}
-	if !strings.Contains(string(stdout), "is healthy") {
-		return fmt.Errorf("etcd cluster health check failed, output: %s", string(stdout))
+	if !strings.Contains(runResult.Stdout, "is healthy") {
+		return fmt.Errorf("etcd cluster health check failed, output: %s", runResult.Stdout)
 	}
 	logger.Info("Check passed: Etcd cluster is healthy.")
 

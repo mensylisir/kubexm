@@ -3,7 +3,7 @@ package openebs_local
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -45,7 +45,7 @@ func (t *DeployOpenebsTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 func (t *DeployOpenebsTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
 	if len(masterHosts) == 0 {
@@ -71,9 +71,9 @@ func (t *DeployOpenebsTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragme
 		return nil, err
 	}
 
-	fragment.AddNode(&plan.ExecutionNode{Name: "GenerateOpenEBSValues", Step: generateValues, Hosts: []connector.Host{executionHost}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "DistributeOpenEBSArtifacts", Step: distributeArtifacts, Hosts: []connector.Host{executionHost}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "InstallOpenEBSChart", Step: installChart, Hosts: []connector.Host{executionHost}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "GenerateOpenEBSValues", Step: generateValues, Hosts: []remotefw.Host{executionHost}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "DistributeOpenEBSArtifacts", Step: distributeArtifacts, Hosts: []remotefw.Host{executionHost}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "InstallOpenEBSChart", Step: installChart, Hosts: []remotefw.Host{executionHost}})
 
 	fragment.AddDependency("GenerateOpenEBSValues", "DistributeOpenEBSArtifacts")
 	fragment.AddDependency("DistributeOpenEBSArtifacts", "InstallOpenEBSChart")

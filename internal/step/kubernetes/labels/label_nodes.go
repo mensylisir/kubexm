@@ -63,7 +63,7 @@ func (s *KubeadmLabelNodesStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 			logger.Infof("Worker node '%s' is missing the role label.", nodeName)
 			break
 		}
-		if stdout != value {
+		if stdout.Stdout != value {
 			allLabeled = false
 			break
 		}

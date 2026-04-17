@@ -14,6 +14,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+var _ step.Step = (*DisableSelinuxStep)(nil)
+
 type DisableSelinuxStep struct {
 	step.Base
 	originalSelinuxConfigContent string
@@ -53,7 +55,7 @@ func (s *DisableSelinuxStep) Precheck(ctx runtime.ExecutionContext) (isDone bool
 	}
 
 	getenforceCmd := "getenforce"
-	status, err := runner.Run(ctx.GoContext(), conn, getenforceCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, getenforceCmd, s.Sudo)
 	if err != nil {
 		if strings.Contains(err.Error(), "command not found") {
 			logger.Info("SELinux command 'getenforce' not found. Assuming SELinux is not installed/active.")
@@ -62,13 +64,13 @@ func (s *DisableSelinuxStep) Precheck(ctx runtime.ExecutionContext) (isDone bool
 		return false, errors.Wrap(err, "failed to check SELinux status with 'getenforce'")
 	}
 
-	status = strings.TrimSpace(strings.ToLower(status))
-	if status == "disabled" || status == "permissive" {
-		logger.Infof("SELinux is already in '%s' mode.", status)
+	selinuxStatus := strings.TrimSpace(strings.ToLower(runResult.Stdout))
+	if selinuxStatus == "disabled" || selinuxStatus == "permissive" {
+		logger.Infof("SELinux is already in '%s' mode.", selinuxStatus)
 		return true, nil
 	}
 
-	logger.Infof("SELinux is in '%s' mode and needs to be disabled.", status)
+	logger.Infof("SELinux is in '%s' mode and needs to be disabled.", selinuxStatus)
 	return false, nil
 }
 
@@ -83,8 +85,9 @@ func (s *DisableSelinuxStep) Run(ctx runtime.ExecutionContext) (*types.StepResul
 	}
 
 	logger.Info("Saving current SELinux state for potential rollback...")
-	s.originalEnforceStatus, _ = runner.Run(ctx.GoContext(), conn, "getenforce", s.Sudo)
-	s.originalEnforceStatus = strings.TrimSpace(s.originalEnforceStatus)
+	enforceStatusCmd := "getenforce"
+	enforceResult, _ := runner.Run(ctx.GoContext(), conn, enforceStatusCmd, s.Sudo)
+	s.originalEnforceStatus = strings.TrimSpace(enforceResult.Stdout)
 
 	configPath := "/etc/selinux/config"
 	configBytes, err := runner.ReadFile(ctx.GoContext(), conn, configPath)

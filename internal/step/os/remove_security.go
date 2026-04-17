@@ -15,6 +15,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+var _ step.Step = (*RemoveSecurityLimitsStep)(nil)
+
 type RemoveSecurityLimitsStep struct {
 	step.Base
 	removedFileContent []byte

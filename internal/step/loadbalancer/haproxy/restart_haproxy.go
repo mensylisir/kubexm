@@ -34,6 +34,29 @@ func (s *RestartHAProxyStep) Meta() *spec.StepMeta {
 }
 
 func (s *RestartHAProxyStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		return false, err
+	}
+
+	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
+	if err != nil {
+		return false, err
+	}
+
+	active, err := runner.IsServiceActive(ctx.GoContext(), conn, facts, haproxyServiceName)
+	if err != nil {
+		return false, fmt.Errorf("failed to determine HAProxy service status: %w", err)
+	}
+
+	if !active {
+		logger.Infof("HAProxy service is not active. Nothing to restart, skipping.")
+		return true, nil
+	}
+
+	logger.Info("HAProxy service is active. Step needs to run to restart it.")
 	return false, nil
 }
 
@@ -57,6 +80,16 @@ func (s *RestartHAProxyStep) Run(ctx runtime.ExecutionContext) (*types.StepResul
 	if err := runner.RestartService(ctx.GoContext(), conn, facts, haproxyServiceName); err != nil {
 		result.MarkFailed(err, "failed to restart HAProxy service")
 		return result, err
+	}
+
+	active, err := runner.IsServiceActive(ctx.GoContext(), conn, facts, haproxyServiceName)
+	if err != nil {
+		result.MarkFailed(err, "failed to verify HAProxy service status after restart")
+		return result, fmt.Errorf("failed to verify HAProxy service status after restart: %w", err)
+	}
+	if !active {
+		result.MarkFailed(err, "HAProxy service did not become active after restart command")
+		return result, fmt.Errorf("HAProxy service did not become active after restart command")
 	}
 
 	logger.Info("HAProxy service restarted successfully.")

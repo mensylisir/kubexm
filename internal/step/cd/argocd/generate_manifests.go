@@ -11,8 +11,8 @@ import (
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
-	"github.com/mensylisir/kubexm/internal/step/helpers/bom/helm"
-	"github.com/mensylisir/kubexm/internal/step/helpers/bom/images"
+	"github.com/mensylisir/kubexm/internal/util/helm"
+	"github.com/mensylisir/kubexm/internal/util/images"
 	"github.com/mensylisir/kubexm/internal/templates"
 	"github.com/mensylisir/kubexm/internal/types"
 )
@@ -47,8 +47,10 @@ func NewGenerateArgoCDValuesStepBuilder(ctx runtime.ExecutionContext, instanceNa
 	s.Base.Timeout = 2 * time.Minute
 
 	s.ImageRegistry = argocdImage.RegistryAddr()
-	if reg := ctx.GetClusterConfig().Spec.Registry.MirroringAndRewriting.PrivateRegistry; reg != "" {
-		s.ImageRegistry = reg
+	if cfg := ctx.GetClusterConfig(); cfg != nil && cfg.Spec.Registry != nil && cfg.Spec.Registry.MirroringAndRewriting != nil {
+		if reg := cfg.Spec.Registry.MirroringAndRewriting.PrivateRegistry; reg != "" {
+			s.ImageRegistry = reg
+		}
 	}
 
 	s.ImageTag = argocdImage.Tag()

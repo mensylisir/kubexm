@@ -1,11 +1,13 @@
 package registry
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/internal/runtime"
+	"github.com/mensylisir/kubexm/internal/runner"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
 	"github.com/mensylisir/kubexm/internal/types"
@@ -35,24 +37,58 @@ func (s *StopRegistryServiceStep) Meta() *spec.StepMeta {
 }
 
 func (s *StopRegistryServiceStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
-	runner := ctx.GetRunner()
+	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		return false, err
 	}
-	output, err := runner.Run(ctx.GoContext(), conn, "systemctl is-active registry.service", s.Sudo)
-	return err != nil || strings.TrimSpace(output) != "active", nil
+	stdout, stderr, err := runnerSvc.RunWithOptions(ctx.GoContext(), conn, "systemctl is-active registry.service", &runner.ExecOptions{Sudo: s.Sudo})
+	if err != nil {
+		var cmdErr *runner.CommandError
+		if errors.As(err, &cmdErr) {
+			combined := strings.TrimSpace(cmdErr.Stderr + "\n" + string(stderr) + "\n" + string(stdout))
+			if cmdErr.ExitCode != 0 && (strings.Contains(combined, "inactive") || strings.Contains(combined, "unknown") || strings.Contains(combined, "could not be found") || strings.Contains(combined, "not-found") || strings.Contains(combined, "not found") || strings.Contains(combined, "loaded: not-found")) {
+				return true, nil
+			}
+		}
+		return false, fmt.Errorf("failed to determine registry service status: %w", err)
+	}
+	return strings.TrimSpace(string(stdout)) != "active", nil
 }
 
 func (s *StopRegistryServiceStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, error) {
 	result := types.NewStepResult(s.Base.Meta.Name, ctx.GetStepExecutionID(), ctx.GetHost())
-	runner := ctx.GetRunner()
+	ctx.SetStepResult(result)
+	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		result.MarkFailed(err, "failed to get connector")
 		return result, err
 	}
-	if _, err := runner.Run(ctx.GoContext(), conn, "systemctl stop registry.service", s.Sudo); err != nil {
+
+	stdout, stderr, err := runnerSvc.RunWithOptions(ctx.GoContext(), conn, "systemctl is-active registry.service", &runner.ExecOptions{Sudo: s.Sudo})
+	if err != nil {
+		var cmdErr *runner.CommandError
+		if errors.As(err, &cmdErr) {
+			combined := strings.TrimSpace(cmdErr.Stderr + "\n" + string(stderr) + "\n" + string(stdout))
+			if cmdErr.ExitCode != 0 && (strings.Contains(combined, "inactive") || strings.Contains(combined, "unknown") || strings.Contains(combined, "could not be found") || strings.Contains(combined, "not-found") || strings.Contains(combined, "not found") || strings.Contains(combined, "loaded: not-found")) {
+				result.SetMetadata("registry_was_active", false)
+				result.MarkCompleted("registry service already inactive")
+				return result, nil
+			}
+		}
+		result.MarkFailed(err, "failed to determine registry service status before stop")
+		return result, fmt.Errorf("failed to determine registry service status before stop: %w", err)
+	}
+
+	wasActive := strings.TrimSpace(string(stdout)) == "active"
+	result.SetMetadata("registry_was_active", wasActive)
+	if !wasActive {
+		result.MarkCompleted("registry service already inactive")
+		return result, nil
+	}
+
+	if _, err := runnerSvc.Run(ctx.GoContext(), conn, "systemctl stop registry.service", s.Sudo); err != nil {
 		result.MarkFailed(err, "failed to stop registry service")
 		return result, err
 	}
@@ -61,8 +97,26 @@ func (s *StopRegistryServiceStep) Run(ctx runtime.ExecutionContext) (*types.Step
 }
 
 func (s *StopRegistryServiceStep) Rollback(ctx runtime.ExecutionContext) error {
+	stepResult := ctx.GetStepResult()
+	if stepResult == nil {
+		return nil
+	}
+
+	wasActiveValue, ok := stepResult.GetMetadata("registry_was_active")
+	if !ok {
+		return nil
+	}
+
+	wasActive, ok := wasActiveValue.(bool)
+	if !ok || !wasActive {
+		return nil
+	}
+
 	runner := ctx.GetRunner()
-	conn, _ := ctx.GetCurrentHostConnector()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		return nil
+	}
 	_, _ = runner.Run(ctx.GoContext(), conn, "systemctl start registry.service", s.Sudo)
 	return nil
 }

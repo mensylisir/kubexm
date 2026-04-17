@@ -114,8 +114,6 @@ func (s *KubeadmCheckK8sCAExpirationStep) Run(ctx runtime.ExecutionContext) (*ty
 
 	cacheKey := fmt.Sprintf(common.CacheKubeadmK8sCACertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
 	ctx.GetTaskCache().Set(cacheKey, anyCARequiresRenewal)
-	ctx.GetModuleCache().Set(cacheKey, anyCARequiresRenewal)
-	ctx.GetPipelineCache().Set(cacheKey, anyCARequiresRenewal)
 	logger.Infof("Core K8s CA check complete. Renewal required: %v", anyCARequiresRenewal)
 
 	result.MarkCompleted("CA certificate expiration check completed")

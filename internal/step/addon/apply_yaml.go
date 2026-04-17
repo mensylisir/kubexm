@@ -130,12 +130,12 @@ func (s *ApplyAddonYamlStep) Run(ctx runtime.ExecutionContext) (*types.StepResul
 		}
 
 		logger.Info("Applying YAML manifest.", "command", cmd)
-		output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
+		runResult, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 		if err != nil {
 			result.MarkFailed(err, fmt.Sprintf("failed to apply addon yaml manifest %s", remotePath))
 			return result, err
 		}
-		logger.Debug("Command output.", "output", output)
+		logger.Debug("Command output.", "output", runResult.Stdout)
 	}
 
 	logger.Info("Successfully applied all YAML manifests for this addon source.")

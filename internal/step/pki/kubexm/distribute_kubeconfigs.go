@@ -13,6 +13,8 @@ import (
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
+var _ step.Step = (*DistributeMasterKubeconfigsStep)(nil)
+
 type DistributeMasterKubeconfigsStep struct {
 	step.Base
 	localKubeconfigDir  string

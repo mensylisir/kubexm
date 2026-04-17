@@ -4,16 +4,16 @@ import (
 	"fmt"
 
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	stepcommon "github.com/mensylisir/kubexm/internal/step/common"
 	"github.com/mensylisir/kubexm/internal/step/kubernetes/health"
-	"github.com/mensylisir/kubexm/internal/step/kubernetes/kube-apiserver"
-	"github.com/mensylisir/kubexm/internal/step/kubernetes/kube-controller-manager"
+	"github.com/mensylisir/kubexm/internal/step/kubernetes/apiserver"
+	"github.com/mensylisir/kubexm/internal/step/kubernetes/controller-manager"
 	"github.com/mensylisir/kubexm/internal/step/kubernetes/kube-proxy"
-	"github.com/mensylisir/kubexm/internal/step/kubernetes/kube-scheduler"
+	"github.com/mensylisir/kubexm/internal/step/kubernetes/scheduler"
 	"github.com/mensylisir/kubexm/internal/step/kubernetes/kubelet"
 	kubexmstep "github.com/mensylisir/kubexm/internal/step/pki/kubexm"
 	"github.com/mensylisir/kubexm/internal/task"
@@ -43,29 +43,13 @@ func (t *FinalizeMastersTask) Description() string {
 }
 
 func (t *FinalizeMastersTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	var renewalTriggered bool
-	runtimeCtx := ctx.(*runtime.Context)
-	caCacheKey := fmt.Sprintf(common.CacheKubexmK8sCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
-	if val, ok := ctx.GetModuleCache().Get(caCacheKey); ok {
-		if renew, isBool := val.(bool); isBool && renew {
-			renewalTriggered = true
-		}
-	}
-	if !renewalTriggered {
-		leafCacheKey := fmt.Sprintf(common.CacheKubexmK8sLeafCertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
-		if val, ok := ctx.GetModuleCache().Get(leafCacheKey); ok {
-			if renew, isBool := val.(bool); isBool && renew {
-				renewalTriggered = true
-			}
-		}
-	}
-	return renewalTriggered, nil
+	return true, nil
 }
 
 func (t *FinalizeMastersTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
 	if len(masterHosts) == 0 {
@@ -76,7 +60,7 @@ func (t *FinalizeMastersTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFrag
 
 	for _, host := range masterHosts {
 		hostName := host.GetName()
-		hostList := []connector.Host{host}
+		hostList := []remotefw.Host{host}
 
 		backupStep, err := kubexmstep.NewBackupKubeconfigsStepBuilder(runtimeCtx, fmt.Sprintf("BackupMasterConfigsFor%s", hostName)).Build()
 		if err != nil {
@@ -213,7 +197,7 @@ func (t *FinalizeMastersTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFrag
 		verifyClusterNode := &plan.ExecutionNode{
 			Name:  "UltimateClusterHealthVerification",
 			Step:  verifyClusterStep,
-			Hosts: []connector.Host{masterHosts[0]},
+			Hosts: []remotefw.Host{masterHosts[0]},
 		}
 		verifyClusterID, _ := fragment.AddNode(verifyClusterNode)
 

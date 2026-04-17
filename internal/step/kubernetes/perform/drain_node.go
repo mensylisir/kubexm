@@ -53,12 +53,12 @@ func (s *DrainNodeStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err
 	}
 
 	checkCmd := fmt.Sprintf("kubectl --kubeconfig /etc/kubernetes/admin.conf get node %s", s.TargetNodeName)
-	stdout, err := runner.Run(ctx.GoContext(), conn, checkCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, checkCmd, s.Sudo)
 	if err != nil {
 		return false, fmt.Errorf("precheck failed: cannot get status of node '%s': %w", s.TargetNodeName, err)
 	}
 
-	if !strings.Contains(string(stdout), "SchedulingDisabled") {
+	if !strings.Contains(runResult.Stdout, "SchedulingDisabled") {
 		return false, fmt.Errorf("precheck failed: node '%s' must be cordoned before draining", s.TargetNodeName)
 	}
 

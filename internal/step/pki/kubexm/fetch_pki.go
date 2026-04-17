@@ -42,7 +42,8 @@ func NewKubxmFetchPKIStepBuilder(ctx runtime.ExecutionContext, instanceName stri
 			"sa.key":             common.ServiceAccountPrivateKeyFileName,
 		},
 	}
-	if ctx.GetClusterConfig().Spec.Etcd.Type == string(common.EtcdDeploymentTypeKubeadm) {
+	etcdSpec := ctx.GetClusterConfig().Spec.Etcd
+	if etcdSpec != nil && etcdSpec.Type == string(common.EtcdDeploymentTypeKubeadm) {
 		s.filesToFetch["etcd/ca.crt"] = common.CACertFileName
 		s.filesToFetch["etcd/ca.key"] = common.CAKeyFileName
 	}
@@ -86,7 +87,10 @@ func (s *KubxmFetchPKIStep) Run(ctx runtime.ExecutionContext) (*types.StepResult
 		return result, err
 	}
 
-	isStackedEtcd := ctx.GetClusterConfig().Spec.Etcd.Type == string(common.EtcdDeploymentTypeKubeadm)
+	isStackedEtcd := false
+	if cfg := ctx.GetClusterConfig(); cfg != nil && cfg.Spec.Etcd != nil {
+		isStackedEtcd = cfg.Spec.Etcd.Type == string(common.EtcdDeploymentTypeKubeadm)
+	}
 
 	for remoteRelativePath, _ := range s.filesToFetch {
 		remoteFullPath := filepath.Join(s.remotePKIDir, remoteRelativePath)

@@ -105,11 +105,11 @@ func (s *VerifyTimeSyncStep) checkSyncStatus(ctx runtime.ExecutionContext) (bool
 
 	chronyCmd := "chronyc tracking"
 	if _, err := runner.Run(ctx.GoContext(), conn, "command -v chronyc", s.Sudo); err == nil {
-		stdout, err := runner.Run(ctx.GoContext(), conn, chronyCmd, s.Sudo)
+		runResult, err := runner.Run(ctx.GoContext(), conn, chronyCmd, s.Sudo)
 		if err != nil {
 			return false, fmt.Errorf("failed to execute 'chronyc tracking': %w", err)
 		}
-		if strings.Contains(string(stdout), "Leap status     : Normal") {
+		if strings.Contains(runResult.Stdout, "Leap status     : Normal") {
 			return true, nil
 		}
 		return false, nil

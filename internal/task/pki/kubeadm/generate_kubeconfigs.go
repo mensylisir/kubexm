@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
@@ -37,7 +37,10 @@ func (t *GenerateKubeconfigsTask) Description() string {
 }
 
 func (t *GenerateKubeconfigsTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	runtimeCtx := ctx.(*runtime.Context)
+	runtimeCtx, ok := ctx.(*runtime.Context)
+	if !ok {
+		return false, fmt.Errorf("ctx is not *runtime.Context")
+	}
 	caCacheKey := fmt.Sprintf(common.CacheKubeadmK8sCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
 	if val, ok := ctx.GetModuleCache().Get(caCacheKey); ok {
 		if renew, isBool := val.(bool); isBool && renew {
@@ -56,13 +59,13 @@ func (t *GenerateKubeconfigsTask) IsRequired(ctx runtime.TaskContext) (bool, err
 func (t *GenerateKubeconfigsTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
 	if err != nil {
 		return nil, err
 	}
-	controlNodeList := []connector.Host{controlNode}
+	controlNodeList := []remotefw.Host{controlNode}
 
 	moveAssetsStep, err := kubeadmstep.NewKubeadmMoveNewAssetsStepBuilder(runtimeCtx, "ActivateNewCertificates").Build()
 	if err != nil {

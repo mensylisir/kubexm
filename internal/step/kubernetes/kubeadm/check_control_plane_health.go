@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	runnerpkg "github.com/mensylisir/kubexm/internal/runner"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
@@ -115,15 +116,16 @@ func (s *KubeadmVerifyControlPlaneHealthStep) checkPodsHealth(ctx runtime.Execut
 		return err
 	}
 
+	var runResult *runnerpkg.CommandResult
 	for component, namePattern := range s.components {
 		cmd := fmt.Sprintf("crictl ps --name %s --no-trunc", namePattern)
 
-		stdout, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
+		runResult, err = runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 		if err != nil {
 			return fmt.Errorf("failed to list containers for component '%s': %w", component, err)
 		}
 
-		output := string(stdout)
+		output := runResult.Stdout
 		if !strings.Contains(output, namePattern) {
 			return fmt.Errorf("container for component '%s' not found", component)
 		}

@@ -71,13 +71,13 @@ func (s *StopAndRemoveHarborStep) Precheck(ctx runtime.ExecutionContext) (isDone
 
 	checkCmd := "docker ps -a --filter name=harbor-core --format '{{.Names}}'"
 
-	output, err := runner.Run(ctx.GoContext(), conn, checkCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, checkCmd, s.Sudo)
 	if err != nil {
 		logger.Warnf("Failed to check for harbor-core container, will attempt removal. Error: %v", err)
 		return false, nil
 	}
 
-	if !strings.Contains(output, "harbor-core") {
+	if !strings.Contains(runResult.Stdout, "harbor-core") {
 		logger.Info("Harbor core container does not exist. Step is done.")
 		return true, nil
 	}
@@ -106,16 +106,16 @@ func (s *StopAndRemoveHarborStep) Run(ctx runtime.ExecutionContext) (*types.Step
 	uninstallCmd := fmt.Sprintf("cd %s && docker-compose down -v", s.RemoteInstallDir)
 	logger.Infof("Executing Harbor removal command on remote host: %s", uninstallCmd)
 
-	output, err := runner.Run(ctx.GoContext(), conn, uninstallCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, uninstallCmd, s.Sudo)
 	if err != nil {
-		logger.Errorf("Harbor removal failed. Full output:\n%s", output)
+		logger.Errorf("Harbor removal failed. Full output:\n%s", runResult.Stdout)
 		err := fmt.Errorf("failed to execute docker-compose down: %w", err)
 		result.MarkFailed(err, err.Error())
 		return result, err
 	}
 
 	logger.Info("Harbor services and data volumes removed successfully.")
-	logger.Debugf("Harbor removal output:\n%s", output)
+	logger.Debugf("Harbor removal output:\n%s", runResult.Stdout)
 	result.MarkCompleted("Harbor services and data volumes removed successfully")
 	return result, nil
 }

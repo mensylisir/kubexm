@@ -75,15 +75,15 @@ func (s *CopyKubeconfigStep) Precheck(ctx runtime.ExecutionContext) (isDone bool
 
 	compareCmd := fmt.Sprintf("sha256sum %s %s | cut -d' ' -f1 | uniq | wc -l", srcPath, destPath)
 
-	output, err := runner.Run(ctx.GoContext(), conn, compareCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, compareCmd, s.Sudo)
 	if err != nil {
 		logger.Warnf("Failed to compare file hashes on remote host, assuming re-copy is needed. Error: %v", err)
 		return false, nil
 	}
 
-	result := strings.TrimSpace(output)
+	hashOutput := strings.TrimSpace(runResult.Stdout)
 
-	if result == "1" {
+	if hashOutput == "1" {
 		logger.Info("Remote kubeconfig file is up to date with admin.conf. Step is done.")
 		return true, nil
 	}

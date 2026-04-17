@@ -3,7 +3,7 @@ package kubelet
 import (
 	"crypto/x509"
 	"fmt"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"os"
 	"path/filepath"
 	"time"
@@ -51,7 +51,7 @@ func (s *GenerateKubeletCertsForAllNodesStep) Precheck(ctx runtime.ExecutionCont
 
 	allHosts := ctx.GetHostsByRole(common.RoleWorker)
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
-	allHosts = helpers.UnionBy(allHosts, masterHosts, func(h connector.Host) string {
+	allHosts = helpers.UnionBy(allHosts, masterHosts, func(h remotefw.Host) string {
 		return h.GetName()
 	})
 	for _, node := range allHosts {
@@ -79,7 +79,7 @@ func (s *GenerateKubeletCertsForAllNodesStep) Run(ctx runtime.ExecutionContext) 
 
 	allHosts := ctx.GetHostsByRole(common.RoleWorker)
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
-	allHosts = helpers.UnionBy(allHosts, masterHosts, func(h connector.Host) string {
+	allHosts = helpers.UnionBy(allHosts, masterHosts, func(h remotefw.Host) string {
 		return h.GetName()
 	})
 	for _, node := range allHosts {
@@ -113,7 +113,7 @@ func (s *GenerateKubeletCertsForAllNodesStep) Rollback(ctx runtime.ExecutionCont
 
 	allHosts := ctx.GetHostsByRole(common.RoleWorker)
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
-	allHosts = helpers.UnionBy(allHosts, masterHosts, func(h connector.Host) string {
+	allHosts = helpers.UnionBy(allHosts, masterHosts, func(h remotefw.Host) string {
 		return h.GetName()
 	})
 
@@ -128,11 +128,11 @@ func (s *GenerateKubeletCertsForAllNodesStep) Rollback(ctx runtime.ExecutionCont
 	return nil
 }
 
-func (s *GenerateKubeletCertsForAllNodesStep) getWorkerOnlyNodes(ctx runtime.ExecutionContext) []connector.Host {
+func (s *GenerateKubeletCertsForAllNodesStep) getWorkerOnlyNodes(ctx runtime.ExecutionContext) []remotefw.Host {
 	workerHosts := ctx.GetHostsByRole(common.RoleWorker)
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
 
-	return helpers.DifferenceBy(workerHosts, masterHosts, func(h connector.Host) string {
+	return helpers.DifferenceBy(workerHosts, masterHosts, func(h remotefw.Host) string {
 		return h.GetName()
 	})
 }

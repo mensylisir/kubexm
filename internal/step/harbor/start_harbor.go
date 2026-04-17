@@ -108,16 +108,16 @@ func (s *InstallAndStartHarborStep) Run(ctx runtime.ExecutionContext) (*types.St
 	installCmd := fmt.Sprintf("cd %s && ./install.sh", s.RemoteInstallDir)
 	logger.Infof("Executing Harbor installation script on remote host: %s", installCmd)
 
-	output, err := runner.Run(ctx.GoContext(), conn, installCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, installCmd, s.Sudo)
 	if err != nil {
-		logger.Errorf("Harbor installation failed. Full output:\n%s", output)
+		logger.Errorf("Harbor installation failed. Full output:\n%s", runResult.Stdout)
 		err := fmt.Errorf("failed to execute Harbor install script: %w", err)
 		result.MarkFailed(err, err.Error())
 		return result, err
 	}
 
 	logger.Info("Harbor installation script executed successfully.")
-	logger.Debugf("Harbor installation output:\n%s", output)
+	logger.Debugf("Harbor installation output:\n%s", runResult.Stdout)
 	result.MarkCompleted("Harbor installed and started successfully")
 	return result, nil
 }

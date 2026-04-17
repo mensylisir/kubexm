@@ -43,7 +43,7 @@ func (t *CleanHAProxyAsDaemonTask) IsRequired(ctx runtime.TaskContext) (bool, er
 func (t *CleanHAProxyAsDaemonTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	loadbalancerHosts := ctx.GetHostsByRole(common.RoleLoadBalancer)
 	if len(loadbalancerHosts) == 0 {

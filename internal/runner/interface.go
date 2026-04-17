@@ -125,9 +125,9 @@ type Runner interface {
 	GatherFacts(ctx context.Context, conn connector.Connector) (*Facts, error)
 	GatherHostFacts(ctx context.Context, conn connector.Connector) (*HostFacts, error)
 	DetermineSudo(ctx context.Context, conn connector.Connector, path string) (bool, error)
-	Run(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (string, error)
+	Run(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (*CommandResult, error)
 	OriginRun(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (string, string, error)
-	MustRun(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (string, error)
+	MustRun(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (*CommandResult, error)
 	Check(ctx context.Context, conn connector.Connector, cmd string, sudo bool) (bool, error)
 	VerifyChecksum(ctx context.Context, conn connector.Connector, filePath, expectedChecksum, checksumType string, sudo bool) error
 	RunWithOptions(ctx context.Context, conn connector.Connector, cmd string, opts *connector.ExecOptions) (stdout, stderr []byte, err error)

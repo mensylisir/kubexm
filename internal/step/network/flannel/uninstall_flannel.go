@@ -8,7 +8,7 @@ import (
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
-	"github.com/mensylisir/kubexm/internal/step/helpers/bom/helm"
+	"github.com/mensylisir/kubexm/internal/util/helm"
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
@@ -59,9 +59,9 @@ func (s *UninstallFlannelHelmChartStep) Precheck(ctx runtime.ExecutionContext) (
 	}
 
 	checkCmd := fmt.Sprintf("helm status %s -n %s", s.ReleaseName, s.Namespace)
-	output, err := runner.Run(ctx.GoContext(), conn, checkCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, checkCmd, s.Sudo)
 	if err != nil {
-		if strings.Contains(strings.ToLower(output), "release: not found") || strings.Contains(strings.ToLower(err.Error()), "release: not found") {
+		if strings.Contains(strings.ToLower(runResult.Stdout), "release: not found") || strings.Contains(strings.ToLower(err.Error()), "release: not found") {
 			logger.Info("Flannel Helm release not found. Step is done.")
 			return true, nil
 		}

@@ -90,7 +90,7 @@ func (s *BackupEtcdStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, e
 	remoteBackupPath := filepath.Join(s.RemoteBackupDir, s.BackupFileName)
 	logger.Info("Preparing to save etcd snapshot...", "path", remoteBackupPath)
 
-	caPath, certPath, keyPath := getEtcdctlCertPaths(ctx.GetHost().GetName())
+	caPath, certPath, keyPath := getEtcdctlCertPaths(ctx, ctx.GetHost().GetName())
 
 	endpoint := "https://127.0.0.1:2379"
 

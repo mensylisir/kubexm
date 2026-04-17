@@ -144,6 +144,8 @@ func generatePoolKey(cfg ConnectionCfg) string {
 }
 
 func (cp *ConnectionPool) getOrCreateHostPool(poolKey string) *hostConnectionPool {
+	// Fast path: pool already exists. Safe under RLock since map reads
+	// are allowed concurrently with other readers.
 	cp.mu.RLock()
 	hcp, ok := cp.pools[poolKey]
 	cp.mu.RUnlock()
@@ -151,13 +153,20 @@ func (cp *ConnectionPool) getOrCreateHostPool(poolKey string) *hostConnectionPoo
 		return hcp
 	}
 
+	// Slow path: pool does not exist. Acquire write lock and double-check.
+	// This is the classic double-check locking pattern to avoid creating
+	// duplicate pools. Using Lock() here (not RLock) to ensure exclusive
+	// access for map write, and to synchronise with the fast path above
+	// (which uses RUnlock, creating a happens-before edge).
 	cp.mu.Lock()
-	defer cp.mu.Unlock()
 	hcp, ok = cp.pools[poolKey]
-	if !ok {
-		hcp = &hostConnectionPool{}
-		cp.pools[poolKey] = hcp
+	if ok {
+		cp.mu.Unlock()
+		return hcp
 	}
+	hcp = &hostConnectionPool{}
+	cp.pools[poolKey] = hcp
+	cp.mu.Unlock()
 	return hcp
 }
 

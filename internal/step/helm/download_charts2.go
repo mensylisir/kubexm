@@ -14,7 +14,7 @@ import (
 	"github.com/mensylisir/kubexm/internal/step"
 	"github.com/mensylisir/kubexm/internal/step/helpers"
 	"github.com/mensylisir/kubexm/internal/step/helpers/bom/binary"
-	"github.com/mensylisir/kubexm/internal/step/helpers/bom/helm"
+	"github.com/mensylisir/kubexm/internal/util/helm"
 	"github.com/mensylisir/kubexm/internal/types"
 	"github.com/pkg/errors"
 )

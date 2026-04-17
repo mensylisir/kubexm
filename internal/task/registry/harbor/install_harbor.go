@@ -2,7 +2,7 @@ package harbor
 
 import (
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -42,7 +42,7 @@ func (t *DeployHarborTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 
 func (t *DeployHarborTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
-	runtimeCtx, _ := ctx.(*runtime.Context)
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	controlNode, _ := ctx.GetControlNode()
 	registryHosts := ctx.GetHostsByRole(common.RoleRegistry)
@@ -84,18 +84,18 @@ func (t *DeployHarborTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragmen
 
 	// Downloads are handled centrally in Preflight PrepareAssets/ExtractBundle.
 
-	fragment.AddNode(&plan.ExecutionNode{Name: "GenerateHarborCerts", Step: genCerts, Hosts: []connector.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "GenerateHarborCerts", Step: genCerts, Hosts: []remotefw.Host{controlNode}})
 	fragment.AddNode(&plan.ExecutionNode{Name: "DistributeHarborCA", Step: distributeCACerts, Hosts: allClusterHosts})
 	fragment.AddDependency("GenerateHarborCerts", "DistributeHarborCA")
-	fragment.AddNode(&plan.ExecutionNode{Name: "ExtractHarborOnControlNode", Step: extractOnControlNode, Hosts: []connector.Host{controlNode}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "GenerateHarborConfig", Step: genConfig, Hosts: []connector.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "ExtractHarborOnControlNode", Step: extractOnControlNode, Hosts: []remotefw.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "GenerateHarborConfig", Step: genConfig, Hosts: []remotefw.Host{controlNode}})
 
 	fragment.AddDependency("ExtractHarborOnControlNode", "GenerateHarborConfig")
 	fragment.AddDependency("GenerateHarborCerts", "GenerateHarborConfig")
-	fragment.AddNode(&plan.ExecutionNode{Name: "UploadHarborInstaller", Step: uploadInstaller, Hosts: []connector.Host{executionHost}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "ExtractHarborOnRegistryNode", Step: extractOnRegistryNode, Hosts: []connector.Host{executionHost}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "ConfigureHarbor", Step: configureHarbor, Hosts: []connector.Host{executionHost}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "InstallAndStartHarbor", Step: installAndStart, Hosts: []connector.Host{executionHost}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "UploadHarborInstaller", Step: uploadInstaller, Hosts: []remotefw.Host{executionHost}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "ExtractHarborOnRegistryNode", Step: extractOnRegistryNode, Hosts: []remotefw.Host{executionHost}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "ConfigureHarbor", Step: configureHarbor, Hosts: []remotefw.Host{executionHost}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "InstallAndStartHarbor", Step: installAndStart, Hosts: []remotefw.Host{executionHost}})
 	fragment.AddDependency("UploadHarborInstaller", "ExtractHarborOnRegistryNode")
 	fragment.AddDependency("ExtractHarborOnRegistryNode", "ConfigureHarbor")
 	fragment.AddDependency("ConfigureHarbor", "InstallAndStartHarbor")

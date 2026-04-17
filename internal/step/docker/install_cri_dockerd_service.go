@@ -14,7 +14,7 @@ import (
 	"github.com/mensylisir/kubexm/internal/step"
 	"github.com/mensylisir/kubexm/internal/step/helpers"
 	"github.com/mensylisir/kubexm/internal/step/helpers/bom/binary"
-	"github.com/mensylisir/kubexm/internal/step/helpers/bom/images"
+	"github.com/mensylisir/kubexm/internal/util/images"
 	"github.com/mensylisir/kubexm/internal/templates"
 	"github.com/mensylisir/kubexm/internal/types"
 )

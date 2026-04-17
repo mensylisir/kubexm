@@ -5,9 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mensylisir/kubexm/internal/runner"
 	"github.com/mensylisir/kubexm/internal/runtime"
-
-	"github.com/mensylisir/kubexm/internal/connector"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
 	"github.com/mensylisir/kubexm/internal/types"
@@ -94,10 +93,10 @@ func (s *ManageServiceStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 		return false, nil
 	case ActionEnable:
 		cmd := fmt.Sprintf("systemctl is-enabled %s", s.ServiceName)
-		stdout, _, err := runnerSvc.RunWithOptions(ctx.GoContext(), conn, cmd, &connector.ExecOptions{Sudo: false})
+		stdout, _, err := runnerSvc.RunWithOptions(ctx.GoContext(), conn, cmd, &runner.ExecOptions{Sudo: false})
 		if err != nil {
-			if cmdErr, ok := err.(*connector.CommandError); ok && cmdErr.ExitCode != 0 {
-				logger.Info("Service is not enabled (is-enabled returned non-zero).", "service", s.ServiceName, "exit_code", cmdErr.ExitCode, "stdout", string(stdout))
+			if cmdErr, ok := err.(*runner.CommandError); ok && cmdErr.ExitCode != 0 {
+				logger.Info("Service is not enabled (is-enabled returned non-zero).", "service", s.ServiceName, "exit_code", cmdErr.ExitCode, "stdout", stdout)
 				return false, nil
 			}
 			logger.Warn("Failed to check if service is enabled (unexpected error), assuming it needs action.", "command", cmd, "error", err)
@@ -107,13 +106,13 @@ func (s *ManageServiceStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 			logger.Info("Service is already enabled.", "service", s.ServiceName)
 			return true, nil
 		}
-		logger.Info("Service is not enabled.", "service", s.ServiceName, "status_output", string(stdout))
+		logger.Info("Service is not enabled.", "service", s.ServiceName, "status_output", stdout)
 		return false, nil
 	case ActionDisable:
 		cmd := fmt.Sprintf("systemctl is-enabled %s", s.ServiceName)
-		stdout, _, err := runnerSvc.RunWithOptions(ctx.GoContext(), conn, cmd, &connector.ExecOptions{Sudo: false})
+		stdout, _, err := runnerSvc.RunWithOptions(ctx.GoContext(), conn, cmd, &runner.ExecOptions{Sudo: false})
 		if err != nil {
-			if cmdErr, ok := err.(*connector.CommandError); ok && cmdErr.ExitCode != 0 {
+			if cmdErr, ok := err.(*runner.CommandError); ok && cmdErr.ExitCode != 0 {
 				logger.Info("Service is already not enabled (is-enabled returned non-zero), disable action satisfied.", "service", s.ServiceName, "exit_code", cmdErr.ExitCode, "stdout", string(stdout))
 				return true, nil
 			}
@@ -152,12 +151,12 @@ func (s *ManageServiceStep) Run(ctx runtime.ExecutionContext) (*types.StepResult
 	}
 
 	logger.Info("Executing systemctl command.", "command", cmd)
-	runOpts := &connector.ExecOptions{Sudo: s.Sudo}
+	runOpts := &runner.ExecOptions{Sudo: s.Sudo}
 
 	stdout, stderr, err := runnerSvc.RunWithOptions(ctx.GoContext(), conn, cmd, runOpts)
 
 	if err != nil {
-		if cmdErr, ok := err.(*connector.CommandError); ok {
+		if cmdErr, ok := err.(*runner.CommandError); ok {
 			if s.Action == ActionIsActive || s.Action == ActionIsEnabled {
 				logger.Info("Service check result.", "exit_code", cmdErr.ExitCode, "stdout", string(stdout), "stderr", string(stderr))
 				result.MarkCompleted(fmt.Sprintf("Service check result: exit_code=%d", cmdErr.ExitCode))

@@ -13,6 +13,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+var _ step.Step = (*CheckMemoryStep)(nil)
+
 type CheckMemoryStep struct {
 	step.Base
 	MinMemoryMB *uint64
@@ -108,11 +110,11 @@ func (s *CheckMemoryStep) getActualMemoryMB(ctx runtime.ExecutionContext) (uint6
 		cmd = "grep MemTotal /proc/meminfo | awk '{print $2}'"
 		isKb = true
 	}
-	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
 		return 0, errors.Wrapf(err, "failed to execute '%s' to get memory info", cmd)
 	}
-	memStr := strings.TrimSpace(output)
+	memStr := strings.TrimSpace(runResult.Stdout)
 	memVal, err := strconv.ParseUint(memStr, 10, 64)
 	if err != nil {
 		return 0, errors.Wrapf(err, "failed to parse memory size from command output: %s", memStr)

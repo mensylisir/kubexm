@@ -46,12 +46,12 @@ func NewGenerateCertsStepBuilder(ctx runtime.ExecutionContext, instanceName stri
 		Organization:   []string{"kubexm"},
 		Usages:         []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 	}
-	if ctx.GetClusterConfig().Spec.Certs.CertDuration != "" {
-		parsedDuration, err := time.ParseDuration(ctx.GetClusterConfig().Spec.Certs.CADuration)
+	if certsSpec := ctx.GetClusterConfig().Spec.Certs; certsSpec != nil && certsSpec.CertDuration != "" {
+		parsedDuration, err := time.ParseDuration(certsSpec.CertDuration)
 		if err == nil {
 			s.CertDuration = parsedDuration
 		} else {
-			ctx.GetLogger().Warnf("Failed to parse user-provided Cert duration '%s', using default. Error: %v", ctx.GetClusterConfig().Spec.Certs.CertDuration, err)
+			ctx.GetLogger().Warnf("Failed to parse user-provided Cert duration '%s', using default. Error: %v", certsSpec.CertDuration, err)
 		}
 	}
 

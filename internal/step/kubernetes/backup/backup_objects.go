@@ -87,7 +87,7 @@ func (s *KubernetesBackupObjectsStep) Run(ctx runtime.ExecutionContext) (*types.
 
 	backupCmd := "kubectl --kubeconfig /etc/kubernetes/admin.conf get all --all-namespaces -o yaml"
 
-	stdout, err := runner.Run(ctx.GoContext(), conn, backupCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, backupCmd, s.Sudo)
 	if err != nil {
 		err = fmt.Errorf("failed to execute 'kubectl get all': %w", err)
 		result.MarkFailed(err, "failed to backup cluster objects")
@@ -95,7 +95,7 @@ func (s *KubernetesBackupObjectsStep) Run(ctx runtime.ExecutionContext) (*types.
 	}
 
 	logger.Infof("Writing cluster state to local file: '%s'", s.localBackupFilePath)
-	if err := os.WriteFile(s.localBackupFilePath, []byte(stdout), 0644); err != nil {
+	if err := os.WriteFile(s.localBackupFilePath, []byte(runResult.Stdout), 0644); err != nil {
 		err = fmt.Errorf("failed to write backup file: %w", err)
 		result.MarkFailed(err, "failed to write backup file")
 		return result, err

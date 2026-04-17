@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
@@ -16,10 +17,12 @@ type ExecutionContext interface {
 	CoreServiceContext
 	ClusterQueryContext
 	GetCurrentHostConnector() (connector.Connector, error)
-	GetHost() connector.Host
+	GetHost() remotefw.Host
 	GetStepExecutionID() string
 	GetExecutionStartTime() time.Time
 	WithGoContext(goCtx context.Context) ExecutionContext
+	WithTimeout(d time.Duration) ExecutionContext
+	Cancel()
 	GetHttpClient() *http.Client
 	GetFromRuntimeConfig(key string) (value interface{}, ok bool)
 	GetGlobalState() StateBag

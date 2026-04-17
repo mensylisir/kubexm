@@ -13,30 +13,31 @@ import (
 
 // DownloadAssetsPipeline downloads and packages artifacts for offline use.
 type DownloadAssetsPipeline struct {
-	name       string
-	desc       string
+	*pipeline.Base
 	modules    []module.Module
 	outputPath string
 }
 
 func NewDownloadAssetsPipeline(outputPath string) *DownloadAssetsPipeline {
+	if outputPath == "" {
+		outputPath = "./packages" // Default to current directory
+	}
 	modules := []module.Module{
 		assetsmodule.NewAssetsDownloadModule(outputPath),
 	}
 	return &DownloadAssetsPipeline{
-		name:       "DownloadAssets",
-		desc:       "Download and package all assets for offline installation",
+		Base:       pipeline.NewBase("DownloadAssets", "Download and package all assets for offline installation"),
 		modules:    modules,
 		outputPath: outputPath,
 	}
 }
 
 func (p *DownloadAssetsPipeline) Name() string {
-	return p.name
+	return p.Base.Meta.Name
 }
 
 func (p *DownloadAssetsPipeline) Description() string {
-	return p.desc
+	return p.Base.Meta.Description
 }
 
 func (p *DownloadAssetsPipeline) Modules() []module.Module {
@@ -44,55 +45,57 @@ func (p *DownloadAssetsPipeline) Modules() []module.Module {
 }
 
 func (p *DownloadAssetsPipeline) Plan(ctx runtime.PipelineContext) (*plan.ExecutionGraph, error) {
-	logger := ctx.GetLogger().With("pipeline", p.Name())
-	logger.Info("Planning asset download pipeline...")
+	return pipeline.SafePlan(ctx, p.Name(), func() (*plan.ExecutionGraph, error) {
+		logger := ctx.GetLogger().With("pipeline", p.Name())
+		logger.Info("Planning asset download pipeline...")
 
-	finalGraph := plan.NewExecutionGraph(p.Name())
-	var previousModuleExitNodes []plan.NodeID
+		finalGraph := plan.NewExecutionGraph(p.Name())
+		var previousModuleExitNodes []plan.NodeID
 
-	moduleCtx, ok := ctx.(runtime.ModuleContext)
-	if !ok {
-		return nil, fmt.Errorf("pipeline context cannot be asserted to module context for pipeline %s", p.Name())
-	}
-
-	for i, mod := range p.Modules() {
-		logger.Info("Planning module", "module_name", mod.Name(), "module_index", i)
-
-		moduleFragment, err := mod.Plan(moduleCtx)
-		if err != nil {
-			logger.Error(err, "Failed to plan module", "module", mod.Name())
-			return nil, fmt.Errorf("failed to plan module %s in pipeline %s: %w", mod.Name(), p.Name(), err)
+		moduleCtx, ok := ctx.(runtime.ModuleContext)
+		if !ok {
+			return nil, fmt.Errorf("pipeline context cannot be asserted to module context for pipeline %s", p.Name())
 		}
 
-		if moduleFragment == nil || len(moduleFragment.Nodes) == 0 {
-			logger.Info("Module returned an empty fragment, skipping merge and link.", "module", mod.Name())
-			continue
-		}
+		for i, mod := range p.Modules() {
+			logger.Info("Planning module", "module_name", mod.Name(), "module_index", i)
 
-		for nodeID, node := range moduleFragment.Nodes {
-			if _, exists := finalGraph.Nodes[nodeID]; exists {
-				err := fmt.Errorf("duplicate NodeID '%s' detected when merging fragment from module '%s'", nodeID, mod.Name())
-				logger.Error(err, "NodeID collision")
-				return nil, err
+			moduleFragment, err := pipeline.SafeModulePlan(moduleCtx, p.Name(), mod)
+			if err != nil {
+				logger.Error(err, "Failed to plan module", "module", mod.Name())
+				return nil, fmt.Errorf("failed to plan module %s in pipeline %s: %w", mod.Name(), p.Name(), err)
 			}
-			finalGraph.Nodes[nodeID] = node
-		}
 
-		if len(previousModuleExitNodes) > 0 {
-			for _, entryNodeID := range moduleFragment.EntryNodes {
-				if node, ok := finalGraph.Nodes[entryNodeID]; ok {
-					node.Dependencies = plan.UniqueNodeIDs(append(node.Dependencies, previousModuleExitNodes...))
+			if moduleFragment == nil || len(moduleFragment.Nodes) == 0 {
+				logger.Info("Module returned an empty fragment, skipping merge and link.", "module", mod.Name())
+				continue
+			}
+
+			for nodeID, node := range moduleFragment.Nodes {
+				if _, exists := finalGraph.Nodes[nodeID]; exists {
+					err := fmt.Errorf("duplicate NodeID '%s' detected when merging fragment from module '%s'", nodeID, mod.Name())
+					logger.Error(err, "NodeID collision")
+					return nil, err
+				}
+				finalGraph.Nodes[nodeID] = node
+			}
+
+			if len(previousModuleExitNodes) > 0 {
+				for _, entryNodeID := range moduleFragment.EntryNodes {
+					if node, ok := finalGraph.Nodes[entryNodeID]; ok {
+						node.Dependencies = plan.UniqueNodeIDs(append(node.Dependencies, previousModuleExitNodes...))
+					}
 				}
 			}
+			previousModuleExitNodes = moduleFragment.ExitNodes
 		}
-		previousModuleExitNodes = moduleFragment.ExitNodes
-	}
 
-	finalGraph.CalculateEntryAndExitNodes()
-	if err := finalGraph.Validate(); err != nil {
-		return nil, fmt.Errorf("final execution graph for pipeline %s is invalid: %w", p.Name(), err)
-	}
-	return finalGraph, nil
+		finalGraph.CalculateEntryAndExitNodes()
+		if err := finalGraph.Validate(); err != nil {
+			return nil, fmt.Errorf("final execution graph for pipeline %s is invalid: %w", p.Name(), err)
+		}
+		return finalGraph, nil
+	})
 }
 
 func (p *DownloadAssetsPipeline) Run(ctx runtime.PipelineContext, graph *plan.ExecutionGraph, dryRun bool) (*plan.GraphExecutionResult, error) {
@@ -118,7 +121,7 @@ func (p *DownloadAssetsPipeline) Run(ctx runtime.PipelineContext, graph *plan.Ex
 		return &plan.GraphExecutionResult{GraphName: p.Name(), Status: plan.StatusSuccess}, nil
 	}
 
-	execEngine := engine.NewExecutor()
+	execEngine := engine.NewCheckpointExecutorForPipeline(engineCtx, p.Name())
 	result, execErr := execEngine.Execute(engineCtx, currentGraph, dryRun)
 	if execErr != nil {
 		if result == nil {
@@ -127,11 +130,6 @@ func (p *DownloadAssetsPipeline) Run(ctx runtime.PipelineContext, graph *plan.Ex
 		return result, fmt.Errorf("execution phase for pipeline %s failed: %w", p.Name(), execErr)
 	}
 	return result, nil
-}
-
-// GetBase returns the base pipeline context.
-func (p *DownloadAssetsPipeline) GetBase() *pipeline.Base {
-	return nil
 }
 
 var _ pipeline.Pipeline = (*DownloadAssetsPipeline)(nil)

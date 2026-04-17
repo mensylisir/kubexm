@@ -14,6 +14,8 @@ const (
 	DockerServiceName = "docker"
 )
 
+var _ step.Step = (*EnableDockerStep)(nil)
+
 type EnableDockerStep struct {
 	step.Base
 }

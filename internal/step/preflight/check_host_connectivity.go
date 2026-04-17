@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/mensylisir/kubexm/internal/apis/kubexms/v1alpha1"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
@@ -70,7 +70,7 @@ func (s *CheckHostConnectivityStep) Run(ctx runtime.ExecutionContext) (*types.St
 		}
 
 		wg.Add(1)
-		go func(target connector.Host) {
+		go func(target remotefw.Host) {
 			defer wg.Done()
 
 			log := logger.With("target_host", target.GetName(), "target_address", target.GetAddress())
@@ -115,7 +115,7 @@ func (s *CheckHostConnectivityStep) Run(ctx runtime.ExecutionContext) (*types.St
 	return result, nil
 }
 
-func (s *CheckHostConnectivityStep) getPortsForHost(spec *v1alpha1.ClusterSpec, host connector.Host) []int {
+func (s *CheckHostConnectivityStep) getPortsForHost(spec *v1alpha1.ClusterSpec, host remotefw.Host) []int {
 	ports := make(map[int]bool)
 
 	isMaster := false

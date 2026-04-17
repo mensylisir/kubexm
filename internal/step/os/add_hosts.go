@@ -27,6 +27,8 @@ const HOSTS_TEMPLATE = `
 # KubeXM hosts END
 `
 
+var _ step.Step = (*UpdateEtcHostsStep)(nil)
+
 type HostEntry struct {
 	IP        string
 	Hostnames string

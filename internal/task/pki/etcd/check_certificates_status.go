@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -42,7 +42,7 @@ func (t *CheckRenewalStatusTask) IsRequired(ctx runtime.TaskContext) (bool, erro
 func (t *CheckRenewalStatusTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 	controlNode, err := ctx.GetControlNode()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get control node for task %s: %w", t.Name(), err)
@@ -65,8 +65,8 @@ func (t *CheckRenewalStatusTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionF
 		return nil, err
 	}
 
-	fragment.AddNode(&plan.ExecutionNode{Name: "RestoreEtcdCAFromRemote", Step: restoreCaStep, Hosts: []connector.Host{controlNode}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "CheckEtcdCAExpiration", Step: checkCaStep, Hosts: []connector.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "RestoreEtcdCAFromRemote", Step: restoreCaStep, Hosts: []remotefw.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "CheckEtcdCAExpiration", Step: checkCaStep, Hosts: []remotefw.Host{controlNode}})
 	fragment.AddNode(&plan.ExecutionNode{Name: "CheckLeafCertificateExpiration", Step: checkLeafStep, Hosts: etcdNodes})
 
 	fragment.AddDependency("RestoreEtcdCAFromRemote", "CheckEtcdCAExpiration")

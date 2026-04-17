@@ -23,7 +23,7 @@ func GetRemoteFileChecksum(ctx runtime.ExecutionContext, remotePath string, sudo
 		return "", fmt.Errorf("failed to get remote file checksum for %s: %w", remotePath, runErr)
 	}
 
-	checksum := strings.TrimSpace(string(output))
+	checksum := strings.TrimSpace(output.Stdout)
 	if checksum == "" {
 		return "", fmt.Errorf("got empty checksum for remote file %s", remotePath)
 	}

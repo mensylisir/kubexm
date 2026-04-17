@@ -15,6 +15,8 @@ import (
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
+var _ step.Step = (*RemoveCriDockerdStep)(nil)
+
 type RemoveCriDockerdStep struct {
 	step.Base
 	InstallPath string
@@ -67,7 +69,11 @@ func (s *RemoveCriDockerdStep) Precheck(ctx runtime.ExecutionContext) (isDone bo
 
 	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
 	if err == nil {
-		isActive, _ := runner.IsServiceActive(ctx.GoContext(), conn, facts, common.DefaultCRIDockerServiceName)
+		isActive, err := runner.IsServiceActive(ctx.GoContext(), conn, facts, common.DefaultCRIDockerServiceName)
+		if err != nil {
+			logger.Warn("Failed to check cri-dockerd service status", "error", err)
+			return false, nil // safest: assume cleanup needed
+		}
 		if isActive {
 			logger.Info("cri-dockerd service is still active. Cleanup is required.")
 			return false, nil

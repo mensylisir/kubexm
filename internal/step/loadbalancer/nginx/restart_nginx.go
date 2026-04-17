@@ -34,6 +34,29 @@ func (s *RestartNginxStep) Meta() *spec.StepMeta {
 }
 
 func (s *RestartNginxStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		return false, err
+	}
+
+	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
+	if err != nil {
+		return false, err
+	}
+
+	active, err := runner.IsServiceActive(ctx.GoContext(), conn, facts, nginxServiceName)
+	if err != nil {
+		return false, fmt.Errorf("failed to determine nginx service status: %w", err)
+	}
+
+	if !active {
+		logger.Infof("NGINX service is not active. Nothing to restart, skipping.")
+		return true, nil
+	}
+
+	logger.Info("NGINX service is active. Step needs to run to restart it.")
 	return false, nil
 }
 
@@ -57,6 +80,16 @@ func (s *RestartNginxStep) Run(ctx runtime.ExecutionContext) (*types.StepResult,
 	if err := runner.RestartService(ctx.GoContext(), conn, facts, nginxServiceName); err != nil {
 		result.MarkFailed(err, "failed to restart NGINX service")
 		return result, err
+	}
+
+	active, err := runner.IsServiceActive(ctx.GoContext(), conn, facts, nginxServiceName)
+	if err != nil {
+		result.MarkFailed(err, "failed to verify NGINX service status after restart")
+		return result, fmt.Errorf("failed to verify NGINX service status after restart: %w", err)
+	}
+	if !active {
+		result.MarkFailed(err, "NGINX service did not become active after restart command")
+		return result, fmt.Errorf("NGINX service did not become active after restart command")
 	}
 
 	logger.Info("NGINX service restarted successfully.")

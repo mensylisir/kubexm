@@ -3,7 +3,7 @@ package cilium
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -38,12 +38,16 @@ func (t *DeployCiliumTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 	if ctx.GetClusterConfig().Spec.Network == nil {
 		return false, nil
 	}
-	return ctx.GetClusterConfig().Spec.Network.Plugin == string(common.CNITypeCilium), nil
+	netSpec := ctx.GetClusterConfig().Spec.Network
+	if netSpec == nil {
+		return false, nil
+	}
+	return netSpec.Plugin == string(common.CNITypeCilium), nil
 }
 
 func (t *DeployCiliumTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
 	if err != nil {
@@ -68,9 +72,9 @@ func (t *DeployCiliumTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragmen
 		return nil, err
 	}
 
-	nodeGenerate := &plan.ExecutionNode{Name: "GenerateCiliumManifest", Step: generateStep, Hosts: []connector.Host{controlNode}}
-	nodeDistribute := &plan.ExecutionNode{Name: "DistributeCiliumAssets", Step: distributeStep, Hosts: []connector.Host{executionHost}}
-	nodeInstall := &plan.ExecutionNode{Name: "InstallCilium", Step: installStep, Hosts: []connector.Host{executionHost}}
+	nodeGenerate := &plan.ExecutionNode{Name: "GenerateCiliumManifest", Step: generateStep, Hosts: []remotefw.Host{controlNode}}
+	nodeDistribute := &plan.ExecutionNode{Name: "DistributeCiliumAssets", Step: distributeStep, Hosts: []remotefw.Host{executionHost}}
+	nodeInstall := &plan.ExecutionNode{Name: "InstallCilium", Step: installStep, Hosts: []remotefw.Host{executionHost}}
 
 	fragment.AddNode(nodeGenerate)
 	fragment.AddNode(nodeDistribute)
@@ -79,7 +83,6 @@ func (t *DeployCiliumTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragmen
 	fragment.AddDependency("GenerateCiliumManifest", "DistributeCiliumAssets")
 	fragment.AddDependency("DistributeCiliumAssets", "InstallCilium")
 
-	_ = controlNode
 	// Downloads are handled centrally in Preflight PrepareAssets/ExtractBundle.
 
 	fragment.CalculateEntryAndExitNodes()

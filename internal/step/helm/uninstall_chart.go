@@ -11,6 +11,8 @@ import (
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
+var _ step.Step = (*UninstallChartStep)(nil)
+
 type UninstallChartStep struct {
 	step.Base
 	ReleaseName string

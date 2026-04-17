@@ -3,7 +3,6 @@ package helpers
 import (
 	"encoding/base64"
 	"encoding/json"
-	"github.com/containerd/containerd/reference/docker"
 	"github.com/mensylisir/kubexm/internal/common"
 	"github.com/mensylisir/kubexm/internal/errors/validation"
 	"gopkg.in/yaml.v3"
@@ -27,6 +26,7 @@ var (
 	k8sNameRegex              = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 	k8sLabelRegex             = regexp.MustCompile(`^[a-z0-9A-Z]([-a-z0-9A-Z_.]*[a-z0-9A-Z])?$`)
 	emailRegex                = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+	imageReferenceRegex       = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*((:[a-zA-Z0-9_][a-zA-Z0-9_.-]*)|(@sha256:[a-fA-F0-9]{64}))?$|^([a-zA-Z0-9.-]+(:[0-9]+)?/)?([a-zA-Z0-9][a-zA-Z0-9_.-]*/)*[a-zA-Z0-9][a-zA-Z0-9_.-]*((:[a-zA-Z0-9_][a-zA-Z0-9_.-]*)|(@sha256:[a-fA-F0-9]{64}))?$`)
 )
 
 func IsValidK8sName(name string) bool {
@@ -300,8 +300,10 @@ func IsValidHTTPURL(rawURL string) bool {
 }
 
 func IsValidImageReference(ref string) bool {
-	_, err := docker.ParseAnyReference(ref)
-	return err == nil
+	if ref == "" {
+		return false
+	}
+	return imageReferenceRegex.MatchString(ref)
 }
 
 func IsValidChartVersion(version string) bool {

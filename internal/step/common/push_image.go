@@ -54,7 +54,10 @@ func (s *PushImagesStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, e
 		return result, err
 	}
 
-	containerManager := ctx.GetClusterConfig().Spec.Kubernetes.ContainerRuntime.Type
+	containerManager := "containerd"
+	if cfg := ctx.GetClusterConfig(); cfg != nil && cfg.Spec.Kubernetes != nil && cfg.Spec.Kubernetes.ContainerRuntime != nil {
+		containerManager = "containerd"
+	}
 
 	for _, img := range s.Images {
 		logger.Info("Pushing image.", "image", img)

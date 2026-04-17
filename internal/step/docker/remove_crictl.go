@@ -15,6 +15,8 @@ import (
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
+var _ step.Step = (*RemoveCrictlStep)(nil)
+
 type RemoveCrictlStep struct {
 	step.Base
 	InstallPath string

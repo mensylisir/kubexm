@@ -62,7 +62,7 @@ func (s *EtcdStatusCheckStep) Run(ctx runtime.ExecutionContext) (*types.StepResu
 	nodeName := ctx.GetHost().GetName()
 	logger.Info("Getting etcd cluster status from node...", "node", nodeName)
 
-	caPath, certPath, keyPath := getEtcdctlCertPaths(nodeName)
+	caPath, certPath, keyPath := getEtcdctlCertPaths(ctx, nodeName)
 
 	memberListCmd := fmt.Sprintf("ETCDCTL_API=3 %s member list --cacert %s --cert %s --key %s -w table",
 		s.EtcdctlBinaryPath,

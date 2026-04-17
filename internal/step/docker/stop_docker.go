@@ -10,6 +10,8 @@ import (
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
+var _ step.Step = (*StopDockerStep)(nil)
+
 type StopDockerStep struct {
 	step.Base
 }
@@ -50,8 +52,7 @@ func (s *StopDockerStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, er
 
 	active, err := runner.IsServiceActive(ctx.GoContext(), conn, facts, DockerServiceName)
 	if err != nil {
-		logger.Warnf("Failed to check service status, assuming it's not active. Error: %v", err)
-		return true, nil
+		return false, fmt.Errorf("failed to determine docker service status: %w", err)
 	}
 
 	if !active {
@@ -65,6 +66,7 @@ func (s *StopDockerStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, er
 
 func (s *StopDockerStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, error) {
 	result := types.NewStepResult(s.Base.Meta.Name, ctx.GetStepExecutionID(), ctx.GetHost())
+	ctx.SetStepResult(result)
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Run")
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
@@ -79,10 +81,32 @@ func (s *StopDockerStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, e
 		return result, err
 	}
 
+	active, err := runner.IsServiceActive(ctx.GoContext(), conn, facts, DockerServiceName)
+	if err != nil {
+		result.MarkFailed(err, "failed to determine docker service status before stop")
+		return result, fmt.Errorf("failed to determine docker service status before stop: %w", err)
+	}
+	result.SetMetadata("docker_was_active", active)
+	if !active {
+		logger.Info("Docker service is already inactive.")
+		result.MarkCompleted("Docker service already inactive")
+		return result, nil
+	}
+
 	logger.Infof("Stopping docker service...")
 	if err := runner.StopService(ctx.GoContext(), conn, facts, DockerServiceName); err != nil {
 		result.MarkFailed(err, "failed to stop docker service")
 		return result, fmt.Errorf("failed to stop docker service: %w", err)
+	}
+
+	active, err = runner.IsServiceActive(ctx.GoContext(), conn, facts, DockerServiceName)
+	if err != nil {
+		result.MarkFailed(err, "failed to verify docker service status after stop")
+		return result, fmt.Errorf("failed to verify docker service status after stop: %w", err)
+	}
+	if active {
+		result.MarkFailed(err, "docker service is still active after stop command")
+		return result, fmt.Errorf("docker service is still active after stop command")
 	}
 
 	logger.Info("Docker service stopped successfully.")
@@ -92,6 +116,24 @@ func (s *StopDockerStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, e
 
 func (s *StopDockerStep) Rollback(ctx runtime.ExecutionContext) error {
 	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Rollback")
+	stepResult := ctx.GetStepResult()
+	if stepResult == nil {
+		logger.Warn("Rollback skipped: no step result context available.")
+		return nil
+	}
+
+	wasActiveValue, ok := stepResult.GetMetadata("docker_was_active")
+	if !ok {
+		logger.Warn("Rollback skipped: original docker service state was not recorded.")
+		return nil
+	}
+
+	wasActive, ok := wasActiveValue.(bool)
+	if !ok || !wasActive {
+		logger.Info("Rollback skipped: docker service was not active before this step.")
+		return nil
+	}
+
 	runner := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {

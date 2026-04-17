@@ -1,8 +1,8 @@
 package binary
 
 import (
-	"fmt"
 	"github.com/Masterminds/semver/v3"
+	"github.com/mensylisir/kubexm/internal/logger"
 )
 
 // ComponentBinaryBOM (Bill of Materials) 存储了一个二进制组件的版本与 K8s 的兼容关系。
@@ -85,9 +85,8 @@ var componentBinaryBOMs = map[string][]ComponentBinaryBOM{
 	},
 }
 
-// getBinaryVersionFromBOM 是一个内部辅助函数，
-// 它的唯一职责就是根据 K8s 版本从 BOM 中查找推荐的组件版本。
-func getBinaryVersionFromBOM(componentName string, kubeVersionStr string) string {
+// GetBinaryVersionFromBOM 根据 K8s 版本从 BOM 中查找推荐的组件版本。
+func GetBinaryVersionFromBOM(componentName string, kubeVersionStr string) string {
 	if componentName == "" {
 		return ""
 	}
@@ -98,7 +97,7 @@ func getBinaryVersionFromBOM(componentName string, kubeVersionStr string) string
 
 	k8sVersion, err := semver.NewVersion(kubeVersionStr)
 	if err != nil {
-		fmt.Printf("Warning: could not parse kubernetes version '%s' for binary BOM lookup: %v\n", kubeVersionStr, err)
+		logger.Warn("could not parse kubernetes version '%s' for binary BOM lookup: %v", kubeVersionStr, err)
 		if bomList, ok := componentBinaryBOMs[componentName]; ok {
 			for _, entry := range bomList {
 				if entry.KubeVersionConstraints == ">= 0.0.0" {
@@ -117,7 +116,7 @@ func getBinaryVersionFromBOM(componentName string, kubeVersionStr string) string
 	for _, bomEntry := range componentBOMList {
 		constraints, err := semver.NewConstraint(bomEntry.KubeVersionConstraints)
 		if err != nil {
-			fmt.Printf("Error: invalid version constraint in binary BOM for %s: '%s'. Skipping.\n", componentName, bomEntry.KubeVersionConstraints)
+			logger.Warn("invalid version constraint in binary BOM for %s: '%s'. Skipping.", componentName, bomEntry.KubeVersionConstraints)
 			continue
 		}
 		if constraints.Check(k8sVersion) {
@@ -125,7 +124,7 @@ func getBinaryVersionFromBOM(componentName string, kubeVersionStr string) string
 		}
 	}
 
-	fmt.Printf("Warning: no compatible binary version in BOM for component '%s' with K8s '%s'\n", componentName, kubeVersionStr)
+	logger.Warn("no compatible binary version in BOM for component '%s' with K8s '%s'", componentName, kubeVersionStr)
 	return ""
 }
 

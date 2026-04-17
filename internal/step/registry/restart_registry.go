@@ -37,6 +37,29 @@ func (s *RestartRegistryServiceStep) Meta() *spec.StepMeta {
 }
 
 func (s *RestartRegistryServiceStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		return false, err
+	}
+
+	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
+	if err != nil {
+		return false, err
+	}
+
+	active, err := runner.IsServiceActive(ctx.GoContext(), conn, facts, "registry.service")
+	if err != nil {
+		return false, fmt.Errorf("failed to determine registry service status: %w", err)
+	}
+
+	if !active {
+		logger.Infof("Registry service is not active. Nothing to restart, skipping.")
+		return true, nil
+	}
+
+	logger.Info("Registry service is active. Step needs to run to restart it.")
 	return false, nil
 }
 
@@ -64,17 +87,17 @@ func (s *RestartRegistryServiceStep) Run(ctx runtime.ExecutionContext) (*types.S
 		journalCmd := "journalctl -u registry.service -n 50 --no-pager"
 		journalOutput, _ := runner.Run(ctx.GoContext(), conn, journalCmd, s.Sudo)
 
-		result.MarkFailed(err, fmt.Sprintf("failed to restart registry service:\nStatus:\n%s\nJournal logs:\n%s", statusOutput, journalOutput))
+		result.MarkFailed(err, fmt.Sprintf("failed to restart registry service:\nStatus:\n%s\nJournal logs:\n%s", statusOutput.Stdout, journalOutput.Stdout))
 		return result, err
 	}
 
 	time.Sleep(3 * time.Second)
 	statusCmd := "systemctl is-active registry.service"
-	output, err := runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
-	if err != nil || strings.TrimSpace(output) != "active" {
+	runResult, err := runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
+	if err != nil || strings.TrimSpace(runResult.Stdout) != "active" {
 		journalCmd := "journalctl -u registry.service -n 50 --no-pager"
 		journalOutput, _ := runner.Run(ctx.GoContext(), conn, journalCmd, s.Sudo)
-		result.MarkFailed(err, fmt.Sprintf("registry service failed to become active after restart. Journal logs:\n%s", journalOutput))
+		result.MarkFailed(err, fmt.Sprintf("registry service failed to become active after restart. Journal logs:\n%s", journalOutput.Stdout))
 		return result, err
 	}
 

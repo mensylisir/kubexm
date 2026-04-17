@@ -73,37 +73,38 @@ func (s *KubeadmInitStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, 
 
 	logger.Infof("Running command: %s", cmd)
 
-	output, err := runner.Run(ctx.GoContext(), conn, cmd, true)
+	runResult, err := runner.Run(ctx.GoContext(), conn, cmd, true)
 	if err != nil {
-		err = fmt.Errorf("kubeadm init failed: %w. Output:\n%s", err, output)
+		err = fmt.Errorf("kubeadm init failed: %w. Output:\n%s", err, runResult.Stdout)
 		result.MarkFailed(err, "kubeadm init failed")
 		return result, err
 	}
-	token, err := helpers.ParseTokenFromOutput(output)
+	token, err := helpers.ParseTokenFromOutput(runResult.Stdout)
 	if err != nil {
 		err = fmt.Errorf("failed to parse bootstrap token from cached output: %w", err)
 		result.MarkFailed(err, "failed to parse bootstrap token")
 		return result, err
 	}
 
-	certKey, err := helpers.ParseCertificateKeyFromOutput(output)
+	certKey, err := helpers.ParseCertificateKeyFromOutput(runResult.Stdout)
 	if err != nil {
 		err = fmt.Errorf("failed to parse certificate key from cached output: %w", err)
 		result.MarkFailed(err, "failed to parse certificate key")
 		return result, err
 	}
 
-	caCertHash, err := helpers.ParseCaCertHashFromOutput(output)
+	caCertHash, err := helpers.ParseCaCertHashFromOutput(runResult.Stdout)
 	if err != nil {
 		err = fmt.Errorf("failed to parse ca cert hash from cached output: %w", err)
 		result.MarkFailed(err, "failed to parse ca cert hash")
 		return result, err
 	}
-	cacheKey := fmt.Sprintf(common.CacheKubeadmInitToken, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	// Use stable task names for cache keys to ensure join tasks can find the data.
+	cacheKey := fmt.Sprintf(common.CacheKubeadmInitToken, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), "KubeadmInit")
 	ctx.GetTaskCache().Set(cacheKey, token)
-	cacheKey = fmt.Sprintf(common.CacheKubeadmInitCertKey, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	cacheKey = fmt.Sprintf(common.CacheKubeadmInitCertKey, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), "KubeadmInit")
 	ctx.GetTaskCache().Set(cacheKey, certKey)
-	cacheKey = fmt.Sprintf(common.CacheKubeadmInitCACertHash, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	cacheKey = fmt.Sprintf(common.CacheKubeadmInitCACertHash, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), "KubeadmInit")
 	ctx.GetTaskCache().Set(cacheKey, caCertHash)
 	logger.Info("Kubeadm init completed successfully.")
 	result.MarkCompleted("kubeadm init completed successfully")

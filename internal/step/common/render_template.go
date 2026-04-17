@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/runner"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
@@ -173,7 +173,7 @@ func (s *RenderTemplateStep) Run(ctx runtime.ExecutionContext) (*types.StepResul
 	logger.Info("Writing rendered template to remote host.", "path", s.RemoteDestPath, "permissions", s.Permissions, "sudo", s.Sudo)
 	err = runnerSvc.WriteFile(ctx.GoContext(), conn, []byte(renderedContent), s.RemoteDestPath, s.Permissions, s.Sudo)
 	if err != nil {
-		var cmdErr *connector.CommandError
+		var cmdErr *runner.CommandError
 		if errors.As(err, &cmdErr) {
 			logger.Error(err, "Failed to write rendered template to remote host.", "stderr", cmdErr.Stderr, "stdout", cmdErr.Stdout)
 		}

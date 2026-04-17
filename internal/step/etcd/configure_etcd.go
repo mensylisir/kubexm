@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
@@ -44,7 +44,7 @@ type EtcdConfigData struct {
 
 type ConfigureEtcdStep struct {
 	step.Base
-	EtcdNodes               []connector.Host
+	EtcdNodes               []remotefw.Host
 	RemoteConfDir           string
 	RemotePKIDir            string
 	DataDir                 string

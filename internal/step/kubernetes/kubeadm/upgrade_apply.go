@@ -80,14 +80,14 @@ func (s *KubeadmUpgradeApplyStep) Run(ctx runtime.ExecutionContext) (*types.Step
 	logger.Infof("Applying control plane upgrade to version %s...", versionStr)
 	applyCmd := fmt.Sprintf("kubeadm upgrade apply %s --yes --etcd-upgrade=false", versionStr)
 
-	stdout, err := runner.Run(ctx.GoContext(), conn, applyCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, applyCmd, s.Sudo)
 	if err != nil {
-		err = fmt.Errorf("'kubeadm upgrade apply' failed. Output:\n%s\nError: %w", string(stdout), err)
+		err = fmt.Errorf("'kubeadm upgrade apply' failed. Output:\n%s\nError: %w", runResult.Stdout, err)
 		result.MarkFailed(err, "kubeadm upgrade apply failed")
 		return result, err
 	}
 
-	output := string(stdout)
+	output := runResult.Stdout
 	logger.Infof("`kubeadm upgrade apply` output:\n%s", output)
 
 	re := regexp.MustCompile(`located at (/etc/kubernetes/tmp/kubeadm-backup-[a-z0-9-]+)`)

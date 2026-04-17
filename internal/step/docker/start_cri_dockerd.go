@@ -10,6 +10,8 @@ import (
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
+var _ step.Step = (*StartCriDockerdStep)(nil)
+
 type StartCriDockerdStep struct {
 	step.Base
 }

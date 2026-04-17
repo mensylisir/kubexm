@@ -19,6 +19,8 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
+var _ step.Step = (*KubeadmCreateKubeconfigsStep)(nil)
+
 type KubeadmCreateKubeconfigsStep struct {
 	step.Base
 	caToUseDir string

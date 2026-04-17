@@ -72,7 +72,7 @@ func (b *Base) GetBase() *Base {
 //	initNode := &plan.ExecutionNode{
 //		Name:  "KubeadmInit-On-First-Master",
 //		Step:  initCmdStep,
-//		Hosts: []connector.Host{firstMaster}, // <-- 精确地只设置一个主机！
+//		Hosts: []remotefw.Host{firstMaster}, // <-- 精确地只设置一个主机！
 //	}
 //
 //	fragment.AddNode(initNode)

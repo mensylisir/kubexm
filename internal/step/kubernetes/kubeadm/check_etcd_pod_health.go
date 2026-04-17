@@ -106,12 +106,12 @@ func (s *KubeadmVerifyEtcdPodHealthStep) checkPodHealth(ctx runtime.ExecutionCon
 	etcdContainerNamePattern := fmt.Sprintf("k8s_etcd_etcd-%s_kube-system", nodeName)
 	cmd := fmt.Sprintf("crictl ps --name %s --no-trunc", etcdContainerNamePattern)
 
-	stdout, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
-		return fmt.Errorf("failed to list etcd container: %w. Output: %s", err, string(stdout))
+		return fmt.Errorf("failed to list etcd container: %w. Output: %s", err, runResult.Stdout)
 	}
 
-	output := string(stdout)
+	output := runResult.Stdout
 	if !strings.Contains(output, "etcd") {
 		return fmt.Errorf("etcd container not found using pattern '%s'", etcdContainerNamePattern)
 	}

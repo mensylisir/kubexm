@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/mensylisir/kubexm/internal/runner"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
@@ -37,12 +38,21 @@ func (s *EnableKeepalivedService) Precheck(ctx runtime.ExecutionContext) (bool, 
 
 func (s *EnableKeepalivedService) Run(ctx runtime.ExecutionContext) (*types.StepResult, error) {
 	result := types.NewStepResult(s.Base.Meta.Name, ctx.GetStepExecutionID(), ctx.GetHost())
-	facts, _ := ctx.GetHostFacts(ctx.GetHost())
-	conn, _ := ctx.GetCurrentHostConnector()
-	cmd := fmt.Sprintf(facts.InitSystem.EnableCmd, "keepalived")
-	_, _, err := conn.Exec(ctx.GoContext(), cmd, nil)
+	runnerSvc := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		result.MarkFailed(err, "failed to enable keepalived service")
+		result.MarkFailed(err, fmt.Sprintf("failed to get connector for host %s", ctx.GetHost().GetName()))
+		return result, err
+	}
+	facts, err := ctx.GetHostFacts(ctx.GetHost())
+	if err != nil {
+		result.MarkFailed(err, "failed to get host facts")
+		return result, err
+	}
+	cmd := fmt.Sprintf(facts.InitSystem.EnableCmd, "keepalived")
+	_, stderr, err := runnerSvc.RunWithOptions(ctx.GoContext(), conn, cmd, &runner.ExecOptions{Sudo: s.Base.Sudo})
+	if err != nil {
+		result.MarkFailed(err, fmt.Sprintf("failed to enable keepalived service: %s", string(stderr)))
 		return result, err
 	}
 	result.MarkCompleted("Keepalived service enabled successfully")

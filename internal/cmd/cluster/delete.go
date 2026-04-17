@@ -97,7 +97,7 @@ var deleteCmd = &cobra.Command{
 		defer cleanupFunc()
 		log.Info("Runtime environment built successfully for deletion.")
 
-		deletePipeline := kubexmcluster.NewDeleteClusterPipeline(assumeYesGlobal) // Pass global assumeYes
+		deletePipeline := kubexmcluster.NewDeleteClusterPipeline(assumeYesGlobal)
 		log.Infof("Instantiated pipeline: %s", deletePipeline.Name())
 
 		log.Info("Executing delete pipeline run...")

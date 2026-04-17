@@ -16,6 +16,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+var _ step.Step = (*LoadKernelModulesStep)(nil)
+
 type LoadKernelModulesStep struct {
 	step.Base
 	configFileCreated         bool
@@ -159,8 +161,8 @@ func (s *LoadKernelModulesStep) Run(ctx runtime.ExecutionContext) (*types.StepRe
 		if exists {
 			logger.Infof("Kernel module '%s' is available. Loading with 'modprobe'...", module)
 			loadCmd := fmt.Sprintf("modprobe %s", module)
-			if output, err := runner.Run(ctx.GoContext(), conn, loadCmd, s.Sudo); err != nil {
-				logger.Warnf("Could not modprobe '%s'. It might be built-in. Output: %s", module, output)
+			if runResult, err := runner.Run(ctx.GoContext(), conn, loadCmd, s.Sudo); err != nil {
+				logger.Warnf("Could not modprobe '%s'. It might be built-in. Output: %s", module, runResult.Stdout)
 			}
 			availableModules = append(availableModules, module)
 		} else {

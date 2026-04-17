@@ -3,7 +3,7 @@ package etcd
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -35,7 +35,10 @@ func (t *GenerateNewCertificatesTask) Description() string {
 }
 
 func (t *GenerateNewCertificatesTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	runtimeCtx := ctx.(*runtime.Context)
+	runtimeCtx, ok := ctx.(*runtime.Context)
+	if !ok {
+		return false, fmt.Errorf("ctx is not *runtime.Context")
+	}
 	caCacheKey := fmt.Sprintf(common.CacheKubexmEtcdCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
 	caRenewVal, _ := ctx.GetModuleCache().Get(caCacheKey)
 	caRenew, _ := caRenewVal.(bool)
@@ -47,7 +50,7 @@ func (t *GenerateNewCertificatesTask) IsRequired(ctx runtime.TaskContext) (bool,
 }
 
 func (t *GenerateNewCertificatesTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 	fragment := plan.NewExecutionFragment(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
@@ -72,10 +75,10 @@ func (t *GenerateNewCertificatesTask) Plan(ctx runtime.TaskContext) (*plan.Execu
 		return nil, err
 	}
 
-	fragment.AddNode(&plan.ExecutionNode{Name: "PrepareAssets", Step: prepareAssetsStep, Hosts: []connector.Host{controlNode}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "ResignEtcdCA", Step: resignCaStep, Hosts: []connector.Host{controlNode}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "GenerateNewEtcdLeafCerts", Step: resignCertStep, Hosts: []connector.Host{controlNode}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "CreateCABundle", Step: createBundleStep, Hosts: []connector.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "PrepareAssets", Step: prepareAssetsStep, Hosts: []remotefw.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "ResignEtcdCA", Step: resignCaStep, Hosts: []remotefw.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "GenerateNewEtcdLeafCerts", Step: resignCertStep, Hosts: []remotefw.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "CreateCABundle", Step: createBundleStep, Hosts: []remotefw.Host{controlNode}})
 
 	fragment.AddDependency("PrepareAssets", "ResignEtcdCA")
 	fragment.AddDependency("PrepareAssets", "CreateCABundle")

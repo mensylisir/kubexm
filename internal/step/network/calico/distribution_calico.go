@@ -11,7 +11,7 @@ import (
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
 	"github.com/mensylisir/kubexm/internal/step/helpers"
-	"github.com/mensylisir/kubexm/internal/step/helpers/bom/helm"
+	"github.com/mensylisir/kubexm/internal/util/helm"
 	"github.com/mensylisir/kubexm/internal/types"
 	"github.com/pkg/errors"
 )
@@ -66,7 +66,10 @@ func (s *DistributeCalicoArtifactsStep) getLocalPaths(ctx runtime.ExecutionConte
 		return "", "", fmt.Errorf("cannot find chart info for calico in BOM")
 	}
 
-	k8sVersion := ctx.GetClusterConfig().Spec.Kubernetes.Version
+	k8sVersion := "v1.24.0"
+	if cfg := ctx.GetClusterConfig(); cfg != nil && cfg.Spec.Kubernetes != nil && cfg.Spec.Kubernetes.Version != "" {
+		k8sVersion = cfg.Spec.Kubernetes.Version
+	}
 
 	valuesFileName := fmt.Sprintf("%s-values.yaml", chart.RepoName())
 	localValuesPath = filepath.Join(ctx.GetGlobalWorkDir(), "helm", k8sVersion, chart.RepoName(), chart.Version, valuesFileName)

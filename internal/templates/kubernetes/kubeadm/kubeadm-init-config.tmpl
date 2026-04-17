@@ -42,6 +42,15 @@ apiServer:
     - "{{ . }}"
     {{- end }}
   {{- end }}
+  {{- if .ClusterConfiguration.ApiServer.ExtraVolumes }}
+  extraVolumes:
+    {{- range .ClusterConfiguration.ApiServer.ExtraVolumes }}
+    - name: "{{ .Name }}"
+      hostPath: "{{ .HostPath }}"
+      mountPath: "{{ .MountPath }}"
+      readOnly: {{ .ReadOnly }}
+    {{- end }}
+  {{- end }}
 controllerManager:
   {{- if .ClusterConfiguration.ControllerManager.ExtraArgs }}
   extraArgs:

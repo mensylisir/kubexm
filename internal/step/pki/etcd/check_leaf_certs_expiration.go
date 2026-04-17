@@ -78,13 +78,13 @@ func (s *CheckLeafCertsExpirationStep) Run(ctx runtime.ExecutionContext) (*types
 		remotePathPattern := filepath.Join(s.remoteCertsDir, pattern)
 
 		findCmd := fmt.Sprintf("find %s -type f 2>/dev/null", remotePathPattern)
-		stdout, err := runner.Run(ctx.GoContext(), conn, findCmd, s.Sudo)
+		runResult, err := runner.Run(ctx.GoContext(), conn, findCmd, s.Sudo)
 		if err != nil {
 			logger.Warnf("Could not find files for pattern '%s'. This may be expected.", remotePathPattern)
 			continue
 		}
 
-		remoteFiles := strings.Fields(string(stdout))
+		remoteFiles := strings.Fields(string(runResult.Stdout))
 		for _, remoteFile := range remoteFiles {
 			logger.Debugf("Checking certificate: %s", remoteFile)
 
@@ -121,8 +121,6 @@ func (s *CheckLeafCertsExpirationStep) Run(ctx runtime.ExecutionContext) (*types
 
 	cacheKey := fmt.Sprintf(common.CacheKubexmEtcdLeafCertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
 	ctx.GetTaskCache().Set(cacheKey, anyCertRequiresRenewal)
-	ctx.GetModuleCache().Set(cacheKey, anyCertRequiresRenewal)
-	ctx.GetPipelineCache().Set(cacheKey, anyCertRequiresRenewal)
 
 	if anyCertRequiresRenewal {
 		logger.Warnf("One or more leaf certificates on this node require renewal. Result has been saved to cache ('%s': true).", cacheKey)

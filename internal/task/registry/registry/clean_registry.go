@@ -43,7 +43,7 @@ func (t *CleanRegistryTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 func (t *CleanRegistryTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	registryHosts := ctx.GetHostsByRole(common.RoleRegistry)
 	if len(registryHosts) == 0 {

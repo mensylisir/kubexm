@@ -1,9 +1,9 @@
 package helm
 
 import (
-	"fmt"
 	"github.com/Masterminds/semver/v3"
 	"github.com/mensylisir/kubexm/internal/common"
+	"github.com/mensylisir/kubexm/internal/logger"
 )
 
 type ComponentChartBOM struct {
@@ -133,13 +133,13 @@ func GetChartInfo(componentName string, kubeVersionStr string) *ChartInfo {
 
 	k8sVersion, err := semver.NewVersion(kubeVersionStr)
 	if err != nil {
-		fmt.Printf("Warning: could not parse kubernetes version '%s': %v. Unable to find a compatible chart.\n", kubeVersionStr, err)
+		logger.Warn("could not parse kubernetes version '%s': %v. Unable to find a compatible chart.", kubeVersionStr, err)
 		return nil
 	}
 
 	componentBOMList, ok := componentBOMs[componentName]
 	if !ok {
-		fmt.Printf("Warning: no chart BOM found for component '%s'\n", componentName)
+		logger.Warn("no chart BOM found for component '%s'", componentName)
 		return nil
 	}
 
@@ -147,7 +147,7 @@ func GetChartInfo(componentName string, kubeVersionStr string) *ChartInfo {
 	for _, bomEntry := range componentBOMList {
 		constraints, err := semver.NewConstraint(bomEntry.KubeVersionConstraints)
 		if err != nil {
-			fmt.Printf("Error: invalid version constraint in BOM for %s: '%s'. Skipping this entry.\n", componentName, bomEntry.KubeVersionConstraints)
+			logger.Warn("invalid version constraint in BOM for %s: '%s'. Skipping this entry.", componentName, bomEntry.KubeVersionConstraints)
 			continue
 		}
 
@@ -157,20 +157,20 @@ func GetChartInfo(componentName string, kubeVersionStr string) *ChartInfo {
 	}
 
 	if len(candidates) == 0 {
-		fmt.Printf("Warning: no compatible chart version found in BOM for component '%s' with Kubernetes version '%s'\n", componentName, kubeVersionStr)
+		logger.Warn("no compatible chart version found in BOM for component '%s' with Kubernetes version '%s'", componentName, kubeVersionStr)
 		return nil
 	}
 
 	bestCandidate := candidates[0]
 	bestVersion, err := semver.NewVersion(bestCandidate.Chart.Version)
 	if err != nil {
-		fmt.Printf("Warning: could not parse chart version '%s' for component '%s'. Using it as initial best guess.\n", bestCandidate.Chart.Version, componentName)
+		logger.Warn("could not parse chart version '%s' for component '%s'. Using it as initial best guess.", bestCandidate.Chart.Version, componentName)
 	}
 
 	for i := 1; i < len(candidates); i++ {
 		currentVersion, err := semver.NewVersion(candidates[i].Chart.Version)
 		if err != nil {
-			fmt.Printf("Warning: could not parse chart version '%s' for component '%s'. Skipping for comparison.\n", candidates[i].Chart.Version, componentName)
+			logger.Warn("could not parse chart version '%s' for component '%s'. Skipping for comparison.", candidates[i].Chart.Version, componentName)
 			continue
 		}
 

@@ -34,17 +34,26 @@ func (t *CleanKubeVipTask) Description() string {
 
 func (t *CleanKubeVipTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 	cfg := ctx.GetClusterConfig()
-	if cfg.Spec.ControlPlaneEndpoint.HighAvailability.Enabled == nil || !*cfg.Spec.ControlPlaneEndpoint.HighAvailability.Enabled ||
-		cfg.Spec.ControlPlaneEndpoint.HighAvailability.External.Type != string(common.ExternalLBTypeKubeVIP) {
+	ha := cfg.Spec.ControlPlaneEndpoint.HighAvailability
+	if ha == nil || ha.Enabled == nil || !*ha.Enabled {
 		return false, nil
 	}
-	return len(ctx.GetHostsByRole(common.RoleMaster)) > 1, nil
+	// Check external kube-vip
+	if ha.External != nil && ha.External.Type == string(common.ExternalLBTypeKubeVIP) {
+		return len(ctx.GetHostsByRole(common.RoleMaster)) > 1, nil
+	}
+	// Check internal kube-vip
+	if ha.Internal != nil && ha.Internal.Enabled != nil && *ha.Internal.Enabled &&
+		ha.Internal.Type == string(common.InternalLBTypeKubeVIP) {
+		return len(ctx.GetHostsByRole(common.RoleMaster)) > 1, nil
+	}
+	return false, nil
 }
 
 func (t *CleanKubeVipTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
 	if len(masterHosts) == 0 {

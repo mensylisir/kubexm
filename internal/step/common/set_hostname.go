@@ -44,13 +44,13 @@ func (s *SetHostnameStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, e
 		return false, fmt.Errorf("precheck: failed to get connector: %w", err)
 	}
 
-	output, err := runnerSvc.Run(ctx.GoContext(), conn, "hostname", false)
+	runResult, err := runnerSvc.Run(ctx.GoContext(), conn, "hostname", false)
 	if err != nil {
 		logger.Warn(err, "Failed to get current hostname, assuming it needs to be set.")
 		return false, nil
 	}
 
-	currentHostname := strings.TrimSpace(string(output))
+	currentHostname := strings.TrimSpace(runResult.Stdout)
 	if currentHostname == s.Hostname {
 		logger.Info("Hostname is already set to desired value.", "hostname", s.Hostname)
 		return true, nil

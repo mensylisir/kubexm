@@ -71,13 +71,13 @@ func (s *StopHarborServiceStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 
 	// Check if key harbor services are running. If not, the step is done.
 	checkCmd := "docker ps --filter name=harbor-core --filter status=running --format '{{.Names}}'"
-	output, err := runner.Run(ctx.GoContext(), conn, checkCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, checkCmd, s.Sudo)
 	if err != nil {
 		logger.Warnf("Failed to check for running harbor-core container, will attempt to stop anyway. Error: %v", err)
 		return false, nil
 	}
 
-	if !strings.Contains(output, "harbor-core") {
+	if !strings.Contains(runResult.Stdout, "harbor-core") {
 		logger.Info("Harbor core container is not running. Step is done.")
 		return true, nil
 	}
@@ -106,16 +106,16 @@ func (s *StopHarborServiceStep) Run(ctx runtime.ExecutionContext) (*types.StepRe
 	stopCmd := fmt.Sprintf("cd %s && docker-compose down", s.RemoteInstallDir)
 	logger.Infof("Executing Harbor stop command on remote host: %s", stopCmd)
 
-	output, err := runner.Run(ctx.GoContext(), conn, stopCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, stopCmd, s.Sudo)
 	if err != nil {
-		logger.Errorf("Harbor stop failed. Full output:\n%s", output)
+		logger.Errorf("Harbor stop failed. Full output:\n%s", runResult.Stdout)
 		err := fmt.Errorf("failed to execute docker-compose down: %w", err)
 		result.MarkFailed(err, err.Error())
 		return result, err
 	}
 
 	logger.Info("Harbor services stopped successfully.")
-	logger.Debugf("Harbor stop output:\n%s", output)
+	logger.Debugf("Harbor stop output:\n%s", runResult.Stdout)
 	result.MarkCompleted("Harbor services stopped successfully")
 	return result, nil
 }

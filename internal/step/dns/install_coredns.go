@@ -78,14 +78,14 @@ func (s *InstallCoreDNSStep) Run(ctx runtime.ExecutionContext) (*types.StepResul
 	)
 
 	logger.Info("Executing remote command to apply CoreDNS manifest.", "command", cmd)
-	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
 		result.MarkFailed(err, "failed to apply CoreDNS manifest")
 		return result, err
 	}
 
 	logger.Info("CoreDNS manifest applied successfully.")
-	logger.Debug("kubectl apply output.", "output", output)
+	logger.Debug("kubectl apply output.", "output", runResult.Stdout)
 	result.MarkCompleted("CoreDNS installed successfully")
 	return result, nil
 }

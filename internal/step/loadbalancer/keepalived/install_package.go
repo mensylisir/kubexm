@@ -41,8 +41,17 @@ func (s *InstallKeepalivedPackage) Precheck(ctx runtime.ExecutionContext) (bool,
 
 func (s *InstallKeepalivedPackage) Run(ctx runtime.ExecutionContext) (*types.StepResult, error) {
 	result := types.NewStepResult(s.Base.Meta.Name, ctx.GetStepExecutionID(), ctx.GetHost())
-	conn, _ := ctx.GetCurrentHostConnector()
-	facts, _ := ctx.GetHostFacts(ctx.GetHost())
+	runnerSvc := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		result.MarkFailed(err, fmt.Sprintf("failed to get connector for host %s", ctx.GetHost().GetName()))
+		return result, err
+	}
+	facts, err := ctx.GetHostFacts(ctx.GetHost())
+	if err != nil {
+		result.MarkFailed(err, "failed to get host facts")
+		return result, err
+	}
 
 	var cmd string
 	switch facts.PackageManager.Type {
@@ -51,13 +60,13 @@ func (s *InstallKeepalivedPackage) Run(ctx runtime.ExecutionContext) (*types.Ste
 	case runner.PackageManagerYum, runner.PackageManagerDnf:
 		cmd = fmt.Sprintf(facts.PackageManager.InstallCmd, "keepalived")
 	default:
-		result.MarkFailed(fmt.Errorf("unsupported package manager"), "unsupported package manager")
-		return result, fmt.Errorf("unsupported package manager")
+		result.MarkFailed(fmt.Errorf("unsupported package manager: %s", facts.PackageManager.Type), "unsupported package manager")
+		return result, fmt.Errorf("unsupported package manager: %s", facts.PackageManager.Type)
 	}
 
-	_, _, err := conn.Exec(ctx.GoContext(), cmd, nil)
+	_, stderr, err := runnerSvc.RunWithOptions(ctx.GoContext(), conn, cmd, &runner.ExecOptions{Sudo: s.Base.Sudo})
 	if err != nil {
-		result.MarkFailed(err, "failed to install keepalived package")
+		result.MarkFailed(err, fmt.Sprintf("failed to install keepalived package: %s", string(stderr)))
 		return result, err
 	}
 	result.MarkCompleted("Keepalived package installed successfully")

@@ -3,11 +3,12 @@ package docker
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
-	"github.com/mensylisir/kubexm/internal/step/docker" // 确保引入了 docker 的 step 包
+	"github.com/mensylisir/kubexm/internal/step/docker"
+	"github.com/mensylisir/kubexm/internal/step/network/cni"
 	"github.com/mensylisir/kubexm/internal/task"
 )
 
@@ -41,7 +42,7 @@ func (t *DeployDockerTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 func (t *DeployDockerTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
 	if err != nil {
@@ -89,8 +90,14 @@ func (t *DeployDockerTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragmen
 		return nil, err
 	}
 
-	fragment.AddNode(&plan.ExecutionNode{Name: "ExtractDocker", Step: extractDocker, Hosts: []connector.Host{controlNode}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "ExtractCriDockerd", Step: extractCriDockerd, Hosts: []connector.Host{controlNode}})
+	// CNI binary distribution (required for Docker runtime too)
+	installCni, err := cni.NewInstallCNIPluginsStepBuilder(runtimeCtx, "InstallCNIPlugins").Build()
+	if err != nil {
+		return nil, err
+	}
+
+	fragment.AddNode(&plan.ExecutionNode{Name: "ExtractDocker", Step: extractDocker, Hosts: []remotefw.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "ExtractCriDockerd", Step: extractCriDockerd, Hosts: []remotefw.Host{controlNode}})
 	fragment.AddNode(&plan.ExecutionNode{Name: "InstallDocker", Step: installDocker, Hosts: deployHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "ConfigureDocker", Step: configureDocker, Hosts: deployHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "InstallDockerService", Step: installDockerSvc, Hosts: deployHosts})
@@ -98,6 +105,7 @@ func (t *DeployDockerTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragmen
 	fragment.AddNode(&plan.ExecutionNode{Name: "InstallCriDockerd", Step: installCriDockerd, Hosts: deployHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "InstallCriDockerdService", Step: installCriDockerdSvc, Hosts: deployHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "StartCriDockerd", Step: startCriDockerd, Hosts: deployHosts})
+	fragment.AddNode(&plan.ExecutionNode{Name: "InstallCNIPlugins", Step: installCni, Hosts: deployHosts})
 
 	fragment.AddDependency("ExtractDocker", "InstallDocker")
 	fragment.AddDependency("ExtractCriDockerd", "InstallCriDockerd")
@@ -107,6 +115,7 @@ func (t *DeployDockerTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragmen
 	fragment.AddDependency("InstallCriDockerd", "InstallCriDockerdService")
 	fragment.AddDependency("StartDocker", "InstallCriDockerdService")
 	fragment.AddDependency("InstallCriDockerdService", "StartCriDockerd")
+	fragment.AddDependency("StartCriDockerd", "InstallCNIPlugins")
 
 	// Downloads are handled centrally in Preflight PrepareAssets/ExtractBundle.
 

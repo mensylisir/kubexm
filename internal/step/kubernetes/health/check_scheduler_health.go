@@ -97,22 +97,22 @@ func (s *VerifySchedulerHealthStep) checkScheduler(ctx runtime.ExecutionContext)
 	}
 
 	isActiveCmd := fmt.Sprintf("systemctl is-active %s", s.serviceName)
-	stdout, err := runner.Run(ctx.GoContext(), conn, isActiveCmd, false)
-	if err != nil || strings.TrimSpace(string(stdout)) != "active" {
+	runResult, err := runner.Run(ctx.GoContext(), conn, isActiveCmd, false)
+	if err != nil || strings.TrimSpace(runResult.Stdout) != "active" {
 		status := "inactive"
 		if err == nil {
-			status = string(stdout)
+			status = runResult.Stdout
 		}
 		return fmt.Errorf("systemd service '%s' is not active. Status: %s", s.serviceName, status)
 	}
 
 	curlCmd := fmt.Sprintf("curl -s --fail %s", s.healthzEndpoint)
-	stdout, err = runner.Run(ctx.GoContext(), conn, curlCmd, false)
+	runResult, err = runner.Run(ctx.GoContext(), conn, curlCmd, false)
 	if err != nil {
 		return fmt.Errorf("failed to connect to healthz endpoint '%s': %w", s.healthzEndpoint, err)
 	}
-	if strings.TrimSpace(string(stdout)) != "ok" {
-		return fmt.Errorf("healthz endpoint returned '%s', expected 'ok'", string(stdout))
+	if strings.TrimSpace(runResult.Stdout) != "ok" {
+		return fmt.Errorf("healthz endpoint returned '%s', expected 'ok'", runResult.Stdout)
 	}
 
 	return nil

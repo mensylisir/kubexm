@@ -3,7 +3,7 @@ package os
 import (
 	"fmt"
 
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -40,7 +40,7 @@ func (t *ConfigureHostTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 
 func (t *ConfigureHostTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	allHosts := ctx.GetHostsByRole("")
 	if len(allHosts) == 0 {
@@ -58,7 +58,7 @@ func (t *ConfigureHostTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragme
 		if err != nil {
 			return nil, err
 		}
-		node := &plan.ExecutionNode{Name: nodeName, Step: setHostnameStep, Hosts: []connector.Host{host}}
+		node := &plan.ExecutionNode{Name: nodeName, Step: setHostnameStep, Hosts: []remotefw.Host{host}}
 		nodeID, _ := fragment.AddNode(node)
 		setHostnameExitNodes = append(setHostnameExitNodes, nodeID)
 	}

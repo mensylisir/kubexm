@@ -2,7 +2,7 @@ package flannel
 
 import (
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -37,12 +37,16 @@ func (t *CleanFlannelTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 	if ctx.GetClusterConfig().Spec.Network == nil {
 		return false, nil
 	}
-	return ctx.GetClusterConfig().Spec.Network.Plugin == string(common.CNITypeFlannel), nil
+	netSpec := ctx.GetClusterConfig().Spec.Network
+	if netSpec == nil {
+		return false, nil
+	}
+	return netSpec.Plugin == string(common.CNITypeFlannel), nil
 }
 
 func (t *CleanFlannelTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
 	if len(masterHosts) == 0 {
@@ -63,7 +67,7 @@ func (t *CleanFlannelTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragmen
 		return nil, err
 	}
 
-	nodeUninstallChart := &plan.ExecutionNode{Name: "UninstallFlannelChart", Step: uninstallChartStep, Hosts: []connector.Host{executionHost}}
+	nodeUninstallChart := &plan.ExecutionNode{Name: "UninstallFlannelChart", Step: uninstallChartStep, Hosts: []remotefw.Host{executionHost}}
 	fragment.AddNode(nodeUninstallChart)
 
 	nodeCleanFiles := &plan.ExecutionNode{Name: "CleanFlannelNodeFiles", Step: cleanFilesStep, Hosts: allHosts}

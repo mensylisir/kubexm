@@ -5,7 +5,7 @@ import (
 	"io/fs"
 	"time"
 
-	"github.com/mensylisir/kubexm/internal/apis/kubexms/v1alpha1"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -118,7 +118,7 @@ type Host interface {
 	GetRoles() []string
 	SetRoles(roles []string)
 	IsRole(role string) bool
-	GetHostSpec() v1alpha1.HostSpec
+	GetHostSpec() remotefw.HostSpec
 }
 
 type dialSSHFunc func(ctx context.Context, cfg ConnectionCfg, connectTimeout time.Duration) (*ssh.Client, *ssh.Client, error)

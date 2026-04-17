@@ -1,0 +1,105 @@
+# KubeXM Kickstart Configuration
+# Automated installation configuration file for RHEL/CentOS/Fedora
+
+{{ if .KickstartConfig }}
+# version={{ .KickstartConfig.Version }}
+install
+cdrom
+{{ if .KickstartConfig.Language }}
+lang {{ .KickstartConfig.Language }}
+{{ else }}
+lang en_US.UTF-8
+{{ end }}
+{{ if .KickstartConfig.Keyboard }}
+keyboard {{ .KickstartConfig.Keyboard }}
+{{ else }}
+keyboard us
+{{ end }}
+{{ if .KickstartConfig.Timezone }}
+timezone {{ .KickstartConfig.Timezone }} --utc
+{{ else }}
+timezone UTC --utc
+{{ end }}
+rootpw {{ .KickstartConfig.RootPassword }}
+{{ if .KickstartConfig.Network }}
+network --bootproto=dhcp --device={{ .KickstartConfig.Network.Device }} --onboot=on --ipv6=auto --activate
+{{ else }}
+network --bootproto=dhcp --device=eth0 --onboot=on --ipv6=auto --activate
+{{ end }}
+services --enabled=sshd,firewalld
+selinux --enforcing
+firewall --enabled --service=ssh
+bootloader --location=mbr --driveorder=sda
+zerombr
+clearpart --all --initlabel
+
+part /boot --fstype=ext4 --size=1024 --ondisk=sda
+part pv.01 --size=1 --grow --ondisk=sda
+volgroup vg_root pv.01
+logvol / --fstype=ext4 --name=lv_root --vgname=vg_root --size=1 --grow
+logvol swap --fstype=swap --name=lv_swap --vgname=vg_root --size=2048
+
+%post
+#!/bin/bash
+set -e
+
+# Configure sysctl for Kubernetes
+cat > /etc/sysctl.d/99-kubexm.conf << 'SYSCTL'
+net.bridge.bridge-nf-call-iptables  = 1
+net.ipv4.ip_forward                 = 1
+net.ipv4.conf.all.forwarding        = 1
+net.ipv4.conf.default.forwarding    = 1
+fs.inotify.max_user_watches         = 524288
+vm.max_map_count                    = 262144
+vm.swappiness                       = 0
+SYSCTL
+
+sysctl --system
+
+# Disable SELinux
+setenforce 0 || true
+sed -i 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/selinux/config
+
+# Disable swap
+swapoff -a
+sed -i '/swap/d' /etc/fstab
+
+# Install required packages
+yum install -y -q rsync xz gzip wget curl
+
+# Create kubexm directories
+mkdir -p /opt/kubexm/{bin,config,packages,logs}
+mkdir -p /etc/kubernetes
+mkdir -p /etc/cni/net.d
+mkdir -p /etc/containerd
+mkdir -p /var/lib/kubelet
+mkdir -p /var/lib/etcd
+
+# Copy packages
+cp -r /kubexm/packages/* /opt/kubexm/packages/
+
+# Copy configuration
+cp /kubexm/config/config.yaml /etc/kubexm/config.yaml
+
+# Make binaries executable
+chmod +x /opt/kubexm/packages/kubernetes/kubeadm/*/kubeadm
+chmod +x /opt/kubexm/packages/kubernetes/kubelet/*/kubelet
+chmod +x /opt/kubexm/packages/kubernetes/kubectl/*/kubectl
+
+echo "KubeXM post-installation complete"
+%end
+
+%packages
+@^minimal
+@standard
+openssh-server
+rsync
+xz
+gzip
+wget
+curl
+net-tools
+iproute
+iputils
+%end
+{{ end }}

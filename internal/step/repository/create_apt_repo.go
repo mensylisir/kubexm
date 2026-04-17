@@ -85,22 +85,22 @@ func (s *CreateAptRepoStep) Run(ctx runtime.ExecutionContext) (*types.StepResult
 	gzipCmd := fmt.Sprintf("cd %s && gzip -k -f Packages", s.RepoDir)
 
 	logger.Info("Creating/updating apt repository index...", "command", scanCmd)
-	output, err := runner.Run(ctx.GoContext(), conn, scanCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, scanCmd, s.Sudo)
 	if err != nil {
-		err = errors.Wrapf(err, "failed to create apt repository index\nOutput:\n%s", output)
+		err = errors.Wrapf(err, "failed to create apt repository index\nOutput:\n%s", runResult.Stdout)
 		result.MarkFailed(err, "failed to create apt repository index")
 		return result, err
 	}
-	logger.Debug("Command output.", "output", output)
+	logger.Debug("Command output.", "output", runResult.Stdout)
 
 	logger.Info("Compressing apt repository index...", "command", gzipCmd)
-	output, err = runner.Run(ctx.GoContext(), conn, gzipCmd, s.Sudo)
+	runResult, err = runner.Run(ctx.GoContext(), conn, gzipCmd, s.Sudo)
 	if err != nil {
-		err = errors.Wrapf(err, "failed to compress apt repository index\nOutput:\n%s", output)
+		err = errors.Wrapf(err, "failed to compress apt repository index\nOutput:\n%s", runResult.Stdout)
 		result.MarkFailed(err, "failed to compress apt repository index")
 		return result, err
 	}
-	logger.Debug("Command output.", "output", output)
+	logger.Debug("Command output.", "output", runResult.Stdout)
 
 	logger.Info("Apt repository created/updated successfully.", "directory", s.RepoDir)
 	result.MarkCompleted("Apt repository created/updated successfully")

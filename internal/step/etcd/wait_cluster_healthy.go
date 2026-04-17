@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
@@ -17,7 +17,7 @@ import (
 
 type WaitClusterHealthyStep struct {
 	step.Base
-	etcdNodes      []connector.Host
+	etcdNodes      []remotefw.Host
 	remoteCertsDir string
 	checkTimeout   time.Duration
 	checkInterval  time.Duration
@@ -103,13 +103,13 @@ func (s *WaitClusterHealthyStep) Run(ctx runtime.ExecutionContext) (*types.StepR
 			return result, err
 		case <-ticker.C:
 			logger.Info("Checking etcd cluster health...")
-			stdout, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
+			runResult, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 			if err != nil {
 				logger.Warnf("Health check command failed: %v. Retrying in %v...", err, s.checkInterval)
 				continue
 			}
 
-			output := string(stdout)
+			output := runResult.Stdout
 			logger.Debugf("Health check output:\n%s", output)
 
 			lines := strings.Split(strings.TrimSpace(output), "\n")

@@ -6,9 +6,9 @@ import (
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	certsstep "github.com/mensylisir/kubexm/internal/step/kubernetes/certs"
-	apiserverstep "github.com/mensylisir/kubexm/internal/step/kubernetes/kube-apiserver"
-	controllerstep "github.com/mensylisir/kubexm/internal/step/kubernetes/kube-controller-manager"
-	schedulerstep "github.com/mensylisir/kubexm/internal/step/kubernetes/kube-scheduler"
+	apiserverstep "github.com/mensylisir/kubexm/internal/step/kubernetes/apiserver"
+	controllerstep "github.com/mensylisir/kubexm/internal/step/kubernetes/controller-manager"
+	schedulerstep "github.com/mensylisir/kubexm/internal/step/kubernetes/scheduler"
 	"github.com/mensylisir/kubexm/internal/task"
 )
 
@@ -42,7 +42,7 @@ func (t *DistributeControlPlaneAssetsTask) IsRequired(ctx runtime.TaskContext) (
 func (t *DistributeControlPlaneAssetsTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
 	if len(masterHosts) == 0 {

@@ -49,12 +49,12 @@ func (s *CordonNodeStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, er
 	}
 
 	checkCmd := fmt.Sprintf("kubectl --kubeconfig /etc/kubernetes/admin.conf get node %s", s.TargetNodeName)
-	stdout, err := runner.Run(ctx.GoContext(), conn, checkCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, checkCmd, s.Sudo)
 	if err != nil {
 		return false, fmt.Errorf("precheck failed: cannot get status of node '%s': %w", s.TargetNodeName, err)
 	}
 
-	if strings.Contains(string(stdout), "SchedulingDisabled") {
+	if strings.Contains(runResult.Stdout, "SchedulingDisabled") {
 		logger.Infof("Node '%s' is already cordoned. Step is done.", s.TargetNodeName)
 		return true, nil
 	}

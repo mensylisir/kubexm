@@ -55,14 +55,14 @@ func (s *CheckTimeSyncStep) Run(ctx runtime.ExecutionContext) (*types.StepResult
 
 	chronyCmd := "chronyc tracking"
 	if _, err := runner.Run(ctx.GoContext(), conn, chronyCmd, s.Sudo); err == nil {
-		stdout, err := runner.Run(ctx.GoContext(), conn, chronyCmd, s.Sudo)
+		runResult, err := runner.Run(ctx.GoContext(), conn, chronyCmd, s.Sudo)
 		if err != nil {
 			err = fmt.Errorf("failed to execute 'chronyc tracking': %w", err)
 			result.MarkFailed(err, "Failed to execute chronyc tracking")
 			return result, err
 		}
 
-		output := string(stdout)
+		output := runResult.Stdout
 		if !strings.Contains(output, "Leap status     : Normal") {
 			logger.Errorf("chrony reports abnormal leap status. Full output:\n%s", output)
 			err = fmt.Errorf("NTP time synchronization is not healthy according to chrony")
@@ -82,8 +82,8 @@ func (s *CheckTimeSyncStep) Run(ctx runtime.ExecutionContext) (*types.StepResult
 		result.MarkCompleted("Time is synchronized")
 		return result, nil
 	} else {
-		stdout, _ := runner.Run(ctx.GoContext(), conn, ntpstatCmd, s.Sudo)
-		logger.Errorf("ntpstat check failed. Full output:\n%s", string(stdout))
+		runResult, _ := runner.Run(ctx.GoContext(), conn, ntpstatCmd, s.Sudo)
+		logger.Errorf("ntpstat check failed. Full output:\n%s", runResult.Stdout)
 		err = fmt.Errorf("NTP time synchronization check failed with ntpstat: %w", err)
 		result.MarkFailed(err, "NTP time synchronization check failed")
 		return result, err

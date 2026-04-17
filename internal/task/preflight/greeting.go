@@ -2,7 +2,7 @@ package preflight
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -40,7 +40,7 @@ func (t *GreetingTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 func (t *GreetingTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
 	if err != nil {
@@ -52,7 +52,7 @@ func (t *GreetingTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, e
 		return nil, err
 	}
 
-	fragment.AddNode(&plan.ExecutionNode{Name: "PrintWelcomeLogo", Step: printLogoStep, Hosts: []connector.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "PrintWelcomeLogo", Step: printLogoStep, Hosts: []remotefw.Host{controlNode}})
 
 	fragment.CalculateEntryAndExitNodes()
 	return fragment, nil

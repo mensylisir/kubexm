@@ -38,7 +38,7 @@ func (t *JoinWorkersTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 
 func (t *JoinWorkersTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	workerHosts := ctx.GetHostsByRole(common.RoleWorker)
 

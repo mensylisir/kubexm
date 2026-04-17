@@ -101,9 +101,7 @@ func (s *CheckCAExpirationStep) Run(ctx runtime.ExecutionContext) (*types.StepRe
 	}
 	cacheKey := fmt.Sprintf(common.CacheKubexmEtcdCACertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
 	ctx.GetTaskCache().Set(cacheKey, requiresRenewal)
-	ctx.GetModuleCache().Set(cacheKey, requiresRenewal)
-	ctx.GetPipelineCache().Set(cacheKey, requiresRenewal)
-	logger.Infof("Result 'ca_requires_renewal' (%v) has been saved to the pipeline cache.", requiresRenewal)
+	logger.Infof("Result 'ca_requires_renewal' (%v) has been saved to the task cache.", requiresRenewal)
 
 	result.MarkCompleted("CA expiration check completed")
 	return result, nil

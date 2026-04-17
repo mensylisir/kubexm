@@ -13,6 +13,8 @@ import (
 	"github.com/mensylisir/kubexm/internal/step"
 )
 
+var _ step.Step = (*EnableSwapStep)(nil)
+
 type EnableSwapStep struct {
 	step.Base
 	originalFstabContent string
@@ -47,9 +49,9 @@ func (s *EnableSwapStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, er
 		return false, err
 	}
 
-	swapStatus, _ := runner.Run(ctx.GoContext(), conn, "swapon --show", s.Sudo)
+	runResult, _ := runner.Run(ctx.GoContext(), conn, "swapon --show", s.Sudo)
 
-	if strings.TrimSpace(swapStatus) != "" {
+	if strings.TrimSpace(runResult.Stdout) != "" {
 		logger.Info("Swap is already enabled.")
 		return true, nil
 	}
@@ -110,7 +112,8 @@ func (s *EnableSwapStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, e
 
 	logger.Info("Turning on swap with 'swapon -a'...")
 	if _, err := runner.Run(ctx.GoContext(), conn, "swapon -a", s.Sudo); err != nil {
-		logger.Warnf("Command 'swapon -a' did not succeed, which may be expected if no swap partitions are defined. Error: %v", err)
+		result.MarkFailed(err, "'swapon -a' command failed")
+		return result, fmt.Errorf("'swapon -a' command failed: %w", err)
 	}
 
 	logger.Info("Swap enable step completed.")

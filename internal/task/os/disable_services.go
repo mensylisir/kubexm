@@ -37,7 +37,7 @@ func (t *DisableServicesTask) IsRequired(ctx runtime.TaskContext) (bool, error) 
 
 func (t *DisableServicesTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	allHosts := ctx.GetHostsByRole("")
 	if len(allHosts) == 0 {

@@ -2,7 +2,7 @@ package kubexm
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -41,13 +41,13 @@ func (t *GenerateNodePKITask) IsRequired(ctx runtime.TaskContext) (bool, error) 
 func (t *GenerateNodePKITask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get control node to generate node PKI: %w", err)
 	}
-	executionHost := []connector.Host{controlNode}
+	executionHost := []remotefw.Host{controlNode}
 
 	generateKubeletCerts, err := kubeletcertsstep.NewGenerateKubeletCertsForAllNodesStepBuilder(runtimeCtx, "GenerateAllKubeletClientCerts").Build()
 	if err != nil {

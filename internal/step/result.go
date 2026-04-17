@@ -11,7 +11,7 @@ package step
 // ===================================================================
 
 import (
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
@@ -46,6 +46,6 @@ const (
 )
 
 // Re-export constructor
-func NewStepResult(stepName, executionID string, host connector.Host) *StepResult {
+func NewStepResult(stepName, executionID string, host remotefw.Host) *StepResult {
 	return types.NewStepResult(stepName, executionID, host)
 }

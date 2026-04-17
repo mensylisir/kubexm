@@ -5,7 +5,7 @@ import (
 	"github.com/mensylisir/kubexm/internal/step"
 
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -38,19 +38,28 @@ func (t *DeployEtcdClusterTask) Description() string {
 }
 
 func (t *DeployEtcdClusterTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	return ctx.GetClusterConfig().Spec.Etcd.Type == string(common.EtcdDeploymentTypeKubexm), nil
+	etcdSpec := ctx.GetClusterConfig().Spec.Etcd
+	if etcdSpec == nil {
+		return false, nil
+	}
+	
+	// Only deploy etcd when type is kubexm (binary deployment)
+	// For kubeadm type, etcd is managed by kubeadm
+	// For external/exists type, skip deployment as etcd already exists
+	etcdType := etcdSpec.Type
+	return etcdType == string(common.EtcdDeploymentTypeKubexm), nil
 }
 
 func (t *DeployEtcdClusterTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
 	if err != nil {
 		return nil, err
 	}
-	controlNodeList := []connector.Host{controlNode}
+	controlNodeList := []remotefw.Host{controlNode}
 
 	etcdHosts := ctx.GetHostsByRole(common.RoleEtcd)
 	if len(etcdHosts) == 0 {
@@ -86,7 +95,7 @@ func (t *DeployEtcdClusterTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFr
 
 	for i, host := range etcdHosts {
 		hostName := host.GetName()
-		hostList := []connector.Host{host}
+		hostList := []remotefw.Host{host}
 
 		distributeCertsStep, err := etcd.NewDistributeEtcdCertsStepBuilder(runtimeCtx, fmt.Sprintf("DistributeEtcdCertsTo%s", hostName)).Build()
 		if err != nil {

@@ -3,7 +3,7 @@ package kubexm
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -43,7 +43,7 @@ func (t *FinalizeClusterSetupTask) IsRequired(ctx runtime.TaskContext) (bool, er
 func (t *FinalizeClusterSetupTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
 	if len(masterHosts) == 0 {
@@ -70,7 +70,7 @@ func (t *FinalizeClusterSetupTask) Plan(ctx runtime.TaskContext) (*plan.Executio
 		return nil, err
 	}
 
-	fragment.AddNode(&plan.ExecutionNode{Name: "ApplyEssentialRBAC", Step: applyRBAC, Hosts: []connector.Host{executionHost}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "ApplyEssentialRBAC", Step: applyRBAC, Hosts: []remotefw.Host{executionHost}})
 
 	fragment.AddNode(&plan.ExecutionNode{Name: "InstallKubectlOnAllNodes", Step: installKubectl, Hosts: allHosts})
 

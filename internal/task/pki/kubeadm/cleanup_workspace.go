@@ -1,7 +1,7 @@
 package kubeadm
 
 import (
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -39,7 +39,7 @@ func (t *CleanupWorkspaceTask) IsRequired(ctx runtime.TaskContext) (bool, error)
 func (t *CleanupWorkspaceTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
 	if err != nil {
@@ -50,7 +50,7 @@ func (t *CleanupWorkspaceTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFra
 	if err != nil {
 		return nil, err
 	}
-	cleanupNode := &plan.ExecutionNode{Name: "CleanupLocalWorkspace", Step: cleanupStep, Hosts: []connector.Host{controlNode}}
+	cleanupNode := &plan.ExecutionNode{Name: "CleanupLocalWorkspace", Step: cleanupStep, Hosts: []remotefw.Host{controlNode}}
 
 	fragment.AddNode(cleanupNode, "CleanupLocalWorkspace")
 

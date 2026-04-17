@@ -17,6 +17,8 @@ import (
 
 const KubeXMBlockRegex = `(?s)# KubeXM hosts BEGIN.*# KubeXM hosts END\s*`
 
+var _ step.Step = (*RemoveEtcHostsStep)(nil)
+
 type RemoveEtcHostsStep struct {
 	step.Base
 	removedKubeXMBlock string

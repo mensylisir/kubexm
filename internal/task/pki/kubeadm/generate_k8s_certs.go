@@ -36,7 +36,10 @@ func (t *GenerateK8sLeafCertsTask) Description() string {
 }
 
 func (t *GenerateK8sLeafCertsTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	runtimeCtx := ctx.(*runtime.Context)
+	runtimeCtx, ok := ctx.(*runtime.Context)
+	if !ok {
+		return false, fmt.Errorf("ctx is not *runtime.Context")
+	}
 
 	caCacheKey := fmt.Sprintf(common.CacheKubeadmK8sCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
 	rawCaRenewal, ok := ctx.GetModuleCache().Get(caCacheKey)
@@ -70,7 +73,7 @@ func (t *GenerateK8sLeafCertsTask) IsRequired(ctx runtime.TaskContext) (bool, er
 func (t *GenerateK8sLeafCertsTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	renewLeafStep, err := kubeadmstep.NewKubeadmRenewLeafCertsStepBuilder(runtimeCtx, "RenewK8sLeafCerts").Build()
 	if err != nil {

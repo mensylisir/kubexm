@@ -51,12 +51,12 @@ func (s *EtcdFinalizeUpgradeStep) getTargetVersionFromBinary(ctx runtime.Executi
 	}
 
 	versionCmd := "etcd --version | grep 'etcd version' | awk '{print $3}'"
-	stdout, err := runner.Run(ctx.GoContext(), conn, versionCmd, false)
+	runResult, err := runner.Run(ctx.GoContext(), conn, versionCmd, false)
 	if err != nil {
 		return "", fmt.Errorf("failed to determine etcd binary version: %w", err)
 	}
 
-	version := strings.TrimSpace(string(stdout))
+	version := strings.TrimSpace(runResult.Stdout)
 	if version == "" {
 		return "", fmt.Errorf("could not parse etcd version from binary")
 	}
@@ -96,12 +96,12 @@ func (s *EtcdFinalizeUpgradeStep) Precheck(ctx runtime.ExecutionContext) (isDone
 	statusCmd := fmt.Sprintf("%s endpoint status -w simple | grep 'Cluster-Version' | awk '{print $2}'", baseEtcdctlCmd)
 	shellCmd := fmt.Sprintf("bash -c \"%s\"", statusCmd)
 
-	stdout, err := runner.Run(ctx.GoContext(), conn, shellCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, shellCmd, s.Sudo)
 	if err != nil {
 		return false, fmt.Errorf("precheck failed to get current etcd cluster version: %w", err)
 	}
 
-	currentVersion := strings.TrimSpace(string(stdout))
+	currentVersion := strings.TrimSpace(runResult.Stdout)
 	logger.Infof("Current etcd cluster version is: %s", currentVersion)
 
 	if currentVersion == s.targetVersion {

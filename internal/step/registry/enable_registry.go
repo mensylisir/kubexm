@@ -39,8 +39,11 @@ func (s *EnableRegistryServiceStep) Precheck(ctx runtime.ExecutionContext) (isDo
 	if err != nil {
 		return false, err
 	}
-	output, err := runner.Run(ctx.GoContext(), conn, "systemctl is-enabled registry.service", s.Sudo)
-	return err == nil && strings.TrimSpace(output) == "enabled", nil
+	runResult, err := runner.Run(ctx.GoContext(), conn, "systemctl is-enabled registry.service", s.Sudo)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(runResult.Stdout) == "enabled", nil
 }
 
 func (s *EnableRegistryServiceStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, error) {

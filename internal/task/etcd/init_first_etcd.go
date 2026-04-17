@@ -2,7 +2,7 @@ package etcd
 
 import (
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -34,14 +34,18 @@ func (t *DeployFirstEtcdTask) Description() string {
 }
 
 func (t *DeployFirstEtcdTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	return ctx.GetClusterConfig().Spec.Etcd.Type == string(common.EtcdDeploymentTypeKubexm), nil
+	etcdSpec := ctx.GetClusterConfig().Spec.Etcd
+	if etcdSpec == nil {
+		return false, nil
+	}
+	return etcdSpec.Type == string(common.EtcdDeploymentTypeKubexm), nil
 }
 
 func (t *DeployFirstEtcdTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
 	if err != nil {
@@ -78,13 +82,13 @@ func (t *DeployFirstEtcdTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFrag
 		return nil, err
 	}
 
-	extractNode := &plan.ExecutionNode{Name: "ExtractEtcd", Step: extractEtcd, Hosts: []connector.Host{controlNode}}
+	extractNode := &plan.ExecutionNode{Name: "ExtractEtcd", Step: extractEtcd, Hosts: []remotefw.Host{controlNode}}
 	distributeCertsNode := &plan.ExecutionNode{Name: "DistributeEtcdCerts", Step: distributeCerts, Hosts: etcdHosts}
 	installEtcdNode := &plan.ExecutionNode{Name: "InstallEtcd", Step: installEtcd, Hosts: etcdHosts}
 	configureEtcdNode := &plan.ExecutionNode{Name: "ConfigureEtcd", Step: configureEtcd, Hosts: etcdHosts}
 	installServiceNode := &plan.ExecutionNode{Name: "InstallEtcdService", Step: installService, Hosts: etcdHosts}
 	startEtcdNode := &plan.ExecutionNode{Name: "StartEtcd", Step: startEtcd, Hosts: etcdHosts}
-	checkHealthNode := &plan.ExecutionNode{Name: "CheckEtcdHealth", Step: checkHealth, Hosts: []connector.Host{etcdHosts[0]}}
+	checkHealthNode := &plan.ExecutionNode{Name: "CheckEtcdHealth", Step: checkHealth, Hosts: []remotefw.Host{etcdHosts[0]}}
 
 	fragment.AddNode(extractNode)
 	fragment.AddNode(distributeCertsNode)

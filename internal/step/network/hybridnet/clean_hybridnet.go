@@ -10,7 +10,7 @@ import (
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
-	"github.com/mensylisir/kubexm/internal/step/helpers/bom/helm"
+	"github.com/mensylisir/kubexm/internal/util/helm"
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
@@ -79,14 +79,14 @@ func (s *CleanHybridnetStep) Precheck(ctx runtime.ExecutionContext) (isDone bool
 		s.AdminKubeconfigPath,
 	)
 
-	output, err := runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
 	if err != nil {
 		logger.Infof("Helm release '%s' not found. Cleanup step is considered complete.", s.ReleaseName)
 		return true, nil
 	}
 
 	var status helmStatusOutput
-	if jsonErr := json.Unmarshal([]byte(output), &status); jsonErr != nil {
+	if jsonErr := json.Unmarshal([]byte(runResult.Stdout), &status); jsonErr != nil {
 		logger.Warnf("Found helm release '%s', but failed to parse its status. Proceeding with uninstall. %v", s.ReleaseName, jsonErr)
 		return false, nil
 	}
@@ -113,15 +113,15 @@ func (s *CleanHybridnetStep) Run(ctx runtime.ExecutionContext) (*types.StepResul
 	)
 
 	logger.Infof("Executing remote Helm uninstall command: %s", cmd)
-	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
-		logger.Errorf("Failed to uninstall Hybridnet Helm chart: %v\nOutput: %s", err, output)
+		logger.Errorf("Failed to uninstall Hybridnet Helm chart: %v\nOutput: %s", err, runResult.Stdout)
 		result.MarkFailed(err, fmt.Sprintf("helm uninstall failed for release %s", s.ReleaseName))
 		return result, err
 	}
 
 	logger.Info("Hybridnet Helm chart uninstalled successfully.")
-	logger.Debugf("Helm uninstall command output:\n%s", output)
+	logger.Debugf("Helm uninstall command output:\n%s", runResult.Stdout)
 	result.MarkCompleted("Hybridnet Helm chart uninstalled successfully")
 	return result, nil
 }

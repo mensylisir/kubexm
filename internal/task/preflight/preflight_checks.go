@@ -1,7 +1,7 @@
 package preflight
 
 import (
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -51,7 +51,7 @@ func (t *PreflightChecksTask) IsRequired(ctx runtime.TaskContext) (bool, error) 
 func (t *PreflightChecksTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	allHosts := ctx.GetHostsByRole("")
 	if len(allHosts) == 0 {
@@ -94,16 +94,21 @@ func (t *PreflightChecksTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFrag
 	if err != nil {
 		return nil, err
 	}
+	checkVersionCompat, err := preflightstep.NewCheckVersionCompatibilityStepBuilder(runtimeCtx, "CheckVersionCompatibility").Build()
+	if err != nil {
+		return nil, err
+	}
 
 	// Add nodes to the execution fragment for each check.
-	// Most checks run on all hosts. Linting the spec might only need to run on the control node.
+	// Most checks run on all hosts. Linting and version compatibility only need control node.
 	fragment.AddNode(&plan.ExecutionNode{Name: "CheckMinCPUCores", Step: checkCPU, Hosts: allHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "CheckMinMemory", Step: checkMemory, Hosts: allHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "CheckHostConnectivity", Step: checkConnectivity, Hosts: allHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "CheckDNSConfig", Step: checkDNS, Hosts: allHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "CheckRequiredCommands", Step: checkCommands, Hosts: allHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "CheckTimeSync", Step: checkTimeSync, Hosts: allHosts})
-	fragment.AddNode(&plan.ExecutionNode{Name: "LintClusterSpec", Step: lintSpec, Hosts: []connector.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "LintClusterSpec", Step: lintSpec, Hosts: []remotefw.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "CheckVersionCompatibility", Step: checkVersionCompat, Hosts: []remotefw.Host{controlNode}})
 
 	// Since all these checks can run in parallel, we don't add any dependencies between them.
 	// The CalculateEntryAndExitNodes function will correctly identify all of them as entry points.

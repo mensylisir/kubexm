@@ -39,8 +39,11 @@ func (s *StartRegistryServiceStep) Precheck(ctx runtime.ExecutionContext) (isDon
 	if err != nil {
 		return false, err
 	}
-	output, err := runner.Run(ctx.GoContext(), conn, "systemctl is-active registry.service", s.Sudo)
-	return err == nil && strings.TrimSpace(output) == "active", nil
+	runResult, err := runner.Run(ctx.GoContext(), conn, "systemctl is-active registry.service", s.Sudo)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(runResult.Stdout) == "active", nil
 }
 
 func (s *StartRegistryServiceStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, error) {

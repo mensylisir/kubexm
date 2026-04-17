@@ -13,6 +13,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+var _ step.Step = (*AddRepoStep)(nil)
+
 type AddRepoStep struct {
 	step.Base
 	RepoName string
@@ -67,13 +69,13 @@ func (s *AddRepoStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err e
 	}
 
 	listCmd := "helm repo list"
-	output, err := runner.Run(ctx.GoContext(), conn, listCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, listCmd, s.Sudo)
 	if err != nil {
 		logger.Warnf("Failed to list helm repos, assuming repo needs to be added: %v", err)
 		return false, nil
 	}
 
-	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner := bufio.NewScanner(strings.NewReader(runResult.Stdout))
 	for scanner.Scan() {
 		line := scanner.Text()
 		fields := strings.Fields(line)
@@ -109,14 +111,14 @@ func (s *AddRepoStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, erro
 	addCmd := fmt.Sprintf("helm repo add %s %s --force-update", s.RepoName, s.RepoURL)
 
 	logger.Infof("Adding or updating helm repo '%s' from '%s'", s.RepoName, s.RepoURL)
-	output, err := runner.Run(ctx.GoContext(), conn, addCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, addCmd, s.Sudo)
 	if err != nil {
 		result.MarkFailed(err, "failed to add helm repo")
 		return result, err
 	}
 
 	logger.Info("Successfully added or updated helm repo.")
-	logger.Debugf("Helm command output:\n%s", output)
+	logger.Debugf("Helm command output:\n%s", runResult.Stdout)
 	result.MarkCompleted("helm repo added successfully")
 	return result, nil
 }

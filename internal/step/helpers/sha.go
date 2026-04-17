@@ -64,12 +64,12 @@ func CheckRemoteFileIntegrity(ctx runtime.ExecutionContext, localPath, remotePat
 		}
 
 		remoteHashCmd := fmt.Sprintf("sha256sum %s | cut -d' ' -f1", remotePath)
-		remoteHashOutput, err := runner.Run(ctx.GoContext(), conn, remoteHashCmd, false)
+		runResult, err := runner.Run(ctx.GoContext(), conn, remoteHashCmd, false)
 		if err != nil {
 			logger.Warnf("Failed to get remote hash for %s (no sudo): %v. Assuming re-upload is needed.", remotePath, err)
 			return false, nil
 		}
-		remoteHash := strings.TrimSpace(remoteHashOutput)
+		remoteHash := strings.TrimSpace(runResult.Stdout)
 		if localHash == remoteHash {
 			logger.Debugf("Remote file %s exists and content is up-to-date.", remotePath)
 			return true, nil
@@ -109,11 +109,11 @@ func CheckRemoteFileIntegrity(ctx runtime.ExecutionContext, localPath, remotePat
 	}
 
 	remoteHashCmd := fmt.Sprintf("sha256sum %s | cut -d' ' -f1", tmpFilePath)
-	remoteHashOutput, err := runner.Run(ctx.GoContext(), conn, remoteHashCmd, false)
+	runResult, err := runner.Run(ctx.GoContext(), conn, remoteHashCmd, false)
 	if err != nil {
 		return false, errors.Wrapf(err, "failed to calculate hash of temp file")
 	}
-	remoteHash := strings.TrimSpace(remoteHashOutput)
+	remoteHash := strings.TrimSpace(runResult.Stdout)
 
 	if localHash == remoteHash {
 		logger.Debugf("Remote file %s exists and content is up-to-date.", remotePath)

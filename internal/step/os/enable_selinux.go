@@ -14,6 +14,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+var _ step.Step = (*EnableSelinuxStep)(nil)
+
 type EnableSelinuxStep struct {
 	step.Base
 	originalSelinuxConfigContent string
@@ -50,7 +52,7 @@ func (s *EnableSelinuxStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 	}
 
 	getenforceCmd := "getenforce"
-	status, err := runner.Run(ctx.GoContext(), conn, getenforceCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, getenforceCmd, s.Sudo)
 	if err != nil {
 		if strings.Contains(err.Error(), "command not found") {
 			logger.Info("SELinux command 'getenforce' not found. Assuming SELinux is not installed.")
@@ -59,13 +61,13 @@ func (s *EnableSelinuxStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 		return false, errors.Wrap(err, "failed to check SELinux status with 'getenforce'")
 	}
 
-	status = strings.TrimSpace(strings.ToLower(status))
-	if status == "enforcing" {
-		logger.Infof("SELinux is already in '%s' mode.", status)
+	selinuxStatus := strings.TrimSpace(strings.ToLower(runResult.Stdout))
+	if selinuxStatus == "enforcing" {
+		logger.Infof("SELinux is already in '%s' mode.", selinuxStatus)
 		return true, nil
 	}
 
-	logger.Infof("SELinux is in '%s' mode and needs to be enabled.", status)
+	logger.Infof("SELinux is in '%s' mode and needs to be enabled.", selinuxStatus)
 	return false, nil
 }
 
@@ -80,7 +82,8 @@ func (s *EnableSelinuxStep) Run(ctx runtime.ExecutionContext) (*types.StepResult
 	}
 
 	logger.Info("Saving current SELinux state for potential rollback...")
-	s.originalEnforceStatus, _ = runner.Run(ctx.GoContext(), conn, "getenforce", s.Sudo)
+	enforceResult, _ := runner.Run(ctx.GoContext(), conn, "getenforce", s.Sudo)
+	s.originalEnforceStatus = strings.TrimSpace(enforceResult.Stdout)
 	s.originalEnforceStatus = strings.TrimSpace(s.originalEnforceStatus)
 
 	configPath := "/etc/selinux/config"

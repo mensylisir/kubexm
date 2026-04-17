@@ -714,23 +714,23 @@ func (rfi *remoteFileInfo) Sys() interface{}   { return nil }
 
 func (r *defaultRunner) Stat(ctx context.Context, conn connector.Connector, path string) (os.FileInfo, error) {
 	cmd := fmt.Sprintf("stat -c \"%%a %%F\" %s", path)
-	output, err := r.Run(ctx, conn, cmd, false)
+	result, err := r.Run(ctx, conn, cmd, false)
 
 	if err != nil {
-		if strings.Contains(strings.ToLower(output), "no such file or directory") {
+		if strings.Contains(strings.ToLower(result.Stdout), "no such file or directory") {
 			return nil, fmt.Errorf("stat failed for %s: %w", path, os.ErrNotExist)
 		}
-		return nil, fmt.Errorf("failed to run remote stat on %s: %w. Output: %s", path, err, output)
+		return nil, fmt.Errorf("failed to run remote stat on %s: %w. Output: %s", path, err, result.Stdout)
 	}
 
-	parts := strings.Split(strings.TrimSpace(output), " ")
+	parts := strings.Split(strings.TrimSpace(result.Stdout), " ")
 	if len(parts) < 2 {
-		return nil, fmt.Errorf("unexpected output from remote stat: %q", output)
+		return nil, fmt.Errorf("unexpected output from remote stat: %q", result.Stdout)
 	}
 
 	perm, err := strconv.ParseUint(parts[0], 8, 32)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse permissions from stat output %q: %w", output, err)
+		return nil, fmt.Errorf("failed to parse permissions from stat output %q: %w", result.Stdout, err)
 	}
 
 	fileType := parts[1]

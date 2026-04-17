@@ -2,7 +2,7 @@ package preflight
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -43,13 +43,13 @@ func (t *PrepareAssetsTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 func (t *PrepareAssetsTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
 	if err != nil {
 		return nil, err
 	}
-	executionHosts := []connector.Host{controlNode}
+	executionHosts := []remotefw.Host{controlNode}
 
 	downloadBinaries, err := binarystep.NewDownloadBinariesStepBuilder(runtimeCtx, "DownloadBinaries").Build()
 	if err != nil {
@@ -71,6 +71,9 @@ func (t *PrepareAssetsTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragme
 	fragment.AddDependency("DownloadBinaries", "DownloadHelmCharts")
 
 	for _, addon := range ctx.GetClusterConfig().Spec.Addons {
+		if addon.Name == "" {
+			continue
+		}
 		hasRemoteSource := false
 		if addon.Enabled != nil && *addon.Enabled {
 			for _, source := range addon.Sources {

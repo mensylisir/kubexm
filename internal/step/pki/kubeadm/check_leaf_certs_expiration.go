@@ -36,7 +36,8 @@ func NewKubeadmCheckLeafCertsExpirationStepBuilder(ctx runtime.ExecutionContext,
 		"front-proxy-client.crt",
 	}
 
-	if ctx.GetClusterConfig().Spec.Etcd.Type == string(common.EtcdDeploymentTypeKubeadm) {
+	etcdSpec := ctx.GetClusterConfig().Spec.Etcd
+	if etcdSpec != nil && etcdSpec.Type == string(common.EtcdDeploymentTypeKubeadm) {
 		certsToCheck = append(certsToCheck, "apiserver-etcd-client.crt")
 	}
 
@@ -120,8 +121,6 @@ func (s *KubeadmCheckLeafCertsExpirationStep) Run(ctx runtime.ExecutionContext) 
 
 	cacheKey := fmt.Sprintf(common.CacheKubeadmK8sLeafCertRenew, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
 	ctx.GetTaskCache().Set(cacheKey, anyLeafRequiresRenewal)
-	ctx.GetModuleCache().Set(cacheKey, anyLeafRequiresRenewal)
-	ctx.GetPipelineCache().Set(cacheKey, anyLeafRequiresRenewal)
 
 	if anyLeafRequiresRenewal {
 		logger.Warnf("One or more Kubernetes leaf certificates on this node require renewal. Result saved to cache ('%s': true).", cacheKey)

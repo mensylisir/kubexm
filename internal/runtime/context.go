@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,6 +13,7 @@ import (
 	"github.com/mensylisir/kubexm/internal/cache"
 	"github.com/mensylisir/kubexm/internal/common"
 	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/logger"
 	"github.com/mensylisir/kubexm/internal/runner"
 	"github.com/mensylisir/kubexm/internal/types"
@@ -38,10 +40,11 @@ type Context struct {
 	StepCache     cache.StepCache
 
 	hostInfoMap    map[string]*HostRuntimeInfo
-	controlNode    connector.Host
+	hostInfoMu     *sync.RWMutex
+	controlNode    remotefw.Host
 	ConnectionPool *connector.ConnectionPool
 
-	currentHost        connector.Host
+	currentHost        remotefw.Host
 	stepExecutionID    string
 	executionStartTime time.Time
 
@@ -58,11 +61,12 @@ type Context struct {
 	currentTaskName     string
 	stepResult          *types.StepResult
 
-	RunID string
+	RunID     string
+	cancelFn  context.CancelFunc // cancel function from WithTimeout; call on cleanup
 }
 
 type HostRuntimeInfo struct {
-	Host  connector.Host
+	Host  remotefw.Host
 	Conn  connector.Connector
 	Facts *runner.Facts
 }
@@ -72,7 +76,7 @@ var _ ModuleContext = (*Context)(nil)
 var _ TaskContext = (*Context)(nil)
 var _ ExecutionContext = (*Context)(nil)
 
-func ForHost(rootCtx *Context, host connector.Host) ExecutionContext {
+func ForHost(rootCtx *Context, host remotefw.Host) ExecutionContext {
 	newCtx := *rootCtx
 	newCtx.currentHost = host
 	newCtx.stepExecutionID = ""
@@ -111,6 +115,28 @@ func (c *Context) WithGoContext(goCtx context.Context) ExecutionContext {
 	newCtx := *c
 	newCtx.GoCtx = goCtx
 	return &newCtx
+}
+
+// WithTimeout returns a new context derived from the receiver with a deadline
+// applied. The cancel function is stored on the new context and should be
+// released by calling Cancel() to avoid resource leaks. If d <= 0, the
+// receiver is returned unchanged (no timeout enforcement).
+func (c *Context) WithTimeout(d time.Duration) ExecutionContext {
+	if d <= 0 {
+		return c
+	}
+	newCtx := *c
+	newCtx.GoCtx, newCtx.cancelFn = context.WithTimeout(c.GoCtx, d)
+	return &newCtx
+}
+
+// Cancel releases the resources associated with this context's timeout.
+// It is safe to call multiple times; subsequent calls are no-ops.
+func (c *Context) Cancel() {
+	if c.cancelFn != nil {
+		c.cancelFn()
+		c.cancelFn = nil
+	}
 }
 
 func (c *Context) GetFromRuntimeConfig(key string) (interface{}, bool) {
@@ -250,13 +276,15 @@ func (c *Context) GetRunID() string {
 	return c.RunID
 }
 
-func (c *Context) GetHostsByRole(role string) []connector.Host {
-	var hosts []connector.Host
+func (c *Context) GetHostsByRole(role string) []remotefw.Host {
+	c.hostInfoMu.RLock()
+	defer c.hostInfoMu.RUnlock()
 	if c.hostInfoMap == nil {
 		return nil
 	}
+	var hosts []remotefw.Host
 	if role == "" {
-		hosts := make([]connector.Host, 0, len(c.hostInfoMap))
+		hosts = make([]remotefw.Host, 0, len(c.hostInfoMap))
 		for _, hri := range c.hostInfoMap {
 			hosts = append(hosts, hri.Host)
 		}
@@ -273,7 +301,9 @@ func (c *Context) GetHostsByRole(role string) []connector.Host {
 	return hosts
 }
 
-func (c *Context) GetHostFacts(host connector.Host) (*runner.Facts, error) {
+func (c *Context) GetHostFacts(host remotefw.Host) (*runner.Facts, error) {
+	c.hostInfoMu.RLock()
+	defer c.hostInfoMu.RUnlock()
 	if c.hostInfoMap == nil {
 		return nil, fmt.Errorf("hostInfoMap is not initialized")
 	}
@@ -290,14 +320,14 @@ func (c *Context) GetHostFacts(host connector.Host) (*runner.Facts, error) {
 	return hri.Facts, nil
 }
 
-func (c *Context) GetControlNode() (connector.Host, error) {
+func (c *Context) GetControlNode() (remotefw.Host, error) {
 	if c.controlNode == nil {
 		return nil, fmt.Errorf("control node not initialized")
 	}
 	return c.controlNode, nil
 }
 
-func (c *Context) GetHost() connector.Host { return c.currentHost }
+func (c *Context) GetHost() remotefw.Host { return c.currentHost }
 
 func (c *Context) GetCurrentHostFacts() (*runner.Facts, error) {
 	if c.currentHost == nil {
@@ -390,6 +420,8 @@ func (c *Context) GetHostDir(hostname string) string {
 }
 
 func (c *Context) GetCurrentHostConnector() (connector.Connector, error) {
+	c.hostInfoMu.RLock()
+	defer c.hostInfoMu.RUnlock()
 	if c.currentHost == nil {
 		return nil, fmt.Errorf("no current host set in context")
 	}

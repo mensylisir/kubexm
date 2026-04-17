@@ -37,7 +37,8 @@ func NewKubeadmPrepareCATransitionStepBuilder(ctx runtime.ExecutionContext, inst
 		{CertFile: "front-proxy-ca.crt"},
 	}
 
-	if ctx.GetClusterConfig().Spec.Etcd.Type == string(common.EtcdDeploymentTypeKubeadm) {
+	etcdSpec := ctx.GetClusterConfig().Spec.Etcd
+	if etcdSpec != nil && etcdSpec.Type == string(common.EtcdDeploymentTypeKubeadm) {
 		assets = append(assets, caAsset{CertFile: "etcd/ca.crt"})
 	}
 

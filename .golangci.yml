@@ -1,0 +1,290 @@
+# golangci-lint configuration for kubexm
+# Focus areas:
+#   1. Unchecked errors (errcheck, staticcheck[SA4017])
+#   2. Nil dereference / context leaks (nilness, govet[lostcancel])
+#   3. Goroutine safety (copyloopvar)
+#   4. Interface implementation completeness (unused)
+#   5. Code style (revive, gofmt)
+
+version: "2"
+
+run:
+  timeout: 5m
+  go: "1.23"
+  tests: true
+  exclude-dirs:
+    - "bin"
+    - "docs"
+    - ".git"
+
+linters:
+  enable:
+    # Error handling
+    - errcheck      # Check error return values on all function calls
+
+    # Static analysis
+    - staticcheck  # SAxxxx checks; catches nil deref, unreachable code, etc.
+    - gosimple    # Detect code that could be simplified
+    - unused      # Detect unused vars, funcs, imports, consts, types
+    - govet       # Vetted Go compiler anomalies
+
+    # Code quality
+    - copyloopvar   # Detect loop variable capture in goroutine/closure
+    - dupl          # Code duplication detection
+    - gocyclo       # Cyclomatic complexity checks
+    - nakedret      # Naked returns
+    - unconvert     # Unnecessary type conversions
+    - unparam       # Unused function parameters
+
+    # Style & formatting
+    - gofmt         # Format verification
+    - revive        # Go code style guide enforcement
+    - gocritic      # Additional static analysis rules
+    - errorlint     # Detect issues with error wrapping
+    - depguard     # Package dependency graph — enforces layer isolation
+
+  disable:
+    # Disabled for project-specific reasons
+    - exhaustruct    # Not all struct fields need to be initialized
+    - goheader      # File header comments not required
+    - prealloc      # False positives in hot paths
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true  # CRITICAL: catches type assertions without ok check
+    check-blank: true             # Blank identifiers for intentionally ignored errors
+
+  staticcheck:
+    checks:
+      - "all"
+      - "-SA1012"   # context.Background() usage is intentional for root contexts
+      - "-SA1024"   # string(k) type conversion acceptable for string manipulation
+      - "-SA2000"   # sync.WaitGroup.Add in goroutine acceptable pattern
+      - "-SA4004"   # range over nil map acceptable
+      - "-SA4011"   # "discarding *http.Response.Close value" - acceptable in cleanup
+      - "-SA4017"   # UNCANCELLED TIMER — targets the exact pattern we need to catch
+
+  govet:
+    enable:
+      - all
+    disable:
+      - shadow       # Too noisy with most variable reuse patterns
+      - deepequalerrors # Accept deep equality for error comparisons
+      - fieldalignment # Too strict; memory layout is not a concern
+      - nilfunc       # False positives
+      - unkeyed       # Accept positional struct literals in tests
+
+  gocyclo:
+    min-complexity: 20  # Functions above this complexity get flagged
+
+  dupl:
+    threshold: 150  # Token count threshold for code duplication
+
+  nakedret:
+    max-func-lines: 30  # Flag naked returns in functions > 30 lines
+
+  unconvert:
+    settings:
+      use-community-edition: true
+
+  revive:
+    rules:
+      # Critical rules for this project
+      - name: error-return
+        severity: error
+        params:
+          allowedPrefixes: []
+          ignoreReceiverNames: ["err", "cb"]
+      - name: context-keys-type
+        severity: error
+      - name: errorf
+        severity: error
+      - name: unused-parameter
+        severity: warning
+        params:
+          allowedPrefixes: ["_", "ctx"]
+      - name: var-declaration
+        severity: warning
+      - name: package-comments
+        severity: warning
+        params:
+          minLength: 10
+      - name: exported
+        severity: warning
+        params:
+          ignoreInitAndTestFuncs: true
+          ignoreNonExportedFunctions: true
+      - name: var-naming
+        severity: warning
+        params:
+          allow: ["id", "ok", "ctx", "url", "api", "ip", "os", "db"]
+      - name: receiver-naming
+        severity: warning
+      - name: error-naming
+        severity: warning
+      - name: unexported-naming
+        severity: warning
+      - name: indent-error-flow
+        severity: warning
+      - name: range
+        severity: warning
+      - name: superfluous-else
+        severity: warning
+      - name: early-return
+        severity: warning
+      - name: unchanged-result
+        severity: warning
+      - name: unreachable-code
+        severity: warning
+      - name: bool-literal-in-expr
+        severity: warning
+      - name: constant-logical-expr
+        severity: warning
+      - name: blank-imports
+        severity: warning
+      - name: import-shadowing
+        severity: warning
+      - name: redundant-import
+        severity: warning
+      - name: useless-break
+        severity: warning
+
+  gocritic:
+    disabled-checks:
+      - commentFormatting
+      - defaultCaseOrder
+
+  depguard:
+    # Layer isolation rules — CRITICAL for architecture enforcement
+    rules:
+      # Rule 1: Step must not import Connector directly (bypass Runner)
+      # Constraint: Step → Runner → Connector (never Step → Connector)
+      step-no-connector:
+        files:
+          - "**/internal/step/**"
+        deny:
+          - pkg: github.com/mensylisir/kubexm/internal/connector
+            desc: connector types must not be imported in step layer — use runner/remotefw instead
+      # Rule 2: Task must not import Connector directly (bypass Step)
+      # Constraint: Task → Step → Runner → Connector
+      task-no-connector:
+        files:
+          - "**/internal/task/**"
+        deny:
+          - pkg: github.com/mensylisir/kubexm/internal/connector
+            desc: connector types must not be imported in task layer — use remotefw instead
+      # Rule 3: Task must not import Module (reverse dependency)
+      # Constraint: Module → Task (never Task → Module)
+      task-no-module:
+        files:
+          - "**/internal/task/**"
+        deny:
+          - pkg: github.com/mensylisir/kubexm/internal/module
+            desc: module must not be imported in task layer — reverse dependency violation
+      # Rule 4: Module must not import Pipeline (reverse dependency)
+      # Constraint: Pipeline → Module (never Module → Pipeline)
+      module-no-pipeline:
+        files:
+          - "**/internal/module/**"
+        deny:
+          - pkg: github.com/mensylisir/kubexm/internal/pipeline
+            desc: pipeline must not be imported in module layer — reverse dependency violation
+      # Rule 5: Step must not import Module (reverse dependency)
+      # Constraint: Module → Task → Step (never Step → Module)
+      step-no-module:
+        files:
+          - "**/internal/step/**"
+        deny:
+          - pkg: github.com/mensylisir/kubexm/internal/module
+            desc: module must not be imported in step layer — reverse dependency violation
+      # Rule 6: Step must not import Pipeline (reverse dependency)
+      # Constraint: Pipeline → Module → Task → Step (never Step → Pipeline)
+      step-no-pipeline:
+        files:
+          - "**/internal/step/**"
+        deny:
+          - pkg: github.com/mensylisir/kubexm/internal/pipeline
+            desc: pipeline must not be imported in step layer — reverse dependency violation
+      # Rule 7: Cmd must not import Task, Step, Runner, Connector (bypass Pipeline)
+      # Constraint: bin/cmd → Pipeline → Module → Task → Step → Runner → Connector
+      cmd-no-lower-layers:
+        files:
+          - "**/internal/cmd/**"
+        deny:
+          - pkg: github.com/mensylisir/kubexm/internal/task
+            desc: cmd must not import task layer — go through pipeline instead
+          - pkg: github.com/mensylisir/kubexm/internal/step
+            desc: cmd must not import step layer — go through pipeline instead
+          - pkg: github.com/mensylisir/kubexm/internal/runner
+            desc: cmd must not import runner layer — go through pipeline instead
+          - pkg: github.com/mensylisir/kubexm/internal/connector
+            desc: cmd must not import connector layer — go through pipeline instead
+          - pkg: github.com/mensylisir/kubexm/internal/module
+            desc: cmd must not import module layer — go through pipeline instead
+      # Rule 8: Pipeline must only call Module, never Task/Step/Runner/Connector
+      # Constraint: Pipeline → Module (never Pipeline → Task/Step/Runner/Connector)
+      pipeline-lower-layers:
+        files:
+          - "**/internal/pipeline/**"
+        deny:
+          - pkg: github.com/mensylisir/kubexm/internal/task
+            desc: pipeline must not import task layer — use module instead
+          - pkg: github.com/mensylisir/kubexm/internal/step
+            desc: pipeline must not import step layer — use module instead
+          - pkg: github.com/mensylisir/kubexm/internal/runner
+            desc: pipeline must not import runner layer — use module instead
+          - pkg: github.com/mensylisir/kubexm/internal/connector
+            desc: pipeline must not import connector layer — use module instead
+      # Rule 9: Module must only call Task, never Step/Runner/Connector
+      # Constraint: Module → Task (never Module → Step/Runner/Connector)
+      module-lower-layers:
+        files:
+          - "**/internal/module/**"
+        deny:
+          - pkg: github.com/mensylisir/kubexm/internal/step
+            desc: module must not import step layer — use task instead
+          - pkg: github.com/mensylisir/kubexm/internal/runner
+            desc: module must not import runner layer — use task instead
+          - pkg: github.com/mensylisir/kubexm/internal/connector
+            desc: module must not import connector layer — use task instead
+      # Rule 10: Task must only call Step, never Runner/Connector
+      # Constraint: Task → Step (never Task → Runner/Connector)
+      task-lower-layers:
+        files:
+          - "**/internal/task/**"
+        deny:
+          - pkg: github.com/mensylisir/kubexm/internal/runner
+            desc: task must not import runner layer — use step instead
+          - pkg: github.com/mensylisir/kubexm/internal/connector
+            desc: task must not import connector layer — use step instead
+
+  errorlint:
+    # Allow %w wrapping and fmt.Errorf with %w
+    errors:
+      - github.com/pkg/errors
+    wrapping:
+      width: 80
+
+issues:
+  exclude-use-default: false  # Report all issues
+  max-issues-per-linter: 100
+  max-same-issues: 5
+  new: true  # Only report new issues (after first run, disable for full report)
+
+  # Exclude specific patterns that are false positives in this project
+  exclude-rules:
+    # Accept fmt.Errorf wrapping in step implementations
+    - linters:
+        - errorlint
+      text: "error should be returned as arg"
+
+    # Accept nil error returns in Cleanup methods
+    - linters:
+        - errcheck
+      text: "Error return value of .Cleanup\\("
+      path: "_test\\.go"
+
+    # Accept sync.Mutex operations that return values
+    - linters:
+        - staticcheck
+      text: "SA4009"

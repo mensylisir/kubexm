@@ -24,4 +24,7 @@ type ModuleContext interface {
 type TaskContext interface {
 	OrchestrationContext
 	GetCurrentHostConnector() (connector.Connector, error)
+	// ForTask returns a child context scoped to the named task.
+	// The returned *Context has ForTask called on it already.
+	ForTask(taskName string) *Context
 }

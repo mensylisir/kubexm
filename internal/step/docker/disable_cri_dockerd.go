@@ -10,6 +10,8 @@ import (
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
+var _ step.Step = (*DisableCriDockerdStep)(nil)
+
 type DisableCriDockerdStep struct {
 	step.Base
 }
@@ -82,6 +84,16 @@ func (s *DisableCriDockerdStep) Run(ctx runtime.ExecutionContext) (*types.StepRe
 	if err := runner.DisableService(ctx.GoContext(), conn, facts, CriDockerdServiceName); err != nil {
 		result.MarkFailed(err, "failed to disable cri-dockerd service")
 		return result, fmt.Errorf("failed to disable cri-dockerd service: %w", err)
+	}
+
+	enabled, err := runner.IsServiceEnabled(ctx.GoContext(), conn, facts, CriDockerdServiceName)
+	if err != nil {
+		result.MarkFailed(err, "failed to verify cri-dockerd service status after disable")
+		return result, fmt.Errorf("failed to verify cri-dockerd service status after disable: %w", err)
+	}
+	if enabled {
+		result.MarkFailed(err, "cri-dockerd service is still enabled after disable command")
+		return result, fmt.Errorf("cri-dockerd service is still enabled after disable command")
 	}
 
 	logger.Info("CriDockerd service disabled successfully.")

@@ -11,6 +11,8 @@ import (
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
+const keepalivedServiceName = "keepalived"
+
 // RemoveKeepalivedPackage removes Keepalived package
 type RemoveKeepalivedPackage struct {
 	step.Base
@@ -32,17 +34,40 @@ func NewRemoveKeepalivedStepBuilder(ctx runtime.ExecutionContext, instanceName s
 }
 
 func (s *RemoveKeepalivedPackage) Meta() *spec.StepMeta { return &s.Base.Meta }
+
 func (s *RemoveKeepalivedPackage) Precheck(ctx runtime.ExecutionContext) (bool, error) {
-	return false, nil
+	installed, err := isKeepalivedInstalled(ctx)
+	if err != nil {
+		return false, err
+	}
+	return !installed, nil
 }
 
 func (s *RemoveKeepalivedPackage) Run(ctx runtime.ExecutionContext) (*types.StepResult, error) {
 	result := types.NewStepResult(s.Base.Meta.Name, ctx.GetStepExecutionID(), ctx.GetHost())
-	facts, _ := ctx.GetHostFacts(ctx.GetHost())
-	conn, _ := ctx.GetCurrentHostConnector()
-	cmd := fmt.Sprintf(facts.PackageManager.RemoveCmd, "keepalived")
-	_, _, err := conn.Exec(ctx.GoContext(), cmd, nil)
+	runnerSvc := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
+		result.MarkFailed(err, fmt.Sprintf("failed to get connector for host %s", ctx.GetHost().GetName()))
+		return result, err
+	}
+	facts, err := ctx.GetHostFacts(ctx.GetHost())
+	if err != nil {
+		result.MarkFailed(err, "failed to get host facts")
+		return result, err
+	}
+
+	installed, err := runnerSvc.IsPackageInstalled(ctx.GoContext(), conn, facts, keepalivedServiceName)
+	if err != nil {
+		result.MarkFailed(err, "failed to determine keepalived package state")
+		return result, err
+	}
+	if !installed {
+		result.MarkCompleted("Keepalived package already absent")
+		return result, nil
+	}
+
+	if err := runnerSvc.RemovePackages(ctx.GoContext(), conn, facts, keepalivedServiceName); err != nil {
 		result.MarkFailed(err, "failed to remove keepalived package")
 		return result, err
 	}
@@ -77,33 +102,82 @@ func NewCleanKeepalivedStepBuilder(ctx runtime.ExecutionContext, instanceName st
 }
 
 func (s *CleanKeepalivedPackage) Meta() *spec.StepMeta { return &s.Base.Meta }
+
 func (s *CleanKeepalivedPackage) Precheck(ctx runtime.ExecutionContext) (bool, error) {
-	return false, nil
+	packageInstalled, err := isKeepalivedInstalled(ctx)
+	if err != nil {
+		return false, err
+	}
+	configExists, err := keepalivedConfigExists(ctx)
+	if err != nil {
+		return false, err
+	}
+	serviceActive, err := isKeepalivedServiceActive(ctx)
+	if err != nil {
+		return false, err
+	}
+	serviceEnabled, err := isKeepalivedServiceEnabled(ctx)
+	if err != nil {
+		return false, err
+	}
+	return !packageInstalled && !configExists && !serviceActive && !serviceEnabled, nil
 }
 
 func (s *CleanKeepalivedPackage) Run(ctx runtime.ExecutionContext) (*types.StepResult, error) {
 	result := types.NewStepResult(s.Base.Meta.Name, ctx.GetStepExecutionID(), ctx.GetHost())
-	facts, _ := ctx.GetHostFacts(ctx.GetHost())
-	conn, _ := ctx.GetCurrentHostConnector()
-
-	// Stop service
-	stopCmd := fmt.Sprintf(facts.InitSystem.StopCmd, "keepalived")
-	conn.Exec(ctx.GoContext(), stopCmd, nil)
-
-	// Disable service
-	disableCmd := fmt.Sprintf(facts.InitSystem.DisableCmd, "keepalived")
-	conn.Exec(ctx.GoContext(), disableCmd, nil)
-
-	// Remove package
-	removeCmd := fmt.Sprintf(facts.PackageManager.RemoveCmd, "keepalived")
-	_, _, err := conn.Exec(ctx.GoContext(), removeCmd, nil)
+	runnerSvc := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
-		result.MarkFailed(err, "failed to clean keepalived package")
+		result.MarkFailed(err, fmt.Sprintf("failed to get connector for host %s", ctx.GetHost().GetName()))
+		return result, err
+	}
+	facts, err := ctx.GetHostFacts(ctx.GetHost())
+	if err != nil {
+		result.MarkFailed(err, "failed to get host facts")
 		return result, err
 	}
 
-	// Remove config
-	ctx.GetRunner().Remove(ctx.GoContext(), conn, common.KeepalivedDefaultConfigFileTarget, true, false)
+	if active, err := runnerSvc.IsServiceActive(ctx.GoContext(), conn, facts, keepalivedServiceName); err == nil && active {
+		if err := runnerSvc.StopService(ctx.GoContext(), conn, facts, keepalivedServiceName); err != nil {
+			result.MarkFailed(err, "failed to stop keepalived service during cleanup")
+			return result, err
+		}
+	} else if err != nil {
+		result.MarkFailed(err, "failed to determine keepalived service status during cleanup")
+		return result, err
+	}
+
+	if enabled, err := runnerSvc.IsServiceEnabled(ctx.GoContext(), conn, facts, keepalivedServiceName); err == nil && enabled {
+		if err := runnerSvc.DisableService(ctx.GoContext(), conn, facts, keepalivedServiceName); err != nil {
+			result.MarkFailed(err, "failed to disable keepalived service during cleanup")
+			return result, err
+		}
+	} else if err != nil {
+		result.MarkFailed(err, "failed to determine keepalived service enablement during cleanup")
+		return result, err
+	}
+
+	if installed, err := runnerSvc.IsPackageInstalled(ctx.GoContext(), conn, facts, keepalivedServiceName); err == nil && installed {
+		if err := runnerSvc.RemovePackages(ctx.GoContext(), conn, facts, keepalivedServiceName); err != nil {
+			result.MarkFailed(err, "failed to remove keepalived package")
+			return result, err
+		}
+	} else if err != nil {
+		result.MarkFailed(err, "failed to determine keepalived package state during cleanup")
+		return result, err
+	}
+
+	configExists, err := runnerSvc.Exists(ctx.GoContext(), conn, common.KeepalivedDefaultConfigFileTarget)
+	if err != nil {
+		result.MarkFailed(err, "failed to check keepalived config during cleanup")
+		return result, err
+	}
+	if configExists {
+		if err := runnerSvc.Remove(ctx.GoContext(), conn, common.KeepalivedDefaultConfigFileTarget, true, false); err != nil {
+			result.MarkFailed(err, "failed to remove keepalived config during cleanup")
+			return result, err
+		}
+	}
 
 	result.MarkCompleted("Keepalived package and config cleaned successfully")
 	return result, nil
@@ -136,14 +210,36 @@ func NewRemoveKeepalivedConfigStepBuilder(ctx runtime.ExecutionContext, instance
 }
 
 func (s *RemoveKeepalivedConfig) Meta() *spec.StepMeta { return &s.Base.Meta }
+
 func (s *RemoveKeepalivedConfig) Precheck(ctx runtime.ExecutionContext) (bool, error) {
-	return false, nil
+	configExists, err := keepalivedConfigExists(ctx)
+	if err != nil {
+		return false, err
+	}
+	return !configExists, nil
 }
 
 func (s *RemoveKeepalivedConfig) Run(ctx runtime.ExecutionContext) (*types.StepResult, error) {
 	result := types.NewStepResult(s.Base.Meta.Name, ctx.GetStepExecutionID(), ctx.GetHost())
-	conn, _ := ctx.GetCurrentHostConnector()
-	ctx.GetRunner().Remove(ctx.GoContext(), conn, common.KeepalivedDefaultConfigFileTarget, true, false)
+	runnerSvc := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		result.MarkFailed(err, fmt.Sprintf("failed to get connector for host %s", ctx.GetHost().GetName()))
+		return result, err
+	}
+	configExists, err := runnerSvc.Exists(ctx.GoContext(), conn, common.KeepalivedDefaultConfigFileTarget)
+	if err != nil {
+		result.MarkFailed(err, "failed to check keepalived config")
+		return result, err
+	}
+	if !configExists {
+		result.MarkCompleted("Keepalived config already absent")
+		return result, nil
+	}
+	if err := runnerSvc.Remove(ctx.GoContext(), conn, common.KeepalivedDefaultConfigFileTarget, true, false); err != nil {
+		result.MarkFailed(err, "failed to remove keepalived config")
+		return result, err
+	}
 	result.MarkCompleted("Keepalived config removed successfully")
 	return result, nil
 }
@@ -153,3 +249,51 @@ func (s *RemoveKeepalivedConfig) Rollback(ctx runtime.ExecutionContext) error {
 }
 
 var _ step.Step = (*RemoveKeepalivedConfig)(nil)
+
+func isKeepalivedInstalled(ctx runtime.ExecutionContext) (bool, error) {
+	runnerSvc := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		return false, err
+	}
+	facts, err := ctx.GetHostFacts(ctx.GetHost())
+	if err != nil {
+		return false, err
+	}
+	return runnerSvc.IsPackageInstalled(ctx.GoContext(), conn, facts, keepalivedServiceName)
+}
+
+func keepalivedConfigExists(ctx runtime.ExecutionContext) (bool, error) {
+	runnerSvc := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		return false, err
+	}
+	return runnerSvc.Exists(ctx.GoContext(), conn, common.KeepalivedDefaultConfigFileTarget)
+}
+
+func isKeepalivedServiceActive(ctx runtime.ExecutionContext) (bool, error) {
+	runnerSvc := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		return false, err
+	}
+	facts, err := ctx.GetHostFacts(ctx.GetHost())
+	if err != nil {
+		return false, err
+	}
+	return runnerSvc.IsServiceActive(ctx.GoContext(), conn, facts, keepalivedServiceName)
+}
+
+func isKeepalivedServiceEnabled(ctx runtime.ExecutionContext) (bool, error) {
+	runnerSvc := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		return false, err
+	}
+	facts, err := ctx.GetHostFacts(ctx.GetHost())
+	if err != nil {
+		return false, err
+	}
+	return runnerSvc.IsServiceEnabled(ctx.GoContext(), conn, facts, keepalivedServiceName)
+}

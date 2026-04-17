@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go *)",
+      "Bash(mkdir *)",
+      "Bash(mv *)",
+      "Bash(rmdir *)",
+      "Bash(ls *)",
+      "Bash(rm *)",
+      "Bash(find *)",
+      "Bash(do *)",
+      "Bash(done)",
+      "Bash(sed *)",
+      "Bash(grep *)"
+    ]
+  },
+  "$version": 3
+}

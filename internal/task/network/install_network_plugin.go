@@ -1,14 +1,30 @@
 package network
 
 import (
+	"fmt"
+
 	"github.com/mensylisir/kubexm/internal/common"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/task"
 	"github.com/mensylisir/kubexm/internal/task/network/calico"
+	"github.com/mensylisir/kubexm/internal/task/network/cilium"
 	"github.com/mensylisir/kubexm/internal/task/network/flannel"
+	"github.com/mensylisir/kubexm/internal/task/network/hybridnet"
+	"github.com/mensylisir/kubexm/internal/task/network/kubeovn"
+	"github.com/mensylisir/kubexm/internal/task/network/multus"
 )
+
+// supportedCNIs lists all CNI types that have install tasks implemented.
+var supportedCNIs = []string{
+	string(common.CNITypeCalico),
+	string(common.CNITypeFlannel),
+	string(common.CNITypeCilium),
+	string(common.CNITypeKubeOvn),
+	string(common.CNITypeHybridnet),
+	string(common.CNITypeMultus),
+}
 
 type InstallNetworkPluginTask struct {
 	task.Base
@@ -47,9 +63,16 @@ func (t *InstallNetworkPluginTask) Plan(ctx runtime.TaskContext) (*plan.Executio
 		subTask = calico.NewDeployCalicoTask()
 	case string(common.CNITypeFlannel):
 		subTask = flannel.NewDeployFlannelTask()
+	case string(common.CNITypeCilium):
+		subTask = cilium.NewDeployCiliumTask()
+	case string(common.CNITypeKubeOvn):
+		subTask = kubeovn.NewDeployKubeovnTask()
+	case string(common.CNITypeHybridnet):
+		subTask = hybridnet.NewDeployHybridnetTask()
+	case string(common.CNITypeMultus):
+		subTask = multus.NewDeployMultusTask()
 	default:
-		ctx.GetLogger().Infof("No supported network plugin configured or plugin '%s' not implemented yet.", plugin)
-		return plan.NewEmptyFragment(t.Name()), nil
+		return nil, fmt.Errorf("unsupported CNI plugin '%s': supported plugins are %v", plugin, supportedCNIs)
 	}
 
 	return subTask.Plan(ctx)

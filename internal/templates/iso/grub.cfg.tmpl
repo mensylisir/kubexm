@@ -1,0 +1,22 @@
+set timeout=10
+set default=0
+
+menuentry "Install KubeXM Kubernetes Cluster" {
+    linux /casper/vmlinuz quiet splash ---
+    initrd /casper/initrd
+}
+
+menuentry "Install KubeXM Kubernetes Cluster (safe graphics)" {
+    linux /casper/vmlinuz quiet splash nomodeset ---
+    initrd /casper/initrd
+}
+
+menuentry "KubeXM Kubernetes Cluster - Automated Install" {
+    linux /casper/vmlinuz auto=true priority=low quiet splash ---
+    initrd /casper/initrd
+}
+
+menuentry "Check disc for defects" {
+    linux /casper/vmlinuz maybe-verify only-ubiquity ---
+    initrd /casper/initrd
+}

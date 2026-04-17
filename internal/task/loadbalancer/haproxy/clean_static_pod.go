@@ -43,7 +43,7 @@ func (t *CleanHAProxyStaticPodTask) IsRequired(ctx runtime.TaskContext) (bool, e
 func (t *CleanHAProxyStaticPodTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	workerHosts := ctx.GetHostsByRole(common.RoleWorker)
 	if len(workerHosts) == 0 {

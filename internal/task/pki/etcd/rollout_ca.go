@@ -5,7 +5,7 @@ import (
 	"github.com/mensylisir/kubexm/internal/step/etcd"
 
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -38,7 +38,10 @@ func (t *DeployFinalCARollingTask) Description() string {
 
 func (t *DeployFinalCARollingTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 	logger := ctx.GetLogger().With("task", t.Name(), "phase", "IsRequired")
-	runtimeCtx := ctx.(*runtime.Context)
+	runtimeCtx, ok := ctx.(*runtime.Context)
+	if !ok {
+		return false, fmt.Errorf("ctx is not *runtime.Context")
+	}
 	cacheKey := fmt.Sprintf(common.CacheKubexmEtcdCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
 	caRenewVal, _ := ctx.GetModuleCache().Get(cacheKey)
 	isCARenewal, _ := caRenewVal.(bool)
@@ -51,7 +54,7 @@ func (t *DeployFinalCARollingTask) IsRequired(ctx runtime.TaskContext) (bool, er
 }
 
 func (t *DeployFinalCARollingTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	fragment := plan.NewExecutionFragment(t.Name())
 
@@ -69,7 +72,7 @@ func (t *DeployFinalCARollingTask) Plan(ctx runtime.TaskContext) (*plan.Executio
 			return nil, err
 		}
 		distCANodeID := plan.NodeID(fmt.Sprintf("DistributeFinalCAFor%s", nodeName))
-		fragment.AddNode(&plan.ExecutionNode{Name: string(distCANodeID), Step: distCAStep, Hosts: []connector.Host{node}})
+		fragment.AddNode(&plan.ExecutionNode{Name: string(distCANodeID), Step: distCAStep, Hosts: []remotefw.Host{node}})
 		if lastNodeWaitID != "" {
 			fragment.AddDependency(lastNodeWaitID, distCANodeID)
 		}
@@ -79,7 +82,7 @@ func (t *DeployFinalCARollingTask) Plan(ctx runtime.TaskContext) (*plan.Executio
 			return nil, err
 		}
 		restartNodeID := plan.NodeID(fmt.Sprintf("RestartEtcdForFinalCA_%s", nodeName))
-		fragment.AddNode(&plan.ExecutionNode{Name: string(restartNodeID), Step: restartStep, Hosts: []connector.Host{node}})
+		fragment.AddNode(&plan.ExecutionNode{Name: string(restartNodeID), Step: restartStep, Hosts: []remotefw.Host{node}})
 		fragment.AddDependency(distCANodeID, restartNodeID)
 
 		waitStep, err := etcd.NewWaitClusterHealthyStepBuilder(runtimeCtx, fmt.Sprintf("WaitClusterHealthyForFinalCA_%s", nodeName)).Build()
@@ -87,7 +90,7 @@ func (t *DeployFinalCARollingTask) Plan(ctx runtime.TaskContext) (*plan.Executio
 			return nil, err
 		}
 		waitNodeID := plan.NodeID(fmt.Sprintf("WaitClusterHealthyForFinalCA_%s", nodeName))
-		fragment.AddNode(&plan.ExecutionNode{Name: string(waitNodeID), Step: waitStep, Hosts: []connector.Host{node}})
+		fragment.AddNode(&plan.ExecutionNode{Name: string(waitNodeID), Step: waitStep, Hosts: []remotefw.Host{node}})
 		fragment.AddDependency(restartNodeID, waitNodeID)
 
 		lastNodeWaitID = waitNodeID

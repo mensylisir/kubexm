@@ -2,13 +2,14 @@ package runtime
 
 import (
 	"context"
+	"time"
+
 	"github.com/mensylisir/kubexm/internal/apis/kubexms/v1alpha1"
 	"github.com/mensylisir/kubexm/internal/cache"
-	"github.com/mensylisir/kubexm/internal/connector"
 	"github.com/mensylisir/kubexm/internal/logger"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/runner"
 	"k8s.io/client-go/tools/record"
-	"time"
 )
 
 type CoreServiceContext interface {
@@ -20,9 +21,9 @@ type CoreServiceContext interface {
 
 type ClusterQueryContext interface {
 	GetClusterConfig() *v1alpha1.Cluster
-	GetHostsByRole(role string) []connector.Host
-	GetHostFacts(host connector.Host) (*runner.Facts, error)
-	GetControlNode() (connector.Host, error)
+	GetHostsByRole(role string) []remotefw.Host
+	GetHostFacts(host remotefw.Host) (*runner.Facts, error)
+	GetControlNode() (remotefw.Host, error)
 }
 
 type FileSystemContext interface {

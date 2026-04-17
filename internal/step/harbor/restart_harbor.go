@@ -85,16 +85,16 @@ func (s *RestartHarborStep) Run(ctx runtime.ExecutionContext) (*types.StepResult
 	restartCmd := fmt.Sprintf("cd %s && docker-compose restart", s.RemoteInstallDir)
 	logger.Infof("Executing Harbor restart command on remote host: %s", restartCmd)
 
-	output, err := runner.Run(ctx.GoContext(), conn, restartCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, restartCmd, s.Sudo)
 	if err != nil {
-		logger.Errorf("Harbor restart failed. Full output:\n%s", output)
+		logger.Errorf("Harbor restart failed. Full output:\n%s", runResult.Stdout)
 		err := fmt.Errorf("failed to execute docker-compose restart: %w", err)
 		result.MarkFailed(err, err.Error())
 		return result, err
 	}
 
 	logger.Info("Harbor services restarted successfully.")
-	logger.Debugf("Harbor restart output:\n%s", output)
+	logger.Debugf("Harbor restart output:\n%s", runResult.Stdout)
 	result.MarkCompleted("Harbor services restarted successfully")
 	return result, nil
 }

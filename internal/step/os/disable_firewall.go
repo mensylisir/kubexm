@@ -44,7 +44,7 @@ func (s *DisableFirewallStep) Precheck(ctx runtime.ExecutionContext) (isDone boo
 	}
 
 	// Check if firewalld is active
-	output, err := runner.Run(ctx.GoContext(), conn, "systemctl is-active firewalld", s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, "systemctl is-active firewalld", s.Sudo)
 	if err != nil {
 		// If command fails, it might mean firewalld is not installed or service not found, which is fine.
 		// Or it returns non-zero exit code if not active.
@@ -52,7 +52,7 @@ func (s *DisableFirewallStep) Precheck(ctx runtime.ExecutionContext) (isDone boo
 		return true, nil
 	}
 
-	if output == "active" {
+	if runResult.Stdout == "active" {
 		logger.Info("Firewalld is active, needs to be disabled.")
 		return false, nil
 	}

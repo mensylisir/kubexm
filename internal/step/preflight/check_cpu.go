@@ -13,6 +13,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+var _ step.Step = (*CheckCPUStep)(nil)
+
 type CheckCPUStep struct {
 	step.Base
 	MinCores *int32
@@ -97,9 +99,9 @@ func (s *CheckCPUStep) getActualCores(ctx runtime.ExecutionContext) (int, error)
 	runner := ctx.GetRunner()
 
 	logger.Info("Attempting to determine CPU count via 'nproc' command.")
-	output, err := runner.Run(ctx.GoContext(), conn, "nproc", s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, "nproc", s.Sudo)
 	if err == nil {
-		coresStr := strings.TrimSpace(output)
+		coresStr := strings.TrimSpace(runResult.Stdout)
 		cores, parseErr := strconv.Atoi(coresStr)
 		if parseErr == nil {
 			logger.Debugf("Determined CPU core count from command 'nproc': %d", cores)
@@ -112,12 +114,12 @@ func (s *CheckCPUStep) getActualCores(ctx runtime.ExecutionContext) (int, error)
 
 	logger.Info("Fallback: Attempting to determine CPU count via '/proc/cpuinfo'.")
 	cmd := "grep -c ^processor /proc/cpuinfo"
-	output, err = runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
+	runResult, err = runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
 		return 0, errors.Wrap(err, "failed to execute 'grep' on /proc/cpuinfo to get CPU count")
 	}
 
-	coresStr := strings.TrimSpace(output)
+	coresStr := strings.TrimSpace(runResult.Stdout)
 	cores, err := strconv.Atoi(coresStr)
 	if err != nil {
 		return 0, errors.Wrapf(err, "failed to parse CPU count from 'grep' output: %s", coresStr)

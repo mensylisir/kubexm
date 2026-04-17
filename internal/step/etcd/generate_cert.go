@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
@@ -20,7 +20,7 @@ import (
 type GenerateEtcdCertsStep struct {
 	step.Base
 	LocalCertsDir  string
-	EtcdNodes      []connector.Host
+	EtcdNodes      []remotefw.Host
 	CertDuration   time.Duration
 	CaCertFileName string
 	CaKeyFileName  string
@@ -40,12 +40,12 @@ func NewGenerateEtcdCertsStepBuilder(ctx runtime.ExecutionContext, instanceName 
 		CaKeyFileName:  common.EtcdCaKeyPemFileName,
 		Permission:     "0755",
 	}
-	if ctx.GetClusterConfig().Spec.Certs.CertDuration != "" {
-		parsedDuration, err := time.ParseDuration(ctx.GetClusterConfig().Spec.Certs.CADuration)
+	if certsSpec := ctx.GetClusterConfig().Spec.Certs; certsSpec != nil && certsSpec.CertDuration != "" {
+		parsedDuration, err := time.ParseDuration(certsSpec.CertDuration)
 		if err == nil {
 			s.CertDuration = parsedDuration
 		} else {
-			ctx.GetLogger().Warnf("Failed to parse user-provided Cert duration '%s', using default. Error: %v", ctx.GetClusterConfig().Spec.Certs.CertDuration, err)
+			ctx.GetLogger().Warnf("Failed to parse user-provided Cert duration '%s', using default. Error: %v", certsSpec.CertDuration, err)
 		}
 	}
 
@@ -124,10 +124,29 @@ func (s *GenerateEtcdCertsStep) Run(ctx runtime.ExecutionContext) (*types.StepRe
 		return result, err
 	}
 
+	// Build SANs safely with nil checks
+	cfg := ctx.GetClusterConfig()
+	k8sClusterName := "cluster.local"
+	k8sDNSDomain := "cluster.local"
+	cpDomain := "kubernetes.default"
+	if cfg != nil {
+		if cfg.Spec.Kubernetes != nil {
+			if cfg.Spec.Kubernetes.ClusterName != "" {
+				k8sClusterName = cfg.Spec.Kubernetes.ClusterName
+			}
+			if cfg.Spec.Kubernetes.DNSDomain != "" {
+				k8sDNSDomain = cfg.Spec.Kubernetes.DNSDomain
+			}
+		}
+		if cfg.Spec.ControlPlaneEndpoint != nil && cfg.Spec.ControlPlaneEndpoint.Domain != "" {
+			cpDomain = cfg.Spec.ControlPlaneEndpoint.Domain
+		}
+	}
+
 	altNames := helpers.AltNames{
 		DNSNames: []string{"localhost", "etcd", "etcd.kube-system", "etcd.kube-system.svc",
-			fmt.Sprintf("etcd.kube-system.svc.%s.%s", ctx.GetClusterConfig().Spec.Kubernetes.ClusterName, ctx.GetClusterConfig().Spec.Kubernetes.DNSDomain),
-			ctx.GetClusterConfig().Spec.ControlPlaneEndpoint.Domain},
+			fmt.Sprintf("etcd.kube-system.svc.%s.%s", k8sClusterName, k8sDNSDomain),
+			cpDomain},
 		IPs: []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("0:0:0:0:0:0:0:1")},
 	}
 	for _, node := range s.EtcdNodes {

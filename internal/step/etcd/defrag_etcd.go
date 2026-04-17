@@ -62,7 +62,7 @@ func (s *DefragmentEtcdStep) Run(ctx runtime.ExecutionContext) (*types.StepResul
 
 	nodeName := ctx.GetHost().GetName()
 	logger.Info("Starting defragmentation on etcd member...", "node", nodeName)
-	caPath, certPath, keyPath := getEtcdctlCertPaths(nodeName)
+	caPath, certPath, keyPath := getEtcdctlCertPaths(ctx, nodeName)
 	endpoint := "https://127.0.0.1:2379"
 
 	defragCmd := fmt.Sprintf("ETCDCTL_API=3 %s defrag --endpoints=%s --cacert=%s --cert=%s --key=%s",

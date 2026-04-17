@@ -103,9 +103,9 @@ func (s *KubeadmResetStep) Run(ctx runtime.ExecutionContext) (*types.StepResult,
 
 	logger.Warnf("Running command to reset node: %s", cmd)
 
-	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
-		logger.Warnf("'kubeadm reset' command failed, but continuing cleanup. This might be expected if the node was already partially cleaned. Error: %v, Output: \n%s", err, output)
+		logger.Warnf("'kubeadm reset' command failed, but continuing cleanup. This might be expected if the node was already partially cleaned. Error: %v, Output: \n%s", err, runResult.Stdout)
 	} else {
 		logger.Info("Kubeadm reset completed successfully.")
 	}

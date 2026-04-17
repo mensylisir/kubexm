@@ -3,7 +3,7 @@ package containerd
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -42,7 +42,7 @@ func (t *DeployContainerdTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFra
 
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
 	if err != nil {
@@ -86,8 +86,8 @@ func (t *DeployContainerdTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFra
 		return nil, err
 	}
 
-	fragment.AddNode(&plan.ExecutionNode{Name: "ExtractContainerd", Step: extractContainerd, Hosts: []connector.Host{controlNode}})
-	fragment.AddNode(&plan.ExecutionNode{Name: "ExtractCNI", Step: extractCNI, Hosts: []connector.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "ExtractContainerd", Step: extractContainerd, Hosts: []remotefw.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "ExtractCNI", Step: extractCNI, Hosts: []remotefw.Host{controlNode}})
 	fragment.AddNode(&plan.ExecutionNode{Name: "InstallRunc", Step: installRunc, Hosts: deployHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "InstallCNI", Step: installCNI, Hosts: deployHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "InstallContainerd", Step: installContainerd, Hosts: deployHosts})

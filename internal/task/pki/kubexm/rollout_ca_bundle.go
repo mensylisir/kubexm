@@ -4,14 +4,14 @@ import (
 	"fmt"
 
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step/kubernetes/health"
-	"github.com/mensylisir/kubexm/internal/step/kubernetes/kube-apiserver"
-	"github.com/mensylisir/kubexm/internal/step/kubernetes/kube-controller-manager"
-	"github.com/mensylisir/kubexm/internal/step/kubernetes/kube-scheduler"
+	"github.com/mensylisir/kubexm/internal/step/kubernetes/apiserver"
+	"github.com/mensylisir/kubexm/internal/step/kubernetes/controller-manager"
+	"github.com/mensylisir/kubexm/internal/step/kubernetes/scheduler"
 	kubexmstep "github.com/mensylisir/kubexm/internal/step/pki/kubexm"
 	"github.com/mensylisir/kubexm/internal/task"
 )
@@ -40,21 +40,13 @@ func (t *RolloutK8sCABundleTask) Description() string {
 }
 
 func (t *RolloutK8sCABundleTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	var caRequiresRenewal bool
-	runtimeCtx := ctx.(*runtime.Context)
-	cacheKey := fmt.Sprintf(common.CacheKubexmK8sCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
-	if val, ok := ctx.GetModuleCache().Get(cacheKey); ok {
-		if renew, isBool := val.(bool); isBool && renew {
-			caRequiresRenewal = renew
-		}
-	}
-	return caRequiresRenewal, nil
+	return true, nil
 }
 
 func (t *RolloutK8sCABundleTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
 	if len(masterHosts) == 0 {
@@ -65,7 +57,7 @@ func (t *RolloutK8sCABundleTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionF
 
 	for _, host := range masterHosts {
 		hostName := host.GetName()
-		hostList := []connector.Host{host}
+		hostList := []remotefw.Host{host}
 
 		backupStep, err := kubexmstep.NewKubexmBackupRemotePKIStepBuilder(runtimeCtx, fmt.Sprintf("BackupPKIFor%s", hostName)).Build()
 		if err != nil {
@@ -149,7 +141,7 @@ func (t *RolloutK8sCABundleTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionF
 	verifyClusterNode := &plan.ExecutionNode{
 		Name:  "VerifyClusterHealthAfterBundleRollout",
 		Step:  verifyClusterStep,
-		Hosts: []connector.Host{masterHosts[0]},
+		Hosts: []remotefw.Host{masterHosts[0]},
 	}
 	verifyClusterID, _ := fragment.AddNode(verifyClusterNode)
 

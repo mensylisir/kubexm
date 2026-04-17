@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
@@ -28,7 +28,7 @@ type MemberListOutput struct {
 
 type AddEtcdMemberStep struct {
 	step.Base
-	NewNode           connector.Host
+	NewNode           remotefw.Host
 	EtcdctlBinaryPath string
 }
 
@@ -50,7 +50,7 @@ func NewAddEtcdMemberStepBuilder(ctx runtime.ExecutionContext, instanceName stri
 	return b
 }
 
-func (b *AddEtcdMemberStepBuilder) WithNewNode(host connector.Host) *AddEtcdMemberStepBuilder {
+func (b *AddEtcdMemberStepBuilder) WithNewNode(host remotefw.Host) *AddEtcdMemberStepBuilder {
 	b.Step.NewNode = host
 	return b
 }
@@ -77,7 +77,7 @@ func (s *AddEtcdMemberStep) Precheck(ctx runtime.ExecutionContext) (isDone bool,
 		return false, err
 	}
 
-	caPath, certPath, keyPath := getEtcdctlCertPaths(ctx.GetHost().GetName())
+	caPath, certPath, keyPath := getEtcdctlCertPaths(ctx, ctx.GetHost().GetName())
 	listCmd := fmt.Sprintf("ETCDCTL_API=3 %s member list --cacert %s --cert %s --key %s",
 		s.EtcdctlBinaryPath, caPath, certPath, keyPath)
 
@@ -116,7 +116,7 @@ func (s *AddEtcdMemberStep) Run(ctx runtime.ExecutionContext) (*types.StepResult
 
 	newNodeName := s.NewNode.GetName()
 	newNodePeerURL := getPeerURL(s.NewNode)
-	caPath, certPath, keyPath := getEtcdctlCertPaths(ctx.GetHost().GetName())
+	caPath, certPath, keyPath := getEtcdctlCertPaths(ctx, ctx.GetHost().GetName())
 
 	addCmd := fmt.Sprintf("ETCDCTL_API=3 %s member add %s --peer-urls=%s --cacert %s --cert %s --key %s",
 		s.EtcdctlBinaryPath, newNodeName, newNodePeerURL, caPath, certPath, keyPath)
@@ -154,7 +154,7 @@ func (s *AddEtcdMemberStep) Rollback(ctx runtime.ExecutionContext) error {
 		return nil
 	}
 
-	caPath, certPath, keyPath := getEtcdctlCertPaths(ctx.GetHost().GetName())
+	caPath, certPath, keyPath := getEtcdctlCertPaths(ctx, ctx.GetHost().GetName())
 
 	logger.Info("Listing members to find the ID of the new member for removal...", "member", s.NewNode.GetName())
 	listCmd := fmt.Sprintf("ETCDCTL_API=3 %s member list --cacert %s --cert %s --key %s --write-out=json",
@@ -205,7 +205,7 @@ func (s *AddEtcdMemberStep) Rollback(ctx runtime.ExecutionContext) error {
 	return nil
 }
 
-func getPeerURL(node connector.Host) string {
+func getPeerURL(node remotefw.Host) string {
 	peerAddress := node.GetInternalAddress()
 	if peerAddress == "" {
 		peerAddress = node.GetAddress()
@@ -213,10 +213,29 @@ func getPeerURL(node connector.Host) string {
 	return fmt.Sprintf("https://%s:2380", peerAddress)
 }
 
-func getEtcdctlCertPaths(nodeName string) (caPath, certPath, keyPath string) {
-	caPath = filepath.Join(common.DefaultEtcdPKIDir, common.EtcdCaPemFileName)
-	certPath = filepath.Join(common.DefaultEtcdPKIDir, fmt.Sprintf(common.EtcdAdminCertFileNamePattern, nodeName))
-	keyPath = filepath.Join(common.DefaultEtcdPKIDir, fmt.Sprintf(common.EtcdAdminKeyFileNamePattern, nodeName))
+func getEtcdctlCertPaths(ctx runtime.ExecutionContext, nodeName string) (caPath, certPath, keyPath string) {
+	etcdType := ""
+	if cfg := ctx.GetClusterConfig(); cfg != nil && cfg.Spec.Etcd != nil {
+		etcdType = cfg.Spec.Etcd.Type
+	}
+	if etcdType == string(common.EtcdDeploymentTypeKubeadm) {
+		// kubeadm-managed etcd uses /etc/kubernetes/pki/etcd/ with a SINGLE server.crt/key pair
+		// (not per-node certificates like kubexm)
+		caPath = "/etc/kubernetes/pki/etcd/ca.crt"
+		certPath = "/etc/kubernetes/pki/etcd/server.crt"
+		keyPath = "/etc/kubernetes/pki/etcd/server.key"
+	} else if etcdType == string(common.EtcdDeploymentTypeExternal) {
+		// External etcd: cert paths must be explicitly configured by user
+		// We cannot assume any default path
+		caPath = "/etc/etcd/pki/ca.pem"
+		certPath = filepath.Join(common.DefaultEtcdPKIDir, fmt.Sprintf(common.EtcdAdminCertFileNamePattern, nodeName))
+		keyPath = filepath.Join(common.DefaultEtcdPKIDir, fmt.Sprintf(common.EtcdAdminKeyFileNamePattern, nodeName))
+	} else {
+		// kubexm-deployed etcd uses /etc/etcd/pki/ with per-node .pem certificates
+		caPath = filepath.Join(common.DefaultEtcdPKIDir, common.EtcdCaPemFileName)
+		certPath = filepath.Join(common.DefaultEtcdPKIDir, fmt.Sprintf(common.EtcdAdminCertFileNamePattern, nodeName))
+		keyPath = filepath.Join(common.DefaultEtcdPKIDir, fmt.Sprintf(common.EtcdAdminKeyFileNamePattern, nodeName))
+	}
 	return
 }
 

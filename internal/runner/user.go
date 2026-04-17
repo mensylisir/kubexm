@@ -320,36 +320,36 @@ func (r *defaultRunner) GetUserInfo(ctx context.Context, conn connector.Connecto
 
 	info := &UserInfo{Username: username}
 
-	uidStr, err := r.Run(ctx, conn, fmt.Sprintf("id -u %s", username), false)
+	result, err := r.Run(ctx, conn, fmt.Sprintf("id -u %s", username), false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get UID for user %s: %w", username, err)
 	}
-	info.UID = strings.TrimSpace(uidStr)
+	info.UID = strings.TrimSpace(result.Stdout)
 
-	gidStr, err := r.Run(ctx, conn, fmt.Sprintf("id -g %s", username), false)
+	result, err = r.Run(ctx, conn, fmt.Sprintf("id -g %s", username), false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get GID for user %s: %w", username, err)
 	}
-	info.GID = strings.TrimSpace(gidStr)
+	info.GID = strings.TrimSpace(result.Stdout)
 
-	getentOut, err := r.Run(ctx, conn, fmt.Sprintf("getent passwd %s", username), false)
+	result, err = r.Run(ctx, conn, fmt.Sprintf("getent passwd %s", username), false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get passwd entry for user %s: %w", username, err)
 	}
-	passwdFields := strings.Split(strings.TrimSpace(getentOut), ":")
+	passwdFields := strings.Split(strings.TrimSpace(result.Stdout), ":")
 	if len(passwdFields) >= 7 {
 		info.Comment = passwdFields[4]
 		info.HomeDir = passwdFields[5]
 		info.Shell = passwdFields[6]
 	} else {
-		return nil, fmt.Errorf("unexpected format from 'getent passwd %s': %s", username, getentOut)
+		return nil, fmt.Errorf("unexpected format from 'getent passwd %s': %s", username, result.Stdout)
 	}
 
-	groupsStr, err := r.Run(ctx, conn, fmt.Sprintf("id -Gn %s", username), false)
+	result, err = r.Run(ctx, conn, fmt.Sprintf("id -Gn %s", username), false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get group names for user %s using 'id -Gn': %w", username, err)
 	}
-	info.Groups = strings.Fields(strings.TrimSpace(groupsStr))
+	info.Groups = strings.Fields(strings.TrimSpace(result.Stdout))
 
 	return info, nil
 }

@@ -14,6 +14,8 @@ const (
 	CriDockerdServiceName = "cri-dockerd"
 )
 
+var _ step.Step = (*EnableCriDockerdStep)(nil)
+
 type EnableCriDockerdStep struct {
 	step.Base
 }

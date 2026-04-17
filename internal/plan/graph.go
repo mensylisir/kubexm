@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/step"
 )
@@ -26,7 +26,7 @@ type ExecutionGraph struct {
 type ExecutionNode struct {
 	Name          string                 `json:"name"`
 	Step          step.Step              `json:"-"`
-	Hosts         []connector.Host       `json:"-"`
+	Hosts         []remotefw.Host       `json:"-"`
 	Dependencies  []NodeID               `json:"dependencies"`
 	StepName      string                 `json:"stepName"`
 	Hostnames     []string               `json:"hostnames"`

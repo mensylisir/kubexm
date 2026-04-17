@@ -42,3 +42,18 @@ func (b *Base) Rollback(ctx runtime.ExecutionContext) error {
 func (b *Base) GetStatus(ctx runtime.ExecutionContext) (types.StepStatus, error) {
 	return types.StepStatusPending, nil
 }
+
+// Precheck returns (false, nil) by default — step needs to be executed.
+// Step implementations must override this to implement idempotency checks:
+//   - Return (true, nil) if the step is already done (skip execution)
+//   - Return (false, nil) if the step needs to run
+//   - Return (false, err) if the precheck itself failed
+func (b *Base) Precheck(ctx runtime.ExecutionContext) (bool, error) {
+	return false, nil
+}
+
+// Run returns an error by default — step implementations must override this.
+// This prevents accidentally calling a step without proper implementation.
+func (b *Base) Run(ctx runtime.ExecutionContext) (*types.StepResult, error) {
+	return nil, fmt.Errorf("Run not implemented for step: %s", b.Meta.Name)
+}

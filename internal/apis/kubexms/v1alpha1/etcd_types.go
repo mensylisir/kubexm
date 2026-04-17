@@ -199,8 +199,19 @@ func Validate_ExternalEtcdConfig(cfg *ExternalEtcdConfig, verrs *validation.Vali
 			verrs.Add(fmt.Sprintf("%s.endpoints[%d]: endpoint cannot be empty", pathPrefix, i))
 		}
 	}
+	// Validate mTLS configuration
 	if (cfg.CertFile != "" && cfg.KeyFile == "") || (cfg.CertFile == "" && cfg.KeyFile != "") {
 		verrs.Add(pathPrefix + ": certFile and keyFile must be specified together for mTLS")
+	}
+	// Validate CA file is provided when using mTLS
+	if cfg.CAFile == "" && cfg.CertFile != "" {
+		verrs.Add(pathPrefix + ": caFile must be specified when using mTLS (certFile and keyFile)")
+	}
+	// Validate certificate files exist (basic path validation)
+	for _, certPath := range []string{cfg.CAFile, cfg.CertFile, cfg.KeyFile} {
+		if certPath != "" && strings.TrimSpace(certPath) == "" {
+			verrs.Add(pathPrefix + ": certificate path cannot contain only whitespace")
+		}
 	}
 }
 

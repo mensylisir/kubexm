@@ -2,7 +2,7 @@ package preflight
 
 import (
 	"fmt"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
@@ -41,7 +41,7 @@ func (t *PreflightCheckTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 func (t *PreflightCheckTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	allHosts := ctx.GetHostsByRole("")
 	if len(allHosts) == 0 {
@@ -77,7 +77,7 @@ func (t *PreflightCheckTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragm
 	lintSpecNode := &plan.ExecutionNode{
 		Name:  "LintClusterSpec",
 		Step:  lintSpecStep,
-		Hosts: []connector.Host{controlNode},
+		Hosts: []remotefw.Host{controlNode},
 	}
 	checkTimeSyncNode := &plan.ExecutionNode{
 		Name:  "CheckTimeSyncOnAllNodes",

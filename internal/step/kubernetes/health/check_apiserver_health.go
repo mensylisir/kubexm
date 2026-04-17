@@ -106,12 +106,12 @@ func (s *VerifyAPIServerHealthStep) checkAPIServer(ctx runtime.ExecutionContext)
 	}
 
 	isActiveCmd := fmt.Sprintf("systemctl is-active %s", s.serviceName)
-	stdout, err := runner.Run(ctx.GoContext(), conn, isActiveCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, isActiveCmd, s.Sudo)
 	if err != nil {
-		return fmt.Errorf("systemd service '%s' is not active. Status: %s", s.serviceName, string(stdout))
+		return fmt.Errorf("systemd service '%s' is not active. Status: %s", s.serviceName, runResult.Stdout)
 	}
-	if strings.TrimSpace(string(stdout)) != "active" {
-		return fmt.Errorf("systemd service '%s' status is '%s', expected 'active'", s.serviceName, string(stdout))
+	if strings.TrimSpace(runResult.Stdout) != "active" {
+		return fmt.Errorf("systemd service '%s' status is '%s', expected 'active'", s.serviceName, runResult.Stdout)
 	}
 
 	checkPortCmd := fmt.Sprintf("ss -lntp | grep -q ':%s.*kube-apiserver'", s.securePort)
@@ -121,12 +121,12 @@ func (s *VerifyAPIServerHealthStep) checkAPIServer(ctx runtime.ExecutionContext)
 
 	caPath := "/etc/kubernetes/ssl/ca.crt"
 	curlCmd := fmt.Sprintf("curl --cacert %s --resolve kubernetes.default.svc:%s:127.0.0.1 %s", caPath, s.securePort, s.healthzEndpoint)
-	stdout, err = runner.Run(ctx.GoContext(), conn, curlCmd, false)
+	runResult, err = runner.Run(ctx.GoContext(), conn, curlCmd, false)
 	if err != nil {
 		return fmt.Errorf("failed to connect to healthz endpoint '%s': %w", s.healthzEndpoint, err)
 	}
-	if strings.TrimSpace(string(stdout)) != "ok" {
-		return fmt.Errorf("healthz endpoint returned '%s', expected 'ok'", string(stdout))
+	if strings.TrimSpace(runResult.Stdout) != "ok" {
+		return fmt.Errorf("healthz endpoint returned '%s', expected 'ok'", runResult.Stdout)
 	}
 
 	return nil

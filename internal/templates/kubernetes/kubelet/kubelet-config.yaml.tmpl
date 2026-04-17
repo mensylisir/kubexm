@@ -54,12 +54,18 @@ imageGCHighThresholdPercent: 85
 imageGCLowThresholdPercent: 80
 imageMinimumGCAge: 0s
 # 资源预留
+{{- if .KubeReserved }}
 kubeReserved:
-  cpu: {{ .KubeReservedCPU }}
-  memory: {{ .KubeReservedMemory }}
+  {{- range $key, $value := .KubeReserved }}
+  {{ $key }}: "{{ $value }}"
+  {{- end }}
+{{- end }}
+{{- if .SystemReserved }}
 systemReserved:
-  cpu: {{ .SystemReservedCPU }}
-  memory: {{ .SystemReservedMemory }}
+  {{- range $key, $value := .SystemReserved }}
+  {{ $key }}: "{{ $value }}"
+  {{- end }}
+{{- end }}
 # 日志 (v1beta1 结构)
 logging:
   flushFrequency: 5s

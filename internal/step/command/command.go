@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/runner"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
@@ -73,21 +73,22 @@ func (s *CommandStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err e
 
 	logger.Debug("Executing CheckCmd", "command", s.CheckCmd)
 
+	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		logger.Error("Failed to get connector for host", "error", err)
 		return false, fmt.Errorf("failed to get connector for host %s for step %s: %w", ctx.GetHost().GetName(), s.Meta().Name, err)
 	}
 
-	opts := &connector.ExecOptions{
+	opts := &runner.ExecOptions{
 		Sudo:    s.CheckSudo,
 		Timeout: s.Timeout,
 		Env:     s.Env,
 	}
-	_, stderrBytes, runErr := conn.Exec(ctx.GoContext(), s.CheckCmd, opts)
+	_, stderrBytes, runErr := runnerSvc.RunWithOptions(ctx.GoContext(), conn, s.CheckCmd, opts)
 	checkCmdStderr := string(stderrBytes)
 	if runErr != nil {
-		var cmdErr *connector.CommandError
+		var cmdErr *runner.CommandError
 		if errors.As(runErr, &cmdErr) {
 			if cmdErr.ExitCode == s.CheckExpectedExitCode {
 				logger.Debug("CheckCmd completed with expected exit code. Main command will be skipped.", "exitCode", cmdErr.ExitCode)
@@ -121,16 +122,17 @@ func (s *CommandStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, erro
 		return result, err
 	}
 
-	opts := &connector.ExecOptions{
+	opts := &runner.ExecOptions{
 		Sudo:    s.Sudo,
 		Timeout: s.Timeout,
 		Env:     s.Env,
 	}
 
 	logger.Info("Running command", "command", s.Cmd, "sudo", s.Sudo)
-	stdoutBytes, stderrBytes, runErr := conn.Exec(ctx.GoContext(), s.Cmd, opts)
+	runnerSvc := ctx.GetRunner()
+	stdoutBytes, stderrBytes, runErr := runnerSvc.RunWithOptions(ctx.GoContext(), conn, s.Cmd, opts)
 	if runErr != nil {
-		var cmdErr *connector.CommandError
+		var cmdErr *runner.CommandError
 		if errors.As(runErr, &cmdErr) {
 			if s.IgnoreError {
 				logger.Warn("Command exited with error, but error is ignored.", "command", s.Cmd, "exitCode", cmdErr.ExitCode, "stdout", string(stdoutBytes), "stderr", string(stderrBytes))
@@ -162,7 +164,7 @@ func (s *CommandStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, erro
 	err = errors.New(errMsg)
 	logger.Error(err, "Command exited with 0, but expected non-zero.")
 	result.MarkFailed(err, fmt.Sprintf("unexpected exit code 0, expected %d", s.ExpectedExitCode))
-	return result, &connector.CommandError{
+	return result, &runner.CommandError{
 		Cmd:        s.Cmd,
 		Underlying: err,
 		ExitCode:   0,
@@ -181,23 +183,24 @@ func (s *CommandStep) Rollback(ctx runtime.ExecutionContext) error {
 
 	logger.Info("Attempting to run rollback command", "command", s.RollbackCmd, "sudo", s.RollbackSudo)
 
+	runnerSvc := ctx.GetRunner()
 	conn, err := ctx.GetCurrentHostConnector()
 	if err != nil {
 		logger.Error(err, "Failed to get connector for host during rollback")
 		return fmt.Errorf("failed to get connector for host %s for rollback of step %s: %w", ctx.GetHost().GetName(), s.Base.Meta.Name, err)
 	}
 
-	opts := &connector.ExecOptions{
+	opts := &runner.ExecOptions{
 		Sudo:    s.RollbackSudo,
 		Timeout: s.Timeout,
 		Env:     s.Env,
 	}
 
-	stdoutBytes, stderrBytes, runErr := conn.Exec(ctx.GoContext(), s.RollbackCmd, opts)
+	stdoutBytes, stderrBytes, runErr := runnerSvc.RunWithOptions(ctx.GoContext(), conn, s.RollbackCmd, opts)
 
 	if runErr != nil {
 		logger.Error(runErr, "Rollback command failed.", "command", s.RollbackCmd, "stdout", string(stdoutBytes), "stderr", string(stderrBytes))
-		var cmdErr *connector.CommandError
+		var cmdErr *runner.CommandError
 		if errors.As(runErr, &cmdErr) {
 			return fmt.Errorf("rollback command '%s' failed for step %s on host %s: %w", s.RollbackCmd, s.Base.Meta.Name, ctx.GetHost().GetName(), cmdErr)
 		}

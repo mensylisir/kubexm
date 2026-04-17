@@ -5,7 +5,7 @@ import (
 	"github.com/mensylisir/kubexm/internal/step/kubernetes/kubeadm"
 
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -38,7 +38,10 @@ func (t *RolloutMasterLeafCertsTask) Description() string {
 
 func (t *RolloutMasterLeafCertsTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 	var renewalTriggered bool
-	runtimeCtx := ctx.(*runtime.Context)
+	runtimeCtx, ok := ctx.(*runtime.Context)
+	if !ok {
+		return false, fmt.Errorf("ctx is not *runtime.Context")
+	}
 	caCacheKey := fmt.Sprintf(common.CacheKubeadmK8sCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
 	if val, ok := ctx.GetModuleCache().Get(caCacheKey); ok {
 		if renew, isBool := val.(bool); isBool && renew {
@@ -59,7 +62,7 @@ func (t *RolloutMasterLeafCertsTask) IsRequired(ctx runtime.TaskContext) (bool, 
 func (t *RolloutMasterLeafCertsTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
 	if len(masterHosts) == 0 {
@@ -70,7 +73,7 @@ func (t *RolloutMasterLeafCertsTask) Plan(ctx runtime.TaskContext) (*plan.Execut
 
 	for _, host := range masterHosts {
 		hostName := host.GetName()
-		hostList := []connector.Host{host}
+		hostList := []remotefw.Host{host}
 
 		distributeStep, err := kubeadmstep.NewKubeadmDistributeLeafCertsStepBuilder(runtimeCtx, fmt.Sprintf("DistributeLeafs-For-%s", hostName)).Build()
 		if err != nil {
@@ -110,7 +113,7 @@ func (t *RolloutMasterLeafCertsTask) Plan(ctx runtime.TaskContext) (*plan.Execut
 	verifyClusterNode := &plan.ExecutionNode{
 		Name:  "VerifyClusterHealthAfterLeafsRollout",
 		Step:  verifyClusterStep,
-		Hosts: []connector.Host{masterHosts[0]},
+		Hosts: []remotefw.Host{masterHosts[0]},
 	}
 	verifyClusterID, _ := fragment.AddNode(verifyClusterNode)
 

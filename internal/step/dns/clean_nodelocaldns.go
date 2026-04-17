@@ -82,9 +82,9 @@ func (s *CleanNodeLocalDNSStep) Run(ctx runtime.ExecutionContext) (*types.StepRe
 		deleteCmd := fmt.Sprintf("kubectl delete -f %s --ignore-not-found=true", remoteManifestPath)
 		logger.Info("Cleaning up NodeLocal DNSCache using manifest.", "command", deleteCmd)
 
-		output, err := runner.Run(ctx.GoContext(), conn, deleteCmd, s.Sudo)
+		runResult, err := runner.Run(ctx.GoContext(), conn, deleteCmd, s.Sudo)
 		if err != nil {
-			logger.Warn(err, "kubectl delete -f command failed, will attempt deletion by label as a fallback.", "output", output)
+			logger.Warn(err, "kubectl delete -f command failed, will attempt deletion by label as a fallback.", "output", runResult.Stdout)
 			return s.deleteByLabel(ctx)
 		}
 

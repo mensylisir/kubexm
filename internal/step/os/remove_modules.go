@@ -15,6 +15,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+var _ step.Step = (*RemoveKernelModulesStep)(nil)
+
 type RemoveKernelModulesStep struct {
 	step.Base
 	removedFileContent []byte

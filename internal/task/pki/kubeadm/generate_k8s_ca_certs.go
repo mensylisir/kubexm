@@ -37,7 +37,10 @@ func (t *GenerateK8sCACertsTask) Description() string {
 
 func (t *GenerateK8sCACertsTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 	var caRequiresRenewal bool
-	runtimeCtx := ctx.(*runtime.Context)
+	runtimeCtx, ok := ctx.(*runtime.Context)
+	if !ok {
+		return false, fmt.Errorf("ctx is not *runtime.Context")
+	}
 	cacheKey := fmt.Sprintf(common.CacheKubeadmK8sCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
 	if rawVal, ok := ctx.GetModuleCache().Get(cacheKey); ok {
 		if val, isBool := rawVal.(bool); isBool {
@@ -51,7 +54,7 @@ func (t *GenerateK8sCACertsTask) IsRequired(ctx runtime.TaskContext) (bool, erro
 func (t *GenerateK8sCACertsTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	prepareAssetsStep, err := kubeadmstep.NewKubeadmPrepareCAAssetsStepBuilder(runtimeCtx, "PrepareK8sCAAssets").Build()
 	if err != nil {

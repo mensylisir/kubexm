@@ -40,10 +40,17 @@ type CreateKubeletKubeconfigStepBuilder struct {
 func NewCreateKubeletKubeconfigStepBuilder(ctx runtime.ExecutionContext, instanceName string) *CreateKubeletKubeconfigStepBuilder {
 	clusterCfg := ctx.GetClusterConfig()
 	k8sSpec := clusterCfg.Spec.Kubernetes
+	
+	// For internal LB mode, kubelets connect to local LB (127.0.0.1), not VIP
+	// This ensures kubelets always have connectivity even if VIP fails
+	ha := clusterCfg.Spec.ControlPlaneEndpoint.HighAvailability
+	useLocalLB := ha != nil && ha.Internal != nil && ha.Internal.Enabled != nil && *ha.Internal.Enabled
+	
 	controlEndpoint := "127.0.0.1"
-	if clusterCfg.Spec.ControlPlaneEndpoint.Address != "" {
+	if !useLocalLB && clusterCfg.Spec.ControlPlaneEndpoint.Address != "" {
 		controlEndpoint = clusterCfg.Spec.ControlPlaneEndpoint.Address
 	}
+	
 	s := &CreateKubeletKubeconfigStep{
 		ClusterName:          k8sSpec.ClusterName,
 		APIServerURL:         fmt.Sprintf("https://%s:%d", controlEndpoint, common.DefaultAPIServerPort),

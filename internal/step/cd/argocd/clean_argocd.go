@@ -9,7 +9,7 @@ import (
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
-	"github.com/mensylisir/kubexm/internal/step/helpers/bom/helm"
+	"github.com/mensylisir/kubexm/internal/util/helm"
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
@@ -106,9 +106,9 @@ func (s *CleanArgoCDStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, 
 	)
 
 	logger.Info("Executing remote Helm uninstall command.", "command", cmd)
-	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
-		logger.Error(err, "Failed to uninstall Argo CD Helm chart.", "output", output)
+		logger.Error(err, "Failed to uninstall Argo CD Helm chart.", "output", runResult.Stdout)
 	}
 
 	logger.Info("Argo CD Helm chart uninstalled successfully.")

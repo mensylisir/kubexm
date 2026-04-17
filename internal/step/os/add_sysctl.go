@@ -15,6 +15,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+var _ step.Step = (*ConfigureSysctlStep)(nil)
+
 type ConfigureSysctlStep struct {
 	step.Base
 	configFileCreated bool

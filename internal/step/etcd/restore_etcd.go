@@ -112,6 +112,9 @@ func (s *RestoreEtcdStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, 
 
 	logger.Warn("Removing old etcd data directory...", "path", s.DataDir)
 	if err := runner.Remove(ctx.GoContext(), conn, s.DataDir, s.Sudo, true); err != nil {
+		err = fmt.Errorf("failed to remove old etcd data directory %s: %w", s.DataDir, err)
+		result.MarkFailed(err, "Failed to remove old etcd data")
+		return result, err
 	}
 
 	restoredDataDirName := fmt.Sprintf("%s.etcd", ctx.GetHost().GetName())

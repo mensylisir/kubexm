@@ -115,12 +115,12 @@ func (s *KubeadmVerifyEtcdClusterHealthStep) checkClusterHealth(ctx runtime.Exec
 
 	shellCmd := fmt.Sprintf("bash -c \"%s\"", etcdHealthCmd)
 
-	stdout, err := runner.Run(ctx.GoContext(), conn, shellCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, shellCmd, s.Sudo)
 	if err != nil {
-		return fmt.Errorf("failed to execute 'etcdctl endpoint health': %w. Output: %s", err, string(stdout))
+		return fmt.Errorf("failed to execute 'etcdctl endpoint health': %w. Output: %s", err, runResult.Stdout)
 	}
 
-	output := string(stdout)
+	output := runResult.Stdout
 
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	if len(lines) < 1 {

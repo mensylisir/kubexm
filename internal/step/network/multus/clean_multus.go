@@ -9,7 +9,7 @@ import (
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
-	"github.com/mensylisir/kubexm/internal/step/helpers/bom/helm"
+	"github.com/mensylisir/kubexm/internal/util/helm"
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
@@ -115,15 +115,15 @@ func (s *CleanMultusStep) Run(ctx runtime.ExecutionContext) (*types.StepResult, 
 	)
 
 	logger.Infof("Executing remote Helm uninstall command: %s", cmd)
-	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
-		logger.Errorf("Failed to uninstall Multus CNI Helm chart: %v\nOutput: %s", err, output)
+		logger.Errorf("Failed to uninstall Multus CNI Helm chart: %v\nOutput: %s", err, runResult.Stdout)
 		result.MarkFailed(err, fmt.Sprintf("helm uninstall failed for release %s", s.ReleaseName))
 		return result, err
 	}
 
 	logger.Info("Multus CNI Helm chart uninstalled successfully.")
-	logger.Debugf("Helm uninstall command output:\n%s", output)
+	logger.Debugf("Helm uninstall command output:\n%s", runResult.Stdout)
 	result.MarkCompleted("Multus CNI Helm chart uninstalled successfully")
 	return result, nil
 }

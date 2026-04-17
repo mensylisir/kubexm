@@ -9,7 +9,7 @@ import (
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
-	"github.com/mensylisir/kubexm/internal/step/helpers/bom/helm"
+	"github.com/mensylisir/kubexm/internal/util/helm"
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
@@ -111,9 +111,9 @@ func (s *CleanNFSProvisionerStep) Run(ctx runtime.ExecutionContext) (*types.Step
 	)
 
 	logger.Infof("Executing remote Helm uninstall command: %s", cmd)
-	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
-		logger.Errorf("Failed to uninstall NFS Provisioner Helm chart: %v\nOutput: %s", err, output)
+		logger.Errorf("Failed to uninstall NFS Provisioner Helm chart: %v\nOutput: %s", err, runResult.Stdout)
 	}
 
 	logger.Info("NFS Provisioner Helm chart uninstalled successfully.")

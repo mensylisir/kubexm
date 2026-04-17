@@ -60,10 +60,14 @@ func (s *GenerateJoinMasterConfigStep) renderContent(ctx runtime.ExecutionContex
 	data := JoinMasterTemplateData{}
 
 	data.Discovery.APIServerEndpoint = fmt.Sprintf("%s:%d", cluster.Spec.ControlPlaneEndpoint.Domain, cluster.Spec.ControlPlaneEndpoint.Port)
-	cacheKey := fmt.Sprintf(common.CacheKubeadmInitToken, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	// IMPORTANT: Use fixed task name "KubeadmInit" for cache keys, not the current task name.
+	// The token/certKey are written by BootstrapFirstMasterTask.KubeadmInit step,
+	// and read by JoinMastersTask.GenerateJoinMasterConfig step.
+	// Using ctx.GetTaskName() would cause key mismatch and join would always fail.
+	cacheKey := fmt.Sprintf(common.CacheKubeadmInitToken, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), "KubeadmInit")
 	tokenVal, found := ctx.GetTaskCache().Get(cacheKey)
 	if !found {
-		return nil, fmt.Errorf("bootstrap token not found in task cache with key '%s'", cacheKey)
+		return nil, fmt.Errorf("bootstrap token not found in task cache with key '%s' (did KubeadmInit step run successfully?)", cacheKey)
 	}
 	token, ok := tokenVal.(string)
 	if !ok {
@@ -71,10 +75,10 @@ func (s *GenerateJoinMasterConfigStep) renderContent(ctx runtime.ExecutionContex
 	}
 	data.Discovery.BootstrapToken = token
 
-	cacheKey = fmt.Sprintf(common.CacheKubeadmInitCertKey, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), ctx.GetTaskName())
+	cacheKey = fmt.Sprintf(common.CacheKubeadmInitCertKey, ctx.GetRunID(), ctx.GetPipelineName(), ctx.GetModuleName(), "KubeadmInit")
 	certKeyVal, found := ctx.GetTaskCache().Get(cacheKey)
 	if !found {
-		return nil, fmt.Errorf("certificate key not found in task cache with key '%s'", cacheKey)
+		return nil, fmt.Errorf("certificate key not found in task cache with key '%s' (did KubeadmInit step run successfully?)", cacheKey)
 	}
 	certKey, ok := certKeyVal.(string)
 	if !ok {

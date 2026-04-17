@@ -47,10 +47,18 @@ func (s *TransformImagesStep) Run(ctx runtime.ExecutionContext) (*types.StepResu
 	result := types.NewStepResult(s.Base.Meta.Name, ctx.GetStepExecutionID(), ctx.GetHost())
 	logger.Info("Starting image name transformation...")
 
-	registryConfig := ctx.GetClusterConfig().Spec.Registry.MirroringAndRewriting
-	if registryConfig == nil {
+	registryConfig := &struct {
+		PrivateRegistry   string
+		NamespaceOverride string
+		NamespaceRewrite  *v1alpha1.NamespaceRewrite
+	}{}
+	if cfg := ctx.GetClusterConfig(); cfg != nil && cfg.Spec.Registry != nil && cfg.Spec.Registry.MirroringAndRewriting != nil {
+		registryConfig.PrivateRegistry = cfg.Spec.Registry.MirroringAndRewriting.PrivateRegistry
+		registryConfig.NamespaceOverride = cfg.Spec.Registry.MirroringAndRewriting.NamespaceOverride
+		registryConfig.NamespaceRewrite = cfg.Spec.Registry.MirroringAndRewriting.NamespaceRewrite
+	}
+	if registryConfig.PrivateRegistry == "" {
 		logger.Info("No registry mirroring or rewriting configuration found. Using default image names.")
-		registryConfig = &v1alpha1.RegistryMirroringAndRewriting{}
 	}
 
 	var finalImageNames []string

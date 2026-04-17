@@ -122,14 +122,14 @@ func (s *InstallAddonChartStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 		s.AdminKubeconfigPath,
 	)
 
-	output, err := runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
 	if err != nil {
 		logger.Info("Helm release not found. Installation is required.", "release", s.ReleaseName)
 		return false, nil
 	}
 
 	var status helmStatusOutput
-	if err := json.Unmarshal([]byte(output), &status); err != nil {
+	if err := json.Unmarshal([]byte(runResult.Stdout), &status); err != nil {
 		logger.Warn(err, "Failed to parse helm status, assuming upgrade is needed.", "release", s.ReleaseName)
 		return false, nil
 	}
@@ -170,14 +170,14 @@ func (s *InstallAddonChartStep) Run(ctx runtime.ExecutionContext) (*types.StepRe
 	cmd := cmdBuilder.String()
 
 	logger.Info("Executing remote Helm command.", "command", cmd)
-	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
 		result.MarkFailed(err, fmt.Sprintf("failed to install/upgrade addon helm chart '%s'", s.ReleaseName))
 		return result, err
 	}
 
 	logger.Info("Addon Helm chart installed/upgraded successfully.")
-	logger.Debug("Helm command output.", "output", output)
+	logger.Debug("Helm command output.", "output", runResult.Stdout)
 	result.MarkCompleted("addon helm chart installed successfully")
 	return result, nil
 }

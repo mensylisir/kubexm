@@ -3,7 +3,7 @@ package kubexm
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -33,13 +33,13 @@ func (t *GenerateAdminConfigTask) IsRequired(ctx runtime.TaskContext) (bool, err
 func (t *GenerateAdminConfigTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
 	if len(masterHosts) == 0 {
 		return nil, fmt.Errorf("no master host found to generate admin.conf")
 	}
-	executionHost := []connector.Host{masterHosts[0]}
+	executionHost := []remotefw.Host{masterHosts[0]}
 
 	generateAdminConf, err := kubeconfigstep.NewGenerateAdminKubeconfigStepBuilder(runtimeCtx, "GenerateAdminKubeconfig").Build()
 	if err != nil {

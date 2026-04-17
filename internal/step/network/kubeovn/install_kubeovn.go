@@ -10,7 +10,7 @@ import (
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
-	"github.com/mensylisir/kubexm/internal/step/helpers/bom/helm"
+	"github.com/mensylisir/kubexm/internal/util/helm"
 	"github.com/mensylisir/kubexm/internal/types"
 	"github.com/pkg/errors"
 )
@@ -112,14 +112,14 @@ func (s *InstallKubeOvnHelmChartStep) Precheck(ctx runtime.ExecutionContext) (is
 		s.AdminKubeconfigPath,
 	)
 
-	output, err := runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, statusCmd, s.Sudo)
 	if err != nil {
 		logger.Infof("Helm release '%s' not found. Installation is required.", s.ReleaseName)
 		return false, nil
 	}
 
 	var status helmStatusOutput
-	if err := json.Unmarshal([]byte(output), &status); err != nil {
+	if err := json.Unmarshal([]byte(runResult.Stdout), &status); err != nil {
 		return false, errors.Wrap(err, "failed to parse helm status JSON output")
 	}
 
@@ -158,14 +158,14 @@ func (s *InstallKubeOvnHelmChartStep) Run(ctx runtime.ExecutionContext) (*types.
 	)
 
 	logger.Infof("Executing remote Helm command: %s", cmd)
-	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
 		result.MarkFailed(err, "failed to install/upgrade Kube-OVN Helm chart")
 		return result, err
 	}
 
 	logger.Info("Kube-OVN Helm chart installed/upgraded successfully.")
-	logger.Debugf("Helm command output:\n%s", output)
+	logger.Debugf("Helm command output:\n%s", runResult.Stdout)
 	result.MarkCompleted("Kube-OVN Helm chart installed/upgraded successfully")
 	return result, nil
 }

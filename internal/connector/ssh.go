@@ -563,7 +563,7 @@ func (s *SSHConnector) GetOS(ctx context.Context) (*OS, error) {
 	}
 
 	if osInfo.ID == "" {
-		return nil, fmt.Errorf("failed to determine OS: %v", err)
+		return nil, fmt.Errorf("failed to determine OS: %w", err)
 	}
 
 	s.cachedOS = osInfo

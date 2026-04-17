@@ -16,6 +16,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+var _ step.Step = (*ConfigureSecurityLimitsStep)(nil)
+
 type ConfigureSecurityLimitsStep struct {
 	step.Base
 	configFileCreated bool

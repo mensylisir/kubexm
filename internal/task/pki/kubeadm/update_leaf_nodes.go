@@ -3,7 +3,7 @@ package kubeadm
 import (
 	"fmt"
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -37,7 +37,10 @@ func (t *UpdateWorkerNodesTask) Description() string {
 
 func (t *UpdateWorkerNodesTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 	var renewalTriggered bool
-	runtimeCtx := ctx.(*runtime.Context)
+	runtimeCtx, ok := ctx.(*runtime.Context)
+	if !ok {
+		return false, fmt.Errorf("ctx is not *runtime.Context")
+	}
 	caCacheKey := fmt.Sprintf(common.CacheKubeadmK8sCACertRenew, runtimeCtx.GetRunID(), runtimeCtx.GetPipelineName(), runtimeCtx.GetModuleName(), t.Name())
 	if val, ok := ctx.GetModuleCache().Get(caCacheKey); ok {
 		if renew, isBool := val.(bool); isBool && renew {
@@ -58,7 +61,7 @@ func (t *UpdateWorkerNodesTask) IsRequired(ctx runtime.TaskContext) (bool, error
 func (t *UpdateWorkerNodesTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	workerHosts := ctx.GetHostsByRole(common.RoleWorker)
 	masterHosts := ctx.GetHostsByRole(common.RoleMaster)
@@ -68,7 +71,7 @@ func (t *UpdateWorkerNodesTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFr
 		masterHostNames[master.GetName()] = true
 	}
 
-	pureWorkerHosts := make([]connector.Host, 0)
+	pureWorkerHosts := make([]remotefw.Host, 0)
 	for _, worker := range workerHosts {
 		if !masterHostNames[worker.GetName()] {
 			pureWorkerHosts = append(pureWorkerHosts, worker)
@@ -86,7 +89,7 @@ func (t *UpdateWorkerNodesTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFr
 
 	for _, host := range pureWorkerHosts {
 		hostName := host.GetName()
-		hostList := []connector.Host{host}
+		hostList := []remotefw.Host{host}
 
 		distributeCAStep, err := kubeadmstep.NewKubeadmDistributeK8sPKIStepBuilder(runtimeCtx, fmt.Sprintf("DistributeCAFor%s", hostName)).Build()
 		if err != nil {
@@ -133,7 +136,7 @@ func (t *UpdateWorkerNodesTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFr
 	verifyClusterNode := &plan.ExecutionNode{
 		Name:  "VerifyClusterHealthAfterWorkerRollout",
 		Step:  verifyClusterStep,
-		Hosts: []connector.Host{firstMaster},
+		Hosts: []remotefw.Host{firstMaster},
 	}
 	verifyClusterID, _ := fragment.AddNode(verifyClusterNode)
 

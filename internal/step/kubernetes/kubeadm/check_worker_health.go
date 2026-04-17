@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mensylisir/kubexm/internal/connector"
 	"github.com/mensylisir/kubexm/internal/runtime"
+	"github.com/mensylisir/kubexm/internal/runner"
 	"github.com/mensylisir/kubexm/internal/spec"
 	"github.com/mensylisir/kubexm/internal/step"
 	"github.com/mensylisir/kubexm/internal/types"
@@ -131,7 +131,7 @@ func (s *KubeadmVerifyWorkerHealthStep) checkWorkerHealth(ctx runtime.ExecutionC
 	return nil
 }
 
-func (s *KubeadmVerifyWorkerHealthStep) checkKubeletHealth(ctx runtime.ExecutionContext, conn connector.Connector) error {
+func (s *KubeadmVerifyWorkerHealthStep) checkKubeletHealth(ctx runtime.ExecutionContext, conn runner.Connector) error {
 	logger := ctx.GetLogger().With("component", s.kubeletServiceName)
 	runner := ctx.GetRunner()
 	facts, err := runner.GatherFacts(ctx.GoContext(), conn)
@@ -159,19 +159,19 @@ func (s *KubeadmVerifyWorkerHealthStep) checkKubeletHealth(ctx runtime.Execution
 	logger.Info("Kubelet service is active and not in a failed state.")
 	return nil
 }
-func (s *KubeadmVerifyWorkerHealthStep) checkKubeProxyHealth(ctx runtime.ExecutionContext, conn connector.Connector) error {
+func (s *KubeadmVerifyWorkerHealthStep) checkKubeProxyHealth(ctx runtime.ExecutionContext, conn runner.Connector) error {
 	logger := ctx.GetLogger().With("component", s.kubeProxyPodName)
 	runner := ctx.GetRunner()
 
 	logger.Info("Checking kube-proxy container status...")
 
 	cmd := fmt.Sprintf("crictl ps --name %s --no-trunc", s.kubeProxyPodName)
-	stdout, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
 		return fmt.Errorf("failed to list containers for kube-proxy: %w", err)
 	}
 
-	output := string(stdout)
+	output := runResult.Stdout
 	if !strings.Contains(output, s.kubeProxyPodName) {
 		return fmt.Errorf("container for kube-proxy not found")
 	}

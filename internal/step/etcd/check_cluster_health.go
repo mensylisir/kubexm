@@ -114,23 +114,23 @@ func (s *EtcdVerifyClusterHealthStep) checkClusterHealth(ctx runtime.ExecutionCo
 	listEndpointsCmd := fmt.Sprintf("%s --endpoints=https://127.0.0.1:2379 member list -w simple | awk -F', ' '{print $5}' | paste -sd, -", baseEtcdctlCmd)
 
 	shellCmd := fmt.Sprintf("bash -c \"%s\"", listEndpointsCmd)
-	stdout, err := runner.Run(ctx.GoContext(), conn, shellCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, shellCmd, s.Sudo)
 	if err != nil {
-		return fmt.Errorf("failed to get etcd member endpoints: %w. Output: %s", err, string(stdout))
+		return fmt.Errorf("failed to get etcd member endpoints: %w. Output: %s", err, runResult.Stdout)
 	}
-	endpoints := strings.TrimSpace(string(stdout))
+	endpoints := strings.TrimSpace(runResult.Stdout)
 	if endpoints == "" {
 		return fmt.Errorf("could not determine any etcd endpoints from member list")
 	}
 
 	healthCmd := fmt.Sprintf("%s --endpoints=%s endpoint health --cluster", baseEtcdctlCmd, endpoints)
 
-	stdout, err = runner.Run(ctx.GoContext(), conn, healthCmd, s.Sudo)
+	runResult, err = runner.Run(ctx.GoContext(), conn, healthCmd, s.Sudo)
 	if err != nil {
-		return fmt.Errorf("cluster health check command failed: %w. Output: %s", err, string(stdout))
+		return fmt.Errorf("cluster health check command failed: %w. Output: %s", err, runResult.Stdout)
 	}
 
-	output := string(stdout)
+	output := runResult.Stdout
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 
 	if len(lines) != len(etcdNodes) {

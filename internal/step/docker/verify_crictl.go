@@ -11,6 +11,8 @@ import (
 	"github.com/mensylisir/kubexm/internal/types"
 )
 
+var _ step.Step = (*VerifyCrictlStep)(nil)
+
 type VerifyCrictlStep struct {
 	step.Base
 	CrictlPath      string
@@ -52,6 +54,33 @@ func (s *VerifyCrictlStep) Meta() *spec.StepMeta {
 }
 
 func (s *VerifyCrictlStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		return false, err
+	}
+
+	cmdArgs := []string{s.CrictlPath}
+	if s.RuntimeEndpoint != "" {
+		cmdArgs = append(cmdArgs, "--runtime-endpoint", s.RuntimeEndpoint)
+	}
+	cmdArgs = append(cmdArgs, "info")
+	cmd := strings.Join(cmdArgs, " ")
+
+	logger.Info("Precheck: executing crictl info to verify CRI interface.")
+	stdout, stderr, err := runner.OriginRun(ctx.GoContext(), conn, cmd, s.Sudo)
+	if err != nil {
+		logger.Warnf("crictl info failed during precheck: %v. Stderr: %s", err, stderr)
+		return false, nil
+	}
+
+	if strings.Contains(strings.ToLower(stdout), "docker") && strings.Contains(stdout, "ServerVersion") {
+		logger.Info("crictl info already indicates healthy CRI interface. Skipping.")
+		return true, nil
+	}
+
+	logger.Info("CRI interface verification needed.")
 	return false, nil
 }
 
@@ -85,10 +114,11 @@ func (s *VerifyCrictlStep) Run(ctx runtime.ExecutionContext) (*types.StepResult,
 
 	if !strings.Contains(strings.ToLower(outputStr), "docker") || !strings.Contains(outputStr, "ServerVersion") {
 		logger.Warn("Output of 'crictl info' (for cri-dockerd) does not clearly indicate Docker information.", "output", outputStr)
-	} else {
-		logger.Info("crictl info output (for cri-dockerd) contains Docker information, CRI interface appears healthy.")
+		result.MarkFailed(fmt.Errorf("crictl info output does not contain expected Docker/ServerVersion fields"), "CRI interface verification failed")
+		return result, fmt.Errorf("crictl info output does not contain expected Docker/ServerVersion fields")
 	}
 
+	logger.Info("crictl info output (for cri-dockerd) contains Docker information, CRI interface appears healthy.")
 	result.MarkCompleted("crictl verification successful")
 	return result, nil
 }

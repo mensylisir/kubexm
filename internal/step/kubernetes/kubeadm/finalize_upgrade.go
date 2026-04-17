@@ -110,16 +110,16 @@ func (s *KubeadmFinalizeUpgradeStep) Run(ctx runtime.ExecutionContext) (*types.S
 	finalizeCmd := fmt.Sprintf("kubeadm upgrade apply %s --yes", versionStr)
 
 	log.Infof("Re-running 'kubeadm upgrade apply' to finalize addon configuration...")
-	stdout, err := runner.Run(ctx.GoContext(), conn, finalizeCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, finalizeCmd, s.Sudo)
 	if err != nil {
-		err = fmt.Errorf("failed to finalize upgrade with 'kubeadm upgrade apply': %w. Output:\n%s", err, string(stdout))
+		err = fmt.Errorf("failed to finalize upgrade with 'kubeadm upgrade apply': %w. Output:\n%s", err, runResult.Stdout)
 		result.MarkFailed(err, "failed to finalize upgrade")
 		return result, err
 	}
 
 	// The output should indicate that the control plane is already upgraded and it's just checking addons.
-	if !strings.Contains(string(stdout), "is already up to date") && !strings.Contains(string(stdout), "Upgraded CoreDNS") {
-		log.Warnf("Finalize command output was unexpected, but may have succeeded. Output:\n%s", string(stdout))
+	if !strings.Contains(runResult.Stdout, "is already up to date") && !strings.Contains(runResult.Stdout, "Upgraded CoreDNS") {
+		log.Warnf("Finalize command output was unexpected, but may have succeeded. Output:\n%s", runResult.Stdout)
 	}
 
 	logger.Info("Finalization tasks completed successfully.")

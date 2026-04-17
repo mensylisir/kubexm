@@ -2,6 +2,7 @@ package helpers
 
 import (
 	"math/rand"
+	"sync"
 	"time"
 )
 
@@ -10,14 +11,20 @@ const (
 	tokenSecretChars = "abcdefghijklmnopqrstuvwxyz0123456789"
 )
 
-var seededRand *rand.Rand = rand.New(
-	rand.NewSource(time.Now().UnixNano()))
+// seededRand is protected by randMu to ensure thread-safe access.
+// math/rand.Rand is not safe for concurrent use.
+var (
+	seededRand = rand.New(rand.NewSource(time.Now().UnixNano()))
+	randMu     sync.Mutex
+)
 
 func GenerateRandomString(length int, charset string) string {
 	b := make([]byte, length)
+	randMu.Lock()
 	for i := range b {
 		b[i] = charset[seededRand.Intn(len(charset))]
 	}
+	randMu.Unlock()
 	return string(b)
 }
 

@@ -60,13 +60,13 @@ func (s *ConfigureTimezoneStep) Precheck(ctx runtime.ExecutionContext) (isDone b
 	}
 
 	getCurrentTimezoneCmd := "timedatectl | grep 'Time zone' | awk '{print $3}'"
-	stdout, err := runner.Run(ctx.GoContext(), conn, getCurrentTimezoneCmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, getCurrentTimezoneCmd, s.Sudo)
 	if err != nil {
 		logger.Warnf("Failed to get current timezone, will attempt to set it. Error: %v", err)
 		return false, nil
 	}
 
-	currentTimezone := strings.TrimSpace(string(stdout))
+	currentTimezone := strings.TrimSpace(runResult.Stdout)
 
 	if currentTimezone == s.Timezone {
 		logger.Infof("Precheck: System timezone is already set to '%s'. Step is done.", s.Timezone)

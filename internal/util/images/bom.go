@@ -1,11 +1,11 @@
 package images
 
 import (
-	"fmt"
 	"path"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+	"github.com/mensylisir/kubexm/internal/logger"
 )
 
 // ImageBOM 定义了一个镜像的版本及其在原始仓库的元数据。
@@ -106,7 +106,7 @@ func getImageBOM(componentName string, kubeVersionStr string) *ImageBOM {
 	}
 	k8sVersion, err := semver.NewVersion(kubeVersionStr)
 	if err != nil {
-		fmt.Printf("Warning: could not parse kubernetes version '%s' for image BOM lookup: %v\n", kubeVersionStr, err)
+		logger.Warn("could not parse kubernetes version '%s' for image BOM lookup: %v", kubeVersionStr, err)
 		return nil
 	}
 	bomList, ok := componentImageBOMs[componentName]
@@ -128,7 +128,7 @@ func getImageBOM(componentName string, kubeVersionStr string) *ImageBOM {
 		constraintStr := strings.ReplaceAll(bomEntry.KubeVersionConstraints, ".x", ".*")
 		constraints, err := semver.NewConstraint(constraintStr)
 		if err != nil {
-			fmt.Printf("Error: invalid version constraint in image BOM for %s: '%s'. Skipping.\n", componentName, bomEntry.KubeVersionConstraints)
+			logger.Warn("invalid version constraint in image BOM for %s: '%s'. Skipping.", componentName, bomEntry.KubeVersionConstraints)
 			continue
 		}
 		if constraints.Check(k8sVersion) {
@@ -136,7 +136,7 @@ func getImageBOM(componentName string, kubeVersionStr string) *ImageBOM {
 		}
 	}
 	if len(candidates) == 0 {
-		fmt.Printf("Warning: no compatible image version found in BOM for component '%s' with K8s '%s'\n", componentName, kubeVersionStr)
+		logger.Warn("no compatible image version found in BOM for component '%s' with K8s '%s'", componentName, kubeVersionStr)
 		return nil
 	}
 	bestCandidate := candidates[0]

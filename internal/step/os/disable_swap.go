@@ -13,6 +13,8 @@ import (
 	"github.com/mensylisir/kubexm/internal/step"
 )
 
+var _ step.Step = (*DisableSwapStep)(nil)
+
 type DisableSwapStep struct {
 	step.Base
 	originalFstabContent string
@@ -50,9 +52,9 @@ func (s *DisableSwapStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, e
 		return false, err
 	}
 
-	swapStatus, _ := runner.Run(ctx.GoContext(), conn, "swapon --show", s.Sudo)
+	runResult, _ := runner.Run(ctx.GoContext(), conn, "swapon --show", s.Sudo)
 
-	if strings.TrimSpace(swapStatus) == "" {
+	if strings.TrimSpace(runResult.Stdout) == "" {
 		logger.Info("Swap is already disabled.")
 		return true, nil
 	}

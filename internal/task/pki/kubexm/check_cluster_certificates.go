@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -42,7 +42,7 @@ func (t *CheckClusterCertificatesTask) IsRequired(ctx runtime.TaskContext) (bool
 func (t *CheckClusterCertificatesTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	masterNodes := ctx.GetHostsByRole(common.RoleMaster)
 	if len(masterNodes) == 0 {
@@ -54,7 +54,7 @@ func (t *CheckClusterCertificatesTask) Plan(ctx runtime.TaskContext) (*plan.Exec
 	if err != nil {
 		return nil, err
 	}
-	controlNodeList := []connector.Host{controlNode}
+	controlNodeList := []remotefw.Host{controlNode}
 
 	fetchPkiStep, err := kubexmstep.NewKubxmFetchPKIStepBuilder(runtimeCtx, "FetchCorePKI").Build()
 	if err != nil {
@@ -69,9 +69,9 @@ func (t *CheckClusterCertificatesTask) Plan(ctx runtime.TaskContext) (*plan.Exec
 		return nil, err
 	}
 
-	fetchPkiNode := &plan.ExecutionNode{Name: "FetchCorePKIFromMaster", Step: fetchPkiStep, Hosts: []connector.Host{firstMaster}}
+	fetchPkiNode := &plan.ExecutionNode{Name: "FetchCorePKIFromMaster", Step: fetchPkiStep, Hosts: []remotefw.Host{firstMaster}}
 	checkCaNode := &plan.ExecutionNode{Name: "CheckCAExpirationLocally", Step: checkCaStep, Hosts: controlNodeList}
-	checkLeafNode := &plan.ExecutionNode{Name: "CheckLeafCertsExpirationOnMaster", Step: checkLeafStep, Hosts: []connector.Host{firstMaster}}
+	checkLeafNode := &plan.ExecutionNode{Name: "CheckLeafCertsExpirationOnMaster", Step: checkLeafStep, Hosts: []remotefw.Host{firstMaster}}
 
 	fetchPkiNodeID, _ := fragment.AddNode(fetchPkiNode)
 	checkCaNodeID, _ := fragment.AddNode(checkCaNode)

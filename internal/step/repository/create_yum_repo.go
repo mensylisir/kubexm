@@ -97,13 +97,13 @@ func (s *CreateYumRepoStep) Run(ctx runtime.ExecutionContext) (*types.StepResult
 	cmd := fmt.Sprintf("%s --update %s", cmdName, s.RepoDir)
 
 	logger.Info("Creating/updating yum repository...", "command", cmd)
-	output, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
+	runResult, err := runner.Run(ctx.GoContext(), conn, cmd, s.Sudo)
 	if err != nil {
-		err = errors.Wrapf(err, "failed to create yum repository\nOutput:\n%s", output)
+		err = errors.Wrapf(err, "failed to create yum repository\nOutput:\n%s", runResult.Stdout)
 		result.MarkFailed(err, "failed to create yum repository")
 		return result, err
 	}
-	logger.Debug("Command output.", "output", output)
+	logger.Debug("Command output.", "output", runResult.Stdout)
 
 	logger.Info("Yum repository created/updated successfully.", "directory", s.RepoDir)
 	result.MarkCompleted("Yum repository created/updated successfully")

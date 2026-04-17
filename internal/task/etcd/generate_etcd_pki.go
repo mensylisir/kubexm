@@ -2,7 +2,7 @@ package etcd
 
 import (
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -28,19 +28,26 @@ func NewGenerateEtcdPKITask() task.Task {
 func (t *GenerateEtcdPKITask) Name() string                                     { return t.Meta.Name }
 func (t *GenerateEtcdPKITask) Description() string                              { return t.Meta.Description }
 func (t *GenerateEtcdPKITask) IsRequired(ctx runtime.TaskContext) (bool, error) {
-	return ctx.GetClusterConfig().Spec.Etcd.Type != string(common.EtcdDeploymentTypeExternal), nil
+	// Only generate etcd PKI when kubexm is deploying etcd (binary mode)
+	// For kubeadm type, kubeadm generates its own etcd certs
+	// For external type, user provides their own etcd certs
+	etcdSpec := ctx.GetClusterConfig().Spec.Etcd
+	if etcdSpec == nil {
+		return false, nil
+	}
+	return etcdSpec.Type == string(common.EtcdDeploymentTypeKubexm), nil
 }
 
 func (t *GenerateEtcdPKITask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	controlNode, err := ctx.GetControlNode()
 	if err != nil {
 		return nil, err
 	}
-	executionHost := []connector.Host{controlNode}
+	executionHost := []remotefw.Host{controlNode}
 
 	generateEtcdCA, err := etcdcertsstep.NewGenerateEtcdCAStepBuilder(runtimeCtx, "GenerateEtcdCA").Build()
 	if err != nil {

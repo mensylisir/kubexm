@@ -2,7 +2,7 @@ package registry
 
 import (
 	"github.com/mensylisir/kubexm/internal/common"
-	"github.com/mensylisir/kubexm/internal/connector"
+	"github.com/mensylisir/kubexm/internal/remotefw"
 	"github.com/mensylisir/kubexm/internal/plan"
 	"github.com/mensylisir/kubexm/internal/runtime"
 	"github.com/mensylisir/kubexm/internal/spec"
@@ -44,7 +44,7 @@ func (t *DeployRegistryTask) IsRequired(ctx runtime.TaskContext) (bool, error) {
 func (t *DeployRegistryTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragment, error) {
 	fragment := plan.NewExecutionFragment(t.Name())
 
-	runtimeCtx := ctx.(*runtime.Context).ForTask(t.Name())
+	runtimeCtx := ctx.ForTask(t.Name())
 
 	registryHosts := ctx.GetHostsByRole(common.RoleRegistry)
 	if len(registryHosts) == 0 {
@@ -86,10 +86,10 @@ func (t *DeployRegistryTask) Plan(ctx runtime.TaskContext) (*plan.ExecutionFragm
 		return nil, err
 	}
 
-	fragment.AddNode(&plan.ExecutionNode{Name: "GenerateRegistryConfig", Step: generateConfig, Hosts: []connector.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "GenerateRegistryConfig", Step: generateConfig, Hosts: []remotefw.Host{controlNode}})
 	// Downloads are handled centrally in Preflight PrepareAssets/ExtractBundle.
 
-	fragment.AddNode(&plan.ExecutionNode{Name: "ExtractRegistryBinary", Step: extractBinary, Hosts: []connector.Host{controlNode}})
+	fragment.AddNode(&plan.ExecutionNode{Name: "ExtractRegistryBinary", Step: extractBinary, Hosts: []remotefw.Host{controlNode}})
 	fragment.AddNode(&plan.ExecutionNode{Name: "DistributeRegistryConfig", Step: distributeConfig, Hosts: registryHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "InstallRegistryBinary", Step: installBinary, Hosts: registryHosts})
 	fragment.AddNode(&plan.ExecutionNode{Name: "SetupRegistryService", Step: setupService, Hosts: registryHosts})

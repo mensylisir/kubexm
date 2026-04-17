@@ -154,6 +154,7 @@ func (ef *ExecutionFragment) MergeFragment(other *ExecutionFragment) error {
 	}
 	for id, node := range other.Nodes {
 		if _, exists := ef.Nodes[id]; exists {
+			return fmt.Errorf("cannot merge fragment: node with ID '%s' already exists in target fragment", id)
 		}
 		ef.Nodes[id] = node
 	}

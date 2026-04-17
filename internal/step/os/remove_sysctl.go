@@ -15,6 +15,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+var _ step.Step = (*RemoveSysctlStep)(nil)
+
 type RemoveSysctlStep struct {
 	step.Base
 	removedFileContent []byte

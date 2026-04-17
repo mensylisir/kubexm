@@ -3,6 +3,7 @@ package rbac
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mensylisir/kubexm/internal/common"
@@ -49,6 +50,26 @@ func (s *ApplyEssentialRBACStep) renderRBAC() (string, error) {
 }
 
 func (s *ApplyEssentialRBACStep) Precheck(ctx runtime.ExecutionContext) (isDone bool, err error) {
+	logger := ctx.GetLogger().With("step", s.Base.Meta.Name, "host", ctx.GetHost().GetName(), "phase", "Precheck")
+	runner := ctx.GetRunner()
+	conn, err := ctx.GetCurrentHostConnector()
+	if err != nil {
+		return false, err
+	}
+
+	checkCmd := "kubectl get clusterrolebindings -o jsonpath='{range .items[?(@.roleRef.name==\"kubexm:essential\")]}{.metadata.name}{\"\\n\"}{end}'"
+	stdout, _, err := runner.OriginRun(ctx.GoContext(), conn, checkCmd, s.Sudo)
+	if err != nil {
+		logger.Warnf("Failed to check existing RBAC bindings, will apply: %v", err)
+		return false, nil
+	}
+
+	if len(stdout) > 0 {
+		logger.Infof("Essential RBAC bindings already exist (found: %s). Skipping apply.", strings.TrimSpace(stdout))
+		return true, nil
+	}
+
+	logger.Info("No essential RBAC bindings found. Step needs to run.")
 	return false, nil
 }
 

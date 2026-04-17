@@ -5,7 +5,7 @@ go 1.23.0
 require (
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/fatih/color v1.15.0
-	github.com/olekukonko/tablewriter v0.0.5 // Changed to v0.0.5
+	github.com/olekukonko/tablewriter v0.0.5
 	github.com/pkg/sftp v1.13.9
 	github.com/spf13/cobra v1.9.1
 	go.uber.org/zap v1.27.0
@@ -21,7 +21,6 @@ require (
 require (
 	github.com/Masterminds/semver/v3 v3.3.0
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
-	github.com/containerd/containerd v1.7.27
 	github.com/distribution/reference v0.6.0
 	github.com/docker/docker v28.3.2+incompatible
 	github.com/docker/go-connections v0.5.0
@@ -43,11 +42,7 @@ require (
 	github.com/AdamKorcz/go-118-fuzz-build v0.0.0-20230306123547-8075edf89bb0 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/Microsoft/hcsshim v0.11.7 // indirect
 	github.com/andybalholm/brotli v1.0.1 // indirect
-	github.com/containerd/cgroups v1.1.0 // indirect
-	github.com/containerd/containerd/api v1.8.0 // indirect
-	github.com/containerd/continuity v0.4.4 // indirect
 	github.com/containerd/errdefs v0.3.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/fifo v1.1.0 // indirect
@@ -114,7 +109,6 @@ require (
 	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/ulikunitz/xz v0.5.9 // indirect
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 // indirect
-	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.45.0 // indirect
 	go.opentelemetry.io/otel v1.37.0 // indirect
@@ -129,7 +123,6 @@ require (
 	golang.org/x/time v0.9.0 // indirect
 	google.golang.org/genproto v0.0.0-20231211222908-989df2bf70f3 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
-	google.golang.org/grpc v1.67.0 // indirect
 	google.golang.org/protobuf v1.36.5 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
@@ -140,3 +133,21 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect
 )
+
+replace golang.org/x/sys => golang.org/x/sys v0.33.0
+replace google.golang.org/protobuf => google.golang.org/protobuf v1.36.5
+replace golang.org/x/mod => /home/mensyli1/go/offline-mod-cache/golang.org/x/mod@v0.25.0
+replace github.com/cespare/xxhash/v2 => /home/mensyli1/go/offline-mod-cache/github.com/cespare/xxhash/v2@v2.3.0
+replace golang.org/x/tools => /home/mensyli1/go/offline-mod-cache/golang.org/x/tools@v0.0.0-20210106214847-113979e3529a
+replace golang.org/x/crypto => golang.org/x/crypto v0.39.0
+replace golang.org/x/net => golang.org/x/net v0.41.0
+replace github.com/google/go-cmp => github.com/google/go-cmp v0.7.0
+replace github.com/containerd/continuity => github.com/containerd/continuity v0.4.4
+replace github.com/golang/protobuf v1.5.0 => github.com/golang/protobuf v1.5.4
+replace golang.org/x/xerrors => /home/mensyli1/go/offline-mod-cache/golang.org/x/xerrors@v0.0.0-20191204190536-9bdfabe68543
+replace golang.org/x/text v0.17.0 => golang.org/x/text v0.26.0
+replace golang.org/x/sync v0.0.0-20210220032951-036812b2e83c => golang.org/x/sync v0.15.0
+replace github.com/cespare/xxhash/v2 v2.3.0 => /home/mensyli1/go/offline-mod-cache/github.com/cespare/xxhash/v2@v2.3.0
+replace google.golang.org/grpc => /home/mensyli1/go/pkg/mod/google.golang.org/grpc@v1.67.0
+replace github.com/cncf/xds/go => /home/mensyli1/go/offline-mod-cache/github.com/cncf/xds/go@v0.0.0-20240723142845-024c85f92f20
+

@@ -175,6 +175,7 @@ func (b *Builder) Build(ctx context.Context) (*Context, func(), error) {
 		StepCache:     stepCache,
 
 		hostInfoMap:    make(map[string]*HostRuntimeInfo),
+		hostInfoMu:     &sync.RWMutex{},
 		ConnectionPool: connectionPool,
 
 		stepExecutionID:    "",
@@ -231,7 +232,6 @@ func (b *Builder) getOrParseConfig() (*v1alpha1.Cluster, error) {
 func (b *Builder) initializeAllHosts(rc *Context, factory connector.Factory, runnerSvc runner.Runner) error {
 	log := rc.Logger
 	g, gCtx := errgroup.WithContext(rc.GoCtx)
-	var mu sync.Mutex
 
 	allHostSpecs := make([]v1alpha1.HostSpec, 0, len(rc.ClusterConfig.Spec.Hosts)+1)
 	controlNodeSpec, err := b.buildControlNodeSpec()
@@ -249,12 +249,12 @@ func (b *Builder) initializeAllHosts(rc *Context, factory connector.Factory, run
 			if err != nil {
 				return err
 			}
-			mu.Lock()
+			rc.hostInfoMu.Lock()
 			rc.hostInfoMap[hri.Host.GetName()] = hri
 			if hri.Host.IsRole(common.ControlNodeRole) {
 				rc.controlNode = hri.Host
 			}
-			mu.Unlock()
+			rc.hostInfoMu.Unlock()
 			return nil
 		})
 	}
@@ -295,8 +295,8 @@ func (b *Builder) initializeHostsWithoutConnect(rc *Context, factory connector.F
 		return fmt.Errorf("control node local connection failed: %w", err)
 	}
 
+	rc.hostInfoMu.Lock()
 	rc.hostInfoMap[controlHost.GetName()] = &HostRuntimeInfo{
-		Host:  controlHost,
 		Conn:  controlConn,
 		Facts: nil,
 	}
@@ -310,6 +310,7 @@ func (b *Builder) initializeHostsWithoutConnect(rc *Context, factory connector.F
 			Facts: nil,
 		}
 	}
+	rc.hostInfoMu.Unlock()
 
 	log.Info("Initialized hosts without remote connections.")
 	return nil
