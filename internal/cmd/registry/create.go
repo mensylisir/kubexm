@@ -25,19 +25,19 @@ type CreateOptions struct {
 var createOptions = &CreateOptions{}
 
 func init() {
-	RegistryCmd.AddCommand(createCmd)
-	createCmd.Flags().StringVarP(&createOptions.ClusterConfigFile, "config", "f", "", "Path to the cluster configuration YAML file (required)")
-	createCmd.Flags().StringVar(&createOptions.RegistryType, "type", "registry", "Registry type: registry (default: registry)")
-	createCmd.Flags().IntVar(&createOptions.RegistryPort, "port", 5000, "Registry port (default: 5000)")
-	createCmd.Flags().BoolVar(&createOptions.DryRun, "dry-run", false, "Simulate the registry creation without making changes")
+	CreateRegistryCmd.Flags().StringVarP(&createOptions.ClusterConfigFile, "config", "f", "", "Path to the cluster configuration YAML file (required)")
+	CreateRegistryCmd.Flags().StringVar(&createOptions.RegistryType, "type", "registry", "Registry type: registry (default: registry)")
+	CreateRegistryCmd.Flags().IntVar(&createOptions.RegistryPort, "port", 5000, "Registry port (default: 5000)")
+	CreateRegistryCmd.Flags().BoolVar(&createOptions.DryRun, "dry-run", false, "Simulate the registry creation without making changes")
 
-	if err := createCmd.MarkFlagRequired("config"); err != nil {
+	if err := CreateRegistryCmd.MarkFlagRequired("config"); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to mark 'config' flag as required: %v\n", err)
 	}
 }
 
-var createCmd = &cobra.Command{
-	Use:   "create",
+// CreateRegistryCmd is the registry create command
+var CreateRegistryCmd = &cobra.Command{
+	Use:   "registry",
 	Short: "Create a private image registry",
 	Long:  `Create a private Docker Registry on registry-role hosts.`,
 	RunE: func(cmd *cobra.Command, args []string) error {

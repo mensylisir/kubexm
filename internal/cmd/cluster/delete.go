@@ -5,79 +5,63 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/mensylisir/kubexm/internal/config"
+	"github.com/spf13/cobra"
+
 	"github.com/mensylisir/kubexm/internal/logger"
 	"github.com/mensylisir/kubexm/internal/plan"
-	kubexmcluster "github.com/mensylisir/kubexm/internal/pipeline/cluster" // Alias for pipeline cluster package
+	kubexmcluster "github.com/mensylisir/kubexm/internal/pipeline/cluster"
 	"github.com/mensylisir/kubexm/internal/runtime"
-	"github.com/spf13/cobra"
 )
 
-type DeleteOptions struct {
-	ClusterConfigFile string
-	// YesAssume is now handled by global flag
-	Force             bool // May not be used initially, but common for delete commands
-	// Verbose is now handled by global flag
+type DeleteClusterOptions struct {
+	ClusterName string
+	Force     bool
+	DryRun    bool
 }
 
-var deleteOptions = &DeleteOptions{}
+var deleteClusterOpts = &DeleteClusterOptions{}
 
 func init() {
-	ClusterCmd.AddCommand(deleteCmd)
-	deleteCmd.Flags().StringVarP(&deleteOptions.ClusterConfigFile, "config", "f", "", "Path to the cluster configuration YAML file (required)")
-	// deleteCmd.Flags().BoolVarP(&deleteOptions.YesAssume, "yes", "y", false, "Assume yes to all prompts and run non-interactively") // Uses global
-	deleteCmd.Flags().BoolVar(&deleteOptions.Force, "force", false, "Force deletion without some safety checks (use with caution)")
-	// deleteCmd.Flags().BoolVarP(&deleteOptions.Verbose, "verbose", "v", false, "Enable verbose output (already in create, but good to have consistency if root doesn't have it)") // Uses global
-
-	if err := deleteCmd.MarkFlagRequired("config"); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to mark 'config' flag as required for delete command: %v\n", err)
-	}
+	DeleteClusterCmd.Flags().StringVarP(&deleteClusterOpts.ClusterName, "name", "n", "", "Cluster name (required)")
+	DeleteClusterCmd.Flags().BoolVar(&deleteClusterOpts.Force, "force", false, "Force deletion without confirmation")
+	DeleteClusterCmd.Flags().BoolVar(&deleteClusterOpts.DryRun, "dry-run", false, "Simulate without making changes")
+	DeleteClusterCmd.MarkFlagRequired("name")
 }
 
-var deleteCmd = &cobra.Command{
-	Use:   "delete",
+// DeleteClusterCmd - kubexm delete cluster --name=xxx
+var DeleteClusterCmd = &cobra.Command{
+	Use:   "cluster",
 	Short: "Delete a Kubernetes cluster",
-	Long:  `Delete a Kubernetes cluster based on a provided configuration file. This operation is destructive and will remove cluster components and data.`,
+	Long:  `Delete a Kubernetes cluster. This operation is destructive and will remove cluster components and data.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := logger.Get() // Use global logger
+		log := logger.Get()
 		defer logger.SyncGlobal()
 
-		assumeYesGlobal, _ := cmd.Flags().GetBool("yes") // Get global assumeYes
+		assumeYesGlobal, _ := cmd.Flags().GetBool("yes")
 
 		log.Info("Starting cluster deletion process...")
 
-		if deleteOptions.ClusterConfigFile == "" {
-			return fmt.Errorf("cluster configuration file must be provided via -f or --config flag")
+		if deleteClusterOpts.ClusterName == "" {
+			return fmt.Errorf("cluster name must be provided via --name or -n flag")
 		}
 
-		absPath, err := filepath.Abs(deleteOptions.ClusterConfigFile)
+		clusterConfig, err := LoadClusterConfig(deleteClusterOpts.ClusterName)
 		if err != nil {
-			log.Error(err, "Failed to get absolute path for config file")
-			return fmt.Errorf("failed to get absolute path for config file %s: %w", deleteOptions.ClusterConfigFile, err)
-		}
-		log.Infof("Loading cluster configuration from: %s for deletion.", absPath)
-
-		clusterConfig, err := config.ParseFromFile(absPath) // Use ParseFromFile
-		if err != nil {
-			log.Error(err, "Failed to load cluster configuration")
-			return fmt.Errorf("failed to load cluster configuration from %s: %w", absPath, err)
+			return fmt.Errorf("failed to load cluster configuration: %w", err)
 		}
 		log.Infof("Configuration loaded for cluster: %s", clusterConfig.Name)
 
-		// Confirmation prompt
-		if !assumeYesGlobal { // Use global assumeYes
-			fmt.Printf("WARNING: This action will delete the Kubernetes cluster '%s'.\n", clusterConfig.Name)
-			fmt.Printf("This is a destructive operation and cannot be undone.\n")
-			fmt.Print("Are you sure you want to proceed? (yes/no): ")
+		if !assumeYesGlobal && !deleteClusterOpts.Force {
+			fmt.Printf("WARNING: This will delete the Kubernetes cluster '%s'.\n", clusterConfig.Name)
+			fmt.Print("Are you sure? (yes/no): ")
 			reader := bufio.NewReader(os.Stdin)
 			input, _ := reader.ReadString('\n')
 			input = strings.TrimSpace(strings.ToLower(input))
 			if input != "yes" {
-				log.Info("Cluster deletion aborted by user.")
+				log.Info("Cluster deletion aborted.")
 				return nil
 			}
 		}
@@ -88,42 +72,23 @@ var deleteCmd = &cobra.Command{
 		defer cancel()
 
 		rtBuilder := runtime.NewBuilderFromConfig(clusterConfig)
-		log.Info("Building runtime environment for deletion...")
 		runtimeCtx, cleanupFunc, err := rtBuilder.Build(goCtx)
 		if err != nil {
-			log.Error(err, "Failed to build runtime environment for deletion")
-			return fmt.Errorf("failed to build runtime environment for deletion: %w", err)
+			return fmt.Errorf("failed to build runtime environment: %w", err)
 		}
 		defer cleanupFunc()
-		log.Info("Runtime environment built successfully for deletion.")
 
 		deletePipeline := kubexmcluster.NewDeleteClusterPipeline(assumeYesGlobal)
-		log.Infof("Instantiated pipeline: %s", deletePipeline.Name())
-
-		log.Info("Executing delete pipeline run...")
-		// The pipeline's Run method expects the full *runtime.Context, which runtimeCtx is.
-		// The interface pipeline.PipelineContext is satisfied by *runtime.Context.
-		// Pass nil for graph, as DeleteClusterPipeline's Run method will call Plan.
-		result, err := deletePipeline.Run(runtimeCtx, nil, false) // dryRun is false
+		result, err := deletePipeline.Run(runtimeCtx, nil, deleteClusterOpts.DryRun)
 		if err != nil {
-			log.Error(err, "Cluster deletion pipeline failed")
-			if result != nil {
-				log.Infof("Pipeline result status during failure: %s", result.Status)
-			}
-			return fmt.Errorf("cluster deletion pipeline execution failed: %w", err)
+			return fmt.Errorf("cluster deletion failed: %w", err)
 		}
 
 		if result.Status == plan.StatusFailed {
-			log.Error(nil, "Cluster deletion pipeline reported failure.", "status", result.Status)
-			return fmt.Errorf("cluster deletion pipeline failed with status: %s", result.Status)
+			return fmt.Errorf("cluster deletion failed: %s", result.Status)
 		}
 
-		log.Info("Cluster deletion pipeline completed successfully!", "status", result.Status)
-
-		// TODO: Add optional cleanup of local artifact directory for the cluster
-		// e.g., os.RemoveAll(runtimeCtx.GetClusterArtifactsDir())
-		// This should be done carefully.
-
+		log.Infof("Cluster deletion completed successfully! Status: %s", result.Status)
 		return nil
 	},
 }

@@ -27,19 +27,19 @@ type DeleteOptions struct {
 var deleteOptions = &DeleteOptions{}
 
 func init() {
-	RegistryCmd.AddCommand(deleteCmd)
-	deleteCmd.Flags().StringVarP(&deleteOptions.ClusterConfigFile, "config", "f", "", "Path to the cluster configuration YAML file (required)")
-	deleteCmd.Flags().BoolVar(&deleteOptions.Force, "force", false, "Force deletion without confirmation")
-	deleteCmd.Flags().BoolVar(&deleteOptions.DeleteImages, "delete-images", false, "Also delete stored images")
-	deleteCmd.Flags().BoolVar(&deleteOptions.DryRun, "dry-run", false, "Simulate the registry deletion without making changes")
+	DeleteRegistryCmd.Flags().StringVarP(&deleteOptions.ClusterConfigFile, "config", "f", "", "Path to the cluster configuration YAML file (required)")
+	DeleteRegistryCmd.Flags().BoolVar(&deleteOptions.Force, "force", false, "Force deletion without confirmation")
+	DeleteRegistryCmd.Flags().BoolVar(&deleteOptions.DeleteImages, "delete-images", false, "Also delete stored images")
+	DeleteRegistryCmd.Flags().BoolVar(&deleteOptions.DryRun, "dry-run", false, "Simulate the registry deletion without making changes")
 
-	if err := deleteCmd.MarkFlagRequired("config"); err != nil {
+	if err := DeleteRegistryCmd.MarkFlagRequired("config"); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to mark 'config' flag as required: %v\n", err)
 	}
 }
 
-var deleteCmd = &cobra.Command{
-	Use:   "delete",
+// DeleteRegistryCmd is the registry delete command
+var DeleteRegistryCmd = &cobra.Command{
+	Use:   "registry",
 	Short: "Delete a private image registry",
 	Long:  `Delete the private Docker Registry from registry-role hosts.`,
 	RunE: func(cmd *cobra.Command, args []string) error {

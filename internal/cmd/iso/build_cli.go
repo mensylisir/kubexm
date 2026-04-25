@@ -50,28 +50,26 @@ type BuildOptions struct {
 var buildOptions = &BuildOptions{}
 
 func init() {
-	IsoCmd.AddCommand(buildIsoCmd)
-
-	buildIsoCmd.Flags().StringVar(&buildOptions.OS, "os", "", "Operating system (ubuntu, centos, rocky, debian) (required for docker mode)")
-	buildIsoCmd.Flags().StringVarP(&buildOptions.OSVersion, "version", "v", "", "OS version (e.g., 22.04 for Ubuntu, 7/8 for CentOS) (required for docker mode)")
-	buildIsoCmd.Flags().StringVarP(&buildOptions.Arch, "arch", "a", "", "Architecture (amd64, arm64) (default: current host arch)")
-	buildIsoCmd.Flags().StringVarP(&buildOptions.ClusterConfigFile, "config", "f", "", "Cluster configuration file for automatic dependency resolution")
-	buildIsoCmd.Flags().StringVarP(&buildOptions.Mode, "mode", "m", "host", "Build mode: 'host' (current OS/arch) or 'docker' (cross-platform)")
-	buildIsoCmd.Flags().BoolVar(&buildOptions.MultiArch, "multi-arch", false, "Build for multiple architectures using Docker Buildx")
-	buildIsoCmd.Flags().StringVar(&buildOptions.Registry, "registry", "", "Docker registry for builder images")
-	buildIsoCmd.Flags().StringVarP(&buildOptions.OutputPath, "output", "o", "", "Output directory for ISO file (default: ./output)")
-	buildIsoCmd.Flags().StringVarP(&buildOptions.PackagesDir, "packages", "p", "", "Path to kubexm binary packages directory")
-	buildIsoCmd.Flags().BoolVar(&buildOptions.IncludeKubexm, "include-kubexm", true, "Include kubexm binary packages in ISO")
-	buildIsoCmd.Flags().StringVar(&buildOptions.Runtime, "runtime", "", "Container runtime (containerd, docker, cri-o)")
-	buildIsoCmd.Flags().StringVar(&buildOptions.CNIPlugin, "cni", "", "CNI plugin (calico, cilium, flannel, kubeovn, hybridnet)")
-	buildIsoCmd.Flags().StringVar(&buildOptions.LoadBalancer, "lb", "", "Load balancer type (kubexm_kh, kubexm_kn, haproxy, nginx)")
-	buildIsoCmd.Flags().StringVar(&buildOptions.StorageType, "storage", "", "Storage type (nfs, longhorn, openebs)")
-	buildIsoCmd.Flags().StringSliceVar(&buildOptions.ExtraPackages, "extra-pkgs", nil, "Extra packages to include")
-	buildIsoCmd.Flags().BoolVar(&buildOptions.DryRun, "dry-run", false, "Show what would be built without building")
+	BuildIsoCmd.Flags().StringVar(&buildOptions.OS, "os", "", "Operating system (ubuntu, centos, rocky, debian) (required for docker mode)")
+	BuildIsoCmd.Flags().StringVarP(&buildOptions.OSVersion, "version", "v", "", "OS version (e.g., 22.04 for Ubuntu, 7/8 for CentOS) (required for docker mode)")
+	BuildIsoCmd.Flags().StringVarP(&buildOptions.Arch, "arch", "a", "", "Architecture (amd64, arm64) (default: current host arch)")
+	BuildIsoCmd.Flags().StringVarP(&buildOptions.ClusterConfigFile, "config", "f", "", "Cluster configuration file for automatic dependency resolution")
+	BuildIsoCmd.Flags().StringVarP(&buildOptions.Mode, "mode", "m", "host", "Build mode: 'host' (current OS/arch) or 'docker' (cross-platform)")
+	BuildIsoCmd.Flags().BoolVar(&buildOptions.MultiArch, "multi-arch", false, "Build for multiple architectures using Docker Buildx")
+	BuildIsoCmd.Flags().StringVar(&buildOptions.Registry, "registry", "", "Docker registry for builder images")
+	BuildIsoCmd.Flags().StringVarP(&buildOptions.OutputPath, "output", "o", "", "Output directory for ISO file (default: ./output)")
+	BuildIsoCmd.Flags().StringVarP(&buildOptions.PackagesDir, "packages", "p", "", "Path to kubexm binary packages directory")
+	BuildIsoCmd.Flags().BoolVar(&buildOptions.IncludeKubexm, "include-kubexm", true, "Include kubexm binary packages in ISO")
+	BuildIsoCmd.Flags().StringVar(&buildOptions.Runtime, "runtime", "", "Container runtime (containerd, docker, cri-o)")
+	BuildIsoCmd.Flags().StringVar(&buildOptions.CNIPlugin, "cni", "", "CNI plugin (calico, cilium, flannel, kubeovn, hybridnet)")
+	BuildIsoCmd.Flags().StringVar(&buildOptions.LoadBalancer, "lb", "", "Load balancer type (kubexm_kh, kubexm_kn, haproxy, nginx)")
+	BuildIsoCmd.Flags().StringVar(&buildOptions.StorageType, "storage", "", "Storage type (nfs, longhorn, openebs)")
+	BuildIsoCmd.Flags().StringSliceVar(&buildOptions.ExtraPackages, "extra-pkgs", nil, "Extra packages to include")
+	BuildIsoCmd.Flags().BoolVar(&buildOptions.DryRun, "dry-run", false, "Show what would be built without building")
 }
 
-var buildIsoCmd = &cobra.Command{
-	Use:   "build",
+var BuildIsoCmd = &cobra.Command{
+	Use:   "iso",
 	Short: "Build offline installation ISO with OS packages",
 	Long: `Build an offline installation ISO containing all necessary OS packages
 and dependencies for air-gapped Kubernetes cluster installation.
@@ -98,19 +96,19 @@ Two build modes are supported:
 
 Examples:
   # Build ISO for current OS (host mode)
-  kubexm iso build -f config.yaml
+  kubexm build iso -f config.yaml
 
   # Build ISO for Ubuntu 22.04 using Docker
-  kubexm iso build --os ubuntu --version 22.04 --mode docker
+  kubexm build iso --os ubuntu --version 22.04 --mode docker
 
   # Build multi-architecture ISOs (amd64 + arm64)
-  kubexm iso build --os ubuntu --version 22.04 --multi-arch --mode docker
+  kubexm build iso --os ubuntu --version 22.04 --multi-arch --mode docker
 
   # Build with specific component overrides
-  kubexm iso build --os centos --version 8 --cni calico --lb kubexm_kh --storage longhorn
+  kubexm build iso --os centos --version 8 --cni calico --lb kubexm_kh --storage longhorn
 
   # Dry run to see what would be included
-  kubexm iso build --os ubuntu --version 22.04 --dry-run`,
+  kubexm build iso --os ubuntu --version 22.04 --dry-run`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := logger.Get()
 		defer logger.SyncGlobal()

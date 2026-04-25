@@ -1,84 +1,131 @@
 package cmd
 
 import (
-	"github.com/mensylisir/kubexm/internal/cmd/certs"
-	"github.com/mensylisir/kubexm/internal/cmd/cluster"
 	"github.com/mensylisir/kubexm/internal/cmd/config"
-	"github.com/mensylisir/kubexm/internal/cmd/node"
 	"github.com/mensylisir/kubexm/internal/logger"
+
 	"github.com/spf13/cobra"
+)
+
+var (
+	// Commands - all verb-first
+	CreateCmd   *cobra.Command // kubexm create
+	BuildCmd    *cobra.Command // kubexm build
+	DeleteCmd   *cobra.Command // kubexm delete
+	InstallCmd  *cobra.Command // kubexm install
+	UpdateCmd   *cobra.Command // kubexm update
+	UpgradeCmd  *cobra.Command // kubexm upgrade
+	DrainCmd    *cobra.Command // kubexm drain
+	CordonCmd   *cobra.Command // kubexm cordon
+	UncordonCmd *cobra.Command // kubexm uncordon
+	ListCmd     *cobra.Command // kubexm list
+	GetCmd      *cobra.Command // kubexm get
+	CheckCmd    *cobra.Command // kubexm check
+	RenewCmd    *cobra.Command // kubexm renew
+	RotateCmd   *cobra.Command // kubexm rotate
+	PushCmd     *cobra.Command // kubexm push
 )
 
 var (
 	// Global flags
 	verboseFlag   bool
 	assumeYesFlag bool
-	// cfgFile string // Future use for global config file
 )
 
-// rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "kubexm",
 	Short: "kubexm is a tool for managing Kubernetes clusters.",
 	Long: `kubexm is a command-line interface tool that helps you
 create, manage, and scale Kubernetes clusters efficiently.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Initialize global logger based on verboseFlag
 		logOpts := logger.DefaultOptions()
-		logOpts.ColorConsole = true // Default for CLI
+		logOpts.ColorConsole = true
+
+		if localCfg, err := config.LoadLocalConfig(); err == nil && localCfg.LogLevel != "" {
+			switch localCfg.LogLevel {
+			case "debug":
+				logOpts.ConsoleLevel = logger.DebugLevel
+			case "info":
+				logOpts.ConsoleLevel = logger.InfoLevel
+			case "warn":
+				logOpts.ConsoleLevel = logger.WarnLevel
+			case "error":
+				logOpts.ConsoleLevel = logger.ErrorLevel
+			}
+		}
+
 		if verboseFlag {
 			logOpts.ConsoleLevel = logger.DebugLevel
 		}
-		logger.Init(logOpts) // Initialize global logger
-		// No need to defer SyncGlobal here, individual commands should do it or main.
+		logger.Init(logOpts)
 		return nil
 	},
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() error {
 	return rootCmd.Execute()
 }
 
-func init() {
-	// cobra.OnInitialize(initConfig) // For viper config
+func NewRootCmd() *cobra.Command {
+	return rootCmd
+}
 
-	// Define global persistent flags
+func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Enable verbose output")
 	rootCmd.PersistentFlags().BoolVarP(&assumeYesFlag, "yes", "y", false, "Assume yes to all prompts and run non-interactively")
-	// rootCmd.PersistentFlags().StringVar(&cfgFile, "config-global", "", "Global config file (default is $HOME/.kubexm/config.yaml)")
 
-	// Add cluster command group
-	rootCmd.AddCommand(cluster.ClusterCmd)
-	// Add node command group
-	node.AddNodeCommand(rootCmd) // Using the exported function from node package
-	// Add certs command group
-	certs.AddCertsCommand(rootCmd) // Using the exported function from certs package
-	// Add config command group
-	config.AddConfigCommand(rootCmd) // Using the exported function from config package
+	// Verb-first commands
+	CreateCmd = newCreateCommand()
+	rootCmd.AddCommand(CreateCmd)
+
+	BuildCmd = newBuildCommand()
+	rootCmd.AddCommand(BuildCmd)
+
+	DeleteCmd = newDeleteCommand()
+	rootCmd.AddCommand(DeleteCmd)
+
+	DownloadCmd = DownloadCmdVar()
+	rootCmd.AddCommand(DownloadCmd)
+
+	InstallCmd = newInstallCommand()
+	rootCmd.AddCommand(InstallCmd)
+
+	UpdateCmd = newUpdateCommand()
+	rootCmd.AddCommand(UpdateCmd)
+
+	UpgradeCmd = newUpgradeCommand()
+	rootCmd.AddCommand(UpgradeCmd)
+
+	DrainCmd = newDrainCommand()
+	rootCmd.AddCommand(DrainCmd)
+
+	CordonCmd = newCordonCommand()
+	rootCmd.AddCommand(CordonCmd)
+
+	UncordonCmd = newUncordonCommand()
+	rootCmd.AddCommand(UncordonCmd)
+
+	ListCmd = newListNodesCommand()
+	rootCmd.AddCommand(ListCmd)
+
+	GetCmd = newGetNodeCommand()
+	rootCmd.AddCommand(GetCmd)
+
+	CheckCmd = newCheckCommand()
+	rootCmd.AddCommand(CheckCmd)
+
+	RenewCmd = newRenewCommand()
+	rootCmd.AddCommand(RenewCmd)
+
+	RotateCmd = newRotateCommand()
+	rootCmd.AddCommand(RotateCmd)
+
+	PushCmd = newPushCommand()
+	rootCmd.AddCommand(PushCmd)
+
+	// Noun commands
+	config.AddConfigCommand(rootCmd)
 }
 
-/* // initConfig reads in config file and ENV variables if set.
-func initConfig() {
-	if cfgFile != "" {
-		// Use config file from the flag.
-		viper.SetConfigFile(cfgFile)
-	} else {
-		// Find home directory.
-		home, err := homedir.Dir()
-		cobra.CheckErr(err)
-
-		// Search config in home directory with name ".kubexm" (without extension).
-		viper.AddConfigPath(home)
-		viper.SetConfigName(".kubexm")
-	}
-
-	viper.AutomaticEnv() // read in environment variables that match
-
-	// If a config file is found, read it in.
-	if err := viper.ReadInConfig(); err == nil {
-		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
-	}
+func EnsureInitialized() {
 }
-*/

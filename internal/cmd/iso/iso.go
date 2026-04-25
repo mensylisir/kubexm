@@ -46,33 +46,26 @@ type atomicHostRolesCache struct {
 }
 
 func init() {
-	IsoCmd.AddCommand(createIsoCmd)
-	createIsoCmd.Flags().StringVarP(&createOptions.ClusterConfigFile, "config", "f", "", "Path to the cluster configuration YAML file (required)")
-	createIsoCmd.Flags().StringVarP(&createOptions.OutputPath, "output", "o", "", "Output directory for ISO file (default: ./output)")
-	createIsoCmd.Flags().StringVarP(&createOptions.ISOFile, "iso", "i", "", "Path to the base ISO file (required)")
-	createIsoCmd.Flags().StringVarP(&createOptions.OSName, "os", "", "ubuntu", "Operating system name (default: ubuntu)")
-	createIsoCmd.Flags().StringVarP(&createOptions.OSVersion, "version", "v", "22.04", "Operating system version (default: 22.04)")
-	createIsoCmd.Flags().StringVarP(&createOptions.Arch, "arch", "a", "amd64", "Architecture (default: amd64)")
-	createIsoCmd.Flags().StringVarP(&createOptions.PackagesDir, "packages", "p", "", "Path to kubexm packages directory (if not using config's workDir)")
-	createIsoCmd.Flags().BoolVar(&createOptions.DryRun, "dry-run", false, "Show what would be created without making changes")
-	createIsoCmd.Flags().BoolVar(&createOptions.SkipVerification, "skip-verification", false, "Skip ISO integrity verification")
+	CreateIsoCmd.Flags().StringVarP(&createOptions.ClusterConfigFile, "config", "f", "", "Path to the cluster configuration YAML file (required)")
+	CreateIsoCmd.Flags().StringVarP(&createOptions.OutputPath, "output", "o", "", "Output directory for ISO file (default: ./output)")
+	CreateIsoCmd.Flags().StringVarP(&createOptions.ISOFile, "iso", "i", "", "Path to the base ISO file (required)")
+	CreateIsoCmd.Flags().StringVarP(&createOptions.OSName, "os", "", "ubuntu", "Operating system name (default: ubuntu)")
+	CreateIsoCmd.Flags().StringVarP(&createOptions.OSVersion, "os-version", "", "22.04", "Operating system version (default: 22.04)")
+	CreateIsoCmd.Flags().StringVarP(&createOptions.Arch, "arch", "a", "amd64", "Architecture (default: amd64)")
+	CreateIsoCmd.Flags().StringVarP(&createOptions.PackagesDir, "packages", "p", "", "Path to kubexm packages directory (if not using config's workDir)")
+	CreateIsoCmd.Flags().BoolVar(&createOptions.DryRun, "dry-run", false, "Show what would be created without making changes")
+	CreateIsoCmd.Flags().BoolVar(&createOptions.SkipVerification, "skip-verification", false, "Skip ISO integrity verification")
 
-	if err := createIsoCmd.MarkFlagRequired("config"); err != nil {
+	if err := CreateIsoCmd.MarkFlagRequired("config"); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to mark 'config' flag as required for iso create command: %v\n", err)
 	}
-	if err := createIsoCmd.MarkFlagRequired("iso"); err != nil {
+	if err := CreateIsoCmd.MarkFlagRequired("iso"); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to mark 'iso' flag as required for iso create command: %v\n", err)
 	}
 }
 
-var IsoCmd = &cobra.Command{
+var CreateIsoCmd = &cobra.Command{
 	Use:   "iso",
-	Short: "Manage ISO images",
-	Long:  `Commands for creating and managing offline installation ISO images for Kubernetes clusters.`,
-}
-
-var createIsoCmd = &cobra.Command{
-	Use:   "create",
 	Short: "Create offline installation ISO",
 	Long: `Create an offline installation ISO image containing all necessary
 binaries, configurations, and packages for air-gapped Kubernetes installation.
@@ -91,16 +84,16 @@ The resulting ISO can be used for fully offline Kubernetes cluster installation.
 
 Examples:
   # Create ISO from cluster config
-  kubexm iso create -f config.yaml -i ubuntu-22.04.iso
+  kubexm create iso -f config.yaml -i ubuntu-22.04.iso
 
   # Create ISO with custom output directory
-  kubexm iso create -f config.yaml -i ubuntu-22.04.iso -o /path/to/output
+  kubexm create iso -f config.yaml -i ubuntu-22.04.iso -o /path/to/output
 
   # Create ISO with pre-downloaded packages directory
-  kubexm iso create -f config.yaml -i ubuntu-22.04.iso -p /path/to/packages
+  kubexm create iso -f config.yaml -i ubuntu-22.04.iso -p /path/to/packages
 
   # Dry run to see what would be included
-  kubexm iso create -f config.yaml -i ubuntu-22.04.iso --dry-run`,
+  kubexm create iso -f config.yaml -i ubuntu-22.04.iso --dry-run`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := logger.Get()
 		defer logger.SyncGlobal()
@@ -1024,7 +1017,3 @@ func copyDirContents(src, dest string, log *logger.Logger) error {
 	return nil
 }
 
-// AddIsoCommand adds the iso command to the root command
-func AddIsoCommand(parentCmd *cobra.Command) {
-	parentCmd.AddCommand(IsoCmd)
-}
